@@ -213,6 +213,17 @@ def _check_orphaned_packages():
         return []  # Return empty list if any error occurs
 
 
+def _should_auto_create_github_dir(project_root: Path) -> bool:
+    """Return True when install should bootstrap .github/.
+
+    We bootstrap .github/ only when no supported integration root exists.
+    Supported roots are .github/, .claude/, and .opencode/.
+    """
+    return not any(
+        (project_root / root).exists() for root in (".github", ".claude", ".opencode")
+    )
+
+
 def print_version(ctx, param, value):
     """Print version and exit."""
     if not value or ctx.resilient_parsing:
@@ -529,7 +540,6 @@ def _validate_package_exists(package):
         # For regular packages, use git ls-remote
         with tempfile.TemporaryDirectory() as temp_dir:
             try:
-
                 # Try cloning with minimal fetch
                 cmd = [
                     "git",
@@ -539,7 +549,10 @@ def _validate_package_exists(package):
                     package_url,
                 ]
                 result = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=30  # 30 second timeout
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,  # 30 second timeout
                 )
 
                 return result.returncode == 0
@@ -600,7 +613,17 @@ def _validate_package_exists(package):
     help="Trust self-defined MCP servers from transitive packages (skip re-declaration requirement)",
 )
 @click.pass_context
-def install(ctx, packages, runtime, exclude, only, update, dry_run, verbose, trust_transitive_mcp):
+def install(
+    ctx,
+    packages,
+    runtime,
+    exclude,
+    only,
+    update,
+    dry_run,
+    verbose,
+    trust_transitive_mcp,
+):
     """Install APM and MCP dependencies from apm.yml (like npm install).
 
     This command automatically detects AI runtimes from your apm.yml scripts and installs
@@ -711,9 +734,13 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, verbose, tru
         apm_modules_path = Path.cwd() / "apm_modules"
         if should_install_mcp and apm_modules_path.exists():
             lock_path = Path.cwd() / "apm.lock"
-            transitive_mcp = _collect_transitive_mcp_deps(apm_modules_path, lock_path, trust_transitive_mcp)
+            transitive_mcp = _collect_transitive_mcp_deps(
+                apm_modules_path, lock_path, trust_transitive_mcp
+            )
             if transitive_mcp:
-                _rich_info(f"Collected {len(transitive_mcp)} transitive MCP dependency(ies)")
+                _rich_info(
+                    f"Collected {len(transitive_mcp)} transitive MCP dependency(ies)"
+                )
                 mcp_deps = _deduplicate_mcp_deps(mcp_deps + transitive_mcp)
 
         # Continue with MCP installation (existing logic)
@@ -827,7 +854,9 @@ def prune(ctx, dry_run):
             for candidate in apm_modules_dir.rglob("*"):
                 if not candidate.is_dir() or candidate.name.startswith("."):
                     continue
-                if not ((candidate / "apm.yml").exists() or (candidate / ".apm").exists()):
+                if not (
+                    (candidate / "apm.yml").exists() or (candidate / ".apm").exists()
+                ):
                     continue
                 rel_parts = candidate.relative_to(apm_modules_dir).parts
                 if len(rel_parts) >= 2:
@@ -978,9 +1007,7 @@ def update(check):
             # Use /bin/sh for better cross-platform compatibility
             # Note: We don't capture output so the installer can prompt for sudo
             shell_path = "/bin/sh" if os.path.exists("/bin/sh") else "sh"
-            result = subprocess.run(
-                [shell_path, temp_script], check=False
-            )
+            result = subprocess.run([shell_path, temp_script], check=False)
 
             # Clean up temp file
             try:
@@ -1108,6 +1135,7 @@ def uninstall(ctx, packages, dry_run):
 
             # Show transitive deps that would be removed
             from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
             lockfile_path = get_lockfile_path(Path("."))
             lockfile = LockFile.read(lockfile_path)
             if lockfile:
@@ -1163,6 +1191,7 @@ def uninstall(ctx, packages, dry_run):
 
         # npm-style transitive dep cleanup: use lockfile to find orphaned transitive deps
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
         lockfile_path = get_lockfile_path(Path("."))
         lockfile = LockFile.read(lockfile_path)
 
@@ -1248,7 +1277,9 @@ def uninstall(ctx, packages, dry_run):
                 try:
                     with open(apm_yml_path, "r") as f:
                         updated_data = yaml.safe_load(f) or {}
-                    for dep_str in updated_data.get("dependencies", {}).get("apm", []) or []:
+                    for dep_str in (
+                        updated_data.get("dependencies", {}).get("apm", []) or []
+                    ):
                         try:
                             ref = DependencyReference.parse(dep_str)
                             remaining_deps.add(ref.get_unique_key())
@@ -1260,7 +1291,10 @@ def uninstall(ctx, packages, dry_run):
                 # Also check remaining lockfile deps that are NOT orphaned
                 for dep in lockfile.get_all_dependencies():
                     key = dep.get_unique_key()
-                    if key not in potential_orphans and dep.repo_url not in removed_repo_urls:
+                    if (
+                        key not in potential_orphans
+                        and dep.repo_url not in removed_repo_urls
+                    ):
                         remaining_deps.add(key)
 
                 # Remove only true orphans (not needed by remaining deps)
@@ -1274,13 +1308,20 @@ def uninstall(ctx, packages, dry_run):
                         orphan_path = orphan_ref.get_install_path(apm_modules_dir)
                     except ValueError:
                         parts = orphan_key.split("/")
-                        orphan_path = apm_modules_dir.joinpath(*parts) if len(parts) >= 2 else apm_modules_dir / orphan_key
+                        orphan_path = (
+                            apm_modules_dir.joinpath(*parts)
+                            if len(parts) >= 2
+                            else apm_modules_dir / orphan_key
+                        )
 
                     if orphan_path.exists():
                         try:
                             import shutil
+
                             shutil.rmtree(orphan_path)
-                            _rich_info(f"✓ Removed transitive dependency {orphan_key} from apm_modules/")
+                            _rich_info(
+                                f"✓ Removed transitive dependency {orphan_key} from apm_modules/"
+                            )
                             removed_from_modules += 1
 
                             # Cleanup empty parent directories
@@ -1295,11 +1336,13 @@ def uninstall(ctx, packages, dry_run):
                                 except OSError:
                                     break
                         except Exception as e:
-                            _rich_error(f"✗ Failed to remove transitive dep {orphan_key}: {e}")
+                            _rich_error(
+                                f"✗ Failed to remove transitive dep {orphan_key}: {e}"
+                            )
 
         # Update lockfile: remove entries for all removed packages (direct + transitive)
         removed_orphan_keys = builtins.set()
-        if lockfile and apm_modules_dir.exists() and 'actual_orphans' in locals():
+        if lockfile and apm_modules_dir.exists() and "actual_orphans" in locals():
             removed_orphan_keys = actual_orphans
         if lockfile:
             lockfile_updated = False
@@ -1335,7 +1378,12 @@ def uninstall(ctx, packages, dry_run):
         hooks_cleaned = 0
 
         try:
-            from apm_cli.models.apm_package import APMPackage, PackageInfo, PackageType, validate_apm_package
+            from apm_cli.models.apm_package import (
+                APMPackage,
+                PackageInfo,
+                PackageType,
+                validate_apm_package,
+            )
             from apm_cli.integration.prompt_integrator import PromptIntegrator
             from apm_cli.integration.agent_integrator import AgentIntegrator
             from apm_cli.integration.skill_integrator import SkillIntegrator
@@ -1366,7 +1414,7 @@ def uninstall(ctx, packages, dry_run):
                 result = integrator.sync_integration(apm_package, project_root)
                 skills_cleaned = result.get("files_removed", 0)
 
-            if Path(".claude/commands").exists():
+            if Path(".claude/commands").exists() or Path(".opencode/commands").exists():
                 integrator = CommandIntegrator()
                 result = integrator.sync_integration(apm_package, project_root)
                 commands_cleaned = result.get("files_removed", 0)
@@ -1384,13 +1432,15 @@ def uninstall(ctx, packages, dry_run):
             hook_integrator_reint = HookIntegrator()
 
             for dep in apm_package.get_apm_dependencies():
-                dep_ref = dep if hasattr(dep, 'repo_url') else None
+                dep_ref = dep if hasattr(dep, "repo_url") else None
                 if not dep_ref:
                     continue
                 # Build install path
                 install_path = Path("apm_modules") / dep_ref.repo_url
                 if dep_ref.is_virtual and dep_ref.virtual_path:
-                    install_path = Path("apm_modules") / dep_ref.repo_url / dep_ref.virtual_path
+                    install_path = (
+                        Path("apm_modules") / dep_ref.repo_url / dep_ref.virtual_path
+                    )
                 if not install_path.exists():
                     continue
 
@@ -1408,16 +1458,28 @@ def uninstall(ctx, packages, dry_run):
 
                 try:
                     if prompt_integrator.should_integrate(project_root):
-                        prompt_integrator.integrate_package_prompts(pkg_info, project_root)
+                        prompt_integrator.integrate_package_prompts(
+                            pkg_info, project_root
+                        )
                     if agent_integrator.should_integrate(project_root):
-                        agent_integrator.integrate_package_agents(pkg_info, project_root)
+                        agent_integrator.integrate_package_agents(
+                            pkg_info, project_root
+                        )
                         if Path(".claude").exists():
-                            agent_integrator.integrate_package_agents_claude(pkg_info, project_root)
+                            agent_integrator.integrate_package_agents_claude(
+                                pkg_info, project_root
+                            )
                     skill_integrator.integrate_package_skill(pkg_info, project_root)
                     if command_integrator.should_integrate(project_root):
-                        command_integrator.integrate_package_commands(pkg_info, project_root)
-                    hook_integrator_reint.integrate_package_hooks(pkg_info, project_root)
-                    hook_integrator_reint.integrate_package_hooks_claude(pkg_info, project_root)
+                        command_integrator.integrate_package_commands(
+                            pkg_info, project_root
+                        )
+                    hook_integrator_reint.integrate_package_hooks(
+                        pkg_info, project_root
+                    )
+                    hook_integrator_reint.integrate_package_hooks_claude(
+                        pkg_info, project_root
+                    )
                 except Exception:
                     pass  # Best effort re-integration
 
@@ -1482,22 +1544,25 @@ def _install_apm_dependencies(
     _rich_info(f"Installing APM dependencies ({len(apm_deps)})...")
 
     project_root = Path.cwd()
-    
+
     # T5: Check for existing lockfile - use locked versions for reproducible installs
     from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
     lockfile_path = get_lockfile_path(project_root)
     existing_lockfile = None
     if lockfile_path.exists() and not update_refs:
         existing_lockfile = LockFile.read(lockfile_path)
         if existing_lockfile and existing_lockfile.dependencies:
-            _rich_info(f"Using apm.lock ({len(existing_lockfile.dependencies)} locked dependencies)")
-    
+            _rich_info(
+                f"Using apm.lock ({len(existing_lockfile.dependencies)} locked dependencies)"
+            )
+
     apm_modules_dir = project_root / "apm_modules"
     apm_modules_dir.mkdir(exist_ok=True)
-    
+
     # Create downloader early so it can be used for transitive dependency resolution
     downloader = GitHubPackageDownloader()
-    
+
     # Track direct dependency keys so the download callback can distinguish them from transitive
     direct_dep_keys = builtins.set(dep.get_unique_key() for dep in apm_deps)
 
@@ -1519,38 +1584,47 @@ def _install_apm_dependencies(
                 repo_ref = f"{dep_ref.host}/{dep_ref.repo_url}"
             if dep_ref.virtual_path:
                 repo_ref = f"{repo_ref}/{dep_ref.virtual_path}"
-            
+
             # T5: Use locked commit if available (reproducible installs)
             locked_ref = None
             if existing_lockfile:
                 locked_dep = existing_lockfile.get_dependency(dep_ref.get_unique_key())
-                if locked_dep and locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
+                if (
+                    locked_dep
+                    and locked_dep.resolved_commit
+                    and locked_dep.resolved_commit != "cached"
+                ):
                     locked_ref = locked_dep.resolved_commit
-            
+
             # Priority: locked commit > explicit reference > default branch
             if locked_ref:
                 repo_ref = f"{repo_ref}#{locked_ref}"
             elif dep_ref.reference:
                 repo_ref = f"{repo_ref}#{dep_ref.reference}"
-            
+
             # Silent download - no progress display for transitive deps
             result = downloader.download_package(repo_ref, install_path)
             # Capture resolved commit SHA for lockfile
             resolved_sha = None
-            if result and hasattr(result, 'resolved_reference') and result.resolved_reference:
+            if (
+                result
+                and hasattr(result, "resolved_reference")
+                and result.resolved_reference
+            ):
                 resolved_sha = result.resolved_reference.resolved_commit
             callback_downloaded[dep_ref.get_unique_key()] = resolved_sha
             return install_path
         except Exception as e:
             # Log but don't fail - allow resolution to continue
             if verbose:
-                _rich_error(f"  └─ Failed to resolve transitive dep {dep_ref.repo_url}: {e}")
+                _rich_error(
+                    f"  └─ Failed to resolve transitive dep {dep_ref.repo_url}: {e}"
+                )
             return None
-    
+
     # Resolve dependencies with transitive download support
     resolver = APMDependencyResolver(
-        apm_modules_dir=apm_modules_dir,
-        download_callback=download_callback
+        apm_modules_dir=apm_modules_dir, download_callback=download_callback
     )
 
     try:
@@ -1610,20 +1684,20 @@ def _install_apm_dependencies(
             detect_target,
             should_integrate_vscode,
             should_integrate_claude,
+            should_integrate_opencode,
             get_target_description,
         )
 
         # Get config target from apm.yml if available
         config_target = apm_package.target
 
-        # Auto-create .github/ if neither .github/ nor .claude/ exists.
+        # Auto-create .github/ if no integration root exists.
         # Per skill-strategy Decision 1, .github/skills/ is the standard skills location;
         # creating .github/ here ensures a consistent skills root and also enables
         # VSCode/Copilot integration by default (quick path to value), even for
         # projects that don't yet use .claude/.
         github_dir = project_root / ".github"
-        claude_dir = project_root / ".claude"
-        if not github_dir.exists() and not claude_dir.exists():
+        if _should_auto_create_github_dir(project_root):
             github_dir.mkdir(parents=True, exist_ok=True)
             _rich_info(
                 "Created .github/ as standard skills root (.github/skills/) and to enable VSCode/Copilot integration"
@@ -1638,11 +1712,15 @@ def _install_apm_dependencies(
         # Determine which integrations to run based on detected target
         integrate_vscode = should_integrate_vscode(detected_target)
         integrate_claude = should_integrate_claude(detected_target)
+        integrate_opencode = should_integrate_opencode(detected_target)
 
         # Initialize integrators
         prompt_integrator = PromptIntegrator()
         agent_integrator = AgentIntegrator()
-        from apm_cli.integration.skill_integrator import SkillIntegrator, should_install_skill
+        from apm_cli.integration.skill_integrator import (
+            SkillIntegrator,
+            should_install_skill,
+        )
         from apm_cli.integration.command_integrator import CommandIntegrator
         from apm_cli.integration.hook_integrator import HookIntegrator
 
@@ -1660,7 +1738,10 @@ def _install_apm_dependencies(
 
         # Collect installed packages for lockfile generation
         from apm_cli.deps.lockfile import LockFile, LockedDependency, get_lockfile_path
-        installed_packages: List[tuple] = []  # List of (dep_ref, resolved_commit, depth, resolved_by)
+
+        installed_packages: List[
+            tuple
+        ] = []  # List of (dep_ref, resolved_commit, depth, resolved_by)
 
         # Install each dependency with Rich progress display
         from rich.progress import (
@@ -1727,7 +1808,7 @@ def _install_apm_dependencies(
                     _rich_info(f"✓ {display_name}{ref_str} (cached)")
 
                     # Still need to integrate prompts for cached packages (zero-config behavior)
-                    if integrate_vscode or integrate_claude:
+                    if integrate_vscode or integrate_claude or integrate_opencode:
                         try:
                             # Create PackageInfo from cached package
                             from apm_cli.models.apm_package import (
@@ -1778,14 +1859,24 @@ def _install_apm_dependencies(
                             if skill_md_exists and apm_yml_exists:
                                 cached_package_info.package_type = PackageType.HYBRID
                             elif skill_md_exists:
-                                cached_package_info.package_type = PackageType.CLAUDE_SKILL
+                                cached_package_info.package_type = (
+                                    PackageType.CLAUDE_SKILL
+                                )
                             elif apm_yml_exists:
-                                cached_package_info.package_type = PackageType.APM_PACKAGE
+                                cached_package_info.package_type = (
+                                    PackageType.APM_PACKAGE
+                                )
 
                             # Collect for lockfile (cached packages still need to be tracked)
-                            node = dependency_graph.dependency_tree.get_node(dep_ref.get_unique_key())
+                            node = dependency_graph.dependency_tree.get_node(
+                                dep_ref.get_unique_key()
+                            )
                             depth = node.depth if node else 1
-                            resolved_by = node.parent.dependency_ref.repo_url if node and node.parent else None
+                            resolved_by = (
+                                node.parent.dependency_ref.repo_url
+                                if node and node.parent
+                                else None
+                            )
                             # Get commit SHA: callback capture > existing lockfile > explicit reference
                             dep_key = dep_ref.get_unique_key()
                             cached_commit = callback_downloaded.get(dep_key)
@@ -1795,7 +1886,9 @@ def _install_apm_dependencies(
                                     cached_commit = locked_dep.resolved_commit
                             if not cached_commit:
                                 cached_commit = dep_ref.reference
-                            installed_packages.append((dep_ref, cached_commit, depth, resolved_by))
+                            installed_packages.append(
+                                (dep_ref, cached_commit, depth, resolved_by)
+                            )
 
                             # VSCode + Claude integration (prompts + agents)
                             if integrate_vscode or integrate_claude:
@@ -1841,7 +1934,11 @@ def _install_apm_dependencies(
 
                             # Skill integration (works for both VSCode and Claude)
                             # Skills go to .github/skills/ (primary) and .claude/skills/ (if .claude/ exists)
-                            if integrate_vscode or integrate_claude:
+                            if (
+                                integrate_vscode
+                                or integrate_claude
+                                or integrate_opencode
+                            ):
                                 skill_result = skill_integrator.integrate_package_skill(
                                     cached_package_info, project_root
                                 )
@@ -1851,7 +1948,9 @@ def _install_apm_dependencies(
                                         f"  └─ Skill integrated → .github/skills/"
                                     )
                                 if skill_result.sub_skills_promoted > 0:
-                                    total_sub_skills_promoted += skill_result.sub_skills_promoted
+                                    total_sub_skills_promoted += (
+                                        skill_result.sub_skills_promoted
+                                    )
                                     _rich_info(
                                         f"  └─ {skill_result.sub_skills_promoted} skill(s) integrated → .github/skills/"
                                     )
@@ -1868,7 +1967,7 @@ def _install_apm_dependencies(
                                     f"  └─ {instruction_count} instruction(s) ready (compile via `apm compile`)"
                                 )
 
-                            # Claude-specific integration (agents + commands)
+                            # Claude/OpenCode command integration
                             if integrate_claude:
                                 # Integrate agents to .claude/agents/
                                 claude_agent_result = (
@@ -1883,9 +1982,12 @@ def _install_apm_dependencies(
                                     _rich_info(
                                         f"  └─ {claude_agent_result.files_integrated} agents integrated → .claude/agents/"
                                     )
-                                total_links_resolved += claude_agent_result.links_resolved
+                                total_links_resolved += (
+                                    claude_agent_result.links_resolved
+                                )
 
-                                # Generate Claude commands from prompts
+                            if integrate_claude or integrate_opencode:
+                                # Generate commands from prompts (.claude/commands or .opencode/commands)
                                 command_result = (
                                     command_integrator.integrate_package_commands(
                                         cached_package_info, project_root
@@ -1895,8 +1997,13 @@ def _install_apm_dependencies(
                                     total_commands_integrated += (
                                         command_result.files_integrated
                                     )
+                                    target_hint = (
+                                        command_result.target_paths[0].parent
+                                        if command_result.target_paths
+                                        else Path(".claude/commands")
+                                    )
                                     _rich_info(
-                                        f"  └─ {command_result.files_integrated} commands integrated → .claude/commands/"
+                                        f"  └─ {command_result.files_integrated} commands integrated → {target_hint}/"
                                     )
                                 if command_result.files_updated > 0:
                                     _rich_info(
@@ -1910,16 +2017,22 @@ def _install_apm_dependencies(
                                     cached_package_info, project_root
                                 )
                                 if hook_result.hooks_integrated > 0:
-                                    total_hooks_integrated += hook_result.hooks_integrated
+                                    total_hooks_integrated += (
+                                        hook_result.hooks_integrated
+                                    )
                                     _rich_info(
                                         f"  └─ {hook_result.hooks_integrated} hook(s) integrated → .github/hooks/"
                                     )
                             if integrate_claude:
-                                hook_result_claude = hook_integrator.integrate_package_hooks_claude(
-                                    cached_package_info, project_root
+                                hook_result_claude = (
+                                    hook_integrator.integrate_package_hooks_claude(
+                                        cached_package_info, project_root
+                                    )
                                 )
                                 if hook_result_claude.hooks_integrated > 0:
-                                    total_hooks_integrated += hook_result_claude.hooks_integrated
+                                    total_hooks_integrated += (
+                                        hook_result_claude.hooks_integrated
+                                    )
                                     _rich_info(
                                         f"  └─ {hook_result_claude.hooks_integrated} hook(s) integrated → .claude/settings.json"
                                     )
@@ -1951,8 +2064,14 @@ def _install_apm_dependencies(
                     # T5: Build download ref - use locked commit if available
                     download_ref = str(dep_ref)
                     if existing_lockfile:
-                        locked_dep = existing_lockfile.get_dependency(dep_ref.get_unique_key())
-                        if locked_dep and locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
+                        locked_dep = existing_lockfile.get_dependency(
+                            dep_ref.get_unique_key()
+                        )
+                        if (
+                            locked_dep
+                            and locked_dep.resolved_commit
+                            and locked_dep.resolved_commit != "cached"
+                        ):
                             # Override with locked commit for reproducible install
                             base_ref = dep_ref.repo_url
                             if dep_ref.virtual_path:
@@ -1976,13 +2095,26 @@ def _install_apm_dependencies(
 
                     # Collect for lockfile: get resolved commit and depth
                     resolved_commit = None
-                    if hasattr(package_info, 'resolved_reference') and package_info.resolved_reference:
-                        resolved_commit = package_info.resolved_reference.resolved_commit
+                    if (
+                        hasattr(package_info, "resolved_reference")
+                        and package_info.resolved_reference
+                    ):
+                        resolved_commit = (
+                            package_info.resolved_reference.resolved_commit
+                        )
                     # Get depth from dependency tree
-                    node = dependency_graph.dependency_tree.get_node(dep_ref.get_unique_key())
+                    node = dependency_graph.dependency_tree.get_node(
+                        dep_ref.get_unique_key()
+                    )
                     depth = node.depth if node else 1
-                    resolved_by = node.parent.dependency_ref.repo_url if node and node.parent else None
-                    installed_packages.append((dep_ref, resolved_commit, depth, resolved_by))
+                    resolved_by = (
+                        node.parent.dependency_ref.repo_url
+                        if node and node.parent
+                        else None
+                    )
+                    installed_packages.append(
+                        (dep_ref, resolved_commit, depth, resolved_by)
+                    )
 
                     # Show package type in verbose mode
                     if verbose and hasattr(package_info, "package_type"):
@@ -1990,9 +2122,7 @@ def _install_apm_dependencies(
 
                         package_type = package_info.package_type
                         if package_type == PackageType.CLAUDE_SKILL:
-                            _rich_info(
-                                f"  └─ Package type: Skill (SKILL.md detected)"
-                            )
+                            _rich_info(f"  └─ Package type: Skill (SKILL.md detected)")
                         elif package_type == PackageType.HYBRID:
                             _rich_info(
                                 f"  └─ Package type: Hybrid (apm.yml + SKILL.md)"
@@ -2001,14 +2131,12 @@ def _install_apm_dependencies(
                             _rich_info(f"  └─ Package type: APM Package (apm.yml)")
 
                     # Auto-integrate prompts and agents if enabled
-                    if integrate_vscode or integrate_claude:
+                    if integrate_vscode or integrate_claude or integrate_opencode:
                         try:
                             # Integrate prompts + agents (dual-target: .github/ + .claude/)
                             # Integrate prompts
-                            prompt_result = (
-                                prompt_integrator.integrate_package_prompts(
-                                    package_info, project_root
-                                )
+                            prompt_result = prompt_integrator.integrate_package_prompts(
+                                package_info, project_root
                             )
                             if prompt_result.files_integrated > 0:
                                 total_prompts_integrated += (
@@ -2025,15 +2153,11 @@ def _install_apm_dependencies(
                             total_links_resolved += prompt_result.links_resolved
 
                             # Integrate agents
-                            agent_result = (
-                                agent_integrator.integrate_package_agents(
-                                    package_info, project_root
-                                )
+                            agent_result = agent_integrator.integrate_package_agents(
+                                package_info, project_root
                             )
                             if agent_result.files_integrated > 0:
-                                total_agents_integrated += (
-                                    agent_result.files_integrated
-                                )
+                                total_agents_integrated += agent_result.files_integrated
                                 _rich_info(
                                     f"  └─ {agent_result.files_integrated} agents integrated → .github/agents/"
                                 )
@@ -2046,7 +2170,11 @@ def _install_apm_dependencies(
 
                             # Skill integration (works for both VSCode and Claude)
                             # Skills go to .github/skills/ (primary) and .claude/skills/ (if .claude/ exists)
-                            if integrate_vscode or integrate_claude:
+                            if (
+                                integrate_vscode
+                                or integrate_claude
+                                or integrate_opencode
+                            ):
                                 skill_result = skill_integrator.integrate_package_skill(
                                     package_info, project_root
                                 )
@@ -2056,7 +2184,9 @@ def _install_apm_dependencies(
                                         f"  └─ Skill integrated → .github/skills/"
                                     )
                                 if skill_result.sub_skills_promoted > 0:
-                                    total_sub_skills_promoted += skill_result.sub_skills_promoted
+                                    total_sub_skills_promoted += (
+                                        skill_result.sub_skills_promoted
+                                    )
                                     _rich_info(
                                         f"  └─ {skill_result.sub_skills_promoted} skill(s) integrated → .github/skills/"
                                     )
@@ -2073,7 +2203,7 @@ def _install_apm_dependencies(
                                     f"  └─ {instruction_count} instruction(s) ready (compile via `apm compile`)"
                                 )
 
-                            # Claude-specific integration (agents + commands)
+                            # Claude/OpenCode command integration
                             if integrate_claude:
                                 # Integrate agents to .claude/agents/
                                 claude_agent_result = (
@@ -2088,9 +2218,12 @@ def _install_apm_dependencies(
                                     _rich_info(
                                         f"  └─ {claude_agent_result.files_integrated} agents integrated → .claude/agents/"
                                     )
-                                total_links_resolved += claude_agent_result.links_resolved
+                                total_links_resolved += (
+                                    claude_agent_result.links_resolved
+                                )
 
-                                # Generate Claude commands from prompts
+                            if integrate_claude or integrate_opencode:
+                                # Generate commands from prompts (.claude/commands or .opencode/commands)
                                 command_result = (
                                     command_integrator.integrate_package_commands(
                                         package_info, project_root
@@ -2100,8 +2233,13 @@ def _install_apm_dependencies(
                                     total_commands_integrated += (
                                         command_result.files_integrated
                                     )
+                                    target_hint = (
+                                        command_result.target_paths[0].parent
+                                        if command_result.target_paths
+                                        else Path(".claude/commands")
+                                    )
                                     _rich_info(
-                                        f"  └─ {command_result.files_integrated} commands integrated → .claude/commands/"
+                                        f"  └─ {command_result.files_integrated} commands integrated → {target_hint}/"
                                     )
                                 if command_result.files_updated > 0:
                                     _rich_info(
@@ -2115,16 +2253,22 @@ def _install_apm_dependencies(
                                     package_info, project_root
                                 )
                                 if hook_result.hooks_integrated > 0:
-                                    total_hooks_integrated += hook_result.hooks_integrated
+                                    total_hooks_integrated += (
+                                        hook_result.hooks_integrated
+                                    )
                                     _rich_info(
                                         f"  └─ {hook_result.hooks_integrated} hook(s) integrated → .github/hooks/"
                                     )
                             if integrate_claude:
-                                hook_result_claude = hook_integrator.integrate_package_hooks_claude(
-                                    package_info, project_root
+                                hook_result_claude = (
+                                    hook_integrator.integrate_package_hooks_claude(
+                                        package_info, project_root
+                                    )
                                 )
                                 if hook_result_claude.hooks_integrated > 0:
-                                    total_hooks_integrated += hook_result_claude.hooks_integrated
+                                    total_hooks_integrated += (
+                                        hook_result_claude.hooks_integrated
+                                    )
                                     _rich_info(
                                         f"  └─ {hook_result_claude.hooks_integrated} hook(s) integrated → .claude/settings.json"
                                     )
@@ -2149,10 +2293,14 @@ def _install_apm_dependencies(
         # Generate apm.lock for reproducible installs (T4: lockfile generation)
         if installed_packages:
             try:
-                lockfile = LockFile.from_installed_packages(installed_packages, dependency_graph)
+                lockfile = LockFile.from_installed_packages(
+                    installed_packages, dependency_graph
+                )
                 lockfile_path = get_lockfile_path(project_root)
                 lockfile.save(lockfile_path)
-                _rich_info(f"Generated apm.lock with {len(lockfile.dependencies)} dependencies")
+                _rich_info(
+                    f"Generated apm.lock with {len(lockfile.dependencies)} dependencies"
+                )
             except Exception as e:
                 _rich_warning(f"Could not generate apm.lock: {e}")
 
@@ -2161,14 +2309,18 @@ def _install_apm_dependencies(
         gitignore_updated = False
         if total_prompts_integrated > 0:
             try:
-                if prompt_integrator.update_gitignore_for_integrated_prompts(project_root):
+                if prompt_integrator.update_gitignore_for_integrated_prompts(
+                    project_root
+                ):
                     gitignore_updated = True
             except Exception:
                 pass
 
         if total_agents_integrated > 0:
             try:
-                if agent_integrator.update_gitignore_for_integrated_agents(project_root):
+                if agent_integrator.update_gitignore_for_integrated_agents(
+                    project_root
+                ):
                     gitignore_updated = True
             except Exception:
                 pass
@@ -2186,8 +2338,10 @@ def _install_apm_dependencies(
         # Update .gitignore for integrated Claude agents if any were integrated
         if integrate_claude and total_agents_integrated > 0:
             try:
-                updated = agent_integrator.update_gitignore_for_integrated_agents_claude(
-                    project_root
+                updated = (
+                    agent_integrator.update_gitignore_for_integrated_agents_claude(
+                        project_root
+                    )
                 )
                 if updated:
                     _rich_info(
@@ -2201,9 +2355,7 @@ def _install_apm_dependencies(
             try:
                 updated = hook_integrator.update_gitignore(project_root)
                 if updated:
-                    _rich_info(
-                        "Updated .gitignore for integrated hooks (*-apm.json)"
-                    )
+                    _rich_info("Updated .gitignore for integrated hooks (*-apm.json)")
             except Exception as e:
                 _rich_warning(f"Could not update .gitignore for hooks: {e}")
 
@@ -2227,7 +2379,9 @@ def _install_apm_dependencies(
         raise RuntimeError(f"Failed to resolve APM dependencies: {e}")
 
 
-def _collect_transitive_mcp_deps(apm_modules_dir: Path, lock_path: Path = None, trust_private: bool = False) -> list:
+def _collect_transitive_mcp_deps(
+    apm_modules_dir: Path, lock_path: Path = None, trust_private: bool = False
+) -> list:
     """Collect MCP dependencies from resolved APM packages listed in apm.lock.
 
     Only scans apm.yml files for packages present in apm.lock to avoid
@@ -2259,7 +2413,11 @@ def _collect_transitive_mcp_deps(apm_modules_dir: Path, lock_path: Path = None, 
             locked_paths = builtins.set()
             for dep in lockfile.get_all_dependencies():
                 if dep.repo_url:
-                    yml = apm_modules_dir / dep.repo_url / dep.virtual_path / "apm.yml" if dep.virtual_path else apm_modules_dir / dep.repo_url / "apm.yml"
+                    yml = (
+                        apm_modules_dir / dep.repo_url / dep.virtual_path / "apm.yml"
+                        if dep.virtual_path
+                        else apm_modules_dir / dep.repo_url / "apm.yml"
+                    )
                     locked_paths.add(yml.resolve())
 
     # Prefer iterating lock-derived paths directly (existing files only).
@@ -2276,7 +2434,7 @@ def _collect_transitive_mcp_deps(apm_modules_dir: Path, lock_path: Path = None, 
             mcp = pkg.get_mcp_dependencies()
             if mcp:
                 for dep in mcp:
-                    if hasattr(dep, 'is_self_defined') and dep.is_self_defined:
+                    if hasattr(dep, "is_self_defined") and dep.is_self_defined:
                         if trust_private:
                             _rich_info(
                                 f"Trusting self-defined MCP server '{dep.name}' "
@@ -2311,7 +2469,7 @@ def _deduplicate_mcp_deps(deps: list) -> list:
     seen_names: builtins.set = builtins.set()
     result = []
     for dep in deps:
-        if hasattr(dep, 'name'):
+        if hasattr(dep, "name"):
             name = dep.name
         elif isinstance(dep, dict):
             name = dep.get("name", "")
@@ -2352,8 +2510,7 @@ def _build_self_defined_server_info(dep) -> dict:
         env_vars = []
         if dep.env:
             env_vars = [
-                {"name": k, "description": "", "required": True}
-                for k in dep.env
+                {"name": k, "description": "", "required": True} for k in dep.env
             ]
 
         runtime_args = []
@@ -2408,7 +2565,11 @@ def _apply_mcp_overlay(server_info_cache: dict, dep) -> None:
 
     # Package type overlay: select specific package registry (npm, pypi, oci)
     if dep.package and "packages" in info:
-        filtered = [p for p in info["packages"] if p.get("registry_name", "").lower() == dep.package.lower()]
+        filtered = [
+            p
+            for p in info["packages"]
+            if p.get("registry_name", "").lower() == dep.package.lower()
+        ]
         if filtered:
             info["packages"] = filtered
 
@@ -2472,10 +2633,21 @@ def _install_mcp_dependencies(
 
     # Split into registry-resolved and self-defined deps
     # Backward compat: plain strings are treated as registry deps
-    registry_deps = [dep for dep in mcp_deps if isinstance(dep, str) or (hasattr(dep, 'is_registry_resolved') and dep.is_registry_resolved)]
-    self_defined_deps = [dep for dep in mcp_deps if hasattr(dep, 'is_self_defined') and dep.is_self_defined]
-    registry_dep_names = [dep.name if hasattr(dep, 'name') else dep for dep in registry_deps]
-    registry_dep_map = {dep.name: dep for dep in registry_deps if hasattr(dep, 'name')}
+    registry_deps = [
+        dep
+        for dep in mcp_deps
+        if isinstance(dep, str)
+        or (hasattr(dep, "is_registry_resolved") and dep.is_registry_resolved)
+    ]
+    self_defined_deps = [
+        dep
+        for dep in mcp_deps
+        if hasattr(dep, "is_self_defined") and dep.is_self_defined
+    ]
+    registry_dep_names = [
+        dep.name if hasattr(dep, "name") else dep for dep in registry_deps
+    ]
+    registry_dep_map = {dep.name: dep for dep in registry_deps if hasattr(dep, "name")}
 
     console = _get_console()
 
@@ -2614,7 +2786,9 @@ def _install_mcp_dependencies(
             # Early validation: check if all servers exist in registry (fail-fast like npm)
             if verbose:
                 _rich_info(f"Validating {len(registry_deps)} registry servers...")
-            valid_servers, invalid_servers = operations.validate_servers_exist(registry_dep_names)
+            valid_servers, invalid_servers = operations.validate_servers_exist(
+                registry_dep_names
+            )
 
             if invalid_servers:
                 _rich_error(
@@ -2660,7 +2834,9 @@ def _install_mcp_dependencies(
                     # Batch fetch server info once to avoid duplicate registry calls
                     if verbose:
                         _rich_info(f"Installing {len(servers_to_install)} servers...")
-                    server_info_cache = operations.batch_fetch_server_info(servers_to_install)
+                    server_info_cache = operations.batch_fetch_server_info(
+                        servers_to_install
+                    )
 
                     # Apply overlays from MCPDependency fields onto fetched server_info
                     for server_name in servers_to_install:
@@ -2709,7 +2885,9 @@ def _install_mcp_dependencies(
         except ImportError:
             _rich_warning("Registry operations not available")
             _rich_error("Cannot validate MCP servers without registry operations")
-            raise RuntimeError("Registry operations module required for MCP installation")
+            raise RuntimeError(
+                "Registry operations module required for MCP installation"
+            )
 
     # --- Self-defined deps (registry: false) ---
     if self_defined_deps:
@@ -2720,7 +2898,9 @@ def _install_mcp_dependencies(
 
             if console:
                 transport_label = dep.transport or "stdio"
-                console.print(f"│  [cyan]⬇️[/cyan]  {dep.name} [dim](self-defined, {transport_label})[/dim]")
+                console.print(
+                    f"│  [cyan]⬇️[/cyan]  {dep.name} [dim](self-defined, {transport_label})[/dim]"
+                )
                 console.print(
                     f"│     └─ Configuring for {', '.join([rt.title() for rt in target_runtimes])}..."
                 )
@@ -2751,9 +2931,6 @@ def _install_mcp_dependencies(
             console.print("└─ [green]All servers up to date[/green]")
 
     return configured_count
-
-
-
 
 
 def _show_install_summary(
@@ -3313,7 +3490,6 @@ def _watch_mode(output, chatmode, no_links, dry_run):
 
                 # Check if it's a relevant file
                 if event.src_path.endswith(".md") or event.src_path.endswith("apm.yml"):
-
                     # Debounce rapid changes
                     current_time = time.time()
                     if current_time - self.last_compile < self.debounce_delay:
@@ -3441,9 +3617,7 @@ def _watch_mode(output, chatmode, no_links, dry_run):
     except ImportError:
         _rich_error("Watch mode requires the 'watchdog' library")
         _rich_info("Install it with: uv pip install watchdog")
-        _rich_info(
-            "Or reinstall APM: uv pip install -e . (from the apm directory)"
-        )
+        _rich_info("Or reinstall APM: uv pip install -e . (from the apm directory)")
         sys.exit(1)
     except Exception as e:
         _rich_error(f"Error in watch mode: {e}")
@@ -3460,9 +3634,9 @@ def _watch_mode(output, chatmode, no_links, dry_run):
 @click.option(
     "--target",
     "-t",
-    type=click.Choice(["vscode", "agents", "claude", "all"]),
+    type=click.Choice(["vscode", "agents", "claude", "opencode", "all"]),
     default=None,
-    help="Target platform: vscode/agents (AGENTS.md), claude (CLAUDE.md), or all. Auto-detects if not specified.",
+    help="Target platform: vscode/agents (AGENTS.md), claude (CLAUDE.md), opencode (AGENTS.md + .opencode), or all. Auto-detects if not specified.",
 )
 @click.option(
     "--dry-run",
@@ -3526,6 +3700,7 @@ def compile(
 
     Target platforms:
     • vscode/agents: Generates AGENTS.md + .github/ structure (VSCode/GitHub Copilot)
+    • opencode: Generates AGENTS.md + .opencode/ structure (OpenCode)
     • claude: Generates CLAUDE.md + .claude/ structure (Claude Code)
     • all: Generates both targets (default)
 
@@ -3611,6 +3786,7 @@ def compile(
             # Show MCP dependency validation count
             try:
                 from apm_cli.models.apm_package import APMPackage
+
                 apm_pkg = APMPackage.from_apm_yml(Path("apm.yml"))
                 mcp_count = len(apm_pkg.get_mcp_dependencies())
                 if mcp_count > 0:
@@ -3670,13 +3846,15 @@ def compile(
             if detected_target == "minimal":
                 _rich_info(f"Compiling for AGENTS.md only ({detection_reason})")
                 _rich_info(
-                    "💡 Create .github/ or .claude/ folder for full integration",
+                    "💡 Create .github/, .claude/, or .opencode/ folder for full integration",
                     symbol="light_bulb",
                 )
             elif detected_target == "vscode" or detected_target == "agents":
                 _rich_info(
                     f"Compiling for AGENTS.md (VSCode/Copilot) - {detection_reason}"
                 )
+            elif detected_target == "opencode":
+                _rich_info(f"Compiling for AGENTS.md (OpenCode) - {detection_reason}")
             elif detected_target == "claude":
                 _rich_info(
                     f"Compiling for CLAUDE.md (Claude Code) - {detection_reason}"
@@ -3838,7 +4016,7 @@ def compile(
                                     os.path.getsize(output_path) if not dry_run else 0
                                 )
                                 size_str = (
-                                    f"{file_size/1024:.1f}KB"
+                                    f"{file_size / 1024:.1f}KB"
                                     if file_size > 0
                                     else "Preview"
                                 )
@@ -4269,9 +4447,9 @@ def status():
 
         try:
             # Create a nice status display
-            status_content = f"""Preference order: {' → '.join(preference)}
+            status_content = f"""Preference order: {" → ".join(preference)}
 
-Active runtime: {available_runtime if available_runtime else 'None available'}"""
+Active runtime: {available_runtime if available_runtime else "None available"}"""
 
             if not available_runtime:
                 status_content += f"\n\n{STATUS_SYMBOLS['info']} Run 'apm runtime setup copilot' to install the primary runtime"

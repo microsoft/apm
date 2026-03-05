@@ -36,9 +36,7 @@ def _make_package(
     pkg_path.mkdir(parents=True, exist_ok=True)
 
     type_line = f"\ntype: {pkg_type.value}" if pkg_type else ""
-    (pkg_path / "apm.yml").write_text(
-        f"name: {name}\nversion: 1.0.0{type_line}\n"
-    )
+    (pkg_path / "apm.yml").write_text(f"name: {name}\nversion: 1.0.0{type_line}\n")
 
     if prompts:
         prompts_dir = pkg_path / ".apm" / "prompts"
@@ -94,11 +92,15 @@ class TestUninstallPreservesOtherPackagePrompts:
 
         # Two packages, each with a prompt
         pkg_a = _make_package(
-            tmp_path, "owner", "pkg-a",
+            tmp_path,
+            "owner",
+            "pkg-a",
             prompts={"review.prompt.md": "---\nname: review\n---\n# Review A"},
         )
         pkg_b = _make_package(
-            tmp_path, "owner", "pkg-b",
+            tmp_path,
+            "owner",
+            "pkg-b",
             prompts={"lint.prompt.md": "---\nname: lint\n---\n# Lint B"},
         )
 
@@ -141,11 +143,15 @@ class TestUninstallPreservesOtherPackageAgents:
         (project_root / ".github").mkdir()
 
         pkg_a = _make_package(
-            tmp_path, "owner", "pkg-a",
+            tmp_path,
+            "owner",
+            "pkg-a",
             agents={"security.agent.md": "---\nname: security\n---\n# Security A"},
         )
         pkg_b = _make_package(
-            tmp_path, "owner", "pkg-b",
+            tmp_path,
+            "owner",
+            "pkg-b",
             agents={"planner.agent.md": "---\nname: planner\n---\n# Planner B"},
         )
 
@@ -185,12 +191,16 @@ class TestUninstallPreservesOtherPackageSkills:
         (project_root / ".github").mkdir()
 
         pkg_a = _make_package(
-            tmp_path, "owner", "skill-a",
+            tmp_path,
+            "owner",
+            "skill-a",
             skill_md="---\nname: skill-a\ndescription: test A\n---\n# Skill A",
             pkg_type=PackageContentType.SKILL,
         )
         pkg_b = _make_package(
-            tmp_path, "owner", "skill-b",
+            tmp_path,
+            "owner",
+            "skill-b",
             skill_md="---\nname: skill-b\ndescription: test B\n---\n# Skill B",
             pkg_type=PackageContentType.SKILL,
         )
@@ -209,10 +219,7 @@ class TestUninstallPreservesOtherPackageSkills:
         # We use a real APMPackage loaded from a manifest that references skill-b only.
         remaining_manifest = tmp_path / "remaining_apm.yml"
         remaining_manifest.write_text(
-            "name: root\nversion: 0.0.0\n"
-            "dependencies:\n"
-            "  apm:\n"
-            "    - owner/skill-b\n"
+            "name: root\nversion: 0.0.0\ndependencies:\n  apm:\n    - owner/skill-b\n"
         )
         root_pkg = APMPackage.from_apm_yml(remaining_manifest)
 
@@ -277,6 +284,23 @@ class TestUninstallPreservesUserFiles:
         assert user_cmd.exists()
         assert user_cmd.read_text() == "# My custom command"
 
+    def test_uninstall_cleans_opencode_apm_commands(self, tmp_path: Path):
+        """Nuke should remove APM commands from .opencode/commands too."""
+        project_root = tmp_path
+        commands_dir = project_root / ".opencode" / "commands"
+        commands_dir.mkdir(parents=True)
+
+        user_cmd = commands_dir / "my-command.md"
+        user_cmd.write_text("# My custom command")
+        apm_cmd = commands_dir / "pkg-cmd-apm.md"
+        apm_cmd.write_text("# APM managed")
+
+        dummy_pkg = APMPackage(name="root", version="0.0.0")
+        CommandIntegrator().sync_integration(dummy_pkg, project_root)
+
+        assert not apm_cmd.exists()
+        assert user_cmd.exists()
+
 
 # ---------------------------------------------------------------------------
 # Last package uninstall → clean state
@@ -291,7 +315,9 @@ class TestUninstallLastPackageLeavesCleanDirs:
         (project_root / ".github").mkdir()
 
         pkg = _make_package(
-            tmp_path, "owner", "only-pkg",
+            tmp_path,
+            "owner",
+            "only-pkg",
             prompts={"guide.prompt.md": "---\nname: guide\n---\n# Guide"},
             agents={"helper.agent.md": "---\nname: helper\n---\n# Helper"},
         )
