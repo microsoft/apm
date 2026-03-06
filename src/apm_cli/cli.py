@@ -2684,22 +2684,28 @@ def _check_self_defined_servers_needing_installation(
     except ImportError:
         return list(dep_names)
 
+    # Build a cache of existing server names per runtime to avoid repeated
+    # client creation and config reads inside the dep_name loop.
+    runtime_existing = {}
+    runtime_failures = []
+    for runtime in target_runtimes:
+        try:
+            client = ClientFactory.create_client(runtime)
+            detector = MCPConflictDetector(client)
+            runtime_existing[runtime] = detector.get_existing_server_configs()
+        except Exception:
+            runtime_failures.append(runtime)
+
     servers_needing_installation = []
     for dep_name in dep_names:
-        needs_install = False
-        for runtime in target_runtimes:
-            try:
-                client = ClientFactory.create_client(runtime)
-                detector = MCPConflictDetector(client)
-                existing = detector.get_existing_server_configs()
-                if dep_name not in existing:
-                    needs_install = True
-                    break
-            except Exception:
-                needs_install = True
-                break
-        if needs_install:
+        if runtime_failures:
+            # If any runtime failed to load, be conservative and install.
             servers_needing_installation.append(dep_name)
+            continue
+        for runtime in target_runtimes:
+            if dep_name not in runtime_existing.get(runtime, {}):
+                servers_needing_installation.append(dep_name)
+                break
     return servers_needing_installation
 
 
@@ -2970,13 +2976,19 @@ def _install_mcp_dependencies(
 
         # Surface already-configured self-defined servers
         if already_configured_self_defined:
-            for name in already_configured_self_defined:
-                if console:
+            if console:
+                for name in already_configured_self_defined:
                     console.print(
                         f"│  [green]✓[/green] {name} [dim](already configured)[/dim]"
                     )
-                elif verbose:
+            elif verbose:
+                for name in already_configured_self_defined:
                     _rich_info(f"{name} already configured, skipping")
+            else:
+                names_str = ", ".join(already_configured_self_defined)
+                _rich_success(
+                    f"{len(already_configured_self_defined)} self-defined server(s) already configured, skipping: {names_str}"
+                )
 
         for dep in self_defined_deps:
             if dep.name not in self_defined_to_install:

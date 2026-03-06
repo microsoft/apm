@@ -438,15 +438,6 @@ class TestInstallMCPDependencies:
 # ---------------------------------------------------------------------------
 class TestCheckSelfDefinedServersNeeding:
 
-    def _make_mock_client(self, existing_server_names):
-        """Return a mock client whose conflict detector reports *existing_server_names*."""
-        client = MagicMock()
-        # get_existing_server_configs() returns a dict keyed by server name
-        config_dict = {name: {"type": "http"} for name in existing_server_names}
-        # We need MCPConflictDetector(client).get_existing_server_configs() to return config_dict.
-        # The helper creates a detector internally, so we patch the detector class.
-        return client, config_dict
-
     @patch("apm_cli.core.conflict_detector.MCPConflictDetector")
     @patch("apm_cli.factory.ClientFactory")
     def test_all_servers_need_installation_when_none_configured(
