@@ -1,6 +1,7 @@
 """GitHub package downloader for APM dependencies."""
 
 import os
+import stat
 import shutil
 import sys
 import time
@@ -10,6 +11,32 @@ from typing import Optional, Dict, Any, Callable
 import random
 import re
 import requests
+
+
+def _remove_readonly(func, path, excinfo):
+    """Error handler for shutil.rmtree on Windows.
+
+    Git marks pack files and objects as read-only.  On Windows this causes
+    ``shutil.rmtree`` to raise ``[WinError 5] Access is denied``.  Clearing
+    the read-only flag before retrying the removal resolves the issue.
+
+    Also handles ``[WinError 32]`` (file in use) by closing stale handles
+    from GitPython via ``gc.collect()`` before retrying.
+    """
+    exc_value = excinfo[1] if excinfo else None
+    if exc_value and getattr(exc_value, 'winerror', None) == 32:
+        # WinError 32: file in use — nudge GitPython to release handles
+        import gc
+        gc.collect()
+        import time
+        time.sleep(0.1)
+        try:
+            func(path)
+            return
+        except Exception:
+            pass
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
 
 import git
 from git import Repo, RemoteProgress
@@ -512,10 +539,15 @@ class GitHubPackageDownloader:
                             raise RuntimeError(f"Failed to clone repository {dep_ref.repo_url}: {sanitized_error}")
                     
         finally:
+            # Close repo handles before cleanup to avoid WinError 32 on Windows
+            try:
+                repo.close()  # type: ignore[possibly-undefined]
+            except Exception:
+                pass
             # Clean up temporary directory
             if temp_dir and temp_dir.exists():
-                shutil.rmtree(temp_dir, ignore_errors=True)
-        
+                shutil.rmtree(temp_dir, onerror=_remove_readonly)
+
         return ResolvedReference(
             original_ref=repo_ref,
             ref_type=ref_type,
@@ -1198,7 +1230,7 @@ author: {dep_ref.repo_url.split('/')[0]}
             
             # If target exists and has content, remove it
             if target_path.exists() and any(target_path.iterdir()):
-                shutil.rmtree(target_path)
+                shutil.rmtree(target_path, onerror=_remove_readonly)
                 target_path.mkdir(parents=True, exist_ok=True)
             
             # Copy subdirectory contents to target
@@ -1302,7 +1334,7 @@ author: {dep_ref.repo_url.split('/')[0]}
         
         # If directory already exists and has content, remove it
         if target_path.exists() and any(target_path.iterdir()):
-            shutil.rmtree(target_path)
+            shutil.rmtree(target_path, onerror=_remove_readonly)
             target_path.mkdir(parents=True, exist_ok=True)
         
         # Store progress reporter so we can disable it after clone
@@ -1341,7 +1373,7 @@ author: {dep_ref.repo_url.split('/')[0]}
             # Remove .git directory to save space and prevent treating as a Git repository
             git_dir = target_path / ".git"
             if git_dir.exists():
-                shutil.rmtree(git_dir, ignore_errors=True)
+                shutil.rmtree(git_dir, onerror=_remove_readonly)
                 
         except GitCommandError as e:
             # Check if this might be a private repository access issue
@@ -1365,7 +1397,7 @@ author: {dep_ref.repo_url.split('/')[0]}
         if not validation_result.is_valid:
             # Clean up on validation failure
             if target_path.exists():
-                shutil.rmtree(target_path, ignore_errors=True)
+                shutil.rmtree(target_path, onerror=_remove_readonly)
             
             error_msg = f"Invalid APM package {dep_ref.repo_url}:\n"
             for error in validation_result.errors:
