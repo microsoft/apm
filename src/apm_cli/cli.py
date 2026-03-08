@@ -2662,6 +2662,53 @@ def _apply_mcp_overlay(server_info_cache: dict, dep) -> None:
         )
 
 
+def _check_self_defined_servers_needing_installation(
+    dep_names: list, target_runtimes: list
+) -> list:
+    """Check which self-defined MCP servers actually need installation.
+
+    Self-defined servers have no registry UUID, so we check by name (config key)
+    instead of by ID. A server needs installation if it is missing from at least
+    one target runtime's configuration.
+
+    Args:
+        dep_names: List of self-defined server names to check.
+        target_runtimes: List of target runtimes to check.
+
+    Returns:
+        List of server names that need installation in at least one runtime.
+    """
+    try:
+        from apm_cli.factory import ClientFactory
+        from apm_cli.core.conflict_detector import MCPConflictDetector
+    except ImportError:
+        return list(dep_names)
+
+    # Build a cache of existing server names per runtime to avoid repeated
+    # client creation and config reads inside the dep_name loop.
+    runtime_existing = {}
+    runtime_failures = []
+    for runtime in target_runtimes:
+        try:
+            client = ClientFactory.create_client(runtime)
+            detector = MCPConflictDetector(client)
+            runtime_existing[runtime] = detector.get_existing_server_configs()
+        except Exception:
+            runtime_failures.append(runtime)
+
+    servers_needing_installation = []
+    for dep_name in dep_names:
+        if runtime_failures:
+            # If any runtime failed to load, be conservative and install.
+            servers_needing_installation.append(dep_name)
+            continue
+        for runtime in target_runtimes:
+            if dep_name not in runtime_existing.get(runtime, {}):
+                servers_needing_installation.append(dep_name)
+                break
+    return servers_needing_installation
+
+
 def _install_mcp_dependencies(
     mcp_deps: list, runtime: str = None, exclude: str = None, verbose: bool = False
 ):
@@ -2919,7 +2966,34 @@ def _install_mcp_dependencies(
 
     # --- Self-defined deps (registry: false) ---
     if self_defined_deps:
+        self_defined_names = [dep.name for dep in self_defined_deps]
+        self_defined_to_install = _check_self_defined_servers_needing_installation(
+            self_defined_names, target_runtimes
+        )
+        already_configured_self_defined = [
+            name for name in self_defined_names if name not in self_defined_to_install
+        ]
+
+        # Surface already-configured self-defined servers
+        if already_configured_self_defined:
+            if console:
+                for name in already_configured_self_defined:
+                    console.print(
+                        f"│  [green]✓[/green] {name} [dim](already configured)[/dim]"
+                    )
+            elif verbose:
+                for name in already_configured_self_defined:
+                    _rich_info(f"{name} already configured, skipping")
+            else:
+                names_str = ", ".join(already_configured_self_defined)
+                _rich_success(
+                    f"{len(already_configured_self_defined)} self-defined server(s) already configured, skipping: {names_str}"
+                )
+
         for dep in self_defined_deps:
+            if dep.name not in self_defined_to_install:
+                continue
+
             synthetic_info = _build_self_defined_server_info(dep)
             self_defined_cache = {dep.name: synthetic_info}
             self_defined_env = dep.env or {}
