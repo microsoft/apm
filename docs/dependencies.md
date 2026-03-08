@@ -528,9 +528,14 @@ dependencies:
     version: "1.2.0"
     depth: 2
     resolved_by: "microsoft/apm-sample-package"
+mcp_servers:
+  - acme-kb
+  - github
 ```
 
 The `deployed_files` field tracks exactly which files APM placed in your project. This enables safe cleanup on `apm uninstall` and `apm prune` — only tracked files are removed.
+
+The `mcp_servers` field records the short names of MCP servers currently managed by APM. It is used to detect and clean up stale servers when dependencies change.
 
 ### How It Works
 

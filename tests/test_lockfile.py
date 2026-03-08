@@ -70,6 +70,35 @@ class TestLockFile:
         assert loaded is not None
         assert loaded.has_dependency("owner/repo")
 
+    def test_mcp_servers_round_trip(self, tmp_path):
+        """mcp_servers must survive a write → read cycle."""
+        lock = LockFile(apm_version="1.0.0")
+        lock.mcp_servers = ["github", "acme-kb", "atlassian"]
+        lock.add_dependency(LockedDependency(repo_url="owner/repo"))
+        lock_path = tmp_path / "apm.lock"
+        lock.write(lock_path)
+
+        loaded = LockFile.read(lock_path)
+        assert loaded is not None
+        assert loaded.mcp_servers == ["acme-kb", "atlassian", "github"]  # sorted
+
+    def test_mcp_servers_empty_by_default(self):
+        lock = LockFile()
+        assert lock.mcp_servers == []
+        yaml_str = lock.to_yaml()
+        assert "mcp_servers" not in yaml_str  # omitted when empty
+
+    def test_mcp_servers_from_yaml(self):
+        yaml_str = (
+            'lockfile_version: "1"\n'
+            'dependencies: []\n'
+            'mcp_servers:\n'
+            '  - github\n'
+            '  - acme-kb\n'
+        )
+        lock = LockFile.from_yaml(yaml_str)
+        assert lock.mcp_servers == ["github", "acme-kb"]
+
     def test_read_nonexistent(self, tmp_path):
         loaded = LockFile.read(tmp_path / "apm.lock")
         assert loaded is None
