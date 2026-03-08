@@ -1,0 +1,11 @@
+{
+  "name": "Mock Marketplace Plugin",
+  "version": "1.0.0",
+  "description": "A test marketplace plugin for APM integration testing",
+  "author": {"name": "APM Test Suite"},
+  "license": "MIT",
+  "repository": "microsoft/apm-test-plugin",
+  "homepage": "https://github.com/microsoft/apm",
+  "tags": ["testing", "example", "marketplace"],
+  "dependencies": []
+}

@@ -661,11 +661,14 @@ class TestPackageValidation:
             assert any("not a directory" in error for error in result.errors)
     
     def test_validate_missing_apm_yml(self):
-        """Test validating directory without apm.yml, SKILL.md, or hooks."""
+        """Test that a directory without apm.yml/SKILL.md normalizes as a Claude plugin."""
         with tempfile.TemporaryDirectory() as tmpdir:
             result = validate_apm_package(Path(tmpdir))
-            assert not result.is_valid
-            assert any("Missing required file" in error for error in result.errors)
+            # Per the Claude plugin spec any directory is a valid (empty) plugin;
+            # the name is derived from the directory name.
+            assert result.is_valid
+            assert result.package_type == PackageType.MARKETPLACE_PLUGIN
+            assert result.package is not None
     
     def test_validate_invalid_apm_yml(self):
         """Test validating directory with invalid apm.yml."""
@@ -935,11 +938,13 @@ class TestHookPackageValidation:
             assert result.package_type == PackageType.APM_PACKAGE
 
     def test_validate_empty_dir_is_invalid(self):
-        """Test that a dir with no apm.yml, SKILL.md, or hooks is invalid."""
+        """Test that a dir with no apm.yml, SKILL.md, or hooks normalizes as Claude plugin."""
         with tempfile.TemporaryDirectory() as tmpdir:
             result = validate_apm_package(Path(tmpdir))
-            assert not result.is_valid
-            assert result.package_type == PackageType.INVALID
+            # Per the Claude plugin spec any directory is treated as a valid plugin;
+            # INVALID is no longer returned as a fallback.
+            assert result.is_valid
+            assert result.package_type == PackageType.MARKETPLACE_PLUGIN
 
 
 class TestGitReferenceUtils:

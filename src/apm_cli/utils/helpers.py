@@ -5,6 +5,8 @@ import platform
 import subprocess
 import shutil
 import sys
+from pathlib import Path
+from typing import Optional
 
 
 def is_tool_available(tool_name):
@@ -99,3 +101,24 @@ def detect_platform():
         return "windows"
     else:
         return "unknown"
+
+
+def find_plugin_json(plugin_path: Path) -> Optional[Path]:
+    """Find plugin.json in a plugin directory.
+    
+    Searches for plugin.json first at the root, then recursively in subdirectories.
+    
+    Args:
+        plugin_path: Path to the plugin directory
+        
+    Returns:
+        Optional[Path]: Path to the plugin.json file if found, None otherwise
+    """
+    # Check root first (fastest)
+    root_plugin = plugin_path / "plugin.json"
+    if root_plugin.exists():
+        return root_plugin
+    
+    # Fallback to recursive search in subdirectories
+    matches = list(plugin_path.glob("**/plugin.json"))
+    return matches[0] if matches else None

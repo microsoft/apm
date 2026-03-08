@@ -48,7 +48,10 @@ STATUS_SYMBOLS = {
     'default': '📍',  # Default script marker
     'eyes': '👀',  # Watch mode
     'folder': '📁',  # Directory/folder operations
-    'cogs': '⚙️'  # Compilation/processing
+    'cogs': '⚙️',  # Compilation/processing
+    'plugin': '🔌',  # Plugin-related operations
+    'search': '🔍',  # Search operations
+    'download': '📥',  # Download operations
 }
 
 

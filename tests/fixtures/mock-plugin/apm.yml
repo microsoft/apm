@@ -1,0 +1,6 @@
+name: mock-plugin
+version: 1.0.0
+description: A mock plugin for testing purposes
+author: Test Author
+repository: https://github.com/test/mock-plugin
+plugins: []

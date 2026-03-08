@@ -18,6 +18,7 @@ New to APM? Follow this learning path for the fastest way to get productive:
 
 ### Command Line Interface
 - **[CLI Reference](cli-reference.md)** - Complete command documentation with examples
+- **[Plugin System](plugins.md)** - Installing and using plugins with plugin.json format
 - **[Manifest Schema](manifest-schema.md)** - Complete `apm.yml` schema reference for integrators
 - **[Integration Guide](integrations.md)** - VSCode, Spec-kit, AI runtimes, and tool compatibility
 

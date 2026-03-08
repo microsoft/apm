@@ -89,6 +89,7 @@ def discover_primitives_with_dependencies(base_dir: str = ".") -> PrimitiveColle
     Priority Order:
     1. Local .apm/ (highest priority - always wins)
     2. Dependencies in declaration order (first declared wins)
+    3. Plugins (lowest priority)
     
     Args:
         base_dir (str): Base directory to search in. Defaults to current directory.
@@ -97,16 +98,18 @@ def discover_primitives_with_dependencies(base_dir: str = ".") -> PrimitiveColle
         PrimitiveCollection: Collection of discovered and parsed primitives with source tracking.
     """
     collection = PrimitiveCollection()
-    
+
     # Phase 1: Local primitives (highest priority)
     scan_local_primitives(base_dir, collection)
-    
+
     # Phase 1b: Local SKILL.md
     _discover_local_skill(base_dir, collection)
-    
+
     # Phase 2: Dependency primitives (lower priority, with conflict detection)
+    # Plugins are normalized into standard APM packages during install
+    # (apm.yml + .apm/ are synthesized), so scan_dependency_primitives handles them.
     scan_dependency_primitives(base_dir, collection)
-    
+
     return collection
 
 

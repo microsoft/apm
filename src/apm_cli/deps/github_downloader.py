@@ -725,7 +725,7 @@ class GitHubPackageDownloader:
         Supports:
         - Virtual files: owner/repo/path/file.prompt.md
         - Collections: owner/repo/collections/name (checks for .collection.yml)
-        - Subdirectory packages: owner/repo/path/subdir (checks for apm.yml or SKILL.md)
+        - Subdirectory packages: owner/repo/path/subdir (checks for apm.yml, SKILL.md, or plugin.json)
         
         Args:
             dep_ref: Parsed dependency reference for virtual package
@@ -756,7 +756,10 @@ class GitHubPackageDownloader:
             except RuntimeError:
                 return False
         
-        # For subdirectory packages, check for apm.yml or SKILL.md
+        # For subdirectory packages: apm.yml or SKILL.md confirm the type;
+        # plugin.json confirms a Claude plugin; README.md is a last-resort
+        # signal that the directory exists (any directory that follows the
+        # Claude plugin spec may have none of the above).
         if dep_ref.is_virtual_subdirectory():
             # Try apm.yml first
             try:
@@ -772,7 +775,28 @@ class GitHubPackageDownloader:
             except RuntimeError:
                 pass
             
-            return False
+            # Try plugin.json at various Claude plugin locations
+            plugin_locations = [
+                f"{dep_ref.virtual_path}/plugin.json",                                    # Root
+                f"{dep_ref.virtual_path}/.github/plugin/plugin.json",                     # GitHub Copilot format
+                f"{dep_ref.virtual_path}/.claude-plugin/plugin.json",                     # Claude format
+            ]
+
+            for plugin_path in plugin_locations:
+                try:
+                    self.download_raw_file(dep_ref, plugin_path, ref)
+                    return True
+                except RuntimeError:
+                    continue
+
+            # Last resort: README.md — any well-formed directory should have one.
+            # A directory that follows the Claude plugin spec (agents/, commands/,
+            # skills/ …) with no manifest files is still a valid plugin.
+            try:
+                self.download_raw_file(dep_ref, f"{dep_ref.virtual_path}/README.md", ref)
+                return True
+            except RuntimeError:
+                pass
         
         # Fallback: try to download the file directly
         try:
@@ -1234,13 +1258,31 @@ author: {dep_ref.repo_url.split('/')[0]}
             ref_type=GitReferenceType.BRANCH,
             resolved_commit=resolved_commit
         )
+
+        # For plugins without an explicit version, stamp with the short commit SHA.
+        package = validation_result.package
+        if (
+            validation_result.package_type == PackageType.MARKETPLACE_PLUGIN
+            and package.version == "0.0.0"
+            and resolved_commit != "unknown"
+        ):
+            short_sha = resolved_commit[:7]
+            package.version = short_sha
+            apm_yml_path = target_path / "apm.yml"
+            if apm_yml_path.exists():
+                import yaml as _yaml
+                with open(apm_yml_path, "r", encoding="utf-8") as _f:
+                    _data = _yaml.safe_load(_f) or {}
+                _data["version"] = short_sha
+                with open(apm_yml_path, "w", encoding="utf-8") as _f:
+                    _yaml.dump(_data, _f, default_flow_style=False, sort_keys=False)
         
         # Update progress - complete
         if progress_obj and progress_task_id is not None:
             progress_obj.update(progress_task_id, completed=100, total=100)
         
         return PackageInfo(
-            package=validation_result.package,
+            package=package,
             install_path=target_path,
             resolved_reference=resolved_ref,
             installed_at=datetime.now().isoformat(),
@@ -1379,6 +1421,25 @@ author: {dep_ref.repo_url.split('/')[0]}
         package = validation_result.package
         package.source = dep_ref.to_github_url()
         package.resolved_commit = resolved_ref.resolved_commit
+
+        # For plugins without an explicit version, use the short commit SHA so the
+        # lock file and conflict detection have a meaningful, stable version string.
+        if (
+            validation_result.package_type == PackageType.MARKETPLACE_PLUGIN
+            and package.version == "0.0.0"
+            and resolved_ref.resolved_commit
+        ):
+            short_sha = resolved_ref.resolved_commit[:7]
+            package.version = short_sha
+            # Keep the synthesized apm.yml in sync
+            apm_yml_path = target_path / "apm.yml"
+            if apm_yml_path.exists():
+                import yaml as _yaml
+                with open(apm_yml_path, "r", encoding="utf-8") as _f:
+                    _data = _yaml.safe_load(_f) or {}
+                _data["version"] = short_sha
+                with open(apm_yml_path, "w", encoding="utf-8") as _f:
+                    _yaml.dump(_data, _f, default_flow_style=False, sort_keys=False)
         
         # Create and return PackageInfo
         return PackageInfo(

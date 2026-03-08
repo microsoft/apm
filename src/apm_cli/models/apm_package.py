@@ -29,13 +29,14 @@ class PackageType(Enum):
     """Types of packages that APM can install.
     
     This enum is used internally to classify packages based on their content
-    (presence of apm.yml, SKILL.md, hooks/, etc.).
+    (presence of apm.yml, SKILL.md, hooks/, plugin.json, etc.).
     """
     APM_PACKAGE = "apm_package"      # Has apm.yml
     CLAUDE_SKILL = "claude_skill"    # Has SKILL.md, no apm.yml
     HOOK_PACKAGE = "hook_package"    # Has hooks/hooks.json, no apm.yml or SKILL.md
     HYBRID = "hybrid"                # Has both apm.yml and SKILL.md
-    INVALID = "invalid"              # Neither apm.yml nor SKILL.md
+    MARKETPLACE_PLUGIN = "marketplace_plugin"  # Has plugin.json, no apm.yml
+    INVALID = "invalid"              # None of the above
 
 
 class PackageContentType(Enum):
@@ -1309,6 +1310,7 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
     - APM_PACKAGE: Has apm.yml and .apm/ directory
     - CLAUDE_SKILL: Has SKILL.md but no apm.yml (auto-generates apm.yml)
     - HOOK_PACKAGE: Has hooks/*.json but no apm.yml or SKILL.md
+    - MARKETPLACE_PLUGIN: Has plugin.json but no apm.yml (synthesizes apm.yml)
     - HYBRID: Has both apm.yml and SKILL.md
     
     Args:
@@ -1331,11 +1333,17 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
     # Detect package type
     apm_yml_path = package_path / "apm.yml"
     skill_md_path = package_path / "SKILL.md"
+
+    # Check for plugin.json — optional metadata, not a detection gate
+    from ..utils.helpers import find_plugin_json
+    plugin_json_path = find_plugin_json(package_path)
+
     has_apm_yml = apm_yml_path.exists()
     has_skill_md = skill_md_path.exists()
     has_hooks = _has_hook_json(package_path)
-    
-    # Determine package type
+
+    # Determine package type.  apm.yml / SKILL.md take precedence; everything
+    # else (hooks-only or bare plugin directories) normalizes as a Claude plugin.
     if has_apm_yml and has_skill_md:
         result.package_type = PackageType.HYBRID
     elif has_apm_yml:
@@ -1345,9 +1353,9 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
     elif has_hooks:
         result.package_type = PackageType.HOOK_PACKAGE
     else:
-        result.package_type = PackageType.INVALID
-        result.add_error("Missing required file: apm.yml, SKILL.md, or hooks/*.json")
-        return result
+        # Fallback: treat any directory without apm.yml / SKILL.md as a Claude plugin.
+        # plugin.json, when present, is read as optional metadata.
+        result.package_type = PackageType.MARKETPLACE_PLUGIN
     
     # Handle hook-only packages (no apm.yml or SKILL.md)
     if result.package_type == PackageType.HOOK_PACKAGE:
@@ -1356,6 +1364,10 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
     # Handle Claude Skills (no apm.yml) - auto-generate minimal apm.yml
     if result.package_type == PackageType.CLAUDE_SKILL:
         return _validate_claude_skill(package_path, skill_md_path, result)
+    
+    # Handle Marketplace Plugins (no apm.yml) - synthesize apm.yml from plugin.json
+    if result.package_type == PackageType.MARKETPLACE_PLUGIN:
+        return _validate_marketplace_plugin(package_path, plugin_json_path, result)
     
     # Standard APM package validation (has apm.yml)
     return _validate_apm_package_with_yml(package_path, apm_yml_path, result)
@@ -1426,6 +1438,39 @@ def _validate_claude_skill(package_path: Path, skill_md_path: Path, result: Vali
         result.add_error(f"Failed to process SKILL.md: {e}")
         return result
     
+    return result
+
+
+def _validate_marketplace_plugin(package_path: Path, plugin_json_path: Optional[Path], result: ValidationResult) -> ValidationResult:
+    """Validate a Claude plugin and synthesize apm.yml.
+
+    plugin.json is **optional** per the spec.  When present it provides
+    metadata (name, version, description …).  When absent the plugin name is
+    derived from the directory name and all other fields default gracefully.
+
+    Args:
+        package_path: Path to the package directory
+        plugin_json_path: Path to plugin.json if found, or None
+        result: ValidationResult to populate
+
+    Returns:
+        ValidationResult: Updated validation result with MARKETPLACE_PLUGIN type
+    """
+    from ..deps.plugin_parser import normalize_plugin_directory
+
+    try:
+        # Normalize the plugin directory; plugin.json is optional metadata
+        apm_yml_path = normalize_plugin_directory(package_path, plugin_json_path)
+
+        # Load the synthesized apm.yml
+        package = APMPackage.from_apm_yml(apm_yml_path)
+        result.package = package
+        result.package_type = PackageType.MARKETPLACE_PLUGIN
+
+    except Exception as e:
+        result.add_error(f"Failed to process Claude plugin: {e}")
+        return result
+
     return result
 
 

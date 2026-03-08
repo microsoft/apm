@@ -2216,6 +2216,10 @@ def _install_apm_dependencies(
                             _rich_info(
                                 f"  └─ Package type: Skill (SKILL.md detected)"
                             )
+                        elif package_type == PackageType.MARKETPLACE_PLUGIN:
+                            _rich_info(
+                                f"  └─ Package type: Marketplace Plugin (plugin.json detected)"
+                            )
                         elif package_type == PackageType.HYBRID:
                             _rich_info(
                                 f"  └─ Package type: Hybrid (apm.yml + SKILL.md)"
