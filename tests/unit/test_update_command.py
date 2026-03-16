@@ -1,5 +1,6 @@
 """Tests for the platform-aware update command."""
 
+import re
 import unittest
 from unittest.mock import Mock, patch
 
@@ -8,6 +9,10 @@ from click.testing import CliRunner
 import apm_cli.commands.update as update_module
 from apm_cli.cli import cli
 
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes for plain-text assertions."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 class TestUpdateCommand(unittest.TestCase):
     """Verify update command behavior across supported installer platforms."""
@@ -49,7 +54,7 @@ class TestUpdateCommand(unittest.TestCase):
             result = self.runner.invoke(cli, ["update"])
 
         self.assertEqual(result.exit_code, 0)
-        self.assertIn("Successfully updated to version 0.7.0", result.output)
+        self.assertIn("Successfully updated to version 0.7.0", _strip_ansi(result.output))
         mock_get.assert_called_once()
         self.assertTrue(mock_get.call_args.args[0].endswith("install.ps1"))
         mock_run.assert_called_once()
@@ -83,7 +88,7 @@ class TestUpdateCommand(unittest.TestCase):
             result = self.runner.invoke(cli, ["update"])
 
         self.assertEqual(result.exit_code, 0)
-        self.assertIn("Successfully updated to version 0.7.0", result.output)
+        self.assertIn("Successfully updated to version 0.7.0", _strip_ansi(result.output))
         mock_get.assert_called_once()
         self.assertTrue(mock_get.call_args.args[0].endswith("install.sh"))
         mock_run.assert_called_once()

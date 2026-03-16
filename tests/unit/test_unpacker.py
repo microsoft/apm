@@ -1,7 +1,13 @@
 """Unit tests for apm_cli.bundle.unpacker."""
 
+import re
 import tarfile
 from pathlib import Path
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes from text for plain-text assertions."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 import pytest
 
@@ -388,11 +394,12 @@ class TestUnpackCmdLogging:
             os.chdir(original_dir)
 
         assert result.exit_code == 0
-        assert "Unpacking" in result.output
-        assert "owner/repo" in result.output
-        assert ".github/agents/a.md" in result.output
-        assert ".github/prompts/b.md" in result.output
-        assert "Unpacked 2 file(s)" in result.output
+        out = _strip_ansi(result.output)
+        assert "Unpacking" in out
+        assert "owner/repo" in out
+        assert ".github/agents/a.md" in out
+        assert ".github/prompts/b.md" in out
+        assert "Unpacked 2 file(s)" in out
 
     def test_unpack_cmd_dry_run_logs_files(self, tmp_path):
         """Dry-run output includes per-dependency file listing."""
@@ -417,9 +424,10 @@ class TestUnpackCmdLogging:
             os.chdir(original_dir)
 
         assert result.exit_code == 0
-        assert "Dry run" in result.output
-        assert "Would unpack 1 file(s)" in result.output
-        assert ".github/agents/a.md" in result.output
+        out = _strip_ansi(result.output)
+        assert "Dry run" in out
+        assert "Would unpack 1 file(s)" in out
+        assert ".github/agents/a.md" in out
 
     def test_unpack_cmd_logs_skipped_files(self, tmp_path):
         """Skipped files warning appears when skip_verify allows missing files."""
@@ -455,7 +463,7 @@ class TestUnpackCmdLogging:
             os.chdir(original_dir)
 
         assert result.exit_code == 0
-        assert "1 file(s) skipped" in result.output
+        assert "1 file(s) skipped" in _strip_ansi(result.output)
 
     def test_unpack_cmd_multi_dep_logging(self, tmp_path):
         """Multiple dependencies are each logged with their file lists."""
@@ -495,8 +503,9 @@ class TestUnpackCmdLogging:
             os.chdir(original_dir)
 
         assert result.exit_code == 0
-        assert "org/repo-a" in result.output
-        assert "org/repo-b" in result.output
-        assert ".github/agents/a.md" in result.output
-        assert ".github/prompts/b.md" in result.output
-        assert "Unpacked 2 file(s)" in result.output
+        out = _strip_ansi(result.output)
+        assert "org/repo-a" in out
+        assert "org/repo-b" in out
+        assert ".github/agents/a.md" in out
+        assert ".github/prompts/b.md" in out
+        assert "Unpacked 2 file(s)" in out
