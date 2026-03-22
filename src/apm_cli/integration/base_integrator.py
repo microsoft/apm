@@ -3,7 +3,7 @@
 import errno
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from apm_cli.compilation.link_resolver import UnifiedLinkResolver
@@ -44,6 +44,12 @@ class IntegrationResult:
     # ``files_integrated`` so the install summary can surface the work
     # done in adopt-only runs instead of looking like a no-op.
     files_adopted: int = 0
+
+    # Hook transparency: per-file display metadata populated by HookIntegrator.
+    # Each entry is a dict with keys: target_label, output_path, source_hook_file,
+    # actions (list of {event, summary}), rendered_json.
+    # Faithfully reflects post-path-rewrite data actually written to disk.
+    display_payloads: list = field(default_factory=list)
 
 
 def _read_bytes_no_follow(path: Path) -> bytes:
