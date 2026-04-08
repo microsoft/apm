@@ -24,6 +24,7 @@ from ..drift import (
 )
 from ..models.results import InstallResult
 from ..core.command_logger import InstallLogger, _ValidationOutcome
+from ..core.target_detection import TargetParamType
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success
 from ..utils.diagnostics import DiagnosticCollector
 
@@ -383,12 +384,9 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
     "--target",
     "-t",
     "target",
-    type=click.Choice(
-        ["copilot", "claude", "cursor", "opencode", "codex", "vscode", "agents", "all"],
-        case_sensitive=False,
-    ),
+    type=TargetParamType(),
     default=None,
-    help="Force deployment to a specific target (overrides auto-detection)",
+    help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Overrides auto-detection.",
 )
 @click.option(
     "--global", "-g", "global_",

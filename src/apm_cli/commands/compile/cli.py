@@ -8,6 +8,7 @@ import click
 from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME
 from ...compilation import AgentsCompiler, CompilationConfig
 from ...core.command_logger import CommandLogger
+from ...core.target_detection import TargetParamType
 from ...primitives.discovery import discover_primitives
 from ...utils.console import (
     _rich_error,
@@ -172,9 +173,9 @@ def _get_validation_suggestion(error_msg):
 @click.option(
     "--target",
     "-t",
-    type=click.Choice(["copilot", "claude", "cursor", "opencode", "codex", "vscode", "agents", "all"]),
+    type=TargetParamType(),
     default=None,
-    help="Target platform: copilot (AGENTS.md), claude (CLAUDE.md), cursor, opencode, or all. 'vscode' and 'agents' are deprecated aliases for 'copilot'. Auto-detects if not specified.",
+    help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Auto-detects if not specified.",
 )
 @click.option(
     "--dry-run",
