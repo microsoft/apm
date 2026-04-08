@@ -474,6 +474,70 @@ class TestCompilationTarget:
         result = _check_compilation_target({}, policy)
         assert result.passed
 
+    # ── Multi-target (list) tests ──────────────────────────────────
+
+    def test_target_list_enforce_present(self):
+        """List target containing the enforced value passes."""
+        policy = CompilationPolicy(
+            target=CompilationTargetPolicy(enforce="claude")
+        )
+        result = _check_compilation_target(
+            {"target": ["claude", "copilot"]}, policy
+        )
+        assert result.passed
+
+    def test_target_list_enforce_missing(self):
+        """List target missing the enforced value fails."""
+        policy = CompilationPolicy(
+            target=CompilationTargetPolicy(enforce="claude")
+        )
+        result = _check_compilation_target(
+            {"target": ["cursor", "copilot"]}, policy
+        )
+        assert not result.passed
+        assert "enforced" in result.details[0]
+
+    def test_target_list_allow_all_in(self):
+        """All items in list target within allow set passes."""
+        policy = CompilationPolicy(
+            target=CompilationTargetPolicy(
+                allow=["claude", "copilot", "cursor"]
+            )
+        )
+        result = _check_compilation_target(
+            {"target": ["claude", "copilot"]}, policy
+        )
+        assert result.passed
+
+    def test_target_list_allow_some_disallowed(self):
+        """List target with items outside allow set fails."""
+        policy = CompilationPolicy(
+            target=CompilationTargetPolicy(allow=["claude"])
+        )
+        result = _check_compilation_target(
+            {"target": ["claude", "copilot"]}, policy
+        )
+        assert not result.passed
+        assert "copilot" in result.message
+
+    def test_target_string_still_works(self):
+        """Backward compat: single string target with enforce."""
+        policy = CompilationPolicy(
+            target=CompilationTargetPolicy(enforce="copilot")
+        )
+        result = _check_compilation_target({"target": "copilot"}, policy)
+        assert result.passed
+
+    def test_target_list_single_item(self):
+        """Single-element list target with matching enforce passes."""
+        policy = CompilationPolicy(
+            target=CompilationTargetPolicy(enforce="copilot")
+        )
+        result = _check_compilation_target(
+            {"target": ["copilot"]}, policy
+        )
+        assert result.passed
+
 
 # ── Check 12: compilation-strategy ─────────────────────────────────
 
