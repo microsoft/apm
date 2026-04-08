@@ -163,6 +163,36 @@ def _get_validation_suggestion(error_msg):
         return "Check primitive structure and frontmatter"
 
 
+def _resolve_compile_target(target):
+    """Map CLI target input to compiler-understood target string.
+
+    The compiler only understands ``"vscode"``, ``"claude"``, and ``"all"``.
+    Multi-target lists are mapped to the narrowest equivalent.
+
+    Args:
+        target: A single target string, a list of target strings, or ``None``.
+
+    Returns:
+        A single string (or ``None``) suitable for :func:`detect_target`.
+    """
+    if target is None:
+        return None  # will trigger detect_target() auto-detection
+    if isinstance(target, list):
+        target_set = set(target)
+        # Any target that produces AGENTS.md (copilot/vscode/agents/cursor/opencode/codex)
+        has_agents_family = bool(
+            target_set & {"copilot", "vscode", "agents", "cursor", "opencode", "codex"}
+        )
+        has_claude = "claude" in target_set
+        if has_agents_family and has_claude:
+            return "all"
+        elif has_claude:
+            return "claude"
+        else:
+            return "vscode"  # agents-family only
+    return target  # single string pass-through
+
+
 @click.command(help="Compile APM context into distributed AGENTS.md files")
 @click.option(
     "--output",
@@ -355,10 +385,14 @@ def compile(
             # No apm.yml or parsing error - proceed with auto-detection
             pass
 
+        # Resolve list targets to compiler-understood string
+        compile_target = _resolve_compile_target(target)
+        # Also handle config_target being a list (from apm.yml target: [claude, copilot])
+        compile_config_target = _resolve_compile_target(config_target)
         detected_target, detection_reason = detect_target(
             project_root=Path("."),
-            explicit_target=target,
-            config_target=config_target,
+            explicit_target=compile_target,
+            config_target=compile_config_target,
         )
 
         # Map 'minimal' to 'vscode' for the compiler (AGENTS.md only, no folder integration)
@@ -384,7 +418,22 @@ def compile(
             # Show target-aware message with detection reason. Use
             # get_target_description() so any future target added to
             # target_detection shows up here automatically.
-            if detected_target == "minimal":
+            if isinstance(target, list):
+                # Multi-target list: show what the compiler will produce
+                _target_label = ",".join(target)
+                if effective_target == "all":
+                    logger.progress(
+                        f"Compiling for AGENTS.md + CLAUDE.md (--target {_target_label})"
+                    )
+                elif effective_target == "claude":
+                    logger.progress(
+                        f"Compiling for CLAUDE.md (--target {_target_label})"
+                    )
+                else:
+                    logger.progress(
+                        f"Compiling for AGENTS.md (--target {_target_label})"
+                    )
+            elif detected_target == "minimal":
                 logger.progress(f"Compiling for AGENTS.md only ({detection_reason})")
                 logger.progress(
                     " Create .github/, .claude/, .codex/, .opencode/ or .cursor/ folder for full integration",
