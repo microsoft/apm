@@ -21,7 +21,7 @@ are accepted as aliases and map to the same internal value.
 """
 
 from pathlib import Path
-from typing import Literal, Optional, Tuple
+from typing import List, Literal, Optional, Tuple, Union
 
 # Valid target values (internal canonical form)
 TargetType = Literal["vscode", "claude", "cursor", "opencode", "codex", "all", "minimal"]
@@ -222,3 +222,59 @@ def get_target_description(target: UserTargetType) -> str:
         "minimal": "AGENTS.md only (create .github/ or .claude/ for full integration)",
     }
     return descriptions.get(normalized, "unknown target")
+
+
+# ---------------------------------------------------------------------------
+# Multi-target helpers (used by active_targets() in the integration layer)
+# ---------------------------------------------------------------------------
+
+#: The complete set of real (non-pseudo) canonical targets.
+#: "minimal" is intentionally excluded — it is a fallback pseudo-target.
+ALL_CANONICAL_TARGETS = frozenset({"vscode", "claude", "cursor", "opencode", "codex"})
+
+#: Alias mapping: user-facing name → canonical internal name.
+TARGET_ALIASES: dict[str, str] = {
+    "copilot": "vscode",
+    "agents": "vscode",
+    "vscode": "vscode",
+}
+
+
+def normalize_target_list(
+    value: Union[str, List[str], None],
+) -> Optional[List[str]]:
+    """Normalize a user-provided target value to a list of canonical names.
+
+    Handles:
+    - ``None`` → ``None`` (auto-detect)
+    - ``"claude"`` → ``["claude"]``
+    - ``"copilot"`` → ``["vscode"]``  (alias resolution)
+    - ``"all"`` → ``None``  (let ``active_targets()`` expand)
+    - ``["claude", "copilot"]`` → ``["claude", "vscode"]``
+    - Deduplicates while preserving first-seen order.
+
+    Args:
+        value: A single target string, a list of target strings, or ``None``.
+
+    Returns:
+        A deduplicated list of canonical target names, or ``None`` if the
+        input was ``None`` or ``"all"`` (meaning "expand to everything").
+    """
+    if value is None:
+        return None
+
+    raw: List[str] = [value] if isinstance(value, str) else list(value)
+
+    # "all" anywhere in the input means "every target" — return None so the
+    # caller (active_targets) can expand using folder detection + full set.
+    if "all" in raw:
+        return None
+
+    seen: set[str] = set()
+    result: List[str] = []
+    for item in raw:
+        canonical = TARGET_ALIASES.get(item, item)
+        if canonical not in seen:
+            seen.add(canonical)
+            result.append(canonical)
+    return result
