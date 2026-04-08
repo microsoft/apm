@@ -325,7 +325,8 @@ class AuthResolver:
 
         When the resolved token comes from a global env var and fails
         (e.g. a github.com PAT tried on ``*.ghe.com``), the method
-        retries with ``git credential fill`` before giving up.
+        retries with ``gh auth token`` and then ``git credential fill``
+        before giving up.
         """
         auth_ctx = self.resolve(host, org, port=port)
         host_info = auth_ctx.host_info
@@ -342,15 +343,22 @@ class AuthResolver:
             # ADO uses ADO_APM_PAT + AAD bearer fallback; credential fill is out of scope.
             if host_info.kind == "ado":
                 raise exc
-            _log(
-                f"Token from {auth_ctx.source} failed, trying git credential fill "
-                f"for {host_info.display_name}"
-            )
+            _log(f"Token from {auth_ctx.source} failed, trying fallback credentials for {host_info.display_name}")
+            if host_info.kind in ("github", "ghe_cloud", "ghes"):
+                gh_token = self._token_manager.resolve_credential_from_gh_cli(host_info.host)
+                if gh_token:
+                    return operation(
+                        gh_token,
+                        self._build_git_env(gh_token, scheme="basic", host_kind=host_info.kind),
+                    )
             cred = self._token_manager.resolve_credential_from_git(
                 host_info.host, port=host_info.port
             )
             if cred:
-                return operation(cred, self._build_git_env(cred))
+                return operation(
+                    cred,
+                    self._build_git_env(cred, scheme="basic", host_kind=host_info.kind),
+                )
             raise exc
 
         # ADO bearer fallback machinery (PAT was tried first; bearer is the safety net)
@@ -600,7 +608,8 @@ class AuthResolver:
         2. Global env vars ``GITHUB_APM_PAT`` -> ``GITHUB_TOKEN`` -> ``GH_TOKEN``
            (any host -- if the token is wrong for the target host,
            ``try_with_fallback`` retries with git credentials)
-        3. Git credential helper (any host except ADO)
+          3. gh CLI active account (GitHub-like hosts only)
+          4. Git credential helper (any host except ADO)
 
         Resolution order (ADO):
         1. ``ADO_APM_PAT`` env var -> scheme ``"basic"``
@@ -647,7 +656,13 @@ class AuthResolver:
             source = self._identify_env_source(purpose)
             return token, source, "basic"
 
-        # 3. Git credential helper (not for ADO)
+        # 3. gh CLI active account (GitHub-like hosts only)
+        if host_info.kind in ("github", "ghe_cloud", "ghes"):
+            gh_token = self._token_manager.resolve_credential_from_gh_cli(host_info.host)
+            if gh_token:
+                return gh_token, "gh-auth-token", "basic"
+
+        # 4. Git credential helper (not for ADO)
         if host_info.kind not in ("ado",):
             credential = self._token_manager.resolve_credential_from_git(
                 host_info.host, port=host_info.port
