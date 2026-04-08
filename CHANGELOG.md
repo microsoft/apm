@@ -82,6 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Multi-target support: `apm.yml` `target` field now accepts a list (`target: [claude, copilot]`) and CLI `--target` accepts comma-separated values (`-t claude,copilot`). Only specified targets are compiled, installed, and packed -- no redundant output for unused tools. Single-string syntax is fully backward compatible. (#529)
 - Artifactory archive entry download for virtual file packages (#525)
 - `apm view <package> [field]` command for viewing package metadata and remote refs (#613)
 - `apm view <package> versions` field selector lists remote tags and branches via `git ls-remote` (#613)

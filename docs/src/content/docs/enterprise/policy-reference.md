@@ -38,8 +38,8 @@ mcp:
 
 compilation:
   target:
-    allow: []                   # vscode | claude | all
-    enforce: null               # Enforce specific target
+    allow: []                   # vscode | claude | cursor | opencode | codex | all
+    enforce: null               # Enforce specific target (must be present in list)
   strategy:
     enforce: null               # distributed | single-file
   source_attribution: false     # Require source attribution
@@ -205,13 +205,16 @@ Whether to trust MCP servers declared by transitive dependencies. Default: `fals
 
 ### `target.allow` / `target.enforce`
 
-Control which compilation targets are permitted:
+Control which compilation targets are permitted. With multi-target support, these policies apply to every item in the target list:
+
+- **`enforce`**: The enforced target must be present in the target list. Fails if missing (e.g., `enforce: vscode` requires `vscode` to appear in `target: [claude, vscode]`).
+- **`allow`**: Every target in the list must be in the allowed set. Rejects any target not listed.
 
 ```yaml
 compilation:
   target:
     allow: [vscode, claude]  # Only these targets allowed
-    enforce: vscode           # Must use this specific target
+    enforce: vscode           # Must be present in the target list
 ```
 
 `enforce` takes precedence over `allow`. Use one or the other.

@@ -106,21 +106,34 @@ compilation:   <CompilationConfig>
 
 | | |
 |---|---|
-| **Type** | `enum<string>` |
+| **Type** | `string \| list<string>` |
 | **Required** | OPTIONAL |
-| **Default** | Auto-detect: `vscode` if `.github/` exists, `claude` if `.claude/` exists, `codex` if `.codex/` exists, `all` if both `.github/` and `.claude/`, `minimal` if neither |
-| **Allowed values** | `vscode` · `agents` · `claude` · `codex` · `all` |
+| **Default** | Auto-detect: `vscode` if `.github/` exists, `claude` if `.claude/` exists, `codex` if `.codex/` exists, `all` if multiple target folders exist, `minimal` if none |
+| **Allowed values** | `vscode` · `agents` · `copilot` · `claude` · `cursor` · `opencode` · `codex` · `all` |
 
-Controls which output targets are generated during compilation. When unset, a conforming resolver SHOULD auto-detect based on `.github/`, `.claude/`, and `.codex/` folder presence. Unknown values MUST be silently ignored (auto-detection takes over).
+Controls which output targets are generated during compilation and installation. Accepts a single string or a list of strings. When unset, a conforming resolver SHOULD auto-detect based on folder presence. Unknown values MUST be silently ignored (auto-detection takes over).
+
+```yaml
+# Single target
+target: copilot
+
+# Multiple targets
+target: [claude, copilot]
+```
+
+When a list is specified, only those targets are compiled, installed, and packed -- no output is generated for unlisted targets. `all` cannot be combined with other values.
 
 | Value | Effect |
 |---|---|
 | `vscode` | Emits `AGENTS.md` at the project root (and per-directory files in distributed mode) |
 | `agents` | Alias for `vscode` |
+| `copilot` | Alias for `vscode` |
 | `claude` | Emits `CLAUDE.md` at the project root |
+| `cursor` | Emits to `.cursor/rules/`, `.cursor/agents/`, `.cursor/skills/` |
+| `opencode` | Emits to `.opencode/agents/`, `.opencode/commands/`, `.opencode/skills/` |
 | `codex` | Emits `AGENTS.md` and deploys skills to `.agents/skills/`, agents to `.codex/agents/` |
-| `all` | Both `vscode` and `claude` targets |
-| `minimal` | AGENTS.md only at project root. **Auto-detected only** — this value MUST NOT be set explicitly in manifests; it is an internal fallback when no `.github/` or `.claude/` folder is detected. |
+| `all` | All targets. Cannot be combined with other values in a list. |
+| `minimal` | AGENTS.md only at project root. **Auto-detected only** -- this value MUST NOT be set explicitly in manifests; it is an internal fallback when no target folder is detected. |
 
 ### 3.7. `type`
 
