@@ -23,7 +23,9 @@ class CopilotClientAdapter(MCPClientAdapter):
     a global ~/.copilot/mcp-config.json file, following the JSON format for
     MCP server configuration.
     """
-    
+
+    supports_user_scope: bool = True
+
     def __init__(self, registry_url=None):
         """Initialize the Copilot CLI client adapter.
         
