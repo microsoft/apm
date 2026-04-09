@@ -394,7 +394,7 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
     "--global", "-g", "global_",
     is_flag=True,
     default=False,
-    help="Install to user scope (~/.apm/) instead of the current project",
+    help="Install to user scope (~/.apm/) instead of the current project. MCP servers target global-capable runtimes only (Copilot CLI, Codex CLI).",
 )
 @click.option(
     "--ssh",

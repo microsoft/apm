@@ -476,10 +476,14 @@ class MCPIntegrator:
         if scope is InstallScope.USER:
             from apm_cli.factory import ClientFactory as _CF
 
-            target_runtimes = {
-                rt for rt in target_runtimes
-                if _CF.create_client(rt).supports_user_scope
-            }
+            supported = builtins.set()
+            for rt in target_runtimes:
+                try:
+                    if _CF.create_client(rt).supports_user_scope:
+                        supported.add(rt)
+                except ValueError:
+                    pass
+            target_runtimes = supported
 
         # Build an expanded set that includes both the full reference and the
         # last-segment short name so we match config keys in every runtime.
@@ -1084,20 +1088,26 @@ class MCPIntegrator:
             from apm_cli.factory import ClientFactory as _CF
 
             pre_filter = list(target_runtimes)
-            target_runtimes = [
-                rt for rt in target_runtimes
-                if _CF.create_client(rt).supports_user_scope
-            ]
+            filtered_runtimes = []
+            for rt in target_runtimes:
+                try:
+                    client = _CF.create_client(rt)
+                except ValueError:
+                    continue
+                if client.supports_user_scope:
+                    filtered_runtimes.append(rt)
+            target_runtimes = filtered_runtimes
             skipped = set(pre_filter) - set(target_runtimes)
             if skipped:
                 msg = (
                     f"Skipped workspace-only runtimes at user scope: "
                     f"{', '.join(sorted(skipped))}"
+                    f" -- omit --global to install these"
                 )
                 if logger:
-                    logger.verbose_detail(msg)
+                    logger.warning(msg)
                 else:
-                    _rich_info(msg)
+                    _rich_info(msg, symbol="info")
             if not target_runtimes:
                 if logger:
                     logger.warning(
@@ -1107,7 +1117,8 @@ class MCPIntegrator:
                 else:
                     _rich_warning(
                         "No runtimes support user-scope MCP installation "
-                        "(supported: copilot, codex)"
+                        "(supported: copilot, codex)",
+                        symbol="warning",
                     )
                 return 0
 

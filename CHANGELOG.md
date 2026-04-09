@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` no longer silently drops skills, agents, and commands when a Claude Code plugin also ships `hooks/*.json`. The package-type detection cascade now classifies plugin-shaped packages as `MARKETPLACE_PLUGIN` (which already maps hooks via the plugin synthesizer) before falling back to the hook-only classification, and emits a default-visibility `[!]` warning when a hook-only classification disagrees with the package's directory contents (#780)
 - Preserve custom git ports across protocols: non-default ports on `ssh://` and `https://` dependency URLs (e.g. Bitbucket Datacenter on SSH port 7999, self-hosted GitLab on HTTPS port 8443) are now captured as a first-class `port` field on `DependencyReference` and threaded through all clone URL builders. When the SSH clone fails, the HTTPS fallback reuses the same port instead of silently dropping it (#661, #731)
 - Detect port-like first path segment in SCP shorthand (`git@host:7999/path`) and raise an actionable error suggesting the `ssh://` URL form, instead of silently misparsing the port as part of the repository path (#784)
-- `apm install --global` now installs MCP servers to global-capable runtimes (Copilot CLI, Codex CLI) instead of blanket-skipping all MCP installation at user scope (#638)
+- `apm install --global` now installs MCP servers to global-capable runtimes (Copilot CLI, Codex CLI) instead of blanket-skipping all MCP installation at user scope. Note: lockfile-path behavior at `--global` tracked in #794 (#638)
 - `--trust-transitive-mcp` no longer silently ignored when combined with `--global` (#638)
 
 ## [0.8.12] - 2026-04-19
