@@ -338,7 +338,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
                         headers = {h["name"]: h["value"] for h in headers if "name" in h and "value" in h}
                     server_config = {
                         "type": transport,
-                        "url": remote["url"],
+                        "url": remote["url"].strip(),
                         "headers": headers,
                     }
                     input_vars.extend(
