@@ -126,7 +126,7 @@ def init(ctx, project_name, yes, plugin, verbose):
                 start_prompt_path.write_text(START_PROMPT_TEMPLATE, encoding="utf-8")
                 start_prompt_created = True
             else:
-                logger.progress("start.prompt.md already exists, skipping")
+                logger.progress(f"{START_PROMPT_FILENAME} already exists, skipping")
 
         # Create plugin.json for plugin mode
         if plugin:
@@ -151,7 +151,7 @@ def init(ctx, project_name, yes, plugin, verbose):
             logger.progress("Created:")
             click.echo("  * apm.yml - Project configuration")
             if start_prompt_created:
-                click.echo("  * start.prompt.md - Starter prompt")
+                click.echo(f"  * {START_PROMPT_FILENAME} - Starter prompt")
             if plugin:
                 click.echo("  * plugin.json - Plugin metadata")
 
@@ -167,7 +167,7 @@ def init(ctx, project_name, yes, plugin, verbose):
             next_steps = [
                 "Install a runtime:       apm runtime setup copilot",
                 "Add APM dependencies:    apm install <owner>/<repo>",
-                "Edit your prompt:        start.prompt.md",
+                "Edit your prompt:        start.prompt.md (or .apm/prompts/start.prompt.md)",
                 "Run your first workflow: apm run start",
             ]
 
