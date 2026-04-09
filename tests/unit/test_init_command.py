@@ -36,7 +36,7 @@ class TestInitCommand:
             os.chdir(str(repo_root))
 
     def test_init_current_directory(self):
-        """Test initialization in current directory (minimal mode)."""
+        """Test initialization in current directory."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
@@ -46,7 +46,8 @@ class TestInitCommand:
                 assert result.exit_code == 0
                 assert "APM project initialized successfully!" in result.output
                 assert Path("apm.yml").exists()
-                # Minimal mode: no template files created
+                assert Path("start.prompt.md").exists()
+                # No extra template files created
                 assert not Path("hello-world.prompt.md").exists()
                 assert not Path("README.md").exists()
                 assert not Path(".apm").exists()
@@ -54,7 +55,7 @@ class TestInitCommand:
                 os.chdir(self.original_dir)  # restore CWD before TemporaryDirectory cleanup
 
     def test_init_explicit_current_directory(self):
-        """Test initialization with explicit '.' argument (minimal mode)."""
+        """Test initialization with explicit '.' argument."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
@@ -64,13 +65,14 @@ class TestInitCommand:
                 assert result.exit_code == 0
                 assert "APM project initialized successfully!" in result.output
                 assert Path("apm.yml").exists()
-                # Minimal mode: no template files created
+                assert Path("start.prompt.md").exists()
+                # No extra template files created
                 assert not Path("hello-world.prompt.md").exists()
             finally:
                 os.chdir(self.original_dir)  # restore CWD before TemporaryDirectory cleanup
 
     def test_init_new_directory(self):
-        """Test initialization in new directory (minimal mode)."""
+        """Test initialization in new directory."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
@@ -84,7 +86,8 @@ class TestInitCommand:
                 assert project_path.exists()
                 assert project_path.is_dir()
                 assert (project_path / "apm.yml").exists()
-                # Minimal mode: no template files created
+                assert (project_path / "start.prompt.md").exists()
+                # No extra template files created
                 assert not (project_path / "hello-world.prompt.md").exists()
                 assert not (project_path / "README.md").exists()
                 assert not (project_path / ".apm").exists()
@@ -266,7 +269,7 @@ class TestInitCommand:
                 os.chdir(self.original_dir)  # restore CWD before TemporaryDirectory cleanup
 
     def test_init_validates_project_structure(self):
-        """Test that init creates minimal project structure."""
+        """Test that init creates expected project structure."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
@@ -288,7 +291,9 @@ class TestInitCommand:
                     assert "scripts" in config
                     assert config["scripts"] == {}
 
-                # Minimal mode: no template files created
+                # start.prompt.md created
+                assert (project_path / "start.prompt.md").exists()
+                # No extra template files created
                 assert not (project_path / "hello-world.prompt.md").exists()
                 assert not (project_path / "README.md").exists()
                 assert not (project_path / ".apm").exists()
@@ -340,6 +345,71 @@ class TestInitCommand:
                 assert not Path("SKILL.md").exists()
             finally:
                 os.chdir(self.original_dir)  # restore CWD before TemporaryDirectory cleanup
+
+    def test_init_creates_start_prompt_md(self):
+        """Test that init creates start.prompt.md with correct content."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                result = self.runner.invoke(cli, ["init", "--yes"])
+
+                assert result.exit_code == 0
+                prompt_path = Path("start.prompt.md")
+                assert prompt_path.exists()
+
+                content = prompt_path.read_text(encoding="utf-8")
+                assert "---" in content
+                assert "name: start" in content
+                assert "You are a helpful assistant" in content
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_init_does_not_overwrite_existing_start_prompt(self):
+        """Test that init preserves existing start.prompt.md (brownfield)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                # Create existing start.prompt.md with custom content
+                Path("start.prompt.md").write_text(
+                    "---\nname: start\n---\nMy custom prompt\n", encoding="utf-8"
+                )
+
+                result = self.runner.invoke(cli, ["init", "--yes"])
+
+                assert result.exit_code == 0
+                content = Path("start.prompt.md").read_text(encoding="utf-8")
+                assert "My custom prompt" in content
+                assert "start.prompt.md already exists" in result.output
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_init_next_steps_no_compile(self):
+        """Test that next steps do not reference apm compile."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                result = self.runner.invoke(cli, ["init", "--yes"])
+
+                assert result.exit_code == 0
+                assert "apm compile" not in result.output
+                assert "Edit your prompt" in result.output
+                assert "start.prompt.md" in result.output
+                assert "apm run start" in result.output
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_init_created_files_table_includes_start_prompt(self):
+        """Test that Created Files table lists start.prompt.md."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                result = self.runner.invoke(cli, ["init", "--yes"])
+
+                assert result.exit_code == 0
+                # start.prompt.md appears in the Created Files table
+                assert "start.prompt.md" in result.output
+            finally:
+                os.chdir(self.original_dir)
 
 
 
