@@ -231,10 +231,10 @@ def get_target_description(target: UserTargetType) -> str:
 # ---------------------------------------------------------------------------
 
 #: The complete set of real (non-pseudo) canonical targets.
-#: "minimal" is intentionally excluded — it is a fallback pseudo-target.
+#: "minimal" is intentionally excluded -- it is a fallback pseudo-target.
 ALL_CANONICAL_TARGETS = frozenset({"vscode", "claude", "cursor", "opencode", "codex"})
 
-#: Alias mapping: user-facing name → canonical internal name.
+#: Alias mapping: user-facing name -> canonical internal name.
 TARGET_ALIASES: dict[str, str] = {
     "copilot": "vscode",
     "agents": "vscode",
@@ -248,11 +248,11 @@ def normalize_target_list(
     """Normalize a user-provided target value to a list of canonical names.
 
     Handles:
-    - ``None`` → ``None`` (auto-detect)
-    - ``"claude"`` → ``["claude"]``
-    - ``"copilot"`` → ``["vscode"]``  (alias resolution)
-    - ``"all"`` → ``None``  (let ``active_targets()`` expand)
-    - ``["claude", "copilot"]`` → ``["claude", "vscode"]``
+    - ``None`` -> ``None`` (auto-detect)
+    - ``"claude"`` -> ``["claude"]``
+    - ``"copilot"`` -> ``["vscode"]``  (alias resolution)
+    - ``"all"`` -> ``["claude", "codex", "copilot", "cursor", "opencode"]``
+    - ``["claude", "copilot"]`` -> ``["claude", "vscode"]``
     - Deduplicates while preserving first-seen order.
 
     Args:
@@ -260,17 +260,17 @@ def normalize_target_list(
 
     Returns:
         A deduplicated list of canonical target names, or ``None`` if the
-        input was ``None`` or ``"all"`` (meaning "expand to everything").
+        input was ``None`` (meaning "auto-detect").
     """
     if value is None:
         return None
 
     raw: List[str] = [value] if isinstance(value, str) else list(value)
 
-    # "all" anywhere in the input means "every target" — return None so the
-    # caller (active_targets) can expand using folder detection + full set.
+    # "all" anywhere in the input means "every target" -- expand to the
+    # full sorted list of canonical targets.
     if "all" in raw:
-        return None
+        return sorted(ALL_CANONICAL_TARGETS)
 
     seen: set[str] = set()
     result: List[str] = []
@@ -302,10 +302,10 @@ class TargetParamType(click.ParamType):
 
     Examples::
 
-        -t claude             → "claude"
-        -t claude,copilot     → ["claude", "vscode"]
-        -t all                → "all"
-        -t copilot,vscode     → ["vscode"]  (deduped aliases)
+        -t claude             -> "claude"
+        -t claude,copilot     -> ["claude", "vscode"]
+        -t all                -> "all"
+        -t copilot,vscode     -> ["vscode"]  (deduped aliases)
     """
 
     name = "target"
@@ -337,7 +337,7 @@ class TargetParamType(click.ParamType):
                     ctx,
                 )
 
-        # "all" is exclusive — reject combinations like "all,claude".
+        # "all" is exclusive -- reject combinations like "all,claude".
         if "all" in parts:
             if len(parts) > 1:
                 self.fail(
@@ -347,7 +347,7 @@ class TargetParamType(click.ParamType):
                 )
             return "all"
 
-        # Single target → plain string (backward compat).
+        # Single target -> plain string (backward compat).
         if len(parts) == 1:
             return parts[0]
 

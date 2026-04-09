@@ -134,7 +134,7 @@ class TestActiveTargets:
         assert [t.name for t in targets] == ["claude", "copilot"]
 
     def test_explicit_list_deduplicates_aliases(self):
-        """copilot and vscode are aliases — should return one profile."""
+        """copilot and vscode are aliases -- should return one profile."""
         targets = active_targets(self.root, explicit_target=["copilot", "vscode"])
         assert [t.name for t in targets] == ["copilot"]
 
@@ -168,7 +168,7 @@ class TestActiveTargets:
         assert [t.name for t in targets] == ["copilot", "claude"]
 
     def test_explicit_empty_list_falls_through_to_autodetect(self):
-        """Empty list is falsy — should auto-detect (fallback to copilot)."""
+        """Empty list is falsy -- should auto-detect (fallback to copilot)."""
         targets = active_targets(self.root, explicit_target=[])
         assert [t.name for t in targets] == ["copilot"]  # fallback
 

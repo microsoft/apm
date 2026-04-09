@@ -82,6 +82,10 @@ def _filter_files_by_target(
                     seen_prefixes.add(p)
                     prefixes.append(p)
         # Union all cross-target maps
+        # NOTE: dict.update() means the last target's mapping wins when
+        # multiple targets map the same source prefix. In practice this
+        # is benign -- common multi-target combos (e.g. claude+copilot)
+        # match prefixes directly without needing cross-maps.
         cross_map: Dict[str, str] = {}
         for t in target:
             cross_map.update(_CROSS_TARGET_MAPS.get(t, {}))
