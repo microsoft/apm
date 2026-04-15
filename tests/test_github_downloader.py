@@ -1703,23 +1703,28 @@ class TestGiteaRawUrlDownload:
         assert "/api/v1/" in urls[1]
 
 
-class TestGitLabApiVersionNegotiation:
-    """API version negotiation: v1 -> v3 -> v4 for generic hosts."""
+class TestGiteaGogsApiVersionNegotiation:
+    """API version negotiation: raw URL -> v1 -> v3 for Gitea/Gogs generic hosts.
+
+    The implementation intentionally stops at v3.  GitLab uses a completely
+    different API shape (/api/v4/projects/:id/repository/files/...) that is
+    not compatible with the GitHub Contents-style endpoint negotiated here;
+    GitLab support is limited to git-clone operations only.
+    """
 
     def setup_method(self):
         with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
             self.downloader = GitHubPackageDownloader()
 
-    def test_gitlab_v4_reached_after_v1_and_v3_return_404(self):
-        """GitLab uses /api/v4/ -- negotiation must try v1, v3, then v4."""
-        dep_ref = DependencyReference.parse("gitlab.myorg.com/owner/repo")
-        expected = b"gitlab file content"
+    def test_v1_falls_back_to_v3_for_generic_hosts(self):
+        """When Gitea raw URL and v1 both return 404, v3 is tried and succeeds."""
+        dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
+        expected = b"gitea v3 file content"
 
         side_effects = [
             _make_resp(404),           # raw URL
             _make_resp(404),           # v1
-            _make_resp(404),           # v3
-            _make_resp(200, expected), # v4
+            _make_resp(200, expected), # v3
         ]
         with patch.object(self.downloader, "_resilient_get", side_effect=side_effects) as mock_get:
             result = self.downloader.download_raw_file(dep_ref, "skill.md", "main")
@@ -1728,10 +1733,10 @@ class TestGitLabApiVersionNegotiation:
         urls = [c[0][0] for c in mock_get.call_args_list]
         assert "/api/v1/" in urls[1]
         assert "/api/v3/" in urls[2]
-        assert "/api/v4/" in urls[3]
+        assert len(mock_get.call_args_list) == 3
 
-    def test_gitea_v1_succeeds_without_trying_v3_or_v4(self):
-        """When v1 returns 200, v3 and v4 must never be called."""
+    def test_gitea_v1_succeeds_without_trying_v3(self):
+        """When v1 returns 200, v3 must never be called."""
         dep_ref = DependencyReference.parse("gitea.example.com/owner/repo")
         expected = b"gitea content"
 
@@ -1743,13 +1748,13 @@ class TestGitLabApiVersionNegotiation:
 
         assert result == expected
         urls = [c[0][0] for c in mock_get.call_args_list]
-        assert all("/api/v3/" not in u and "/api/v4/" not in u for u in urls)
+        assert all("/api/v3/" not in u for u in urls)
 
     def test_all_api_versions_404_raises_runtime_error(self):
         """When every API version returns 404 for both refs, a clear error is raised."""
         dep_ref = DependencyReference.parse("git.example.com/owner/repo")
-        # raw + v1 + v3 + v4 for 'main', then v1 + v3 + v4 for 'master' fallback
-        side_effects = [_make_resp(404)] * 8
+        # raw(main) + v1(main) + v3(main) = 3 calls, then v1(master) + v3(master) = 2 calls
+        side_effects = [_make_resp(404)] * 5
 
         with patch.object(self.downloader, "_resilient_get", side_effect=side_effects):
             with pytest.raises(RuntimeError, match="File not found"):

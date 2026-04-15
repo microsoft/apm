@@ -1295,8 +1295,7 @@ class GitHubPackageDownloader:
                 else:
                     fallback_url_candidates = [
                         f"https://{host}/api/v1/repos/{owner}/{repo}/contents/{file_path}?ref={fallback_ref}",
-                        f"https://{host}/api/v3/repos/{owner}/{repo}/contents/{file_path}?ref={fallback_ref}",
-                        f"https://{host}/api/v4/repos/{owner}/{repo}/contents/{file_path}?ref={fallback_ref}",
+                        f"https://{host}/api/v3/repos/{owner}/{repo}/contents/{file_path}?ref={fallback_ref}",                        
                     ]
 
                 for fallback_url in fallback_url_candidates:
