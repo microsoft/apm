@@ -1,7 +1,7 @@
 """Fetch, parse, and cache marketplace.json from GitHub repositories.
 
-Uses ``AuthResolver.try_with_fallback(unauth_first=True)`` for public-first
-access with automatic credential fallback for private marketplace repos.
+Uses ``AuthResolver.try_with_fallback(unauth_first=False)`` for auth-first
+access so private marketplace repos are fetched with credentials when available.
 When ``PROXY_REGISTRY_URL`` is set, fetches are routed through the registry
 proxy (Artifactory Archive Entry Download) before falling back to the
 GitHub Contents API.  When ``PROXY_REGISTRY_ONLY=1``, the GitHub fallback
@@ -243,7 +243,7 @@ def _fetch_file(
             source.host,
             _do_fetch,
             org=source.owner,
-            unauth_first=True,
+            unauth_first=False,
         )
     except Exception as exc:
         raise MarketplaceFetchError(source.name, str(exc)) from exc

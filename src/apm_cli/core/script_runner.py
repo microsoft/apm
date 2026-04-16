@@ -256,7 +256,7 @@ class ScriptRunner:
             compiled_prompt_files.append(prompt_file)
 
             # Read the compiled content
-            with open(compiled_path, "r") as f:
+            with open(compiled_path, "r", encoding="utf-8") as f:
                 compiled_content = f.read().strip()
 
             # Check if this is a runtime command (copilot, codex, llm) before transformation
@@ -916,7 +916,7 @@ class PromptCompiler:
         # Now ensure compiled directory exists
         self.compiled_dir.mkdir(parents=True, exist_ok=True)
 
-        with open(prompt_path, "r") as f:
+        with open(prompt_path, "r", encoding="utf-8") as f:
             content = f.read()
 
         # Parse frontmatter and content
@@ -939,7 +939,7 @@ class PromptCompiler:
         output_path = self.compiled_dir / output_name
 
         # Write compiled content
-        with open(output_path, "w") as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             f.write(compiled_content)
 
         return str(output_path)

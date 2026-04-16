@@ -331,6 +331,46 @@ class TestScanDirectoryWithSource(unittest.TestCase):
             self.assertIn("Warning", buf.getvalue())
         self.assertEqual(collection.count(), 0)
 
+    def test_github_instructions_discovered_when_no_apm_dir(self):
+        """Regression test for issue #631.
+
+        Dependency instructions stored in .github/instructions/ must be
+        included in compile --target claude without --local-only.
+        """
+        dep_dir = Path(self.tmp) / "chkp-roniz" / "cc-rubber-duck"
+        _write(
+            dep_dir / ".github" / "instructions" / "rubber-duck.instructions.md",
+            INSTRUCTION_CONTENT,
+        )
+        collection = PrimitiveCollection()
+        scan_directory_with_source(
+            dep_dir, collection, source="dependency:chkp-roniz/cc-rubber-duck"
+        )
+        self.assertEqual(len(collection.instructions), 1)
+        self.assertEqual(
+            collection.instructions[0].source,
+            "dependency:chkp-roniz/cc-rubber-duck",
+        )
+
+    def test_github_instructions_discovered_alongside_apm_dir(self):
+        """Regression test for issue #631.
+
+        When a dependency has both .apm/instructions/ and .github/instructions/,
+        primitives from both directories must be discovered.
+        """
+        dep_dir = Path(self.tmp) / "owner" / "mixed-pkg"
+        _write(
+            dep_dir / ".apm" / "instructions" / "from-apm.instructions.md",
+            INSTRUCTION_CONTENT,
+        )
+        _write(
+            dep_dir / ".github" / "instructions" / "from-github.instructions.md",
+            INSTRUCTION_CONTENT,
+        )
+        collection = PrimitiveCollection()
+        scan_directory_with_source(dep_dir, collection, source="dependency:owner/mixed-pkg")
+        self.assertEqual(len(collection.instructions), 2)
+
 
 class TestGetDependencyDeclarationOrder(unittest.TestCase):
     """Tests for get_dependency_declaration_order."""

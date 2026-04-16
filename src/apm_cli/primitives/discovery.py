@@ -55,6 +55,20 @@ DEPENDENCY_PRIMITIVE_PATTERNS: Dict[str, List[str]] = {
     ]
 }
 
+# Dependency primitive patterns for .github directory within dependencies.
+# Some packages store primitives in .github/ instead of (or in addition to) .apm/.
+DEPENDENCY_GITHUB_PRIMITIVE_PATTERNS: Dict[str, List[str]] = {
+    'chatmode': [
+        "agents/*.agent.md",
+        "chatmodes/*.chatmode.md",
+    ],
+    'instruction': ["instructions/*.instructions.md"],
+    'context': [
+        "context/*.context.md",
+        "memory/*.memory.md",
+    ]
+}
+
 
 def discover_primitives(
     base_dir: str = ".",
@@ -297,28 +311,18 @@ def get_dependency_declaration_order(base_dir: str) -> List[str]:
         return []
 
 
-def scan_directory_with_source(directory: Path, collection: PrimitiveCollection, source: str) -> None:
-    """Scan a directory for primitives with a specific source tag.
-    
+def _scan_patterns(base_dir: Path, patterns: Dict[str, List[str]], collection: PrimitiveCollection, source: str) -> None:
+    """Glob-scan-parse loop for one base directory and one patterns dict.
+
     Args:
-        directory (Path): Directory to scan (e.g., apm_modules/package_name).
+        base_dir (Path): Directory to scan (e.g., dep/.apm or dep/.github).
+        patterns (Dict[str, List[str]]): Primitive-type → glob-pattern mapping.
         collection (PrimitiveCollection): Collection to add primitives to.
         source (str): Source identifier for discovered primitives.
     """
-    # Look for .apm directory within the dependency
-    apm_dir = directory / ".apm"
-    if not apm_dir.exists():
-        # Even without .apm, check for SKILL.md (Claude Skills support)
-        _discover_skill_in_directory(directory, collection, source)
-        return
-    
-    # Find and parse files for each primitive type
-    for primitive_type, patterns in DEPENDENCY_PRIMITIVE_PATTERNS.items():
-        for pattern in patterns:
-            full_pattern = str(apm_dir / pattern)
-            matching_files = glob.glob(full_pattern, recursive=True)
-            
-            for file_path_str in matching_files:
+    for _primitive_type, type_patterns in patterns.items():
+        for pattern in type_patterns:
+            for file_path_str in glob.glob(str(base_dir / pattern), recursive=True):
                 file_path = Path(file_path_str)
                 if file_path.is_file() and _is_readable(file_path):
                     try:
@@ -326,8 +330,29 @@ def scan_directory_with_source(directory: Path, collection: PrimitiveCollection,
                         collection.add_primitive(primitive)
                     except Exception as e:
                         print(f"Warning: Failed to parse dependency primitive {file_path}: {e}")
-    
-    # Also check for SKILL.md in the dependency root
+
+
+def scan_directory_with_source(directory: Path, collection: PrimitiveCollection, source: str) -> None:
+    """Scan a directory for primitives with a specific source tag.
+
+    Args:
+        directory (Path): Directory to scan (e.g., apm_modules/package_name).
+        collection (PrimitiveCollection): Collection to add primitives to.
+        source (str): Source identifier for discovered primitives.
+    """
+    # Scan .apm directory within the dependency
+    apm_dir = directory / ".apm"
+    if apm_dir.exists():
+        _scan_patterns(apm_dir, DEPENDENCY_PRIMITIVE_PATTERNS, collection, source)
+
+    # Also scan .github directory — some packages store primitives there instead of (or
+    # in addition to) .apm/.  Without this, dependency instructions in .github/instructions/
+    # are silently skipped in the normal compile path (issue #631).
+    github_dir = directory / ".github"
+    if github_dir.exists():
+        _scan_patterns(github_dir, DEPENDENCY_GITHUB_PRIMITIVE_PATTERNS, collection, source)
+
+    # Check for SKILL.md in the dependency root
     _discover_skill_in_directory(directory, collection, source)
 
 

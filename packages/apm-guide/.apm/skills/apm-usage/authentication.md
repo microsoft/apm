@@ -96,3 +96,15 @@ apm install --verbose your-org/package
 # Increase git credential timeout (default 30s, max 180s)
 export APM_GIT_CREDENTIAL_TIMEOUT=120
 ```
+
+### SSH connection hangs on corporate/VPN networks
+
+APM tries SSH as a fallback when HTTPS auth is not available. On networks
+that silently drop SSH traffic (port 22), this can appear to hang. APM sets
+`GIT_SSH_COMMAND="ssh -o ConnectTimeout=30"` so SSH attempts fail within
+30 seconds and the fallback chain continues to plain HTTPS with git
+credential helpers.
+
+To override the SSH command (e.g., custom key path), set `GIT_SSH_COMMAND`
+in your environment. APM appends `-o ConnectTimeout=30` unless it finds
+`ConnectTimeout` already present in your value.

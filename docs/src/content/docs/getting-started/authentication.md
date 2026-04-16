@@ -281,3 +281,9 @@ git config credential.helper              # check current helper
 git config --global credential.helper osxkeychain  # macOS
 gh auth login                              # GitHub CLI
 ```
+
+### SSH connection hangs on corporate/VPN networks
+
+When no token is available, APM tries SSH before falling back to plain HTTPS. Firewalls that silently drop SSH packets (port 22) can make `apm install` appear to hang. APM sets `GIT_SSH_COMMAND="ssh -o ConnectTimeout=30"` so SSH attempts fail within 30 seconds and the fallback proceeds to HTTPS with git credential helpers.
+
+If you already set `GIT_SSH_COMMAND` (e.g., for a custom key), APM appends `-o ConnectTimeout=30` unless `ConnectTimeout` is already present in your value.

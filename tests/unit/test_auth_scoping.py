@@ -254,6 +254,20 @@ class TestCloneWithFallbackEnv:
                 import shutil
                 shutil.rmtree(target, ignore_errors=True)
 
+    def test_clone_env_includes_ssh_connect_timeout(self):
+        """Both locked-down and relaxed clone envs should carry GIT_SSH_COMMAND."""
+        dl = _make_downloader(github_token="ghp_TESTTOKEN")
+
+        # Locked-down env (git_env) used when token is present
+        assert "GIT_SSH_COMMAND" in dl.git_env
+        assert "ConnectTimeout" in dl.git_env["GIT_SSH_COMMAND"]
+
+        # Relaxed env built for no-token paths keeps GIT_SSH_COMMAND
+        relaxed = {k: v for k, v in dl.git_env.items()
+                   if k not in ("GIT_ASKPASS", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM")}
+        assert "GIT_SSH_COMMAND" in relaxed
+        assert "ConnectTimeout" in relaxed["GIT_SSH_COMMAND"]
+
 
 # ===========================================================================
 # Object-style dependency entries (parse_from_dict)

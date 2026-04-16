@@ -14,8 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fix `apm marketplace add` silently failing for private repos by using credentials when probing `marketplace.json` (#701)
 - Pin codex setup to `rust-v0.118.0` for security and reproducibility; update config to `wire_api = "responses"` (#663)
 - Propagate headers and environment variables through OpenCode MCP adapter with defensive copies to prevent mutation (#622)
+- Fix `apm install` hanging indefinitely when corporate firewalls silently drop SSH packets by setting `GIT_SSH_COMMAND` with `ConnectTimeout=30` (#652)
+- Fix `apm compile --target claude` silently skipping dependency instructions stored in `.github/instructions/` (#631)
+
 ### Changed
 
 - `apm marketplace browse/search/add/update` now route through the registry proxy when `PROXY_REGISTRY_URL` is set; `PROXY_REGISTRY_ONLY=1` blocks direct GitHub API calls (#506)
@@ -452,7 +456,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Install Script and `apm update`**: Repaired corrupted header in install.sh. Use awk instead of sed for shell subprocess compatibility. Directed shell output to terminal for password input during update process. 
+- **Install Script and `apm update`**: Repaired corrupted header in install.sh. Use awk instead of sed for shell subprocess compatibility. Directed shell output to terminal for password input during update process.
 
 ## [0.7.1] - 2025-01-22
 
@@ -494,7 +498,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **SKILL.md as first-class primitive**: meta-description of what an APM Package does for agents to read
 - **Claude Skills Installation**: Install Claude Skills directly as APM Packages
-- **Bidirectional Format Support**: 
+- **Bidirectional Format Support**:
   - APM packages → SKILL.md (for Claude target)
   - Claude Skills → .agent.md (for VSCode target)
 - **Skills Documentation**: New `docs/skills.md` guide
@@ -511,7 +515,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Target Auto-Detection**: Smart compilation based on project structure
   - `.github/` only → generates `AGENTS.md` + VSCode integration
-  - `.claude/` only → generates `CLAUDE.md` + Claude integration  
+  - `.claude/` only → generates `CLAUDE.md` + Claude integration
   - Both folders → generates all formats
   - Neither folder → generates `AGENTS.md` only (universal format)
 

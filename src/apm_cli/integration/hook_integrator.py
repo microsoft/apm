@@ -203,6 +203,7 @@ class HookIntegrator(BaseIntegrator):
         Handles:
         - ${CLAUDE_PLUGIN_ROOT}/path references (resolved from package root)
         - ./path relative references (resolved from hook file's parent directory)
+        - Windows backslash variants of both (.\\ and ${CLAUDE_PLUGIN_ROOT}\\)
 
         Args:
             command: Original command string
@@ -232,10 +233,14 @@ class HookIntegrator(BaseIntegrator):
             scripts_base = f"{base_root}/hooks/{package_name}"
 
         # Handle ${CLAUDE_PLUGIN_ROOT} references (always relative to package root)
-        plugin_root_pattern = r'\$\{CLAUDE_PLUGIN_ROOT\}(/[^\s]+)'
+        # Match both forward-slash and backslash separators (Windows hook JSON
+        # may use backslashes: ${CLAUDE_PLUGIN_ROOT}\scripts\scan.ps1)
+        plugin_root_pattern = r'\$\{CLAUDE_PLUGIN_ROOT\}([\\/][^\s]+)'
         for match in re.finditer(plugin_root_pattern, command):
             full_var = match.group(0)
-            rel_path = match.group(1).lstrip('/')
+            # Normalize backslashes to forward slashes before Path construction
+            # (on Unix, Path treats backslashes as literal filename chars)
+            rel_path = match.group(1).replace('\\', '/').lstrip('/')
 
             source_file = (package_path / rel_path).resolve()
             # Reject path traversal outside the package directory
@@ -246,14 +251,18 @@ class HookIntegrator(BaseIntegrator):
                 scripts_to_copy.append((source_file, target_rel))
                 new_command = new_command.replace(full_var, target_rel)
 
-        # Handle relative ./path references (safe to run after ${CLAUDE_PLUGIN_ROOT}
-        # substitution since replacements produce paths like ".github/..." not "./...")
+        # Handle relative ./path and .\path references (safe to run after
+        # ${CLAUDE_PLUGIN_ROOT} substitution since replacements produce paths
+        # like ".github/..." not "./" or ".\")
+        # Match both forward-slash and backslash separators (Windows hook JSON
+        # may use backslashes: .\scripts\scan.ps1)
         # Resolve from hook file's directory if available, else fall back to package root
         resolve_base = hook_file_dir if hook_file_dir else package_path
-        rel_pattern = r'(\./[^\s]+)'
+        rel_pattern = r'(\.[\\/][^\s]+)'
         for match in re.finditer(rel_pattern, new_command):
             rel_ref = match.group(1)
-            rel_path = rel_ref[2:]  # Strip ./
+            # Normalize to forward slashes for path resolution
+            rel_path = rel_ref[2:].replace('\\', '/')
 
             source_file = (resolve_base / rel_path).resolve()
             # Reject path traversal outside the package directory

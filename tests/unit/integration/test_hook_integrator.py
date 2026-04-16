@@ -135,7 +135,7 @@ class TestHookDiscovery:
         """Find hook JSON files in .apm/hooks/ directory."""
         pkg_dir = temp_project / "pkg"
         hooks_dir = pkg_dir / ".apm" / "hooks"
-        hooks_dir.mkdir(parents=True)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
         (hooks_dir / "security.json").write_text(json.dumps({"hooks": {}}))
         (hooks_dir / "quality.json").write_text(json.dumps({"hooks": {}}))
         (hooks_dir / "readme.md").write_text("# Not a hook")  # Should be ignored
@@ -149,7 +149,7 @@ class TestHookDiscovery:
         """Find hook JSON files in hooks/ directory (Claude-native convention)."""
         pkg_dir = temp_project / "pkg"
         hooks_dir = pkg_dir / "hooks"
-        hooks_dir.mkdir(parents=True)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
         (hooks_dir / "hooks.json").write_text(json.dumps({"hooks": {}}))
 
         integrator = HookIntegrator()
@@ -162,11 +162,11 @@ class TestHookDiscovery:
         pkg_dir = temp_project / "pkg"
         # Create both directories pointing to the same conceptual hooks
         apm_hooks = pkg_dir / ".apm" / "hooks"
-        apm_hooks.mkdir(parents=True)
+        apm_hooks.mkdir(parents=True, exist_ok=True)
         (apm_hooks / "a.json").write_text(json.dumps({"hooks": {}}))
 
         hooks_dir = pkg_dir / "hooks"
-        hooks_dir.mkdir(parents=True)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
         (hooks_dir / "b.json").write_text(json.dumps({"hooks": {}}))
 
         integrator = HookIntegrator()
@@ -238,7 +238,7 @@ class TestVSCodeIntegration:
         """Create a hookify-like package structure."""
         pkg_dir = project / "apm_modules" / "anthropics" / "hookify"
         hooks_dir = pkg_dir / "hooks"
-        hooks_dir.mkdir(parents=True)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
 
         (hooks_dir / "hooks.json").write_text(json.dumps(HOOKIFY_HOOKS_JSON, indent=2))
 
@@ -281,8 +281,8 @@ class TestVSCodeIntegration:
         pkg_dir = temp_project / "apm_modules" / "anthropics" / "learning-output-style"
         hooks_dir = pkg_dir / "hooks"
         handlers_dir = pkg_dir / "hooks-handlers"
-        hooks_dir.mkdir(parents=True)
-        handlers_dir.mkdir(parents=True)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        handlers_dir.mkdir(parents=True, exist_ok=True)
 
         (hooks_dir / "hooks.json").write_text(json.dumps(LEARNING_OUTPUT_STYLE_HOOKS_JSON))
         (handlers_dir / "session-start.sh").write_text("#!/bin/bash\necho 'start'")
@@ -318,7 +318,7 @@ class TestVSCodeIntegration:
         """Test VSCode integration of ralph-loop plugin (Stop hook)."""
         pkg_dir = temp_project / "apm_modules" / "anthropics" / "ralph-loop"
         hooks_dir = pkg_dir / "hooks"
-        hooks_dir.mkdir(parents=True)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
 
         (hooks_dir / "hooks.json").write_text(json.dumps(RALPH_LOOP_HOOKS_JSON))
         (hooks_dir / "stop-hook.sh").write_text("#!/bin/bash\nexit 0")
@@ -354,8 +354,8 @@ class TestVSCodeIntegration:
         pkg_dir = temp_project / "apm_modules" / "myorg" / "security-hooks"
         hooks_dir = pkg_dir / ".apm" / "hooks"
         scripts_dir = pkg_dir / "scripts"
-        hooks_dir.mkdir(parents=True)
-        scripts_dir.mkdir(parents=True)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        scripts_dir.mkdir(parents=True, exist_ok=True)
 
         hook_data = {
             "hooks": {
@@ -384,7 +384,7 @@ class TestVSCodeIntegration:
         """Test that system commands without file paths are passed through unchanged."""
         pkg_dir = temp_project / "apm_modules" / "myorg" / "format-pkg"
         hooks_dir = pkg_dir / "hooks"
-        hooks_dir.mkdir(parents=True)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
 
         hook_data = {
             "hooks": {
@@ -416,7 +416,7 @@ class TestVSCodeIntegration:
         """Test that invalid JSON hook files are skipped gracefully."""
         pkg_dir = temp_project / "pkg"
         hooks_dir = pkg_dir / "hooks"
-        hooks_dir.mkdir(parents=True)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
         (hooks_dir / "bad.json").write_text("not json")
 
         pkg_info = _make_package_info(pkg_dir)
@@ -429,7 +429,7 @@ class TestVSCodeIntegration:
         """Test that .github/hooks/ directory is created if it doesn't exist."""
         pkg_dir = temp_project / "pkg"
         hooks_dir = pkg_dir / "hooks"
-        hooks_dir.mkdir(parents=True)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
         (hooks_dir / "hooks.json").write_text(json.dumps({"hooks": {"Stop": []}}))
 
         pkg_info = _make_package_info(pkg_dir)
@@ -457,7 +457,7 @@ class TestClaudeIntegration:
         """Create a hookify-like package structure."""
         pkg_dir = project / "apm_modules" / "anthropics" / "hookify"
         hooks_dir = pkg_dir / "hooks"
-        hooks_dir.mkdir(parents=True)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
 
         (hooks_dir / "hooks.json").write_text(json.dumps(HOOKIFY_HOOKS_JSON, indent=2))
 
@@ -499,8 +499,8 @@ class TestClaudeIntegration:
         pkg_dir = temp_project / "apm_modules" / "anthropics" / "learning-output-style"
         hooks_dir = pkg_dir / "hooks"
         handlers_dir = pkg_dir / "hooks-handlers"
-        hooks_dir.mkdir(parents=True)
-        handlers_dir.mkdir(parents=True)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        handlers_dir.mkdir(parents=True, exist_ok=True)
 
         (hooks_dir / "hooks.json").write_text(json.dumps(LEARNING_OUTPUT_STYLE_HOOKS_JSON))
         (handlers_dir / "session-start.sh").write_text("#!/bin/bash\necho 'start'")
@@ -518,7 +518,7 @@ class TestClaudeIntegration:
         """Test Claude integration of ralph-loop plugin."""
         pkg_dir = temp_project / "apm_modules" / "anthropics" / "ralph-loop"
         hooks_dir = pkg_dir / "hooks"
-        hooks_dir.mkdir(parents=True)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
 
         (hooks_dir / "hooks.json").write_text(json.dumps(RALPH_LOOP_HOOKS_JSON))
         (hooks_dir / "stop-hook.sh").write_text("#!/bin/bash\nexit 0")
@@ -546,7 +546,7 @@ class TestClaudeIntegration:
 
         pkg_dir = temp_project / "pkg"
         hooks_dir = pkg_dir / "hooks"
-        hooks_dir.mkdir(parents=True)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
         (hooks_dir / "hooks.json").write_text(json.dumps(RALPH_LOOP_HOOKS_JSON))
         (hooks_dir / "stop-hook.sh").write_text("#!/bin/bash\nexit 0")
 
@@ -570,7 +570,7 @@ class TestClaudeIntegration:
         # First package: ralph-loop with Stop hook
         pkg1_dir = temp_project / "pkg1"
         hooks1_dir = pkg1_dir / "hooks"
-        hooks1_dir.mkdir(parents=True)
+        hooks1_dir.mkdir(parents=True, exist_ok=True)
         (hooks1_dir / "hooks.json").write_text(json.dumps(RALPH_LOOP_HOOKS_JSON))
         (hooks1_dir / "stop-hook.sh").write_text("#!/bin/bash\nexit 0")
         pkg1_info = _make_package_info(pkg1_dir, "ralph-loop")
@@ -580,7 +580,7 @@ class TestClaudeIntegration:
         # Second package: also has Stop hook
         pkg2_dir = temp_project / "pkg2"
         hooks2_dir = pkg2_dir / "hooks"
-        hooks2_dir.mkdir(parents=True)
+        hooks2_dir.mkdir(parents=True, exist_ok=True)
         other_hooks = {
             "hooks": {
                 "Stop": [{"hooks": [{"type": "command", "command": "echo other-stop"}]}]
@@ -613,7 +613,7 @@ class TestClaudeIntegration:
 
         pkg_dir = temp_project / "pkg"
         hooks_dir = pkg_dir / "hooks"
-        hooks_dir.mkdir(parents=True)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
         (hooks_dir / "hooks.json").write_text(json.dumps(RALPH_LOOP_HOOKS_JSON))
         (hooks_dir / "stop-hook.sh").write_text("#!/bin/bash\nexit 0")
 
@@ -629,7 +629,7 @@ class TestClaudeIntegration:
         pkg_dir = temp_project / "apm_modules" / "myorg" / "lint-hooks"
         hooks_dir = pkg_dir / "hooks"
         scripts_dir = hooks_dir / "scripts"
-        scripts_dir.mkdir(parents=True)
+        scripts_dir.mkdir(parents=True, exist_ok=True)
 
         hook_data = {
             "hooks": {
@@ -684,7 +684,7 @@ class TestCursorIntegration:
         """Create a hookify-like package structure."""
         pkg_dir = project / "apm_modules" / "anthropics" / "hookify"
         hooks_dir = pkg_dir / "hooks"
-        hooks_dir.mkdir(parents=True)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
 
         (hooks_dir / "hooks.json").write_text(json.dumps(HOOKIFY_HOOKS_JSON, indent=2))
 
@@ -746,7 +746,7 @@ class TestCursorIntegration:
 
         pkg_dir = temp_project / "pkg"
         hooks_dir = pkg_dir / "hooks"
-        hooks_dir.mkdir(parents=True)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
         (hooks_dir / "hooks.json").write_text(json.dumps(RALPH_LOOP_HOOKS_JSON))
         (hooks_dir / "stop-hook.sh").write_text("#!/bin/bash\nexit 0")
 
@@ -770,7 +770,7 @@ class TestCursorIntegration:
         # First package
         pkg1_dir = temp_project / "apm_modules" / "ralph-loop"
         hooks1_dir = pkg1_dir / "hooks"
-        hooks1_dir.mkdir(parents=True)
+        hooks1_dir.mkdir(parents=True, exist_ok=True)
         (hooks1_dir / "hooks.json").write_text(json.dumps(RALPH_LOOP_HOOKS_JSON))
         (hooks1_dir / "stop-hook.sh").write_text("#!/bin/bash\nexit 0")
         pkg1_info = _make_package_info(pkg1_dir, "ralph-loop")
@@ -780,7 +780,7 @@ class TestCursorIntegration:
         # Second package with same event
         pkg2_dir = temp_project / "apm_modules" / "other-pkg"
         hooks2_dir = pkg2_dir / "hooks"
-        hooks2_dir.mkdir(parents=True)
+        hooks2_dir.mkdir(parents=True, exist_ok=True)
         (hooks2_dir / "hooks.json").write_text(json.dumps({
             "hooks": {
                 "Stop": [{"hooks": [{"type": "command", "command": "echo other-stop"}]}]
@@ -840,7 +840,7 @@ class TestCursorIntegration:
     def test_sync_removes_cursor_hooks_scripts(self, temp_project):
         """Test that sync removes .cursor/hooks/ scripts via manifest mode."""
         cursor_hooks = temp_project / ".cursor" / "hooks" / "hookify"
-        cursor_hooks.mkdir(parents=True)
+        cursor_hooks.mkdir(parents=True, exist_ok=True)
         (cursor_hooks / "pretooluse.py").write_text("# script")
 
         integrator = HookIntegrator()
@@ -881,7 +881,7 @@ class TestSyncIntegration:
     def test_sync_removes_vscode_hook_files(self, temp_project):
         """Test that sync removes all *-apm.json files from .github/hooks/."""
         hooks_dir = temp_project / ".github" / "hooks"
-        hooks_dir.mkdir(parents=True)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
 
         (hooks_dir / "hookify-hooks-apm.json").write_text("{}")
         (hooks_dir / "ralph-loop-hooks-apm.json").write_text("{}")
@@ -899,7 +899,7 @@ class TestSyncIntegration:
         """Test that sync removes scripts via manifest mode and cleans empty parents."""
         hooks_dir = temp_project / ".github" / "hooks"
         scripts_dir = hooks_dir / "scripts" / "hookify" / "hooks"
-        scripts_dir.mkdir(parents=True)
+        scripts_dir.mkdir(parents=True, exist_ok=True)
         (scripts_dir / "pretooluse.py").write_text("# script")
 
         integrator = HookIntegrator()
@@ -945,7 +945,7 @@ class TestSyncIntegration:
     def test_sync_removes_claude_hooks_dir(self, temp_project):
         """Test that sync removes .claude/hooks/ scripts via manifest mode and cleans empty parents."""
         claude_hooks = temp_project / ".claude" / "hooks" / "hookify"
-        claude_hooks.mkdir(parents=True)
+        claude_hooks.mkdir(parents=True, exist_ok=True)
         (claude_hooks / "pretooluse.py").write_text("# script")
 
         integrator = HookIntegrator()
@@ -996,7 +996,7 @@ class TestScriptPathRewriting:
     def test_rewrite_claude_plugin_root(self, temp_project):
         """Test rewriting ${CLAUDE_PLUGIN_ROOT} variable."""
         pkg_dir = temp_project / "pkg"
-        (pkg_dir / "hooks").mkdir(parents=True)
+        (pkg_dir / "hooks").mkdir(parents=True, exist_ok=True)
         (pkg_dir / "hooks" / "script.sh").write_text("#!/bin/bash")
 
         integrator = HookIntegrator()
@@ -1014,7 +1014,7 @@ class TestScriptPathRewriting:
     def test_rewrite_relative_path(self, temp_project):
         """Test rewriting relative ./path references."""
         pkg_dir = temp_project / "pkg"
-        (pkg_dir / "scripts").mkdir(parents=True)
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
         (pkg_dir / "scripts" / "check.sh").write_text("#!/bin/bash")
 
         integrator = HookIntegrator()
@@ -1032,7 +1032,7 @@ class TestScriptPathRewriting:
     def test_system_command_unchanged(self, temp_project):
         """Test that system commands are not modified."""
         pkg_dir = temp_project / "pkg"
-        pkg_dir.mkdir(parents=True)
+        pkg_dir.mkdir(parents=True, exist_ok=True)
 
         integrator = HookIntegrator()
         cmd, scripts = integrator._rewrite_command_for_target(
@@ -1048,7 +1048,7 @@ class TestScriptPathRewriting:
     def test_rewrite_for_claude_target(self, temp_project):
         """Test that Claude target uses .claude/hooks/ path."""
         pkg_dir = temp_project / "pkg"
-        (pkg_dir / "hooks").mkdir(parents=True)
+        (pkg_dir / "hooks").mkdir(parents=True, exist_ok=True)
         (pkg_dir / "hooks" / "run.sh").write_text("#!/bin/bash")
 
         integrator = HookIntegrator()
@@ -1065,7 +1065,7 @@ class TestScriptPathRewriting:
     def test_nonexistent_script_not_rewritten(self, temp_project):
         """Test that references to non-existent scripts are left as-is."""
         pkg_dir = temp_project / "pkg"
-        pkg_dir.mkdir(parents=True)
+        pkg_dir.mkdir(parents=True, exist_ok=True)
 
         integrator = HookIntegrator()
         cmd, scripts = integrator._rewrite_command_for_target(
@@ -1082,7 +1082,7 @@ class TestScriptPathRewriting:
     def test_rewrite_preserves_binary_prefix(self, temp_project):
         """Test that binary prefix (e.g., python3) is preserved in rewritten commands."""
         pkg_dir = temp_project / "pkg"
-        (pkg_dir / "hooks").mkdir(parents=True)
+        (pkg_dir / "hooks").mkdir(parents=True, exist_ok=True)
         (pkg_dir / "hooks" / "check.py").write_text("#!/usr/bin/env python3")
 
         integrator = HookIntegrator()
@@ -1101,7 +1101,7 @@ class TestScriptPathRewriting:
         pkg_dir = temp_project / "pkg"
         hooks_dir = pkg_dir / "hooks"
         scripts_dir = hooks_dir / "scripts"
-        scripts_dir.mkdir(parents=True)
+        scripts_dir.mkdir(parents=True, exist_ok=True)
         (scripts_dir / "lint.sh").write_text("#!/bin/bash")
 
         integrator = HookIntegrator()
@@ -1124,7 +1124,7 @@ class TestScriptPathRewriting:
         pkg_dir = temp_project / "pkg"
         hooks_dir = pkg_dir / "hooks"
         scripts_dir = hooks_dir / "scripts"
-        scripts_dir.mkdir(parents=True)
+        scripts_dir.mkdir(parents=True, exist_ok=True)
         (scripts_dir / "lint.sh").write_text("#!/bin/bash")
 
         integrator = HookIntegrator()
@@ -1143,7 +1143,7 @@ class TestScriptPathRewriting:
     def test_rewrite_rejects_plugin_root_path_traversal(self, temp_project):
         """Test that ${CLAUDE_PLUGIN_ROOT}/../ paths are rejected (path traversal)."""
         pkg_dir = temp_project / "pkg"
-        pkg_dir.mkdir(parents=True)
+        pkg_dir.mkdir(parents=True, exist_ok=True)
         # Create a file outside the package directory
         secret = temp_project / "secrets.txt"
         secret.write_text("top-secret")
@@ -1164,7 +1164,7 @@ class TestScriptPathRewriting:
         """Test that ./../../ paths are rejected (path traversal via relative refs)."""
         pkg_dir = temp_project / "pkg"
         hooks_dir = pkg_dir / "hooks"
-        hooks_dir.mkdir(parents=True)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
         # Create a file outside the package directory
         secret = temp_project / "secrets.txt"
         secret.write_text("top-secret")
@@ -1185,7 +1185,7 @@ class TestScriptPathRewriting:
     def test_rewrite_bash_key(self, temp_project):
         """Test rewriting the bash key (GitHub Copilot format)."""
         pkg_dir = temp_project / "pkg"
-        (pkg_dir / "scripts").mkdir(parents=True)
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
         (pkg_dir / "scripts" / "check.sh").write_text("#!/bin/bash")
 
         integrator = HookIntegrator()
@@ -1203,7 +1203,7 @@ class TestScriptPathRewriting:
     def test_rewrite_powershell_key(self, temp_project):
         """Test rewriting the powershell key (GitHub Copilot format)."""
         pkg_dir = temp_project / "pkg"
-        (pkg_dir / "scripts").mkdir(parents=True)
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
         (pkg_dir / "scripts" / "check.ps1").write_text("Write-Host 'ok'")
 
         integrator = HookIntegrator()
@@ -1221,7 +1221,7 @@ class TestScriptPathRewriting:
     def test_rewrite_windows_key(self, temp_project):
         """Test rewriting the windows key (GitHub Copilot format)."""
         pkg_dir = temp_project / "pkg"
-        (pkg_dir / "scripts").mkdir(parents=True)
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
         (pkg_dir / "scripts" / "scan-secrets.ps1").write_text("Write-Host 'scanning'")
 
         integrator = HookIntegrator()
@@ -1239,7 +1239,7 @@ class TestScriptPathRewriting:
     def test_rewrite_linux_key(self, temp_project):
         """Test rewriting the linux key (VS Code OS-specific override)."""
         pkg_dir = temp_project / "pkg"
-        (pkg_dir / "scripts").mkdir(parents=True)
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
         (pkg_dir / "scripts" / "validate.sh").write_text("#!/bin/bash")
 
         integrator = HookIntegrator()
@@ -1257,7 +1257,7 @@ class TestScriptPathRewriting:
     def test_rewrite_osx_key(self, temp_project):
         """Test rewriting the osx key (VS Code OS-specific override)."""
         pkg_dir = temp_project / "pkg"
-        (pkg_dir / "scripts").mkdir(parents=True)
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
         (pkg_dir / "scripts" / "format-mac.sh").write_text("#!/bin/bash")
 
         integrator = HookIntegrator()
@@ -1272,10 +1272,135 @@ class TestScriptPathRewriting:
         assert ".github/hooks/scripts/my-pkg/scripts/format-mac.sh" in cmd
         assert len(scripts) == 1
 
+    # -- Windows backslash path tests ------------------------------------------
+
+    def test_rewrite_backslash_relative_path(self, temp_project):
+        """Test rewriting .\\ backslash relative path (Windows convention)."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "scripts" / "scan.ps1").write_text("Write-Host 'ok'")
+
+        integrator = HookIntegrator()
+        cmd, scripts = integrator._rewrite_command_for_target(
+            ".\\scripts\\scan.ps1",
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        assert ".\\" not in cmd
+        assert ".github/hooks/scripts/my-pkg/scripts/scan.ps1" in cmd
+        assert len(scripts) == 1
+
+    def test_rewrite_backslash_with_command_prefix(self, temp_project):
+        """Test .\\ path preceded by command text (e.g. pwsh -File .\\scan.ps1)."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "scripts" / "scan.ps1").write_text("Write-Host 'ok'")
+
+        integrator = HookIntegrator()
+        cmd, scripts = integrator._rewrite_command_for_target(
+            "pwsh -File .\\scripts\\scan.ps1",
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        assert cmd.startswith("pwsh -File ")
+        assert ".\\" not in cmd
+        assert ".github/hooks/scripts/my-pkg/scripts/scan.ps1" in cmd
+        assert len(scripts) == 1
+
+    def test_rewrite_backslash_plugin_root(self, temp_project):
+        """Test ${CLAUDE_PLUGIN_ROOT} with backslash separators."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "hooks").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "hooks" / "validate.ps1").write_text("Write-Host 'ok'")
+
+        integrator = HookIntegrator()
+        cmd, scripts = integrator._rewrite_command_for_target(
+            "pwsh ${CLAUDE_PLUGIN_ROOT}\\hooks\\validate.ps1",
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        assert "${CLAUDE_PLUGIN_ROOT}" not in cmd
+        assert "\\" not in cmd
+        assert cmd.startswith("pwsh ")
+        assert ".github/hooks/scripts/my-pkg/hooks/validate.ps1" in cmd
+        assert len(scripts) == 1
+
+    def test_rewrite_backslash_normalizes_to_forward_slash(self, temp_project):
+        """Output paths always use forward slashes regardless of input."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "sub" / "dir").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "sub" / "dir" / "run.ps1").write_text("Write-Host 'ok'")
+
+        integrator = HookIntegrator()
+        cmd, scripts = integrator._rewrite_command_for_target(
+            ".\\sub\\dir\\run.ps1",
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        assert "\\" not in cmd
+        assert ".github/hooks/scripts/my-pkg/sub/dir/run.ps1" in cmd
+        # Target path in scripts_to_copy also uses forward slashes
+        assert all("\\" not in target_rel for _, target_rel in scripts)
+
+    def test_rewrite_backslash_path_traversal_rejected(self, temp_project):
+        """Backslash path traversal (..\\) is still rejected."""
+        pkg_dir = temp_project / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+        # Create file outside package dir
+        (temp_project / "secret.ps1").write_text("bad")
+
+        integrator = HookIntegrator()
+        cmd, scripts = integrator._rewrite_command_for_target(
+            ".\\..\\secret.ps1",
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        # Path traversal should be rejected — command unchanged, no scripts
+        assert len(scripts) == 0
+
+    def test_rewrite_hooks_data_windows_backslash_flat(self, temp_project):
+        """Test _rewrite_hooks_data handles backslash paths in windows key."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "scripts" / "validate.sh").write_text("#!/bin/bash")
+        (pkg_dir / "scripts" / "validate.ps1").write_text("Write-Host 'ok'")
+
+        integrator = HookIntegrator()
+        data = {
+            "hooks": {
+                "preToolUse": [
+                    {
+                        "type": "command",
+                        "bash": "./scripts/validate.sh",
+                        "windows": ".\\scripts\\validate.ps1",
+                    }
+                ]
+            }
+        }
+        rewritten, scripts = integrator._rewrite_hooks_data(
+            data, pkg_dir, "my-pkg", "vscode",
+        )
+
+        hook = rewritten["hooks"]["preToolUse"][0]
+        assert ".github/hooks/scripts/my-pkg/scripts/validate.sh" in hook["bash"]
+        assert ".github/hooks/scripts/my-pkg/scripts/validate.ps1" in hook["windows"]
+        assert "\\" not in hook["windows"]
+        assert len(scripts) == 2
+
     def test_rewrite_hooks_data_windows_flat_format(self, temp_project):
         """Test _rewrite_hooks_data handles windows key in flat format (GitHub Copilot)."""
         pkg_dir = temp_project / "pkg"
-        (pkg_dir / "scripts").mkdir(parents=True)
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
         (pkg_dir / "scripts" / "validate.sh").write_text("#!/bin/bash")
         (pkg_dir / "scripts" / "validate.ps1").write_text("Write-Host 'ok'")
 
@@ -1305,7 +1430,7 @@ class TestScriptPathRewriting:
     def test_rewrite_hooks_data_windows_nested_format(self, temp_project):
         """Test _rewrite_hooks_data handles windows key in nested format (Claude-style)."""
         pkg_dir = temp_project / "pkg"
-        (pkg_dir / "scripts").mkdir(parents=True)
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
         (pkg_dir / "scripts" / "validate.sh").write_text("#!/bin/bash")
         (pkg_dir / "scripts" / "validate.ps1").write_text("Write-Host 'ok'")
 
@@ -1339,7 +1464,7 @@ class TestScriptPathRewriting:
     def test_rewrite_hooks_data_linux_flat_format(self, temp_project):
         """Test _rewrite_hooks_data handles linux key in flat format (VS Code)."""
         pkg_dir = temp_project / "pkg"
-        (pkg_dir / "scripts").mkdir(parents=True)
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
         (pkg_dir / "scripts" / "format.sh").write_text("#!/bin/bash")
         (pkg_dir / "scripts" / "format-linux.sh").write_text("#!/bin/bash")
 
@@ -1368,7 +1493,7 @@ class TestScriptPathRewriting:
     def test_rewrite_hooks_data_linux_nested_format(self, temp_project):
         """Test _rewrite_hooks_data handles linux key in nested format (Claude-style)."""
         pkg_dir = temp_project / "pkg"
-        (pkg_dir / "scripts").mkdir(parents=True)
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
         (pkg_dir / "scripts" / "validate.sh").write_text("#!/bin/bash")
         (pkg_dir / "scripts" / "validate-linux.sh").write_text("#!/bin/bash")
 
@@ -1402,7 +1527,7 @@ class TestScriptPathRewriting:
     def test_rewrite_hooks_data_osx_flat_format(self, temp_project):
         """Test _rewrite_hooks_data handles osx key in flat format (VS Code)."""
         pkg_dir = temp_project / "pkg"
-        (pkg_dir / "scripts").mkdir(parents=True)
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
         (pkg_dir / "scripts" / "format.sh").write_text("#!/bin/bash")
         (pkg_dir / "scripts" / "format-mac.sh").write_text("#!/bin/bash")
 
@@ -1431,7 +1556,7 @@ class TestScriptPathRewriting:
     def test_rewrite_hooks_data_osx_nested_format(self, temp_project):
         """Test _rewrite_hooks_data handles osx key in nested format (Claude-style)."""
         pkg_dir = temp_project / "pkg"
-        (pkg_dir / "scripts").mkdir(parents=True)
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
         (pkg_dir / "scripts" / "validate.sh").write_text("#!/bin/bash")
         (pkg_dir / "scripts" / "validate-mac.sh").write_text("#!/bin/bash")
 
@@ -1465,7 +1590,7 @@ class TestScriptPathRewriting:
     def test_rewrite_hooks_data_all_platform_keys(self, temp_project):
         """Test _rewrite_hooks_data handles all 6 platform keys together."""
         pkg_dir = temp_project / "pkg"
-        (pkg_dir / "scripts").mkdir(parents=True)
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
         (pkg_dir / "scripts" / "run.sh").write_text("#!/bin/bash")
         (pkg_dir / "scripts" / "run.ps1").write_text("Write-Host 'ok'")
         (pkg_dir / "scripts" / "run-win.ps1").write_text("Write-Host 'win'")
@@ -1514,7 +1639,7 @@ class TestScriptPathRewriting:
     def test_rewrite_hooks_data_github_copilot_flat_format(self, temp_project):
         """Test _rewrite_hooks_data handles GitHub Copilot flat format (bash/powershell at top level)."""
         pkg_dir = temp_project / "pkg"
-        (pkg_dir / "scripts").mkdir(parents=True)
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
         (pkg_dir / "scripts" / "validate.sh").write_text("#!/bin/bash")
         (pkg_dir / "scripts" / "validate.ps1").write_text("Write-Host 'ok'")
 
@@ -1544,7 +1669,7 @@ class TestScriptPathRewriting:
     def test_rewrite_hooks_data_claude_nested_format(self, temp_project):
         """Test _rewrite_hooks_data handles Claude nested format (command in inner hooks array)."""
         pkg_dir = temp_project / "pkg"
-        (pkg_dir / "scripts").mkdir(parents=True)
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
         (pkg_dir / "scripts" / "validate.sh").write_text("#!/bin/bash")
 
         data = {
@@ -1574,7 +1699,7 @@ class TestScriptPathRewriting:
         pkg_dir = temp_project / "apm_modules" / "myorg" / "lint-hooks"
         hooks_dir = pkg_dir / "hooks"
         scripts_dir = hooks_dir / "scripts"
-        scripts_dir.mkdir(parents=True)
+        scripts_dir.mkdir(parents=True, exist_ok=True)
 
         hook_data = {
             "hooks": {
@@ -1634,7 +1759,7 @@ class TestEndToEnd:
         # Setup hookify package
         pkg_dir = temp_project / "apm_modules" / "anthropics" / "hookify"
         hooks_dir = pkg_dir / "hooks"
-        hooks_dir.mkdir(parents=True)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
         (hooks_dir / "hooks.json").write_text(json.dumps(HOOKIFY_HOOKS_JSON))
         for script in ["pretooluse.py", "posttooluse.py", "stop.py", "userpromptsubmit.py"]:
             (hooks_dir / script).write_text(f"# {script}")
@@ -1674,7 +1799,7 @@ class TestEndToEnd:
         # Package 1: ralph-loop
         pkg1_dir = temp_project / "apm_modules" / "anthropics" / "ralph-loop"
         hooks1_dir = pkg1_dir / "hooks"
-        hooks1_dir.mkdir(parents=True)
+        hooks1_dir.mkdir(parents=True, exist_ok=True)
         (hooks1_dir / "hooks.json").write_text(json.dumps(RALPH_LOOP_HOOKS_JSON))
         (hooks1_dir / "stop-hook.sh").write_text("#!/bin/bash")
         pkg1_info = _make_package_info(pkg1_dir, "ralph-loop")
@@ -1683,8 +1808,8 @@ class TestEndToEnd:
         pkg2_dir = temp_project / "apm_modules" / "anthropics" / "learning-output-style"
         hooks2_dir = pkg2_dir / "hooks"
         handlers_dir = pkg2_dir / "hooks-handlers"
-        hooks2_dir.mkdir(parents=True)
-        handlers_dir.mkdir(parents=True)
+        hooks2_dir.mkdir(parents=True, exist_ok=True)
+        handlers_dir.mkdir(parents=True, exist_ok=True)
         (hooks2_dir / "hooks.json").write_text(json.dumps(LEARNING_OUTPUT_STYLE_HOOKS_JSON))
         (handlers_dir / "session-start.sh").write_text("#!/bin/bash")
         pkg2_info = _make_package_info(pkg2_dir, "learning-output-style")
@@ -1723,7 +1848,7 @@ class TestDeepCopySafety:
     def test_rewrite_does_not_mutate_original(self, temp_project):
         """Ensure _rewrite_hooks_data returns a copy, not mutating original."""
         pkg_dir = temp_project / "pkg"
-        (pkg_dir / "hooks").mkdir(parents=True)
+        (pkg_dir / "hooks").mkdir(parents=True, exist_ok=True)
         (pkg_dir / "hooks" / "script.sh").write_text("#!/bin/bash")
 
         data = {
@@ -1843,7 +1968,7 @@ class TestScopeResolvedHookDeployment:
         # Create package with hooks
         self.pkg_dir = self.root / "apm_modules" / "scope-pkg"
         hooks_dir = self.pkg_dir / ".apm" / "hooks"
-        hooks_dir.mkdir(parents=True)
+        hooks_dir.mkdir(parents=True, exist_ok=True)
         hooks_dir.joinpath("hooks.json").write_text(json.dumps({
             "hooks": {
                 "SessionStart": [{"type": "command", "command": "echo hello"}]
@@ -1965,3 +2090,116 @@ class TestScopeResolvedHookDeployment:
         for name, profile in KNOWN_TARGETS.items():
             if not profile.auto_create:
                 assert name != "copilot", "copilot should have auto_create=True"
+
+
+# ─── Backslash path rewrite tests (issue #520) ───────────────────────────────
+
+
+class TestBackslashPathRewrite:
+    """Windows-style backslash paths in hook commands must be rewritten."""
+
+    @pytest.fixture
+    def temp_project(self):
+        temp_dir = tempfile.mkdtemp()
+        yield Path(temp_dir)
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_rewrite_backslash_relative_path(self, temp_project):
+        """Backslash relative paths should be rewritten like forward-slash paths."""
+        pkg_dir = temp_project / "pkg"
+        scripts_dir = pkg_dir / "secrets-scanner"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        (scripts_dir / "scan-secrets.ps1").write_text("Write-Host 'scanning'")
+
+        integrator = HookIntegrator()
+        cmd, scripts = integrator._rewrite_command_for_target(
+            "pwsh -File .\\secrets-scanner\\scan-secrets.ps1",
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        assert ".github/hooks/scripts/my-pkg/secrets-scanner/scan-secrets.ps1" in cmd
+        assert len(scripts) == 1
+
+    def test_rewrite_backslash_hooks_data_flat(self, temp_project):
+        """End-to-end: windows key with backslash paths in flat format."""
+        pkg_dir = temp_project / "pkg"
+        scripts_dir = pkg_dir / "secrets-scanner"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        (scripts_dir / "scan.sh").write_text("#!/bin/bash")
+        (scripts_dir / "scan.ps1").write_text("Write-Host 'ok'")
+
+        data = {
+            "hooks": {
+                "Stop": [
+                    {
+                        "type": "command",
+                        "command": "./secrets-scanner/scan.sh",
+                        "windows": "pwsh -File .\\secrets-scanner\\scan.ps1",
+                    }
+                ]
+            }
+        }
+
+        integrator = HookIntegrator()
+        rewritten, scripts = integrator._rewrite_hooks_data(
+            data, pkg_dir, "my-pkg", "vscode",
+        )
+
+        hook = rewritten["hooks"]["Stop"][0]
+        assert ".github/hooks/scripts/my-pkg/secrets-scanner/scan.sh" in hook["command"]
+        assert ".github/hooks/scripts/my-pkg/secrets-scanner/scan.ps1" in hook["windows"]
+        assert len(scripts) == 2
+
+    def test_rewrite_backslash_hooks_data_nested(self, temp_project):
+        """End-to-end: windows key with backslash paths in nested Claude format."""
+        pkg_dir = temp_project / "pkg"
+        scripts_dir = pkg_dir / "session-auto-commit"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        (scripts_dir / "auto-commit.sh").write_text("#!/bin/bash")
+        (scripts_dir / "auto-commit.ps1").write_text("Write-Host 'commit'")
+
+        data = {
+            "hooks": {
+                "Stop": [
+                    {
+                        "matcher": "Always",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "./session-auto-commit/auto-commit.sh",
+                                "windows": "pwsh -File .\\session-auto-commit\\auto-commit.ps1",
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+
+        integrator = HookIntegrator()
+        rewritten, scripts = integrator._rewrite_hooks_data(
+            data, pkg_dir, "my-pkg", "vscode",
+        )
+
+        hook = rewritten["hooks"]["Stop"][0]["hooks"][0]
+        assert ".github/hooks/scripts/my-pkg/session-auto-commit/auto-commit.sh" in hook["command"]
+        assert ".github/hooks/scripts/my-pkg/session-auto-commit/auto-commit.ps1" in hook["windows"]
+        assert len(scripts) == 2
+
+    def test_rewrite_forward_slash_still_works(self, temp_project):
+        """Forward-slash windows paths (./scripts/scan.ps1) still rewrite correctly."""
+        pkg_dir = temp_project / "pkg"
+        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "scripts" / "scan.ps1").write_text("Write-Host 'ok'")
+
+        integrator = HookIntegrator()
+        cmd, scripts = integrator._rewrite_command_for_target(
+            "./scripts/scan.ps1",
+            pkg_dir,
+            "my-pkg",
+            "vscode",
+        )
+
+        assert ".github/hooks/scripts/my-pkg/scripts/scan.ps1" in cmd
+        assert len(scripts) == 1
