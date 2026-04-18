@@ -141,13 +141,13 @@ except (ImportError, NameError):
 ## Documentation Sync Requirements
 
 ### CLI Reference Documentation
-- **ALWAYS** update `docs/cli-reference.md` when adding, modifying, or removing CLI commands
+- **ALWAYS** update `docs/src/content/docs/reference/cli-commands.md` when adding, modifying, or removing CLI commands
 - **ALWAYS** update command help text, options, arguments, and examples in the reference
 - **ALWAYS** verify examples in the documentation actually work with the current implementation
 - **ALWAYS** keep the command list in sync with available commands
 
 ### Documentation Update Checklist
-When changing CLI functionality, update these sections in `docs/cli-reference.md`:
+When changing CLI functionality, update these sections in `docs/src/content/docs/reference/cli-commands.md`:
 - Command syntax and arguments
 - Available options and flags  
 - Usage examples
