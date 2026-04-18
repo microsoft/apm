@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm marketplace validate` command with schema validation and duplicate name detection (#514)
 - Ref immutability advisory: caches plugin-to-ref pins and warns when a previously pinned plugin's ref changes (#514)
 - Multi-marketplace shadow detection: warns when the same plugin name appears in multiple registered marketplaces (#514)
+- `AGENTS.md` at repository root -- single entry point for AI coding agents with CI-enforced rules (#695)
 
 ### Fixed
 
