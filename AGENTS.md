@@ -33,9 +33,9 @@ Run these checks before every commit. All must pass.
    grep -rn --include='*.py' -P 'str\([^)]*\.relative_to\(' src/apm_cli/ | grep -v portable_relpath
    ```
 
-4. **Encoding check** -- verify no non-ASCII characters in changed `.py` files
+4. **Encoding check** -- verify no non-ASCII characters in changed text files
    ```
-   grep -Pn '[^\x09\x0a\x0d\x20-\x7e]' <changed-files>
+   git diff --cached --name-only --diff-filter=ACMR | xargs grep -Pn '[^\x09\x0a\x0d\x20-\x7e]'
    ```
 
 5. **CHANGELOG entry** -- add an entry under `[Unreleased]` for any PR changing code, tests, or docs.
