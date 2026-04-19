@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` now automatically discovers and deploys local `.apm/` primitives (skills, instructions, agents, prompts, hooks, commands) to target directories, with local content taking priority over dependencies on collision (#626, #644)
 - Add `temp-dir` configuration key (`apm config set temp-dir PATH`) to override the system temporary directory, resolving `[WinError 5] Access is denied` in corporate Windows environments (#629)
 
+### Changed
+
+- CI: adopt GitHub Merge Queue with tiered CI. `ci.yml` (Tier 1: unit tests + binary build) now runs on `pull_request` and `merge_group`. The integration + release-validation suite (Tier 2) moves to `merge_group`-only, replacing the previous `workflow_run` + environment-approval flow. PR branches no longer need manual updates against `main`, and the heavy integration suite runs once at merge time instead of on every PR push (#770)
+- CI: add `ci-integration-pr-stub.yml`, an inert `pull_request_target` workflow that produces no-op check runs for the four Tier 2 required checks (`Build (Linux)`, `Smoke Test (Linux)`, `Integration Tests (Linux)`, `Release Validation (Linux)`). This satisfies branch protection's required-check gate at PR time without burning CI minutes, and works retroactively on existing fork PRs because `pull_request_target` reads workflow YAML from `main`. The stub holds no secrets, runs no checkout, and grants `permissions: {}` so it cannot be turned into a supply-chain attack vector. Real Tier 2 work continues to run only inside the merge queue. CODEOWNERS now requires Lead Maintainer review for any change to `.github/workflows/**`
+
 ### Fixed
 
 - Harden `apm install` stale-file cleanup to prevent unsafe lockfile deletions, preserve user-edited files via per-file SHA-256 provenance, and improve cleanup reporting during install and `--dry-run` (#666, #762)
