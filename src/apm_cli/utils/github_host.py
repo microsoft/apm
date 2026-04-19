@@ -278,9 +278,16 @@ def build_artifactory_archive_url(host: str, prefix: str, owner: str, repo: str,
     """Build Artifactory VCS archive download URLs.
 
     Returns a tuple of URLs to try in order.  Because Artifactory proxies
-    the upstream server's native URL scheme, we attempt both GitHub-style
-    and GitLab-style archive paths so the caller does not need to know
-    what sits behind the Artifactory remote repository.
+    the upstream server's native URL scheme, we attempt GitHub-style,
+    GitLab-style, and codeload.github.com-style archive paths so the caller
+    does not need to know what sits behind the Artifactory remote repository.
+
+    Organizations using private GitHub repositories must configure their
+    Artifactory upstream as ``codeload.github.com`` (instead of ``github.com``)
+    because Artifactory cannot follow GitHub's cross-host redirect (which
+    carries short-lived tokens) to codeload.  When the upstream is
+    ``codeload.github.com``, the required archive path is
+    ``/{owner}/{repo}/zip/refs/heads/{ref}`` (no ``.zip`` extension).
 
     Args:
         host: Artifactory hostname (e.g., 'artifactory.example.com')
@@ -301,6 +308,12 @@ def build_artifactory_archive_url(host: str, prefix: str, owner: str, repo: str,
         f"{base}/-/archive/{ref}/{repo}-{ref}.zip",
         # GitHub-style tags fallback
         f"{base}/archive/refs/tags/{ref}.zip",
+        # codeload.github.com-style: /zip/refs/heads/{ref}
+        # Required when Artifactory upstream is configured as codeload.github.com
+        # (workaround for private repos where github.com redirects to codeload with tokens
+        # that Artifactory cannot follow across hosts)
+        f"{base}/zip/refs/heads/{ref}",
+        f"{base}/zip/refs/tags/{ref}",
     )
 
 

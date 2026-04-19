@@ -4,7 +4,7 @@ These functions are stateless and side-effect-free, making them easy to test
 in isolation and to reuse from multiple call sites in ``install.py`` without
 duplicating logic.
 
-Three kinds of drift are detected:
+Four kinds of drift are detected:
 
 * **Ref drift** — the ``ref`` pinned in ``apm.yml`` differs from what the
   lockfile recorded as ``resolved_ref``.  This includes transitions such as
@@ -18,6 +18,11 @@ Three kinds of drift are detected:
 * **Config drift** — an already-installed dependency's serialised configuration
   differs from the baseline stored in the lockfile.  (Currently only MCP
   servers; extendable to other integrator types.)
+
+* **Stale-file drift** -- files previously deployed for a still-present
+  package that are no longer produced by the current install (e.g. a
+  rename or removal inside the package).  The now-unused paths should be
+  removed.  See :func:`detect_stale_files`.
 
 Scope / non-goals
 -----------------
@@ -131,6 +136,36 @@ def detect_orphans(
         if dep_key not in intended_dep_keys:
             orphaned.update(dep.deployed_files)
     return orphaned
+
+
+# ---------------------------------------------------------------------------
+# File-level stale detection (intra-package)
+# ---------------------------------------------------------------------------
+
+def detect_stale_files(
+    old_deployed: builtins.list,
+    new_deployed: builtins.list,
+) -> builtins.set:
+    """Return the set of paths that were deployed previously but are no longer produced.
+
+    Complements :func:`detect_orphans`, which operates at the *package* level
+    (a whole package left the manifest).  This helper operates at the *file*
+    level *inside* a still-present package: if a package renamed or removed a
+    file between installs, the now-unused path is flagged as stale.
+
+    Pure set-difference semantics: ``set(old_deployed) - set(new_deployed)``.
+    The function does not touch the filesystem; the caller is responsible for
+    actually removing the files.
+
+    Args:
+        old_deployed: Paths recorded in the previous lockfile's
+                      ``deployed_files`` for this package.
+        new_deployed: Paths produced by the current install for this package.
+
+    Returns:
+        Workspace-relative path strings that should no longer exist on disk.
+    """
+    return builtins.set(old_deployed) - builtins.set(new_deployed)
 
 
 # ---------------------------------------------------------------------------
