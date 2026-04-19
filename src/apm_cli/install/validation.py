@@ -214,12 +214,20 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                 if result.returncode == 0:
                     verbose_log(f"git ls-remote rc=0 for {package}")
                 else:
-                    # Sanitize stderr to avoid leaking tokens
-                    stderr_snippet = (result.stderr or "").strip()[:200]
+                    # Sanitize stderr to avoid leaking tokens.  Two layers:
+                    # 1) scrub PAT-bearing URLs (git often echoes the URL
+                    #    in error messages -- the URL we built above
+                    #    embeds _url_token).  Use the same sanitizer the
+                    #    downloader uses for clone errors.
+                    # 2) belt-and-suspenders: also redact any literal env
+                    #    values that may have leaked through unrelated
+                    #    diagnostics paths.
+                    raw_stderr = (result.stderr or "").strip()[:200]
+                    stderr_snippet = ado_downloader._sanitize_git_error(raw_stderr)
                     for env_var in ("GIT_ASKPASS", "GIT_CONFIG_GLOBAL"):
-                        stderr_snippet = stderr_snippet.replace(
-                            validate_env.get(env_var, ""), "***"
-                        )
+                        env_val = validate_env.get(env_var, "")
+                        if env_val:
+                            stderr_snippet = stderr_snippet.replace(env_val, "***")
                     verbose_log(f"git ls-remote rc={result.returncode}: {stderr_snippet}")
 
             return result.returncode == 0

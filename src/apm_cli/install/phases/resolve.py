@@ -131,10 +131,10 @@ def run(ctx: "InstallContext") -> None:
             # Handle local packages: copy instead of git clone
             if dep_ref.is_local and dep_ref.local_path:
                 if scope is InstallScope.USER:
-                    # Cannot resolve local paths at user scope
-                    callback_failures[dep_ref.get_unique_key()] = (
-                        f"local package '{dep_ref.local_path}' skipped at user scope"
-                    )
+                    # Cannot resolve local paths at user scope.
+                    # Note: callback_failures is a set (see line ~105),
+                    # so use .add() rather than dict-style assignment.
+                    callback_failures.add(dep_ref.get_unique_key())
                     return None
                 result_path = _copy_local_package(
                     dep_ref, install_path, project_root, logger=logger

@@ -522,6 +522,13 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                     "MCP servers skipped at user scope (workspace-scoped concept)"
                 )
 
+        # Compute the canonical only_packages list once -- used both by
+        # the dry-run orphan preview and the actual install path.  When
+        # the user passed --packages, we restrict to validated_packages
+        # (canonical strings) rather than the raw input which may carry
+        # marketplace refs like NAME@MARKETPLACE.
+        only_pkgs = builtins.list(validated_packages) if packages else None
+
         # Show what will be installed if dry run
         if dry_run:
             from apm_cli.install.presentation.dry_run import render_and_exit
@@ -534,6 +541,7 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                 dev_apm_deps=dev_apm_deps,
                 should_install_mcp=should_install_mcp,
                 update=update,
+                only_packages=only_pkgs,
                 apm_dir=apm_dir,
             )
             return
@@ -573,10 +581,8 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
             try:
                 # If specific packages were requested, only install those
                 # Otherwise install all from apm.yml.
-                # Use validated_packages (canonical strings) instead of
-                # raw packages (which may contain marketplace refs like
-                # NAME@MARKETPLACE that don't match resolved dep identities).
-                only_pkgs = builtins.list(validated_packages) if packages else None
+                # `only_pkgs` was computed above so the dry-run preview
+                # and the actual install share one canonical list.
                 install_result = _install_apm_dependencies(
                     apm_package, update, verbose, only_pkgs, force=force,
                     parallel_downloads=parallel_downloads,
