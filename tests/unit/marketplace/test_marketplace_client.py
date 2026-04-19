@@ -35,7 +35,8 @@ class TestCache:
 
         cached = client_mod._read_cache("test-mkt")
         assert cached is not None
-        assert cached["name"] == "Test"
+        data_out, _ = cached
+        assert data_out["name"] == "Test"
 
     def test_expired_cache(self, tmp_path, monkeypatch):
         data = {"name": "Test", "plugins": []}

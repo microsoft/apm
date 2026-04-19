@@ -6,6 +6,7 @@ Click group pattern as ``mcp.py``.
 
 import builtins
 import sys
+from urllib.parse import urlparse
 
 import click
 
@@ -14,6 +15,35 @@ from ._helpers import _get_console
 
 # Restore builtins shadowed by subcommand names
 list = builtins.list
+
+_WELL_KNOWN_PATH = "/.well-known/agent-skills/index.json"
+
+
+def _resolve_index_url(raw_url: str) -> str:
+    """Resolve a bare origin URL to the Agent Skills .well-known index URL.
+
+    If the URL already has a non-trivial path it is returned unchanged.
+    Trailing slashes on bare origins are normalised away.
+
+    Args:
+        raw_url: A user-supplied ``https://`` URL -- either a bare origin
+            (``https://example.com``) or a fully-qualified index URL.
+
+    Returns:
+        Fully-qualified index URL ending in
+        ``/.well-known/agent-skills/index.json``, or *raw_url* unchanged
+        when it already contains a meaningful path.
+    """
+    parsed = urlparse(raw_url)
+    path = parsed.path.rstrip("/")
+    if not path or path == "/.well-known/agent-skills":
+        # Bare origin or just the .well-known dir -- append full path
+        base = f"{parsed.scheme}://{parsed.netloc}"
+        resolved = base + _WELL_KNOWN_PATH
+        if parsed.query:
+            resolved += "?" + parsed.query
+        return resolved
+    return raw_url
 
 
 @click.group(help="Manage plugin marketplaces for discovery and governance")
@@ -29,17 +59,65 @@ def marketplace():
 
 @marketplace.command(help="Register a plugin marketplace")
 @click.argument("repo", required=True)
-@click.option("--name", "-n", default=None, help="Display name (defaults to repo name)")
+@click.option("--name", "-n", default=None, help="Display name (defaults to repo name or hostname)")
 @click.option("--branch", "-b", default="main", show_default=True, help="Branch to use")
 @click.option("--host", default=None, help="Git host FQDN (default: github.com)")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def add(repo, name, branch, host, verbose):
-    """Register a marketplace from OWNER/REPO or HOST/OWNER/REPO."""
+    """Register a marketplace from OWNER/REPO, HOST/OWNER/REPO, or HTTPS URL."""
     logger = CommandLogger("marketplace-add", verbose=verbose)
     try:
+        import re
+
         from ..marketplace.client import _auto_detect_path, fetch_marketplace
         from ..marketplace.models import MarketplaceSource
         from ..marketplace.registry import add_marketplace
+
+        # URL-based path (Agent Skills discovery)
+        repo_lower = repo.lower()
+        if repo_lower.startswith("https://") or repo_lower.startswith("http://"):
+            if repo_lower.startswith("http://"):
+                logger.error(
+                    "URL marketplaces must use HTTPS. "
+                    "Please provide an https:// URL."
+                )
+                sys.exit(1)
+
+            resolved_url = _resolve_index_url(repo)
+            parsed = urlparse(resolved_url)
+            display_name = name or parsed.netloc
+
+            if not re.match(r"^[a-zA-Z0-9._-]+$", display_name):
+                logger.error(
+                    f"Invalid marketplace name: '{display_name}'. "
+                    f"Names must only contain letters, digits, '.', '_', and '-' "
+                    f"(required for 'apm install skill@marketplace' syntax)."
+                )
+                sys.exit(1)
+
+            logger.start(f"Registering marketplace '{display_name}'...", symbol="gear")
+            logger.verbose_detail(f"    URL: {resolved_url}")
+
+            source = MarketplaceSource(
+                name=display_name,
+                source_type="url",
+                url=resolved_url,
+            )
+
+            manifest = fetch_marketplace(source, force_refresh=True)
+            skill_count = len(manifest.plugins)
+
+            add_marketplace(source)
+
+            logger.success(
+                f"Marketplace '{display_name}' registered ({skill_count} skills)",
+                symbol="check",
+            )
+            if manifest.description:
+                logger.verbose_detail(f"    {manifest.description}")
+            return
+
+        # GitHub path (OWNER/REPO or HOST/OWNER/REPO)
 
         # Parse OWNER/REPO or HOST/OWNER/REPO
         if "/" not in repo:
@@ -86,8 +164,6 @@ def add(repo, name, branch, host, verbose):
         display_name = name or repo_name
 
         # Validate name is identifier-compatible for NAME@MARKETPLACE syntax
-        import re
-
         if not re.match(r"^[a-zA-Z0-9._-]+$", display_name):
             logger.error(
                 f"Invalid marketplace name: '{display_name}'. "
@@ -102,7 +178,6 @@ def add(repo, name, branch, host, verbose):
         if resolved_host != "github.com":
             logger.verbose_detail(f"    Host: {resolved_host}")
 
-        # Auto-detect marketplace.json location
         probe_source = MarketplaceSource(
             name=display_name,
             owner=owner,
@@ -122,7 +197,6 @@ def add(repo, name, branch, host, verbose):
 
         logger.verbose_detail(f"    Detected path: {detected_path}")
 
-        # Create source with detected path
         source = MarketplaceSource(
             name=display_name,
             owner=owner,
@@ -132,11 +206,9 @@ def add(repo, name, branch, host, verbose):
             path=detected_path,
         )
 
-        # Fetch and validate
         manifest = fetch_marketplace(source, force_refresh=True)
         plugin_count = len(manifest.plugins)
 
-        # Register
         add_marketplace(source)
 
         logger.success(
@@ -147,7 +219,14 @@ def add(repo, name, branch, host, verbose):
             logger.verbose_detail(f"    {manifest.description}")
 
     except Exception as e:
-        logger.error(f"Failed to register marketplace: {e}")
+        from ..marketplace.errors import MarketplaceFetchError
+
+        if isinstance(e, MarketplaceFetchError):
+            logger.error(str(e))
+        elif isinstance(e, ValueError):
+            logger.error(f"Invalid index format: {e}")
+        else:
+            logger.error(f"Failed to register marketplace: {e}")
         sys.exit(1)
 
 
@@ -181,7 +260,8 @@ def list_cmd(verbose):
                 f"{len(sources)} marketplace(s) registered:", symbol="info"
             )
             for s in sources:
-                click.echo(f"  {s.name}  ({s.owner}/{s.repo})")
+                location = s.url if s.is_url_source else f"{s.owner}/{s.repo}"
+                click.echo(f"  {s.name}  ({location})")
             return
 
         from rich.table import Table
@@ -198,7 +278,10 @@ def list_cmd(verbose):
         table.add_column("Path", style="dim")
 
         for s in sources:
-            table.add_row(s.name, f"{s.owner}/{s.repo}", s.branch, s.path)
+            if s.is_url_source:
+                table.add_row(s.name, s.url, "--", "--")
+            else:
+                table.add_row(s.name, f"{s.owner}/{s.repo}", s.branch, s.path)
 
         console.print()
         console.print(table)
@@ -299,7 +382,7 @@ def update(name, verbose):
         if name:
             source = get_marketplace_by_name(name)
             logger.start(f"Refreshing marketplace '{name}'...", symbol="gear")
-            clear_marketplace_cache(name, host=source.host)
+            clear_marketplace_cache(source=source)
             manifest = fetch_marketplace(source, force_refresh=True)
             logger.success(
                 f"Marketplace '{name}' updated ({len(manifest.plugins)} plugins)",
@@ -317,7 +400,7 @@ def update(name, verbose):
             )
             for s in sources:
                 try:
-                    clear_marketplace_cache(s.name, host=s.host)
+                    clear_marketplace_cache(source=s)
                     manifest = fetch_marketplace(s, force_refresh=True)
                     logger.tree_item(
                         f"  {s.name} ({len(manifest.plugins)} plugins)"
@@ -351,8 +434,9 @@ def remove(name, yes, verbose):
         source = get_marketplace_by_name(name)
 
         if not yes:
+            location = source.url if source.is_url_source else f"{source.owner}/{source.repo}"
             confirmed = click.confirm(
-                f"Remove marketplace '{source.name}' ({source.owner}/{source.repo})?",
+                f"Remove marketplace '{source.name}' ({location})?",
                 default=False,
             )
             if not confirmed:
@@ -360,7 +444,7 @@ def remove(name, yes, verbose):
                 return
 
         remove_marketplace(name)
-        clear_marketplace_cache(name, host=source.host)
+        clear_marketplace_cache(source=source)
         logger.success(f"Marketplace '{name}' removed", symbol="check")
 
     except Exception as e:

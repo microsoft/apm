@@ -15,25 +15,14 @@ class TestInstallMarketplacePreParse:
         result = parse_marketplace_ref("security-checks@acme-tools")
         assert result == ("security-checks", "acme-tools")
 
-    def test_owner_repo_not_intercepted(self):
-        """owner/repo should NOT be intercepted."""
-        result = parse_marketplace_ref("owner/repo")
-        assert result is None
-
-    def test_owner_repo_at_alias_not_intercepted(self):
-        """owner/repo@alias should NOT be intercepted (has slash)."""
-        result = parse_marketplace_ref("owner/repo@alias")
-        assert result is None
-
-    def test_bare_name_not_intercepted(self):
-        """Just a name without @ should NOT be intercepted."""
-        result = parse_marketplace_ref("just-a-name")
-        assert result is None
-
-    def test_ssh_not_intercepted(self):
-        """SSH URLs should NOT be intercepted (has colon)."""
-        result = parse_marketplace_ref("git@github.com:o/r")
-        assert result is None
+    @pytest.mark.parametrize("ref", [
+        "owner/repo",
+        "owner/repo@alias",
+        "just-a-name",
+        "git@github.com:o/r",
+    ])
+    def test_non_marketplace_ref_returns_none(self, ref):
+        assert parse_marketplace_ref(ref) is None
 
 
 class TestValidationOutcomeProvenance:

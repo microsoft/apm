@@ -39,6 +39,8 @@ class LockedDependency:
     is_dev: bool = False  # True for devDependencies
     discovered_via: Optional[str] = None  # Marketplace name (provenance)
     marketplace_plugin_name: Optional[str] = None  # Plugin name in marketplace
+    source_url: Optional[str] = None  # URL the index was fetched from
+    source_digest: Optional[str] = None  # sha256 digest of the fetched index
 
     def get_unique_key(self) -> str:
         """Returns unique key for this dependency."""
@@ -89,6 +91,10 @@ class LockedDependency:
             result["discovered_via"] = self.discovered_via
         if self.marketplace_plugin_name:
             result["marketplace_plugin_name"] = self.marketplace_plugin_name
+        if self.source_url is not None:
+            result["source_url"] = self.source_url
+        if self.source_digest is not None:
+            result["source_digest"] = self.source_digest
         return result
 
     @classmethod
@@ -128,6 +134,8 @@ class LockedDependency:
             is_dev=data.get("is_dev", False),
             discovered_via=data.get("discovered_via"),
             marketplace_plugin_name=data.get("marketplace_plugin_name"),
+            source_url=data.get("source_url"),
+            source_digest=data.get("source_digest"),
         )
 
     @classmethod

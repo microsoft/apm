@@ -65,6 +65,8 @@ With `pluginRoot` set to `./plugins`, the source `"my-tool"` resolves to `owner/
 
 ## Register a marketplace
 
+### From a GitHub repository
+
 ```bash
 apm marketplace add acme/plugin-marketplace
 ```
@@ -83,6 +85,28 @@ apm marketplace add acme/plugin-marketplace --name acme-plugins --branch release
 # Register from a GitHub Enterprise host (two equivalent forms)
 apm marketplace add acme/plugin-marketplace --host ghes.corp.example.com
 apm marketplace add ghes.corp.example.com/acme/plugin-marketplace
+```
+
+### From a URL
+
+```bash
+apm marketplace add https://plugins.example.com
+```
+
+APM automatically appends `/.well-known/agent-skills/index.json` to bare origins, following the Agent Skills Discovery RFC v0.2.0. You can also pass the full index URL:
+
+```bash
+apm marketplace add https://plugins.example.com/.well-known/agent-skills/index.json
+```
+
+The index must conform to the Agent Skills RFC schema (`$schema: "https://aka.ms/agent-skills-discovery/v0.2.0/schema"`). Plugins may use `type: "skill-md"` (direct Markdown content) or `type: "archive"` (downloadable `.tar.gz` archive). APM enforces HTTPS-only, validates SHA-256 digests when present, and supports conditional refresh via `ETag`/`Last-Modified` headers.
+
+**Options:**
+- `--name/-n` -- Custom display name for the marketplace
+
+```bash
+# Register with a custom name
+apm marketplace add https://plugins.example.com --name company-skills
 ```
 
 ## List registered marketplaces

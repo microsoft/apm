@@ -1,4 +1,5 @@
-"""Fetch, parse, and cache marketplace.json from GitHub repositories.
+"""Fetch, parse, and cache marketplace indexes from GitHub repositories or
+arbitrary HTTPS URLs (Agent Skills discovery endpoints).
 
 Uses ``AuthResolver.try_with_fallback(unauth_first=False)`` for auth-first
 access so private marketplace repos are fetched with credentials when available.
@@ -6,24 +7,50 @@ When ``PROXY_REGISTRY_URL`` is set, fetches are routed through the registry
 proxy (Artifactory Archive Entry Download) before falling back to the
 GitHub Contents API.  When ``PROXY_REGISTRY_ONLY=1``, the GitHub fallback
 is blocked entirely.
+
+For URL sources (``source_type='url'``), fetches are made directly to the
+fully-qualified HTTPS URL without GitHub auth or proxy.  Index format is
+auto-detected: Agent Skills (``"skills"`` key) or legacy marketplace.json
+(``"plugins"`` key).
+
 Cache lives at ``~/.apm/cache/marketplace/`` with a 1-hour TTL.
 """
 
 import json
+import hashlib
 import logging
 import os
 import time
-from typing import Dict, List, Optional
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
 
 import requests
 
 from .errors import MarketplaceFetchError
-from .models import MarketplaceManifest, MarketplacePlugin, MarketplaceSource, parse_marketplace_json
+from .models import (
+    MarketplaceManifest,
+    MarketplacePlugin,
+    MarketplaceSource,
+    parse_agent_skills_index,
+    parse_marketplace_json,
+)
 from .registry import get_registered_marketplaces
 
 logger = logging.getLogger(__name__)
 
+
+@dataclass(frozen=True)
+class FetchResult:
+    """Result of a direct URL fetch."""
+
+    data: Dict
+    digest: str
+    etag: str = ""
+    last_modified: str = ""
+
+
 _CACHE_TTL_SECONDS = 3600  # 1 hour
+_MAX_INDEX_BYTES = 10 * 1024 * 1024  # 10 MB
 _CACHE_DIR_NAME = os.path.join("cache", "marketplace")
 
 # Candidate locations for marketplace.json in a repository (priority order)
@@ -61,7 +88,14 @@ def _sanitize_cache_name(name: str) -> str:
 
 
 def _cache_key(source: MarketplaceSource) -> str:
-    """Cache key that includes host to avoid collisions across hosts."""
+    """Cache key that avoids collisions across hosts and URL sources.
+
+    - GitHub sources: ``name`` (same host) or ``{host}__{name}`` (GHE).
+    - URL sources: first 16 hex chars of ``sha256(url)`` -- avoids
+      host-based collisions between two URL sources on the same domain.
+    """
+    if source.is_url_source:
+        return hashlib.sha256(source.url.encode()).hexdigest()[:16]
     normalized_host = source.host.lower()
     if normalized_host == "github.com":
         return source.name
@@ -76,8 +110,12 @@ def _cache_meta_path(name: str) -> str:
     return os.path.join(_cache_dir(), f"{_sanitize_cache_name(name)}.meta.json")
 
 
-def _read_cache(name: str) -> Optional[Dict]:
-    """Read cached marketplace data if valid (not expired)."""
+def _read_cache(name: str) -> Optional[Tuple[Dict, str]]:
+    """Read cached marketplace data if valid (not expired).
+
+    Returns:
+        Tuple of (data dict, stored index_digest) if cache is fresh, else None.
+    """
     data_path = _cache_data_path(name)
     meta_path = _cache_meta_path(name)
     if not os.path.exists(data_path) or not os.path.exists(meta_path):
@@ -89,9 +127,10 @@ def _read_cache(name: str) -> Optional[Dict]:
         ttl = meta.get("ttl_seconds", _CACHE_TTL_SECONDS)
         if time.time() - fetched_at > ttl:
             return None  # Expired
+        stored_digest = meta.get("index_digest", "")
         with open(data_path, "r") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError, KeyError) as exc:
+            return json.load(f), stored_digest
+    except (json.JSONDecodeError, OSError) as exc:
         logger.debug("Cache read failed for '%s': %s", name, exc)
         return None
 
@@ -108,18 +147,23 @@ def _read_stale_cache(name: str) -> Optional[Dict]:
         return None
 
 
-def _write_cache(name: str, data: Dict) -> None:
+def _write_cache(name: str, data: Dict, *, index_digest: str = "",
+                 etag: str = "", last_modified: str = "") -> None:
     """Write marketplace data and metadata to cache."""
     data_path = _cache_data_path(name)
     meta_path = _cache_meta_path(name)
     try:
         with open(data_path, "w") as f:
             json.dump(data, f, indent=2)
+        meta: Dict = {"fetched_at": time.time(), "ttl_seconds": _CACHE_TTL_SECONDS}
+        if index_digest:
+            meta["index_digest"] = index_digest
+        if etag:
+            meta["etag"] = etag
+        if last_modified:
+            meta["last_modified"] = last_modified
         with open(meta_path, "w") as f:
-            json.dump(
-                {"fetched_at": time.time(), "ttl_seconds": _CACHE_TTL_SECONDS},
-                f,
-            )
+            json.dump(meta, f)
     except OSError as exc:
         logger.debug("Cache write failed for '%s': %s", name, exc)
 
@@ -131,6 +175,22 @@ def _clear_cache(name: str) -> None:
             os.remove(path)
         except OSError:
             pass
+
+
+def _read_stale_meta(name: str) -> Optional[Dict]:
+    """Read cache metadata even if the cache has expired.
+
+    Returns the raw meta dict (may contain etag, last_modified, etc.),
+    or ``None`` if no meta file exists.
+    """
+    meta_path = _cache_meta_path(name)
+    if not os.path.exists(meta_path):
+        return None
+    try:
+        with open(meta_path, "r") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +236,99 @@ def _try_proxy_fetch(
             source.owner, source.repo, file_path,
         )
         return None
+
+
+def _fetch_url_direct(url: str, *, etag: str = "", last_modified: str = "",
+                      expected_digest: str = ""):
+    """Fetch a URL marketplace index directly over HTTPS.
+
+    No GitHub auth or proxy involved -- used for URL sources only.
+
+    Supports conditional requests: when *etag* or *last_modified* are provided
+    the corresponding ``If-None-Match`` / ``If-Modified-Since`` headers are sent.
+    A 304 Not Modified response returns ``None`` (caller should use cached data).
+
+    When *expected_digest* is non-empty the computed ``sha256:`` digest of the
+    response body is compared against it; a mismatch raises ``MarketplaceFetchError``.
+
+    Returns:
+        FetchResult with data, digest, etag, and last_modified; or ``None`` on 304.
+
+    Raises:
+        MarketplaceFetchError: On non-HTTPS scheme, 404, any other HTTP error,
+            network failure, non-JSON response body, or digest mismatch.
+    """
+    from urllib.parse import urlparse
+
+    if urlparse(url).scheme.lower() != "https":
+        raise MarketplaceFetchError(url, "URL sources must use HTTPS")
+    try:
+        headers = {"User-Agent": "apm-cli"}
+        if etag:
+            headers["If-None-Match"] = etag
+        if last_modified:
+            headers["If-Modified-Since"] = last_modified
+        resp = requests.get(url, headers=headers, timeout=30)
+        # Guard against HTTPS->HTTP redirect (S1)
+        final_url = getattr(resp, "url", None)
+        if isinstance(final_url, str) and urlparse(final_url).scheme.lower() != "https":
+            raise MarketplaceFetchError(
+                url, "Redirect to non-HTTPS URL rejected"
+            )
+        if resp.status_code == 304:
+            return None
+        if resp.status_code == 404:
+            raise MarketplaceFetchError(url, "404 Not Found")
+        resp.raise_for_status()
+        content_length = resp.headers.get("Content-Length")
+        if content_length:
+            try:
+                size = int(content_length)
+            except ValueError:
+                pass
+            else:
+                if size > _MAX_INDEX_BYTES:
+                    raise MarketplaceFetchError(
+                        url,
+                        f"Index exceeds size limit ({size} bytes, max {_MAX_INDEX_BYTES})",
+                    )
+        raw = resp.content
+        if len(raw) > _MAX_INDEX_BYTES:
+            raise MarketplaceFetchError(
+                url,
+                f"Index exceeds size limit ({len(raw)} bytes, max {_MAX_INDEX_BYTES})",
+            )
+        digest = "sha256:" + hashlib.sha256(raw).hexdigest()
+        if expected_digest and digest != expected_digest:
+            raise MarketplaceFetchError(
+                url,
+                f"digest mismatch: expected {expected_digest!r}, got {digest!r}",
+            )
+        data = json.loads(raw)
+        resp_etag = resp.headers.get("ETag", "")
+        resp_last_modified = resp.headers.get("Last-Modified", "")
+        return FetchResult(data=data, digest=digest,
+                           etag=resp_etag, last_modified=resp_last_modified)
+    except MarketplaceFetchError:
+        raise
+    except requests.exceptions.RequestException as exc:
+        raise MarketplaceFetchError(url, str(exc)) from exc
+    except ValueError as exc:
+        raise MarketplaceFetchError(url, f"Invalid JSON response: {exc}") from exc
+
+def _detect_index_format(data: Dict) -> str:
+    """Detect whether *data* is an Agent Skills index or a legacy marketplace.json.
+
+    Returns:
+        ``"agent-skills"`` if the ``"skills"`` key is present.
+        ``"github"`` if the ``"plugins"`` key is present.
+        ``"unknown"`` otherwise.
+    """
+    if "skills" in data:
+        return "agent-skills"
+    if "plugins" in data:
+        return "github"
+    return "unknown"
 
 
 def _github_contents_url(source: MarketplaceSource, file_path: str) -> str:
@@ -270,11 +423,59 @@ def _auto_detect_path(
 # ---------------------------------------------------------------------------
 
 
+def _parse_manifest(
+    data: Dict,
+    source: MarketplaceSource,
+    *,
+    source_url: str = "",
+    source_digest: str = "",
+) -> MarketplaceManifest:
+    """Parse *data* using the correct parser for *source*.
+
+    For URL sources the index format is auto-detected via
+    ``_detect_index_format`` and dispatched to the appropriate parser.
+    For GitHub sources ``parse_marketplace_json`` is used directly
+    (``source_url`` and ``source_digest`` are ignored -- GitHub sources
+    have no URL provenance).
+
+    Args:
+        data: Parsed JSON dict from the marketplace index.
+        source: The marketplace source that produced *data*.
+        source_url: Optional URL to attach as provenance metadata.
+        source_digest: Optional digest to attach as provenance metadata.
+
+    Returns:
+        Parsed ``MarketplaceManifest``.
+
+    Raises:
+        MarketplaceFetchError: If the URL source index has an
+            unrecognised format (neither ``skills`` nor ``plugins`` key).
+    """
+    if source.is_url_source:
+        fmt = _detect_index_format(data)
+        if fmt == "agent-skills":
+            return parse_agent_skills_index(
+                data, source.name,
+                source_url=source_url, source_digest=source_digest,
+            )
+        if fmt == "github":
+            return parse_marketplace_json(
+                data, source.name,
+                source_url=source_url, source_digest=source_digest,
+            )
+        raise MarketplaceFetchError(
+            source.url or source.name,
+            "Unrecognised index format; run `apm marketplace update` to refresh",
+        )
+    return parse_marketplace_json(data, source.name)
+
+
 def fetch_marketplace(
     source: MarketplaceSource,
     *,
     force_refresh: bool = False,
     auth_resolver: Optional[object] = None,
+    on_stale_warning: Optional[object] = None,
 ) -> MarketplaceManifest:
     """Fetch and parse a marketplace manifest.
 
@@ -285,6 +486,9 @@ def fetch_marketplace(
         source: Marketplace source to fetch.
         force_refresh: Skip cache and re-fetch from network.
         auth_resolver: Optional ``AuthResolver`` instance (created if None).
+        on_stale_warning: Optional callable invoked with a warning message when
+            stale cache is served due to a network error.  Use this to surface
+            the warning to the terminal in the command layer.
 
     Returns:
         MarketplaceManifest: Parsed manifest.
@@ -298,11 +502,60 @@ def fetch_marketplace(
     if not force_refresh:
         cached = _read_cache(cache_name)
         if cached is not None:
+            cached_data, stored_digest = cached
             logger.debug("Using cached marketplace data for '%s'", source.name)
-            return parse_marketplace_json(cached, source.name)
+            return _parse_manifest(
+                cached_data, source,
+                source_url=source.url if source.is_url_source else "",
+                source_digest=stored_digest,
+            )
 
     # Fetch from network
     try:
+        # URL source -- direct HTTPS fetch, no GitHub auth or proxy
+        if source.is_url_source:
+            # Read stale ETag/Last-Modified for conditional request
+            stale_meta = _read_stale_meta(cache_name)
+            stored_etag = (stale_meta or {}).get("etag", "")
+            stored_last_modified = (stale_meta or {}).get("last_modified", "")
+
+            result = _fetch_url_direct(
+                source.url, etag=stored_etag, last_modified=stored_last_modified
+            )
+
+            if result is None:
+                # 304 Not Modified -- reset TTL on existing cache, serve stale data
+                stale = _read_stale_cache(cache_name)
+                if stale is not None:
+                    _write_cache(
+                        cache_name, stale,
+                        index_digest=(stale_meta or {}).get("index_digest", ""),
+                        etag=stored_etag,
+                        last_modified=stored_last_modified,
+                    )
+                    logger.debug("304 Not Modified for '%s'; serving cached data", source.name)
+                    return _parse_manifest(
+                        stale, source,
+                        source_url=source.url,
+                        source_digest=(stale_meta or {}).get("index_digest", ""),
+                    )
+                raise MarketplaceFetchError(
+                    source.name,
+                    "Got 304 Not Modified but no cached data is available",
+                )
+
+            _write_cache(
+                cache_name, result.data,
+                index_digest=result.digest,
+                etag=result.etag,
+                last_modified=result.last_modified,
+            )
+            return _parse_manifest(
+                result.data, source,
+                source_url=source.url, source_digest=result.digest,
+            )
+
+        # GitHub source -- proxy-first, then GitHub Contents API
         data = _fetch_file(source, source.path, auth_resolver=auth_resolver)
         if data is None:
             raise MarketplaceFetchError(
@@ -316,10 +569,18 @@ def fetch_marketplace(
         # Stale-while-revalidate: serve expired cache on network error
         stale = _read_stale_cache(cache_name)
         if stale is not None:
-            logger.warning(
-                "Network error fetching '%s'; using stale cache", source.name
-            )
-            return parse_marketplace_json(stale, source.name)
+            warning_msg = f"Network error fetching '{source.name}'; using stale cache"
+            logger.warning(warning_msg)
+            if on_stale_warning is not None:
+                on_stale_warning(warning_msg)
+            if source.is_url_source:
+                _stale_meta = _read_stale_meta(cache_name)
+                return _parse_manifest(
+                    stale, source,
+                    source_url=source.url,
+                    source_digest=(_stale_meta or {}).get("index_digest", ""),
+                )
+            return _parse_manifest(stale, source)
         raise
 
 
@@ -365,18 +626,24 @@ def search_all_marketplaces(
 def clear_marketplace_cache(
     name: Optional[str] = None,
     host: str = "github.com",
+    source: Optional[MarketplaceSource] = None,
 ) -> int:
     """Clear cached data for one or all marketplaces.
 
     Returns the number of caches cleared.
     """
+    if source is not None:
+        # Use the actual source object to derive the correct cache key
+        # (required for URL sources whose key is sha256-based, not name-based)
+        _clear_cache(_cache_key(source))
+        return 1
     if name:
         # Build a minimal source to derive the cache key
         _src = MarketplaceSource(name=name, owner="", repo="", host=host)
         _clear_cache(_cache_key(_src))
         return 1
     count = 0
-    for source in get_registered_marketplaces():
-        _clear_cache(_cache_key(source))
+    for src in get_registered_marketplaces():
+        _clear_cache(_cache_key(src))
         count += 1
     return count

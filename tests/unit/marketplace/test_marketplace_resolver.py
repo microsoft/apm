@@ -7,7 +7,6 @@ from apm_cli.marketplace.resolver import (
     _resolve_github_source,
     _resolve_git_subdir_source,
     _resolve_relative_source,
-    _resolve_url_source,
     parse_marketplace_ref,
     resolve_plugin_source,
 )
@@ -122,20 +121,6 @@ class TestResolveGithubSource:
     def test_invalid_repo(self):
         with pytest.raises(ValueError, match="owner/repo"):
             _resolve_github_source({"repo": "just-a-name"})
-
-
-class TestResolveUrlSource:
-    """Resolve url source type."""
-
-    def test_github_https(self):
-        assert _resolve_url_source({"url": "https://github.com/owner/repo"}) == "owner/repo"
-
-    def test_github_https_with_git_suffix(self):
-        assert _resolve_url_source({"url": "https://github.com/owner/repo.git"}) == "owner/repo"
-
-    def test_non_github_url(self):
-        with pytest.raises(ValueError, match="Cannot resolve URL source"):
-            _resolve_url_source({"url": "https://gitlab.com/owner/repo"})
 
 
 class TestResolveGitSubdirSource:

@@ -68,10 +68,14 @@ def _resolve_github_source(source: dict) -> str:
 def _resolve_url_source(source: dict) -> str:
     """Resolve a ``url`` source type.
 
-    APM is Git-native -- URL sources that point to GitHub repos are
-    resolved to ``owner/repo``. Non-GitHub URLs are rejected.
+    GitHub repo URLs are resolved to ``owner/repo``.
+    Any other HTTPS URL is returned as-is so that Agent Skills CDN entries
+    and arbitrary HTTPS plugin sources are passed through to the installer.
     """
     url = source.get("url", "")
+    if not url:
+        raise ValueError("url source has an empty 'url' field")
+
     # Try to extract owner/repo from common GitHub URL patterns
     for prefix in ("https://github.com/", "http://github.com/"):
         if url.lower().startswith(prefix):
@@ -83,9 +87,15 @@ def _resolve_url_source(source: dict) -> str:
             if len(parts) >= 2:
                 return f"{parts[0]}/{parts[1]}"
 
+    # Non-GitHub HTTPS URL -- return as-is (CDN, arbitrary HTTPS host, etc.)
+    from urllib.parse import urlparse as _urlparse
+
+    if _urlparse(url).scheme.lower() == "https":
+        return url
+
     raise ValueError(
         f"Cannot resolve URL source '{url}' to a Git coordinate. "
-        f"APM requires Git-based sources (owner/repo format)."
+        f"APM requires Git-based sources (owner/repo format) or HTTPS URLs."
     )
 
 
@@ -155,7 +165,7 @@ def resolve_plugin_source(
 ) -> str:
     """Resolve a plugin's source to a canonical ``owner/repo[#ref]`` string.
 
-    Handles 4 source types: relative, github, url, git-subdir.
+    Handles 6 source types: relative, github, url, skill-md, archive, git-subdir.
     NPM sources are rejected with a clear message.
 
     Args:
@@ -176,6 +186,11 @@ def resolve_plugin_source(
 
     # String source = relative path
     if isinstance(source, str):
+        if not marketplace_owner:
+            raise ValueError(
+                f"Plugin '{plugin.name}' has a relative source but no "
+                "marketplace_owner is available"
+            )
         return _resolve_relative_source(
             source, marketplace_owner, marketplace_repo, plugin_root=plugin_root
         )
@@ -189,6 +204,14 @@ def resolve_plugin_source(
 
     if source_type == "github":
         return _resolve_github_source(source)
+    elif source_type in ("skill-md", "archive"):
+        # Agent Skills RFC types -- the canonical reference is the download URL
+        url = source.get("url", "")
+        if not url:
+            raise ValueError(
+                f"Plugin '{plugin.name}' has a '{source_type}' source with no 'url' field"
+            )
+        return url
     elif source_type == "url":
         return _resolve_url_source(source)
     elif source_type == "git-subdir":

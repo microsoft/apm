@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `apm marketplace add <URL>` accepts HTTPS URLs for registering Agent Skills discovery indexes, with automatic `.well-known/agent-skills/index.json` resolution for bare origins (#676, #691)
+- Agent Skills Discovery RFC v0.2.0 index parser with strict `$schema` validation, skill name rules, and digest verification (#676, #691)
+- SHA-256 digest computation and integrity verification for URL-based marketplace indexes (#676, #691)
+- ETag/Last-Modified conditional refresh for URL marketplace indexes with stale-while-revalidate fallback (#676, #691)
+- Archive download and extraction support for `type: "archive"` skill entries with path traversal and decompression bomb safety guards (#676, #691)
+- Lockfile provenance fields (`source_url`, `source_digest`) for URL-sourced marketplace dependencies (#676, #691)
 - `apm install` now automatically discovers and deploys local `.apm/` primitives (skills, instructions, agents, prompts, hooks, commands) to target directories, with local content taking priority over dependencies on collision (#626, #644)
 - Add `temp-dir` configuration key (`apm config set temp-dir PATH`) to override the system temporary directory, resolving `[WinError 5] Access is denied` in corporate Windows environments (#629)
 

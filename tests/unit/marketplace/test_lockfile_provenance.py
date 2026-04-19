@@ -71,3 +71,39 @@ class TestLockedDependencyProvenance:
         assert dep.content_hash == "sha256:def456"
         assert dep.is_dev is True
         assert dep.discovered_via == "mkt"
+
+
+class TestLockedDependencySourceProvenance:
+    """source_url and source_digest record where a skill was fetched from."""
+
+    def test_defaults_are_none(self):
+        dep = LockedDependency(repo_url="owner/repo")
+        assert dep.source_url is None
+        assert dep.source_digest is None
+
+    def test_to_dict_omits_when_none(self):
+        dep = LockedDependency(repo_url="owner/repo")
+        d = dep.to_dict()
+        assert "source_url" not in d
+        assert "source_digest" not in d
+
+    @pytest.mark.parametrize("field,value", [
+        ("source_url", "https://example.com/.well-known/agent-skills/index.json"),
+        ("source_digest", "sha256:" + "a" * 64),
+    ])
+    def test_to_dict_includes_field(self, field, value):
+        dep = LockedDependency(repo_url="owner/repo", **{field: value})
+        assert dep.to_dict()[field] == value
+
+    @pytest.mark.parametrize("field,value", [
+        ("source_url", "https://example.com/.well-known/agent-skills/index.json"),
+        ("source_digest", "sha256:" + "c" * 64),
+    ])
+    def test_from_dict_round_trip(self, field, value):
+        dep = LockedDependency.from_dict({"repo_url": "o/r", field: value})
+        assert getattr(dep, field) == value
+
+    def test_from_dict_missing_fields_default_none(self):
+        dep = LockedDependency.from_dict({"repo_url": "o/r"})
+        assert dep.source_url is None
+        assert dep.source_digest is None
