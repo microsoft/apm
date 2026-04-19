@@ -319,3 +319,111 @@ class TestPluginNameValidation:
         assert _validate_plugin_name("-plugin") is False
         assert _validate_plugin_name("a" * 65) is False
         assert _validate_plugin_name("My-Plugin") is False
+
+
+class TestProjectNameValidation:
+    """Unit tests for _validate_project_name helper."""
+
+    def test_valid_names(self):
+        from apm_cli.commands._helpers import _validate_project_name
+
+        assert _validate_project_name("myproject") is True
+        assert _validate_project_name("my-project") is True
+        assert _validate_project_name("my_project") is True
+        assert _validate_project_name("Project123") is True
+        assert _validate_project_name("4") is True
+        assert _validate_project_name(".") is True
+
+    def test_invalid_forward_slash(self):
+        from apm_cli.commands._helpers import _validate_project_name
+
+        assert _validate_project_name("4/15") is False
+        assert _validate_project_name("a/b") is False
+        assert _validate_project_name("/leading") is False
+        assert _validate_project_name("trailing/") is False
+
+    def test_invalid_backslash(self):
+        from apm_cli.commands._helpers import _validate_project_name
+
+        bs = chr(92)  # one backslash character
+        assert _validate_project_name("a" + bs + "b") is False
+        assert _validate_project_name(bs + "leading") is False
+        assert _validate_project_name("trailing" + bs) is False
+
+    def test_invalid_dotdot(self):
+        from apm_cli.commands._helpers import _validate_project_name
+
+        assert _validate_project_name("..") is False
+
+    def test_dotdot_in_slash_path_caught_by_slash_check(self):
+        """Names like a/../b are caught by the slash check, not the dotdot check."""
+        from apm_cli.commands._helpers import _validate_project_name
+
+        assert _validate_project_name("a/../b") is False  # slash catches it
+
+
+class TestInitProjectNameValidation:
+    """Integration tests: apm init rejects project names with path separators or '..'."""
+
+    def setup_method(self):
+        self.runner = CliRunner()
+
+    def test_init_rejects_forward_slash_in_name(self):
+        """apm init 4/15 must fail with a clear error, not a WinError."""
+        with self.runner.isolated_filesystem():
+            result = self.runner.invoke(cli, ["init", "4/15", "--yes"])
+            assert result.exit_code != 0
+            assert "Invalid project name" in result.output
+            assert "4/15" in result.output
+            assert not Path("4").exists()
+
+    def test_init_rejects_backslash_in_name(self):
+        """apm init with a backslash in the name must fail with a clear error."""
+        bs = chr(92)
+        with self.runner.isolated_filesystem():
+            result = self.runner.invoke(cli, ["init", "a" + bs + "b", "--yes"])
+            assert result.exit_code != 0
+            assert "Invalid project name" in result.output
+            assert bs in result.output
+
+    def test_init_rejects_dotdot(self):
+        """apm init .. must fail -- '..' would create a project in the parent directory."""
+        with self.runner.isolated_filesystem():
+            result = self.runner.invoke(cli, ["init", "..", "--yes"])
+            assert result.exit_code != 0
+            assert "Invalid project name" in result.output
+            assert ".." in result.output
+
+    def test_init_accepts_plain_name(self):
+        """apm init with a simple name still works normally."""
+        with self.runner.isolated_filesystem() as tmp_dir:
+            result = self.runner.invoke(cli, ["init", "my-project", "--yes"])
+            assert result.exit_code == 0
+            assert (Path(tmp_dir) / "my-project" / "apm.yml").exists()
+
+    def test_init_interactive_reprompts_on_invalid_name_click(self):
+        """In interactive mode, an invalid name triggers a re-prompt."""
+        with self.runner.isolated_filesystem() as tmp_dir:
+            # First input is invalid (contains '/'), second is valid.
+            # In no-argument interactive mode, the prompted name goes into apm.yml
+            # but does not create a subdirectory; apm.yml lands in the CWD.
+            result = self.runner.invoke(
+                cli,
+                ["init"],
+                input="bad/name\nmy-project\n1.0.0\n\n\ny\n",
+                catch_exceptions=False,
+            )
+            assert "Invalid project name" in result.output
+            assert (Path(tmp_dir) / "apm.yml").exists()
+
+    def test_init_interactive_reprompts_on_dotdot_click(self):
+        """In interactive mode, '..' triggers re-prompt."""
+        with self.runner.isolated_filesystem() as tmp_dir:
+            result = self.runner.invoke(
+                cli,
+                ["init"],
+                input="..\nmy-project\n1.0.0\n\n\ny\n",
+                catch_exceptions=False,
+            )
+            assert "Invalid project name" in result.output
+            assert (Path(tmp_dir) / "apm.yml").exists()

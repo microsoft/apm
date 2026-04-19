@@ -13,9 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` now automatically discovers and deploys local `.apm/` primitives (skills, instructions, agents, prompts, hooks, commands) to target directories, with local content taking priority over dependencies on collision (#626, #644)
 - Add `temp-dir` configuration key (`apm config set temp-dir PATH`) to override the system temporary directory, resolving `[WinError 5] Access is denied` in corporate Windows environments (#629)
 
+### Changed
+
+- CI: adopt GitHub Merge Queue with tiered CI. `ci.yml` (Tier 1: unit tests + binary build) now runs on `pull_request` and `merge_group`. The integration + release-validation suite (Tier 2) moves to `merge_group`-only, replacing the previous `workflow_run` + environment-approval flow. PR branches no longer need manual updates against `main`, and the heavy integration suite runs once at merge time instead of on every PR push (#770)
+- CI: add `ci-integration-pr-stub.yml`, an inert `pull_request_target` workflow that produces no-op check runs for the four Tier 2 required checks (`Build (Linux)`, `Smoke Test (Linux)`, `Integration Tests (Linux)`, `Release Validation (Linux)`). This satisfies branch protection's required-check gate at PR time without burning CI minutes, and works retroactively on existing fork PRs because `pull_request_target` reads workflow YAML from `main`. The stub holds no secrets, runs no checkout, and grants `permissions: {}` so it cannot be turned into a supply-chain attack vector. Real Tier 2 work continues to run only inside the merge queue. CODEOWNERS now requires Lead Maintainer review for any change to `.github/workflows/**`
+
 ### Fixed
 
+- Harden `apm install` stale-file cleanup to prevent unsafe lockfile deletions, preserve user-edited files via per-file SHA-256 provenance, and improve cleanup reporting during install and `--dry-run` (#666, #762)
+- Local `.apm/` stale-cleanup now uses pre-install content hashes for provenance verification. Previously the lockfile was re-read after regeneration, which always yielded empty hashes, causing the user-edit safety gate to be silently skipped for project-local files (#764)
+- Fix `apm install --target claude` not creating `.claude/` when the directory does not already exist (`auto_create=False` targets now get their root directory created when explicitly requested) (#763)
+- Fix content hash mismatch on re-install when `.git/` is absent from installed packages by falling back to content-hash verification before re-downloading (#763)
 - Fix `apm marketplace add` silently failing for private repos by using credentials when probing `marketplace.json` (#701)
+- Harden marketplace plugin normalization to enforce that manifest-declared `agents`/`skills`/`commands`/`hooks` paths resolve inside the plugin root (#760)
+- Stop `test_auto_detect_through_proxy` from making real `api.github.com` calls by passing a mock `auth_resolver`, fixing flaky macOS CI rate-limit failures (#759)
 - Pin codex setup to `rust-v0.118.0` for security and reproducibility; update config to `wire_api = "responses"` (#663)
 - Propagate headers and environment variables through OpenCode MCP adapter with defensive copies to prevent mutation (#622)
 - Fix `apm install` hanging indefinitely when corporate firewalls silently drop SSH packets by setting `GIT_SSH_COMMAND` with `ConnectTimeout=30` (#652)
@@ -23,7 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Refactor `apm install` internals to apply real design patterns: introduce a `DependencySource` Strategy hierarchy with shared `run_integration_template()` Template Method (kills ~300 LOC duplication across local/cached/fresh dep handlers), add `services.py` DI seam to eliminate `_install_mod` indirection, and wrap the pipeline in a typed `InstallService` Application Service consuming a frozen `InstallRequest`. `install/phases/integrate.py` shrinks from 1013 to ~400 LOC; the public `apm install` behaviour and CLI surface are unchanged. Backward-compatible: `_install_apm_dependencies` re-export and 55 healthy test patches keep working (#764)
 - `apm marketplace browse/search/add/update` now route through the registry proxy when `PROXY_REGISTRY_URL` is set; `PROXY_REGISTRY_ONLY=1` blocks direct GitHub API calls (#506)
+- Refactor `apm install` into a modular engine package (`apm_cli/install/`) with discrete phases (resolve, targets, download, integrate, cleanup, lockfile, finalize, post-deps local), preserving behaviour and the `#762` cleanup chokepoint (#764)
 
 ## [0.8.11] - 2026-04-06
 
