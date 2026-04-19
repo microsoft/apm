@@ -930,3 +930,20 @@ class TestPathTraversalProtection:
         _map_plugin_artifacts(plugin, apm_dir, manifest)
 
         assert (apm_dir / "prompts" / "hello.prompt.md").read_text() == "# hello"
+
+    def test_default_component_dir_as_symlink_rejected(self, tmp_path):
+        """Default 'agents'/'skills'/etc dirs must be rejected if they're symlinks
+        pointing outside the plugin root (no manifest override needed)."""
+        outside = tmp_path / "outside_target"
+        outside.mkdir()
+        (outside / "leak.md").write_text("# leak")
+        plugin, apm_dir = self._make_plugin(tmp_path)
+        (plugin / "agents").symlink_to(outside, target_is_directory=True)
+        manifest = {"name": "evil"}  # no custom paths -> default branch is taken
+
+        _map_plugin_artifacts(plugin, apm_dir, manifest)
+
+        agents_dir = apm_dir / "agents"
+        assert not agents_dir.exists() or not list(agents_dir.iterdir()), (
+            "Symlinked default component dir must not be copied"
+        )

@@ -31,13 +31,20 @@ def _is_within_plugin(candidate: Path, plugin_root: Path, *, component: str, raw
     root (absolute path, ``..`` traversal, or symlink pointing outside).
     Used to enforce the trust boundary on attacker-controlled manifest
     fields (agents/skills/commands/hooks) during plugin normalization.
+
+    The rejected path string is intentionally kept out of the warning
+    record (logged at debug level only) because manifest values are
+    externally controlled and may carry data flagged as sensitive by
+    static-analysis tooling.
     """
     try:
         ensure_path_within(candidate, plugin_root)
     except PathTraversalError as exc:
         _logger.warning(
-            "Skipping %s entry %r: path escapes plugin root (%s)",
-            component, raw, exc,
+            "Skipping %s entry: path escapes plugin root", component,
+        )
+        _logger.debug(
+            "Rejected %s entry %r: %s", component, raw, exc,
         )
         return False
     return True
@@ -389,7 +396,14 @@ def _map_plugin_artifacts(plugin_path: Path, apm_dir: Path, manifest: Optional[D
                 return [src]
             return []
         default = plugin_path / default_dir
-        return [default] if default.exists() and default.is_dir() else []
+        if (
+            default.exists()
+            and not default.is_symlink()
+            and default.is_dir()
+            and _is_within_plugin(default, plugin_path, component=component, raw=default_dir)
+        ):
+            return [default]
+        return []
 
     # Map agents/
     # Unlike skills (which are named directories containing SKILL.md), agents
