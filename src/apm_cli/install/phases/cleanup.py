@@ -127,6 +127,12 @@ def run(ctx: InstallContext) -> None:
             cleanup_result = remove_stale_deployed_files(
                 stale, project_root,
                 dep_key=dep_key,
+                # `_targets or None` mirrors the pre-refactor behavior: when
+                # no targets were resolved (e.g. unknown runtime), pass None
+                # so the cleanup helper falls back to scanning all
+                # KNOWN_TARGETS rather than skipping cleanup entirely.
+                # The chokepoint at integration/cleanup.py applies its own
+                # path-safety gates regardless of which target set is used.
                 targets=_targets or None,
                 diagnostics=diagnostics,
                 recorded_hashes=dict(prev_dep.deployed_file_hashes),
