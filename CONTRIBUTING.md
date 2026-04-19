@@ -43,7 +43,7 @@ Enhancement suggestions are welcome! Please:
 
 ### Pull Request Process
 
-1. Fill out the PR template — describe what changed, why, and link the issue.
+1. Fill out the PR template - describe what changed, why, and link the issue.
 2. Ensure your PR addresses only one concern (one feature, one bug fix).
 3. Include tests for new functionality.
 4. Update documentation if needed.
@@ -54,7 +54,7 @@ Enhancement suggestions are welcome! Please:
 This repo uses GitHub's native **merge queue**. Once your PR is approved, a
 maintainer adds it to the queue. The queue then:
 
-1. Builds a tentative merge of your PR against the latest `main` — no manual
+1. Builds a tentative merge of your PR against the latest `main` - no manual
    "Update branch" needed.
 2. Runs the integration suite against that tentative merge.
 3. Auto-merges if checks pass; ejects from the queue if they fail.
@@ -73,9 +73,9 @@ ask a maintainer to re-queue.
 
 Every new issue is automatically labeled `needs-triage`. Maintainers review incoming issues and:
 
-1. **Accept** — remove `needs-triage`, add `accepted`, and assign a milestone.
-2. **Prioritize** — optionally add `priority/high` or `priority/low`.
-3. **Close** — if it's a duplicate (`duplicate`) or out of scope, close with a comment explaining why.
+1. **Accept** - remove `needs-triage`, add `accepted`, and assign a milestone.
+2. **Prioritize** - optionally add `priority/high` or `priority/low`.
+3. **Close** - if it's a duplicate (`duplicate`) or out of scope, close with a comment explaining why.
 
 Labels used for triage: `needs-triage`, `accepted`, `needs-design`, `priority/high`, `priority/low`.
 
@@ -97,7 +97,7 @@ uv sync --extra dev
 We use pytest for testing with `pytest-xdist` for parallel execution. After completing the setup above:
 
 ```bash
-# Run the unit test suite (recommended — matches CI, fast)
+# Run the unit test suite (recommended - matches CI, fast)
 uv run pytest tests/unit tests/test_console.py -x
 
 # Run a specific test file (fastest, use during development)

@@ -1,4 +1,4 @@
-# Tier 2 integration suite — runs only when a PR is added to the merge queue.
+# Tier 2 integration suite - runs only when a PR is added to the merge queue.
 #
 # Design (microsoft/apm#770):
 #   - Tier 1 (ci.yml) runs unit tests + binary build on every PR push and on
