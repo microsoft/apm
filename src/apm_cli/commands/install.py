@@ -60,6 +60,12 @@ from apm_cli.install.phases.local_content import (
     _project_has_root_primitives,
 )
 
+# Re-export the pre-deploy security scan so that bare-name call sites inside
+# this module and ``tests/unit/test_install_scanning.py``'s direct import
+# (``from apm_cli.commands.install import _pre_deploy_security_scan``) keep
+# working without modification.
+from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
+
 from ._helpers import (
     _create_minimal_apm_yml,
     _get_default_config,
@@ -864,46 +870,6 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
 # ---------------------------------------------------------------------------
 # Install engine
 # ---------------------------------------------------------------------------
-
-
-def _pre_deploy_security_scan(
-    install_path: Path,
-    diagnostics: DiagnosticCollector,
-    package_name: str = "",
-    force: bool = False,
-    logger=None,
-) -> bool:
-    """Scan package source files for hidden characters BEFORE deployment.
-
-    Delegates to :class:`SecurityGate` for the scan->classify->decide pipeline.
-    Inline CLI feedback (error/info lines) is kept here because it is
-    install-specific formatting.
-
-    Returns:
-        True if deployment should proceed, False to block.
-    """
-    from ..security.gate import BLOCK_POLICY, SecurityGate
-
-    verdict = SecurityGate.scan_files(
-        install_path, policy=BLOCK_POLICY, force=force
-    )
-    if not verdict.has_findings:
-        return True
-
-    # Record into diagnostics (consistent messaging via gate)
-    SecurityGate.report(verdict, diagnostics, package=package_name, force=force)
-
-    if verdict.should_block:
-        if logger:
-            logger.error(
-                f"  Blocked: {package_name or 'package'} contains "
-                f"critical hidden character(s)"
-            )
-            logger.progress(f"  └─ Inspect source: {install_path}")
-            logger.progress("  └─ Use --force to deploy anyway")
-        return False
-
-    return True
 
 
 def _integrate_package_primitives(
