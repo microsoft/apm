@@ -1242,25 +1242,6 @@ def _install_apm_dependencies(
         from apm_cli.install.phases import integrate as _integrate_phase
         _integrate_phase.run(ctx)
 
-        # Bridge: read phase outputs back into locals so downstream code
-        # (orphan cleanup, stale cleanup, lockfile assembly, summary)
-        # continues working without modification.
-        installed_count = ctx.installed_count
-        unpinned_count = ctx.unpinned_count
-        installed_packages = ctx.installed_packages
-        package_deployed_files = ctx.package_deployed_files
-        package_types = ctx.package_types
-        _package_hashes = ctx.package_hashes
-        total_prompts_integrated = ctx.total_prompts_integrated
-        total_agents_integrated = ctx.total_agents_integrated
-        total_skills_integrated = ctx.total_skills_integrated
-        total_sub_skills_promoted = ctx.total_sub_skills_promoted
-        total_instructions_integrated = ctx.total_instructions_integrated
-        total_commands_integrated = ctx.total_commands_integrated
-        total_hooks_integrated = ctx.total_hooks_integrated
-        total_links_resolved = ctx.total_links_resolved
-        intended_dep_keys = ctx.intended_dep_keys
-
         # Update .gitignore
         _update_gitignore_for_apm_modules(logger=logger)
 
@@ -1272,109 +1253,12 @@ def _install_apm_dependencies(
         _cleanup_phase.run(ctx)
 
         # Generate apm.lock for reproducible installs (T4: lockfile generation)
-        if installed_packages:
-            try:
-                lockfile = LockFile.from_installed_packages(installed_packages, dependency_graph)
-                # Attach deployed_files and package_type to each LockedDependency
-                for dep_key, dep_files in package_deployed_files.items():
-                    if dep_key in lockfile.dependencies:
-                        lockfile.dependencies[dep_key].deployed_files = dep_files
-                        # Hash the files as they exist on disk AFTER stale
-                        # cleanup so the recorded hashes match what is now
-                        # deployed (provenance for the next install's stale
-                        # cleanup).
-                        lockfile.dependencies[dep_key].deployed_file_hashes = (
-                            _hash_deployed(dep_files, project_root)
-                        )
-                for dep_key, pkg_type in package_types.items():
-                    if dep_key in lockfile.dependencies:
-                        lockfile.dependencies[dep_key].package_type = pkg_type
-                # Attach content hashes captured at download/verify time
-                for dep_key, locked_dep in lockfile.dependencies.items():
-                    if dep_key in _package_hashes:
-                        locked_dep.content_hash = _package_hashes[dep_key]
-                # Attach marketplace provenance if available
-                if marketplace_provenance:
-                    for dep_key, prov in marketplace_provenance.items():
-                        if dep_key in lockfile.dependencies:
-                            lockfile.dependencies[dep_key].discovered_via = prov.get("discovered_via")
-                            lockfile.dependencies[dep_key].marketplace_plugin_name = prov.get("marketplace_plugin_name")
-                # Selectively merge entries from the existing lockfile:
-                #   - For partial installs (only_packages): preserve all old entries
-                #     (sequential install — only the specified package was processed).
-                #   - For full installs: only preserve entries for packages still in
-                #     the manifest that failed to download (in intended_dep_keys but
-                #     not in the new lockfile due to a download error).
-                #   - Orphaned entries (not in intended_dep_keys) are intentionally
-                #     dropped so the lockfile matches the manifest.
-                # Skip merge entirely when update_refs is set — stale entries must not survive.
-                if existing_lockfile and not update_refs:
-                    for dep_key, dep in existing_lockfile.dependencies.items():
-                        if dep_key not in lockfile.dependencies:
-                            if only_packages or dep_key in intended_dep_keys:
-                                # Preserve: partial install (sequential install support)
-                                # OR package still in manifest but failed to download.
-                                lockfile.dependencies[dep_key] = dep
-                            # else: orphan — package was in lockfile but is no longer in
-                            # the manifest (full install only). Don't preserve so the
-                            # lockfile stays in sync with what apm.yml declares.
-                lockfile_path = get_lockfile_path(apm_dir)
+        from apm_cli.install.phases.lockfile import LockfileBuilder
+        LockfileBuilder(ctx).build_and_save()
 
-                # When installing a subset of packages (apm install <pkg>),
-                # merge new entries into the existing lockfile instead of
-                # overwriting it — otherwise the uninstalled packages disappear.
-                if only_packages:
-                    existing = LockFile.read(lockfile_path)
-                    if existing:
-                        for key, dep in lockfile.dependencies.items():
-                            existing.add_dependency(dep)
-                        lockfile = existing
-
-                # Only write when the semantic content has actually changed
-                # (avoids generated_at churn in version control).
-                existing_lockfile = LockFile.read(lockfile_path) if lockfile_path.exists() else None
-                if existing_lockfile and lockfile.is_semantically_equivalent(existing_lockfile):
-                    if logger:
-                        logger.verbose_detail("apm.lock.yaml unchanged -- skipping write")
-                else:
-                    lockfile.save(lockfile_path)
-                    if logger:
-                        logger.verbose_detail(f"Generated apm.lock.yaml with {len(lockfile.dependencies)} dependencies")
-            except Exception as e:
-                _lock_msg = f"Could not generate apm.lock.yaml: {e}"
-                diagnostics.error(_lock_msg)
-                if logger:
-                    logger.error(_lock_msg)
-
-        # Show integration stats (verbose-only when logger is available)
-        if total_links_resolved > 0:
-            if logger:
-                logger.verbose_detail(f"Resolved {total_links_resolved} context file links")
-
-        if total_commands_integrated > 0:
-            if logger:
-                logger.verbose_detail(f"Integrated {total_commands_integrated} command(s)")
-
-        if total_hooks_integrated > 0:
-            if logger:
-                logger.verbose_detail(f"Integrated {total_hooks_integrated} hook(s)")
-
-        if total_instructions_integrated > 0:
-            if logger:
-                logger.verbose_detail(f"Integrated {total_instructions_integrated} instruction(s)")
-
-        # Summary is now emitted by the caller via logger.install_summary()
-        if not logger:
-            _rich_success(f"Installed {installed_count} APM dependencies")
-
-        if unpinned_count:
-            noun = "dependency has" if unpinned_count == 1 else "dependencies have"
-            diagnostics.info(
-                f"{unpinned_count} {noun} no pinned version "
-                f"-- pin with #tag or #sha to prevent drift"
-            )
-
-        return InstallResult(installed_count, total_prompts_integrated, total_agents_integrated, diagnostics)
+        # Emit verbose integration stats + bare-success fallback + return result
+        from apm_cli.install.phases import finalize as _finalize_phase
+        return _finalize_phase.run(ctx)
 
     except Exception as e:
         raise RuntimeError(f"Failed to resolve APM dependencies: {e}")
