@@ -293,8 +293,8 @@ def test_orphan_loop_uses_manifest_intent_not_integration_outcome():
     still in apm.yml. Detected by the security re-review on commit 4b64c27.
     """
     import inspect
-    from apm_cli.commands import install as install_mod
-    src = inspect.getsource(install_mod)
+    from apm_cli.install.phases import cleanup as cleanup_mod
+    src = inspect.getsource(cleanup_mod)
     orphan_marker = "# Orphan cleanup: remove deployed files for packages that were"
     assert orphan_marker in src, "Orphan cleanup block not found -- update marker."
     block_start = src.index(orphan_marker)

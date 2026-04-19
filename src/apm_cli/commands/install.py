@@ -1307,96 +1307,11 @@ def _install_apm_dependencies(
         _update_gitignore_for_apm_modules(logger=logger)
 
         # ------------------------------------------------------------------
-        # Orphan cleanup: remove deployed files for packages that were
-        # removed from the manifest. This happens on every full install
-        # (no only_packages), making apm install idempotent with the manifest.
-        # Routed through remove_stale_deployed_files() so the same safety
-        # gates -- including per-file content-hash provenance -- apply
-        # uniformly with the intra-package stale path below.
+        # Phase: Orphan cleanup + intra-package stale-file cleanup
+        # All deletions routed through integration/cleanup.py (#762).
         # ------------------------------------------------------------------
-        if existing_lockfile and not only_packages:
-            from ..integration.cleanup import remove_stale_deployed_files as _rmstale
-            # Use intended_dep_keys (manifest intent, computed at ~line 1707) --
-            # NOT package_deployed_files.keys() (integration outcome). A transient
-            # integration failure for a still-declared package would leave its key
-            # absent from package_deployed_files; deriving orphans from the outcome
-            # set would then misclassify it as removed and delete its previously
-            # deployed files even though it is still in apm.yml.
-            _orphan_total_deleted = 0
-            _orphan_deleted_targets: builtins.list = []
-            for _orphan_key, _orphan_dep in existing_lockfile.dependencies.items():
-                if _orphan_key in intended_dep_keys:
-                    continue  # still in manifest -- handled by stale-cleanup below
-                if not _orphan_dep.deployed_files:
-                    continue
-                _orphan_result = _rmstale(
-                    _orphan_dep.deployed_files,
-                    project_root,
-                    dep_key=_orphan_key,
-                    # targets=None -> validate against all KNOWN_TARGETS, not
-                    # just the active install's targets. An orphan can have
-                    # files under a target the user is not currently running
-                    # (e.g. switched runtime since the dep was installed,
-                    # or scope mismatch). Restricting to _targets here would
-                    # leave those files behind. Pre-PR code handled this by
-                    # explicitly merging KNOWN_TARGETS; targets=None is the
-                    # cleaner equivalent.
-                    targets=None,
-                    diagnostics=diagnostics,
-                    recorded_hashes=dict(_orphan_dep.deployed_file_hashes),
-                    failed_path_retained=False,
-                )
-                _orphan_total_deleted += len(_orphan_result.deleted)
-                _orphan_deleted_targets.extend(_orphan_result.deleted_targets)
-                for _skipped in _orphan_result.skipped_user_edit:
-                    logger.cleanup_skipped_user_edit(_skipped, _orphan_key)
-            if _orphan_deleted_targets:
-                BaseIntegrator.cleanup_empty_parents(
-                    _orphan_deleted_targets, project_root
-                )
-            logger.orphan_cleanup(_orphan_total_deleted)
-
-        # ------------------------------------------------------------------
-        # Stale-file cleanup: within each package still present in the
-        # manifest, remove files that were in the previous lockfile's
-        # deployed_files but are not in the fresh integration output.
-        # Handles renames and intra-package file removals (issue #666).
-        # Complements the package-level orphan cleanup above, which handles
-        # packages that left the manifest entirely.
-        # ------------------------------------------------------------------
-        if existing_lockfile and package_deployed_files:
-            from ..integration.cleanup import remove_stale_deployed_files as _rmstale
-            for dep_key, new_deployed in package_deployed_files.items():
-                # Skip packages whose integration reported errors this run --
-                # a file that failed to re-deploy would look stale and get
-                # wrongly deleted.
-                if diagnostics.count_for_package(dep_key, "error") > 0:
-                    continue
-
-                prev_dep = existing_lockfile.get_dependency(dep_key)
-                if not prev_dep:
-                    continue  # new package this install -- nothing stale yet
-                stale = detect_stale_files(prev_dep.deployed_files, new_deployed)
-                if not stale:
-                    continue
-
-                cleanup_result = _rmstale(
-                    stale, project_root,
-                    dep_key=dep_key,
-                    targets=_targets or None,
-                    diagnostics=diagnostics,
-                    recorded_hashes=dict(prev_dep.deployed_file_hashes),
-                )
-                # Re-insert failed paths so the lockfile retains them for
-                # retry on the next install.
-                new_deployed.extend(cleanup_result.failed)
-                if cleanup_result.deleted_targets:
-                    BaseIntegrator.cleanup_empty_parents(
-                        cleanup_result.deleted_targets, project_root
-                    )
-                for _skipped in cleanup_result.skipped_user_edit:
-                    logger.cleanup_skipped_user_edit(_skipped, dep_key)
-                logger.stale_cleanup(dep_key, len(cleanup_result.deleted))
+        from apm_cli.install.phases import cleanup as _cleanup_phase
+        _cleanup_phase.run(ctx)
 
         # Generate apm.lock for reproducible installs (T4: lockfile generation)
         if installed_packages:
