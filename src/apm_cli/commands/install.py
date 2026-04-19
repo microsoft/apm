@@ -16,7 +16,12 @@ from ..constants import (
     SKILL_MD_FILENAME,
     InstallMode,
 )
-from ..drift import build_download_ref, detect_orphans, detect_ref_change
+from ..drift import (
+    build_download_ref,
+    detect_orphans,
+    detect_ref_change,
+    detect_stale_files,
+)
 from ..models.results import InstallResult
 from ..core.command_logger import InstallLogger, _ValidationOutcome
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success
@@ -2696,6 +2701,78 @@ def _install_apm_dependencies(
                     logger.verbose_detail(
                         f"Removed {_removed_orphan_count} file(s) from packages "
                         "no longer in apm.yml"
+                    )
+
+        # ------------------------------------------------------------------
+        # Stale-file cleanup: within each package still present in the
+        # manifest, remove files that were in the previous lockfile's
+        # deployed_files but are not in the fresh integration output.
+        # Handles renames and intra-package file removals (issue #666).
+        # Complements the package-level orphan cleanup above, which handles
+        # packages that left the manifest entirely.
+        # ------------------------------------------------------------------
+        if existing_lockfile and package_deployed_files:
+            import shutil as _shutil
+            _validation_targets = _targets or {}
+            _default_targets = getattr(BaseIntegrator, "KNOWN_TARGETS", None)
+            if _default_targets:
+                _validation_targets = {**_default_targets, **_validation_targets}
+
+            for dep_key, new_deployed in package_deployed_files.items():
+                # Skip packages whose integration reported errors this run --
+                # a file that failed to re-deploy would look stale and get
+                # wrongly deleted.
+                if diagnostics.count_for_package(dep_key, "error") > 0:
+                    continue
+
+                prev_dep = existing_lockfile.get_dependency(dep_key)
+                if not prev_dep:
+                    continue  # new package this install -- nothing stale yet
+                old_deployed = builtins.list(prev_dep.deployed_files)
+
+                stale = detect_stale_files(old_deployed, new_deployed)
+                if not stale:
+                    continue
+
+                _stale_failed: builtins.list = []
+                _stale_deleted_paths: builtins.list = []
+                for stale_path in sorted(stale):
+                    # validate_deploy_path is the safety gate: no traversal,
+                    # must start with a known integration prefix, must resolve
+                    # inside project_root.
+                    if not BaseIntegrator.validate_deploy_path(
+                        stale_path, project_root, targets=_validation_targets
+                    ):
+                        continue
+                    stale_target = project_root / stale_path
+                    if not stale_target.exists():
+                        continue
+                    try:
+                        if stale_target.is_dir():
+                            _shutil.rmtree(stale_target)
+                        else:
+                            stale_target.unlink()
+                        _stale_deleted_paths.append(stale_target)
+                    except Exception as stale_err:
+                        _stale_failed.append(stale_path)
+                        stale_msg = f"Could not remove stale path {stale_path}: {stale_err}"
+                        diagnostics.error(stale_msg, package=dep_key)
+                        if logger:
+                            logger.verbose_detail(f"  {stale_msg}")
+
+                # Re-insert failed paths so the lockfile retains them for
+                # retry on the next install (matches the local-package
+                # stale-cleanup pattern in install.py:1025).
+                new_deployed.extend(_stale_failed)
+
+                if _stale_deleted_paths:
+                    BaseIntegrator.cleanup_empty_parents(
+                        _stale_deleted_paths, project_root
+                    )
+                _removed = len(_stale_deleted_paths)
+                if _removed > 0 and logger:
+                    logger.verbose_detail(
+                        f"Removed {_removed} stale file(s) from {dep_key}"
                     )
 
         # Generate apm.lock for reproducible installs (T4: lockfile generation)

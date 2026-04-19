@@ -115,6 +115,7 @@ Exceptions:
 - MCP servers already configured but with changed manifest config are re-applied automatically (`updated`)
 - APM packages removed from `apm.yml` have their deployed files cleaned up on the next full `apm install`
 - APM packages whose ref/version changed in `apm.yml` are re-downloaded automatically (no `--update` needed)
+- Files previously deployed by a still-present package that are no longer produced (e.g. the package renamed or removed a primitive) are removed from disk and from `apm.lock.yaml` `deployed_files` on the next `apm install`
 - `--force` remains available for full overwrite/reset scenarios
 
 **Examples:**
