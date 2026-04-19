@@ -6,25 +6,17 @@ and freshly-downloaded packages.  For every package the loop:
 
 1. Builds a ``PackageInfo`` (or reuses the pre-downloaded result).
 2. Runs the pre-deploy security scan.
-3. Calls ``_integrate_package_primitives`` (via module-attribute access on
-   ``apm_cli.commands.install`` so that test patches at
-   ``@patch("apm_cli.commands.install._integrate_package_primitives")``
-   continue to intercept the call).
+3. Calls ``integrate_package_primitives`` from
+   ``apm_cli.install.services`` (the integration template).
 4. Accumulates deployed-file lists, content hashes, and integration totals
    on *ctx* for the downstream cleanup and lockfile phases.
 
 After the dependency loop, root-project primitives (``<project_root>/.apm/``)
 are integrated when present (#714).
 
-**Test-patch contract**: every name that tests patch at
-``apm_cli.commands.install.X`` is accessed via the ``_install_mod.X``
-indirection rather than a bare-name import.  This includes at minimum:
-``_integrate_package_primitives``, ``_rich_success``, ``_rich_error``,
-``_copy_local_package``, ``_pre_deploy_security_scan``.  All five private
-helpers in this module (``_resolve_download_strategy``,
-``_integrate_local_dep``, ``_integrate_cached_dep``,
-``_integrate_fresh_dep``, ``_integrate_root_project``) honour this
-contract via the ``_install_mod`` parameter.
+Direct imports (no module-attribute indirection): collaborators are imported
+from the install package itself, eliminating the legacy ``_install_mod``
+shim that previously routed through ``apm_cli.commands.install``.
 """
 
 from __future__ import annotations
@@ -33,6 +25,14 @@ import builtins
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+
+from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
+from apm_cli.install.phases.local_content import _copy_local_package
+from apm_cli.install.services import (
+    integrate_local_content,
+    integrate_package_primitives,
+)
+from apm_cli.utils.console import _rich_error, _rich_success
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
@@ -168,7 +168,6 @@ def _resolve_download_strategy(
 
 def _integrate_local_dep(
     ctx: "InstallContext",
-    _install_mod: Any,
     dep_ref: Any,
     install_path: Path,
     dep_key: str,
@@ -201,7 +200,7 @@ def _integrate_local_dep(
             )
         return None
 
-    result_path = _install_mod._copy_local_package(dep_ref, install_path, ctx.project_root, logger=logger)
+    result_path = _copy_local_package(dep_ref, install_path, ctx.project_root, logger=logger)
     if not result_path:
         diagnostics.error(
             f"Failed to copy local package: {dep_ref.local_path}",
@@ -285,7 +284,7 @@ def _integrate_local_dep(
     # Run shared integration pipeline
     try:
         # Pre-deploy security gate
-        if not _install_mod._pre_deploy_security_scan(
+        if not _pre_deploy_security_scan(
             install_path, diagnostics,
             package_name=dep_key, force=ctx.force,
             logger=logger,
@@ -293,7 +292,7 @@ def _integrate_local_dep(
             ctx.package_deployed_files[dep_key] = []
             return deltas
 
-        int_result = _install_mod._integrate_package_primitives(
+        int_result = integrate_package_primitives(
             package_info, ctx.project_root,
             targets=ctx.targets,
             prompt_integrator=ctx.integrators["prompt"],
@@ -342,7 +341,6 @@ def _integrate_local_dep(
 
 def _integrate_cached_dep(
     ctx: "InstallContext",
-    _install_mod: Any,
     dep_ref: Any,
     install_path: Path,
     dep_key: str,
@@ -469,7 +467,7 @@ def _integrate_cached_dep(
             ctx.package_types[dep_key] = cached_package_info.package_type.value
 
         # Pre-deploy security gate
-        if not _install_mod._pre_deploy_security_scan(
+        if not _pre_deploy_security_scan(
             install_path, diagnostics,
             package_name=dep_key, force=ctx.force,
             logger=logger,
@@ -477,7 +475,7 @@ def _integrate_cached_dep(
             ctx.package_deployed_files[dep_key] = []
             return deltas
 
-        int_result = _install_mod._integrate_package_primitives(
+        int_result = integrate_package_primitives(
             cached_package_info, ctx.project_root,
             targets=ctx.targets,
             prompt_integrator=ctx.integrators["prompt"],
@@ -525,7 +523,6 @@ def _integrate_cached_dep(
 
 def _integrate_fresh_dep(
     ctx: "InstallContext",
-    _install_mod: Any,
     dep_ref: Any,
     install_path: Path,
     dep_key: str,
@@ -617,7 +614,7 @@ def _integrate_fresh_dep(
                     _ref_suffix = f" #{_r}"
                 elif _s:
                     _ref_suffix = f" @{_s}"
-            _install_mod._rich_success(f"[+] {display_name}{_ref_suffix}")
+            _rich_success(f"[+] {display_name}{_ref_suffix}")
 
         # Track unpinned deps for aggregated diagnostic
         if not dep_ref.reference:
@@ -653,7 +650,7 @@ def _integrate_fresh_dep(
             _fresh_hash = ctx.package_hashes[dep_ref.get_unique_key()]
             if _fresh_hash != dep_locked_chk.content_hash:
                 safe_rmtree(install_path, ctx.apm_modules_dir)
-                _install_mod._rich_error(
+                _rich_error(
                     f"Content hash mismatch for "
                     f"{dep_ref.get_unique_key()}: "
                     f"expected {dep_locked_chk.content_hash}, "
@@ -686,7 +683,7 @@ def _integrate_fresh_dep(
 
         # Auto-integrate prompts and agents if enabled
         # Pre-deploy security gate
-        if not _install_mod._pre_deploy_security_scan(
+        if not _pre_deploy_security_scan(
             package_info.install_path, diagnostics,
             package_name=dep_ref.get_unique_key(), force=ctx.force,
             logger=logger,
@@ -696,7 +693,7 @@ def _integrate_fresh_dep(
 
         if ctx.targets:
             try:
-                int_result = _install_mod._integrate_package_primitives(
+                int_result = integrate_package_primitives(
                     package_info, ctx.project_root,
                     targets=ctx.targets,
                     prompt_integrator=ctx.integrators["prompt"],
@@ -760,7 +757,6 @@ def _integrate_fresh_dep(
 
 def _integrate_root_project(
     ctx: "InstallContext",
-    _install_mod: Any,
 ) -> Optional[Dict[str, int]]:
     """Integrate root project's own .apm/ primitives (#714).
 
@@ -770,7 +766,7 @@ def _integrate_root_project(
     found in <project_root>/.apm/ are integrated after all declared
     dependency packages have been processed.
 
-    Delegates to ``_install_mod._integrate_local_content`` which creates a
+    Delegates to ``integrate_local_content`` which creates a
     synthetic ``_local`` APMPackage with ``PackageType.APM_PACKAGE`` so that
     a root-level ``SKILL.md`` is NOT deployed as a skill.  Deployed files
     are tracked on ``ctx.local_deployed_files`` for the downstream
@@ -806,7 +802,7 @@ def _integrate_root_project(
         logger.download_complete("<project root>", ref_suffix="local")
         logger.verbose_detail("Integrating local .apm/ content...")
     try:
-        _root_result = _install_mod._integrate_local_content(
+        _root_result = integrate_local_content(
             ctx.project_root,
             targets=ctx.targets,
             prompt_integrator=ctx.integrators["prompt"],
@@ -879,14 +875,6 @@ def run(ctx: "InstallContext") -> None:
     ``total_instructions_integrated``, ``total_commands_integrated``,
     ``total_hooks_integrated``, ``total_links_resolved``.
     """
-    # ------------------------------------------------------------------
-    # Module-attribute access for late-patchability.
-    # Tests patch names at apm_cli.commands.install.X -- importing the
-    # MODULE (not the name) ensures the patched attribute is resolved at
-    # call time.
-    # ------------------------------------------------------------------
-    from apm_cli.commands import install as _install_mod
-
     from rich.progress import (
         BarColumn,
         Progress,
@@ -950,7 +938,7 @@ def run(ctx: "InstallContext") -> None:
             # --- Dispatch to per-source helper ---
             if dep_ref.is_local and dep_ref.local_path:
                 deltas = _integrate_local_dep(
-                    ctx, _install_mod, dep_ref, install_path, dep_key,
+                    ctx, dep_ref, install_path, dep_key,
                 )
             else:
                 resolved_ref, skip_download, dep_locked_chk, ref_changed = (
@@ -958,12 +946,12 @@ def run(ctx: "InstallContext") -> None:
                 )
                 if skip_download:
                     deltas = _integrate_cached_dep(
-                        ctx, _install_mod, dep_ref, install_path, dep_key,
+                        ctx, dep_ref, install_path, dep_key,
                         resolved_ref, dep_locked_chk,
                     )
                 else:
                     deltas = _integrate_fresh_dep(
-                        ctx, _install_mod, dep_ref, install_path, dep_key,
+                        ctx, dep_ref, install_path, dep_key,
                         resolved_ref, dep_locked_chk, ref_changed, progress,
                     )
 
@@ -985,7 +973,7 @@ def run(ctx: "InstallContext") -> None:
     # ------------------------------------------------------------------
     # Integrate root project's own .apm/ primitives (#714).
     # ------------------------------------------------------------------
-    root_deltas = _integrate_root_project(ctx, _install_mod)
+    root_deltas = _integrate_root_project(ctx)
     if root_deltas:
         installed_count += root_deltas.get("installed", 0)
         total_prompts_integrated += root_deltas.get("prompts", 0)
