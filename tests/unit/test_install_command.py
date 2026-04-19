@@ -511,7 +511,7 @@ class TestDownloadCallbackErrorMessages:
         apm_package = APMPackage.from_apm_yml(tmp_path / "apm.yml")
 
         # Patch the downloader to always fail
-        with patch("apm_cli.commands.install.GitHubPackageDownloader") as MockDownloader:
+        with patch("apm_cli.deps.github_downloader.GitHubPackageDownloader") as MockDownloader:
             mock_dl = MockDownloader.return_value
             mock_dl.download_package.side_effect = RuntimeError("auth failed")
 
@@ -560,7 +560,7 @@ class TestCallbackFailureDeduplication:
         }))
         apm_package = APMPackage.from_apm_yml(tmp_path / "apm.yml")
 
-        with patch("apm_cli.commands.install.GitHubPackageDownloader") as MockDownloader:
+        with patch("apm_cli.deps.github_downloader.GitHubPackageDownloader") as MockDownloader:
             mock_dl = MockDownloader.return_value
             mock_dl.download_package.side_effect = RuntimeError("auth failed")
 

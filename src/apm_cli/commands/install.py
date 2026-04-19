@@ -1096,7 +1096,7 @@ def _install_apm_dependencies(
     if not APM_DEPS_AVAILABLE:
         raise RuntimeError("APM dependency system not available")
 
-    from apm_cli.core.scope import InstallScope, get_deploy_root, get_apm_dir, get_modules_dir
+    from apm_cli.core.scope import InstallScope, get_deploy_root, get_apm_dir
     if scope is None:
         scope = InstallScope.PROJECT
 
@@ -1108,307 +1108,76 @@ def _install_apm_dependencies(
     apm_dir = get_apm_dir(scope)
 
     # Check whether the project root itself has local .apm/ primitives (#714).
-    # Users should be able to keep root-level .apm/ rules alongside their apm.yml
-    # without creating a dummy sub-package stub.
     _root_has_local_primitives = _project_has_root_primitives(project_root)
 
     if not all_apm_deps and not _root_has_local_primitives:
         return InstallResult()
 
-    # T5: Check for existing lockfile - use locked versions for reproducible installs
-    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
-    lockfile_path = get_lockfile_path(apm_dir)
-    existing_lockfile = None
-    lockfile_count = 0
-    if lockfile_path.exists():
-        existing_lockfile = LockFile.read(lockfile_path)
-        if existing_lockfile and existing_lockfile.dependencies:
-            lockfile_count = len(existing_lockfile.dependencies)
-            if logger:
-                if update_refs:
-                    logger.verbose_detail(f"Loaded apm.lock.yaml for SHA comparison ({lockfile_count} dependencies)")
-                else:
-                    logger.verbose_detail(f"Using apm.lock.yaml ({lockfile_count} locked dependencies)")
-                if logger.verbose:
-                    for locked_dep in existing_lockfile.get_all_dependencies():
-                        _sha = locked_dep.resolved_commit[:8] if locked_dep.resolved_commit else ""
-                        _ref = locked_dep.resolved_ref if hasattr(locked_dep, 'resolved_ref') and locked_dep.resolved_ref else ""
-                        logger.lockfile_entry(locked_dep.get_unique_key(), ref=_ref, sha=_sha)
+    # ------------------------------------------------------------------
+    # Build InstallContext from function args + computed state
+    # ------------------------------------------------------------------
+    from apm_cli.install.context import InstallContext
 
-    apm_modules_dir = get_modules_dir(scope)
-    apm_modules_dir.mkdir(parents=True, exist_ok=True)
-
-    # Use provided resolver or create new one if not in a CLI session context
-    if auth_resolver is None:
-        auth_resolver = AuthResolver()
-
-    # Create downloader early so it can be used for transitive dependency resolution
-    downloader = GitHubPackageDownloader(auth_resolver=auth_resolver)
-
-    # Track direct dependency keys so the download callback can distinguish them from transitive
-    direct_dep_keys = builtins.set(dep.get_unique_key() for dep in all_apm_deps)
-
-    # Track paths already downloaded by the resolver callback to avoid re-downloading
-    # Maps dep_key -> resolved_commit (SHA or None) so the cached path can use it
-    callback_downloaded = {}
-
-    # Collect transitive dep failures during resolution — they'll be routed to
-    # diagnostics after the DiagnosticCollector is created (later in the flow).
-    transitive_failures: list[tuple[str, str]] = []  # (dep_display, message)
-
-    # Track dep keys that failed in download_callback so the main install loop
-    # skips them instead of re-trying and producing a duplicate error entry.
-    callback_failures: builtins.set = builtins.set()
-
-    # Create a download callback for transitive dependency resolution
-    # This allows the resolver to fetch packages on-demand during tree building
-    def download_callback(dep_ref, modules_dir, parent_chain=""):
-        """Download a package during dependency resolution.
-
-        Args:
-            dep_ref: The dependency to download.
-            modules_dir: Target apm_modules directory.
-            parent_chain: Human-readable breadcrumb (e.g. "root > mid")
-                showing which dependency path led to this transitive dep.
-        """
-        install_path = dep_ref.get_install_path(modules_dir)
-        if install_path.exists():
-            return install_path
-        try:
-            # Handle local packages: copy instead of git clone
-            if dep_ref.is_local and dep_ref.local_path:
-                if scope is InstallScope.USER:
-                    # Cannot resolve local paths at user scope
-                    callback_failures[dep_ref.get_unique_key()] = (
-                        f"local package '{dep_ref.local_path}' skipped at user scope"
-                    )
-                    return None
-                result_path = _copy_local_package(dep_ref, install_path, project_root)
-                if result_path:
-                    callback_downloaded[dep_ref.get_unique_key()] = None
-                    return result_path
-                return None
-
-            # T5: Use locked commit if available (reproducible installs)
-            locked_ref = None
-            if existing_lockfile:
-                locked_dep = existing_lockfile.get_dependency(dep_ref.get_unique_key())
-                if locked_dep and locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
-                    locked_ref = locked_dep.resolved_commit
-
-            # Build a DependencyReference with the right ref to avoid lossy
-            # str() -> parse() round-trips (#382).
-            from dataclasses import replace as _dc_replace
-            if locked_ref and not update_refs:
-                download_dep = _dc_replace(dep_ref, reference=locked_ref)
-            else:
-                download_dep = dep_ref
-
-            # Silent download - no progress display for transitive deps
-            result = downloader.download_package(download_dep, install_path)
-            # Capture resolved commit SHA for lockfile
-            resolved_sha = None
-            if result and hasattr(result, 'resolved_reference') and result.resolved_reference:
-                resolved_sha = result.resolved_reference.resolved_commit
-            callback_downloaded[dep_ref.get_unique_key()] = resolved_sha
-            return install_path
-        except Exception as e:
-            dep_display = dep_ref.get_display_name()
-            dep_key = dep_ref.get_unique_key()
-            is_direct = dep_key in direct_dep_keys
-
-            # Distinguish direct vs transitive failure messages so users
-            # don't see a misleading "transitive dep" label for top-level deps.
-            if is_direct:
-                fail_msg = (
-                    f"Failed to download dependency "
-                    f"{dep_ref.repo_url}: {e}"
-                )
-            else:
-                chain_hint = f" (via {parent_chain})" if parent_chain else ""
-                fail_msg = (
-                    f"Failed to resolve transitive dep "
-                    f"{dep_ref.repo_url}{chain_hint}: {e}"
-                )
-
-            # Verbose: inline detail
-            if logger:
-                logger.verbose_detail(f"  {fail_msg}")
-            elif verbose:
-                _rich_error(f"  └─ {fail_msg}")
-            # Collect for deferred diagnostics summary (always, even non-verbose)
-            callback_failures.add(dep_key)
-            transitive_failures.append((dep_display, fail_msg))
-            return None
-
-    # Resolve dependencies with transitive download support
-    resolver = APMDependencyResolver(
-        apm_modules_dir=apm_modules_dir,
-        download_callback=download_callback
+    ctx = InstallContext(
+        project_root=project_root,
+        apm_dir=apm_dir,
+        apm_package=apm_package,
+        update_refs=update_refs,
+        verbose=verbose,
+        only_packages=only_packages,
+        force=force,
+        parallel_downloads=parallel_downloads,
+        logger=logger,
+        scope=scope,
+        auth_resolver=auth_resolver,
+        target_override=target,
+        marketplace_provenance=marketplace_provenance,
+        all_apm_deps=all_apm_deps,
+        root_has_local_primitives=_root_has_local_primitives,
     )
 
-    try:
-        dependency_graph = resolver.resolve_dependencies(apm_dir)
+    # ------------------------------------------------------------------
+    # Phase 1: Resolve dependencies
+    # ------------------------------------------------------------------
+    from apm_cli.install.phases import resolve as _resolve_phase
+    _resolve_phase.run(ctx)
 
-        # Verbose: show resolved tree summary
+    if not ctx.deps_to_install and not ctx.root_has_local_primitives:
         if logger:
-            tree = dependency_graph.dependency_tree
-            direct_count = len(tree.get_nodes_at_depth(1))
-            transitive_count = len(tree.nodes) - direct_count
-            if transitive_count > 0:
-                logger.verbose_detail(
-                    f"Resolved dependency tree: {direct_count} direct + "
-                    f"{transitive_count} transitive deps (max depth {tree.max_depth})"
-                )
-                for node in tree.nodes.values():
-                    if node.depth > 1:
-                        logger.verbose_detail(
-                            f"    {node.get_ancestor_chain()}"
-                        )
-            else:
-                logger.verbose_detail(f"Resolved {direct_count} direct dependencies (no transitive)")
+            logger.nothing_to_install()
+        return InstallResult()
 
-        # Check for circular dependencies
-        if dependency_graph.circular_dependencies:
-            if logger:
-                logger.error("Circular dependencies detected:")
-            for circular in dependency_graph.circular_dependencies:
-                cycle_path = " -> ".join(circular.cycle_path)
-                if logger:
-                    logger.error(f"  {cycle_path}")
-            raise RuntimeError("Cannot install packages with circular dependencies")
+    try:
+        # --------------------------------------------------------------
+        # Phase 2: Target detection + integrator initialization
+        # --------------------------------------------------------------
+        from apm_cli.install.phases import targets as _targets_phase
+        _targets_phase.run(ctx)
 
-        # Get flattened dependencies for installation
-        flat_deps = dependency_graph.flattened_dependencies
-        deps_to_install = flat_deps.get_installation_list()
+        # --------------------------------------------------------------
+        # Seam: read phase outputs into locals for remaining code.
+        # This minimises diff below -- subsequent phases (download,
+        # integrate, cleanup, lockfile) continue using bare-name locals.
+        # Future S-phases will fold them into the context one by one.
+        # --------------------------------------------------------------
+        deps_to_install = ctx.deps_to_install
+        intended_dep_keys = ctx.intended_dep_keys
+        dependency_graph = ctx.dependency_graph
+        existing_lockfile = ctx.existing_lockfile
+        lockfile_path = ctx.lockfile_path
+        apm_modules_dir = ctx.apm_modules_dir
+        downloader = ctx.downloader
+        callback_downloaded = ctx.callback_downloaded
+        callback_failures = ctx.callback_failures
+        transitive_failures = ctx.transitive_failures
+        _targets = ctx.targets
+        prompt_integrator = ctx.integrators["prompt"]
+        agent_integrator = ctx.integrators["agent"]
+        skill_integrator = ctx.integrators["skill"]
+        command_integrator = ctx.integrators["command"]
+        hook_integrator = ctx.integrators["hook"]
+        instruction_integrator = ctx.integrators["instruction"]
 
-        # If specific packages were requested, filter to only those
-        # **and their full transitive dependency subtrees** so that
-        # sub-deps (and their MCP servers) are installed and recorded
-        # in the lockfile.
-        if only_packages:
-            # Build identity set from user-supplied package specs.
-            # Accepts any input form: git URLs, FQDN, shorthand.
-            only_identities = builtins.set()
-            for p in only_packages:
-                try:
-                    ref = DependencyReference.parse(p)
-                    only_identities.add(ref.get_identity())
-                except Exception:
-                    only_identities.add(p)
-
-            # Expand the set to include transitive descendants of the
-            # requested packages so their MCP servers, primitives, etc.
-            # are correctly installed and written to the lockfile.
-            tree = dependency_graph.dependency_tree
-
-            def _collect_descendants(node, visited=None):
-                """Walk the tree and add every child identity (cycle-safe)."""
-                if visited is None:
-                    visited = builtins.set()
-                for child in node.children:
-                    identity = child.dependency_ref.get_identity()
-                    if identity not in visited:
-                        visited.add(identity)
-                        only_identities.add(identity)
-                        _collect_descendants(child, visited)
-
-            for node in tree.nodes.values():
-                if node.dependency_ref.get_identity() in only_identities:
-                    _collect_descendants(node)
-
-            deps_to_install = [
-                dep for dep in deps_to_install
-                if dep.get_identity() in only_identities
-            ]
-
-        if not deps_to_install and not _root_has_local_primitives:
-            if logger:
-                logger.nothing_to_install()
-            return InstallResult()
-
-        # ------------------------------------------------------------------
-        # Orphan detection: packages in lockfile no longer in the manifest.
-        # Only relevant for a full install (not apm install <pkg>).
-        # We compute this NOW, before the download loop, so we know which old
-        # lockfile entries to remove from the merge and which deployed files
-        # to clean up after the loop.
-        # ------------------------------------------------------------------
-        intended_dep_keys: builtins.set = builtins.set(
-            d.get_unique_key() for d in deps_to_install
-        )
-
-        # apm_modules directory already created above
-
-        # Auto-detect target for integration (same logic as compile)
-        from apm_cli.core.target_detection import (
-            detect_target,
-            get_target_description,
-        )
-
-        # Get config target from apm.yml if available
-        config_target = apm_package.target
-
-        # Resolve effective explicit target: CLI --target wins, then apm.yml
-        _explicit = target or config_target or None
-
-        # Determine active targets.  When --target or apm.yml target is set
-        # the user's choice wins.  Otherwise auto-detect from existing dirs,
-        # falling back to copilot when nothing is found.
-        from apm_cli.integration.targets import resolve_targets as _resolve_targets
-
-        _is_user = scope is InstallScope.USER
-        _targets = _resolve_targets(
-            project_root, user_scope=_is_user, explicit_target=_explicit,
-        )
-
-        # Log target detection results
-        if logger and _targets:
-            _scope_label = "global" if _is_user else "project"
-            _target_names = ", ".join(
-                f"{t.name} (~/{t.root_dir}/)"
-                if _is_user else t.name
-                for t in _targets
-            )
-            logger.verbose_detail(
-                f"Active {_scope_label} targets: {_target_names}"
-            )
-            if _is_user:
-                from apm_cli.deps.lockfile import get_lockfile_path
-                logger.verbose_detail(
-                    f"Lockfile: {get_lockfile_path(apm_dir)}"
-                )
-
-        for _t in _targets:
-            if not _t.auto_create:
-                continue
-            _root = _t.root_dir
-            _target_dir = project_root / _root
-            if not _target_dir.exists():
-                _target_dir.mkdir(parents=True, exist_ok=True)
-                if logger:
-                    logger.verbose_detail(
-                        f"Created {_root}/ ({_t.name} target)"
-                    )
-
-        detected_target, detection_reason = detect_target(
-            project_root=project_root,
-            explicit_target=_explicit,
-            config_target=config_target,
-        )
-
-        # Initialize integrators
-        prompt_integrator = PromptIntegrator()
-        agent_integrator = AgentIntegrator()
-        from apm_cli.integration.skill_integrator import SkillIntegrator, should_install_skill
-        from apm_cli.integration.command_integrator import CommandIntegrator
-        from apm_cli.integration.hook_integrator import HookIntegrator
-        from apm_cli.integration.instruction_integrator import InstructionIntegrator
-
-        skill_integrator = SkillIntegrator()
-        command_integrator = CommandIntegrator()
-        hook_integrator = HookIntegrator()
-        instruction_integrator = InstructionIntegrator()
         diagnostics = DiagnosticCollector(verbose=verbose)
 
         # Drain transitive failures collected during resolution into diagnostics

@@ -2,35 +2,50 @@
 
 Each phase is a function ``def run(ctx: InstallContext) -> None`` that reads
 the inputs already populated by earlier phases and writes its own outputs to
-the context. Keeping shared state on a single typed object turns implicit
-shared lexical scope (the legacy 1444-line `_install_apm_dependencies`) into
-explicit data flow that is easy to audit and to test phase-by-phase.
+the context.  Keeping shared state on a single typed object turns implicit
+shared lexical scope (the legacy 1444-line ``_install_apm_dependencies``)
+into explicit data flow that is easy to audit and to test phase-by-phase.
 
 Fields are added to this dataclass incrementally as phases are extracted from
-the legacy entry point. A field belongs here if and only if it is read or
-written by more than one phase. Phase-local state should stay local.
+the legacy entry point.  A field belongs here if and only if it is read or
+written by more than one phase.  Phase-local state should stay local.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 
 @dataclass
 class InstallContext:
     """State shared across install pipeline phases.
 
-    Currently a stub. Fields are added by the phase extractions in P1 and P2
-    of the install.py modularization refactor.
-
     Required-on-construction fields go above the ``field(default=...)``
     barrier; outputs accumulated by phases use ``field(default_factory=...)``.
+
+    Fields are grouped by the phase that first populates them.  A trailing
+    comment ``# <phase>`` marks the originating phase for auditability.
     """
 
+    # ------------------------------------------------------------------
+    # Required on construction (caller supplies before any phase runs)
+    # ------------------------------------------------------------------
     project_root: Path
     apm_dir: Path
+
+    # ------------------------------------------------------------------
+    # Inputs: populated by the caller from CLI args / APMPackage
+    # ------------------------------------------------------------------
+    apm_package: Any = None  # APMPackage
+    update_refs: bool = False
+    scope: Any = None  # InstallScope (defaults to PROJECT)
+    auth_resolver: Any = None  # AuthResolver
+    marketplace_provenance: Optional[Dict[str, Any]] = None
+    parallel_downloads: int = 4
+    logger: Any = None  # InstallLogger
+    target_override: Optional[str] = None  # CLI --target value
 
     dry_run: bool = False
     force: bool = False
@@ -38,6 +53,30 @@ class InstallContext:
     dev: bool = False
     only_packages: Optional[List[str]] = None
 
+    # ------------------------------------------------------------------
+    # Resolve phase outputs
+    # ------------------------------------------------------------------
+    all_apm_deps: List[Any] = field(default_factory=list)  # resolve
+    root_has_local_primitives: bool = False  # resolve
+    deps_to_install: List[Any] = field(default_factory=list)  # resolve
+    dependency_graph: Any = None  # resolve
+    existing_lockfile: Any = None  # resolve
+    lockfile_path: Optional[Path] = None  # resolve
+    apm_modules_dir: Optional[Path] = None  # resolve
+    downloader: Any = None  # resolve (GitHubPackageDownloader)
+    callback_downloaded: Dict[str, Any] = field(default_factory=dict)  # resolve
+    callback_failures: Set[str] = field(default_factory=set)  # resolve
+    transitive_failures: List[Tuple[str, str]] = field(default_factory=list)  # resolve
+
+    # ------------------------------------------------------------------
+    # Targets phase outputs
+    # ------------------------------------------------------------------
+    targets: List[Any] = field(default_factory=list)  # targets
+    integrators: Dict[str, Any] = field(default_factory=dict)  # targets
+
+    # ------------------------------------------------------------------
+    # Downstream phase accumulators (written by integrate, read by cleanup/lockfile)
+    # ------------------------------------------------------------------
     intended_dep_keys: Set[str] = field(default_factory=set)
     package_deployed_files: Dict[str, List[str]] = field(default_factory=dict)
     package_types: Dict[str, Dict[str, Any]] = field(default_factory=dict)
