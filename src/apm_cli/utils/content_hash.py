@@ -58,6 +58,29 @@ def compute_package_hash(package_path: Path) -> str:
     return f"sha256:{hasher.hexdigest()}"
 
 
+def compute_file_hash(file_path: Path) -> str:
+    """Compute SHA-256 of a single file's contents.
+
+    Used for per-deployed-file provenance checks before APM deletes a
+    file recorded in ``deployed_files``. The path itself is not mixed
+    in (unlike :func:`compute_package_hash`) because deployed files may
+    be renamed by integrators (e.g. ``.md`` -> ``.mdc`` for Cursor).
+
+    Args:
+        file_path: File to hash.
+
+    Returns:
+        Hash string in format ``"sha256:<hex_digest>"``. Returns the
+        empty-content hash when the path does not exist or is not a
+        regular file.
+    """
+    if not file_path.is_file() or file_path.is_symlink():
+        return _EMPTY_HASH
+    hasher = hashlib.sha256()
+    hasher.update(file_path.read_bytes())
+    return f"sha256:{hasher.hexdigest()}"
+
+
 def verify_package_hash(package_path: Path, expected_hash: str) -> bool:
     """Verify a package's content matches the expected hash.
 

@@ -22,6 +22,7 @@ from ._helpers import (
     _lazy_confirm,
     _rich_blank_line,
     _validate_plugin_name,
+    _validate_project_name,
 )
 
 
@@ -46,6 +47,14 @@ def init(ctx, project_name, yes, plugin, verbose):
         # Handle explicit current directory
         if project_name == ".":
             project_name = None
+
+        # Reject names containing path separators before any filesystem use
+        if project_name and not _validate_project_name(project_name):
+            logger.error(
+                f"Invalid project name '{project_name}': "
+                "project names must not contain path separators ('/' or '\\\\') or be '..'."
+            )
+            sys.exit(1)
 
         # Determine project directory and name
         if project_name:
@@ -163,7 +172,7 @@ def init(ctx, project_name, yes, plugin, verbose):
 
 def _interactive_project_setup(default_name, logger):
     """Interactive setup for new APM projects with auto-detection."""
-    from ._helpers import _auto_detect_author, _auto_detect_description
+    from ._helpers import _auto_detect_author, _auto_detect_description, _validate_project_name
 
     # Get auto-detected defaults
     auto_author = _auto_detect_author()
@@ -179,7 +188,15 @@ def _interactive_project_setup(default_name, logger):
         console.print("\n[info]Setting up your APM project...[/info]")
         console.print("[muted]Press ^C at any time to quit.[/muted]\n")
 
-        name = Prompt.ask("Project name", default=default_name).strip()
+        while True:
+            name = Prompt.ask("Project name", default=default_name).strip()
+            if _validate_project_name(name):
+                break
+            console.print(
+                f"[error]Invalid project name '{name}': "
+                "project names must not contain path separators ('/' or '\\\\') or be '..'.[/error]"
+            )
+
         version = Prompt.ask("Version", default="1.0.0").strip()
         description = Prompt.ask("Description", default=auto_description).strip()
         author = Prompt.ask("Author", default=auto_author).strip()
@@ -201,7 +218,15 @@ author: {author}"""
         logger.progress("Setting up your APM project...")
         logger.progress("Press ^C at any time to quit.")
 
-        name = click.prompt("Project name", default=default_name).strip()
+        while True:
+            name = click.prompt("Project name", default=default_name).strip()
+            if _validate_project_name(name):
+                break
+            click.echo(
+                f"{ERROR}Invalid project name '{name}': "
+                f"project names must not contain path separators ('/' or '\\\\') or be '..'.{RESET}"
+            )
+
         version = click.prompt("Version", default="1.0.0").strip()
         description = click.prompt("Description", default=auto_description).strip()
         author = click.prompt("Author", default=auto_author).strip()

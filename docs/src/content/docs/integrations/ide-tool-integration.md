@@ -57,7 +57,7 @@ For running agentic workflows locally, see the [Agent Workflows guide](../../gui
 
 APM works natively with VS Code's GitHub Copilot implementation.
 
-> **Auto-Detection**: VS Code integration is automatically enabled when a `.github/` folder exists in your project. If neither `.github/` nor `.claude/` exists, `apm install` skips folder integration (packages are still installed to `apm_modules/`).
+> **Auto-Detection**: VS Code integration is automatically enabled when a `.github/` folder exists in your project. If neither `.github/` nor `.claude/` exists, `apm install` skips folder integration (packages are still installed to `apm_modules/`). To force integration regardless of folder presence, pass an explicit target (e.g. `apm install --target copilot`) or set `target:` in `apm.yml` -- the target's root folder will be created automatically.
 
 ### Native VS Code Primitives
 
@@ -167,7 +167,7 @@ AGENTS.md aggregates instructions, context, and optionally the Spec-kit constitu
 
 APM provides first-class support for Claude Code and Claude Desktop through native format generation.
 
-> **Auto-Detection**: Claude integration is automatically enabled when a `.claude/` folder exists in your project. If neither `.github/` nor `.claude/` exists, `apm install` skips folder integration (packages are still installed to `apm_modules/`).
+> **Auto-Detection**: Claude integration is automatically enabled when a `.claude/` folder exists in your project. If neither `.github/` nor `.claude/` exists, `apm install` skips folder integration (packages are still installed to `apm_modules/`). To force integration regardless of folder presence, pass an explicit target (e.g. `apm install --target claude`) or set `target: claude` in `apm.yml` -- `.claude/` will be created automatically.
 
 ### Optional: Compiled Output for Claude
 

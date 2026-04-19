@@ -380,23 +380,20 @@ def compile(
 
         # Handle distributed vs single-file compilation
         if config.strategy == "distributed" and not single_agents:
-            # Show target-aware message with detection reason
+            # Show target-aware message with detection reason. Use
+            # get_target_description() so any future target added to
+            # target_detection shows up here automatically.
             if detected_target == "minimal":
                 logger.progress(f"Compiling for AGENTS.md only ({detection_reason})")
                 logger.progress(
-                    " Create .github/ or .claude/ folder for full integration",
+                    " Create .github/, .claude/, .codex/, .opencode/ or .cursor/ folder for full integration",
                     symbol="light_bulb",
                 )
-            elif detected_target == "vscode" or detected_target == "agents":
+            else:
+                description = get_target_description(detected_target)
                 logger.progress(
-                    f"Compiling for AGENTS.md (VSCode/Copilot) - {detection_reason}"
+                    f"Compiling for {description} - {detection_reason}"
                 )
-            elif detected_target == "claude":
-                logger.progress(
-                    f"Compiling for CLAUDE.md (Claude Code) - {detection_reason}"
-                )
-            else:  # "all"
-                logger.progress(f"Compiling for AGENTS.md + CLAUDE.md - {detection_reason}")
 
             if dry_run:
                 logger.dry_run_notice(

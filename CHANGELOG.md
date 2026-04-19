@@ -8,22 +8,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.12] - 2026-04-19
+
 ### Added
 
 - `apm install` now automatically discovers and deploys local `.apm/` primitives (skills, instructions, agents, prompts, hooks, commands) to target directories, with local content taking priority over dependencies on collision (#626, #644)
+- Deploy primitives from the project root's own `.apm/` directory alongside declared dependencies, so single-package projects no longer need a sub-package stub to install their own content (#715)
 - Add `temp-dir` configuration key (`apm config set temp-dir PATH`) to override the system temporary directory, resolving `[WinError 5] Access is denied` in corporate Windows environments (#629)
-
-### Fixed
-
-- Fix `apm marketplace add` silently failing for private repos by using credentials when probing `marketplace.json` (#701)
-- Pin codex setup to `rust-v0.118.0` for security and reproducibility; update config to `wire_api = "responses"` (#663)
-- Propagate headers and environment variables through OpenCode MCP adapter with defensive copies to prevent mutation (#622)
-- Fix `apm install` hanging indefinitely when corporate firewalls silently drop SSH packets by setting `GIT_SSH_COMMAND` with `ConnectTimeout=30` (#652)
-- Fix `apm compile --target claude` silently skipping dependency instructions stored in `.github/instructions/` (#631)
 
 ### Changed
 
-- `apm marketplace browse/search/add/update` now route through the registry proxy when `PROXY_REGISTRY_URL` is set; `PROXY_REGISTRY_ONLY=1` blocks direct GitHub API calls (#506)
+- Refactor `apm install` into a modular engine package (`apm_cli/install/`) with discrete phases (resolve, targets, download, integrate, cleanup, lockfile, finalize, post-deps local) and apply design patterns -- introduce a `DependencySource` Strategy hierarchy with shared `run_integration_template()` Template Method (kills ~300 LOC duplication across local/cached/fresh dep handlers), add `services.py` DI seam to eliminate `_install_mod` indirection, and wrap the pipeline in a typed `InstallService` Application Service consuming a frozen `InstallRequest`. `install/phases/integrate.py` shrinks from 1013 to ~400 LOC; the public `apm install` behaviour and CLI surface are unchanged. Preserves the `#762` cleanup chokepoint and remains backward-compatible (`_install_apm_dependencies` re-export and 55 healthy test patches keep working) (#764)
+- `apm marketplace browse/search/add/update` now route through the registry proxy when `PROXY_REGISTRY_URL` is set; `PROXY_REGISTRY_ONLY=1` blocks direct GitHub API calls (#506, #617)
+- CI: adopt GitHub Merge Queue with tiered CI and add an inert `pull_request_target` stub workflow (`ci-integration-pr-stub.yml`) for the four Tier 2 required checks. `ci.yml` (Tier 1: unit tests + binary build) now runs on `pull_request` and `merge_group`. The integration + release-validation suite (Tier 2) moves to `merge_group`-only, replacing the previous `workflow_run` + environment-approval flow. PR branches no longer need manual updates against `main`, and the heavy integration suite runs once at merge time instead of on every PR push. The PR-time stub satisfies branch protection's required-check gate without burning CI minutes, holds no secrets, runs no checkout, and grants `permissions: {}` so it cannot be turned into a supply-chain attack vector. CODEOWNERS now requires Lead Maintainer review for any change to `.github/workflows/**` (#770, #771)
+- Bump `pytest` from 8.4.2 to 9.0.3 (#698)
+- Bump `dompurify` from 3.3.2 to 3.4.0 in `/docs` (#730)
+- Bump `lodash-es` and `langium` in `/docs` (#761)
+- Add `.editorconfig` to standardize charset, line endings, indentation, and trailing whitespace across contributions (#671)
+- Add `@sergio-sisternes-epam` as maintainer (#623)
+- Close install/uninstall/update CLI integration coverage gaps surfaced by the `#764` review (#767)
+- Add 55 unit tests for `commands/deps/_utils.py` and `commands/view.py` to address Test Improver backlog items #4 and #5 (#682)
+
+### Fixed
+
+- Harden `apm install` stale-file cleanup to prevent unsafe lockfile deletions, preserve user-edited files via per-file SHA-256 provenance, and improve cleanup reporting during install and `--dry-run` (#666, #750, #762)
+- Local `.apm/` stale-cleanup now uses pre-install content hashes for provenance verification. Previously the lockfile was re-read after regeneration, which always yielded empty hashes, causing the user-edit safety gate to be silently skipped for project-local files (#764)
+- Fix `apm install --target claude` not creating `.claude/` when the directory does not already exist (`auto_create=False` targets now get their root directory created when explicitly requested) (#763)
+- Fix content hash mismatch on re-install when `.git/` is absent from installed packages by falling back to content-hash verification before re-downloading (#763)
+- Make `apm install` idempotent for hook entries: upsert by `_apm_source` ownership marker instead of unconditionally appending, so re-running install no longer duplicates per-event hook commands (#709)
+- Rewrite Windows backslash paths in hook commands' `windows` key during integration; previously only Unix-style `./` references were rewritten, leaving `windows` script paths unresolved at runtime (#609)
+- Add explicit `encoding="utf-8"` to `.prompt.md` `open()` calls in `script_runner` to prevent `UnicodeDecodeError` on Windows non-UTF-8 locales (CP950/CP936/CP932) (#607)
+- Validate the `project_name` argument to `apm init` and reject `/` and `\` to prevent confusing `[WinError 3]` and silent path-traversal behaviour (#724)
+- Use `yaml.safe_dump` when generating `apm.yml` for virtual-file and collection packages, so `description` values containing `:` no longer break `apm install` with a YAML parse error (#707)
+- `_count_package_files` in `apm deps list` now reads the canonical `.apm/context/` (singular) directory; previously it scanned `.apm/contexts/` and always reported `0 context files` per package (#748)
+- `apm pack --format plugin` no longer emits duplicated `skills/skills/` nesting for bare-skill dependencies referenced through virtual paths like `skills/<name>` (#738)
+- Provide an ADO-specific authentication error message for `dev.azure.com` remotes so users get actionable guidance instead of a generic GitHub-flavored hint (#742)
+- Fix `apm compile --target codex` (and `opencode`, `minimal`) being a silent no-op; `AgentsCompiler.compile()` now routes these through the AGENTS.md compiler instead of returning an empty success result that left stale `AGENTS.md` files (#766)
+- Support `codeload.github.com`-style archive URLs in Artifactory archive URL generation, unblocking JFrog Artifactory proxies configured against `codeload.github.com` (#712)
+- `_parse_artifactory_base_url()` now reads `PROXY_REGISTRY_URL` first (with `ARTIFACTORY_BASE_URL` fallback + `DeprecationWarning`), and the virtual-subdirectory download path checks `dep_ref.is_artifactory()` before falling back to env-var detection, fixing lockfile reinstall failures when proxy config is only on the lockfile entry (#616)
+- Fall back to SSH URLs when validating git remotes for generic / self-hosted hosts so `apm install` no longer fails the pre-install validation step against private SSH-only servers (#584)
+- Suppress internal config keys (e.g. `default_client`) from `apm config get` output, removing the get/set asymmetry that confused users and was flagged as a Medium security issue (#571)
+- Include dependency instructions stored in `.github/instructions/` (not only `.apm/instructions/`) when running `apm compile --target claude` without `--local-only` (#631, #642)
+- Fix `apm marketplace add` silently failing for private repos by using credentials when probing `marketplace.json` (#701)
+- Harden marketplace plugin normalization to enforce that manifest-declared `agents`/`skills`/`commands`/`hooks` paths resolve inside the plugin root (#760)
+- Pin codex setup to `rust-v0.118.0` for security and reproducibility; update config to `wire_api = "responses"` (#663)
+- Propagate headers and environment variables through OpenCode MCP adapter with defensive copies to prevent mutation (#622)
+- Fix `apm install` hanging indefinitely when corporate firewalls silently drop SSH packets by setting `GIT_SSH_COMMAND` with `ConnectTimeout=30` (#652, #653)
+- Stop `test_auto_detect_through_proxy` from making real `api.github.com` calls by passing a mock `auth_resolver`, fixing flaky macOS CI rate-limit failures (#759)
+- Fix the Daily Test Improver workflow creating duplicate monthly activity issues; Task 7 now finds and updates the existing month's issue instead of opening a new one each run (#681)
 
 ## [0.8.11] - 2026-04-06
 
