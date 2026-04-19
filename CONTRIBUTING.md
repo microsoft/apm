@@ -49,6 +49,26 @@ Enhancement suggestions are welcome! Please:
 4. Update documentation if needed.
 5. PRs must pass all CI checks before they can be merged.
 
+### How merging works
+
+This repo uses GitHub's native **merge queue**. Once your PR is approved, a
+maintainer adds it to the queue. The queue then:
+
+1. Builds a tentative merge of your PR against the latest `main` — no manual
+   "Update branch" needed.
+2. Runs the integration suite against that tentative merge.
+3. Auto-merges if checks pass; ejects from the queue if they fail.
+
+What this means for contributors:
+
+- You don't need to keep your branch up to date with `main` manually.
+- The fast unit + build checks (Tier 1) run on every push to your PR.
+- The full integration suite (Tier 2) only runs once your PR is in the queue,
+  not on every WIP push.
+
+If your PR is ejected from the queue because of a real failure, push a fix and
+ask a maintainer to re-queue.
+
 ### Issue Triage
 
 Every new issue is automatically labeled `needs-triage`. Maintainers review incoming issues and:
