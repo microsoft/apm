@@ -727,18 +727,22 @@ def _install_apm_dependencies(
     target: str = None,
     marketplace_provenance: dict = None,
 ):
-    """Thin wrapper -- delegates to :func:`apm_cli.install.pipeline.run_install_pipeline`.
+    """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
+    :class:`apm_cli.install.service.InstallService`.
 
     Kept here so that ``@patch("apm_cli.commands.install._install_apm_dependencies")``
-    continues to intercept calls from the Click handler.
+    continues to intercept calls from the Click handler.  The service
+    itself is the typed Application Service entry point for any future
+    programmatic callers.
     """
     if not APM_DEPS_AVAILABLE:
         raise RuntimeError("APM dependency system not available")
 
-    from apm_cli.install.pipeline import run_install_pipeline
+    from apm_cli.install.request import InstallRequest
+    from apm_cli.install.service import InstallService
 
-    return run_install_pipeline(
-        apm_package,
+    request = InstallRequest(
+        apm_package=apm_package,
         update_refs=update_refs,
         verbose=verbose,
         only_packages=only_packages,
@@ -750,6 +754,7 @@ def _install_apm_dependencies(
         target=target,
         marketplace_provenance=marketplace_provenance,
     )
+    return InstallService().run(request)
 
 
 
