@@ -2700,11 +2700,16 @@ def _install_apm_dependencies(
         # ------------------------------------------------------------------
         if existing_lockfile and not only_packages:
             from ..integration.cleanup import remove_stale_deployed_files as _rmstale
-            _intended_keys = builtins.set(package_deployed_files.keys())
+            # Use intended_dep_keys (manifest intent, computed at ~line 1707) --
+            # NOT package_deployed_files.keys() (integration outcome). A transient
+            # integration failure for a still-declared package would leave its key
+            # absent from package_deployed_files; deriving orphans from the outcome
+            # set would then misclassify it as removed and delete its previously
+            # deployed files even though it is still in apm.yml.
             _orphan_total_deleted = 0
             _orphan_deleted_targets: builtins.list = []
             for _orphan_key, _orphan_dep in existing_lockfile.dependencies.items():
-                if _orphan_key in _intended_keys:
+                if _orphan_key in intended_dep_keys:
                     continue  # still in manifest -- handled by stale-cleanup below
                 if not _orphan_dep.deployed_files:
                     continue

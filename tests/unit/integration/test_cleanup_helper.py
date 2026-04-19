@@ -244,6 +244,45 @@ def test_helper_signature_does_not_accept_logger():
     assert "logger" not in sig.parameters
 
 
+def test_orphan_loop_uses_manifest_intent_not_integration_outcome():
+    """Regression guard: the orphan-cleanup loop in install.py must derive
+    'still-declared' from intended_dep_keys (manifest intent), NOT from
+    package_deployed_files (integration outcome).
+
+    Bug reproduced if the membership test reads package_deployed_files: a
+    transient integration failure for a still-declared package leaves its
+    key absent from package_deployed_files; the orphan loop then deletes
+    that package's previously deployed files even though the package is
+    still in apm.yml. Detected by the security re-review on commit 4b64c27.
+    """
+    import inspect
+    from apm_cli.commands import install as install_mod
+    src = inspect.getsource(install_mod)
+    orphan_marker = "# Orphan cleanup: remove deployed files for packages that were"
+    assert orphan_marker in src, "Orphan cleanup block not found -- update marker."
+    block_start = src.index(orphan_marker)
+    block_end = src.index("# Stale-file cleanup:", block_start)
+    orphan_block = src[block_start:block_end]
+    # Strip comments so the banned-phrase check doesn't trip on the
+    # cautionary comment that explains the bug we're guarding against.
+    code_only_lines = [
+        ln for ln in orphan_block.splitlines()
+        if not ln.lstrip().startswith("#")
+    ]
+    code_only = "\n".join(code_only_lines)
+    # Must consult manifest intent.
+    assert "intended_dep_keys" in code_only, (
+        "Orphan loop must use intended_dep_keys (manifest intent). "
+        "Using package_deployed_files.keys() (integration outcome) re-introduces "
+        "silent deletion of files for still-declared packages on transient errors."
+    )
+    # Must NOT regress to the outcome set.
+    assert "package_deployed_files.keys()" not in code_only, (
+        "Orphan loop must not derive membership from package_deployed_files.keys() -- "
+        "see test_orphan_loop_uses_manifest_intent_not_integration_outcome docstring."
+    )
+
+
 def test_result_dataclass_defaults():
     r = CleanupResult()
     assert r.deleted == []
