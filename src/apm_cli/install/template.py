@@ -13,14 +13,11 @@ This is the Template Method companion to the Strategy pattern in
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import Dict, Optional
 
 from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
 from apm_cli.install.services import integrate_package_primitives
 from apm_cli.install.sources import DependencySource, Materialization
-
-if TYPE_CHECKING:
-    pass
 
 
 def run_integration_template(
@@ -97,36 +94,19 @@ def _integrate_materialization(
             deltas[k] = int_result[k]
         ctx.package_deployed_files[dep_key] = int_result["deployed_files"]
     except Exception as e:
-        # Match legacy error message shape per source.  Local packages
-        # use the local path; cached/fresh use the dep_key.
-        if dep_ref.is_local and dep_ref.local_path:
-            diagnostics.error(
-                f"Failed to integrate primitives from local package: {e}",
-                package=dep_ref.local_path,
-            )
-        else:
-            # Both cached and fresh originally used different prefixes;
-            # we preserve the cached "from cached package" wording when
-            # the source is cached, otherwise the generic fresh message.
-            from apm_cli.install.sources import (
-                CachedDependencySource,
-                FreshDependencySource,
-            )
-            if isinstance(source, CachedDependencySource):
-                diagnostics.error(
-                    f"Failed to integrate primitives from cached package: {e}",
-                    package=dep_key,
-                )
-            elif isinstance(source, FreshDependencySource):
-                diagnostics.error(
-                    f"Failed to integrate primitives: {e}",
-                    package=dep_key,
-                )
-            else:
-                diagnostics.error(
-                    f"Failed to integrate primitives: {e}",
-                    package=dep_key,
-                )
+        # Per-source error wording: each DependencySource subclass
+        # declares its own INTEGRATE_ERROR_PREFIX (Strategy pattern).
+        # Local packages key the diagnostic by local_path; cached/fresh
+        # key by dep_key -- a behavioural detail preserved from legacy.
+        package_key = (
+            dep_ref.local_path
+            if (dep_ref.is_local and dep_ref.local_path)
+            else dep_key
+        )
+        diagnostics.error(
+            f"{source.INTEGRATE_ERROR_PREFIX}: {e}",
+            package=package_key,
+        )
 
     # Verbose: inline skip / error count for this package
     if logger and logger.verbose:

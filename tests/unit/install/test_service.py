@@ -42,8 +42,9 @@ def _make_request(pkg, **overrides):
 
 class TestInstallRequest:
     def test_request_is_frozen(self, fake_apm_package):
+        from dataclasses import FrozenInstanceError
         request = _make_request(fake_apm_package)
-        with pytest.raises((AttributeError, Exception)):
+        with pytest.raises(FrozenInstanceError):
             request.force = True
 
     def test_request_defaults(self, fake_apm_package):
@@ -52,6 +53,14 @@ class TestInstallRequest:
         assert request.parallel_downloads == 4
         assert request.only_packages is None
         assert request.target is None
+
+    def test_only_packages_is_shallow_immutable(self, fake_apm_package):
+        # Documents the known limitation: frozen=True locks the
+        # InstallRequest fields themselves, but the list reference is
+        # still mutable.  Future hardening could swap to a tuple.
+        request = _make_request(fake_apm_package, only_packages=["pkg-a"])
+        request.only_packages.append("pkg-b")
+        assert request.only_packages == ["pkg-a", "pkg-b"]
 
 
 class TestInstallServiceDelegation:
@@ -63,6 +72,8 @@ class TestInstallServiceDelegation:
             force=True,
             parallel_downloads=8,
             target="copilot",
+            only_packages=["alpha", "beta"],
+            marketplace_provenance={"source": "test-marketplace"},
         )
         with patch("apm_cli.install.pipeline.run_install_pipeline") as mock_run:
             mock_run.return_value = "result-sentinel"
@@ -77,6 +88,8 @@ class TestInstallServiceDelegation:
         assert kwargs["force"] is True
         assert kwargs["parallel_downloads"] == 8
         assert kwargs["target"] == "copilot"
+        assert kwargs["only_packages"] == ["alpha", "beta"]
+        assert kwargs["marketplace_provenance"] == {"source": "test-marketplace"}
 
     def test_run_passes_optional_collaborators(self, fake_apm_package):
         logger = MagicMock()

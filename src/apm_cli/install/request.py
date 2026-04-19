@@ -8,7 +8,7 @@ the ``InstallService`` consumes.  This is the typed-IO companion to
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:

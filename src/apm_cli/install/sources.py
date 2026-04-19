@@ -62,6 +62,11 @@ class DependencySource(ABC):
     The post-acquire template flow is the same for every source.
     """
 
+    INTEGRATE_ERROR_PREFIX: str = "Failed to integrate primitives"
+    """Per-source error wording used by the integration template when
+    ``integrate_package_primitives`` raises.  Subclasses override to
+    preserve the legacy diagnostic text shown to users."""
+
     def __init__(
         self,
         ctx: "InstallContext",
@@ -86,6 +91,8 @@ class DependencySource(ABC):
 
 class LocalDependencySource(DependencySource):
     """Local (``file://``) dependency: copy from a filesystem path."""
+
+    INTEGRATE_ERROR_PREFIX = "Failed to integrate primitives from local package"
 
     def acquire(self) -> Optional[Materialization]:
         from apm_cli.core.scope import InstallScope
@@ -198,6 +205,8 @@ class LocalDependencySource(DependencySource):
 class CachedDependencySource(DependencySource):
     """Cached dependency: already extracted under ``apm_modules/``."""
 
+    INTEGRATE_ERROR_PREFIX = "Failed to integrate primitives from cached package"
+
     def __init__(
         self,
         ctx: "InstallContext",
@@ -247,15 +256,11 @@ class CachedDependencySource(DependencySource):
         if not dep_ref.reference:
             deltas["unpinned"] = 1
 
-        # Skip integration entirely if no targets
+        # Skip integration entirely if no targets.  The template will
+        # write the empty deployed_files entry on its own (single source
+        # of truth), so we just signal "skip integration" via
+        # package_info=None.
         if not ctx.targets:
-            ctx.package_deployed_files[dep_key] = []
-            # Caller will treat None as "no integration" -- but we still
-            # want to count this as installed.  Convention: return a
-            # Materialization with package_info=None to signal "skip
-            # integration but keep deltas".  We instead return a special
-            # marker by setting package_info to a sentinel; cleaner is to
-            # let the template detect ctx.targets falsy.
             return Materialization(
                 package_info=None,  # type: ignore[arg-type]
                 install_path=install_path,
@@ -351,6 +356,8 @@ class FreshDependencySource(DependencySource):
     legacy behaviour because content drift from the lockfile is treated
     as a possible tampering event.
     """
+
+    # Inherits the default "Failed to integrate primitives" prefix.
 
     def __init__(
         self,
