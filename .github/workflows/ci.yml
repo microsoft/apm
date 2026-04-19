@@ -15,6 +15,7 @@ on:
   # microsoft/apm#770 for the design.
   merge_group:
     branches: [ main ]
+    types: [ checks_requested ]
 
 permissions:
   contents: read

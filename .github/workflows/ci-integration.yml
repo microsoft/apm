@@ -26,6 +26,7 @@ env:
 on:
   merge_group:
     branches: [ main ]
+    types: [ checks_requested ]
 
 permissions:
   contents: read
@@ -104,11 +105,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Artifact root is ./dist/ (least common ancestor of the uploaded paths in
+      # the build job), so download to ./dist/ to preserve dist/apm-linux-x86_64/apm.
       - name: Download binary
         uses: actions/download-artifact@v4
         with:
           name: apm-mq-linux-x86_64
-          path: ./dist/apm-linux-x86_64/
+          path: ./dist/
+
+      - name: Make binary executable
+        run: chmod +x ./dist/apm-linux-x86_64/apm
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -159,16 +165,15 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      # See note in integration-tests: download to dist/ to preserve layout.
       - name: Download binary
         uses: actions/download-artifact@v4
         with:
           name: apm-mq-linux-x86_64
-          path: /tmp/apm-isolated-test/dist/apm-linux-x86_64/
+          path: /tmp/apm-isolated-test/dist/
 
       - name: Make binary executable
-        run: |
-          cd /tmp/apm-isolated-test
-          chmod +x ./dist/apm-linux-x86_64/apm
+        run: chmod +x /tmp/apm-isolated-test/dist/apm-linux-x86_64/apm
 
       - name: Create APM symlink for testing
         run: |
