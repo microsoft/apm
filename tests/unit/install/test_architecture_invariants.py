@@ -41,10 +41,9 @@ def test_install_context_importable():
 MAX_MODULE_LOC = 1000
 
 KNOWN_LARGE_MODULES = {
-    # integrate.py hosts 4 per-package code paths + the root-project
-    # integration rewritten in F3 to use _integrate_local_content.
-    # Natural seam: decompose per-package helpers into a sub-module.
-    "phases/integrate.py": 1020,
+    # No exceptions: integrate.py was decomposed into Strategy
+    # (sources.py) + Template Method (template.py) and now sits well
+    # below the default budget.
 }
 
 
