@@ -295,9 +295,12 @@ class TestProxyAwareFetch:
                 return None  # first candidate not found
             return json.dumps(self._MARKETPLACE_JSON).encode()
 
+        mock_resolver = MagicMock()
+        mock_resolver.try_with_fallback.return_value = None
+        mock_resolver.classify_host.return_value = MagicMock(api_base="https://api.github.com")
         with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg), \
              patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", side_effect=mock_entry):
-            path = client_mod._auto_detect_path(source)
+            path = client_mod._auto_detect_path(source, auth_resolver=mock_resolver)
 
         assert path == ".github/plugin/marketplace.json"
 
