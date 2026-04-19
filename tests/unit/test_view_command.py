@@ -357,6 +357,183 @@ class TestViewCommand(_InfoCmdBase):
         assert result.exit_code == 1
         assert "traversal" in result.output.lower()
 
+    # -- global flag -------------------------------------------------------
+
+    def test_view_global_flag(self):
+        """``apm view org/repo -g`` uses user scope."""
+        with self._chdir_tmp():
+            fake_home = Path(tempfile.mkdtemp())
+            pkg_dir = fake_home / "apm_modules" / "gorg" / "grepo"
+            pkg_dir.mkdir(parents=True)
+            (pkg_dir / "apm.yml").write_text(
+                "name: grepo\nversion: 1.0.0\ndescription: global pkg\nauthor: X\n"
+            )
+            with patch(
+                "apm_cli.core.scope.get_apm_dir", return_value=fake_home,
+            ), _force_rich_fallback():
+                result = self.runner.invoke(
+                    cli, ["view", "gorg/grepo", "-g"]
+                )
+            assert result.exit_code == 0
+            assert "grepo" in result.output
+
+    # -- display with context files, workflows, hooks ----------------------
+
+    def test_view_shows_context_files(self):
+        """``apm view`` displays context file counts."""
+        with self._chdir_tmp() as tmp:
+            pkg = self._make_package(tmp, "corg", "crepo")
+            apm_dir = pkg / ".apm"
+            apm_dir.mkdir()
+            inst = apm_dir / "instructions"
+            inst.mkdir()
+            (inst / "setup.md").write_text("# setup")
+            os.chdir(tmp)
+            with _force_rich_fallback():
+                result = self.runner.invoke(cli, ["view", "corg/crepo"])
+        assert result.exit_code == 0
+        assert "1 instructions" in result.output
+
+    def test_view_shows_workflows(self):
+        """``apm view`` displays workflow count."""
+        with self._chdir_tmp() as tmp:
+            pkg = self._make_package(tmp, "worg", "wrepo")
+            apm_dir = pkg / ".apm"
+            apm_dir.mkdir()
+            prompts = apm_dir / "prompts"
+            prompts.mkdir()
+            (prompts / "run.prompt.md").write_text("# run")
+            os.chdir(tmp)
+            with _force_rich_fallback():
+                result = self.runner.invoke(cli, ["view", "worg/wrepo"])
+        assert result.exit_code == 0
+        assert "1 executable workflows" in result.output
+
+    def test_view_shows_hooks(self):
+        """``apm view`` displays hook count when hooks exist."""
+        with self._chdir_tmp() as tmp:
+            pkg = self._make_package(tmp, "horg", "hrepo")
+            hooks_dir = pkg / "hooks"
+            hooks_dir.mkdir()
+            (hooks_dir / "pre-commit.json").write_text("{}")
+            os.chdir(tmp)
+            with _force_rich_fallback():
+                result = self.runner.invoke(cli, ["view", "horg/hrepo"])
+        assert result.exit_code == 0
+        assert "hook file(s)" in result.output
+
+    # -- lockfile ref/commit display ---------------------------------------
+
+    def test_view_shows_lockfile_ref_and_commit(self):
+        """``apm view`` displays ref and commit from lockfile."""
+        with self._chdir_tmp() as tmp:
+            self._make_package(tmp, "lorg", "lrepo")
+            os.chdir(tmp)
+            with patch(
+                "apm_cli.commands.view._lookup_lockfile_ref",
+                return_value=("v2.0.0", "abcdef1234567890deadbeef"),
+            ), _force_rich_fallback():
+                result = self.runner.invoke(cli, ["view", "lorg/lrepo"])
+        assert result.exit_code == 0
+        assert "v2.0.0" in result.output
+        assert "abcdef123456" in result.output  # truncated to 12 chars
+
+
+# ------------------------------------------------------------------
+# _lookup_lockfile_ref unit tests
+# ------------------------------------------------------------------
+
+
+class TestLookupLockfileRef(_InfoCmdBase):
+    """Direct tests for the _lookup_lockfile_ref helper."""
+
+    def test_returns_empty_when_no_lockfile(self):
+        """Returns ('', '') when lockfile does not exist."""
+        from apm_cli.commands.view import _lookup_lockfile_ref
+
+        with self._chdir_tmp() as tmp:
+            ref, commit = _lookup_lockfile_ref("org/repo", tmp)
+        assert ref == ""
+        assert commit == ""
+
+    def test_exact_match(self):
+        """Returns ref/commit for exact lockfile key match."""
+        from apm_cli.commands.view import _lookup_lockfile_ref
+
+        mock_dep = MagicMock()
+        mock_dep.resolved_ref = "v1.0.0"
+        mock_dep.resolved_commit = "abc123"
+        mock_lockfile = MagicMock()
+        mock_lockfile.dependencies = {"org/repo": mock_dep}
+
+        with patch("apm_cli.deps.lockfile.LockFile") as mock_lf, \
+             patch("apm_cli.deps.lockfile.get_lockfile_path"), \
+             patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"):  # noqa: patched to prevent real I/O
+            mock_lf.read.return_value = mock_lockfile
+            ref, commit = _lookup_lockfile_ref("org/repo", Path("/fake"))
+        assert ref == "v1.0.0"
+        assert commit == "abc123"
+
+    def test_substring_match(self):
+        """Falls back to substring match when exact key misses."""
+        from apm_cli.commands.view import _lookup_lockfile_ref
+
+        mock_dep = MagicMock()
+        mock_dep.resolved_ref = "main"
+        mock_dep.resolved_commit = "deadbeef"
+        mock_lockfile = MagicMock()
+        # Key includes "org/repo" as substring but exact .get("org/repo") misses
+        mock_lockfile.dependencies = {
+            "github.com/org/repo": mock_dep,
+        }
+
+        with patch("apm_cli.deps.lockfile.LockFile") as mock_lf, \
+             patch("apm_cli.deps.lockfile.get_lockfile_path"), \
+             patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"):  # noqa: patched to prevent real I/O
+            mock_lf.read.return_value = mock_lockfile
+            ref, commit = _lookup_lockfile_ref("org/repo", Path("/fake"))
+        assert ref == "main"
+        assert commit == "deadbeef"
+
+    def test_no_matching_dep(self):
+        """Returns ('', '') when no dependency matches."""
+        from apm_cli.commands.view import _lookup_lockfile_ref
+
+        mock_lockfile = MagicMock()
+        mock_lockfile.dependencies = {"other/pkg": MagicMock()}
+
+        with patch("apm_cli.deps.lockfile.LockFile") as mock_lf, \
+             patch("apm_cli.deps.lockfile.get_lockfile_path"), \
+             patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"):  # noqa: patched to prevent real I/O
+            mock_lf.read.return_value = mock_lockfile
+            ref, commit = _lookup_lockfile_ref("nomatch", Path("/fake"))
+        assert ref == ""
+        assert commit == ""
+
+    def test_exception_returns_empty(self):
+        """Any exception is swallowed and empty strings returned."""
+        from apm_cli.commands.view import _lookup_lockfile_ref
+
+        with patch(
+            "apm_cli.deps.lockfile.migrate_lockfile_if_needed",
+            side_effect=RuntimeError("boom"),
+        ):
+            ref, commit = _lookup_lockfile_ref("x", Path("/fake"))
+        assert ref == ""
+        assert commit == ""
+
+    def test_lockfile_read_returns_none(self):
+        """Returns ('', '') when LockFile.read returns None."""
+        from apm_cli.commands.view import _lookup_lockfile_ref
+
+        with patch("apm_cli.deps.lockfile.LockFile") as mock_lf, \
+             patch("apm_cli.deps.lockfile.get_lockfile_path"), \
+             patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"):  # noqa: patched to prevent real I/O
+            mock_lf.read.return_value = None
+            ref, commit = _lookup_lockfile_ref("org/repo", Path("/fake"))
+        assert ref == ""
+        assert commit == ""
+
 
 class TestInfoAlias(_InfoCmdBase):
     """Verify ``apm info`` still works as a hidden backward-compatible alias."""
