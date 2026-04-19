@@ -66,7 +66,11 @@ def run(ctx: "InstallContext") -> None:
             )
 
     for _t in _targets:
-        if not _t.auto_create:
+        # When the user passes --target (or apm.yml sets target=) we honour
+        # the request even for targets that normally don't auto-create
+        # their root dir (e.g. claude). Without this, `apm install --target
+        # claude` would silently no-op when .claude/ doesn't exist (#763).
+        if not _t.auto_create and not _explicit:
             continue
         _root = _t.root_dir
         _target_dir = ctx.project_root / _root

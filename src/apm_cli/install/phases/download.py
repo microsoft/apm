@@ -83,7 +83,13 @@ def run(ctx: "InstallContext") -> None:
                 if _PDGitRepo(_pd_path).head.commit.hexsha == _pd_locked_chk.resolved_commit:
                     continue
             except Exception:
-                pass
+                # Git check failed (e.g. .git removed after download).
+                # Fall back to content-hash verification so correctly
+                # installed packages are not re-downloaded every run (#763).
+                if _pd_locked_chk.content_hash and _pd_path.is_dir():
+                    from apm_cli.utils.content_hash import verify_package_hash as _pd_verify_hash
+                    if _pd_verify_hash(_pd_path, _pd_locked_chk.content_hash):
+                        continue
         # Build download ref (use locked commit for reproducibility).
         # build_download_ref() uses the manifest ref when ref_changed is True.
         _pd_dlref = build_download_ref(

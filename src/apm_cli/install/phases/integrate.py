@@ -108,7 +108,12 @@ def _resolve_download_strategy(
                         if local_repo.head.commit.hexsha == locked_dep.resolved_commit:
                             lockfile_match = True
                     except Exception:
-                        pass  # Local checkout invalid -- fall through to download
+                        # Git check failed (e.g. .git removed). Fall back to
+                        # content-hash verification (#763).
+                        if locked_dep.content_hash and install_path.is_dir():
+                            from apm_cli.utils.content_hash import verify_package_hash
+                            if verify_package_hash(install_path, locked_dep.content_hash):
+                                lockfile_match = True
             elif not ref_changed:
                 # Normal mode: compare local HEAD with lockfile SHA.
                 try:
@@ -117,7 +122,12 @@ def _resolve_download_strategy(
                     if local_repo.head.commit.hexsha == locked_dep.resolved_commit:
                         lockfile_match = True
                 except Exception:
-                    pass  # Not a git repo or invalid -- fall through to download
+                    # Git check failed (e.g. .git removed). Fall back to
+                    # content-hash verification (#763).
+                    if locked_dep.content_hash and install_path.is_dir():
+                        from apm_cli.utils.content_hash import verify_package_hash
+                        if verify_package_hash(install_path, locked_dep.content_hash):
+                            lockfile_match = True
     skip_download = install_path.exists() and (
         (is_cacheable and not update_refs)
         or (already_resolved and not update_refs)
