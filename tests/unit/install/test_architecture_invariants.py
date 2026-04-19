@@ -38,16 +38,49 @@ def test_install_context_importable():
     )
 
 
-@pytest.mark.skip(reason="LOC budget activated in P3.R2 once extraction is complete")
-def test_no_install_module_exceeds_500_loc():
-    """No file in the engine package should grow past 500 LOC.
+MAX_MODULE_LOC = 1000
 
-    This is the structural guard against the install.py mega-function ever
-    growing back. Activated in P3.R2 of the refactor with the final budget.
+KNOWN_LARGE_MODULES = {
+    "phases/integrate.py": 900,
+}
+
+
+def test_no_install_module_exceeds_loc_budget():
+    """No file in the engine package may grow past its LOC budget.
+
+    Default budget: 1000 LOC. Specific modules with documented oversize
+    extractions have their own per-file budget in KNOWN_LARGE_MODULES; any
+    file under the default budget is fine. This guards against the
+    mega-function pattern returning by accident.
+
+    KNOWN_LARGE_MODULES entries are technical debt: their natural seams
+    (e.g. integrate.py's 4 per-package code paths) should be decomposed in
+    a follow-up PR, after which their entry should be removed.
     """
     offenders = []
     for path in ENGINE_ROOT.rglob("*.py"):
+        rel = path.relative_to(ENGINE_ROOT).as_posix()
+        budget = KNOWN_LARGE_MODULES.get(rel, MAX_MODULE_LOC)
         n = _line_count(path)
-        if n > 500:
-            offenders.append((path.relative_to(ENGINE_ROOT), n))
-    assert not offenders, f"Modules exceeding 500 LOC: {offenders}"
+        if n > budget:
+            offenders.append((rel, n, budget))
+    assert not offenders, (
+        "Modules exceeding LOC budget (file, actual, budget): "
+        f"{offenders}"
+    )
+
+
+def test_install_py_under_legacy_budget():
+    """commands/install.py is the legacy seam being thinned.
+
+    It started this refactor at 2905 LOC. The post-P2 actual is ~1268 LOC.
+    Budget is set with headroom for follow-ups; tighten when further
+    extractions land.
+    """
+    install_py = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "commands" / "install.py"
+    assert install_py.is_file()
+    n = _line_count(install_py)
+    assert n <= 1500, (
+        f"commands/install.py grew to {n} LOC (budget 1500). "
+        "Add new logic to apm_cli/install/ phase modules instead."
+    )
