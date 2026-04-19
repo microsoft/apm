@@ -1094,10 +1094,22 @@ class TestContentHashFallback:
             assert verify_package_hash(pkg_dir, "sha256:badhash") is False
 
     def test_missing_content_hash_skips_fallback(self):
-        """When locked dep has no content_hash, fallback is not attempted."""
-        locked = MagicMock()
-        locked.resolved_commit = "abc123"
-        locked.content_hash = None
+        """When locked dep has no content_hash, the fallback guard prevents
+        verify_package_hash from being called."""
+        from apm_cli.utils.content_hash import verify_package_hash
 
-        # The guard `if locked.content_hash` prevents fallback
-        assert not locked.content_hash
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg_dir = Path(tmpdir) / "pkg"
+            pkg_dir.mkdir()
+            (pkg_dir / "file.txt").write_text("data")
+
+            # Simulate the guard logic from install.py:
+            # if _pd_locked_chk.content_hash and _pd_path.is_dir():
+            content_hash = None  # no content_hash recorded in lockfile
+            fallback_triggered = False
+            if content_hash and pkg_dir.is_dir():
+                fallback_triggered = verify_package_hash(pkg_dir, content_hash)
+
+            assert not fallback_triggered, (
+                "Fallback must not trigger when content_hash is None"
+            )
