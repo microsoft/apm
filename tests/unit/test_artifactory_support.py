@@ -144,6 +144,49 @@ class TestBuildArtifactoryArchiveUrl:
         assert parsed.hostname == "artifactory.example.com"
         assert parsed.path == "/artifactory/github/microsoft/apm-sample-package/archive/refs/heads/main.zip"
 
+    def test_codeload_upstream_heads_ref(self):
+        """When Artifactory upstream targets codeload.github.com, generate codeload-style archive URLs.
+
+        codeload.github.com uses /zip/refs/heads/{ref} (no .zip extension) instead of
+        the github.com-style /archive/refs/heads/{ref}.zip.
+        """
+        urls = build_artifactory_archive_url(
+            "art.example.com", "artifactory/github", "owner", "repo", ref="main"
+        )
+        assert any("/zip/refs/heads/main" in u and not u.endswith("archive/refs/heads/main") for u in urls), (
+            "codeload-style /zip/refs/heads/{ref} URL must be present"
+        )
+
+    def test_codeload_upstream_tags_ref(self):
+        """Tags fallback for codeload-style upstream — /zip/refs/tags/{ref}."""
+        urls = build_artifactory_archive_url(
+            "art.example.com", "artifactory/github", "owner", "repo", ref="v2.0.0"
+        )
+        assert any("/zip/refs/tags/v2.0.0" in u for u in urls), (
+            "codeload-style /zip/refs/tags/{ref} URL must be present for tags fallback"
+        )
+
+    def test_github_archive_urls_unchanged(self):
+        """Existing github.com archive URL patterns must not be broken by codeload support."""
+        urls = build_artifactory_archive_url(
+            "art.example.com", "artifactory/github", "owner", "repo", ref="main"
+        )
+        assert any("/archive/refs/heads/main.zip" in u for u in urls), (
+            "github.com-style /archive/refs/heads/{ref}.zip must still be present"
+        )
+        assert any("/archive/refs/tags/main.zip" in u for u in urls), (
+            "github.com-style /archive/refs/tags/{ref}.zip must still be present"
+        )
+
+    def test_gitlab_archive_urls_unchanged(self):
+        """Existing GitLab archive URL pattern must not be broken by codeload support."""
+        urls = build_artifactory_archive_url(
+            "art.example.com", "artifactory/github", "owner", "repo", ref="main"
+        )
+        assert any("/-/archive/main/repo-main.zip" in u for u in urls), (
+            "GitLab-style /-/archive/{ref}/{repo}-{ref}.zip must still be present"
+        )
+
 
 # ── apm_package.py: DependencyReference Artifactory parsing ──
 
@@ -1323,8 +1366,9 @@ class TestArchiveEntryDownload:
         )
 
         assert result is None
-        # Should have tried all 3 URL patterns
-        assert mock_get.call_count == 3
+        # Should have tried all 5 URL patterns (GitHub heads, GitLab, GitHub tags,
+        # codeload heads, codeload tags)
+        assert mock_get.call_count == 5
 
     def test_entry_download_returns_none_on_connection_error(self):
         """Returns None when the HTTP call raises an exception."""
