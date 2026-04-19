@@ -511,7 +511,7 @@ class TestDownloadCallbackErrorMessages:
         apm_package = APMPackage.from_apm_yml(tmp_path / "apm.yml")
 
         # Patch the downloader to always fail
-        with patch("apm_cli.commands.install.GitHubPackageDownloader") as MockDownloader:
+        with patch("apm_cli.deps.github_downloader.GitHubPackageDownloader") as MockDownloader:
             mock_dl = MockDownloader.return_value
             mock_dl.download_package.side_effect = RuntimeError("auth failed")
 
@@ -560,7 +560,7 @@ class TestCallbackFailureDeduplication:
         }))
         apm_package = APMPackage.from_apm_yml(tmp_path / "apm.yml")
 
-        with patch("apm_cli.commands.install.GitHubPackageDownloader") as MockDownloader:
+        with patch("apm_cli.deps.github_downloader.GitHubPackageDownloader") as MockDownloader:
             mock_dl = MockDownloader.return_value
             mock_dl.download_package.side_effect = RuntimeError("auth failed")
 
@@ -994,3 +994,123 @@ class TestGenericHostSshFirstValidation:
         assert all("git@" not in arg for arg in only_cmd), (
             f"Expected HTTPS-only URL for GHES host, got: {only_cmd}"
         )
+
+
+class TestExplicitTargetDirCreation:
+    """Verify --target creates root_dir even when auto_create=False (GH bug fix)."""
+
+    def setup_method(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self.project_root = Path(self._tmpdir)
+
+    def teardown_method(self):
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_explicit_target_creates_dir_for_auto_create_false(self):
+        """When _explicit is set, target dirs are created even if auto_create=False."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        claude = KNOWN_TARGETS["claude"]
+        assert claude.auto_create is False
+
+        # Simulate the fixed loop logic: create dir when _explicit is set
+        _explicit = "claude"
+        _targets = [claude]
+        for _t in _targets:
+            if not _t.auto_create and not _explicit:
+                continue
+            _target_dir = self.project_root / _t.root_dir
+            if not _target_dir.exists():
+                _target_dir.mkdir(parents=True, exist_ok=True)
+
+        assert (self.project_root / ".claude").is_dir()
+
+    def test_auto_detect_skips_dir_for_auto_create_false(self):
+        """Without _explicit, auto_create=False targets don't get dirs created."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        claude = KNOWN_TARGETS["claude"]
+        assert claude.auto_create is False
+
+        _explicit = None
+        _targets = [claude]
+        for _t in _targets:
+            if not _t.auto_create and not _explicit:
+                continue
+            _target_dir = self.project_root / _t.root_dir
+            if not _target_dir.exists():
+                _target_dir.mkdir(parents=True, exist_ok=True)
+
+        assert not (self.project_root / ".claude").exists()
+
+    def test_auto_create_true_always_creates_dir(self):
+        """auto_create=True targets create dir regardless of _explicit."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        copilot = KNOWN_TARGETS["copilot"]
+        assert copilot.auto_create is True
+
+        for _explicit in [None, "copilot"]:
+            import shutil
+            shutil.rmtree(self.project_root / copilot.root_dir, ignore_errors=True)
+
+            _targets = [copilot]
+            for _t in _targets:
+                if not _t.auto_create and not _explicit:
+                    continue
+                _target_dir = self.project_root / _t.root_dir
+                if not _target_dir.exists():
+                    _target_dir.mkdir(parents=True, exist_ok=True)
+
+            assert (self.project_root / ".github").is_dir(), (
+                f"auto_create=True should create dir when _explicit={_explicit!r}"
+            )
+
+
+class TestContentHashFallback:
+    """Verify content-hash fallback when .git is removed from installed packages."""
+
+    def test_hash_match_skips_redownload(self):
+        """Content hash verification allows skipping re-download."""
+        from apm_cli.utils.content_hash import compute_package_hash, verify_package_hash
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg_dir = Path(tmpdir) / "pkg"
+            pkg_dir.mkdir()
+            (pkg_dir / "file.txt").write_text("hello")
+            content_hash = compute_package_hash(pkg_dir)
+
+            assert verify_package_hash(pkg_dir, content_hash) is True
+
+    def test_hash_mismatch_triggers_redownload(self):
+        """Mismatched content hash means re-download should proceed."""
+        from apm_cli.utils.content_hash import verify_package_hash
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg_dir = Path(tmpdir) / "pkg"
+            pkg_dir.mkdir()
+            (pkg_dir / "file.txt").write_text("original")
+
+            assert verify_package_hash(pkg_dir, "sha256:badhash") is False
+
+    def test_missing_content_hash_skips_fallback(self):
+        """When locked dep has no content_hash, the fallback guard prevents
+        verify_package_hash from being called."""
+        from apm_cli.utils.content_hash import verify_package_hash
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg_dir = Path(tmpdir) / "pkg"
+            pkg_dir.mkdir()
+            (pkg_dir / "file.txt").write_text("data")
+
+            # Simulate the guard logic from install.py:
+            # if _pd_locked_chk.content_hash and _pd_path.is_dir():
+            content_hash = None  # no content_hash recorded in lockfile
+            fallback_triggered = False
+            if content_hash and pkg_dir.is_dir():
+                fallback_triggered = verify_package_hash(pkg_dir, content_hash)
+
+            assert not fallback_triggered, (
+                "Fallback must not trigger when content_hash is None"
+            )

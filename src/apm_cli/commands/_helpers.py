@@ -414,6 +414,21 @@ def _validate_plugin_name(name):
     return bool(re.match(r"^[a-z][a-z0-9-]{0,63}$", name))
 
 
+def _validate_project_name(name):
+    """Validate that a project name is safe to use as a directory name.
+
+    Project names are used directly as directory names and must not contain
+    '/' or '\' so the name is not interpreted as a filesystem path,
+    and must not be '..' to prevent directory traversal.
+
+    Returns True if valid, False otherwise.
+    """
+    if "/" in name or "\\" in name:
+        return False
+    if name == "..":
+        return False
+    return True
+
 def _create_plugin_json(config):
     """Create plugin.json file with package metadata.
 
