@@ -3,9 +3,7 @@
 Covers the pure helpers that scan, count, and describe installed packages.
 """
 
-import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -233,10 +231,10 @@ class TestCountPackageFiles:
         assert ctx == 1
 
     def test_contexts_dir_counted(self, tmp_path):
-        """Files in .apm/contexts/ are counted as context."""
+        """Files in .apm/context/ (singular) are counted as context."""
         apm = _make_apm_dir(tmp_path)
-        (apm / "contexts").mkdir()
-        (apm / "contexts" / "c.md").write_text("# c")
+        (apm / "context").mkdir()
+        (apm / "context" / "c.md").write_text("# c")
         ctx, _ = _count_package_files(tmp_path)
         assert ctx == 1
 

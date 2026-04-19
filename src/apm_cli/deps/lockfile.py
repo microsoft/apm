@@ -32,6 +32,7 @@ class LockedDependency:
     resolved_by: Optional[str] = None
     package_type: Optional[str] = None
     deployed_files: List[str] = field(default_factory=list)
+    deployed_file_hashes: Dict[str, str] = field(default_factory=dict)
     source: Optional[str] = None  # "local" for local deps, None/absent for remote
     local_path: Optional[str] = None  # Original local path (relative to project root)
     content_hash: Optional[str] = None  # SHA-256 of package file tree
@@ -72,6 +73,10 @@ class LockedDependency:
             result["package_type"] = self.package_type
         if self.deployed_files:
             result["deployed_files"] = sorted(self.deployed_files)
+        if self.deployed_file_hashes:
+            result["deployed_file_hashes"] = dict(
+                sorted(self.deployed_file_hashes.items())
+            )
         if self.source:
             result["source"] = self.source
         if self.local_path:
@@ -116,6 +121,7 @@ class LockedDependency:
             resolved_by=data.get("resolved_by"),
             package_type=data.get("package_type"),
             deployed_files=deployed_files,
+            deployed_file_hashes=dict(data.get("deployed_file_hashes") or {}),
             source=data.get("source"),
             local_path=data.get("local_path"),
             content_hash=data.get("content_hash"),
@@ -183,6 +189,7 @@ class LockFile:
     mcp_servers: List[str] = field(default_factory=list)
     mcp_configs: Dict[str, dict] = field(default_factory=dict)
     local_deployed_files: List[str] = field(default_factory=list)
+    local_deployed_file_hashes: Dict[str, str] = field(default_factory=dict)
 
     def add_dependency(self, dep: LockedDependency) -> None:
         """Add a dependency to the lock file."""
@@ -217,6 +224,10 @@ class LockFile:
             data["mcp_configs"] = dict(sorted(self.mcp_configs.items()))
         if self.local_deployed_files:
             data["local_deployed_files"] = sorted(self.local_deployed_files)
+        if self.local_deployed_file_hashes:
+            data["local_deployed_file_hashes"] = dict(
+                sorted(self.local_deployed_file_hashes.items())
+            )
         from ..utils.yaml_io import yaml_to_str
         return yaml_to_str(data)
 
@@ -238,6 +249,9 @@ class LockFile:
         lock.mcp_servers = list(data.get("mcp_servers", []))
         lock.mcp_configs = dict(data.get("mcp_configs") or {})
         lock.local_deployed_files = list(data.get("local_deployed_files", []))
+        lock.local_deployed_file_hashes = dict(
+            data.get("local_deployed_file_hashes") or {}
+        )
         return lock
 
     def write(self, path: Path) -> None:
