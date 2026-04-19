@@ -105,3 +105,10 @@ class InstallContext:
     total_commands_integrated: int = 0  # integrate
     total_hooks_integrated: int = 0  # integrate
     total_links_resolved: int = 0  # integrate
+
+    # ------------------------------------------------------------------
+    # Post-deps local content tracking (F3)
+    # ------------------------------------------------------------------
+    old_local_deployed: List[str] = field(default_factory=list)  # pipeline setup
+    local_deployed_files: List[str] = field(default_factory=list)  # integrate (root)
+    local_content_errors_before: int = 0  # integrate (pre-root)

@@ -106,7 +106,15 @@ def run_install_pipeline(
 
     _root_has_local_primitives = _project_has_root_primitives(project_root)
 
-    if not all_apm_deps and not _root_has_local_primitives:
+    # Read old local deployed files from the existing lockfile so the
+    # post-deps-local phase can run stale cleanup even when no current
+    # local content exists (e.g. .apm/ was deleted but old files remain).
+    _old_local_deployed: builtins.list = []
+    _early_lockfile = LockFile.read(get_lockfile_path(apm_dir)) if apm_dir else None
+    if _early_lockfile:
+        _old_local_deployed = builtins.list(_early_lockfile.local_deployed_files)
+
+    if not all_apm_deps and not _root_has_local_primitives and not _old_local_deployed:
         return InstallResult()
 
     # ------------------------------------------------------------------
@@ -130,6 +138,7 @@ def run_install_pipeline(
         marketplace_provenance=marketplace_provenance,
         all_apm_deps=all_apm_deps,
         root_has_local_primitives=_root_has_local_primitives,
+        old_local_deployed=_old_local_deployed,
     )
 
     # ------------------------------------------------------------------
@@ -276,6 +285,17 @@ def run_install_pipeline(
         from .phases.lockfile import LockfileBuilder
 
         LockfileBuilder(ctx).build_and_save()
+
+        # ------------------------------------------------------------------
+        # Phase: Post-deps local .apm/ content -- stale cleanup +
+        # lockfile persistence for the project's own .apm/ primitives.
+        # Runs after the dep lockfile so it can read-modify-write the
+        # lockfile with local_deployed_files / hashes.  All deletions
+        # routed through integration/cleanup.py (#762).
+        # ------------------------------------------------------------------
+        from .phases import post_deps_local as _post_deps_local_phase
+
+        _post_deps_local_phase.run(ctx)
 
         # Emit verbose integration stats + bare-success fallback + return result
         from .phases import finalize as _finalize_phase
