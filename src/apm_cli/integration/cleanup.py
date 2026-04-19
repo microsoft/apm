@@ -29,7 +29,6 @@ or progress lines through *logger*.
 
 from __future__ import annotations
 
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
@@ -68,37 +67,48 @@ def remove_stale_deployed_files(
     dep_key: str,
     targets,
     diagnostics,
-    logger,
     recorded_hashes: Optional[Dict[str, str]] = None,
+    failed_path_retained: bool = True,
 ) -> CleanupResult:
     """Remove APM-deployed files that are no longer produced by *dep_key*.
 
     Args:
         stale_paths: Workspace-relative paths flagged as stale by
-            :func:`apm_cli.drift.detect_stale_files`.
+            :func:`apm_cli.drift.detect_stale_files` (intra-package
+            renames/removals) or :func:`apm_cli.drift.detect_orphans`
+            (whole package removed from the manifest).
         project_root: Project root the deletion is scoped within.
         dep_key: Unique key of the package these paths belong to (used
-            for diagnostic attribution and verbose output).
+            for diagnostic attribution).
         targets: Resolved target profiles for this install (passed
             through to :meth:`BaseIntegrator.validate_deploy_path`).
         diagnostics: ``DiagnosticCollector`` -- recoverable warnings
             (user-edit skip, unlink failure, refused directory entry)
             are pushed here.
-        logger: ``CommandLogger`` (or subclass) for inline verbose
-            output. May be ``None`` only in tests; production callers
-            always pass an instance.
         recorded_hashes: Mapping from rel-path to ``"sha256:<hex>"`` as
             stored on the previous ``LockedDependency``. ``None`` (or
             empty) disables the per-file provenance check entirely --
             preserved for backward compat with pre-hash lockfiles.
+        failed_path_retained: When ``True`` (default, intra-package
+            stale cleanup) the failure diagnostic tells the user APM
+            will retry on the next install -- the caller is expected
+            to re-insert ``result.failed`` into the new
+            ``deployed_files``. When ``False`` (orphan cleanup) the
+            owning package is being removed from the lockfile so a
+            failed path cannot be retained; the diagnostic instructs
+            the user to remove the file manually instead.
 
     Returns:
         :class:`CleanupResult` describing what happened. The caller is
         responsible for any post-deletion bookkeeping (extending the
         new ``deployed_files`` list with ``failed`` so they are retried,
         invoking :meth:`BaseIntegrator.cleanup_empty_parents` on
-        ``deleted_targets``, and reporting ``deleted`` count to the user
-        via the appropriate logger method).
+        ``deleted_targets``, calling
+        :meth:`InstallLogger.cleanup_skipped_user_edit` for each entry
+        in ``skipped_user_edit`` so the inline yellow warning renders,
+        and reporting ``deleted`` count to the user via
+        :meth:`InstallLogger.stale_cleanup` /
+        :meth:`InstallLogger.orphan_cleanup`).
     """
     result = CleanupResult()
     recorded_hashes = recorded_hashes or {}
@@ -165,13 +175,23 @@ def remove_stale_deployed_files(
             result.deleted_targets.append(stale_target)
         except Exception as exc:
             result.failed.append(stale_path)
-            diagnostics.warn(
-                (
-                    f"Could not remove stale file {stale_path}: {exc}. "
-                    "Path retained in lockfile; will retry on next "
-                    "'apm install'."
-                ),
-                package=dep_key,
-            )
+            if failed_path_retained:
+                diagnostics.warn(
+                    (
+                        f"Could not remove stale file {stale_path}: {exc}. "
+                        "Path retained in lockfile; will retry on next "
+                        "'apm install'."
+                    ),
+                    package=dep_key,
+                )
+            else:
+                diagnostics.warn(
+                    (
+                        f"Could not remove orphaned file {stale_path}: {exc}. "
+                        "The owning package is no longer in apm.yml -- "
+                        "delete the file manually."
+                    ),
+                    package=dep_key,
+                )
 
     return result

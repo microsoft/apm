@@ -322,7 +322,7 @@ class InstallLogger(CommandLogger):
             return
         self._stale_cleaned_total += count
         noun = "file" if count == 1 else "files"
-        _rich_info(f"Cleaned {count} stale {noun} from {dep_key}", symbol="gear")
+        _rich_info(f"Cleaned {count} stale {noun} from {dep_key}", symbol="info")
 
     def orphan_cleanup(self, count: int):
         """Log post-install orphan-file cleanup outcome at default verbosity.
@@ -336,7 +336,7 @@ class InstallLogger(CommandLogger):
         noun = "file" if count == 1 else "files"
         _rich_info(
             f"Cleaned {count} {noun} from packages no longer in apm.yml",
-            symbol="gear",
+            symbol="info",
         )
 
     @property
@@ -393,12 +393,12 @@ class InstallLogger(CommandLogger):
             summary = " and ".join(parts)
             if errors > 0:
                 _rich_warning(
-                    f"Installed {summary} with {errors} error(s).{cleanup_suffix}",
+                    f"Installed {summary}{cleanup_suffix} with {errors} error(s).",
                     symbol="warning",
                 )
             else:
                 _rich_success(
-                    f"Installed {summary}.{cleanup_suffix}", symbol="sparkles"
+                    f"Installed {summary}{cleanup_suffix}.", symbol="sparkles"
                 )
         elif errors > 0:
             _rich_error(

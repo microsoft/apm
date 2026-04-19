@@ -50,7 +50,7 @@ def test_happy_path_deletes_under_known_prefix(project_root, diagnostics, logger
     result = remove_stale_deployed_files(
         [".github/prompts/old.prompt.md"], project_root,
         dep_key="pkg", targets=None,
-        diagnostics=diagnostics, logger=logger,
+        diagnostics=diagnostics,
     )
     assert result.deleted == [".github/prompts/old.prompt.md"]
     assert not result.failed
@@ -63,7 +63,7 @@ def test_path_traversal_rejected(project_root, diagnostics, logger):
     result = remove_stale_deployed_files(
         ["../escape.md"], project_root,
         dep_key="pkg", targets=None,
-        diagnostics=diagnostics, logger=logger,
+        diagnostics=diagnostics,
     )
     assert result.deleted == []
     assert result.skipped_unmanaged == ["../escape.md"]
@@ -76,7 +76,7 @@ def test_unmanaged_prefix_rejected(project_root, diagnostics, logger):
     result = remove_stale_deployed_files(
         [rel], project_root,
         dep_key="pkg", targets=None,
-        diagnostics=diagnostics, logger=logger,
+        diagnostics=diagnostics,
     )
     assert result.deleted == []
     assert rel in result.skipped_unmanaged
@@ -99,7 +99,7 @@ def test_directory_entry_refused(project_root, diagnostics, logger):
     result = remove_stale_deployed_files(
         [".github/instructions"], project_root,
         dep_key="pkg", targets=None,
-        diagnostics=diagnostics, logger=logger,
+        diagnostics=diagnostics,
     )
     assert result.deleted == []
     assert ".github/instructions" in result.skipped_unmanaged
@@ -114,7 +114,7 @@ def test_missing_file_treated_as_already_clean(project_root, diagnostics, logger
     result = remove_stale_deployed_files(
         [".github/prompts/gone.prompt.md"], project_root,
         dep_key="pkg", targets=None,
-        diagnostics=diagnostics, logger=logger,
+        diagnostics=diagnostics,
     )
     assert result.deleted == []
     assert result.failed == []
@@ -130,7 +130,7 @@ def test_hash_mismatch_skips_user_edited_file(project_root, diagnostics, logger)
     result = remove_stale_deployed_files(
         [rel], project_root,
         dep_key="pkg", targets=None,
-        diagnostics=diagnostics, logger=logger,
+        diagnostics=diagnostics,
         recorded_hashes=fake_recorded,
     )
     assert result.deleted == []
@@ -147,7 +147,7 @@ def test_hash_match_deletes_file(project_root, diagnostics, logger):
     result = remove_stale_deployed_files(
         [rel], project_root,
         dep_key="pkg", targets=None,
-        diagnostics=diagnostics, logger=logger,
+        diagnostics=diagnostics,
         recorded_hashes=recorded,
     )
     assert result.deleted == [rel]
@@ -161,7 +161,7 @@ def test_no_recorded_hashes_falls_through_to_delete(project_root, diagnostics, l
     result = remove_stale_deployed_files(
         [rel], project_root,
         dep_key="pkg", targets=None,
-        diagnostics=diagnostics, logger=logger,
+        diagnostics=diagnostics,
         recorded_hashes=None,
     )
     assert result.deleted == [rel]
@@ -179,12 +179,69 @@ def test_unlink_failure_is_retained_for_retry(project_root, diagnostics, logger,
     result = remove_stale_deployed_files(
         [rel], project_root,
         dep_key="pkg", targets=None,
-        diagnostics=diagnostics, logger=logger,
+        diagnostics=diagnostics,
     )
     assert result.deleted == []
     assert result.failed == [rel]
     msgs = [d.message for d in diagnostics._diagnostics]
     assert any("retry on next" in m.lower() for m in msgs)
+
+
+def test_orphan_failure_message_does_not_promise_retry(
+    project_root, diagnostics, logger, monkeypatch
+):
+    """failed_path_retained=False rewords the failure diagnostic.
+
+    Orphan cleanup runs against a package that is no longer in the
+    manifest, so the lockfile entry is being dropped entirely and a
+    failed deletion can't be retried by APM. The user must remove the
+    file manually -- the diagnostic must say so instead of promising
+    a retry that will never happen.
+    """
+    rel = ".github/prompts/orphan-cant-delete.prompt.md"
+    _make_managed_file(project_root, rel)
+    monkeypatch.setattr(Path, "unlink", lambda *_a, **_kw: (_ for _ in ()).throw(PermissionError("nope")))
+    result = remove_stale_deployed_files(
+        [rel], project_root,
+        dep_key="some/orphan-pkg", targets=None,
+        diagnostics=diagnostics,
+        failed_path_retained=False,
+    )
+    assert result.failed == [rel]
+    msgs = [d.message for d in diagnostics._diagnostics]
+    assert not any("will retry" in m.lower() for m in msgs)
+    assert any("delete the file manually" in m.lower() for m in msgs)
+
+
+def test_orphan_path_honours_hash_gate(project_root, diagnostics, logger):
+    """Orphan cleanup must skip user-edited files just like stale cleanup.
+
+    Regression guard for the security review of the #666 follow-up:
+    earlier the orphan path bypassed the helper entirely and would have
+    silently deleted a file the user edited after APM deployed it.
+    """
+    rel = ".github/prompts/edited-orphan.prompt.md"
+    target = _make_managed_file(project_root, rel, "user has edited this\n")
+    fake_recorded = {rel: "sha256:" + "0" * 64}
+    result = remove_stale_deployed_files(
+        [rel], project_root,
+        dep_key="orphan-pkg", targets=None,
+        diagnostics=diagnostics,
+        recorded_hashes=fake_recorded,
+        failed_path_retained=False,
+    )
+    assert result.deleted == []
+    assert result.skipped_user_edit == [rel]
+    assert target.exists()
+
+
+def test_helper_signature_does_not_accept_logger():
+    """Logger kwarg was dropped -- helper output goes through diagnostics
+    plus caller-side InstallLogger methods (cleanup_skipped_user_edit /
+    stale_cleanup / orphan_cleanup). Pin the SoC."""
+    import inspect
+    sig = inspect.signature(remove_stale_deployed_files)
+    assert "logger" not in sig.parameters
 
 
 def test_result_dataclass_defaults():
