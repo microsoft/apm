@@ -100,7 +100,7 @@ def _count_package_files(package_path: Path) -> tuple[int, int]:
         return 0, workflow_count
     
     context_count = 0
-    context_dirs = ['instructions', 'chatmodes', 'contexts']
+    context_dirs = ['instructions', 'chatmodes', 'context']
     
     for context_dir in context_dirs:
         context_path = apm_dir / context_dir

@@ -117,6 +117,18 @@ Exceptions:
 - APM packages whose ref/version changed in `apm.yml` are re-downloaded automatically (no `--update` needed)
 - `--force` remains available for full overwrite/reset scenarios
 
+**Stale-file cleanup:**
+
+`apm install` removes files that a still-present package previously deployed but no longer produces -- for example after a package renames or drops a primitive. This keeps the workspace consistent with the manifest without any manual `apm prune`/`uninstall` step. Behaviour:
+
+- Scope: only files recorded under that package's `deployed_files` in `apm.lock.yaml` are eligible
+- Safety gate: paths that escape the project root or fall outside known integration prefixes are refused
+- Directory entries are refused outright -- APM only deletes individual files
+- Per-file provenance: APM records a content hash for each deployed file; if the on-disk content has changed since deploy time the file is treated as user-edited and kept (with a warning explaining how to remove it manually)
+- Skipped when integration reports an error for the package (avoids deleting a file that just failed to redeploy)
+- Files that fail to delete are kept in `deployed_files` and retried on the next `apm install`
+- Use `apm install --dry-run` to preview package-level orphan cleanup; intra-package stale cleanup is not previewed because it requires running integration
+
 **Examples:**
 ```bash
 # Install all dependencies from apm.yml
