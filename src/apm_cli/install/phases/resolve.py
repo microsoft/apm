@@ -38,8 +38,6 @@ def run(ctx: "InstallContext") -> None:
     from apm_cli.deps.lockfile import LockFile, get_lockfile_path
     from apm_cli.install.phases.local_content import _copy_local_package
     from apm_cli.models.apm_package import DependencyReference
-    from apm_cli.utils.console import _rich_error
-
     # ------------------------------------------------------------------
     # 1. Lockfile loading
     # ------------------------------------------------------------------
@@ -139,7 +137,7 @@ def run(ctx: "InstallContext") -> None:
                     )
                     return None
                 result_path = _copy_local_package(
-                    dep_ref, install_path, project_root
+                    dep_ref, install_path, project_root, logger=logger
                 )
                 if result_path:
                     callback_downloaded[dep_ref.get_unique_key()] = None
@@ -201,11 +199,10 @@ def run(ctx: "InstallContext") -> None:
                     f"{dep_ref.repo_url}{chain_hint}: {e}"
                 )
 
-            # Verbose: inline detail
+            # Verbose: inline detail via logger (single output path).
+            # Deferred diagnostics below cover the non-logger case.
             if logger:
                 logger.verbose_detail(f"  {fail_msg}")
-            elif verbose:
-                _rich_error(f"  |-- {fail_msg}")
             # Collect for deferred diagnostics summary (always, even non-verbose)
             callback_failures.add(dep_key)
             transitive_failures.append((dep_display, fail_msg))

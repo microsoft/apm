@@ -50,7 +50,7 @@ def _local_path_failure_reason(dep_ref):
     return "no apm.yml, SKILL.md, or plugin.json found"
 
 
-def _local_path_no_markers_hint(local_dir, verbose_log=None):
+def _local_path_no_markers_hint(local_dir, verbose_log=None, logger=None):
     """Scan two levels for sub-packages and print a hint if any are found."""
     from apm_cli.utils.helpers import find_plugin_json
 
@@ -71,21 +71,31 @@ def _local_path_no_markers_hint(local_dir, verbose_log=None):
     if not found:
         return
 
-    _rich_info("  [i] Found installable package(s) inside this directory:")
-    for p in found[:5]:
-        _rich_echo(f"      apm install {p}", color="dim")
-    if len(found) > 5:
-        _rich_echo(f"      ... and {len(found) - 5} more", color="dim")
+    if logger:
+        logger.progress("  [i] Found installable package(s) inside this directory:")
+        for p in found[:5]:
+            logger.verbose_detail(f"      apm install {p}")
+        if len(found) > 5:
+            logger.verbose_detail(f"      ... and {len(found) - 5} more")
+    else:
+        _rich_info("  [i] Found installable package(s) inside this directory:")
+        for p in found[:5]:
+            _rich_echo(f"      apm install {p}", color="dim")
+        if len(found) > 5:
+            _rich_echo(f"      ... and {len(found) - 5} more", color="dim")
 
 
-def _validate_package_exists(package, verbose=False, auth_resolver=None):
+def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=None):
     """Validate that a package exists and is accessible on GitHub, Azure DevOps, or locally."""
     import os
     import subprocess
     import tempfile
     from apm_cli.core.auth import AuthResolver
 
-    verbose_log = (lambda msg: _rich_echo(f"  {msg}", color="dim")) if verbose else None
+    if logger:
+        verbose_log = (lambda msg: logger.verbose_detail(f"  {msg}")) if verbose else None
+    else:
+        verbose_log = (lambda msg: _rich_echo(f"  {msg}", color="dim")) if verbose else None
     # Use provided resolver or create new one if not in a CLI session context
     if auth_resolver is None:
         auth_resolver = AuthResolver()
@@ -112,7 +122,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None):
             if find_plugin_json(local) is not None:
                 return True
             # Directory exists but lacks package markers -- surface a hint
-            _local_path_no_markers_hint(local, verbose_log)
+            _local_path_no_markers_hint(local, verbose_log, logger=logger)
             return False
 
         # For virtual packages, use the downloader's validation method

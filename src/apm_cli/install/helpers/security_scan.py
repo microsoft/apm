@@ -44,8 +44,8 @@ def _pre_deploy_security_scan(
                 f"  Blocked: {package_name or 'package'} contains "
                 f"critical hidden character(s)"
             )
-            logger.progress(f"  |-- Inspect source: {install_path}")
-            logger.progress("  |-- Use --force to deploy anyway")
+            logger.tree_item(f"  |-- Inspect source: {install_path}")
+            logger.tree_item("  |-- Use --force to deploy anyway")
         return False
 
     return True

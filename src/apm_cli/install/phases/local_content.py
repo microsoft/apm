@@ -76,13 +76,14 @@ def _has_local_apm_content(project_root):
 # ---------------------------------------------------------------------------
 
 
-def _copy_local_package(dep_ref, install_path, project_root):
+def _copy_local_package(dep_ref, install_path, project_root, logger=None):
     """Copy a local package to apm_modules/.
 
     Args:
         dep_ref: DependencyReference with is_local=True
         install_path: Target path under apm_modules/
         project_root: Project root for resolving relative paths
+        logger: Optional CommandLogger for structured output
 
     Returns:
         install_path on success, None on failure
@@ -96,7 +97,11 @@ def _copy_local_package(dep_ref, install_path, project_root):
         local = local.resolve()
 
     if not local.is_dir():
-        _rich_error(f"Local package path does not exist: {dep_ref.local_path}")
+        msg = f"Local package path does not exist: {dep_ref.local_path}"
+        if logger:
+            logger.error(msg)
+        else:
+            _rich_error(msg)
         return None
     from apm_cli.utils.helpers import find_plugin_json
     if (
@@ -104,9 +109,14 @@ def _copy_local_package(dep_ref, install_path, project_root):
         and not (local / "SKILL.md").exists()
         and find_plugin_json(local) is None
     ):
-        _rich_error(
-            f"Local package is not a valid APM package (no apm.yml, SKILL.md, or plugin.json): {dep_ref.local_path}"
+        msg = (
+            f"Local package is not a valid APM package "
+            f"(no apm.yml, SKILL.md, or plugin.json): {dep_ref.local_path}"
         )
+        if logger:
+            logger.error(msg)
+        else:
+            _rich_error(msg)
         return None
 
     # Ensure parent exists and clean target (always re-copy for local deps)
