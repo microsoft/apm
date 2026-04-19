@@ -1,0 +1,861 @@
+"""Sequential integration phase -- per-package integration loop.
+
+Reads all prior phase outputs from *ctx* (resolve, targets, download) and
+processes each dependency sequentially: local-copy packages, cached packages,
+and freshly-downloaded packages.  For every package the loop:
+
+1. Builds a ``PackageInfo`` (or reuses the pre-downloaded result).
+2. Runs the pre-deploy security scan.
+3. Calls ``_integrate_package_primitives`` (via module-attribute access on
+   ``apm_cli.commands.install`` so that test patches at
+   ``@patch("apm_cli.commands.install._integrate_package_primitives")``
+   continue to intercept the call).
+4. Accumulates deployed-file lists, content hashes, and integration totals
+   on *ctx* for the downstream cleanup and lockfile phases.
+
+After the dependency loop, root-project primitives (``<project_root>/.apm/``)
+are integrated when present (#714).
+
+**Test-patch contract**: every name that tests patch at
+``apm_cli.commands.install.X`` is accessed via the ``_install_mod.X``
+indirection rather than a bare-name import.  This includes at minimum:
+``_integrate_package_primitives``, ``_rich_success``, ``_rich_error``,
+``_copy_local_package``, ``_pre_deploy_security_scan``.
+"""
+
+from __future__ import annotations
+
+import builtins
+import sys
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from apm_cli.install.context import InstallContext
+
+
+def run(ctx: "InstallContext") -> None:
+    """Execute the sequential integration phase.
+
+    On return the following *ctx* fields are populated / updated:
+    ``installed_count``, ``unpinned_count``, ``installed_packages``,
+    ``package_deployed_files``, ``package_types``, ``package_hashes``,
+    ``total_prompts_integrated``, ``total_agents_integrated``,
+    ``total_skills_integrated``, ``total_sub_skills_promoted``,
+    ``total_instructions_integrated``, ``total_commands_integrated``,
+    ``total_hooks_integrated``, ``total_links_resolved``.
+    """
+    # ------------------------------------------------------------------
+    # Module-attribute access for late-patchability.
+    # Tests patch names at apm_cli.commands.install.X -- importing the
+    # MODULE (not the name) ensures the patched attribute is resolved at
+    # call time.
+    # ------------------------------------------------------------------
+    from apm_cli.commands import install as _install_mod
+
+    # ------------------------------------------------------------------
+    # Direct imports for names NOT patched at apm_cli.commands.install.X
+    # ------------------------------------------------------------------
+    from apm_cli.constants import APM_YML_FILENAME
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.deps.installed_package import InstalledPackage
+    from apm_cli.drift import build_download_ref, detect_ref_change
+    from apm_cli.utils.content_hash import compute_package_hash as _compute_hash
+    from apm_cli.utils.path_security import safe_rmtree
+    from rich.progress import (
+        BarColumn,
+        Progress,
+        SpinnerColumn,
+        TaskProgressColumn,
+        TextColumn,
+    )
+
+    # ------------------------------------------------------------------
+    # Unpack ctx into local aliases.  Mutable containers (lists, dicts,
+    # sets) share the reference so in-place mutations are visible through
+    # ctx.  Int counters are accumulated into locals and written back at
+    # the end of this function.
+    # ------------------------------------------------------------------
+    deps_to_install = ctx.deps_to_install
+    apm_modules_dir = ctx.apm_modules_dir
+    callback_failures = ctx.callback_failures
+    callback_downloaded = ctx.callback_downloaded
+    scope = ctx.scope
+    diagnostics = ctx.diagnostics
+    logger = ctx.logger
+    project_root = ctx.project_root
+    dependency_graph = ctx.dependency_graph
+    existing_lockfile = ctx.existing_lockfile
+    update_refs = ctx.update_refs
+    downloader = ctx.downloader
+    force = ctx.force
+    apm_package = ctx.apm_package
+    all_apm_deps = ctx.all_apm_deps
+    registry_config = ctx.registry_config
+    _targets = ctx.targets
+    _pre_download_results = ctx.pre_download_results
+    _pre_downloaded_keys = ctx.pre_downloaded_keys
+    _root_has_local_primitives = ctx.root_has_local_primitives
+
+    # Mutable containers (shared references -- mutations visible via ctx)
+    installed_packages = ctx.installed_packages
+    package_deployed_files = ctx.package_deployed_files
+    package_types = ctx.package_types
+    _package_hashes = ctx.package_hashes
+    managed_files = ctx.managed_files
+
+    # Integrators
+    prompt_integrator = ctx.integrators["prompt"]
+    agent_integrator = ctx.integrators["agent"]
+    skill_integrator = ctx.integrators["skill"]
+    instruction_integrator = ctx.integrators["instruction"]
+    command_integrator = ctx.integrators["command"]
+    hook_integrator = ctx.integrators["hook"]
+
+    # Int counters (written back to ctx at end of function)
+    installed_count = ctx.installed_count
+    unpinned_count = ctx.unpinned_count
+    total_prompts_integrated = ctx.total_prompts_integrated
+    total_agents_integrated = ctx.total_agents_integrated
+    total_skills_integrated = ctx.total_skills_integrated
+    total_sub_skills_promoted = ctx.total_sub_skills_promoted
+    total_instructions_integrated = ctx.total_instructions_integrated
+    total_commands_integrated = ctx.total_commands_integrated
+    total_hooks_integrated = ctx.total_hooks_integrated
+    total_links_resolved = ctx.total_links_resolved
+
+    # ------------------------------------------------------------------
+    # Begin extracted region (install.py lines 1290-2004, verbatim
+    # except for free-variable replacement and indentation adjustment)
+    # ------------------------------------------------------------------
+
+    # Create progress display for sequential integration
+    # Reuse the shared auth_resolver (already created in this invocation) so
+    # verbose auth logging does not trigger a duplicate credential-helper popup.
+    _auth_resolver = ctx.auth_resolver
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[cyan]{task.description}[/cyan]"),
+        BarColumn(),
+        TaskProgressColumn(),
+        transient=True,  # Progress bar disappears when done
+    ) as progress:
+        for dep_ref in deps_to_install:
+            # Determine installation directory using namespaced structure
+            # e.g., microsoft/apm-sample-package -> apm_modules/microsoft/apm-sample-package/
+            # For virtual packages: owner/repo/prompts/file.prompt.md -> apm_modules/owner/repo-file/
+            # For subdirectory packages: owner/repo/subdir -> apm_modules/owner/repo/subdir/
+            if dep_ref.alias:
+                # If alias is provided, use it directly (assume user handles namespacing)
+                install_name = dep_ref.alias
+                install_path = apm_modules_dir / install_name
+            else:
+                # Use the canonical install path from DependencyReference
+                install_path = dep_ref.get_install_path(apm_modules_dir)
+
+            # Skip deps that already failed during BFS resolution callback
+            # to avoid a duplicate error entry in diagnostics.
+            dep_key = dep_ref.get_unique_key()
+            if dep_key in callback_failures:
+                if logger:
+                    logger.verbose_detail(f"  Skipping {dep_key} (already failed during resolution)")
+                continue
+
+            # --- Local package: copy from filesystem (no git download) ---
+            if dep_ref.is_local and dep_ref.local_path:
+                # User scope: relative paths would resolve against $HOME
+                # instead of cwd, producing wrong results.  Skip with a
+                # clear diagnostic rather than silently failing.
+                if scope is InstallScope.USER:
+                    diagnostics.warn(
+                        f"Skipped local package '{dep_ref.local_path}' "
+                        "-- local paths are not supported at user scope (--global). "
+                        "Use a remote reference (owner/repo) instead.",
+                        package=dep_ref.local_path,
+                    )
+                    if logger:
+                        logger.verbose_detail(
+                            f"  Skipping {dep_ref.local_path} (local packages "
+                            "resolve against cwd, not $HOME)"
+                        )
+                    continue
+
+                result_path = _install_mod._copy_local_package(dep_ref, install_path, project_root)
+                if not result_path:
+                    diagnostics.error(
+                        f"Failed to copy local package: {dep_ref.local_path}",
+                        package=dep_ref.local_path,
+                    )
+                    continue
+
+                installed_count += 1
+                if logger:
+                    logger.download_complete(dep_ref.local_path, ref_suffix="local")
+
+                # Build minimal PackageInfo for integration
+                from apm_cli.models.apm_package import (
+                    APMPackage,
+                    PackageInfo,
+                    PackageType,
+                    ResolvedReference,
+                    GitReferenceType,
+                )
+                from datetime import datetime
+
+                local_apm_yml = install_path / "apm.yml"
+                if local_apm_yml.exists():
+                    local_pkg = APMPackage.from_apm_yml(local_apm_yml)
+                    if not local_pkg.source:
+                        local_pkg.source = dep_ref.local_path
+                else:
+                    local_pkg = APMPackage(
+                        name=Path(dep_ref.local_path).name,
+                        version="0.0.0",
+                        package_path=install_path,
+                        source=dep_ref.local_path,
+                    )
+
+                local_ref = ResolvedReference(
+                    original_ref="local",
+                    ref_type=GitReferenceType.BRANCH,
+                    resolved_commit="local",
+                    ref_name="local",
+                )
+                local_info = PackageInfo(
+                    package=local_pkg,
+                    install_path=install_path,
+                    resolved_reference=local_ref,
+                    installed_at=datetime.now().isoformat(),
+                    dependency_ref=dep_ref,
+                )
+
+                # Detect package type
+                from apm_cli.models.validation import detect_package_type
+                pkg_type, plugin_json_path = detect_package_type(install_path)
+                local_info.package_type = pkg_type
+                if pkg_type == PackageType.MARKETPLACE_PLUGIN:
+                    # Normalize: synthesize .apm/ from plugin.json so
+                    # integration can discover and deploy primitives
+                    from apm_cli.deps.plugin_parser import normalize_plugin_directory
+                    normalize_plugin_directory(install_path, plugin_json_path)
+
+                # Record for lockfile
+                node = dependency_graph.dependency_tree.get_node(dep_ref.get_unique_key())
+                depth = node.depth if node else 1
+                resolved_by = node.parent.dependency_ref.repo_url if node and node.parent else None
+                _is_dev = node.is_dev if node else False
+                installed_packages.append(InstalledPackage(
+                    dep_ref=dep_ref, resolved_commit=None,
+                    depth=depth, resolved_by=resolved_by, is_dev=_is_dev,
+                    registry_config=None,  # local deps never go through registry
+                ))
+                dep_key = dep_ref.get_unique_key()
+                if install_path.is_dir() and not dep_ref.is_local:
+                    _package_hashes[dep_key] = _compute_hash(install_path)
+                dep_deployed_files: builtins.list = []
+
+                if hasattr(local_info, 'package_type') and local_info.package_type:
+                    package_types[dep_key] = local_info.package_type.value
+
+                # Use the same variable name as the rest of the loop
+                package_info = local_info
+
+                # Run shared integration pipeline
+                try:
+                    # Pre-deploy security gate
+                    if not _install_mod._pre_deploy_security_scan(
+                        install_path, diagnostics,
+                        package_name=dep_key, force=force,
+                        logger=logger,
+                    ):
+                        package_deployed_files[dep_key] = []
+                        continue
+
+                    int_result = _install_mod._integrate_package_primitives(
+                        package_info, project_root,
+                        targets=_targets,
+                        prompt_integrator=prompt_integrator,
+                        agent_integrator=agent_integrator,
+                        skill_integrator=skill_integrator,
+                        instruction_integrator=instruction_integrator,
+                        command_integrator=command_integrator,
+                        hook_integrator=hook_integrator,
+                        force=force,
+                        managed_files=managed_files,
+                        diagnostics=diagnostics,
+                        package_name=dep_key,
+                        logger=logger,
+                        scope=scope,
+                    )
+                    total_prompts_integrated += int_result["prompts"]
+                    total_agents_integrated += int_result["agents"]
+                    total_skills_integrated += int_result["skills"]
+                    total_sub_skills_promoted += int_result["sub_skills"]
+                    total_instructions_integrated += int_result["instructions"]
+                    total_commands_integrated += int_result["commands"]
+                    total_hooks_integrated += int_result["hooks"]
+                    total_links_resolved += int_result["links_resolved"]
+                    dep_deployed_files.extend(int_result["deployed_files"])
+                except Exception as e:
+                    diagnostics.error(
+                        f"Failed to integrate primitives from local package: {e}",
+                        package=dep_ref.local_path,
+                    )
+
+                package_deployed_files[dep_key] = dep_deployed_files
+
+                # In verbose mode, show inline skip/error count for this package
+                if logger and logger.verbose:
+                    _skip_count = diagnostics.count_for_package(dep_key, "collision")
+                    _err_count = diagnostics.count_for_package(dep_key, "error")
+                    if _skip_count > 0:
+                        noun = "file" if _skip_count == 1 else "files"
+                        logger.package_inline_warning(f"    [!] {_skip_count} {noun} skipped (local files exist)")
+                    if _err_count > 0:
+                        noun = "error" if _err_count == 1 else "errors"
+                        logger.package_inline_warning(f"    [!] {_err_count} integration {noun}")
+                continue
+
+            # npm-like behavior: Branches always fetch latest, only tags/commits use cache
+            # Resolve git reference to determine type
+            from apm_cli.models.apm_package import GitReferenceType
+
+            resolved_ref = None
+            if dep_ref.get_unique_key() not in _pre_downloaded_keys:
+                # Resolve when there is an explicit ref, OR when update_refs
+                # is True AND we have a non-cached lockfile entry to compare
+                # against (otherwise resolution is wasted work -- the package
+                # will be downloaded regardless).
+                _has_lockfile_sha = False
+                if update_refs and existing_lockfile:
+                    _lck = existing_lockfile.get_dependency(dep_ref.get_unique_key())
+                    _has_lockfile_sha = bool(
+                        _lck and _lck.resolved_commit and _lck.resolved_commit != "cached"
+                    )
+                if dep_ref.reference or (update_refs and _has_lockfile_sha):
+                    try:
+                        resolved_ref = downloader.resolve_git_reference(dep_ref)
+                    except Exception:
+                        pass  # If resolution fails, skip cache (fetch latest)
+
+            # Use cache only for tags and commits (not branches)
+            is_cacheable = resolved_ref and resolved_ref.ref_type in [
+                GitReferenceType.TAG,
+                GitReferenceType.COMMIT,
+            ]
+            # Skip download if: already fetched by resolver callback, or cached tag/commit
+            already_resolved = dep_ref.get_unique_key() in callback_downloaded
+            # Detect if manifest ref changed vs what the lockfile recorded.
+            # detect_ref_change() handles all transitions including None->ref.
+            _dep_locked_chk = (
+                existing_lockfile.get_dependency(dep_ref.get_unique_key())
+                if existing_lockfile
+                else None
+            )
+            ref_changed = detect_ref_change(
+                dep_ref, _dep_locked_chk, update_refs=update_refs
+            )
+            # Phase 5 (#171): Also skip when lockfile SHA matches local HEAD
+            # -- but not when the manifest ref has changed (user wants different version).
+            lockfile_match = False
+            if install_path.exists() and existing_lockfile:
+                locked_dep = existing_lockfile.get_dependency(dep_ref.get_unique_key())
+                if locked_dep and locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
+                    if update_refs:
+                        # Update mode: compare resolved remote SHA with lockfile SHA.
+                        # If the remote ref still resolves to the same commit,
+                        # the package content is unchanged -- skip download.
+                        # Also verify local checkout matches to guard against
+                        # corrupted installs that bypassed pre-download checks.
+                        if resolved_ref and resolved_ref.resolved_commit == locked_dep.resolved_commit:
+                            try:
+                                from git import Repo as GitRepo
+                                local_repo = GitRepo(install_path)
+                                if local_repo.head.commit.hexsha == locked_dep.resolved_commit:
+                                    lockfile_match = True
+                            except Exception:
+                                pass  # Local checkout invalid -- fall through to download
+                    elif not ref_changed:
+                        # Normal mode: compare local HEAD with lockfile SHA.
+                        try:
+                            from git import Repo as GitRepo
+                            local_repo = GitRepo(install_path)
+                            if local_repo.head.commit.hexsha == locked_dep.resolved_commit:
+                                lockfile_match = True
+                        except Exception:
+                            pass  # Not a git repo or invalid -- fall through to download
+            skip_download = install_path.exists() and (
+                (is_cacheable and not update_refs)
+                or (already_resolved and not update_refs)
+                or lockfile_match
+            )
+
+            # Verify content integrity when lockfile has a hash
+            if skip_download and _dep_locked_chk and _dep_locked_chk.content_hash:
+                from apm_cli.utils.content_hash import verify_package_hash
+                if not verify_package_hash(install_path, _dep_locked_chk.content_hash):
+                    _hash_msg = (
+                        f"Content hash mismatch for "
+                        f"{dep_ref.get_unique_key()} -- re-downloading"
+                    )
+                    diagnostics.warn(_hash_msg, package=dep_ref.get_unique_key())
+                    if logger:
+                        logger.progress(_hash_msg)
+                    safe_rmtree(install_path, apm_modules_dir)
+                    skip_download = False
+
+            # When registry-only mode is active, bypass cache if the
+            # cached artifact was NOT previously downloaded via the
+            # registry (no registry_prefix in lockfile). This handles
+            # the transition from direct-VCS installs to proxy installs
+            # for packages not yet in the lockfile.
+            if (
+                skip_download
+                and registry_config
+                and registry_config.enforce_only
+                and not dep_ref.is_local
+            ):
+                if not _dep_locked_chk or _dep_locked_chk.registry_prefix is None:
+                    skip_download = False
+
+            if skip_download:
+                display_name = (
+                    str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
+                )
+                # Show resolved ref from lockfile for consistency with fresh installs
+                _ref = dep_ref.reference or ""
+                _sha = ""
+                if _dep_locked_chk and _dep_locked_chk.resolved_commit and _dep_locked_chk.resolved_commit != "cached":
+                    _sha = _dep_locked_chk.resolved_commit[:8]
+                if logger:
+                    logger.download_complete(display_name, ref=_ref, sha=_sha, cached=True)
+                installed_count += 1
+                if not dep_ref.reference:
+                    unpinned_count += 1
+
+                # Skip integration if not needed
+                if not _targets:
+                    continue
+
+                # Integrate prompts for cached packages (zero-config behavior)
+                try:
+                    # Create PackageInfo from cached package
+                    from apm_cli.models.apm_package import (
+                        APMPackage,
+                        PackageInfo,
+                        PackageType,
+                        ResolvedReference,
+                        GitReferenceType,
+                    )
+                    from datetime import datetime
+
+                    # Load package from apm.yml in install path
+                    apm_yml_path = install_path / APM_YML_FILENAME
+                    if apm_yml_path.exists():
+                        cached_package = APMPackage.from_apm_yml(apm_yml_path)
+                        # Ensure source is set to the repo URL for sync matching
+                        if not cached_package.source:
+                            cached_package.source = dep_ref.repo_url
+                    else:
+                        # Virtual package or no apm.yml - create minimal package
+                        cached_package = APMPackage(
+                            name=dep_ref.repo_url.split("/")[-1],
+                            version="unknown",
+                            package_path=install_path,
+                            source=dep_ref.repo_url,
+                        )
+
+                    # Use resolved reference from ref resolution if available
+                    # (e.g. when update_refs matched the lockfile SHA),
+                    # otherwise create a placeholder for cached packages.
+                    resolved_or_cached_ref = resolved_ref if resolved_ref else ResolvedReference(
+                        original_ref=dep_ref.reference or "default",
+                        ref_type=GitReferenceType.BRANCH,
+                        resolved_commit="cached",  # Mark as cached since we don't know exact commit
+                        ref_name=dep_ref.reference or "default",
+                    )
+
+                    cached_package_info = PackageInfo(
+                        package=cached_package,
+                        install_path=install_path,
+                        resolved_reference=resolved_or_cached_ref,
+                        installed_at=datetime.now().isoformat(),
+                        dependency_ref=dep_ref,  # Store for canonical dependency string
+                    )
+
+                    # Detect package_type from disk contents so
+                    # skill integration is not silently skipped
+                    from apm_cli.models.validation import detect_package_type
+                    pkg_type, _ = detect_package_type(install_path)
+                    cached_package_info.package_type = pkg_type
+
+                    # Collect for lockfile (cached packages still need to be tracked)
+                    node = dependency_graph.dependency_tree.get_node(dep_ref.get_unique_key())
+                    depth = node.depth if node else 1
+                    resolved_by = node.parent.dependency_ref.repo_url if node and node.parent else None
+                    _is_dev = node.is_dev if node else False
+                    # Get commit SHA: resolved ref > callback capture > existing lockfile > explicit reference
+                    dep_key = dep_ref.get_unique_key()
+                    cached_commit = None
+                    if resolved_ref and resolved_ref.resolved_commit and resolved_ref.resolved_commit != "cached":
+                        cached_commit = resolved_ref.resolved_commit
+                    if not cached_commit:
+                        cached_commit = callback_downloaded.get(dep_key)
+                    if not cached_commit and existing_lockfile:
+                        locked_dep = existing_lockfile.get_dependency(dep_key)
+                        if locked_dep:
+                            cached_commit = locked_dep.resolved_commit
+                    if not cached_commit:
+                        cached_commit = dep_ref.reference
+                    # Determine if the cached package came from the registry:
+                    # prefer the lockfile record, then the current registry config.
+                    _cached_registry = None
+                    if _dep_locked_chk and _dep_locked_chk.registry_prefix:
+                        # Reconstruct RegistryConfig from lockfile to preserve original source
+                        _cached_registry = registry_config
+                    elif registry_config and not dep_ref.is_local:
+                        _cached_registry = registry_config
+                    installed_packages.append(InstalledPackage(
+                        dep_ref=dep_ref, resolved_commit=cached_commit,
+                        depth=depth, resolved_by=resolved_by, is_dev=_is_dev,
+                        registry_config=_cached_registry,
+                    ))
+                    if install_path.is_dir():
+                        _package_hashes[dep_key] = _compute_hash(install_path)
+                    # Track package type for lockfile
+                    if hasattr(cached_package_info, 'package_type') and cached_package_info.package_type:
+                        package_types[dep_key] = cached_package_info.package_type.value
+
+                    # Pre-deploy security gate
+                    if not _install_mod._pre_deploy_security_scan(
+                        install_path, diagnostics,
+                        package_name=dep_key, force=force,
+                        logger=logger,
+                    ):
+                        package_deployed_files[dep_key] = []
+                        continue
+
+                    int_result = _install_mod._integrate_package_primitives(
+                        cached_package_info, project_root,
+                        targets=_targets,
+                        prompt_integrator=prompt_integrator,
+                        agent_integrator=agent_integrator,
+                        skill_integrator=skill_integrator,
+                        instruction_integrator=instruction_integrator,
+                        command_integrator=command_integrator,
+                        hook_integrator=hook_integrator,
+                        force=force,
+                        managed_files=managed_files,
+                        diagnostics=diagnostics,
+                        package_name=dep_key,
+                        logger=logger,
+                        scope=scope,
+                    )
+                    total_prompts_integrated += int_result["prompts"]
+                    total_agents_integrated += int_result["agents"]
+                    total_skills_integrated += int_result["skills"]
+                    total_sub_skills_promoted += int_result["sub_skills"]
+                    total_instructions_integrated += int_result["instructions"]
+                    total_commands_integrated += int_result["commands"]
+                    total_hooks_integrated += int_result["hooks"]
+                    total_links_resolved += int_result["links_resolved"]
+                    dep_deployed = int_result["deployed_files"]
+                    package_deployed_files[dep_key] = dep_deployed
+                except Exception as e:
+                    diagnostics.error(
+                        f"Failed to integrate primitives from cached package: {e}",
+                        package=dep_key,
+                    )
+
+                # In verbose mode, show inline skip/error count for this package
+                if logger and logger.verbose:
+                    _skip_count = diagnostics.count_for_package(dep_key, "collision")
+                    _err_count = diagnostics.count_for_package(dep_key, "error")
+                    if _skip_count > 0:
+                        noun = "file" if _skip_count == 1 else "files"
+                        logger.package_inline_warning(f"    [!] {_skip_count} {noun} skipped (local files exist)")
+                    if _err_count > 0:
+                        noun = "error" if _err_count == 1 else "errors"
+                        logger.package_inline_warning(f"    [!] {_err_count} integration {noun}")
+
+                continue
+
+            # Download the package with progress feedback
+            try:
+                display_name = (
+                    str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
+                )
+                short_name = (
+                    display_name.split("/")[-1]
+                    if "/" in display_name
+                    else display_name
+                )
+
+                # Create a progress task for this download
+                task_id = progress.add_task(
+                    description=f"Fetching {short_name}",
+                    total=None,  # Indeterminate initially; git will update with actual counts
+                )
+
+                # T5: Build download ref - use locked commit if available.
+                # build_download_ref() uses manifest ref when ref_changed is True.
+                download_ref = build_download_ref(
+                    dep_ref, existing_lockfile, update_refs=update_refs, ref_changed=ref_changed
+                )
+
+                # Phase 4 (#171): Use pre-downloaded result if available
+                _dep_key = dep_ref.get_unique_key()
+                if _dep_key in _pre_download_results:
+                    package_info = _pre_download_results[_dep_key]
+                else:
+                    # Fallback: sequential download (should rarely happen)
+                    package_info = downloader.download_package(
+                        download_ref,
+                        install_path,
+                        progress_task_id=task_id,
+                        progress_obj=progress,
+                    )
+
+                # CRITICAL: Hide progress BEFORE printing success message to avoid overlap
+                progress.update(task_id, visible=False)
+                progress.refresh()  # Force immediate refresh to hide the bar
+
+                installed_count += 1
+
+                # Show resolved ref alongside package name for visibility
+                resolved = getattr(package_info, 'resolved_reference', None)
+                if logger:
+                    _ref = ""
+                    _sha = ""
+                    if resolved:
+                        _ref = resolved.ref_name if resolved.ref_name else ""
+                        _sha = resolved.resolved_commit[:8] if resolved.resolved_commit else ""
+                    logger.download_complete(display_name, ref=_ref, sha=_sha)
+                    # Log auth source for this download (verbose only)
+                    if _auth_resolver:
+                        try:
+                            _host = dep_ref.host or "github.com"
+                            _org = dep_ref.repo_url.split('/')[0] if dep_ref.repo_url and '/' in dep_ref.repo_url else None
+                            _ctx = _auth_resolver.resolve(_host, org=_org)
+                            logger.package_auth(_ctx.source, _ctx.token_type or "none")
+                        except Exception:
+                            pass
+                else:
+                    _ref_suffix = ""
+                    if resolved:
+                        _r = resolved.ref_name if resolved.ref_name else ""
+                        _s = resolved.resolved_commit[:8] if resolved.resolved_commit else ""
+                        if _r and _s:
+                            _ref_suffix = f" #{_r} @{_s}"
+                        elif _r:
+                            _ref_suffix = f" #{_r}"
+                        elif _s:
+                            _ref_suffix = f" @{_s}"
+                    _install_mod._rich_success(f"[+] {display_name}{_ref_suffix}")
+
+                # Track unpinned deps for aggregated diagnostic
+                if not dep_ref.reference:
+                    unpinned_count += 1
+
+                # Collect for lockfile: get resolved commit and depth
+                resolved_commit = None
+                if resolved:
+                    resolved_commit = package_info.resolved_reference.resolved_commit
+                # Get depth from dependency tree
+                node = dependency_graph.dependency_tree.get_node(dep_ref.get_unique_key())
+                depth = node.depth if node else 1
+                resolved_by = node.parent.dependency_ref.repo_url if node and node.parent else None
+                _is_dev = node.is_dev if node else False
+                installed_packages.append(InstalledPackage(
+                    dep_ref=dep_ref, resolved_commit=resolved_commit,
+                    depth=depth, resolved_by=resolved_by, is_dev=_is_dev,
+                    registry_config=registry_config if not dep_ref.is_local else None,
+                ))
+                if install_path.is_dir():
+                    _package_hashes[dep_ref.get_unique_key()] = _compute_hash(install_path)
+
+                # Supply chain protection: verify content hash on fresh
+                # downloads when the lockfile already records a hash.
+                # A mismatch means the downloaded content differs from
+                # what was previously locked -- possible tampering.
+                if (
+                    not update_refs
+                    and _dep_locked_chk
+                    and _dep_locked_chk.content_hash
+                    and dep_ref.get_unique_key() in _package_hashes
+                ):
+                    _fresh_hash = _package_hashes[dep_ref.get_unique_key()]
+                    if _fresh_hash != _dep_locked_chk.content_hash:
+                        safe_rmtree(install_path, apm_modules_dir)
+                        _install_mod._rich_error(
+                            f"Content hash mismatch for "
+                            f"{dep_ref.get_unique_key()}: "
+                            f"expected {_dep_locked_chk.content_hash}, "
+                            f"got {_fresh_hash}. "
+                            "The downloaded content differs from the "
+                            "lockfile record. This may indicate a "
+                            "supply-chain attack. Use 'apm install "
+                            "--update' to accept new content and "
+                            "update the lockfile."
+                        )
+                        sys.exit(1)
+
+                # Track package type for lockfile
+                if hasattr(package_info, 'package_type') and package_info.package_type:
+                    package_types[dep_ref.get_unique_key()] = package_info.package_type.value
+
+                # Show package type in verbose mode
+                if hasattr(package_info, "package_type"):
+                    from apm_cli.models.apm_package import PackageType
+
+                    package_type = package_info.package_type
+                    _type_label = {
+                        PackageType.CLAUDE_SKILL: "Skill (SKILL.md detected)",
+                        PackageType.MARKETPLACE_PLUGIN: "Marketplace Plugin (plugin.json detected)",
+                        PackageType.HYBRID: "Hybrid (apm.yml + SKILL.md)",
+                        PackageType.APM_PACKAGE: "APM Package (apm.yml)",
+                    }.get(package_type)
+                    if _type_label and logger:
+                        logger.package_type_info(_type_label)
+
+                # Auto-integrate prompts and agents if enabled
+                # Pre-deploy security gate
+                if not _install_mod._pre_deploy_security_scan(
+                    package_info.install_path, diagnostics,
+                    package_name=dep_ref.get_unique_key(), force=force,
+                    logger=logger,
+                ):
+                    package_deployed_files[dep_ref.get_unique_key()] = []
+                    continue
+
+                if _targets:
+                    try:
+                        int_result = _install_mod._integrate_package_primitives(
+                            package_info, project_root,
+                            targets=_targets,
+                            prompt_integrator=prompt_integrator,
+                            agent_integrator=agent_integrator,
+                            skill_integrator=skill_integrator,
+                            instruction_integrator=instruction_integrator,
+                            command_integrator=command_integrator,
+                            hook_integrator=hook_integrator,
+                            force=force,
+                            managed_files=managed_files,
+                            diagnostics=diagnostics,
+                            package_name=dep_ref.get_unique_key(),
+                            logger=logger,
+                            scope=scope,
+                        )
+                        total_prompts_integrated += int_result["prompts"]
+                        total_agents_integrated += int_result["agents"]
+                        total_skills_integrated += int_result["skills"]
+                        total_sub_skills_promoted += int_result["sub_skills"]
+                        total_instructions_integrated += int_result["instructions"]
+                        total_commands_integrated += int_result["commands"]
+                        total_hooks_integrated += int_result["hooks"]
+                        total_links_resolved += int_result["links_resolved"]
+                        dep_deployed_fresh = int_result["deployed_files"]
+                        package_deployed_files[dep_ref.get_unique_key()] = dep_deployed_fresh
+                    except Exception as e:
+                        # Don't fail installation if integration fails
+                        diagnostics.error(
+                            f"Failed to integrate primitives: {e}",
+                            package=dep_ref.get_unique_key(),
+                        )
+
+                    # In verbose mode, show inline skip/error count for this package
+                    if logger and logger.verbose:
+                        pkg_key = dep_ref.get_unique_key()
+                        _skip_count = diagnostics.count_for_package(pkg_key, "collision")
+                        _err_count = diagnostics.count_for_package(pkg_key, "error")
+                        if _skip_count > 0:
+                            noun = "file" if _skip_count == 1 else "files"
+                            logger.package_inline_warning(f"    [!] {_skip_count} {noun} skipped (local files exist)")
+                        if _err_count > 0:
+                            noun = "error" if _err_count == 1 else "errors"
+                            logger.package_inline_warning(f"    [!] {_err_count} integration {noun}")
+
+            except Exception as e:
+                display_name = (
+                    str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
+                )
+                # Remove the progress task on error
+                if "task_id" in locals():
+                    progress.remove_task(task_id)
+                diagnostics.error(
+                    f"Failed to install {display_name}: {e}",
+                    package=dep_ref.get_unique_key(),
+                )
+                # Continue with other packages instead of failing completely
+                continue
+
+    # ------------------------------------------------------------------
+    # Integrate root project's own .apm/ primitives (#714).
+    #
+    # Users should not need a dummy "./agent/apm.yml" stub to get their
+    # root-level .apm/ rules deployed alongside external dependencies.
+    # Treat the project root as an implicit local package: any primitives
+    # found in <project_root>/.apm/ are integrated after all declared
+    # dependency packages have been processed.
+    # ------------------------------------------------------------------
+    if _root_has_local_primitives and _targets:
+        from apm_cli.models.apm_package import PackageInfo as _PackageInfo
+        _root_pkg_info = _PackageInfo(
+            package=apm_package,
+            install_path=project_root,
+        )
+        if logger:
+            logger.download_complete("<project root>", ref_suffix="local")
+        try:
+            _root_result = _install_mod._integrate_package_primitives(
+                _root_pkg_info, project_root,
+                targets=_targets,
+                prompt_integrator=prompt_integrator,
+                agent_integrator=agent_integrator,
+                skill_integrator=skill_integrator,
+                instruction_integrator=instruction_integrator,
+                command_integrator=command_integrator,
+                hook_integrator=hook_integrator,
+                force=force,
+                managed_files=managed_files,
+                diagnostics=diagnostics,
+                package_name="<root>",
+                logger=logger,
+                scope=scope,
+            )
+            total_prompts_integrated += _root_result["prompts"]
+            total_agents_integrated += _root_result["agents"]
+            total_instructions_integrated += _root_result["instructions"]
+            total_commands_integrated += _root_result["commands"]
+            total_hooks_integrated += _root_result["hooks"]
+            total_links_resolved += _root_result["links_resolved"]
+            installed_count += 1
+        except Exception as e:
+            import traceback as _tb
+            diagnostics.error(
+                f"Failed to integrate root project primitives: {e}",
+                package="<root>",
+                detail=_tb.format_exc(),
+            )
+            # When root integration is the *only* action (no external deps),
+            # a failure means nothing was deployed -- surface it clearly.
+            if not all_apm_deps and logger:
+                logger.error(
+                    f"Root project primitives could not be integrated: {e}"
+                )
+
+    # ------------------------------------------------------------------
+    # Write int counters back to ctx (mutable containers already share
+    # the reference and need no write-back).
+    # ------------------------------------------------------------------
+    ctx.installed_count = installed_count
+    ctx.unpinned_count = unpinned_count
+    ctx.total_prompts_integrated = total_prompts_integrated
+    ctx.total_agents_integrated = total_agents_integrated
+    ctx.total_skills_integrated = total_skills_integrated
+    ctx.total_sub_skills_promoted = total_sub_skills_promoted
+    ctx.total_instructions_integrated = total_instructions_integrated
+    ctx.total_commands_integrated = total_commands_integrated
+    ctx.total_hooks_integrated = total_hooks_integrated
+    ctx.total_links_resolved = total_links_resolved

@@ -81,9 +81,27 @@ class InstallContext:
     pre_downloaded_keys: Set[str] = field(default_factory=set)  # download
 
     # ------------------------------------------------------------------
-    # Downstream phase accumulators (written by integrate, read by cleanup/lockfile)
+    # Pre-integrate inputs (populated by caller before integrate phase)
+    # ------------------------------------------------------------------
+    diagnostics: Any = None  # DiagnosticCollector
+    registry_config: Any = None  # RegistryConfig
+    managed_files: Set[str] = field(default_factory=set)
+
+    # ------------------------------------------------------------------
+    # Integrate phase outputs (written by integrate, read by cleanup/lockfile/summary)
     # ------------------------------------------------------------------
     intended_dep_keys: Set[str] = field(default_factory=set)
     package_deployed_files: Dict[str, List[str]] = field(default_factory=dict)
     package_types: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     package_hashes: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    installed_count: int = 0  # integrate
+    unpinned_count: int = 0  # integrate
+    installed_packages: List[Any] = field(default_factory=list)  # integrate
+    total_prompts_integrated: int = 0  # integrate
+    total_agents_integrated: int = 0  # integrate
+    total_skills_integrated: int = 0  # integrate
+    total_sub_skills_promoted: int = 0  # integrate
+    total_instructions_integrated: int = 0  # integrate
+    total_commands_integrated: int = 0  # integrate
+    total_hooks_integrated: int = 0  # integrate
+    total_links_resolved: int = 0  # integrate
