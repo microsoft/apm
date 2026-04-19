@@ -126,7 +126,7 @@ class TestHasLocalApmContent:
 class TestIntegrateLocalContent:
     """Tests for the _integrate_local_content() helper."""
 
-    @patch("apm_cli.commands.install._integrate_package_primitives")
+    @patch("apm_cli.install.services.integrate_package_primitives")
     def test_integrates_instructions(self, mock_integrate, tmp_path):
         """Instructions file in .apm/ is counted in the result."""
         mock_integrate.return_value = _zero_counters(
@@ -139,7 +139,7 @@ class TestIntegrateLocalContent:
         assert result["instructions"] == 1
         assert ".github/instructions/coding.instructions.md" in result["deployed_files"]
 
-    @patch("apm_cli.commands.install._integrate_package_primitives")
+    @patch("apm_cli.install.services.integrate_package_primitives")
     def test_integrates_agents(self, mock_integrate, tmp_path):
         """Agent file in .apm/ is counted in the result."""
         mock_integrate.return_value = _zero_counters(
@@ -152,7 +152,7 @@ class TestIntegrateLocalContent:
         assert result["agents"] == 1
         assert ".github/agents/backend.agent.md" in result["deployed_files"]
 
-    @patch("apm_cli.commands.install._integrate_package_primitives")
+    @patch("apm_cli.install.services.integrate_package_primitives")
     def test_skips_root_skill_md(self, mock_integrate, tmp_path):
         """A root SKILL.md must NOT be deployed (package_type=APM_PACKAGE prevents it).
 
@@ -172,7 +172,7 @@ class TestIntegrateLocalContent:
         package_info = mock_integrate.call_args[0][0]
         assert package_info.package_type == PackageType.APM_PACKAGE
 
-    @patch("apm_cli.commands.install._integrate_package_primitives")
+    @patch("apm_cli.install.services.integrate_package_primitives")
     def test_package_info_install_path_is_project_root(self, mock_integrate, tmp_path):
         """The synthetic PackageInfo must point to project_root, not .apm/."""
         mock_integrate.return_value = _zero_counters()
@@ -182,7 +182,7 @@ class TestIntegrateLocalContent:
         package_info = mock_integrate.call_args[0][0]
         assert package_info.install_path == tmp_path
 
-    @patch("apm_cli.commands.install._integrate_package_primitives")
+    @patch("apm_cli.install.services.integrate_package_primitives")
     def test_returns_zero_counters_when_nothing_deployed(self, mock_integrate, tmp_path):
         """When nothing is deployed the result counters are all zero."""
         mock_integrate.return_value = _zero_counters()

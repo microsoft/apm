@@ -51,9 +51,9 @@ from apm_cli.install.validation import (
 # Re-export local-content leaf helpers so that callers inside this module
 # (e.g. _install_apm_dependencies) and any future test patches against
 # "apm_cli.commands.install._copy_local_package" keep working.
-# _integrate_local_content stays here (not moved) because it calls
-# _integrate_package_primitives via bare-name lookup and tests patch
-# apm_cli.commands.install._integrate_package_primitives to intercept it.
+# _integrate_package_primitives and _integrate_local_content live in
+# apm_cli.install.services (P1 -- DI seam).  Re-exports below preserve
+# the existing import contract for tests and external callers.
 from apm_cli.install.phases.local_content import (
     _copy_local_package,
     _has_local_apm_content,
@@ -691,198 +691,21 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
 # ---------------------------------------------------------------------------
 
 
-def _integrate_package_primitives(
-    package_info,
-    project_root,
-    *,
-    targets,
-    prompt_integrator,
-    agent_integrator,
-    skill_integrator,
-    instruction_integrator,
-    command_integrator,
-    hook_integrator,
-    force,
-    managed_files,
-    diagnostics,
-    package_name="",
-    logger=None,
-    scope=None,
-):
-    """Run the full integration pipeline for a single package.
-
-    Iterates over *targets* (``TargetProfile`` list) and dispatches each
-    primitive to the appropriate integrator via the target-driven API.
-    Skills are handled separately because ``SkillIntegrator`` already
-    routes across all targets internally.
-
-    When *scope* is ``InstallScope.USER``, targets and primitives that
-    do not support user-scope deployment are silently skipped.
-
-    Returns a dict with integration counters and the list of deployed file paths.
-    """
-    from apm_cli.integration.dispatch import get_dispatch_table
-
-    _dispatch = get_dispatch_table()
-    result = {
-        "prompts": 0,
-        "agents": 0,
-        "skills": 0,
-        "sub_skills": 0,
-        "instructions": 0,
-        "commands": 0,
-        "hooks": 0,
-        "links_resolved": 0,
-        "deployed_files": [],
-    }
-
-    deployed = result["deployed_files"]
-
-    if not targets:
-        return result
-
-    def _log_integration(msg):
-        if logger:
-            logger.tree_item(msg)
-
-    # Map integrator kwargs to dispatch table keys
-    _INTEGRATOR_KWARGS = {
-        "prompts": prompt_integrator,
-        "agents": agent_integrator,
-        "commands": command_integrator,
-        "instructions": instruction_integrator,
-        "hooks": hook_integrator,
-        "skills": skill_integrator,
-    }
-
-    # --- per-target dispatch loop ---
-    for _target in targets:
-        for _prim_name, _mapping in _target.primitives.items():
-            _entry = _dispatch.get(_prim_name)
-            if not _entry or _entry.multi_target:
-                continue  # skills handled below
-
-            _integrator = _INTEGRATOR_KWARGS[_prim_name]
-            _int_result = getattr(_integrator, _entry.integrate_method)(
-                _target, package_info, project_root,
-                force=force, managed_files=managed_files,
-                diagnostics=diagnostics,
-            )
-
-            if _int_result.files_integrated > 0:
-                result[_entry.counter_key] += _int_result.files_integrated
-                _effective_root = _mapping.deploy_root or _target.root_dir
-                _deploy_dir = f"{_effective_root}/{_mapping.subdir}/" if _mapping.subdir else f"{_effective_root}/"
-                # Determine display label
-                if _prim_name == "instructions" and _mapping.format_id in ("cursor_rules", "claude_rules"):
-                    _label = "rule(s)"
-                elif _prim_name == "instructions":
-                    _label = "instruction(s)"
-                elif _prim_name == "hooks":
-                    if _target.name == "claude":
-                        _deploy_dir = ".claude/settings.json"
-                    elif _target.name == "cursor":
-                        _deploy_dir = ".cursor/hooks.json"
-                    elif _target.name == "codex":
-                        _deploy_dir = ".codex/hooks.json"
-                    _label = "hook(s)"
-                else:
-                    _label = _prim_name
-                _log_integration(
-                    f"  |-- {_int_result.files_integrated} {_label} integrated -> {_deploy_dir}"
-                )
-            result["links_resolved"] += _int_result.links_resolved
-            for tp in _int_result.target_paths:
-                deployed.append(tp.relative_to(project_root).as_posix())
-
-    # --- skills (multi-target, handled by SkillIntegrator internally) ---
-    skill_result = skill_integrator.integrate_package_skill(
-        package_info, project_root,
-        diagnostics=diagnostics, managed_files=managed_files, force=force,
-        targets=targets,
-    )
-    _skill_target_dirs: set[str] = builtins.set()
-    for tp in skill_result.target_paths:
-        rel = tp.relative_to(project_root)
-        if rel.parts:
-            _skill_target_dirs.add(rel.parts[0])
-    _skill_targets = sorted(_skill_target_dirs)
-    _skill_target_str = ", ".join(f"{d}/skills/" for d in _skill_targets) or "skills/"
-    if skill_result.skill_created:
-        result["skills"] += 1
-        _log_integration(f"  |-- Skill integrated -> {_skill_target_str}")
-    if skill_result.sub_skills_promoted > 0:
-        result["sub_skills"] += skill_result.sub_skills_promoted
-        _log_integration(f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_target_str}")
-    for tp in skill_result.target_paths:
-        deployed.append(tp.relative_to(project_root).as_posix())
-
-    return result
+# Re-exports for backward compatibility -- the real implementations live
+# in apm_cli.install.services (P1 -- DI seam).  Tests that
+# @patch("apm_cli.commands.install._integrate_package_primitives") still
+# work because patching this module-level alias rebinds the name where
+# call-sites in this module would look it up.  Tests inside this codebase
+# now patch the canonical apm_cli.install.services._integrate_package_primitives
+# directly to avoid relying on transitive aliasing.
+from apm_cli.install.services import (
+    integrate_package_primitives,
+    integrate_local_content,
+    _integrate_package_primitives,
+    _integrate_local_content,
+)
 
 
-def _integrate_local_content(
-    project_root,
-    *,
-    targets,
-    prompt_integrator,
-    agent_integrator,
-    skill_integrator,
-    instruction_integrator,
-    command_integrator,
-    hook_integrator,
-    force,
-    managed_files,
-    diagnostics,
-    logger=None,
-    scope=None,
-):
-    """Integrate primitives from the project's own .apm/ directory.
-
-    This treats the project root as a synthetic package so that local
-    skills, instructions, agents, prompts, hooks, and commands in .apm/
-    are deployed to target directories exactly like dependency primitives.
-
-    Only .apm/ sub-directories are processed.  A root-level SKILL.md is
-    intentionally ignored (it describes the project itself, not a
-    deployable skill).
-
-    Returns a dict with integration counters and deployed file paths,
-    same shape as ``_integrate_package_primitives()``.
-    """
-    from ..models.apm_package import APMPackage, PackageInfo, PackageType
-
-    # Build a lightweight synthetic PackageInfo rooted at the project.
-    # package_type=APM_PACKAGE prevents SkillIntegrator from treating
-    # a root SKILL.md as a native skill to deploy.
-    local_pkg = APMPackage(
-        name="_local",
-        version="0.0.0",
-        package_path=project_root,
-        source="local",
-    )
-    local_info = PackageInfo(
-        package=local_pkg,
-        install_path=project_root,
-        package_type=PackageType.APM_PACKAGE,
-    )
-
-    return _integrate_package_primitives(
-        local_info,
-        project_root,
-        targets=targets,
-        prompt_integrator=prompt_integrator,
-        agent_integrator=agent_integrator,
-        skill_integrator=skill_integrator,
-        instruction_integrator=instruction_integrator,
-        command_integrator=command_integrator,
-        hook_integrator=hook_integrator,
-        force=force,
-        managed_files=managed_files,
-        diagnostics=diagnostics,
-        package_name="_local",
-        logger=logger,
-        scope=scope,
-    )
 
 
 # ---------------------------------------------------------------------------
