@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Propagate headers and environment variables through OpenCode MCP adapter with defensive copies to prevent mutation (#622)
 - Fix `apm install` hanging indefinitely when corporate firewalls silently drop SSH packets by setting `GIT_SSH_COMMAND` with `ConnectTimeout=30` (#652)
 - Fix `apm compile --target claude` silently skipping dependency instructions stored in `.github/instructions/` (#631)
+- `_parse_artifactory_base_url()` now honours `PROXY_REGISTRY_URL` — lockfile reinstall no longer fails for virtual subdirectory packages (#614)
 
 ### Changed
 
