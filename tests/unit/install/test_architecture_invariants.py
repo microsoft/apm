@@ -40,9 +40,7 @@ def test_install_context_importable():
 
 MAX_MODULE_LOC = 1000
 
-KNOWN_LARGE_MODULES = {
-    "phases/integrate.py": 900,
-}
+KNOWN_LARGE_MODULES = {}
 
 
 def test_no_install_module_exceeds_loc_budget():
