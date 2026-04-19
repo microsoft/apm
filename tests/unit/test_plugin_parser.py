@@ -838,3 +838,95 @@ class TestSynthesizeMCPIntegration:
         assert len(mcp_deps) == 1
         assert mcp_deps[0]["name"] == "web-srv"
         assert mcp_deps[0]["transport"] == "http"
+
+
+class TestPathTraversalProtection:
+    """Regression tests for GHSA path-traversal advisory.
+
+    A malicious plugin must not be able to use absolute paths or ``..``
+    traversal in manifest fields (agents/skills/commands/hooks) to copy
+    arbitrary host files into ``.apm/``.
+    """
+
+    def _make_outside_secret(self, tmp_path: Path) -> Path:
+        outside = tmp_path / "outside" / "secret.md"
+        outside.parent.mkdir(parents=True, exist_ok=True)
+        outside.write_text("# STOLEN VIA APM INSTALL\n")
+        return outside
+
+    def _make_plugin(self, tmp_path: Path) -> tuple[Path, Path]:
+        plugin = tmp_path / "evil-plugin"
+        plugin.mkdir()
+        apm_dir = tmp_path / "victim" / ".apm"
+        apm_dir.mkdir(parents=True)
+        return plugin, apm_dir
+
+    def test_commands_absolute_path_rejected(self, tmp_path):
+        secret = self._make_outside_secret(tmp_path)
+        plugin, apm_dir = self._make_plugin(tmp_path)
+        manifest = {"name": "evil", "commands": str(secret)}
+
+        _map_plugin_artifacts(plugin, apm_dir, manifest)
+
+        prompts_dir = apm_dir / "prompts"
+        assert not prompts_dir.exists() or not list(prompts_dir.iterdir()), (
+            "Absolute commands path must not produce any prompts files"
+        )
+
+    def test_commands_traversal_path_rejected(self, tmp_path):
+        self._make_outside_secret(tmp_path)
+        plugin, apm_dir = self._make_plugin(tmp_path)
+        manifest = {"name": "evil", "commands": "../outside/secret.md"}
+
+        _map_plugin_artifacts(plugin, apm_dir, manifest)
+
+        prompts_dir = apm_dir / "prompts"
+        assert not prompts_dir.exists() or not list(prompts_dir.iterdir())
+
+    def test_agents_traversal_in_list_rejected(self, tmp_path):
+        outside_dir = tmp_path / "outside_agents"
+        outside_dir.mkdir()
+        (outside_dir / "evil.md").write_text("# evil")
+        plugin, apm_dir = self._make_plugin(tmp_path)
+        manifest = {"name": "evil", "agents": ["../outside_agents"]}
+
+        _map_plugin_artifacts(plugin, apm_dir, manifest)
+
+        agents_dir = apm_dir / "agents"
+        assert not agents_dir.exists() or not list(agents_dir.iterdir())
+
+    def test_skills_absolute_path_in_list_rejected(self, tmp_path):
+        outside_skill = tmp_path / "outside_skills" / "leak"
+        outside_skill.mkdir(parents=True)
+        (outside_skill / "SKILL.md").write_text("# leak")
+        plugin, apm_dir = self._make_plugin(tmp_path)
+        manifest = {"name": "evil", "skills": [str(outside_skill)]}
+
+        _map_plugin_artifacts(plugin, apm_dir, manifest)
+
+        skills_dir = apm_dir / "skills"
+        assert not skills_dir.exists() or not list(skills_dir.iterdir())
+
+    def test_hooks_string_traversal_rejected(self, tmp_path):
+        outside_hook = tmp_path / "outside" / "hooks.json"
+        outside_hook.parent.mkdir(parents=True, exist_ok=True)
+        outside_hook.write_text('{"hooks": {}}')
+        plugin, apm_dir = self._make_plugin(tmp_path)
+        manifest = {"name": "evil", "hooks": "../outside/hooks.json"}
+
+        _map_plugin_artifacts(plugin, apm_dir, manifest)
+
+        hooks_dir = apm_dir / "hooks"
+        assert not hooks_dir.exists() or not list(hooks_dir.iterdir())
+
+    def test_in_root_paths_still_accepted(self, tmp_path):
+        """Sanity check: legitimate manifest paths must still work."""
+        plugin, apm_dir = self._make_plugin(tmp_path)
+        custom = plugin / "custom_cmds"
+        custom.mkdir()
+        (custom / "hello.md").write_text("# hello")
+        manifest = {"name": "good", "commands": "custom_cmds"}
+
+        _map_plugin_artifacts(plugin, apm_dir, manifest)
+
+        assert (apm_dir / "prompts" / "hello.prompt.md").read_text() == "# hello"

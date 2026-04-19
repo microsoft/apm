@@ -18,6 +18,30 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 import yaml
 
+from ..utils.path_security import ensure_path_within, PathTraversalError
+
+
+_logger = logging.getLogger(__name__)
+
+
+def _is_within_plugin(candidate: Path, plugin_root: Path, *, component: str, raw: str) -> bool:
+    """Return True iff *candidate* resolves inside *plugin_root*.
+
+    Logs a warning and returns False when the path escapes the plugin
+    root (absolute path, ``..`` traversal, or symlink pointing outside).
+    Used to enforce the trust boundary on attacker-controlled manifest
+    fields (agents/skills/commands/hooks) during plugin normalization.
+    """
+    try:
+        ensure_path_within(candidate, plugin_root)
+    except PathTraversalError as exc:
+        _logger.warning(
+            "Skipping %s entry %r: path escapes plugin root (%s)",
+            component, raw, exc,
+        )
+        return False
+    return True
+
 
 def parse_plugin_manifest(plugin_json_path: Path) -> Dict[str, Any]:
     """Parse a plugin.json manifest file.
@@ -333,19 +357,37 @@ def _map_plugin_artifacts(plugin_path: Path, apm_dir: Path, manifest: Optional[D
 
     # Resolve source paths  -- use manifest arrays if present, else defaults.
     # Custom paths may be directories OR individual files.
+    #
+    # Security: every manifest-controlled path is verified to resolve
+    # inside *plugin_path* before it is copied.  Without this guard, a
+    # malicious plugin could set ``"commands": "/etc/passwd"`` or
+    # ``"agents": ["../../host"]`` and trick ``apm install`` into copying
+    # arbitrary host files into the project's ``.apm/`` tree (and from
+    # there into ``.github/prompts/`` via auto-integration).
     def _resolve_sources(component: str, default_dir: str):
         """Return list of existing source paths (dirs or files) for a component."""
         custom = manifest.get(component)
         if isinstance(custom, list):
             paths = []
             for p in custom:
-                src = plugin_path / str(p)
-                if src.exists() and not src.is_symlink():
+                raw = str(p)
+                src = plugin_path / raw
+                if (
+                    src.exists()
+                    and not src.is_symlink()
+                    and _is_within_plugin(src, plugin_path, component=component, raw=raw)
+                ):
                     paths.append(src)
             return paths
         elif isinstance(custom, str):
             src = plugin_path / custom
-            return [src] if src.exists() and not src.is_symlink() else []
+            if (
+                src.exists()
+                and not src.is_symlink()
+                and _is_within_plugin(src, plugin_path, component=component, raw=custom)
+            ):
+                return [src]
+            return []
         default = plugin_path / default_dir
         return [default] if default.exists() and default.is_dir() else []
 
@@ -435,10 +477,14 @@ def _map_plugin_artifacts(plugin_path: Path, apm_dir: Path, manifest: Optional[D
         )
     elif isinstance(hooks_value, str) and (plugin_path / hooks_value).is_file():
         # Config file path (e.g. "hooks": "hooks.json")
-        target_hooks = apm_dir / "hooks"
-        target_hooks.mkdir(parents=True, exist_ok=True)
         src_file = plugin_path / hooks_value
-        if not src_file.is_symlink():
+        if src_file.is_symlink() or not _is_within_plugin(
+            src_file, plugin_path, component="hooks", raw=hooks_value
+        ):
+            pass
+        else:
+            target_hooks = apm_dir / "hooks"
+            target_hooks.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src_file, target_hooks / "hooks.json")
     else:
         # Directory path(s)  -- standard flow
