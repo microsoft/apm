@@ -63,6 +63,18 @@ from apm_cli.install.validation import (
     _validate_package_exists,
 )
 
+# Re-export local-content leaf helpers so that callers inside this module
+# (e.g. _install_apm_dependencies) and any future test patches against
+# "apm_cli.commands.install._copy_local_package" keep working.
+# _integrate_local_content stays here (not moved) because it calls
+# _integrate_package_primitives via bare-name lookup and tests patch
+# apm_cli.commands.install._integrate_package_primitives to intercept it.
+from apm_cli.install.phases.local_content import (
+    _copy_local_package,
+    _has_local_apm_content,
+    _project_has_root_primitives,
+)
+
 from ._helpers import (
     _create_minimal_apm_yml,
     _get_default_config,
@@ -95,23 +107,6 @@ try:
     APM_DEPS_AVAILABLE = True
 except ImportError as e:
     _APM_IMPORT_ERROR = str(e)
-
-
-# ---------------------------------------------------------------------------
-# Root primitive detection helper
-# ---------------------------------------------------------------------------
-
-def _project_has_root_primitives(project_root) -> bool:
-    """Return True when *project_root* has a .apm/ directory of its own.
-
-    Used to decide whether ``apm install`` should enter the integration
-    pipeline even when no external APM dependencies are declared (#714).
-    The integrators themselves determine whether the directory contains
-    anything actionable, so we only check for the directory's existence.
-    """
-    from pathlib import Path as _Path
-    root = _Path(project_root)
-    return (root / ".apm").is_dir()
 
 
 # ---------------------------------------------------------------------------
@@ -1055,24 +1050,6 @@ def _integrate_package_primitives(
     return result
 
 
-def _has_local_apm_content(project_root):
-    """Check if the project has local .apm/ content worth integrating.
-
-    Returns True if .apm/ exists and contains at least one primitive file
-    in a recognized subdirectory (skills, instructions, agents/chatmodes,
-    prompts, hooks, commands).
-    """
-    apm_dir = project_root / ".apm"
-    if not apm_dir.is_dir():
-        return False
-    _PRIMITIVE_DIRS = ("skills", "instructions", "chatmodes", "agents", "prompts", "hooks", "commands")
-    for subdir_name in _PRIMITIVE_DIRS:
-        subdir = apm_dir / subdir_name
-        if subdir.is_dir() and any(p.is_file() for p in subdir.rglob("*")):
-            return True
-    return False
-
-
 def _integrate_local_content(
     project_root,
     *,
@@ -1136,51 +1113,6 @@ def _integrate_local_content(
         logger=logger,
         scope=scope,
     )
-
-
-def _copy_local_package(dep_ref, install_path, project_root):
-    """Copy a local package to apm_modules/.
-
-    Args:
-        dep_ref: DependencyReference with is_local=True
-        install_path: Target path under apm_modules/
-        project_root: Project root for resolving relative paths
-
-    Returns:
-        install_path on success, None on failure
-    """
-    import shutil
-
-    local = Path(dep_ref.local_path).expanduser()
-    if not local.is_absolute():
-        local = (project_root / local).resolve()
-    else:
-        local = local.resolve()
-
-    if not local.is_dir():
-        _rich_error(f"Local package path does not exist: {dep_ref.local_path}")
-        return None
-    from apm_cli.utils.helpers import find_plugin_json
-    if (
-        not (local / "apm.yml").exists()
-        and not (local / "SKILL.md").exists()
-        and find_plugin_json(local) is None
-    ):
-        _rich_error(
-            f"Local package is not a valid APM package (no apm.yml, SKILL.md, or plugin.json): {dep_ref.local_path}"
-        )
-        return None
-
-    # Ensure parent exists and clean target (always re-copy for local deps)
-    install_path.parent.mkdir(parents=True, exist_ok=True)
-    if install_path.exists():
-        # install_path is already validated by get_install_path() (Layer 2),
-        # but use safe_rmtree for defense-in-depth.
-        apm_modules_dir = install_path.parent.parent  # _local/<name> → apm_modules
-        safe_rmtree(install_path, apm_modules_dir)
-
-    shutil.copytree(local, install_path, dirs_exist_ok=False, symlinks=True)
-    return install_path
 
 
 def _install_apm_dependencies(
