@@ -25,29 +25,14 @@ from ..drift import (
 from ..models.results import InstallResult
 from ..core.command_logger import InstallLogger, _ValidationOutcome
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success
-from ..utils.content_hash import compute_file_hash as _compute_file_hash_for_provenance
 from ..utils.diagnostics import DiagnosticCollector
 
 
-def _hash_deployed(rel_paths, project_root: Path) -> dict:
-    """Hash currently-on-disk deployed files for provenance.
+# Re-export lockfile hash helper so existing call sites and the regression
+# test pinned in #762 (test_hash_deployed_is_module_level_and_works) keep
+# working via "apm_cli.commands.install._hash_deployed".
+from apm_cli.install.phases.lockfile import compute_deployed_hashes as _hash_deployed
 
-    Module-level so both the local-package persist site (in
-    ``_integrate_local_content``) and the remote-package lockfile-build
-    site (in ``_install_apm_dependencies``) share one implementation.
-    Returns ``{rel_path: "sha256:<hex>"}`` for files that exist as regular
-    files; symlinks and unreadable paths are silently omitted (they cannot
-    contribute meaningful provenance).
-    """
-    out: dict = {}
-    for _rel in rel_paths or ():
-        _full = project_root / _rel
-        if _full.is_file() and not _full.is_symlink():
-            try:
-                out[_rel] = _compute_file_hash_for_provenance(_full)
-            except Exception:
-                pass
-    return out
 from ..utils.github_host import default_host, is_valid_fqdn
 from ..utils.path_security import safe_rmtree
 
