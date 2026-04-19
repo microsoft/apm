@@ -24,7 +24,7 @@ from ..utils.path_security import ensure_path_within, PathTraversalError
 _logger = logging.getLogger(__name__)
 
 
-def _is_within_plugin(candidate: Path, plugin_root: Path, *, component: str, raw: str) -> bool:
+def _is_within_plugin(candidate: Path, plugin_root: Path, *, component: str) -> bool:
     """Return True iff *candidate* resolves inside *plugin_root*.
 
     Logs a warning and returns False when the path escapes the plugin
@@ -32,19 +32,18 @@ def _is_within_plugin(candidate: Path, plugin_root: Path, *, component: str, raw
     Used to enforce the trust boundary on attacker-controlled manifest
     fields (agents/skills/commands/hooks) during plugin normalization.
 
-    The rejected path string is intentionally kept out of the warning
-    record (logged at debug level only) because manifest values are
-    externally controlled and may carry data flagged as sensitive by
-    static-analysis tooling.
+    The rejected path string and resolved exception are deliberately
+    omitted from log output: manifest values are externally controlled
+    and static-analysis tooling treats them as tainted/sensitive. The
+    component name alone is sufficient to identify which manifest field
+    was rejected; operators that need the full value can reproduce
+    locally with a clean checkout.
     """
     try:
         ensure_path_within(candidate, plugin_root)
-    except PathTraversalError as exc:
+    except PathTraversalError:
         _logger.warning(
             "Skipping %s entry: path escapes plugin root", component,
-        )
-        _logger.debug(
-            "Rejected %s entry %r: %s", component, raw, exc,
         )
         return False
     return True
@@ -382,7 +381,7 @@ def _map_plugin_artifacts(plugin_path: Path, apm_dir: Path, manifest: Optional[D
                 if (
                     src.exists()
                     and not src.is_symlink()
-                    and _is_within_plugin(src, plugin_path, component=component, raw=raw)
+                    and _is_within_plugin(src, plugin_path, component=component)
                 ):
                     paths.append(src)
             return paths
@@ -391,7 +390,7 @@ def _map_plugin_artifacts(plugin_path: Path, apm_dir: Path, manifest: Optional[D
             if (
                 src.exists()
                 and not src.is_symlink()
-                and _is_within_plugin(src, plugin_path, component=component, raw=custom)
+                and _is_within_plugin(src, plugin_path, component=component)
             ):
                 return [src]
             return []
@@ -400,7 +399,7 @@ def _map_plugin_artifacts(plugin_path: Path, apm_dir: Path, manifest: Optional[D
             default.exists()
             and not default.is_symlink()
             and default.is_dir()
-            and _is_within_plugin(default, plugin_path, component=component, raw=default_dir)
+            and _is_within_plugin(default, plugin_path, component=component)
         ):
             return [default]
         return []
@@ -493,7 +492,7 @@ def _map_plugin_artifacts(plugin_path: Path, apm_dir: Path, manifest: Optional[D
         # Config file path (e.g. "hooks": "hooks.json")
         src_file = plugin_path / hooks_value
         if src_file.is_symlink() or not _is_within_plugin(
-            src_file, plugin_path, component="hooks", raw=hooks_value
+            src_file, plugin_path, component="hooks"
         ):
             pass
         else:
