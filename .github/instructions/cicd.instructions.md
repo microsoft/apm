@@ -22,6 +22,23 @@ integration suite runs only at merge time via GitHub Merge Queue
      enqueue a PR). No environment approval gate.
    - Inlines the binary build instead of fetching from `ci.yml` to avoid
      cross-workflow artifact plumbing across triggers.
+   - **Never add a `pull_request` or `pull_request_target` trigger here.**
+     This file holds production secrets (`GH_CLI_PAT`, `ADO_APM_PAT`).
+     Required-check satisfaction at PR time is handled by the inert stub
+     `ci-integration-pr-stub.yml` instead.
+3. **`ci-integration-pr-stub.yml`** - inert PR-time stub for required checks
+   - Triggers on `pull_request_target` so the YAML is read from `main`
+     (admin-controlled) regardless of PR head contents - applies retroactively
+     to existing fork PRs without rebase.
+   - `permissions: {}`, no secrets, no checkout, four no-op `echo` jobs whose
+     names match the four Tier 2 required checks. Reports success in seconds.
+   - Concurrency group keyed on PR number cancels in-flight stub runs on
+     subsequent pushes.
+   - Activity types include `labeled/unlabeled/edited` so maintainers can
+     re-trigger the stub without forcing contributors to push commits.
+   - `.github/CODEOWNERS` requires Lead Maintainer review for any change
+     to `.github/workflows/**` to prevent inadvertent additions of secrets,
+     checkout, or PR-data interpolation to this file.
 3. **`build-release.yml`** - `push` to main, tags, schedule, `workflow_dispatch`
    - **Linux + Windows** run combined `build-and-test` (unit tests + binary build in one job).
    - **macOS Intel** uses `build-and-validate-macos-intel` (root node, runs own unit tests - no dependency on `build-and-test`). Builds the binary on every push for early regression feedback; integration + release-validation phases conditional on tag/schedule/dispatch.
