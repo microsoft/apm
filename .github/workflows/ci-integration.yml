@@ -6,6 +6,17 @@
 #   - Tier 2 (this workflow) runs smoke + integration + release-validation
 #     against the tentative merge commit that the merge queue creates.
 #
+# Required-check satisfaction on PR commits:
+#   - The four required check names produced here (Build (Linux), Smoke Test
+#     (Linux), Integration Tests (Linux), Release Validation (Linux)) are also
+#     produced by `ci-integration-pr-stub.yml` on `pull_request_target` events
+#     so branch protection's required-check gate is satisfied at PR time
+#     without burning runner minutes.
+#   - This workflow intentionally does NOT trigger on pull_request events.
+#     Doing so would let a fork PR check out and run code with the secrets
+#     declared below, which is a supply-chain attack vector. Keep this file
+#     `merge_group`-only forever.
+#
 # Trust model:
 #   - merge_group only fires when a user with write access enqueues a PR.
 #   - The gh-readonly-queue/main/* ref contains the PR's code merged into
