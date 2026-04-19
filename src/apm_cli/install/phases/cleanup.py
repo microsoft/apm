@@ -94,12 +94,14 @@ def run(ctx: InstallContext) -> None:
             _orphan_total_deleted += len(_orphan_result.deleted)
             _orphan_deleted_targets.extend(_orphan_result.deleted_targets)
             for _skipped in _orphan_result.skipped_user_edit:
-                logger.cleanup_skipped_user_edit(_skipped, _orphan_key)
+                if logger:
+                    logger.cleanup_skipped_user_edit(_skipped, _orphan_key)
         if _orphan_deleted_targets:
             BaseIntegrator.cleanup_empty_parents(
                 _orphan_deleted_targets, project_root
             )
-        logger.orphan_cleanup(_orphan_total_deleted)
+        if logger:
+            logger.orphan_cleanup(_orphan_total_deleted)
 
     # ------------------------------------------------------------------
     # Stale-file cleanup: within each package still present in the
@@ -145,5 +147,7 @@ def run(ctx: InstallContext) -> None:
                     cleanup_result.deleted_targets, project_root
                 )
             for _skipped in cleanup_result.skipped_user_edit:
-                logger.cleanup_skipped_user_edit(_skipped, dep_key)
-            logger.stale_cleanup(dep_key, len(cleanup_result.deleted))
+                if logger:
+                    logger.cleanup_skipped_user_edit(_skipped, dep_key)
+            if logger:
+                logger.stale_cleanup(dep_key, len(cleanup_result.deleted))
