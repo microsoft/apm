@@ -205,7 +205,7 @@ def run(ctx: "InstallContext") -> None:
             if logger:
                 logger.verbose_detail(f"  {fail_msg}")
             elif verbose:
-                _rich_error(f"  \u2514\u2500 {fail_msg}")
+                _rich_error(f"  |-- {fail_msg}")
             # Collect for deferred diagnostics summary (always, even non-verbose)
             callback_failures.add(dep_key)
             transitive_failures.append((dep_display, fail_msg))

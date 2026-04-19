@@ -247,7 +247,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None):
                 if verbose_log:
                     verbose_log(f"API {api_url} -> {e.code} {e.reason}")
                 if e.code == 404 and token:
-                    # 404 with token could mean no access — raise to trigger fallback
+                    # 404 with token could mean no access -- raise to trigger fallback
                     raise RuntimeError(f"API returned {e.code}")
                 raise RuntimeError(f"API returned {e.code}: {e.reason}")
             except Exception as e:

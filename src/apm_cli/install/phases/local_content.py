@@ -114,7 +114,7 @@ def _copy_local_package(dep_ref, install_path, project_root):
     if install_path.exists():
         # install_path is already validated by get_install_path() (Layer 2),
         # but use safe_rmtree for defense-in-depth.
-        apm_modules_dir = install_path.parent.parent  # _local/<name> → apm_modules
+        apm_modules_dir = install_path.parent.parent  # _local/<name> -> apm_modules
         safe_rmtree(install_path, apm_modules_dir)
 
     shutil.copytree(local, install_path, dirs_exist_ok=False, symlinks=True)

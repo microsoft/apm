@@ -53,14 +53,14 @@ def run(ctx: "InstallContext") -> None:
     for _pd_ref in deps_to_install:
         _pd_key = _pd_ref.get_unique_key()
         _pd_path = (apm_modules_dir / _pd_ref.alias) if _pd_ref.alias else _pd_ref.get_install_path(apm_modules_dir)
-        # Skip local packages \u2014 they are copied, not downloaded
+        # Skip local packages -- they are copied, not downloaded
         if _pd_ref.is_local:
             continue
         # Skip if already downloaded during BFS resolution
         if _pd_key in callback_downloaded:
             continue
         # Detect if manifest ref changed from what's recorded in the lockfile.
-        # detect_ref_change() handles all transitions including None\u2192ref.
+        # detect_ref_change() handles all transitions including None->ref.
         _pd_locked_chk = (
             existing_lockfile.get_dependency(_pd_key)
             if existing_lockfile
