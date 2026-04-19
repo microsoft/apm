@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `_count_package_files` in `apm deps list` now reads the canonical `.apm/context/` (singular) directory; previously it scanned `.apm/contexts/` and always reported `0 context files` per package (#748)
 - `apm pack --format plugin` no longer emits duplicated `skills/skills/` nesting for bare-skill dependencies referenced through virtual paths like `skills/<name>` (#738)
 - Provide an ADO-specific authentication error message for `dev.azure.com` remotes so users get actionable guidance instead of a generic GitHub-flavored hint (#742)
+- Fix `apm compile --target codex` (and `opencode`, `minimal`) being a silent no-op; `AgentsCompiler.compile()` now routes these through the AGENTS.md compiler instead of returning an empty success result that left stale `AGENTS.md` files (#766)
 - Support `codeload.github.com`-style archive URLs in Artifactory archive URL generation, unblocking JFrog Artifactory proxies configured against `codeload.github.com` (#712)
 - `_parse_artifactory_base_url()` now reads `PROXY_REGISTRY_URL` first (with `ARTIFACTORY_BASE_URL` fallback + `DeprecationWarning`), and the virtual-subdirectory download path checks `dep_ref.is_artifactory()` before falling back to env-var detection, fixing lockfile reinstall failures when proxy config is only on the lockfile entry (#616)
 - Fall back to SSH URLs when validating git remotes for generic / self-hosted hosts so `apm install` no longer fails the pre-install validation step against private SSH-only servers (#584)

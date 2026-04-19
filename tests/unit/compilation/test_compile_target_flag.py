@@ -166,13 +166,70 @@ Use type hints in Python code.
             dry_run=True,
             single_agents=True  # Use single-file for AGENTS.md
         )
-        
+
         compiler = AgentsCompiler(str(temp_project))
         result = compiler.compile(config, sample_primitives)
-        
+
         assert result.success
         # Output path should mention both targets
         assert "AGENTS.md" in result.output_path or "CLAUDE" in result.output_path
+
+    def test_target_codex_generates_agents_md(self, temp_project, sample_primitives):
+        """Regression for issue #766: --target codex must produce AGENTS.md, not a silent no-op."""
+        config = CompilationConfig(
+            target="codex",
+            dry_run=True,
+            single_agents=True,
+        )
+
+        compiler = AgentsCompiler(str(temp_project))
+        result = compiler.compile(config, sample_primitives)
+
+        assert result.success
+        assert result.output_path, "codex target must route to a compiler, not return empty"
+        assert "AGENTS.md" in result.output_path
+
+    def test_target_opencode_generates_agents_md(self, temp_project, sample_primitives):
+        """target='opencode' must route to AGENTS.md (same universal format as codex)."""
+        config = CompilationConfig(
+            target="opencode",
+            dry_run=True,
+            single_agents=True,
+        )
+
+        compiler = AgentsCompiler(str(temp_project))
+        result = compiler.compile(config, sample_primitives)
+
+        assert result.success
+        assert "AGENTS.md" in result.output_path
+
+    def test_target_minimal_generates_agents_md(self, temp_project, sample_primitives):
+        """target='minimal' must route to AGENTS.md-only."""
+        config = CompilationConfig(
+            target="minimal",
+            dry_run=True,
+            single_agents=True,
+        )
+
+        compiler = AgentsCompiler(str(temp_project))
+        result = compiler.compile(config, sample_primitives)
+
+        assert result.success
+        assert "AGENTS.md" in result.output_path
+
+    def test_unknown_target_returns_failure(self, temp_project, sample_primitives):
+        """Unknown target must fail explicitly instead of silently succeeding."""
+        config = CompilationConfig(
+            target="not-a-real-target",
+            dry_run=True,
+            single_agents=True,
+        )
+
+        compiler = AgentsCompiler(str(temp_project))
+        result = compiler.compile(config, sample_primitives)
+
+        assert result.success is False
+        assert any("Unknown compilation target" in e for e in result.errors)
 
 
 class TestMergeResults:
