@@ -1276,87 +1276,16 @@ def _install_apm_dependencies(
         installed_count = 0
         unpinned_count = 0
 
-        # Phase 4 (#171): Parallel package downloads using ThreadPoolExecutor
-        # Pre-download all non-cached packages in parallel for wall-clock speedup.
-        # Results are stored and consumed by the sequential integration loop below.
-        from concurrent.futures import ThreadPoolExecutor, as_completed as _futures_completed
+        # --------------------------------------------------------------
+        # Phase 4 (#171): Parallel package pre-download
+        # --------------------------------------------------------------
+        from apm_cli.install.phases import download as _download_phase
+        _download_phase.run(ctx)
 
-        _pre_download_results = {}   # dep_key -> PackageInfo
-        _need_download = []
-        for _pd_ref in deps_to_install:
-            _pd_key = _pd_ref.get_unique_key()
-            _pd_path = (apm_modules_dir / _pd_ref.alias) if _pd_ref.alias else _pd_ref.get_install_path(apm_modules_dir)
-            # Skip local packages — they are copied, not downloaded
-            if _pd_ref.is_local:
-                continue
-            # Skip if already downloaded during BFS resolution
-            if _pd_key in callback_downloaded:
-                continue
-            # Detect if manifest ref changed from what's recorded in the lockfile.
-            # detect_ref_change() handles all transitions including None→ref.
-            _pd_locked_chk = (
-                existing_lockfile.get_dependency(_pd_key)
-                if existing_lockfile
-                else None
-            )
-            _pd_ref_changed = detect_ref_change(
-                _pd_ref, _pd_locked_chk, update_refs=update_refs
-            )
-            # Skip if lockfile SHA matches local HEAD.
-            # Normal mode: only when the ref hasn't changed in the manifest.
-            # Update mode: defer to the sequential loop which resolves the
-            # remote ref and compares -- if unchanged, the download is skipped
-            # entirely; if changed, it falls back to sequential download.
-            if (_pd_path.exists() and _pd_locked_chk
-                    and _pd_locked_chk.resolved_commit
-                    and _pd_locked_chk.resolved_commit != "cached"
-                    and (update_refs or not _pd_ref_changed)):
-                try:
-                    from git import Repo as _PDGitRepo
-                    if _PDGitRepo(_pd_path).head.commit.hexsha == _pd_locked_chk.resolved_commit:
-                        continue
-                except Exception:
-                    pass
-            # Build download ref (use locked commit for reproducibility).
-            # build_download_ref() uses the manifest ref when ref_changed is True.
-            _pd_dlref = build_download_ref(
-                _pd_ref, existing_lockfile, update_refs=update_refs, ref_changed=_pd_ref_changed
-            )
-            _need_download.append((_pd_ref, _pd_path, _pd_dlref))
-
-        if _need_download and parallel_downloads > 0:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[cyan]{task.description}[/cyan]"),
-                BarColumn(),
-                TaskProgressColumn(),
-                transient=True,
-            ) as _dl_progress:
-                _max_workers = min(parallel_downloads, len(_need_download))
-                with ThreadPoolExecutor(max_workers=_max_workers) as _executor:
-                    _futures = {}
-                    for _pd_ref, _pd_path, _pd_dlref in _need_download:
-                        _pd_disp = str(_pd_ref) if _pd_ref.is_virtual else _pd_ref.repo_url
-                        _pd_short = _pd_disp.split("/")[-1] if "/" in _pd_disp else _pd_disp
-                        _pd_tid = _dl_progress.add_task(description=f"Fetching {_pd_short}", total=None)
-                        _pd_fut = _executor.submit(
-                            downloader.download_package, _pd_dlref, _pd_path,
-                            progress_task_id=_pd_tid, progress_obj=_dl_progress,
-                        )
-                        _futures[_pd_fut] = (_pd_ref, _pd_tid, _pd_disp)
-                    for _pd_fut in _futures_completed(_futures):
-                        _pd_ref, _pd_tid, _pd_disp = _futures[_pd_fut]
-                        _pd_key = _pd_ref.get_unique_key()
-                        try:
-                            _pd_info = _pd_fut.result()
-                            _pre_download_results[_pd_key] = _pd_info
-                            _dl_progress.update(_pd_tid, visible=False)
-                            _dl_progress.refresh()
-                        except Exception:
-                            _dl_progress.remove_task(_pd_tid)
-                            # Silent: sequential loop below will retry and report errors
-
-        _pre_downloaded_keys = builtins.set(_pre_download_results.keys())
+        # Bridge: alias ctx outputs into locals so downstream code
+        # (lines ~1554, ~1838-1839) continues working without changes.
+        _pre_download_results = ctx.pre_download_results
+        _pre_downloaded_keys = ctx.pre_downloaded_keys
 
         # Create progress display for sequential integration
         # Reuse the shared auth_resolver (already created in this invocation) so

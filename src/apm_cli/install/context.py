@@ -75,6 +75,12 @@ class InstallContext:
     integrators: Dict[str, Any] = field(default_factory=dict)  # targets
 
     # ------------------------------------------------------------------
+    # Download phase outputs
+    # ------------------------------------------------------------------
+    pre_download_results: Dict[str, Any] = field(default_factory=dict)  # download
+    pre_downloaded_keys: Set[str] = field(default_factory=set)  # download
+
+    # ------------------------------------------------------------------
     # Downstream phase accumulators (written by integrate, read by cleanup/lockfile)
     # ------------------------------------------------------------------
     intended_dep_keys: Set[str] = field(default_factory=set)
