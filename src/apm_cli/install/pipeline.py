@@ -168,7 +168,6 @@ def run_install_pipeline(
         # Future S-phases will fold them into the context one by one.
         # --------------------------------------------------------------
         transitive_failures = ctx.transitive_failures
-        apm_modules_dir = ctx.apm_modules_dir
 
         diagnostics = DiagnosticCollector(verbose=verbose)
 
@@ -180,12 +179,8 @@ def run_install_pipeline(
         from ..deps.lockfile import LockFile, get_lockfile_path
         from ..deps.installed_package import InstalledPackage
         from ..deps.registry_proxy import RegistryConfig
-        from ..utils.content_hash import compute_package_hash as _compute_hash
 
         installed_packages: List[InstalledPackage] = []
-        package_deployed_files: builtins.dict = {}  # dep_key -> list of relative deployed paths
-        package_types: builtins.dict = {}  # dep_key -> package type string
-        _package_hashes: builtins.dict = {}  # dep_key -> sha256 hash
 
         # Resolve registry proxy configuration once for this install session.
         registry_config = RegistryConfig.from_env()

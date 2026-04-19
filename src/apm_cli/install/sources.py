@@ -48,7 +48,7 @@ class Materialization:
     gate + primitive integration on a freshly-acquired package.
     """
 
-    package_info: "PackageInfo"
+    package_info: Optional["PackageInfo"]
     install_path: Path
     dep_key: str
     deltas: Dict[str, int] = field(default_factory=lambda: {"installed": 1})
@@ -262,7 +262,7 @@ class CachedDependencySource(DependencySource):
         # package_info=None.
         if not ctx.targets:
             return Materialization(
-                package_info=None,  # type: ignore[arg-type]
+                package_info=None,
                 install_path=install_path,
                 dep_key=dep_key,
                 deltas=deltas,
@@ -522,7 +522,7 @@ class FreshDependencySource(DependencySource):
             # If no targets, skip integration but keep deltas
             if not ctx.targets:
                 return Materialization(
-                    package_info=None,  # type: ignore[arg-type]
+                    package_info=None,
                     install_path=install_path,
                     dep_key=dep_key,
                     deltas=deltas,

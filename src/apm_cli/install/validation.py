@@ -50,7 +50,7 @@ def _local_path_failure_reason(dep_ref):
     return "no apm.yml, SKILL.md, or plugin.json found"
 
 
-def _local_path_no_markers_hint(local_dir, verbose_log=None, logger=None):
+def _local_path_no_markers_hint(local_dir, logger=None):
     """Scan two levels for sub-packages and print a hint if any are found."""
     from apm_cli.utils.helpers import find_plugin_json
 
@@ -122,7 +122,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             if find_plugin_json(local) is not None:
                 return True
             # Directory exists but lacks package markers -- surface a hint
-            _local_path_no_markers_hint(local, verbose_log, logger=logger)
+            _local_path_no_markers_hint(local, logger=logger)
             return False
 
         # For virtual packages, use the downloader's validation method

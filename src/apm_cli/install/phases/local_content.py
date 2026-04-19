@@ -12,12 +12,11 @@ This module handles two related scenarios:
    a locally-referenced package into ``apm_modules/`` so the downstream
    integration pipeline can treat it uniformly.
 
-The orchestrator ``_integrate_local_content`` remains in
-``apm_cli.commands.install`` because it calls ``_integrate_package_primitives``
-via bare-name lookup, and tests patch
-``apm_cli.commands.install._integrate_package_primitives`` to intercept that
-call.  Keeping the orchestrator co-located with the re-exported name preserves
-``@patch`` compatibility without any test modifications.
+The orchestrator ``_integrate_local_content`` lives in
+``apm_cli.install.services`` (the DI seam) and is re-exported from
+``apm_cli.commands.install`` for backward-compatible patching. Tests should
+patch the symbol at the import path used by the code under test rather than
+assuming the implementation lives in the commands module.
 
 Functions
 ---------
