@@ -809,6 +809,40 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
             if not apm_deps and not dev_apm_deps and not mcp_deps:
                 logger.progress("No dependencies found in apm.yml")
 
+            # Orphan preview: lockfile + manifest difference -- no integration
+            # required, accurate to compute.
+            try:
+                _dryrun_lock = LockFile.read(get_lockfile_path(apm_dir))
+            except Exception:
+                _dryrun_lock = None
+            if _dryrun_lock:
+                _intended_keys = builtins.set()
+                for _dep in (apm_deps or []) + (dev_apm_deps or []):
+                    try:
+                        _intended_keys.add(_dep.get_unique_key())
+                    except Exception:
+                        pass
+                _orphan_preview = detect_orphans(
+                    _dryrun_lock, _intended_keys, only_packages=only_packages,
+                )
+                if _orphan_preview:
+                    logger.progress(
+                        f"Files that would be removed (packages no longer in apm.yml): "
+                        f"{len(_orphan_preview)}"
+                    )
+                    for _orphan in sorted(_orphan_preview)[:10]:
+                        logger.progress(f"  - {_orphan}")
+                    if len(_orphan_preview) > 10:
+                        logger.progress(
+                            f"  ... and {len(_orphan_preview) - 10} more"
+                        )
+
+            logger.dry_run_notice(
+                "Per-package stale-file cleanup (renames within a package) is "
+                "not previewed -- it requires running integration. Run without "
+                "--dry-run to apply."
+            )
+
             logger.success("Dry run complete - no changes made")
             return
 
@@ -1012,56 +1046,44 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                     # integration that are no longer produced.  Only run when
                     # integration completed without errors to avoid deleting
                     # files that failed to re-deploy.
-                    _errors_before = (
-                        _local_diagnostics.error_count
-                        if _local_diagnostics else 0
-                    )
                     _local_had_errors = (
                         _local_diagnostics is not None
                         and _local_diagnostics.error_count > _errors_before_local
                     )
                     if old_local_deployed and not _local_had_errors:
-                        _prev_local = builtins.set(old_local_deployed)
-                        _curr_local = builtins.set(_local_deployed)
-                        _stale = _prev_local - _curr_local
+                        from ..integration.cleanup import remove_stale_deployed_files as _rmstale
+                        _stale = builtins.set(old_local_deployed) - builtins.set(_local_deployed)
                         if _stale:
-                            import shutil as _local_shutil
-                            _stale_removed = 0
-                            _stale_deleted_paths = []
-                            _stale_failed = []
-                            for _stale_path in sorted(_stale):
-                                if BaseIntegrator.validate_deploy_path(
-                                    _stale_path, project_root, targets=_local_targets
-                                ):
-                                    _stale_target = project_root / _stale_path
-                                    if _stale_target.exists():
-                                        try:
-                                            if _stale_target.is_dir():
-                                                _local_shutil.rmtree(_stale_target)
-                                            else:
-                                                _stale_target.unlink()
-                                            _stale_deleted_paths.append(_stale_target)
-                                            _stale_removed += 1
-                                        except Exception:
-                                            _stale_failed.append(_stale_path)
-                                            logger.verbose_detail(
-                                                f"Failed to remove stale file: {_stale_path}"
-                                            )
-                            # Keep failed paths in local_deployed so they
-                            # are retried on the next install.
-                            _local_deployed.extend(_stale_failed)
-                            if _stale_deleted_paths:
+                            _local_prev_hashes = {}
+                            _prev_local_lf = _LocalLF.read(_local_lock_path)
+                            if _prev_local_lf:
+                                _local_prev_hashes = dict(
+                                    _prev_local_lf.local_deployed_file_hashes
+                                )
+                            _cleanup_result = _rmstale(
+                                _stale, project_root,
+                                dep_key="<local .apm/>",
+                                targets=_local_targets,
+                                diagnostics=_local_diagnostics,
+                                logger=logger,
+                                recorded_hashes=_local_prev_hashes,
+                            )
+                            # Failed paths stay in lockfile so we retry next time.
+                            _local_deployed.extend(_cleanup_result.failed)
+                            if _cleanup_result.deleted_targets:
                                 BaseIntegrator.cleanup_empty_parents(
-                                    _stale_deleted_paths, project_root
+                                    _cleanup_result.deleted_targets, project_root
                                 )
-                            if _stale_removed > 0:
-                                logger.verbose_detail(
-                                    f"Removed {_stale_removed} stale local file(s)"
-                                )
+                            logger.stale_cleanup(
+                                "<local .apm/>", len(_cleanup_result.deleted)
+                            )
 
-                    # Persist local_deployed_files in the lockfile
+                    # Persist local_deployed_files (and hashes) in the lockfile
                     _persist_lock = _LocalLF.read(_local_lock_path) or _LocalLF()
                     _persist_lock.local_deployed_files = sorted(_local_deployed)
+                    _persist_lock.local_deployed_file_hashes = _hash_deployed(
+                        _local_deployed
+                    )
                     # Only write if changed
                     _existing_for_cmp = _LocalLF.read(_local_lock_path)
                     if not _existing_for_cmp or not _persist_lock.is_semantically_equivalent(_existing_for_cmp):
@@ -1088,7 +1110,12 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                 error_count = int(apm_diagnostics.error_count)
             except (TypeError, ValueError):
                 error_count = 0
-        logger.install_summary(apm_count=apm_count, mcp_count=mcp_count, errors=error_count)
+        logger.install_summary(
+            apm_count=apm_count,
+            mcp_count=mcp_count,
+            errors=error_count,
+            stale_cleaned=logger.stale_cleaned_total,
+        )
 
         # Hard-fail when critical security findings blocked any package.
         # Consistent with apm unpack which also hard-fails on critical.
@@ -1767,11 +1794,24 @@ def _install_apm_dependencies(
         from apm_cli.deps.lockfile import LockFile, LockedDependency, get_lockfile_path
         from apm_cli.deps.installed_package import InstalledPackage
         from apm_cli.deps.registry_proxy import RegistryConfig
-        from ..utils.content_hash import compute_package_hash as _compute_hash
+        from ..utils.content_hash import compute_package_hash as _compute_hash, compute_file_hash as _compute_file_hash
         installed_packages: List[InstalledPackage] = []
         package_deployed_files: builtins.dict = {}  # dep_key → list of relative deployed paths
+        package_deployed_file_hashes: builtins.dict = {}  # dep_key → {rel_path: "sha256:hex"}
         package_types: builtins.dict = {}  # dep_key → package type string
         _package_hashes: builtins.dict = {}  # dep_key → sha256 hash (captured at download/verify time)
+
+        def _hash_deployed(rel_paths):
+            """Hash currently-on-disk deployed files for provenance."""
+            out: builtins.dict = {}
+            for _rel in rel_paths or ():
+                _full = project_root / _rel
+                if _full.is_file() and not _full.is_symlink():
+                    try:
+                        out[_rel] = _compute_file_hash(_full)
+                    except Exception:
+                        pass
+            return out
 
         # Resolve registry proxy configuration once for this install session.
         registry_config = RegistryConfig.from_env()
@@ -2111,6 +2151,7 @@ def _install_apm_dependencies(
                         )
 
                     package_deployed_files[dep_key] = dep_deployed_files
+                    package_deployed_file_hashes[dep_key] = _hash_deployed(dep_deployed_files)
 
                     # In verbose mode, show inline skip/error count for this package
                     if logger and logger.verbose:
@@ -2369,6 +2410,7 @@ def _install_apm_dependencies(
                         total_links_resolved += int_result["links_resolved"]
                         dep_deployed = int_result["deployed_files"]
                         package_deployed_files[dep_key] = dep_deployed
+                        package_deployed_file_hashes[dep_key] = _hash_deployed(dep_deployed)
                     except Exception as e:
                         diagnostics.error(
                             f"Failed to integrate primitives from cached package: {e}",
@@ -2564,6 +2606,7 @@ def _install_apm_dependencies(
                             total_links_resolved += int_result["links_resolved"]
                             dep_deployed_fresh = int_result["deployed_files"]
                             package_deployed_files[dep_ref.get_unique_key()] = dep_deployed_fresh
+                            package_deployed_file_hashes[dep_ref.get_unique_key()] = _hash_deployed(dep_deployed_fresh)
                         except Exception as e:
                             # Don't fail installation if integration fails
                             diagnostics.error(
@@ -2659,49 +2702,52 @@ def _install_apm_dependencies(
         # Orphan cleanup: remove deployed files for packages that were
         # removed from the manifest.  This happens on every full install
         # (no only_packages), making apm install idempotent with the manifest.
-        # Handles both regular files and directory entries (e.g., legacy skills).
         # ------------------------------------------------------------------
         if orphaned_deployed_files:
             import shutil as _shutil
             _removed_orphan_count = 0
-            _failed_orphan_count = 0
             _deleted_orphan_paths: builtins.list = []
-            # Build validation targets that cover both default KNOWN_TARGETS
-            # and scope-resolved targets so legacy project-scope orphan paths
-            # (e.g., ".github/...") are also cleaned up at user scope.
-            _validation_targets = _targets or {}
-            _default_targets = getattr(BaseIntegrator, "KNOWN_TARGETS", None)
-            if _default_targets:
-                _validation_targets = {**_default_targets, **_validation_targets}
             for _orphan_path in sorted(orphaned_deployed_files):
                 # validate_deploy_path() is the safety gate: it rejects path-traversal,
                 # requires a known integration prefix, and checks the resolved path
-                # stays within project_root -- so rmtree is safe here.
-                if BaseIntegrator.validate_deploy_path(_orphan_path, project_root, targets=_validation_targets):
-                    _target = project_root / _orphan_path
-                    if _target.exists():
-                        try:
-                            if _target.is_dir():
-                                _shutil.rmtree(_target)
-                            else:
-                                _target.unlink()
-                            _deleted_orphan_paths.append(_target)
-                            _removed_orphan_count += 1
-                        except Exception as _orphan_err:
-                            _orphan_msg = f"Could not remove orphaned path {_orphan_path}: {_orphan_err}"
-                            diagnostics.error(_orphan_msg)
-                            if logger:
-                                logger.verbose_detail(f"  {_orphan_msg}")
-                            _failed_orphan_count += 1
+                # stays within project_root.
+                if not BaseIntegrator.validate_deploy_path(
+                    _orphan_path, project_root, targets=_targets or None,
+                ):
+                    continue
+                _target = project_root / _orphan_path
+                if not _target.exists():
+                    continue
+                # Refuse directory entries -- a directory under an integration
+                # prefix is almost certainly a poisoned lockfile entry.  APM
+                # only deploys (and so should only delete) individual files.
+                if _target.is_dir() and not _target.is_symlink():
+                    diagnostics.warn(
+                        (
+                            f"Refused to remove directory entry {_orphan_path}: "
+                            "APM only deletes individual files. Remove it "
+                            "manually from apm.lock.yaml if it was added by "
+                            "a malicious or corrupt lockfile."
+                        ),
+                    )
+                    continue
+                try:
+                    _target.unlink()
+                    _deleted_orphan_paths.append(_target)
+                    _removed_orphan_count += 1
+                except Exception as _orphan_err:
+                    diagnostics.warn(
+                        (
+                            f"Could not remove orphaned file {_orphan_path}: "
+                            f"{_orphan_err}. Path retained in lockfile; will "
+                            "retry on next 'apm install'."
+                        ),
+                    )
             # Clean up empty parent directories left after file removal
             if _deleted_orphan_paths:
                 BaseIntegrator.cleanup_empty_parents(_deleted_orphan_paths, project_root)
-            if _removed_orphan_count > 0:
-                if logger:
-                    logger.verbose_detail(
-                        f"Removed {_removed_orphan_count} file(s) from packages "
-                        "no longer in apm.yml"
-                    )
+            if logger:
+                logger.orphan_cleanup(_removed_orphan_count)
 
         # ------------------------------------------------------------------
         # Stale-file cleanup: within each package still present in the
@@ -2712,12 +2758,7 @@ def _install_apm_dependencies(
         # packages that left the manifest entirely.
         # ------------------------------------------------------------------
         if existing_lockfile and package_deployed_files:
-            import shutil as _shutil
-            _validation_targets = _targets or {}
-            _default_targets = getattr(BaseIntegrator, "KNOWN_TARGETS", None)
-            if _default_targets:
-                _validation_targets = {**_default_targets, **_validation_targets}
-
+            from ..integration.cleanup import remove_stale_deployed_files as _rmstale
             for dep_key, new_deployed in package_deployed_files.items():
                 # Skip packages whose integration reported errors this run --
                 # a file that failed to re-deploy would look stale and get
@@ -2728,52 +2769,27 @@ def _install_apm_dependencies(
                 prev_dep = existing_lockfile.get_dependency(dep_key)
                 if not prev_dep:
                     continue  # new package this install -- nothing stale yet
-                old_deployed = builtins.list(prev_dep.deployed_files)
-
-                stale = detect_stale_files(old_deployed, new_deployed)
+                stale = detect_stale_files(prev_dep.deployed_files, new_deployed)
                 if not stale:
                     continue
 
-                _stale_failed: builtins.list = []
-                _stale_deleted_paths: builtins.list = []
-                for stale_path in sorted(stale):
-                    # validate_deploy_path is the safety gate: no traversal,
-                    # must start with a known integration prefix, must resolve
-                    # inside project_root.
-                    if not BaseIntegrator.validate_deploy_path(
-                        stale_path, project_root, targets=_validation_targets
-                    ):
-                        continue
-                    stale_target = project_root / stale_path
-                    if not stale_target.exists():
-                        continue
-                    try:
-                        if stale_target.is_dir():
-                            _shutil.rmtree(stale_target)
-                        else:
-                            stale_target.unlink()
-                        _stale_deleted_paths.append(stale_target)
-                    except Exception as stale_err:
-                        _stale_failed.append(stale_path)
-                        stale_msg = f"Could not remove stale path {stale_path}: {stale_err}"
-                        diagnostics.error(stale_msg, package=dep_key)
-                        if logger:
-                            logger.verbose_detail(f"  {stale_msg}")
-
+                cleanup_result = _rmstale(
+                    stale, project_root,
+                    dep_key=dep_key,
+                    targets=_targets or None,
+                    diagnostics=diagnostics,
+                    logger=logger,
+                    recorded_hashes=dict(prev_dep.deployed_file_hashes),
+                )
                 # Re-insert failed paths so the lockfile retains them for
-                # retry on the next install (matches the local-package
-                # stale-cleanup pattern in install.py:1025).
-                new_deployed.extend(_stale_failed)
-
-                if _stale_deleted_paths:
+                # retry on the next install.
+                new_deployed.extend(cleanup_result.failed)
+                if cleanup_result.deleted_targets:
                     BaseIntegrator.cleanup_empty_parents(
-                        _stale_deleted_paths, project_root
+                        cleanup_result.deleted_targets, project_root
                     )
-                _removed = len(_stale_deleted_paths)
-                if _removed > 0 and logger:
-                    logger.verbose_detail(
-                        f"Removed {_removed} stale file(s) from {dep_key}"
-                    )
+                if logger:
+                    logger.stale_cleanup(dep_key, len(cleanup_result.deleted))
 
         # Generate apm.lock for reproducible installs (T4: lockfile generation)
         if installed_packages:
@@ -2783,6 +2799,13 @@ def _install_apm_dependencies(
                 for dep_key, dep_files in package_deployed_files.items():
                     if dep_key in lockfile.dependencies:
                         lockfile.dependencies[dep_key].deployed_files = dep_files
+                        # Hash the files as they exist on disk AFTER stale
+                        # cleanup so the recorded hashes match what is now
+                        # deployed (provenance for the next install's stale
+                        # cleanup).
+                        lockfile.dependencies[dep_key].deployed_file_hashes = (
+                            _hash_deployed(dep_files)
+                        )
                 for dep_key, pkg_type in package_types.items():
                     if dep_key in lockfile.dependencies:
                         lockfile.dependencies[dep_key].package_type = pkg_type
