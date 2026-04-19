@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Harden `apm install` stale-file cleanup (#666 follow-up): refuse to delete directory entries from the lockfile (closes a poisoned-lockfile vector); skip files the user has edited since APM deployed them via per-file SHA-256 provenance recorded in `apm.lock.yaml`; preview package-level orphan cleanup in `--dry-run`; reclassify recoverable cleanup failures as warnings (retried on next install) instead of errors; surface stale-file removals at default verbosity through a new `InstallLogger.stale_cleanup` / `orphan_cleanup` path; extract a shared `apm_cli.integration.cleanup.remove_stale_deployed_files` helper to dedupe the remote- and local-package cleanup blocks in `install.py`
+- Harden `apm install` stale-file cleanup to prevent unsafe lockfile deletions, preserve user-edited files via per-file SHA-256 provenance, and improve cleanup reporting during install and `--dry-run` (#666, #762)
 - Fix `apm marketplace add` silently failing for private repos by using credentials when probing `marketplace.json` (#701)
 - Harden marketplace plugin normalization to enforce that manifest-declared `agents`/`skills`/`commands`/`hooks` paths resolve inside the plugin root (#760)
 - Stop `test_auto_detect_through_proxy` from making real `api.github.com` calls by passing a mock `auth_resolver`, fixing flaky macOS CI rate-limit failures (#759)

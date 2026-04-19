@@ -25,7 +25,29 @@ from ..drift import (
 from ..models.results import InstallResult
 from ..core.command_logger import InstallLogger, _ValidationOutcome
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success
+from ..utils.content_hash import compute_file_hash as _compute_file_hash_for_provenance
 from ..utils.diagnostics import DiagnosticCollector
+
+
+def _hash_deployed(rel_paths, project_root: Path) -> dict:
+    """Hash currently-on-disk deployed files for provenance.
+
+    Module-level so both the local-package persist site (in
+    ``_integrate_local_content``) and the remote-package lockfile-build
+    site (in ``_install_apm_dependencies``) share one implementation.
+    Returns ``{rel_path: "sha256:<hex>"}`` for files that exist as regular
+    files; symlinks and unreadable paths are silently omitted (they cannot
+    contribute meaningful provenance).
+    """
+    out: dict = {}
+    for _rel in rel_paths or ():
+        _full = project_root / _rel
+        if _full.is_file() and not _full.is_symlink():
+            try:
+                out[_rel] = _compute_file_hash_for_provenance(_full)
+            except Exception:
+                pass
+    return out
 from ..utils.github_host import default_host, is_valid_fqdn
 from ..utils.path_security import safe_rmtree
 from ._helpers import (
@@ -1086,7 +1108,7 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                     _persist_lock = _LocalLF.read(_local_lock_path) or _LocalLF()
                     _persist_lock.local_deployed_files = sorted(_local_deployed)
                     _persist_lock.local_deployed_file_hashes = _hash_deployed(
-                        _local_deployed
+                        _local_deployed, project_root
                     )
                     # Only write if changed
                     _existing_for_cmp = _LocalLF.read(_local_lock_path)
@@ -1798,23 +1820,11 @@ def _install_apm_dependencies(
         from apm_cli.deps.lockfile import LockFile, LockedDependency, get_lockfile_path
         from apm_cli.deps.installed_package import InstalledPackage
         from apm_cli.deps.registry_proxy import RegistryConfig
-        from ..utils.content_hash import compute_package_hash as _compute_hash, compute_file_hash as _compute_file_hash
+        from ..utils.content_hash import compute_package_hash as _compute_hash
         installed_packages: List[InstalledPackage] = []
         package_deployed_files: builtins.dict = {}  # dep_key → list of relative deployed paths
         package_types: builtins.dict = {}  # dep_key → package type string
         _package_hashes: builtins.dict = {}  # dep_key → sha256 hash (captured at download/verify time)
-
-        def _hash_deployed(rel_paths):
-            """Hash currently-on-disk deployed files for provenance."""
-            out: builtins.dict = {}
-            for _rel in rel_paths or ():
-                _full = project_root / _rel
-                if _full.is_file() and not _full.is_symlink():
-                    try:
-                        out[_rel] = _compute_file_hash(_full)
-                    except Exception:
-                        pass
-            return out
 
         # Resolve registry proxy configuration once for this install session.
         registry_config = RegistryConfig.from_env()
@@ -2717,7 +2727,15 @@ def _install_apm_dependencies(
                     _orphan_dep.deployed_files,
                     project_root,
                     dep_key=_orphan_key,
-                    targets=_targets or None,
+                    # targets=None -> validate against all KNOWN_TARGETS, not
+                    # just the active install's targets. An orphan can have
+                    # files under a target the user is not currently running
+                    # (e.g. switched runtime since the dep was installed,
+                    # or scope mismatch). Restricting to _targets here would
+                    # leave those files behind. Pre-PR code handled this by
+                    # explicitly merging KNOWN_TARGETS; targets=None is the
+                    # cleaner equivalent.
+                    targets=None,
                     diagnostics=diagnostics,
                     recorded_hashes=dict(_orphan_dep.deployed_file_hashes),
                     failed_path_retained=False,
@@ -2787,7 +2805,7 @@ def _install_apm_dependencies(
                         # deployed (provenance for the next install's stale
                         # cleanup).
                         lockfile.dependencies[dep_key].deployed_file_hashes = (
-                            _hash_deployed(dep_files)
+                            _hash_deployed(dep_files, project_root)
                         )
                 for dep_key, pkg_type in package_types.items():
                     if dep_key in lockfile.dependencies:

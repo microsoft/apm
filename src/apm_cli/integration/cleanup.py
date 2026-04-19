@@ -22,9 +22,11 @@ Safety gates, in order:
    (legacy lockfiles) fall through and are deleted, preserving prior
    behaviour.
 
-The helper does not own diagnostics-vs-logger output formatting policy;
-it pushes warnings to *diagnostics* (collect-then-render) and informational
-or progress lines through *logger*.
+The helper records cleanup diagnostics via *diagnostics* (collect-then-
+render) and returns a :class:`CleanupResult` summarizing deleted, failed,
+and skipped paths. Callers remain responsible for any informational,
+progress, or warning logging based on that result -- the helper itself
+takes no logger.
 """
 
 from __future__ import annotations
@@ -146,16 +148,28 @@ def remove_stale_deployed_files(
         # Gate 3: provenance check. If APM recorded a content hash for
         # this file at deploy time and it no longer matches, the user
         # has edited the file -- skip deletion and warn so they can
-        # decide what to do.
+        # decide what to do. Fails CLOSED on hash-read errors: if APM
+        # cannot prove the file is unmodified (PermissionError, race,
+        # etc.) we keep it rather than risk destroying user work.
         expected_hash = recorded_hashes.get(stale_path)
         if expected_hash:
             try:
                 from ..utils.content_hash import compute_file_hash
 
                 actual_hash = compute_file_hash(stale_target)
-            except Exception:
-                actual_hash = None
-            if actual_hash and actual_hash != expected_hash:
+            except Exception as _hash_exc:
+                result.skipped_user_edit.append(stale_path)
+                diagnostics.warn(
+                    (
+                        f"Skipped removing {stale_path}: could not verify "
+                        f"file content ({_hash_exc.__class__.__name__}). "
+                        "Inspect the file and delete it manually if no "
+                        "longer needed."
+                    ),
+                    package=dep_key,
+                )
+                continue
+            if actual_hash != expected_hash:
                 result.skipped_user_edit.append(stale_path)
                 diagnostics.warn(
                     (

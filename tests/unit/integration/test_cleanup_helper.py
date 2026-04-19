@@ -168,6 +168,43 @@ def test_no_recorded_hashes_falls_through_to_delete(project_root, diagnostics, l
     assert not target.exists()
 
 
+def test_hash_read_failure_fails_closed(project_root, diagnostics, logger, monkeypatch):
+    """Provenance gate must fail CLOSED on hash-read errors.
+
+    Regression test for PR #762 review feedback: previously a
+    ``compute_file_hash`` exception (e.g. ``PermissionError``) was
+    swallowed and ``actual_hash`` became ``None``, allowing the file
+    to be deleted even though a hash was recorded. With a hash
+    recorded but unreadable the helper cannot prove the file is
+    unmodified, so it must skip deletion.
+    """
+    rel = ".github/prompts/unreadable.prompt.md"
+    target = _make_managed_file(project_root, rel, "could be edited, can't tell\n")
+    recorded = {rel: "sha256:" + "1" * 64}
+
+    def _boom(_path):
+        raise PermissionError("simulated EACCES")
+
+    # The helper imports compute_file_hash lazily inside the gate, so
+    # patch the source module.
+    monkeypatch.setattr(
+        "apm_cli.utils.content_hash.compute_file_hash", _boom
+    )
+    result = remove_stale_deployed_files(
+        [rel], project_root,
+        dep_key="pkg", targets=None,
+        diagnostics=diagnostics,
+        recorded_hashes=recorded,
+    )
+    assert result.deleted == []
+    assert result.skipped_user_edit == [rel]
+    assert target.exists()
+    msgs = [d.message for d in diagnostics._diagnostics]
+    assert any("could not verify" in m.lower() for m in msgs), (
+        "Expected fail-closed warning mentioning the verification failure."
+    )
+
+
 def test_unlink_failure_is_retained_for_retry(project_root, diagnostics, logger, monkeypatch):
     rel = ".github/prompts/cant-delete.prompt.md"
     _make_managed_file(project_root, rel)
@@ -281,6 +318,34 @@ def test_orphan_loop_uses_manifest_intent_not_integration_outcome():
         "Orphan loop must not derive membership from package_deployed_files.keys() -- "
         "see test_orphan_loop_uses_manifest_intent_not_integration_outcome docstring."
     )
+
+
+def test_hash_deployed_is_module_level_and_works(tmp_path):
+    """Regression test for PR #762 review feedback.
+
+    Previously ``_hash_deployed`` was an inner closure of
+    ``_install_apm_dependencies`` but was *referenced* from
+    ``_integrate_local_content`` (a sibling module-level function),
+    which would raise ``NameError`` at runtime whenever the local
+    ``.apm/`` persist path executed. Promoted to module scope so both
+    call sites share one implementation. This test pins:
+
+    1. The helper is module-importable (no NameError at import time).
+    2. It accepts the new ``(rel_paths, project_root)`` signature.
+    3. It returns ``{rel: "sha256:<hex>"}`` for regular files and
+       silently omits symlinks / missing paths.
+    """
+    from apm_cli.commands.install import _hash_deployed
+
+    (tmp_path / "a.txt").write_text("hello\n", encoding="utf-8")
+    (tmp_path / "missing.txt")  # never created
+    out = _hash_deployed(["a.txt", "missing.txt"], tmp_path)
+    assert "a.txt" in out
+    assert out["a.txt"].startswith("sha256:")
+    assert "missing.txt" not in out
+    # Empty input is safe.
+    assert _hash_deployed([], tmp_path) == {}
+    assert _hash_deployed(None, tmp_path) == {}
 
 
 def test_result_dataclass_defaults():
