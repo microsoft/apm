@@ -10,8 +10,6 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 
 
