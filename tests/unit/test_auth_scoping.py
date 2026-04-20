@@ -287,6 +287,74 @@ class TestCloneWithFallbackEnv:
         assert "GIT_SSH_COMMAND" in relaxed
         assert "ConnectTimeout" in relaxed["GIT_SSH_COMMAND"]
 
+    def test_allow_fallback_env_is_per_attempt_not_per_dep(self):
+        """In a mixed allow_fallback plan, only token-bearing attempts get the
+        locked-down env; SSH and plain-HTTPS attempts get the relaxed env so
+        user credential helpers (gh auth, Keychain, ssh-agent) keep working.
+
+        Regression for the Wave 2 panel finding: previously the env was decided
+        once per dependency from `has_token`, so SSH attempts in a token-having
+        dep ran with `GIT_ASKPASS=echo` and `GIT_CONFIG_GLOBAL=/dev/null`,
+        breaking encrypted-key prompts and credential helpers.
+        """
+        dl = _make_downloader(github_token="ghp_TESTTOKEN")
+        dl._allow_fallback = True
+        dep = _dep("owner/repo")
+
+        mock_repo = Mock()
+        mock_repo.head.commit.hexsha = "abc123"
+        # Fail every attempt so we capture envs from all of them.
+        effects = [GitCommandError("clone", "failed")] * 5
+
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "ghp_TESTTOKEN"}, clear=True), \
+             patch("apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+                   return_value=None), \
+             patch('apm_cli.deps.github_downloader.Repo') as MockRepo:
+            MockRepo.clone_from.side_effect = effects
+            dl.auth_resolver._cache.clear()
+            target = Path(tempfile.mkdtemp())
+            try:
+                with pytest.raises(RuntimeError):
+                    dl._clone_with_fallback(dep.repo_url, target, dep_ref=dep)
+            finally:
+                import shutil
+                shutil.rmtree(target, ignore_errors=True)
+            calls = MockRepo.clone_from.call_args_list
+
+        # Map URL -> env used. Token-bearing attempts must get locked-down env;
+        # SSH attempts and plain-HTTPS must get the relaxed env. Plain-HTTPS
+        # must NOT embed the token in the URL.
+        assert len(calls) >= 2, f"expected mixed chain, got {len(calls)} attempts"
+        seen_auth_https = False
+        seen_plain_https = False
+        seen_ssh = False
+        for c in calls:
+            url = c[0][0]
+            env_used = c[1].get("env", {})
+            if url.startswith("git@") or url.startswith("ssh://"):
+                seen_ssh = True
+                assert "GIT_ASKPASS" not in env_used, (
+                    f"SSH URL must run with relaxed env; got env={env_used}"
+                )
+                assert "GIT_CONFIG_GLOBAL" not in env_used
+            elif "ghp_TESTTOKEN" in url:
+                seen_auth_https = True
+                assert env_used.get("GIT_ASKPASS") == "echo", (
+                    f"token URL must run with locked-down env; got env={env_used}"
+                )
+            else:
+                # Plain HTTPS attempt: must NOT embed the token, and must run
+                # with relaxed env so credential helpers (gh auth, Keychain)
+                # can supply credentials.
+                seen_plain_https = True
+                assert url.startswith("https://"), url
+                assert "GIT_ASKPASS" not in env_used, (
+                    f"plain HTTPS must run with relaxed env; got env={env_used}"
+                )
+        assert seen_auth_https and seen_ssh and seen_plain_https, (
+            "expected at least one of each attempt kind in the mixed chain"
+        )
+
 
 # ===========================================================================
 # Regression: ssh:// URLs with custom ports (issues #661, #731)

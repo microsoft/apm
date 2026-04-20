@@ -623,9 +623,16 @@ class GitHubPackageDownloader:
         # Check if this is Azure DevOps (either via dep_ref or host detection)
         is_ado = (dep_ref and dep_ref.is_azure_devops()) or is_azure_devops_hostname(host)
 
-        # Use provided token or fall back to instance default
-        github_token = token if token is not None else self.github_token
-        ado_token = token if (token is not None and is_ado) else self.ado_token
+        # Use provided token or fall back to instance default. Pass an empty
+        # string ("") explicitly to suppress the per-instance token (used by
+        # the TransportSelector for "plain HTTPS" / "SSH" attempts that must
+        # NOT embed credentials in the URL).
+        if token == "":
+            github_token = ""
+            ado_token = ""
+        else:
+            github_token = token if token is not None else self.github_token
+            ado_token = token if (token is not None and is_ado) else self.ado_token
 
         _debug(f"_build_repo_url: host={host}, is_ado={is_ado}, dep_ref={'present' if dep_ref else 'None'}, "
                f"ado_org={dep_ref.ado_organization if dep_ref else None}")
@@ -707,14 +714,19 @@ class GitHubPackageDownloader:
             f"protocol_pref={self._protocol_pref.value}, allow_fallback={self._allow_fallback}"
         )
 
-        # Locked-down env when APM owns auth; relaxed env when delegating to
-        # git credential helpers. Decision is per-dependency, not per-attempt.
-        if has_token:
-            clone_env = self.git_env
-        else:
-            clone_env = {k: v for k, v in self.git_env.items()
-                         if k not in ('GIT_ASKPASS', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM')}
-            clone_env['GIT_TERMINAL_PROMPT'] = '0'
+        # Choose the clone env PER ATTEMPT (not per dependency): only the
+        # token-bearing attempt should run with the locked-down env that
+        # silences credential helpers. SSH and plain-HTTPS attempts in a
+        # mixed allow_fallback plan need the relaxed env so user-configured
+        # credential helpers (gh auth, Keychain, ssh-agent passphrase
+        # prompts) keep working.
+        def _env_for(use_token_attempt: bool) -> Dict[str, str]:
+            if use_token_attempt:
+                return self.git_env
+            relaxed = {k: v for k, v in self.git_env.items()
+                       if k not in ('GIT_ASKPASS', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM')}
+            relaxed['GIT_TERMINAL_PROMPT'] = '0'
+            return relaxed
 
         plan: TransportPlan = self._transport_selector.select(
             dep_ref=dep_ref,
@@ -739,7 +751,7 @@ class GitHubPackageDownloader:
                     repo_url_base,
                     use_ssh=use_ssh,
                     dep_ref=dep_ref,
-                    token=dep_token if attempt.use_token else None,
+                    token=dep_token if attempt.use_token else "",
                 )
             except Exception as e:
                 last_error = e
@@ -756,7 +768,7 @@ class GitHubPackageDownloader:
             try:
                 _debug(f"Attempting clone with {attempt.label} (URL sanitized)")
                 repo = Repo.clone_from(
-                    url, target_path, env=clone_env,
+                    url, target_path, env=_env_for(attempt.use_token),
                     progress=progress_reporter, **clone_kwargs,
                 )
                 if verbose_callback:

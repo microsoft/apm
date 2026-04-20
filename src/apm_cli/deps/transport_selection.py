@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Protocol, runtime_checkable
@@ -127,10 +128,13 @@ class GitConfigInsteadOfResolver:
 
     def __init__(self) -> None:
         self._rewrites: Optional[List[tuple]] = None  # list of (insteadof_value, target_base)
+        self._lock = threading.Lock()
 
     def resolve(self, candidate_url: str) -> Optional[str]:
         if self._rewrites is None:
-            self._rewrites = self._load_rewrites()
+            with self._lock:
+                if self._rewrites is None:
+                    self._rewrites = self._load_rewrites()
         best_prefix = ""
         best_base = ""
         for insteadof_value, target_base in self._rewrites:
