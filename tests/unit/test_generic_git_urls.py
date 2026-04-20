@@ -821,6 +821,11 @@ class TestSCPPortDetection:
         with pytest.raises(ValueError, match="no repository path follows"):
             DependencyReference.parse("git@host.example.com:7999")
 
+    def test_scp_port_trailing_slash_no_path_raises(self):
+        """git@host:7999/ — trailing slash but empty remaining path."""
+        with pytest.raises(ValueError, match="no repository path follows"):
+            DependencyReference.parse("git@host.example.com:7999/")
+
     def test_scp_port_with_ref_raises_and_preserves_ref(self):
         """Port-like segment with #ref should be caught; suggestion preserves the ref."""
         with pytest.raises(
@@ -855,13 +860,11 @@ class TestSCPPortDetection:
 
     def test_suggestion_omits_git_suffix_when_absent(self):
         """When the user omitted .git, the suggestion should not add it."""
-        try:
+        with pytest.raises(ValueError) as excinfo:
             DependencyReference.parse("git@host.example.com:7999/project/repo")
-            assert False, "should have raised ValueError"
-        except ValueError as e:
-            msg = str(e)
-            assert "ssh://git@host.example.com:7999/project/repo" in msg
-            assert not msg.endswith(".git")
+        msg = str(excinfo.value)
+        assert "ssh://git@host.example.com:7999/project/repo" in msg
+        assert not msg.endswith(".git")
 
     def test_port_zero_not_detected(self):
         """Port 0 is invalid -- should NOT trigger port detection, parses as org name."""

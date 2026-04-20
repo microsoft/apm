@@ -680,8 +680,8 @@ class DependencyReference:
         if re.fullmatch(r"[0-9]+", first_segment):
             port_candidate = int(first_segment)
             if 1 <= port_candidate <= 65535:
-                if len(segments) > 1:
-                    remaining_path = segments[1]
+                remaining_path = segments[1] if len(segments) > 1 else ""
+                if remaining_path:
                     git_suffix = ".git" if had_git_suffix else ""
                     ref_suffix = f"#{reference}" if reference else ""
                     alias_suffix = f"@{alias}" if alias else ""
