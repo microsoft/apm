@@ -97,6 +97,7 @@ apm install [PACKAGES...] [OPTIONS]
 - `--dev` - Add packages to [`devDependencies`](../manifest-schema/#5-devdependencies) instead of `dependencies`. Dev deps are installed locally but excluded from `apm pack --format plugin` bundles
 - `-g, --global` - Install to user scope (`~/.apm/`) instead of the current project. Primitives deploy to `~/.copilot/`, `~/.claude/`, etc. MCP servers are only installed for global-capable runtimes (Copilot CLI, Codex CLI); workspace-only runtimes are skipped.
 - `--allow-insecure` - Allow HTTP (insecure) dependencies. Required when adding or installing dependencies that use an `http://` URL.
+- `--allow-insecure-host HOSTNAME` - Allow transitive HTTP (insecure) dependencies from `HOSTNAME`. Repeat the flag to allow multiple hosts.
 - `--ssh` - Force SSH for shorthand (`owner/repo`) dependencies. Mutually exclusive with `--https`. Ignored for URLs with an explicit scheme.
 - `--https` - Force HTTPS for shorthand dependencies. Mutually exclusive with `--ssh`. Default unless `git config url.<base>.insteadOf` rewrites the candidate to SSH.
 - `--allow-protocol-fallback` - Restore the legacy permissive cross-protocol fallback chain (HTTPS-then-SSH or vice-versa). Strict-by-default otherwise. Each retry emits a `[!]` warning naming both protocols.
@@ -114,6 +115,7 @@ See [Dependencies: Transport selection](../../guides/dependencies/#transport-sel
 - `apm install` (no args): Installs **all** packages from `apm.yml` and deploys the project's own `.apm/` content
 - `apm install <package>`: Installs **only** the specified package (adds to `apm.yml` if not present)
 - Each `http://` dependency is warned at install time before any fetch begins
+- Transitive `http://` dependencies are allowed automatically when they use the same host as a direct insecure dependency you approved with `--allow-insecure`; other transitive hosts require `--allow-insecure-host HOSTNAME`
 
 **Local `.apm/` Content Deployment:**
 
@@ -190,6 +192,9 @@ apm install /home/user/repos/my-ai-package
 
 # Install to user scope (available across all projects)
 apm install -g microsoft/apm-sample-package
+
+# Allow an additional transitive HTTP host
+apm install --allow-insecure-host mirror.example.com
 
 # Install a plugin from a registered marketplace
 apm install code-review@acme-plugins

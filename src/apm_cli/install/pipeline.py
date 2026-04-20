@@ -53,6 +53,8 @@ def run_install_pipeline(
     scope=None,
     auth_resolver: "AuthResolver" = None,
     target: str = None,
+    allow_insecure: bool = False,
+    allow_insecure_hosts=(),
     marketplace_provenance: dict = None,
     protocol_pref=None,
     allow_protocol_fallback: "Optional[bool]" = None,
@@ -81,6 +83,8 @@ def run_install_pipeline(
         scope: InstallScope controlling project vs user deployment
         auth_resolver: Shared auth resolver for caching credentials
         target: Explicit target override from --target CLI flag
+        allow_insecure: Whether direct HTTP dependencies are approved
+        allow_insecure_hosts: Extra approved hosts for transitive HTTP dependencies
         marketplace_provenance: Marketplace provenance data for packages
     """
     # Late import: the ``APM_DEPS_AVAILABLE`` guard in commands/install.py
@@ -137,6 +141,8 @@ def run_install_pipeline(
         scope=scope,
         auth_resolver=auth_resolver,
         target_override=target,
+        allow_insecure=allow_insecure,
+        allow_insecure_hosts=allow_insecure_hosts,
         marketplace_provenance=marketplace_provenance,
         protocol_pref=protocol_pref,
         allow_protocol_fallback=allow_protocol_fallback,

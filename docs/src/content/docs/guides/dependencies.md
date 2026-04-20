@@ -156,9 +156,10 @@ still requires `apm install --allow-insecure`.
 
 HTTP has no transport authentication, so anyone who can intercept the
 connection can swap the package contents in transit. APM warns on every
-`http://` fetch, asks for extra confirmation before installing transitive
-HTTP dependencies, and requires `--allow-insecure-transitive` in CI or other
-non-interactive environments.
+`http://` fetch, allows same-host transitive HTTP dependencies when you
+already passed `--allow-insecure` for a direct HTTP dependency on that host,
+and otherwise requires `--allow-insecure-host <hostname>` for each additional
+transitive host you want to allow.
 :::
 
 > **Nested groups (GitLab, Gitea, etc.):** APM treats all path segments after the host as the repo path, so `gitlab.com/group/subgroup/repo` resolves to a repo at `group/subgroup/repo`. Virtual paths on simple 2-segment repos work with shorthand (`gitlab.com/owner/repo/file.prompt.md`). But for **nested-group repos + virtual paths**, use the object format — the shorthand is ambiguous:

@@ -2,6 +2,8 @@
 
 import builtins
 import sys
+import urllib.parse
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
@@ -106,10 +108,175 @@ except ImportError as e:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class _InsecureDependencyInfo:
+    """Resolved insecure dependency details for warnings and consent checks."""
+
+    url: str
+    is_transitive: bool
+    introduced_by: str | None = None
+
+
+def _collect_insecure_dependency_infos(
+    deps_to_install, dependency_graph
+) -> list[_InsecureDependencyInfo]:
+    """Collect insecure dependency details from the resolved install set."""
+    insecure_infos: list[_InsecureDependencyInfo] = []
+    tree = dependency_graph.dependency_tree
+
+    for dep in deps_to_install:
+        if getattr(dep, "is_insecure", False) is not True:
+            continue
+
+        node = tree.get_node(dep.get_unique_key()) if tree else None
+        parent = node.parent if node else None
+        insecure_infos.append(
+            _InsecureDependencyInfo(
+                url=dep.to_canonical(),
+                is_transitive=parent is not None,
+                introduced_by=(
+                    parent.dependency_ref.get_display_name()
+                    if parent is not None
+                    else None
+                ),
+            )
+        )
+
+    return insecure_infos
+
+
+def _format_insecure_dependency_warning(info: _InsecureDependencyInfo) -> str:
+    """Render the install-time warning text for an insecure dependency."""
+    message = f"Fetching insecurely (no transport auth): {info.url}"
+    if info.is_transitive and info.introduced_by:
+        message = (
+            f"{message} (transitive, introduced by {info.introduced_by})"
+        )
+    return message
+
+
+def _warn_insecure_dependencies(insecure_infos, logger=None) -> None:
+    """Emit one warning per insecure dependency before fetch begins."""
+    for info in insecure_infos:
+        message = _format_insecure_dependency_warning(info)
+        if logger:
+            logger.warning(message)
+        else:
+            from ..utils.console import _rich_warning
+
+            _rich_warning(message)
+
+
+def _normalize_allow_insecure_host(hostname: str) -> str:
+    """Validate and normalize a hostname passed via --allow-insecure-host."""
+    normalized = hostname.strip().lower()
+    if not is_valid_fqdn(normalized):
+        raise ValueError(
+            f"Invalid hostname '{hostname}'. Use a bare hostname like 'mirror.example.com'."
+        )
+    return normalized
+
+
+def _allow_insecure_host_callback(ctx, param, value):
+    """Normalize repeatable --allow-insecure-host values for Click."""
+    normalized_hosts = []
+    seen_hosts = set()
+    for raw_host in value or ():
+        try:
+            normalized = _normalize_allow_insecure_host(raw_host)
+        except ValueError as exc:
+            raise click.BadParameter(str(exc))
+        if normalized not in seen_hosts:
+            seen_hosts.add(normalized)
+            normalized_hosts.append(normalized)
+    return tuple(normalized_hosts)
+
+
+def _get_insecure_dependency_host(info: _InsecureDependencyInfo) -> str | None:
+    """Extract the hostname from an insecure dependency warning record."""
+    parsed = urllib.parse.urlparse(info.url)
+    return parsed.hostname.lower() if parsed.hostname else None
+
+
+def _get_allowed_transitive_insecure_hosts(
+    insecure_infos,
+    *,
+    allow_insecure: bool,
+    allow_insecure_hosts,
+) -> set[str]:
+    """Build the hostname allowlist for transitive insecure dependencies."""
+    allowed_hosts = set(allow_insecure_hosts)
+    if not allow_insecure:
+        return allowed_hosts
+
+    for info in insecure_infos:
+        if info.is_transitive:
+            continue
+        host = _get_insecure_dependency_host(info)
+        if host:
+            allowed_hosts.add(host)
+    return allowed_hosts
+
+
+def _guard_transitive_insecure_dependencies(
+    insecure_infos,
+    *,
+    allow_insecure: bool,
+    allow_insecure_hosts=(),
+    logger=None,
+) -> None:
+    """Block transitive insecure dependencies from unapproved hosts."""
+    transitive_infos = [info for info in insecure_infos if info.is_transitive]
+    if not transitive_infos:
+        return
+
+    allowed_hosts = _get_allowed_transitive_insecure_hosts(
+        insecure_infos,
+        allow_insecure=allow_insecure,
+        allow_insecure_hosts=allow_insecure_hosts,
+    )
+    blocked_hosts = sorted(
+        {
+            host
+            for host in (
+                _get_insecure_dependency_host(info) for info in transitive_infos
+            )
+            if host and host not in allowed_hosts
+        }
+    )
+    if not blocked_hosts:
+        return
+
+    suggested_flags = " ".join(
+        f"--allow-insecure-host {host}" for host in blocked_hosts
+    )
+    message = (
+        "Transitive HTTP (insecure) dependencies were found on unapproved host(s): "
+        f"{', '.join(blocked_hosts)}. "
+        "--allow-insecure only covers direct HTTP dependencies and transitive "
+        "HTTP dependencies on the same host. "
+        f"Re-run with {suggested_flags} to allow these transitive hosts."
+    )
+    if logger:
+        logger.error(message)
+    else:
+        _rich_error(message)
+    sys.exit(1)
+
+
 def _check_insecure_dependencies(
     deps, allow_insecure_flag: bool, logger=None
 ) -> None:
-    """Check APM dependencies for HTTP (insecure) URLs and enforce security policy."""
+    """Check direct APM dependencies for HTTP (insecure) URLs and enforce policy.
+
+    Two conditions must BOTH be true for an HTTP dep to be allowed:
+    1. The dep entry in apm.yml must have allow_insecure: true
+    2. --allow-insecure must be set for this install invocation
+
+    Args:
+        deps: List of DependencyReference objects to check.
+        allow_insecure_flag: True if --allow-insecure was passed on the command line.
+    """
     for dep in deps:
         dep_is_insecure = getattr(dep, "is_insecure", False) is True
         if not dep_is_insecure:
@@ -137,20 +304,6 @@ def _check_insecure_dependencies(
             else:
                 _rich_error(message)
             sys.exit(1)
-
-
-def _warn_insecure_dependencies(deps, logger=None) -> None:
-    """Emit one warning per insecure dependency before fetch begins."""
-    for dep in deps:
-        if getattr(dep, "is_insecure", False) is not True:
-            continue
-        message = f"Fetching insecurely (no transport auth): {dep.to_canonical()}"
-        if logger:
-            logger.warning(message)
-        else:
-            from ..utils.console import _rich_warning
-
-            _rich_warning(message)
 
 
 def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, logger=None, manifest_path=None, auth_resolver=None, scope=None, allow_insecure=False):
@@ -457,6 +610,14 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
     help="Allow HTTP (insecure) dependencies. Required when dependencies use http:// URLs.",
 )
 @click.option(
+    "--allow-insecure-host",
+    "allow_insecure_hosts",
+    multiple=True,
+    callback=_allow_insecure_host_callback,
+    metavar="HOSTNAME",
+    help="Allow transitive HTTP (insecure) dependencies from this hostname. Repeat for multiple hosts.",
+)
+@click.option(
     "--global", "-g", "global_",
     is_flag=True,
     default=False,
@@ -484,12 +645,17 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
     help="Restore the legacy permissive cross-protocol fallback chain (escape hatch for migrating users; also: APM_ALLOW_PROTOCOL_FALLBACK=1).",
 )
 @click.pass_context
-def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, allow_insecure, global_, use_ssh, use_https, allow_protocol_fallback):
+def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, allow_insecure, allow_insecure_hosts, global_, use_ssh, use_https, allow_protocol_fallback):
     """Install APM and MCP dependencies from apm.yml (like npm install).
 
     This command automatically detects AI runtimes from your apm.yml scripts and installs
     MCP servers for all detected and available runtimes. It also installs APM package
     dependencies from GitHub repositories.
+
+    HTTP dependencies require `allow_insecure: true` in apm.yml and
+    `--allow-insecure` on the install command. Transitive HTTP dependencies are
+    allowed automatically when they stay on the same host as a direct HTTP
+    dependency, or explicitly with `--allow-insecure-host <hostname>`.
 
     The --only flag filters by dependency type (apm or mcp). Internally converted
     to an InstallMode enum for type-safe dispatch.
@@ -505,6 +671,7 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         apm install --dry-run                   # Show what would be installed
         apm install -g org/pkg1                 # Install to user scope (~/.apm/)
         apm install --allow-insecure http://my-server.example.com/owner/repo
+        apm install --allow-insecure-host mirror.example.com
     """
     try:
         # Create structured logger for install output early so exception
@@ -618,10 +785,6 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
 
         all_apm_deps = list(apm_deps) + list(dev_apm_deps)
         _check_insecure_dependencies(all_apm_deps, allow_insecure, logger=logger)
-        _warn_insecure_dependencies(all_apm_deps, logger=logger)
-
-        all_apm_deps = list(apm_deps) + list(dev_apm_deps)
-        _check_insecure_dependencies(all_apm_deps, allow_insecure, logger=logger)
 
         # Convert --only string to InstallMode enum
         if only is None:
@@ -701,6 +864,8 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                     scope=scope,
                     auth_resolver=auth_resolver,
                     target=target,
+                    allow_insecure=allow_insecure,
+                    allow_insecure_hosts=allow_insecure_hosts,
                     marketplace_provenance=(
                         outcome.marketplace_provenance if packages and outcome else None
                     ),
@@ -845,6 +1010,8 @@ def _install_apm_dependencies(
     scope=None,
     auth_resolver: "AuthResolver" = None,
     target: str = None,
+    allow_insecure: bool = False,
+    allow_insecure_hosts=(),
     marketplace_provenance: dict = None,
     protocol_pref=None,
     allow_protocol_fallback: "Optional[bool]" = None,
@@ -874,10 +1041,10 @@ def _install_apm_dependencies(
         scope=scope,
         auth_resolver=auth_resolver,
         target=target,
+        allow_insecure=allow_insecure,
+        allow_insecure_hosts=allow_insecure_hosts,
         marketplace_provenance=marketplace_provenance,
         protocol_pref=protocol_pref,
         allow_protocol_fallback=allow_protocol_fallback,
     )
     return InstallService().run(request)
-
-

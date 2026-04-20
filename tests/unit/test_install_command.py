@@ -1,13 +1,15 @@
 """Tests for the apm install command auto-bootstrap feature."""
 
 import contextlib
-import pytest
-import tempfile
 import os
-import yaml
+import tempfile
+import types
 from pathlib import Path
-from click.testing import CliRunner
 from unittest.mock import patch, MagicMock
+
+import pytest
+import yaml
+from click.testing import CliRunner
 
 from apm_cli.models.results import InstallResult
 
@@ -1147,6 +1149,22 @@ class TestAllowInsecureFlag:
         assert result.exit_code == 0
         normalized = " ".join(result.output.split())
         assert "use --allow-insecure for http:// packages" in normalized
+        assert "--allow-insecure-host HOSTNAME" in result.output
+
+    def test_allow_insecure_host_rejects_non_hostname(self):
+        """The explicit transitive host option only accepts bare hostnames."""
+        result = self.runner.invoke(
+            cli,
+            [
+                "install",
+                "--allow-insecure-host",
+                "https://mirror.example.com",
+                "owner/repo",
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "Invalid value for '--allow-insecure-host'" in result.output
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
     @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
@@ -1183,6 +1201,48 @@ class TestAllowInsecureFlag:
                         "allow_insecure": True,
                     }
                 ]
+                assert mock_install_apm.call_args.kwargs["allow_insecure"] is True
+                assert mock_install_apm.call_args.kwargs["allow_insecure_hosts"] == ()
+            finally:
+                os.chdir(self.original_dir)
+
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
+    @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
+    @patch("apm_cli.commands.install.APMPackage")
+    @patch("apm_cli.commands.install._install_apm_dependencies")
+    def test_allow_insecure_host_is_passed_to_install_engine(
+        self, mock_install_apm, mock_apm_package, mock_validate
+    ):
+        """The explicit transitive host option is threaded into the install engine."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            try:
+                os.chdir(tmp_dir)
+                mock_pkg_instance = MagicMock()
+                mock_pkg_instance.get_apm_dependencies.return_value = [MagicMock()]
+                mock_pkg_instance.get_mcp_dependencies.return_value = []
+                mock_pkg_instance.get_dev_apm_dependencies.return_value = []
+                mock_apm_package.from_apm_yml.return_value = mock_pkg_instance
+                mock_install_apm.return_value = InstallResult(
+                    diagnostics=MagicMock(
+                        has_diagnostics=False, has_critical_security=False
+                    )
+                )
+
+                result = self.runner.invoke(
+                    cli,
+                    [
+                        "install",
+                        "--allow-insecure-host",
+                        "mirror.example.com",
+                        "owner/repo",
+                    ],
+                )
+
+                assert result.exit_code == 0
+                assert (
+                    mock_install_apm.call_args.kwargs["allow_insecure_hosts"]
+                    == ("mirror.example.com",)
+                )
             finally:
                 os.chdir(self.original_dir)
 
@@ -1232,3 +1292,165 @@ class TestAllowInsecureFlag:
         from apm_cli.commands.install import _check_insecure_dependencies
 
         _check_insecure_dependencies([], allow_insecure_flag=False)
+
+
+class TestInsecureDependencyWarnings:
+    """Tests for install-time insecure dependency warnings."""
+
+    def test_collect_insecure_dependency_infos_marks_direct_dependency(self):
+        """Direct HTTP dependencies are collected without parent provenance."""
+        from apm_cli.commands.install import (
+            _InsecureDependencyInfo,
+            _collect_insecure_dependency_infos,
+        )
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep = DependencyReference.parse("http://mirror.example.com/acme/rules")
+        tree = MagicMock()
+        tree.get_node.return_value = None
+        graph = MagicMock(dependency_tree=tree)
+
+        infos = _collect_insecure_dependency_infos([dep], graph)
+
+        assert infos == [
+            _InsecureDependencyInfo(
+                url="http://mirror.example.com/acme/rules",
+                is_transitive=False,
+                introduced_by=None,
+            )
+        ]
+
+    def test_collect_insecure_dependency_infos_marks_transitive_dependency(self):
+        """Transitive HTTP dependencies carry introducer information."""
+        from apm_cli.commands.install import _collect_insecure_dependency_infos
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep = DependencyReference.parse("http://mirror.example.com/acme/transitive")
+        parent_ref = DependencyReference.parse("owner/root-package")
+        parent_node = types.SimpleNamespace(dependency_ref=parent_ref)
+        node = types.SimpleNamespace(parent=parent_node)
+        tree = MagicMock()
+        tree.get_node.return_value = node
+        graph = MagicMock(dependency_tree=tree)
+
+        infos = _collect_insecure_dependency_infos([dep], graph)
+
+        assert len(infos) == 1
+        assert infos[0].url == "http://mirror.example.com/acme/transitive"
+        assert infos[0].is_transitive is True
+        assert infos[0].introduced_by == "owner/root-package"
+
+    def test_format_insecure_dependency_warning_for_transitive_dep(self):
+        """Transitive warning strings include the introducer."""
+        from apm_cli.commands.install import (
+            _InsecureDependencyInfo,
+            _format_insecure_dependency_warning,
+        )
+
+        message = _format_insecure_dependency_warning(
+            _InsecureDependencyInfo(
+                url="http://mirror.example.com/acme/transitive",
+                is_transitive=True,
+                introduced_by="owner/root-package",
+            )
+        )
+
+        assert "Fetching insecurely (no transport auth)" in message
+        assert "http://mirror.example.com/acme/transitive" in message
+        assert "transitive, introduced by owner/root-package" in message
+
+
+class TestTransitiveInsecureDependencyGuard:
+    """Tests for host-based consent around transitive insecure dependencies."""
+
+    def test_transitive_guard_blocks_unapproved_host(self):
+        """Transitive insecure deps are blocked when their host is not approved."""
+        from apm_cli.commands.install import (
+            _InsecureDependencyInfo,
+            _guard_transitive_insecure_dependencies,
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            _guard_transitive_insecure_dependencies(
+                [
+                    _InsecureDependencyInfo(
+                        url="http://mirror.example.com/acme/transitive",
+                        is_transitive=True,
+                        introduced_by="owner/root-package",
+                    )
+                ],
+                allow_insecure=False,
+                allow_insecure_hosts=(),
+            )
+
+        assert exc_info.value.code == 1
+
+    def test_transitive_guard_allows_same_host_as_direct_insecure_dependency(self):
+        """A direct insecure dependency host also permits transitive deps on that host."""
+        from apm_cli.commands.install import (
+            _InsecureDependencyInfo,
+            _guard_transitive_insecure_dependencies,
+        )
+
+        _guard_transitive_insecure_dependencies(
+            [
+                _InsecureDependencyInfo(
+                    url="http://mirror.example.com/acme/direct",
+                    is_transitive=False,
+                    introduced_by=None,
+                ),
+                _InsecureDependencyInfo(
+                    url="http://mirror.example.com/acme/transitive",
+                    is_transitive=True,
+                    introduced_by="owner/root-package",
+                ),
+            ],
+            allow_insecure=True,
+            allow_insecure_hosts=(),
+        )
+
+    def test_transitive_guard_accepts_explicit_host(self):
+        """Explicitly allowed hosts permit transitive insecure dependencies."""
+        from apm_cli.commands.install import (
+            _InsecureDependencyInfo,
+            _guard_transitive_insecure_dependencies,
+        )
+
+        _guard_transitive_insecure_dependencies(
+            [
+                _InsecureDependencyInfo(
+                    url="http://mirror.example.com/acme/transitive",
+                    is_transitive=True,
+                    introduced_by="owner/root-package",
+                )
+            ],
+            allow_insecure=False,
+            allow_insecure_hosts=("mirror.example.com",),
+        )
+
+    def test_transitive_guard_blocks_different_host_without_explicit_allowance(self):
+        """A direct insecure host does not permit transitive deps on other hosts."""
+        from apm_cli.commands.install import (
+            _InsecureDependencyInfo,
+            _guard_transitive_insecure_dependencies,
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            _guard_transitive_insecure_dependencies(
+                [
+                    _InsecureDependencyInfo(
+                        url="http://my-server.example.com/acme/direct",
+                        is_transitive=False,
+                        introduced_by=None,
+                    ),
+                    _InsecureDependencyInfo(
+                        url="http://mirror.example.com/acme/transitive",
+                        is_transitive=True,
+                        introduced_by="owner/root-package",
+                    ),
+                ],
+                allow_insecure=True,
+                allow_insecure_hosts=(),
+            )
+
+        assert exc_info.value.code == 1

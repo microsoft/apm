@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- HTTP dependency installs now require per-run `--allow-insecure` and warn on every insecure fetch (#700)
+- HTTP dependency installs now require per-run `--allow-insecure`, warn on every insecure fetch, automatically allow same-host transitive `http://` sources, and use `--allow-insecure-host` for additional transitive hosts (#700)
 
 ### Fixed
 
