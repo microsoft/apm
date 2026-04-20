@@ -158,13 +158,22 @@ class DetectionEvidence:
     has_hook_json: bool
     plugin_json_path: Optional[Path]
     plugin_dirs_present: Tuple[str, ...]
+    has_claude_plugin_dir: bool = False
 
     @property
     def has_plugin_evidence(self) -> bool:
-        """True if any signal indicates this is a marketplace plugin."""
+        """True if any signal indicates this is a marketplace plugin.
+
+        ``.claude-plugin/`` is treated as first-class evidence so that a
+        Claude Code plugin without a ``plugin.json`` (name derived from
+        the directory) classifies as ``MARKETPLACE_PLUGIN`` instead of
+        falling through to ``HOOK_PACKAGE``.  ``normalize_plugin_directory``
+        handles the missing-manifest case gracefully.
+        """
         return (
             self.plugin_json_path is not None
             or bool(self.plugin_dirs_present)
+            or self.has_claude_plugin_dir
         )
 
 
@@ -186,6 +195,7 @@ def gather_detection_evidence(package_path: Path) -> DetectionEvidence:
         has_hook_json=_has_hook_json(package_path),
         plugin_json_path=find_plugin_json(package_path),
         plugin_dirs_present=plugin_dirs_present,
+        has_claude_plugin_dir=(package_path / ".claude-plugin").is_dir(),
     )
 
 
@@ -202,13 +212,17 @@ def detect_package_type(
     1. ``HYBRID`` -- both ``apm.yml`` and ``SKILL.md`` present.
     2. ``APM_PACKAGE`` -- ``apm.yml`` only.
     3. ``CLAUDE_SKILL`` -- ``SKILL.md`` only.
-    4. ``MARKETPLACE_PLUGIN`` -- ``plugin.json`` *or* one of
-       ``agents/``, ``skills/``, ``commands/``.  This must precede the
-       hook-only branch because the marketplace-plugin synthesizer
-       (``_map_plugin_artifacts``) already maps ``hooks/`` alongside
-       agents/skills/commands -- so a Claude Code plugin that ships
-       both hooks and skills must classify as ``MARKETPLACE_PLUGIN``,
-       not ``HOOK_PACKAGE``, otherwise the skills are silently dropped.
+    4. ``MARKETPLACE_PLUGIN`` -- ``plugin.json``, a ``.claude-plugin/``
+       directory, *or* one of ``agents/``, ``skills/``, ``commands/``.
+       This must precede the hook-only branch because the
+       marketplace-plugin synthesizer (``_map_plugin_artifacts``) already
+       maps ``hooks/`` alongside agents/skills/commands -- so a Claude
+       Code plugin that ships both hooks and skills must classify as
+       ``MARKETPLACE_PLUGIN``, not ``HOOK_PACKAGE``, otherwise the
+       skills are silently dropped.  ``.claude-plugin/`` is treated as
+       first-class evidence so plugins without a ``plugin.json``
+       (manifest-less Claude Code plugins) still classify correctly;
+       ``normalize_plugin_directory`` handles missing manifests.
        See microsoft/apm#780.
     5. ``HOOK_PACKAGE`` -- ``hooks/*.json`` only, no plugin evidence.
     6. ``INVALID`` -- nothing recognisable.

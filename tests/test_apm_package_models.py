@@ -1187,7 +1187,34 @@ class TestGatherDetectionEvidence:
         assert evidence.has_hook_json is True
         assert evidence.plugin_json_path is not None
         assert evidence.plugin_dirs_present == ("agents", "skills", "commands")
+        assert evidence.has_claude_plugin_dir is True
         assert evidence.has_plugin_evidence is True
+
+    def test_claude_plugin_dir_alone_is_plugin_evidence(self, tmp_path):
+        """A bare ``.claude-plugin/`` directory (no plugin.json, no
+        agents/skills/commands) must still classify as plugin evidence
+        so a Claude Code plugin without a manifest is not silently
+        treated as hooks-only.  See microsoft/apm#780.
+        """
+        from src.apm_cli.models.validation import (
+            detect_package_type,
+            gather_detection_evidence,
+        )
+
+        (tmp_path / ".claude-plugin").mkdir()
+        (tmp_path / "hooks").mkdir()
+        (tmp_path / "hooks" / "hooks.json").write_text("{}")
+
+        evidence = gather_detection_evidence(tmp_path)
+        assert evidence.has_claude_plugin_dir is True
+        assert evidence.plugin_dirs_present == ()
+        assert evidence.plugin_json_path is None
+        assert evidence.has_plugin_evidence is True
+
+        pkg_type, pj_path = detect_package_type(tmp_path)
+        assert pkg_type == PackageType.MARKETPLACE_PLUGIN
+        # No plugin.json file present -> path is None even though we matched.
+        assert pj_path is None
 
 
 class TestGitReferenceUtils:
