@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Strict-by-default transport selection: explicit `ssh://`/`https://` URLs no longer silently fall back to the other protocol; shorthand consults `git config url.<base>.insteadOf` and otherwise defaults to HTTPS. Set `APM_ALLOW_PROTOCOL_FALLBACK=1` (or pass `--allow-protocol-fallback`) to restore the legacy permissive chain; cross-protocol retries then emit a `[!]` warning. Closes #328 (#778)
 
+### Changed
+
+- `apm install --allow-protocol-fallback` now emits a `[!]` warning before the first clone attempt when a dependency has a custom port and both SSH and HTTPS attempts are planned, explaining that fallback reuses the same port across schemes and suggesting a pinned `ssh://` or `https://` URL for servers that use different ports per protocol (e.g. Bitbucket Datacenter: SSH 7999, HTTPS 7990). Docs note the limitation in the transport-selection and authentication guides. Closes #786
+
 ### Added
 
 - `apm install --ssh` / `--https` flags and `APM_GIT_PROTOCOL=ssh|https` env to pick the initial transport for shorthand dependencies (#778)

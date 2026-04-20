@@ -199,6 +199,11 @@ class GitHubPackageDownloader:
         self._allow_fallback = (
             allow_fallback if allow_fallback is not None else is_fallback_allowed()
         )
+        # Dedup set for the issue #786 cross-protocol port warning: one install
+        # run calls _clone_with_fallback multiple times per dep (ref-resolution
+        # clone, then the actual dep clone). We want the warning exactly once
+        # per (host, repo, port) identity across all those calls.
+        self._fallback_port_warned: set = set()
 
     def _setup_git_environment(self) -> Dict[str, Any]:
         """Set up Git environment with authentication using centralized token manager.
@@ -738,6 +743,32 @@ class GitHubPackageDownloader:
             "transport plan: "
             f"strict={plan.strict}, attempts={[(a.scheme, a.use_token, a.label) for a in plan.attempts]}"
         )
+
+        # Cross-protocol fallback reuses dep_ref.port for every attempt. On
+        # servers that serve SSH and HTTPS on different ports (e.g. Bitbucket
+        # Datacenter: SSH 7999, HTTPS 7990), the off-protocol URL will be
+        # wrong. Warn once per dep, before the first attempt, so the user can
+        # pin the protocol with an explicit ssh:// or https:// URL. See #786.
+        # A single install may call this method multiple times for the same
+        # dep (ref resolution + actual clone), so dedup on (host, repo, port).
+        dep_port = getattr(dep_ref, "port", None) if dep_ref else None
+        if (
+            not plan.strict
+            and dep_port is not None
+            and any(a.scheme == "ssh" for a in plan.attempts)
+            and any(a.scheme == "https" for a in plan.attempts)
+        ):
+            warn_key = (dep_host, repo_url_base, dep_port)
+            if warn_key not in self._fallback_port_warned:
+                self._fallback_port_warned.add(warn_key)
+                _rich_warning(
+                    f"Custom port {dep_port} is set on this dependency. "
+                    f"Cross-protocol fallback will reuse the same port for the "
+                    f"other scheme. If your server uses different ports per "
+                    f"protocol (e.g., Bitbucket Datacenter: SSH 7999, HTTPS 7990), "
+                    f"pin the protocol with an explicit ssh:// or https:// URL.",
+                    symbol="warning",
+                )
 
         prev_label: Optional[str] = None
         prev_scheme: Optional[str] = None

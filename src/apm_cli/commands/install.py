@@ -415,7 +415,7 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
     "allow_protocol_fallback",
     is_flag=True,
     default=False,
-    help="Restore the legacy permissive cross-protocol fallback chain (escape hatch for migrating users; also: APM_ALLOW_PROTOCOL_FALLBACK=1).",
+    help="Restore the legacy permissive cross-protocol fallback chain (escape hatch for migrating users; also: APM_ALLOW_PROTOCOL_FALLBACK=1). Caveat: fallback reuses the same port across schemes, so pin the protocol with an explicit ssh:// or https:// URL on servers that use different SSH and HTTPS ports.",
 )
 @click.pass_context
 def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, global_, use_ssh, use_https, allow_protocol_fallback):

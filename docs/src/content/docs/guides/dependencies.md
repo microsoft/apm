@@ -484,6 +484,16 @@ When fallback runs, each cross-protocol retry emits a `[!]` warning naming
 both protocols. Use this to unblock a pipeline while you fix the root
 cause -- not as a long-term setting.
 
+:::caution[Cross-protocol fallback reuses the same port]
+Fallback reuses `dep_ref.port` for both schemes. On servers that use
+different ports per protocol (e.g. Bitbucket Datacenter: SSH 7999,
+HTTPS 7990), the off-protocol URL will be wrong. APM emits a `[!]`
+warning before the first clone attempt when a custom port is set and
+fallback is enabled. The fix is to pin the protocol with an explicit
+`ssh://...` or `https://...` URL in `apm.yml`, which bypasses the
+fallback chain entirely.
+:::
+
 For SSH key selection (ssh-agent, `~/.ssh/config`) and HTTPS token
 resolution, see
 [Authentication](../../getting-started/authentication/#choosing-transport-ssh-vs-https).
