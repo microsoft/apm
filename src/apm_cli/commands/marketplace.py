@@ -1554,11 +1554,17 @@ def publish(
 
     _render_publish_summary(logger, results, pr_results, no_pr, dry_run)
 
-    # State file path
+    # State file path -- use soft_wrap so the path is never split mid-word
+    # in narrow terminals (Rich would otherwise break at hyphens).
     state_path = Path.cwd() / ".apm" / "publish-state.json"
-    logger.progress(
-        f"State file: {state_path}",
-        symbol="info",
+    from rich.text import Text
+
+    console = _get_console()
+    console.print(
+        Text(f"[i] State file: {state_path}", no_wrap=True),
+        style="blue",
+        highlight=False,
+        soft_wrap=True,
     )
 
     # Exit code
