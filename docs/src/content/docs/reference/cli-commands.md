@@ -1117,6 +1117,165 @@ apm marketplace validate acme-plugins
 apm marketplace validate acme-plugins --verbose
 ```
 
+#### `apm marketplace init` - Scaffold a marketplace.yml
+
+Create a richly-commented `marketplace.yml` in the current directory. The scaffold is valid against the schema and ready to be edited. See the [Authoring a marketplace guide](../../guides/marketplace-authoring/).
+
+```bash
+apm marketplace init [OPTIONS]
+```
+
+**Options:**
+- `--force` - Overwrite an existing `marketplace.yml`
+- `--no-gitignore-check` - Skip the `.gitignore` staleness check
+- `-v, --verbose` - Show detailed output
+
+**Exit codes:**
+- `0` - Scaffold written
+- `1` - File already exists (without `--force`) or write failure
+
+**Examples:**
+```bash
+apm marketplace init
+apm marketplace init --force
+```
+
+#### `apm marketplace build` - Compile marketplace.yml
+
+Resolve all package version ranges against the source repositories and write an Anthropic-compliant `marketplace.json`. APM-only fields (`build:`, version ranges, tag patterns) are stripped; `metadata:` is passed through verbatim.
+
+```bash
+apm marketplace build [OPTIONS]
+```
+
+**Options:**
+- `--dry-run` - Resolve and print the result table, but do not write `marketplace.json`
+- `--offline` - Use cached refs only (no `git ls-remote` calls)
+- `--include-prerelease` - Allow pre-release tags to satisfy ranges
+- `-v, --verbose` - Per-entry resolution detail
+
+**Exit codes:**
+- `0` - Build succeeded (or dry run complete)
+- `1` - Build error (network failure, unresolvable ref, no matching tag)
+- `2` - Schema error in `marketplace.yml`
+
+**Examples:**
+```bash
+# Compile marketplace.yml -> marketplace.json
+apm marketplace build
+
+# Preview without writing
+apm marketplace build --dry-run
+
+# Offline build against cached refs
+apm marketplace build --offline
+```
+
+#### `apm marketplace outdated` - Report available upgrades
+
+List packages in `marketplace.yml` whose source repositories have newer tags available. Range-aware: distinguishes "latest in range" (picked up by next `build`) from "latest overall" (requires a manual range bump).
+
+```bash
+apm marketplace outdated [OPTIONS]
+```
+
+**Options:**
+- `--offline` - Use cached refs only
+- `--include-prerelease` - Include pre-release tags
+- `-v, --verbose` - Show detailed output
+
+**Exit codes:**
+- `0` - Report rendered (even if upgrades are available)
+- `1` - Unable to query refs
+- `2` - Schema error in `marketplace.yml`
+
+**Examples:**
+```bash
+apm marketplace outdated
+apm marketplace outdated --include-prerelease
+```
+
+#### `apm marketplace check` - Validate marketplace.yml entries
+
+Validate the `marketplace.yml` schema and verify that every package entry is resolvable (ref exists, at least one tag satisfies the range). Intended for CI use before publishing.
+
+```bash
+apm marketplace check [OPTIONS]
+```
+
+**Options:**
+- `--offline` - Schema and cached-ref checks only (no network)
+- `-v, --verbose` - Show detailed output
+
+**Exit codes:**
+- `0` - All entries OK
+- `1` - One or more entries are unreachable or unresolvable
+- `2` - Schema error in `marketplace.yml`
+
+**Examples:**
+```bash
+apm marketplace check
+apm marketplace check --offline
+```
+
+#### `apm marketplace doctor` - Environment diagnostics
+
+Check git, network reachability, authentication, `gh` CLI availability, and the presence of `marketplace.yml`. Run this first when `build` or `publish` fails in an unfamiliar environment.
+
+```bash
+apm marketplace doctor [OPTIONS]
+```
+
+**Options:**
+- `-v, --verbose` - Per-check detail
+
+**Exit codes:**
+- `0` - All checks pass
+- `1` - One or more checks failed
+
+**Examples:**
+```bash
+apm marketplace doctor
+apm marketplace doctor --verbose
+```
+
+#### `apm marketplace publish` - Open PRs on consumer repositories
+
+Drive the compiled `marketplace.json` out to consumer repositories listed in a `consumer-targets.yml` file, opening a pull request on each. Requires an authenticated `gh` CLI unless `--no-pr` is used. See the [Authoring a marketplace guide](../../guides/marketplace-authoring/#publishing-to-consumers) for the full workflow.
+
+```bash
+apm marketplace publish [OPTIONS]
+```
+
+**Options:**
+- `--targets PATH` - Path to the targets file (default: `./consumer-targets.yml`)
+- `--dry-run` - Preview without pushing or opening PRs
+- `--no-pr` - Push branches but skip PR creation
+- `--draft` - Create PRs as drafts
+- `--allow-downgrade` - Allow pushing a lower version than the target currently references
+- `--allow-ref-change` - Allow switching ref types (for example, branch to SHA)
+- `--parallel N` - Maximum concurrent target updates (default: `4`)
+- `-y, --yes` - Skip the confirmation prompt (required in non-interactive sessions)
+- `-v, --verbose` - Per-target detail
+
+**Exit codes:**
+- `0` - All targets succeeded (or were already up to date)
+- `1` - One or more targets failed, or prerequisites missing
+
+**Examples:**
+```bash
+# Preview the publish plan
+apm marketplace publish --dry-run --yes
+
+# Publish with PRs
+apm marketplace publish
+
+# Push branches only (no gh CLI needed)
+apm marketplace publish --no-pr
+```
+
+Run history and PR URLs are recorded in `.apm/publish-state.json` so re-runs can detect existing PRs.
+
 ### `apm search` - Search plugins in a marketplace
 
 Search for plugins by name or description within a specific marketplace.

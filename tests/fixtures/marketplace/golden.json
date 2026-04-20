@@ -1,0 +1,43 @@
+{
+  "name": "acme-tools",
+  "description": "Curated developer tools by Acme Corp",
+  "version": "1.0.0",
+  "owner": {
+    "name": "Acme Corp",
+    "email": "tools@acme.example.com",
+    "url": "https://acme.example.com"
+  },
+  "metadata": {
+    "pluginRoot": "plugins",
+    "category": "developer-tools"
+  },
+  "plugins": [
+    {
+      "name": "code-reviewer",
+      "description": "Automated code review assistant",
+      "tags": [
+        "review",
+        "quality"
+      ],
+      "source": {
+        "type": "github",
+        "repository": "acme/code-reviewer",
+        "ref": "v2.1.0",
+        "commit": "abcd234567890abcdef1234567890abcdef12345"
+      }
+    },
+    {
+      "name": "test-generator",
+      "tags": [
+        "testing"
+      ],
+      "source": {
+        "type": "github",
+        "repository": "acme/test-generator",
+        "path": "src/plugin",
+        "ref": "v1.0.3",
+        "commit": "def4567890abcdef1234567890abcdef12345678"
+      }
+    }
+  ]
+}
