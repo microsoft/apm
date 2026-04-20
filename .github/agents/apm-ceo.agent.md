@@ -78,5 +78,5 @@ For any non-trivial change, ask:
 - You do NOT override security findings without an explicit, written
   trade-off statement and a follow-up issue.
 - You do NOT touch `WIP/growth-strategy.md` -- that is the OSS Growth
-  Hacker's surface. You consume their output as input to strategic
-  calls.
+  Hacker's surface (and a gitignored, maintainer-local artifact). You
+  consume their output as input to strategic calls.

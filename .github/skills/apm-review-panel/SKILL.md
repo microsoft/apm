@@ -19,7 +19,7 @@ description: >-
 | [DevX UX Expert](../../agents/devx-ux-expert.agent.md) | Package-Manager UX | Command surfaces, flags, help text, install/init/run flows, error wording |
 | [Supply Chain Security Expert](../../agents/supply-chain-security-expert.agent.md) | Threat-Model Reviewer | Dependency identity, lockfile integrity, path safety, token scoping |
 | [APM CEO](../../agents/apm-ceo.agent.md) | Strategic Owner / Arbiter | Positioning, breaking-change comms, release decisions, final calls on disagreements |
-| [OSS Growth Hacker](../../agents/oss-growth-hacker.agent.md) | Adoption Strategist | Conversion surfaces, story angles, `WIP/growth-strategy.md` |
+| [OSS Growth Hacker](../../agents/oss-growth-hacker.agent.md) | Adoption Strategist | Conversion surfaces, story angles, `WIP/growth-strategy.md` (gitignored, maintainer-local) |
 
 ## Routing topology
 
@@ -60,7 +60,7 @@ description: >-
 ### Release / comms review
 1. CEO grounds the release framing in `gh` CLI stats.
 2. Growth Hacker drafts hook + story angle; updates
-   `WIP/growth-strategy.md`.
+   `WIP/growth-strategy.md` (gitignored maintainer-local; create if absent).
 3. Specialists sanity-check any technical claims in release notes.
 
 ### Full panel review (non-trivial change)
@@ -84,7 +84,8 @@ A non-trivial change passes when:
 - [ ] APM CEO: trade-offs ratified, breaking changes have CHANGELOG +
       migration line
 - [ ] OSS Growth Hacker: conversion surfaces unaffected or improved;
-      `WIP/growth-strategy.md` updated if relevant
+      `WIP/growth-strategy.md` updated if relevant (maintainer-local;
+      gitignored, never committed)
 
 ## Notes
 

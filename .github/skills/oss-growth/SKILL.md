@@ -23,9 +23,12 @@ description: >-
 
 ## Key rules
 
-- Treat `WIP/growth-strategy.md` as the single source of truth for
-  growth tactics. Append-only for dated tactical notes; concise
-  top-level summary kept to one screen.
+- `WIP/growth-strategy.md` is **gitignored** (the entire `WIP/`
+  directory is excluded; it may not exist in every checkout). Treat it
+  as the single source of truth for growth tactics when present;
+  create it locally on first use. Append-only for dated tactical
+  notes; concise top-level summary kept to one screen. Never stage or
+  commit anything under `WIP/`.
 - Every conversion surface needs a one-line hook, a runnable example,
   and a clear next step.
 - Reinforce the "package manager for AI-native development" frame on
