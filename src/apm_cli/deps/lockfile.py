@@ -22,6 +22,7 @@ class LockedDependency:
 
     repo_url: str
     host: Optional[str] = None
+    port: Optional[int] = None  # Non-standard SSH/HTTPS port (e.g. 7999 for Bitbucket DC)
     registry_prefix: Optional[str] = None  # Registry path prefix, e.g. "artifactory/github"
     resolved_commit: Optional[str] = None
     resolved_ref: Optional[str] = None
@@ -38,7 +39,6 @@ class LockedDependency:
     is_dev: bool = False  # True for devDependencies
     discovered_via: Optional[str] = None  # Marketplace name (provenance)
     marketplace_plugin_name: Optional[str] = None  # Plugin name in marketplace
-    original_ssh_url: Optional[str] = None  # Verbatim ssh:// URL supplied by user (preserves custom port)
 
     def get_unique_key(self) -> str:
         """Returns unique key for this dependency."""
@@ -53,6 +53,8 @@ class LockedDependency:
         result: Dict[str, Any] = {"repo_url": self.repo_url}
         if self.host:
             result["host"] = self.host
+        if self.port:
+            result["port"] = self.port
         if self.registry_prefix:
             result["registry_prefix"] = self.registry_prefix
         if self.resolved_commit:
@@ -85,8 +87,6 @@ class LockedDependency:
             result["discovered_via"] = self.discovered_via
         if self.marketplace_plugin_name:
             result["marketplace_plugin_name"] = self.marketplace_plugin_name
-        if self.original_ssh_url:
-            result["original_ssh_url"] = self.original_ssh_url
         return result
 
     @classmethod
@@ -106,9 +106,21 @@ class LockedDependency:
                 deployed_files.append(f".github/skills/{skill_name}/")
                 deployed_files.append(f".claude/skills/{skill_name}/")
 
+        # Defensive cast: reject non-numeric or out-of-range ports from tampered lockfiles.
+        _p_raw = data.get("port")
+        port: Optional[int] = None
+        if _p_raw is not None:
+            try:
+                _p_int = int(_p_raw)
+            except (TypeError, ValueError):
+                _p_int = None
+            if _p_int is not None and 1 <= _p_int <= 65535:
+                port = _p_int
+
         return cls(
             repo_url=data["repo_url"],
             host=data.get("host"),
+            port=port,
             registry_prefix=data.get("registry_prefix"),
             resolved_commit=data.get("resolved_commit"),
             resolved_ref=data.get("resolved_ref"),
@@ -125,7 +137,6 @@ class LockedDependency:
             is_dev=data.get("is_dev", False),
             discovered_via=data.get("discovered_via"),
             marketplace_plugin_name=data.get("marketplace_plugin_name"),
-            original_ssh_url=data.get("original_ssh_url"),
         )
 
     @classmethod
@@ -161,6 +172,7 @@ class LockedDependency:
         return cls(
             repo_url=dep_ref.repo_url,
             host=host,
+            port=dep_ref.port,
             registry_prefix=registry_prefix,
             resolved_commit=resolved_commit,
             resolved_ref=dep_ref.reference,
@@ -171,7 +183,6 @@ class LockedDependency:
             source="local" if dep_ref.is_local else None,
             local_path=dep_ref.local_path if dep_ref.is_local else None,
             is_dev=is_dev,
-            original_ssh_url=dep_ref.original_ssh_url,
         )
 
 

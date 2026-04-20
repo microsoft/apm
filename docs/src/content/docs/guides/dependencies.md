@@ -121,7 +121,9 @@ APM accepts dependencies in two forms:
 **String format** (simple cases):
 - **Shorthand** (`owner/repo`) — defaults to GitHub
 - **HTTPS URL** (`https://host/owner/repo.git`) — any git host, whole repo
+  - Custom port: `https://host:8443/owner/repo.git` — port is preserved in clone URLs
 - **SSH URL** (`git@host:owner/repo.git`) — any git host, whole repo
+  - Custom port: `ssh://git@host:7999/owner/repo.git` — use the `ssh://` form to specify a port (SCP shorthand `git@host:...` cannot carry a port)
 - **FQDN shorthand** (`host/owner/repo`) — any host, supports nested groups
   - GitLab nested groups: `gitlab.com/group/subgroup/repo`
   - Virtual paths on simple repos: `gitlab.com/owner/repo/file.prompt.md`
@@ -139,9 +141,11 @@ dependencies:
     - git: git@bitbucket.org:team/rules.git
       path: prompts/review.prompt.md
       alias: review                      # local alias (controls install directory name)
+    - git: ssh://git@bitbucket.example.com:7999/project/repo.git  # Bitbucket Datacenter (custom SSH port)
+      ref: v1.0
 ```
 
-Fields: `git` (required), `path`, `ref`, `alias` (all optional). The `git` value is any HTTPS or SSH clone URL.
+Fields: `git` (required), `path`, `ref`, `alias` (all optional). The `git` value is any HTTPS or SSH clone URL. Custom ports are preserved across protocols — if the SSH clone fails and APM falls back to HTTPS, the same port number is reused (so `ssh://host:7999/...` falls back to `https://host:7999/...`).
 
 > **Nested groups (GitLab, Gitea, etc.):** APM treats all path segments after the host as the repo path, so `gitlab.com/group/subgroup/repo` resolves to a repo at `group/subgroup/repo`. Virtual paths on simple 2-segment repos work with shorthand (`gitlab.com/owner/repo/file.prompt.md`). But for **nested-group repos + virtual paths**, use the object format — the shorthand is ambiguous:
 >

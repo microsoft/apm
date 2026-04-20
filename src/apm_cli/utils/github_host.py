@@ -150,20 +150,37 @@ def build_raw_content_url(owner: str, repo: str, ref: str, file_path: str) -> st
     return f"https://raw.githubusercontent.com/{owner}/{repo}/{encoded_ref}/{file_path}"
 
 
-def build_ssh_url(host: str, repo_ref: str) -> str:
-    """Build an SSH clone URL for the given host and repo_ref (owner/repo)."""
+def build_ssh_url(host: str, repo_ref: str, port: Optional[int] = None) -> str:
+    """Build an SSH clone URL for the given host and repo_ref (owner/repo).
+
+    When ``port`` is set, emit the explicit ``ssh://`` form because SCP
+    shorthand (``git@host:path``) cannot carry a port — the ``:`` is the path
+    separator. Without a port, keep the compact SCP shorthand (no behavioural
+    change for the common case).
+    """
+    if port:
+        return f"ssh://git@{host}:{port}/{repo_ref}.git"
     return f"git@{host}:{repo_ref}.git"
 
 
-def build_https_clone_url(host: str, repo_ref: str, token: Optional[str] = None) -> str:
+def build_https_clone_url(
+    host: str,
+    repo_ref: str,
+    token: Optional[str] = None,
+    port: Optional[int] = None,
+) -> str:
     """Build an HTTPS clone URL. If token provided, use x-access-token format (no escaping done).
+
+    ``port`` is embedded in the netloc (``host:port``) when set so custom
+    HTTPS ports (e.g. self-hosted Git servers on 8443) are preserved.
 
     Note: callers must avoid logging raw token-bearing URLs.
     """
+    netloc = f"{host}:{port}" if port else host
     if token:
         # Use x-access-token format which is compatible with GitHub Enterprise and GH Actions
-        return f"https://x-access-token:{token}@{host}/{repo_ref}.git"
-    return f"https://{host}/{repo_ref}"
+        return f"https://x-access-token:{token}@{netloc}/{repo_ref}.git"
+    return f"https://{netloc}/{repo_ref}"
 
 
 # Azure DevOps URL builders

@@ -622,14 +622,17 @@ class GitHubPackageDownloader:
         else:
             # Determine if this host should receive a GitHub token
             is_github = is_github_hostname(host)
+            # Thread the user-declared custom port (e.g. 7999 for Bitbucket DC) through
+            # the URL builders so neither SSH nor HTTPS attempts silently drop it.
+            port = dep_ref.port if dep_ref else None
             if use_ssh:
-                return build_ssh_url(host, repo_ref)
+                return build_ssh_url(host, repo_ref, port=port)
             elif is_github and github_token:
                 # Only send GitHub tokens to GitHub hosts
-                return build_https_clone_url(host, repo_ref, token=github_token)
+                return build_https_clone_url(host, repo_ref, token=github_token, port=port)
             else:
                 # Generic hosts: plain HTTPS, let git credential helpers handle auth
-                return build_https_clone_url(host, repo_ref, token=None)
+                return build_https_clone_url(host, repo_ref, token=None, port=port)
 
     def _clone_with_fallback(self, repo_url_base: str, target_path: Path, progress_reporter=None, dep_ref: DependencyReference = None, verbose_callback=None, **clone_kwargs) -> Repo:
         """Attempt to clone a repository with fallback authentication methods.
@@ -695,13 +698,10 @@ class GitHubPackageDownloader:
                 # Continue to next method
 
         # Method 2: Try SSH (works with SSH keys for any host).
-        # When the user supplied an explicit ssh:// URL (e.g. with a custom port for
-        # Bitbucket Datacenter), use it verbatim so the port is not silently dropped.
+        # dep_ref.port is threaded through build_ssh_url so non-default SSH ports
+        # (e.g. Bitbucket Datacenter on 7999) are preserved in the emitted URL.
         try:
-            if dep_ref and dep_ref.original_ssh_url:
-                ssh_url = dep_ref.original_ssh_url
-            else:
-                ssh_url = self._build_repo_url(repo_url_base, use_ssh=True, dep_ref=dep_ref)
+            ssh_url = self._build_repo_url(repo_url_base, use_ssh=True, dep_ref=dep_ref)
             repo = Repo.clone_from(ssh_url, target_path, env=clone_env, progress=progress_reporter, **clone_kwargs)
             if verbose_callback:
                 verbose_callback(f"Cloned from: {ssh_url}")
