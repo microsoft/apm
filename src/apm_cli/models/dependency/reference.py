@@ -683,7 +683,9 @@ class DependencyReference:
                 if len(segments) > 1:
                     remaining_path = segments[1]
                     git_suffix = ".git" if had_git_suffix else ""
-                    suggested = f"ssh://git@{host}:{port_candidate}/{remaining_path}{git_suffix}"
+                    ref_suffix = f"#{reference}" if reference else ""
+                    alias_suffix = f"@{alias}" if alias else ""
+                    suggested = f"ssh://git@{host}:{port_candidate}/{remaining_path}{git_suffix}{ref_suffix}{alias_suffix}"
                     raise ValueError(
                         f"It looks like '{first_segment}' in 'git@{host}:{repo_url}' "
                         f"is a port number, but SCP-style URLs (git@host:path) cannot "

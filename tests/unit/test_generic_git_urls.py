@@ -821,15 +821,29 @@ class TestSCPPortDetection:
         with pytest.raises(ValueError, match="no repository path follows"):
             DependencyReference.parse("git@host.example.com:7999")
 
-    def test_scp_port_with_ref_raises(self):
-        """Port-like segment with #ref should still be caught."""
-        with pytest.raises(ValueError, match="ssh://"):
+    def test_scp_port_with_ref_raises_and_preserves_ref(self):
+        """Port-like segment with #ref should be caught; suggestion preserves the ref."""
+        with pytest.raises(
+            ValueError,
+            match=r"ssh://git@host\.example\.com:7999/project/repo\.git#main",
+        ):
             DependencyReference.parse("git@host.example.com:7999/project/repo.git#main")
 
-    def test_scp_port_with_alias_raises(self):
-        """Port-like segment with @alias should still be caught."""
-        with pytest.raises(ValueError, match="ssh://"):
+    def test_scp_port_with_alias_raises_and_preserves_alias(self):
+        """Port-like segment with @alias should be caught; suggestion preserves the alias."""
+        with pytest.raises(
+            ValueError,
+            match=r"ssh://git@host\.example\.com:7999/project/repo\.git@my-alias",
+        ):
             DependencyReference.parse("git@host.example.com:7999/project/repo.git@my-alias")
+
+    def test_scp_port_with_ref_and_alias_preserves_both(self):
+        """Suggestion should include both #ref and @alias when present."""
+        with pytest.raises(
+            ValueError,
+            match=r"ssh://git@host\.example\.com:7999/project/repo\.git#v1\.0@my-alias",
+        ):
+            DependencyReference.parse("git@host.example.com:7999/project/repo.git#v1.0@my-alias")
 
     def test_suggestion_includes_git_suffix(self):
         """When the user wrote .git, the suggestion should preserve it."""
