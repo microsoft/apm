@@ -193,16 +193,20 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
                 mkt_ref = None
 
             if mkt_ref is not None:
-                plugin_name, marketplace_name = mkt_ref
+                plugin_name, marketplace_name, version_spec = mkt_ref
                 try:
+                    warning_handler = None
                     if logger:
+                        warning_handler = lambda msg: logger.warning(msg)
                         logger.verbose_detail(
                             f"    Resolving {plugin_name}@{marketplace_name} via marketplace..."
                         )
                     canonical_str, resolved_plugin = resolve_marketplace_plugin(
                         plugin_name,
                         marketplace_name,
+                        version_spec=version_spec,
                         auth_resolver=auth_resolver,
+                        warning_handler=warning_handler,
                     )
                     if logger:
                         logger.verbose_detail(

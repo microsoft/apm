@@ -17,9 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --ssh` / `--https` flags and `APM_GIT_PROTOCOL=ssh|https` env to pick the initial transport for shorthand dependencies (#778)
 - `apm install --allow-protocol-fallback` flag and `APM_ALLOW_PROTOCOL_FALLBACK=1` env as the migration escape hatch for cross-protocol fallback (#778)
 - Add APM Review Panel skill (`.github/skills/apm-review-panel/`) and four new specialist personas (`devx-ux-expert`, `supply-chain-security-expert`, `apm-ceo`, `oss-growth-hacker`) with auto-activating per-persona skills. Routes specialist findings through an APM CEO arbiter for strategic / breaking-change calls, with the OSS growth hacker side-channeling adoption insights via `WIP/growth-strategy.md`. Instrumentation per Handbook Ch. 9 (`The Instrumented Codebase`); PROSE-compliant (thin SKILL.md routers, persona detail lazy-loaded via markdown links, explicit boundaries per persona).
+- `apm view plugin@marketplace` displays marketplace plugin metadata (name, version, source, description) (#514)
+- `apm outdated` checks marketplace plugin refs and shows a "Source" column distinguishing marketplace vs git updates (#514)
+- `apm marketplace validate` command with schema validation and duplicate name detection (#514)
+- Ref immutability advisory: caches plugin-to-ref pins and warns when a previously pinned plugin's ref changes (#514)
+- Multi-marketplace shadow detection: warns when the same plugin name appears in multiple registered marketplaces (#514)
 
 ### Fixed
 
+- `apm install` no longer silently drops skills, agents, and commands when a Claude Code plugin also ships `hooks/*.json`. The package-type detection cascade now classifies plugin-shaped packages as `MARKETPLACE_PLUGIN` (which already maps hooks via the plugin synthesizer) before falling back to the hook-only classification, and emits a default-visibility `[!]` warning when a hook-only classification disagrees with the package's directory contents (#780)
 - Preserve custom git ports across protocols: non-default ports on `ssh://` and `https://` dependency URLs (e.g. Bitbucket Datacenter on SSH port 7999, self-hosted GitLab on HTTPS port 8443) are now captured as a first-class `port` field on `DependencyReference` and threaded through all clone URL builders. When the SSH clone fails, the HTTPS fallback reuses the same port instead of silently dropping it (#661, #731)
 
 ## [0.8.12] - 2026-04-19
