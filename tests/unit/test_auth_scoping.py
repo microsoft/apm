@@ -338,7 +338,11 @@ class TestCloneWithFallbackPortPreservation:
         urls = self._run_clone_capture_urls(dep)
         https_urls = [u for u in urls if u.startswith("https://")]
         assert https_urls, f"no https:// fallback attempted, got: {urls!r}"
-        assert "bitbucket.example.com:7999" in https_urls[0], (
+        parsed = urlparse(https_urls[0])
+        assert parsed.hostname == "bitbucket.example.com", (
+            f"HTTPS host mismatch: {https_urls[0]!r}"
+        )
+        assert parsed.port == 7999, (
             f"HTTPS URL should preserve port 7999, got: {https_urls[0]!r}"
         )
 
@@ -350,8 +354,17 @@ class TestCloneWithFallbackPortPreservation:
         urls = self._run_clone_capture_urls(dep)
         ssh_urls = [u for u in urls if "git@" in u and not u.startswith("https://")]
         assert ssh_urls, f"no SSH URL attempted, got: {urls!r}"
-        # scp shorthand or ssh:// without port — both acceptable; just verify no port appears
-        assert ":22/" not in ssh_urls[0] and ":7999" not in ssh_urls[0]
+        # scp shorthand carries no port; ssh:// form must not inject a default port.
+        if ssh_urls[0].startswith("ssh://"):
+            assert urlparse(ssh_urls[0]).port is None, (
+                f"ssh:// URL must not carry a default port, got: {ssh_urls[0]!r}"
+            )
+        else:
+            # SCP shorthand `git@host:path` — path segment must not be purely numeric.
+            path_segment = ssh_urls[0].split(":", 1)[1].split("/", 1)[0]
+            assert not path_segment.isdigit(), (
+                f"SCP shorthand must not leak a port into the path: {ssh_urls[0]!r}"
+            )
 
     def test_https_url_with_custom_port_preserved_through_fallback(self):
         """https:// URL with port must survive through to the HTTPS clone attempt."""
@@ -361,7 +374,11 @@ class TestCloneWithFallbackPortPreservation:
         urls = self._run_clone_capture_urls(dep)
         https_urls = [u for u in urls if u.startswith("https://")]
         assert https_urls, f"no HTTPS URL attempted, got: {urls!r}"
-        assert "git.company.internal:8443" in https_urls[0], (
+        parsed = urlparse(https_urls[0])
+        assert parsed.hostname == "git.company.internal", (
+            f"HTTPS host mismatch: {https_urls[0]!r}"
+        )
+        assert parsed.port == 8443, (
             f"HTTPS URL should preserve port 8443, got: {https_urls[0]!r}"
         )
 
