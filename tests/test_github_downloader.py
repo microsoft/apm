@@ -1371,7 +1371,7 @@ class TestDownloaderCredentialFallback:
                  'apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git',
              ) as mock_cred:
             # Return None for default host, enterprise token for custom host
-            mock_cred.side_effect = lambda host: (
+            mock_cred.side_effect = lambda host, port=None: (
                 'enterprise-token' if host == 'ghes.company.com' else None
             )
             downloader = GitHubPackageDownloader()
