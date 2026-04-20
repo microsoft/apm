@@ -62,6 +62,17 @@
 | `apm install NAME@MKT[#ref]` | Install from marketplace | Optional `#ref` override |
 | `apm view NAME@MARKETPLACE` | View marketplace plugin info | -- |
 
+## Marketplace authoring
+
+| Command | Purpose | Key flags |
+|---------|---------|-----------|
+| `apm marketplace init` | Scaffold `marketplace.yml` in CWD | `--force`, `--no-gitignore-check` |
+| `apm marketplace build` | Compile `marketplace.yml` to Anthropic-compliant `marketplace.json` | `--dry-run`, `--offline`, `--include-prerelease`, `-v` |
+| `apm marketplace outdated` | Report upgradable packages, range-aware | `--offline`, `--include-prerelease`, `-v` |
+| `apm marketplace check` | Validate yml and verify refs resolve | `--offline`, `-v` |
+| `apm marketplace doctor` | Diagnose git, network, auth, yml readiness | `-v` |
+| `apm marketplace publish` | Open PRs on consumer repos from `consumer-targets.yml` | `--targets PATH`, `--dry-run`, `--no-pr`, `--draft`, `--allow-downgrade`, `--allow-ref-change`, `--parallel N`, `-y` |
+
 ## MCP servers
 
 | Command | Purpose | Key flags |

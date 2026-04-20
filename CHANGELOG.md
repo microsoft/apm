@@ -82,6 +82,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enterprise docs IA refactor: hub page + merged team guides, deduped governance content. (#858)
 - Landing page rewritten around the three-pillar spine. (#855)
 - First-package tutorial rewritten end-to-end; fixes `.apm/` anatomy hallucinations. (#866)
+- `apm marketplace init` subcommand to scaffold a richly-commented `marketplace.yml` in the current directory, with an optional `.gitignore` staleness check (#790)
+- `apm marketplace build` subcommand to compile `marketplace.yml` into an Anthropic-compliant `marketplace.json` with `--dry-run`, `--offline`, and `--include-prerelease` flags; APM-only build options are stripped and `metadata:` is passed through verbatim (#790)
+- `apm marketplace outdated` subcommand to report upgradable package versions, distinguishing "latest in range" from "latest overall" so maintainers know when a manual range bump is required (#790)
+- `apm marketplace check` subcommand to validate `marketplace.yml` and verify every package entry resolves (`--offline` for schema + cached-ref checks) (#790)
+- `apm marketplace doctor` subcommand for environment diagnostics (git, network, auth, `gh` CLI, and `marketplace.yml` readiness) (#790)
+- `apm marketplace publish` subcommand to open PRs across consumer repositories from a `consumer-targets.yml`, with `--dry-run`, `--no-pr`, `--draft`, `--allow-downgrade`, `--allow-ref-change`, `--parallel N`, and a `.apm/publish-state.json` run history (#790)
+- `apm install --ssh` / `--https` flags and `APM_GIT_PROTOCOL=ssh|https` env to pick the initial transport for shorthand dependencies (#778)
+- `apm install --allow-protocol-fallback` flag and `APM_ALLOW_PROTOCOL_FALLBACK=1` env as the migration escape hatch for cross-protocol fallback (#778)
+- Add APM Review Panel skill (`.github/skills/apm-review-panel/`) and four new specialist personas (`devx-ux-expert`, `supply-chain-security-expert`, `apm-ceo`, `oss-growth-hacker`) with auto-activating per-persona skills. Routes specialist findings through an APM CEO arbiter for strategic / breaking-change calls, with the OSS growth hacker side-channeling adoption insights via `WIP/growth-strategy.md`. Instrumentation per Handbook Ch. 9 (`The Instrumented Codebase`); PROSE-compliant (thin SKILL.md routers, persona detail lazy-loaded via markdown links, explicit boundaries per persona).
+- `apm view plugin@marketplace` displays marketplace plugin metadata (name, version, source, description) (#514)
+- `apm outdated` checks marketplace plugin refs and shows a "Source" column distinguishing marketplace vs git updates (#514)
+- `apm marketplace validate` command with schema validation and duplicate name detection (#514)
+- Ref immutability advisory: caches plugin-to-ref pins and warns when a previously pinned plugin's ref changes (#514)
+- Multi-marketplace shadow detection: warns when the same plugin name appears in multiple registered marketplaces (#514)
 
 ### Changed
 
