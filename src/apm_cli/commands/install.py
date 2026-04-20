@@ -392,8 +392,29 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
     default=False,
     help="Install to user scope (~/.apm/) instead of the current project",
 )
+@click.option(
+    "--ssh",
+    "use_ssh",
+    is_flag=True,
+    default=False,
+    help="Prefer SSH transport for shorthand (owner/repo) dependencies. Mutually exclusive with --https.",
+)
+@click.option(
+    "--https",
+    "use_https",
+    is_flag=True,
+    default=False,
+    help="Prefer HTTPS transport for shorthand (owner/repo) dependencies. Mutually exclusive with --ssh.",
+)
+@click.option(
+    "--allow-protocol-fallback",
+    "allow_protocol_fallback",
+    is_flag=True,
+    default=False,
+    help="Restore the legacy permissive cross-protocol fallback chain (escape hatch for migrating users; also: APM_ALLOW_PROTOCOL_FALLBACK=1).",
+)
 @click.pass_context
-def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, global_):
+def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, global_, use_ssh, use_https, allow_protocol_fallback):
     """Install APM and MCP dependencies from apm.yml (like npm install).
 
     This command automatically detects AI runtimes from your apm.yml scripts and installs
@@ -420,6 +441,24 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         # scope initialisation below throws).
         is_partial = bool(packages)
         logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=is_partial)
+
+        # Resolve transport selection inputs.
+        from ..deps.transport_selection import (
+            ProtocolPreference,
+            is_fallback_allowed,
+            protocol_pref_from_env,
+        )
+        if use_ssh and use_https:
+            _rich_error("Options --ssh and --https are mutually exclusive.", symbol="error")
+            sys.exit(2)
+        if use_ssh:
+            protocol_pref = ProtocolPreference.SSH
+        elif use_https:
+            protocol_pref = ProtocolPreference.HTTPS
+        else:
+            protocol_pref = protocol_pref_from_env()
+        # CLI flag OR env var enables fallback.
+        allow_protocol_fallback = allow_protocol_fallback or is_fallback_allowed()
 
         # Resolve scope
         from ..core.scope import InstallScope, get_apm_dir, get_manifest_path, get_modules_dir, ensure_user_dirs, warn_unsupported_user_scope
@@ -593,6 +632,8 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                     marketplace_provenance=(
                         outcome.marketplace_provenance if packages and outcome else None
                     ),
+                    protocol_pref=protocol_pref,
+                    allow_protocol_fallback=allow_protocol_fallback,
                 )
                 apm_count = install_result.installed_count
                 prompt_count = install_result.prompts_integrated
@@ -732,6 +773,8 @@ def _install_apm_dependencies(
     auth_resolver: "AuthResolver" = None,
     target: str = None,
     marketplace_provenance: dict = None,
+    protocol_pref=None,
+    allow_protocol_fallback: bool = False,
 ):
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.
@@ -759,6 +802,8 @@ def _install_apm_dependencies(
         auth_resolver=auth_resolver,
         target=target,
         marketplace_provenance=marketplace_provenance,
+        protocol_pref=protocol_pref,
+        allow_protocol_fallback=allow_protocol_fallback,
     )
     return InstallService().run(request)
 

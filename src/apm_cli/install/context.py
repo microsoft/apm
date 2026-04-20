@@ -52,6 +52,8 @@ class InstallContext:
     verbose: bool = False
     dev: bool = False
     only_packages: Optional[List[str]] = None
+    protocol_pref: Any = None  # ProtocolPreference (NONE/SSH/HTTPS) for shorthand transport
+    allow_protocol_fallback: bool = False  # opt-in legacy cross-protocol fallback
 
     # ------------------------------------------------------------------
     # Resolve phase outputs

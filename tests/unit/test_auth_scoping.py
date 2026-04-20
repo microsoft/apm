@@ -165,15 +165,15 @@ class TestCloneWithFallbackEnv:
             return MockRepo.clone_from.call_args_list
 
     def test_generic_host_env_allows_credential_helpers(self):
-        """For GitLab/Bitbucket, GIT_ASKPASS / GIT_CONFIG_GLOBAL are NOT set."""
+        """For GitLab/Bitbucket without token, GIT_ASKPASS / GIT_CONFIG_GLOBAL are NOT set."""
         dl = _make_downloader(github_token="ghp_TESTTOKEN")
         dep = _dep("https://gitlab.com/acme/rules.git")
 
         calls = self._run_clone(dl, dep, succeed_on=1)
         assert len(calls) >= 1
 
-        # First call should be SSH (no token for generic), check its env
-        # Actually for generic: no token → skip method 1, go to method 2 (SSH)
+        # Under strict default, explicit https:// → single HTTPS attempt; env is relaxed
+        # because no token was available for the generic host.
         env_used = calls[0][1].get("env", calls[0].kwargs.get("env"))
         assert "GIT_ASKPASS" not in env_used
         assert "GIT_CONFIG_GLOBAL" not in env_used
@@ -213,15 +213,34 @@ class TestCloneWithFallbackEnv:
         assert "GIT_CONFIG_NOSYSTEM" not in env_used
         assert env_used.get("GIT_TERMINAL_PROMPT") == "0"
 
-    def test_generic_host_no_token_skips_method1(self):
-        """Generic hosts have no token → Method 1 (auth HTTPS) is skipped."""
+    def test_generic_host_explicit_https_strict_no_ssh_fallback(self):
+        """Explicit https:// URL no longer silently falls back to SSH (issue #661)."""
         dl = _make_downloader(github_token="ghp_TESTTOKEN")
         dep = _dep("https://gitlab.com/acme/rules.git")
 
-        calls = self._run_clone(dl, dep, succeed_on=1)
-        # Should only attempt SSH (method 2) first, since no token for generic
-        first_url = calls[0][0][0]
-        assert "git@" in first_url or "ssh://" in first_url
+        # All clone attempts fail; verify only HTTPS is attempted (no SSH).
+        calls = self._run_clone(dl, dep, succeed_on=99)
+        for call in calls:
+            url = call[0][0]
+            assert "git@" not in url, f"explicit https:// must not fall back to SSH, got {url}"
+            assert not url.startswith("ssh://"), f"explicit https:// must not fall back to ssh://, got {url}"
+
+    def test_generic_host_legacy_chain_with_allow_fallback(self):
+        """APM_ALLOW_PROTOCOL_FALLBACK=1 restores cross-protocol fallback so
+        clones that succeeded under the legacy chain still succeed."""
+        dl = _make_downloader(github_token="ghp_TESTTOKEN")
+        # Force the downloader to permit fallback regardless of env state.
+        dl._allow_fallback = True
+        dep = _dep("https://gitlab.com/acme/rules.git")
+
+        # All clone attempts fail; verify both HTTPS and SSH were attempted.
+        calls = self._run_clone(dl, dep, succeed_on=99)
+        urls = [c[0][0] for c in calls]
+        has_https = any(u.startswith("https://") for u in urls)
+        has_ssh = any("git@" in u or u.startswith("ssh://") for u in urls)
+        assert has_https and has_ssh, (
+            f"allow_fallback should attempt both HTTPS and SSH, got urls={urls}"
+        )
 
     def test_github_host_with_token_tries_method1_first(self):
         """GitHub with a token → Method 1 (auth HTTPS) is tried first."""
@@ -282,15 +301,17 @@ class TestCloneWithFallbackPortPreservation:
     SSH and HTTPS URL builders so the port is never silently dropped.
     """
 
-    def _run_clone_capture_urls(self, dep, clone_fails=True):
+    def _run_clone_capture_urls(self, dep, clone_fails=True, allow_fallback=False):
         """Run _clone_with_fallback and return every URL passed to clone_from.
 
         When clone_fails is True, all clone attempts raise GitCommandError,
-        letting the fallback chain exercise both SSH and HTTPS attempts so
-        we can capture every emitted URL.
+        letting the fallback chain (when permitted) exercise both SSH and
+        HTTPS attempts so we can capture every emitted URL.
         """
         dl = _make_downloader()
         dl.auth_resolver._cache.clear()
+        if allow_fallback:
+            dl._allow_fallback = True
 
         called_urls = []
 
@@ -332,10 +353,12 @@ class TestCloneWithFallbackPortPreservation:
         )
 
     def test_https_attempt_preserves_same_port_across_protocols(self):
-        """Method 3 (HTTPS) must emit https://host:7999/... — same port as SSH."""
+        """Under allow_fallback (legacy chain), HTTPS attempt must emit https://host:7999/... —
+        same port as SSH. Port preservation across protocols must hold whenever the
+        chain runs, even though strict default never reaches the HTTPS attempt."""
         dep = _dep("ssh://git@bitbucket.example.com:7999/project/repo.git")
 
-        urls = self._run_clone_capture_urls(dep)
+        urls = self._run_clone_capture_urls(dep, allow_fallback=True)
         https_urls = [u for u in urls if u.startswith("https://")]
         assert https_urls, f"no https:// fallback attempted, got: {urls!r}"
         parsed = urlparse(https_urls[0])

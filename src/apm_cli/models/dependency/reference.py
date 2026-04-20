@@ -33,6 +33,9 @@ class DependencyReference:
         None  # Optional host (github.com, dev.azure.com, or enterprise host)
     )
     port: Optional[int] = None  # Non-standard SSH/HTTPS port (e.g. 7999 for Bitbucket DC)
+    explicit_scheme: Optional[str] = (
+        None  # User-stated transport: "ssh", "https", "http", or None for shorthand
+    )
     reference: Optional[str] = None  # e.g., "main", "v1.0.0", "abc123"
     alias: Optional[str] = None  # Optional alias for the dependency
     virtual_path: Optional[str] = (
@@ -937,17 +940,25 @@ class DependencyReference:
 
         # Phase 2: parse SSH (ssh:// URL first — it preserves port; then SCP shorthand),
         # otherwise fall back to HTTPS/shorthand parsing.
+        explicit_scheme: Optional[str] = None
         ssh_proto_result = cls._parse_ssh_protocol_url(dependency_str)
         if ssh_proto_result:
             host, port, repo_url, reference, alias = ssh_proto_result
+            explicit_scheme = "ssh"
         else:
             scp_result = cls._parse_ssh_url(dependency_str)
             if scp_result:
                 host, port, repo_url, reference, alias = scp_result
+                explicit_scheme = "ssh"
             else:
                 host, port, repo_url, reference, alias = cls._parse_standard_url(
                     dependency_str, is_virtual_package, virtual_path, validated_host
                 )
+                _stripped = dependency_str.strip().lower()
+                if _stripped.startswith("https://"):
+                    explicit_scheme = "https"
+                elif _stripped.startswith("http://"):
+                    explicit_scheme = "http"
 
         # Phase 3: final validation and ADO field extraction
         is_ado_final = host and is_azure_devops_hostname(host)
@@ -1008,6 +1019,7 @@ class DependencyReference:
             repo_url=repo_url,
             host=host,
             port=port,
+            explicit_scheme=explicit_scheme,
             reference=reference,
             alias=alias,
             virtual_path=virtual_path,

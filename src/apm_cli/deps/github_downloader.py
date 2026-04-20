@@ -29,6 +29,7 @@ from ..models.apm_package import (
     validate_apm_package,
     APMPackage
 )
+from ..utils.console import _rich_warning
 from ..utils.github_host import (
     build_https_clone_url,
     build_ssh_url,
@@ -43,6 +44,15 @@ from ..utils.github_host import (
     is_github_hostname
 )
 from ..utils.yaml_io import yaml_to_str
+from .transport_selection import (
+    GitConfigInsteadOfResolver,
+    InsteadOfResolver,
+    ProtocolPreference,
+    TransportPlan,
+    TransportSelector,
+    is_fallback_allowed,
+    protocol_pref_from_env,
+)
 
 
 def normalize_collection_path(virtual_path: str) -> str:
@@ -159,12 +169,36 @@ class GitProgressReporter(RemoteProgress):
 class GitHubPackageDownloader:
     """Downloads and validates APM packages from GitHub repositories."""
 
-    def __init__(self, auth_resolver=None):
-        """Initialize the GitHub package downloader."""
+    def __init__(
+        self,
+        auth_resolver=None,
+        transport_selector: Optional[TransportSelector] = None,
+        protocol_pref: Optional[ProtocolPreference] = None,
+        allow_fallback: Optional[bool] = None,
+    ):
+        """Initialize the GitHub package downloader.
+
+        Args:
+            auth_resolver: Auth resolver instance. Defaults to a new AuthResolver.
+            transport_selector: TransportSelector for protocol decisions.
+                Defaults to a new selector with GitConfigInsteadOfResolver.
+            protocol_pref: User-stated transport preference for shorthand
+                deps. When None, reads APM_GIT_PROTOCOL env.
+            allow_fallback: When True, permits cross-protocol fallback
+                (legacy behavior). When None, reads
+                APM_ALLOW_PROTOCOL_FALLBACK env.
+        """
         from apm_cli.core.auth import AuthResolver
         self.auth_resolver = auth_resolver or AuthResolver()
         self.token_manager = self.auth_resolver._token_manager  # Backward compat
         self.git_env = self._setup_git_environment()
+        self._transport_selector = transport_selector or TransportSelector()
+        self._protocol_pref = (
+            protocol_pref if protocol_pref is not None else protocol_pref_from_env()
+        )
+        self._allow_fallback = (
+            allow_fallback if allow_fallback is not None else is_fallback_allowed()
+        )
 
     def _setup_git_environment(self) -> Dict[str, Any]:
         """Set up Git environment with authentication using centralized token manager.
@@ -631,17 +665,20 @@ class GitHubPackageDownloader:
                 return build_https_clone_url(host, repo_ref, token=None, port=port)
 
     def _clone_with_fallback(self, repo_url_base: str, target_path: Path, progress_reporter=None, dep_ref: DependencyReference = None, verbose_callback=None, **clone_kwargs) -> Repo:
-        """Attempt to clone a repository with fallback authentication methods.
+        """Clone a repository following the TransportSelector plan.
 
-        Uses authentication patterns appropriate for the platform:
-        - GitHub: x-access-token format for private repos, SSH, or HTTPS
-        - Azure DevOps: PAT-based authentication
+        The transport selector decides protocol order and strictness based on
+        the user's URL form, CLI/env preferences, and git ``insteadOf`` config.
+        Strict-by-default: explicit ``ssh://`` and ``https://`` URLs no longer
+        silently fall back to a different protocol. To restore the legacy
+        permissive chain, set ``--allow-protocol-fallback`` or
+        ``APM_ALLOW_PROTOCOL_FALLBACK=1``.
 
         Args:
             repo_url_base: Base repository reference (owner/repo)
             target_path: Target path for cloning
             progress_reporter: GitProgressReporter instance for progress updates
-            dep_ref: Optional DependencyReference for platform-specific URL building
+            dep_ref: DependencyReference for platform/protocol decisions
             verbose_callback: Optional callable for verbose logging (receives str messages)
             **clone_kwargs: Additional arguments for Repo.clone_from
 
@@ -649,75 +686,99 @@ class GitHubPackageDownloader:
             Repo: Successfully cloned repository
 
         Raises:
-            RuntimeError: If all authentication methods fail
+            RuntimeError: If the planned attempt(s) all fail.
         """
         last_error = None
         is_ado = dep_ref and dep_ref.is_azure_devops()
 
-        # Determine host type for auth decisions
         dep_host = dep_ref.host if dep_ref else None
         if dep_host:
             is_github = is_github_hostname(dep_host)
         else:
-            # When no host is specified, default to GitHub behavior
             is_github = True
         is_generic = not is_ado and not is_github
 
-        # Resolve per-dependency token via AuthResolver.
         dep_token = self._resolve_dep_token(dep_ref)
-        has_token = dep_token
+        has_token = dep_token is not None
 
-        _debug(f"_clone_with_fallback: repo={repo_url_base}, is_ado={is_ado}, is_generic={is_generic}, has_token={has_token is not None}")
+        _debug(
+            f"_clone_with_fallback: repo={repo_url_base}, is_ado={is_ado}, "
+            f"is_generic={is_generic}, has_token={has_token}, "
+            f"protocol_pref={self._protocol_pref.value}, allow_fallback={self._allow_fallback}"
+        )
 
-        # When APM has a token for this host, use the locked-down env (APM manages auth).
-        # When no token is available, relax the env so git credential helpers (gh auth,
-        # macOS Keychain, etc.) can provide credentials  -- regardless of host.
+        # Locked-down env when APM owns auth; relaxed env when delegating to
+        # git credential helpers. Decision is per-dependency, not per-attempt.
         if has_token:
             clone_env = self.git_env
         else:
             clone_env = {k: v for k, v in self.git_env.items()
                          if k not in ('GIT_ASKPASS', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM')}
-            clone_env['GIT_TERMINAL_PROMPT'] = '0'  # Still prevent interactive prompts
+            clone_env['GIT_TERMINAL_PROMPT'] = '0'
 
-        # Method 1: Try authenticated HTTPS if token is available (GitHub/ADO only)
-        if has_token:
+        plan: TransportPlan = self._transport_selector.select(
+            dep_ref=dep_ref,
+            cli_pref=self._protocol_pref,
+            allow_fallback=self._allow_fallback,
+            has_token=has_token,
+        )
+        _debug(
+            "transport plan: "
+            f"strict={plan.strict}, attempts={[(a.scheme, a.use_token, a.label) for a in plan.attempts]}"
+        )
+
+        prev_label: Optional[str] = None
+        for attempt in plan.attempts:
+            # Defensive: skip token-bearing attempts when no token available.
+            if attempt.use_token and not has_token:
+                continue
+
+            use_ssh = attempt.scheme == "ssh"
             try:
-                auth_url = self._build_repo_url(repo_url_base, use_ssh=False, dep_ref=dep_ref, token=dep_token)
-                _debug(f"Attempting clone with authenticated HTTPS (URL sanitized)")
-                repo = Repo.clone_from(auth_url, target_path, env=clone_env, progress=progress_reporter, **clone_kwargs)
+                url = self._build_repo_url(
+                    repo_url_base,
+                    use_ssh=use_ssh,
+                    dep_ref=dep_ref,
+                    token=dep_token if attempt.use_token else None,
+                )
+            except Exception as e:
+                last_error = e
+                continue
+
+            # Surface a [!] warning when the plan permits fallback and we
+            # are switching protocols mid-clone (legacy permissive path).
+            if not plan.strict and prev_label and prev_label != attempt.label:
+                _rich_warning(
+                    f"Protocol fallback: {prev_label} clone of {repo_url_base} failed; retrying with {attempt.label}.",
+                    symbol="warning",
+                )
+
+            try:
+                _debug(f"Attempting clone with {attempt.label} (URL sanitized)")
+                repo = Repo.clone_from(
+                    url, target_path, env=clone_env,
+                    progress=progress_reporter, **clone_kwargs,
+                )
                 if verbose_callback:
-                    masked = self._sanitize_git_error(auth_url)
-                    verbose_callback(f"Cloned from: {masked}")
+                    display = self._sanitize_git_error(url) if attempt.use_token else url
+                    verbose_callback(f"Cloned from: {display}")
                 return repo
             except GitCommandError as e:
                 last_error = e
-                # Continue to next method
+                prev_label = attempt.label
+                if plan.strict:
+                    break
 
-        # Method 2: Try SSH (works with SSH keys for any host).
-        # dep_ref.port is threaded through build_ssh_url so non-default SSH ports
-        # (e.g. Bitbucket Datacenter on 7999) are preserved in the emitted URL.
-        try:
-            ssh_url = self._build_repo_url(repo_url_base, use_ssh=True, dep_ref=dep_ref)
-            repo = Repo.clone_from(ssh_url, target_path, env=clone_env, progress=progress_reporter, **clone_kwargs)
-            if verbose_callback:
-                verbose_callback(f"Cloned from: {ssh_url}")
-            return repo
-        except GitCommandError as e:
-            last_error = e
-            # Continue to next method
-
-        # Method 3: Try standard HTTPS (public repos, or git credential helper for generic hosts)
-        try:
-            https_url = self._build_repo_url(repo_url_base, use_ssh=False, dep_ref=dep_ref)
-            repo = Repo.clone_from(https_url, target_path, env=clone_env, progress=progress_reporter, **clone_kwargs)
-            if verbose_callback:
-                verbose_callback(f"Cloned from: {https_url}")
-            return repo
-        except GitCommandError as e:
-            last_error = e
-
-        # All methods failed
-        error_msg = f"Failed to clone repository {repo_url_base} using all available methods. "
+        # All planned attempts failed (or strict-mode single failure)
+        if plan.strict and len(plan.attempts) >= 1:
+            tried = plan.attempts[0].label
+            error_msg = (
+                f"Failed to clone repository {repo_url_base} via {tried}. "
+            )
+            if plan.fallback_hint:
+                error_msg += plan.fallback_hint + " "
+        else:
+            error_msg = f"Failed to clone repository {repo_url_base} using all available methods. "
         configured_host = os.environ.get("GITHUB_HOST", "")
         if is_ado and not self.has_ado_token:
             host = dep_host or "dev.azure.com"

@@ -89,7 +89,11 @@ def run(ctx: "InstallContext") -> None:
     if ctx.auth_resolver is None:
         ctx.auth_resolver = AuthResolver()
 
-    downloader = _ghd_mod.GitHubPackageDownloader(auth_resolver=ctx.auth_resolver)
+    downloader = _ghd_mod.GitHubPackageDownloader(
+        auth_resolver=ctx.auth_resolver,
+        protocol_pref=ctx.protocol_pref,
+        allow_fallback=ctx.allow_protocol_fallback,
+    )
     ctx.downloader = downloader
 
     # ------------------------------------------------------------------
