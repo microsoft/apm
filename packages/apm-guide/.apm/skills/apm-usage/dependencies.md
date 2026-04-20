@@ -19,6 +19,10 @@ dependencies:
     - git@github.com:microsoft/apm-sample-package.git
     - git@gitlab.com:group/subgroup/repo.git
 
+    # Custom ports (e.g. Bitbucket Datacenter, self-hosted GitLab)
+    - ssh://git@bitbucket.example.com:7999/project/repo.git
+    - https://git.internal:8443/team/repo.git
+
     # FQDN shorthand (non-GitHub hosts keep the domain)
     - gitlab.com/acme/coding-standards
     - gitlab.com/group/subgroup/repo
@@ -31,6 +35,19 @@ dependencies:
     - ../sibling-repo/my-package
 ```
 
+### Custom git ports
+
+Non-default git ports are preserved on `https://`, `http://`, and `ssh://` URLs
+and threaded through all clone attempts. When the SSH clone fails, the HTTPS
+fallback reuses the same port instead of silently dropping it.
+
+- Use the `ssh://` form to specify an SSH port
+  (e.g. `ssh://git@host:7999/owner/repo.git`). The SCP shorthand
+  `git@host:path` **cannot** carry a port -- the `:` is the path separator.
+- The lockfile records `port: <int>` (1-65535) only when a non-default port
+  is set. Port is a transport detail, not part of the package identity --
+  the same repo reachable on different ports dedupes to one entry.
+
 ## Object form (complex cases)
 
 ```yaml
@@ -41,6 +58,9 @@ dependencies:
 
 - git: git@gitlab.com:group/subgroup/repo.git
   path: prompts/review.prompt.md
+
+- git: ssh://git@bitbucket.example.com:7999/project/repo.git   # custom SSH port
+  ref: v1.0
 
 - path: ./packages/my-skills                    # local only
 ```
