@@ -172,7 +172,7 @@ class TestCloneWithFallbackEnv:
         calls = self._run_clone(dl, dep, succeed_on=1)
         assert len(calls) >= 1
 
-        # Under strict default, explicit https:// → single HTTPS attempt; env is relaxed
+        # Under strict default, explicit https:// -> single HTTPS attempt; env is relaxed
         # because no token was available for the generic host.
         env_used = calls[0][1].get("env", calls[0].kwargs.get("env"))
         assert "GIT_ASKPASS" not in env_used

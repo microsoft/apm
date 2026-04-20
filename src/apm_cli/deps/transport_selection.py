@@ -255,12 +255,15 @@ class TransportSelector:
         if explicit in ("ssh", "https", "http") and not allow_fallback:
             if explicit == "ssh":
                 initial = [_SSH]
-            elif explicit == "https":
-                initial = [_AUTH_HTTPS] if has_token else [_PLAIN_HTTPS]
-            else:  # http
-                # Plain HTTP: never with token (sending tokens over cleartext is unsafe);
-                # gated separately by --allow-insecure validation upstream (#700).
-                initial = [TransportAttempt(scheme="http", use_token=False, label="plain HTTP")]
+            else:
+                # https or http: build an HTTPS attempt either way. Plain `http://`
+                # URLs are normalized to HTTPS here (and never carry a token, so a
+                # cleartext credential leak is impossible) until #700 introduces a
+                # first-class HTTP transport with explicit `--allow-insecure` gating.
+                if explicit == "https":
+                    initial = [_AUTH_HTTPS] if has_token else [_PLAIN_HTTPS]
+                else:
+                    initial = [_PLAIN_HTTPS]
             return TransportPlan(
                 attempts=initial,
                 strict=True,

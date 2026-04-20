@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import builtins
 import sys
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional
 
 from ..models.results import InstallResult
 from ..utils.console import _rich_error
@@ -55,7 +55,7 @@ def run_install_pipeline(
     target: str = None,
     marketplace_provenance: dict = None,
     protocol_pref=None,
-    allow_protocol_fallback: bool = False,
+    allow_protocol_fallback: "Optional[bool]" = None,
 ):
     """Install APM package dependencies.
 

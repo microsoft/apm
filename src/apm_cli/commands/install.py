@@ -3,7 +3,7 @@
 import builtins
 import sys
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import click
 
@@ -774,7 +774,7 @@ def _install_apm_dependencies(
     target: str = None,
     marketplace_provenance: dict = None,
     protocol_pref=None,
-    allow_protocol_fallback: bool = False,
+    allow_protocol_fallback: "Optional[bool]" = None,
 ):
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.

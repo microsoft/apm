@@ -430,9 +430,9 @@ Run `apm install --dry-run` to preview MCP dependency configuration without writ
 
 APM picks SSH or HTTPS per dependency using a strict, predictable contract.
 
-:::caution[Breaking change]
-Earlier versions silently retried failed clones across protocols. The current
-behavior is **strict by default**: explicit URL schemes are honored exactly,
+:::caution[Breaking change in APM 0.8.13]
+APM versions before 0.8.13 silently retried failed clones across protocols.
+Starting in 0.8.13 the behavior is **strict by default**: explicit URL schemes are honored exactly,
 and shorthand uses HTTPS unless `git config url.<base>.insteadOf` rewrites it
 to SSH. To restore the legacy permissive chain temporarily (e.g. while
 migrating CI), set `APM_ALLOW_PROTOCOL_FALLBACK=1` or pass

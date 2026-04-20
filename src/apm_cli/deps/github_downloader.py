@@ -740,6 +740,7 @@ class GitHubPackageDownloader:
         )
 
         prev_label: Optional[str] = None
+        prev_scheme: Optional[str] = None
         for attempt in plan.attempts:
             # Defensive: skip token-bearing attempts when no token available.
             if attempt.use_token and not has_token:
@@ -758,8 +759,14 @@ class GitHubPackageDownloader:
                 continue
 
             # Surface a [!] warning when the plan permits fallback and we
-            # are switching protocols mid-clone (legacy permissive path).
-            if not plan.strict and prev_label and prev_label != attempt.label:
+            # are actually switching git protocols (ssh <-> https) mid-clone
+            # rather than just retrying with different auth on the same protocol.
+            if (
+                not plan.strict
+                and prev_label
+                and prev_scheme
+                and prev_scheme != attempt.scheme
+            ):
                 _rich_warning(
                     f"Protocol fallback: {prev_label} clone of {repo_url_base} failed; retrying with {attempt.label}.",
                     symbol="warning",
@@ -778,6 +785,7 @@ class GitHubPackageDownloader:
             except GitCommandError as e:
                 last_error = e
                 prev_label = attempt.label
+                prev_scheme = attempt.scheme
                 if plan.strict:
                     break
 
