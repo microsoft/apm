@@ -306,6 +306,19 @@ class InstallLogger(CommandLogger):
             return
         _rich_echo(f"    Package type: {type_label}", color="dim")
 
+    def package_type_warn(self, message: str):
+        """Log a near-miss classification warning at default verbosity.
+
+        Used when a package's classification disagrees with directory
+        evidence in a way that may indicate the package is not what APM
+        thought it was (e.g., classified as hooks-only despite containing
+        plugin-shaped directories).  Renders with ``[!]`` so users see
+        the diagnostic next to the install summary.
+
+        See microsoft/apm#780.
+        """
+        _rich_warning(message, symbol="warning")
+
     # --- Cleanup phase (stale and orphan file removal) ---
 
     def stale_cleanup(self, dep_key: str, count: int):

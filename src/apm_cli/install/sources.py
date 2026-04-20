@@ -40,6 +40,62 @@ if TYPE_CHECKING:
     from apm_cli.models.apm_package import PackageInfo
 
 
+def _format_package_type_label(pkg_type) -> Optional[str]:
+    """Human-readable label for a detected ``PackageType``.
+
+    Centralised so every install path emits the same wording and so
+    new ``PackageType`` values can be added without grepping for ad-hoc
+    dicts.  Missing ``HOOK_PACKAGE`` from this table is what made
+    microsoft/apm#780 silent -- keep all classifiable enum members
+    covered.
+    """
+    from apm_cli.models.apm_package import PackageType
+
+    return {
+        PackageType.CLAUDE_SKILL: "Skill (SKILL.md detected)",
+        PackageType.MARKETPLACE_PLUGIN:
+            "Marketplace Plugin (plugin.json or agents/skills/commands)",
+        PackageType.HYBRID: "Hybrid (apm.yml + SKILL.md)",
+        PackageType.APM_PACKAGE: "APM Package (apm.yml)",
+        PackageType.HOOK_PACKAGE: "Hook Package (hooks/*.json only)",
+    }.get(pkg_type)
+
+
+def _warn_if_classification_near_miss(install_path, pkg_type, logger) -> None:
+    """Default-visibility warning when classification disagrees with evidence.
+
+    Fires when a package is classified as ``HOOK_PACKAGE`` but the
+    directory *also* contains plugin-shaped evidence (e.g. an
+    ``agents/`` directory or a ``.claude-plugin/`` folder without a
+    ``plugin.json``).  The detection cascade reorder in
+    microsoft/apm#780 fixes the common case where ``plugin.json`` or
+    plugin-shaped directories are present; this warning catches the
+    residual near-misses where the package is *almost* a plugin but
+    lacks the evidence to be auto-classified as one, so the user is
+    not left wondering why only their hooks were installed.
+    """
+    from apm_cli.models.apm_package import PackageType
+    from apm_cli.models.validation import gather_detection_evidence
+
+    if pkg_type != PackageType.HOOK_PACKAGE or logger is None:
+        return
+
+    evidence = gather_detection_evidence(install_path)
+    extras = list(evidence.plugin_dirs_present)
+    if (install_path / ".claude-plugin").is_dir():
+        extras.append(".claude-plugin/")
+    if not extras:
+        return
+
+    extras_str = ", ".join(extras)
+    logger.package_type_warn(
+        f"Detected as Hook Package, but the package also contains: "
+        f"{extras_str}. If you expected those primitives to install, "
+        "the package may be missing a plugin.json -- please file an "
+        "issue at https://github.com/microsoft/apm/issues."
+    )
+
+
 @dataclass
 class Materialization:
     """Outcome of ``DependencySource.acquire()``.
@@ -178,6 +234,7 @@ class LocalDependencySource(DependencySource):
         if pkg_type == PackageType.MARKETPLACE_PLUGIN:
             from apm_cli.deps.plugin_parser import normalize_plugin_directory
             normalize_plugin_directory(install_path, plugin_json_path)
+        _warn_if_classification_near_miss(install_path, pkg_type, logger)
 
         # Record for lockfile
         node = ctx.dependency_graph.dependency_tree.get_node(dep_key)
@@ -510,14 +567,12 @@ class FreshDependencySource(DependencySource):
 
             if hasattr(package_info, "package_type"):
                 package_type = package_info.package_type
-                _type_label = {
-                    PackageType.CLAUDE_SKILL: "Skill (SKILL.md detected)",
-                    PackageType.MARKETPLACE_PLUGIN: "Marketplace Plugin (plugin.json detected)",
-                    PackageType.HYBRID: "Hybrid (apm.yml + SKILL.md)",
-                    PackageType.APM_PACKAGE: "APM Package (apm.yml)",
-                }.get(package_type)
+                _type_label = _format_package_type_label(package_type)
                 if _type_label and logger:
                     logger.package_type_info(_type_label)
+                _warn_if_classification_near_miss(
+                    install_path, package_type, logger
+                )
 
             # If no targets, skip integration but keep deltas
             if not ctx.targets:
