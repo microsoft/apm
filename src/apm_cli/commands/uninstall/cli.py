@@ -194,8 +194,15 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         # Step 10: MCP cleanup
         try:
             apm_package = APMPackage.from_apm_yml(manifest_path)
-            _cleanup_stale_mcp(apm_package, lockfile, lockfile_path, _pre_uninstall_mcp_servers,
-                               modules_dir=get_modules_dir(scope))
+            _cleanup_stale_mcp(
+                apm_package,
+                lockfile,
+                lockfile_path,
+                _pre_uninstall_mcp_servers,
+                modules_dir=get_modules_dir(scope),
+                workspace_root=deploy_root,
+                install_scope=scope,
+            )
         except Exception:
             logger.warning("MCP cleanup during uninstall failed")
 

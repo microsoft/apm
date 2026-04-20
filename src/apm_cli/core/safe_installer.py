@@ -2,6 +2,7 @@
 
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
+from pathlib import Path
 from ..factory import ClientFactory
 from .conflict_detector import MCPConflictDetector
 from ..utils.console import _rich_warning, _rich_success, _rich_error
@@ -10,7 +11,7 @@ from ..utils.console import _rich_warning, _rich_success, _rich_error
 @dataclass
 class InstallationSummary:
     """Summary of MCP server installation results."""
-    
+
     def __init__(self):
         self.installed = []
         self.skipped = []
@@ -58,15 +59,23 @@ class InstallationSummary:
 class SafeMCPInstaller:
     """Safe MCP server installation with conflict detection."""
     
-    def __init__(self, runtime: str, logger=None):
+    def __init__(self, runtime: str, logger=None, workspace_root: Optional[Path] = None, install_scope=None):
         """Initialize the safe installer.
-        
+
         Args:
-            runtime: Target runtime (copilot, codex, vscode).
+            runtime: Target runtime (copilot, codex, vscode, claude, ...).
             logger: Optional CommandLogger for structured output.
+            workspace_root: Reserved for forward-compatible API; MCP client
+                adapters still resolve repo-local paths from the process working
+                directory. ``InstallScope.USER`` installs exclude CWD-based
+                runtimes so ``apm install -g`` does not write arbitrary project dirs.
+            install_scope: ``InstallScope`` for user vs project MCP paths (Claude).
         """
+        # Adapters use cwd for VS Code/Cursor/OpenCode paths; not workspace_root.
+        _ = workspace_root
         self.runtime = runtime
         self.adapter = ClientFactory.create_client(runtime)
+        self.adapter.mcp_install_scope = install_scope
         self.conflict_detector = MCPConflictDetector(self.adapter)
         self.logger = logger
     

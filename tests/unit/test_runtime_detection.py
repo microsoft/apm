@@ -80,6 +80,12 @@ class TestRuntimeDetection(unittest.TestCase):
         detected = MCPIntegrator._detect_runtimes(scripts)
         self.assertEqual(detected, ["copilot"])
 
+    def test_detect_claude_in_scripts(self):
+        """Detect claude runtime when apm.yml scripts mention the claude CLI."""
+        scripts = {"cc": "claude --verbose"}
+        detected = MCPIntegrator._detect_runtimes(scripts)
+        self.assertEqual(detected, ["claude"])
+
 
 class TestRuntimeFiltering(unittest.TestCase):
     """Test cases for filtering available runtimes."""

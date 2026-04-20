@@ -469,8 +469,14 @@ APM configures MCP servers in the native config format for each supported client
 | VS Code | `.vscode/mcp.json` | JSON `servers` object |
 | GitHub Copilot CLI | `~/.copilot/mcp-config.json` | JSON `mcpServers` object |
 | Codex CLI | `~/.codex/config.toml` | TOML `mcp_servers` section |
+| Cursor | `.cursor/mcp.json` | JSON `mcpServers` (when `.cursor/` exists) |
+| OpenCode | `opencode.json` | JSON `mcp` object (when `.opencode/` exists) |
+| Claude Code (project) | `.mcp.json` (project root) | JSON `mcpServers` (when `.claude/` exists) |
+| Claude Code (user, `apm install -g`) | `~/.claude.json` | Top-level JSON `mcpServers` |
 
-**Runtime targeting**: APM detects which runtimes are installed and configures MCP servers for all of them. Use `--runtime <name>` or `--exclude <name>` to control which clients receive configuration.
+**Runtime targeting**: APM detects which runtimes are installed and configures MCP servers for all of them. Use `--runtime <name>` or `--exclude <name>` to control which clients receive configuration. Supported MCP runtime names include `copilot`, `codex`, `vscode`, `cursor`, `opencode`, and `claude`.
+
+> **Claude Code**: See [Claude Code MCP / `mcpServers`](https://code.claude.com/docs/en/mcp) for the upstream shape. APM **shallow-merges** each server name with what is already on disk so extra keys (for example OAuth) stay when APM refreshes `command` / `args`. It then **normalizes** stdio entries for Claude: Copilot-only noise such as `type: "local"`, `tools: ["*"]`, and empty `id` are dropped; non-empty registry `id` values and remote (`http` / `url`) entries are preserved as expected.
 
 > **VS Code detection**: APM considers VS Code available when either the `code` CLI command is on PATH **or** a `.vscode/` directory exists in the current working directory. This means VS Code MCP configuration works even when `code` is not on PATH — common on macOS and Linux when "Install 'code' command in PATH" has not been run from the VS Code command palette, or when VS Code was installed via a method that doesn't register the CLI (e.g. `.tar.gz`, Flatpak, or a non-standard macOS install location).
 
@@ -483,6 +489,9 @@ apm install --runtime vscode
 
 # Skip Codex configuration
 apm install --exclude codex
+
+# Target only Claude Code
+apm install --runtime claude
 
 # Install only MCP dependencies (skip APM packages)
 apm install --only mcp

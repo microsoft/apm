@@ -24,7 +24,13 @@ class MCPServerOperations:
         """
         self.registry_client = SimpleRegistryClient(registry_url)
     
-    def check_servers_needing_installation(self, target_runtimes: List[str], server_references: List[str]) -> List[str]:
+    def check_servers_needing_installation(
+        self,
+        target_runtimes: List[str],
+        server_references: List[str],
+        workspace_root: Optional[Path] = None,
+        install_scope=None,
+    ) -> List[str]:
         """Check which MCP servers actually need installation across target runtimes.
         
         This method checks the actual MCP configuration files to see which servers
@@ -33,7 +39,9 @@ class MCPServerOperations:
         Args:
             target_runtimes: List of target runtimes to check
             server_references: List of MCP server references (names or IDs)
-            
+            workspace_root: Reserved for API compatibility; adapters use cwd.
+            install_scope: Optional; forwarded to clients for scope-aware paths.
+
         Returns:
             List of server references that need installation in at least one runtime
         """
@@ -60,7 +68,11 @@ class MCPServerOperations:
                 # Check if this server needs installation in ANY of the target runtimes
                 needs_installation = False
                 for runtime in target_runtimes:
-                    runtime_installed_ids = self._get_installed_server_ids([runtime])
+                    runtime_installed_ids = self._get_installed_server_ids(
+                        [runtime],
+                        workspace_root=workspace_root,
+                        install_scope=install_scope,
+                    )
                     if server_id not in runtime_installed_ids:
                         needs_installation = True
                         break
@@ -74,26 +86,37 @@ class MCPServerOperations:
         
         return list(servers_needing_installation)
     
-    def _get_installed_server_ids(self, target_runtimes: List[str]) -> Set[str]:
+    def _get_installed_server_ids(
+        self,
+        target_runtimes: List[str],
+        workspace_root: Optional[Path] = None,
+        install_scope=None,
+    ) -> Set[str]:
         """Get all installed server IDs across target runtimes.
-        
+
         Args:
             target_runtimes: List of runtimes to check
-            
+            workspace_root: Reserved for API compatibility; adapters use cwd.
+
         Returns:
             Set of server IDs that are currently installed
         """
         installed_ids = set()
-        
+
         # Import here to avoid circular imports
         try:
             from ..factory import ClientFactory
         except ImportError:
             return installed_ids
-        
+
+        # Client adapters read MCP config relative to cwd; workspace_root is API
+        # compatibility. USER-scope MCP install filters CWD-based runtimes upstream.
+        _ = workspace_root
+
         for runtime in target_runtimes:
             try:
                 client = ClientFactory.create_client(runtime)
+                client.mcp_install_scope = install_scope
                 config = client.get_current_config()
                 
                 if isinstance(config, dict):
@@ -128,7 +151,23 @@ class MCPServerOperations:
                                 )
                                 if server_id:
                                     installed_ids.add(server_id)
-                            
+
+                    elif runtime in ("cursor", "claude"):
+                        mcp_servers = config.get("mcpServers", {})
+                        for server_name, server_config in mcp_servers.items():
+                            if isinstance(server_config, dict):
+                                server_id = server_config.get("id")
+                                if server_id:
+                                    installed_ids.add(server_id)
+                    elif runtime == 'opencode':
+                        mcp_block = config.get("mcp") or {}
+                        if isinstance(mcp_block, dict):
+                            for server_name, server_config in mcp_block.items():
+                                if isinstance(server_config, dict):
+                                    server_id = server_config.get("id")
+                                    if server_id:
+                                        installed_ids.add(server_id)
+
             except Exception:
                 # If we can't read a runtime's config, skip it
                 continue

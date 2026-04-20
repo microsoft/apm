@@ -23,9 +23,18 @@ def configure_client(client_type, config_updates):
         return False
 
 
-def install_package(client_type, package_name, version=None, shared_env_vars=None, server_info_cache=None, shared_runtime_vars=None):
+def install_package(
+    client_type,
+    package_name,
+    version=None,
+    shared_env_vars=None,
+    server_info_cache=None,
+    shared_runtime_vars=None,
+    workspace_root=None,
+    install_scope=None,
+):
     """Install an MCP package for a specific client type.
-    
+
     Args:
         client_type (str): Type of client to configure.
         package_name (str): Name of the package to install.
@@ -33,13 +42,19 @@ def install_package(client_type, package_name, version=None, shared_env_vars=Non
         shared_env_vars (dict, optional): Pre-collected environment variables to use.
         server_info_cache (dict, optional): Pre-fetched server info to avoid duplicate registry calls.
         shared_runtime_vars (dict, optional): Pre-collected runtime variables to use.
-    
+        workspace_root (Path, optional): Root for repo-local MCP configs.
+        install_scope: ``InstallScope`` for user vs project MCP (Claude).
+
     Returns:
         dict: Result with 'success' (bool), 'installed' (bool), 'skipped' (bool) keys.
     """
     try:
         # Use safe installer with conflict detection
-        safe_installer = SafeMCPInstaller(client_type)
+        safe_installer = SafeMCPInstaller(
+            client_type,
+            workspace_root=workspace_root,
+            install_scope=install_scope,
+        )
         
         # Pass shared environment and runtime variables and server info cache if available
         if shared_env_vars is not None or server_info_cache is not None or shared_runtime_vars is not None:

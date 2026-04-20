@@ -1,5 +1,6 @@
 """Factory classes for creating adapters."""
 
+from .adapters.client.claude import ClaudeClientAdapter
 from .adapters.client.vscode import VSCodeClientAdapter
 from .adapters.client.codex import CodexClientAdapter
 from .adapters.client.copilot import CopilotClientAdapter
@@ -30,6 +31,7 @@ class ClientFactory:
             "codex": CodexClientAdapter,
             "cursor": CursorClientAdapter,
             "opencode": OpenCodeClientAdapter,
+            "claude": ClaudeClientAdapter,
             # Add more clients as needed
         }
         

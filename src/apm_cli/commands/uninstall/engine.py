@@ -354,7 +354,15 @@ def _sync_integrations_after_uninstall(apm_package, project_root, all_deployed_f
     return counts
 
 
-def _cleanup_stale_mcp(apm_package, lockfile, lockfile_path, old_mcp_servers, modules_dir=None):
+def _cleanup_stale_mcp(
+    apm_package,
+    lockfile,
+    lockfile_path,
+    old_mcp_servers,
+    modules_dir=None,
+    workspace_root=None,
+    install_scope=None,
+):
     """Remove MCP servers that are no longer needed after uninstall."""
     if not old_mcp_servers:
         return
@@ -367,6 +375,11 @@ def _cleanup_stale_mcp(apm_package, lockfile, lockfile_path, old_mcp_servers, mo
     all_remaining_mcp = MCPIntegrator.deduplicate(remaining_root_mcp + remaining_mcp)
     new_mcp_servers = MCPIntegrator.get_server_names(all_remaining_mcp)
     stale_servers = old_mcp_servers - new_mcp_servers
+    wr = workspace_root if workspace_root is not None else Path.cwd()
     if stale_servers:
-        MCPIntegrator.remove_stale(stale_servers)
+        MCPIntegrator.remove_stale(
+            stale_servers,
+            workspace_root=wr,
+            install_scope=install_scope,
+        )
     MCPIntegrator.update_lockfile(new_mcp_servers, lockfile_path)

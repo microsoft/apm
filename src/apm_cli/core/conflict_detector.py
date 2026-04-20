@@ -121,7 +121,14 @@ class MCPConflictDetector:
             return servers
         elif "vscode" in adapter_class_name:
             return existing_config.get("servers", {})
-        
+        elif "claude" in adapter_class_name:
+            return existing_config.get("mcpServers", {})
+        elif "cursor" in adapter_class_name:
+            return existing_config.get("mcpServers", {})
+        elif "opencode" in adapter_class_name:
+            mcp = existing_config.get("mcp") or {}
+            return mcp if isinstance(mcp, dict) else {}
+
         return {}
     
     def get_conflict_summary(self, server_reference: str) -> Dict[str, Any]:
