@@ -10,11 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (BREAKING)
 
-- Transport selection now honors the URL scheme exactly: explicit `ssh://...` and `https://...` dependencies no longer silently fall back to a different protocol when the clone fails. Shorthand (`owner/repo`) defaults to HTTPS but consults `git config url.<base>.insteadOf` and uses SSH if rewrites are configured. To restore the previous permissive behavior set `APM_ALLOW_PROTOCOL_FALLBACK=1` (also `--allow-protocol-fallback` on `apm install`). When fallback runs, a `[!]` warning names the protocols involved. Closes #328 and #778; follow-up to #661/#665.
+- Strict-by-default transport selection: explicit `ssh://`/`https://` URLs no longer silently fall back to the other protocol; shorthand consults `git config url.<base>.insteadOf` and otherwise defaults to HTTPS. Set `APM_ALLOW_PROTOCOL_FALLBACK=1` (or pass `--allow-protocol-fallback`) to restore the legacy permissive chain; cross-protocol retries then emit a `[!]` warning. Closes #328 (#778)
 
 ### Added
 
-- `apm install` accepts `--ssh` / `--https` flags and `APM_GIT_PROTOCOL=ssh|https` env to pick the initial transport for shorthand URLs. `apm install` also accepts `--allow-protocol-fallback` (env: `APM_ALLOW_PROTOCOL_FALLBACK=1`) as the escape hatch for cross-protocol fallback when migrating off the previous permissive behavior (#778).
+- `apm install --ssh` / `--https` flags and `APM_GIT_PROTOCOL=ssh|https` env to pick the initial transport for shorthand dependencies (#778)
+- `apm install --allow-protocol-fallback` flag and `APM_ALLOW_PROTOCOL_FALLBACK=1` env as the migration escape hatch for cross-protocol fallback (#778)
 - Add APM Review Panel skill (`.github/skills/apm-review-panel/`) and four new specialist personas (`devx-ux-expert`, `supply-chain-security-expert`, `apm-ceo`, `oss-growth-hacker`) with auto-activating per-persona skills. Routes specialist findings through an APM CEO arbiter for strategic / breaking-change calls, with the OSS growth hacker side-channeling adoption insights via `WIP/growth-strategy.md`. Instrumentation per Handbook Ch. 9 (`The Instrumented Codebase`); PROSE-compliant (thin SKILL.md routers, persona detail lazy-loaded via markdown links, explicit boundaries per persona).
 
 ### Fixed

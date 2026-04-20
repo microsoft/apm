@@ -145,7 +145,7 @@ dependencies:
       ref: v1.0
 ```
 
-Fields: `git` (required), `path`, `ref`, `alias` (all optional). The `git` value is any HTTPS or SSH clone URL. Explicit URL schemes are honored exactly — see [Transport selection](#transport-selection-ssh-vs-https) for the full contract. Custom ports are preserved across every attempt (including any cross-protocol fallback enabled with `--allow-protocol-fallback`), so `ssh://host:7999/...` retried over HTTPS becomes `https://host:7999/...`.
+Fields: `git` (required), `path`, `ref`, `alias` (all optional). The `git` value is any HTTPS or SSH clone URL. Explicit URL schemes are honored exactly -- see [Transport selection](#transport-selection-ssh-vs-https) for the full contract. Custom ports are preserved across every attempt (including any cross-protocol fallback enabled with `--allow-protocol-fallback`), so `ssh://host:7999/...` retried over HTTPS becomes `https://host:7999/...`.
 
 > **Nested groups (GitLab, Gitea, etc.):** APM treats all path segments after the host as the repo path, so `gitlab.com/group/subgroup/repo` resolves to a repo at `group/subgroup/repo`. Virtual paths on simple 2-segment repos work with shorthand (`gitlab.com/owner/repo/file.prompt.md`). But for **nested-group repos + virtual paths**, use the object format — the shorthand is ambiguous:
 >
