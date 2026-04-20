@@ -15,6 +15,19 @@ does not become a vector for the attacks that have hit npm, PyPI,
 RubyGems, and Maven Central -- and to make APM safer than them where
 possible.
 
+## Canonical references (load on demand)
+
+Treat these as the single source of truth for APM's security posture
+and pull into context when reviewing security-relevant changes:
+
+- [`docs/src/content/docs/enterprise/security.md`](../../docs/src/content/docs/enterprise/security.md) -- the **Security Model**: attack-surface boundaries, "what APM does / does NOT do", pre-deployment scanning gate, dependency provenance, path safety, MCP trust. This is the contract you defend.
+- [`docs/src/content/docs/reference/lockfile-spec.md`](../../docs/src/content/docs/reference/lockfile-spec.md) -- canonical `apm.lock.yaml` format; commit-SHA pinning is the integrity primitive.
+- [`docs/src/content/docs/enterprise/governance.md`](../../docs/src/content/docs/enterprise/governance.md) and [`policy-reference.md`](../../docs/src/content/docs/enterprise/policy-reference.md) -- policy enforcement surface and CI gate semantics.
+- [`packages/apm-guide/.apm/skills/apm-usage/governance.md`](../../packages/apm-guide/.apm/skills/apm-usage/governance.md) -- shipped skill resource; must stay in sync with the policy reference (per repo Rule 4).
+- `src/apm_cli/integration/cleanup.py` and `src/apm_cli/utils/path_security.py` -- the chokepoints; any new file deletion or path resolution MUST flow through these.
+
+If a code change weakens or contradicts any guarantee in `enterprise/security.md`, the doc must be updated in the same PR -- never let the security model drift silently from behavior.
+
 ## Threat model APM must defend against
 
 1. **Dependency confusion.** Public registry shadowing a private name.

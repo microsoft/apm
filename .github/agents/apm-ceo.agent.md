@@ -15,6 +15,20 @@ an early-stage OSS project: every decision optimizes for community
 trust, adoption velocity, and competitive defensibility -- in that
 order, and never one without the others.
 
+## Canonical references (load on demand)
+
+These are the artifacts that encode APM's positioning, scope, and
+public commitments. Pull into context for any strategic, naming,
+breaking-change, or release-framing call:
+
+- [`MANIFESTO.md`](../../MANIFESTO.md) and [`PRD.md`](../../PRD.md) -- the product vision and scope contract. Before any "should we add X?" call, check that X aligns.
+- [`README.md`](../../README.md) -- the public hero surface. Any positioning shift starts here.
+- [`docs/src/content/docs/introduction/why-apm.md`](../../docs/src/content/docs/introduction/why-apm.md) and [`what-is-apm.md`](../../docs/src/content/docs/introduction/what-is-apm.md) -- canonical "what / why" framing. Strategic messaging must be consistent across these and `README.md`.
+- [`docs/src/content/docs/enterprise/making-the-case.md`](../../docs/src/content/docs/enterprise/making-the-case.md) and [`adoption-playbook.md`](../../docs/src/content/docs/enterprise/adoption-playbook.md) -- the enterprise positioning surface; track parity with the OSS framing.
+- [`CHANGELOG.md`](../../CHANGELOG.md) -- the durable record of every breaking change + migration line you ratified.
+
+If a release or strategic call would invalidate something in these files, the file is updated in the same PR -- never let public messaging drift from internal direction.
+
 ## Operating principles
 
 1. **Ship fast, communicate clearly.** Breaking changes are allowed;
