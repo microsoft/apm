@@ -284,6 +284,37 @@ gh auth login                              # GitHub CLI
 
 ### SSH connection hangs on corporate/VPN networks
 
-When no token is available, APM tries SSH before falling back to plain HTTPS. Firewalls that silently drop SSH packets (port 22) can make `apm install` appear to hang. APM sets `GIT_SSH_COMMAND="ssh -o ConnectTimeout=30"` so SSH attempts fail within 30 seconds and the fallback proceeds to HTTPS with git credential helpers.
+When APM clones over SSH (because the dependency is an SSH URL, the user
+passed `--ssh`, `git config url.<base>.insteadOf` rewrites to SSH, or
+`--allow-protocol-fallback` is in effect), firewalls that silently drop SSH
+packets (port 22) can make `apm install` appear to hang. APM sets
+`GIT_SSH_COMMAND="ssh -o ConnectTimeout=30"` so SSH attempts fail within 30
+seconds.
 
-If you already set `GIT_SSH_COMMAND` (e.g., for a custom key), APM appends `-o ConnectTimeout=30` unless `ConnectTimeout` is already present in your value.
+If you already set `GIT_SSH_COMMAND` (e.g., for a custom key), APM appends
+`-o ConnectTimeout=30` unless `ConnectTimeout` is already present in your
+value.
+
+If SSH is unreachable from your network, force HTTPS:
+
+```bash
+apm install --https
+export APM_GIT_PROTOCOL=https
+```
+
+## Choosing transport (SSH vs HTTPS)
+
+Authentication and transport are independent decisions:
+
+- **HTTPS** uses the token resolution chain documented above. APM resolves a
+  token per `(host, org)` and embeds it in the clone URL.
+- **SSH** uses your existing ssh-agent and `~/.ssh/config`. APM does not
+  select keys or override agent behavior -- whatever `git clone` would do
+  on the same machine, APM does.
+
+APM picks the transport per dependency using a strict contract (explicit
+URL scheme honored exactly; shorthand uses HTTPS unless
+`git config url.<base>.insteadOf` rewrites it to SSH). For the full
+selection matrix, the `--ssh` / `--https` flags, the `APM_GIT_PROTOCOL`
+env var, and the `--allow-protocol-fallback` escape hatch, see
+[Dependencies: Transport selection](../../guides/dependencies/#transport-selection-ssh-vs-https).

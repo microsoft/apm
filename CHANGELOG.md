@@ -8,8 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (BREAKING)
+
+- Transport selection now honors the URL scheme exactly: explicit `ssh://...` and `https://...` dependencies no longer silently fall back to a different protocol when the clone fails. Shorthand (`owner/repo`) defaults to HTTPS but consults `git config url.<base>.insteadOf` and uses SSH if rewrites are configured. To restore the previous permissive behavior set `APM_ALLOW_PROTOCOL_FALLBACK=1` (also `--allow-protocol-fallback` on `apm install`). When fallback runs, a `[!]` warning names the protocols involved. Closes #328 and #778; follow-up to #661/#665.
+
 ### Added
 
+- `apm install` accepts `--ssh` / `--https` flags and `APM_GIT_PROTOCOL=ssh|https` env to pick the initial transport for shorthand URLs. `apm install` also accepts `--allow-protocol-fallback` (env: `APM_ALLOW_PROTOCOL_FALLBACK=1`) as the escape hatch for cross-protocol fallback when migrating off the previous permissive behavior (#778).
 - Add APM Review Panel skill (`.github/skills/apm-review-panel/`) and four new specialist personas (`devx-ux-expert`, `supply-chain-security-expert`, `apm-ceo`, `oss-growth-hacker`) with auto-activating per-persona skills. Routes specialist findings through an APM CEO arbiter for strategic / breaking-change calls, with the OSS growth hacker side-channeling adoption insights via `WIP/growth-strategy.md`. Instrumentation per Handbook Ch. 9 (`The Instrumented Codebase`); PROSE-compliant (thin SKILL.md routers, persona detail lazy-loaded via markdown links, explicit boundaries per persona).
 
 ### Fixed

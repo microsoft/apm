@@ -38,8 +38,8 @@ dependencies:
 ### Custom git ports
 
 Non-default git ports are preserved on `https://`, `http://`, and `ssh://` URLs
-and threaded through all clone attempts. When the SSH clone fails, the HTTPS
-fallback reuses the same port instead of silently dropping it.
+and threaded through every clone attempt (including any cross-protocol
+fallback enabled with `--allow-protocol-fallback`).
 
 - Use the `ssh://` form to specify an SSH port
   (e.g. `ssh://git@host:7999/owner/repo.git`). The SCP shorthand
@@ -47,6 +47,50 @@ fallback reuses the same port instead of silently dropping it.
 - The lockfile records `port: <int>` (1-65535) only when a non-default port
   is set. Port is a transport detail, not part of the package identity --
   the same repo reachable on different ports dedupes to one entry.
+
+## Transport selection (SSH vs HTTPS)
+
+Strict by default. Pick the transport up front; APM never silently retries
+across protocols.
+
+| Dependency form | What APM tries |
+|-----------------|----------------|
+| `ssh://...` or `git@host:...` | SSH only |
+| `https://...` or `http://...` | HTTPS only |
+| Shorthand with `git config url.<base>.insteadOf` rewriting to SSH | SSH only |
+| Shorthand otherwise | HTTPS only |
+
+A failed clone fails loudly, naming the URL and the protocol attempted.
+Explicit URL schemes are honored exactly.
+
+Force the initial protocol for shorthand:
+
+```bash
+apm install owner/repo --ssh           # SSH for shorthand
+apm install owner/repo --https         # HTTPS for shorthand
+export APM_GIT_PROTOCOL=ssh            # session default
+```
+
+`--ssh` and `--https` are mutually exclusive and apply only to shorthand.
+URLs with an explicit scheme ignore them.
+
+Match local `git clone` behavior by configuring `insteadOf` once:
+
+```bash
+git config --global url."git@github.com:".insteadOf "https://github.com/"
+apm install owner/repo                 # APM clones over SSH
+```
+
+Restore the legacy permissive chain (escape hatch -- not a long-term
+setting):
+
+```bash
+apm install --allow-protocol-fallback
+export APM_ALLOW_PROTOCOL_FALLBACK=1   # CI / migration window
+```
+
+When fallback runs, each cross-protocol retry emits a `[!]` warning naming
+both protocols.
 
 ## Object form (complex cases)
 

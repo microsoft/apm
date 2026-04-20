@@ -96,6 +96,18 @@ apm install [PACKAGES...] [OPTIONS]
 - `--trust-transitive-mcp` - Trust self-defined MCP servers from transitive packages (skip re-declaration requirement)
 - `--dev` - Add packages to [`devDependencies`](../manifest-schema/#5-devdependencies) instead of `dependencies`. Dev deps are installed locally but excluded from `apm pack --format plugin` bundles
 - `-g, --global` - Install to user scope (`~/.apm/`) instead of the current project. Primitives deploy to `~/.copilot/`, `~/.claude/`, etc.
+- `--ssh` - Force SSH for shorthand (`owner/repo`) dependencies. Mutually exclusive with `--https`. Ignored for URLs with an explicit scheme.
+- `--https` - Force HTTPS for shorthand dependencies. Mutually exclusive with `--ssh`. Default unless `git config url.<base>.insteadOf` rewrites the candidate to SSH.
+- `--allow-protocol-fallback` - Restore the legacy permissive cross-protocol fallback chain (HTTPS-then-SSH or vice-versa). Strict-by-default otherwise. Each retry emits a `[!]` warning naming both protocols.
+
+**Transport env vars:**
+
+| Variable | Purpose |
+|----------|---------|
+| `APM_GIT_PROTOCOL` | `ssh` or `https`. Default initial transport for shorthand dependencies (overridden by `--ssh` / `--https`). |
+| `APM_ALLOW_PROTOCOL_FALLBACK` | Set to `1` to enable the legacy permissive chain without passing `--allow-protocol-fallback`. |
+
+See [Dependencies: Transport selection](../../guides/dependencies/#transport-selection-ssh-vs-https) for the full selection matrix.
 
 **Behavior:**
 - `apm install` (no args): Installs **all** packages from `apm.yml` and deploys the project's own `.apm/` content
