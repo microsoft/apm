@@ -57,7 +57,10 @@
 | `apm marketplace browse NAME` | Browse marketplace packages | -- |
 | `apm marketplace update [NAME]` | Update marketplace index | -- |
 | `apm marketplace remove NAME` | Remove a marketplace | `-y` skip confirm |
+| `apm marketplace validate NAME` | Validate marketplace manifest | `--check-refs`, `-v` |
 | `apm search QUERY@MARKETPLACE` | Search marketplace | `--limit N` |
+| `apm install NAME@MKT[#ref]` | Install from marketplace | Optional `#ref` override |
+| `apm view NAME@MARKETPLACE` | View marketplace plugin info | -- |
 
 ## MCP servers
 

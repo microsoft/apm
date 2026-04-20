@@ -63,6 +63,21 @@ Marketplaces can declare a `metadata.pluginRoot` field to specify the base direc
 
 With `pluginRoot` set to `./plugins`, the source `"my-tool"` resolves to `owner/repo/plugins/my-tool`. Sources that already contain a path separator (e.g. `./custom/path`) are not affected by `pluginRoot`.
 
+### Versioned plugins
+
+Plugins can declare a `version` field and a `source.ref` that points to a specific Git tag or commit:
+
+```json
+{
+  "name": "code-review",
+  "description": "Automated code review agent",
+  "version": "2.1.0",
+  "source": { "type": "github", "repo": "acme/code-review-plugin", "ref": "v2.1.0" }
+}
+```
+
+The `version` field is informational (displayed by `apm view` and `apm outdated`). The `source.ref` determines which Git ref APM checks out during install.
+
 ## Register a marketplace
 
 ```bash
@@ -125,12 +140,31 @@ use `apm marketplace browse <name>` instead.
 Use the `NAME@MARKETPLACE` syntax to install a plugin from a specific marketplace:
 
 ```bash
+# Install using the source ref from the marketplace entry
 apm install code-review@acme-plugins
+
+# Install with a specific git ref override
+apm install code-review@acme-plugins#v2.0.0
+
+# Install from a specific branch
+apm install code-review@acme-plugins#main
 ```
 
-APM resolves the plugin name against the marketplace index, fetches the underlying Git repository, and installs it as a standard APM dependency. The resolved source appears in `apm.yml` and `apm.lock.yaml` just like any direct dependency.
+The `#` separator carries a raw git ref that overrides the `source.ref` from the marketplace entry. Without `#`, APM uses the ref defined in the marketplace manifest.
+
+APM resolves the plugin name against the marketplace index, fetches the underlying Git repository using the resolved ref, and installs it as a standard APM dependency. The resolved source appears in `apm.yml` and `apm.lock.yaml` just like any direct dependency.
 
 For full `apm install` options, see [CLI Commands](../../reference/cli-commands/).
+
+## View plugin details
+
+Show metadata for a marketplace plugin:
+
+```bash
+apm view code-review@acme-plugins
+```
+
+Displays the plugin's name, version, description, source, and tags.
 
 ## Provenance tracking
 
@@ -187,3 +221,50 @@ apm marketplace remove acme-plugins --yes
 ```
 
 Removing a marketplace does not uninstall plugins previously installed from it. Those plugins remain pinned in `apm.lock.yaml` to their resolved Git sources.
+
+## Validate a marketplace
+
+Check a marketplace manifest for schema errors and duplicate entries:
+
+```bash
+apm marketplace validate acme-plugins
+
+# Verbose output
+apm marketplace validate acme-plugins --verbose
+```
+
+Catches: missing required fields and duplicate plugin names (case-insensitive).
+
+:::note[Planned]
+The `--check-refs` flag will verify that source refs are reachable over the network. It is accepted but not yet implemented.
+:::
+
+For full option details, see [CLI Commands](../../reference/cli-commands/).
+
+## Security
+
+### Version immutability
+
+APM caches version-to-ref mappings in `~/.apm/cache/marketplace/version-pins.json`. On subsequent installs, APM compares the marketplace ref against the cached pin. If a version's ref has changed, APM warns:
+
+```
+WARNING: Version 2.0.0 of code-review@acme-plugins ref changed: was 'v2.0.0', now 'deadbeef'. This may indicate a ref swap attack.
+```
+
+This detects marketplace maintainers (or compromised accounts) silently pointing an existing version at different code.
+
+### Shadow detection
+
+When installing a marketplace plugin, APM checks all other registered marketplaces for plugins with the same name. A match produces a warning:
+
+```
+WARNING: Plugin 'code-review' also found in marketplace 'other-plugins'. Verify you are installing from the intended source.
+```
+
+Shadow detection runs automatically during install -- no configuration required.
+
+### Best practices
+
+- **Use commit SHAs as refs** -- tags and branches can be moved; commit SHAs cannot.
+- **Keep plugin names unique across marketplaces** -- avoids shadow warnings and reduces confusion.
+- **Review immutability warnings** -- a changed ref for an existing version is a strong signal of tampering.
