@@ -284,6 +284,73 @@ class TestInstallLogger:
         logger.install_summary(apm_count=0, mcp_count=0, errors=3)
         assert "3 error" in mock_error.call_args[0][0]
 
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_stale_cleanup_visible_at_default_verbosity(self, mock_info):
+        logger = InstallLogger(verbose=False)
+        logger.stale_cleanup("pkg/repo", 3)
+        assert mock_info.called
+        msg = mock_info.call_args[0][0]
+        assert "3 stale files" in msg
+        assert "pkg/repo" in msg
+        assert logger.stale_cleaned_total == 3
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_stale_cleanup_singular_noun(self, mock_info):
+        logger = InstallLogger()
+        logger.stale_cleanup("pkg", 1)
+        assert "1 stale file " in mock_info.call_args[0][0]
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_stale_cleanup_zero_count_silent(self, mock_info):
+        logger = InstallLogger()
+        logger.stale_cleanup("pkg", 0)
+        assert not mock_info.called
+        assert logger.stale_cleaned_total == 0
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_orphan_cleanup_visible_at_default_verbosity(self, mock_info):
+        logger = InstallLogger(verbose=False)
+        logger.orphan_cleanup(2)
+        assert mock_info.called
+        assert "no longer in apm.yml" in mock_info.call_args[0][0]
+        assert logger.stale_cleaned_total == 2
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_stale_and_orphan_totals_accumulate(self, _info):
+        logger = InstallLogger()
+        logger.stale_cleanup("pkg-a", 2)
+        logger.orphan_cleanup(3)
+        logger.stale_cleanup("pkg-b", 1)
+        assert logger.stale_cleaned_total == 6
+
+    @patch("apm_cli.core.command_logger._rich_success")
+    def test_install_summary_reports_stale_cleaned(self, mock_success):
+        logger = InstallLogger()
+        logger.install_summary(apm_count=3, mcp_count=0, stale_cleaned=5)
+        msg = mock_success.call_args[0][0]
+        assert "5 stale files cleaned" in msg
+        # Period belongs at the end of the sentence, after the parenthetical.
+        assert msg.endswith("cleaned).")
+        assert ". (" not in msg
+
+    @patch("apm_cli.core.command_logger._rich_success")
+    def test_install_summary_no_stale_no_suffix(self, mock_success):
+        logger = InstallLogger()
+        logger.install_summary(apm_count=3, mcp_count=0, stale_cleaned=0)
+        msg = mock_success.call_args[0][0]
+        assert "stale" not in msg
+
+    @patch("apm_cli.core.command_logger._rich_warning")
+    def test_cleanup_skipped_user_edit_actionable(self, mock_warning):
+        logger = InstallLogger()
+        logger.cleanup_skipped_user_edit(".github/prompts/x.prompt.md", "pkg")
+        msg = mock_warning.call_args[0][0]
+        # Passes the "So What?" test: tells user what file, where it came
+        # from, and what they can do.
+        assert "x.prompt.md" in msg
+        assert "pkg" in msg
+        assert "delete manually" in msg.lower()
+
     @patch("apm_cli.core.command_logger._rich_error")
     def test_download_failed(self, mock_error):
         logger = InstallLogger()
