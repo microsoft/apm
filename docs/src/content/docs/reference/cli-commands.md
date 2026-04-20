@@ -117,6 +117,18 @@ Exceptions:
 - APM packages whose ref/version changed in `apm.yml` are re-downloaded automatically (no `--update` needed)
 - `--force` remains available for full overwrite/reset scenarios
 
+**Stale-file cleanup:**
+
+`apm install` removes files that a still-present package previously deployed but no longer produces -- for example after a package renames or drops a primitive. This keeps the workspace consistent with the manifest without any manual `apm prune`/`uninstall` step. Behaviour:
+
+- Scope: only files recorded under that package's `deployed_files` in `apm.lock.yaml` are eligible
+- Safety gate: paths that escape the project root or fall outside known integration prefixes are refused
+- Directory entries are refused outright -- APM only deletes individual files
+- Per-file provenance: APM records a content hash for each deployed file; if the on-disk content has changed since deploy time the file is treated as user-edited and kept (with a warning explaining how to remove it manually)
+- Skipped when integration reports an error for the package (avoids deleting a file that just failed to redeploy)
+- Files that fail to delete are kept in `deployed_files` and retried on the next `apm install`
+- Use `apm install --dry-run` to preview package-level orphan cleanup; intra-package stale cleanup is not previewed because it requires running integration
+
 **Examples:**
 ```bash
 # Install all dependencies from apm.yml
@@ -1345,6 +1357,7 @@ apm config
 - Global configuration
   - APM CLI version
   - `auto-integrate` setting
+  - `temp-dir` setting (when configured)
 
 **Examples:**
 ```bash
@@ -1363,6 +1376,7 @@ apm config get [KEY]
 **Arguments:**
 - `KEY` (optional) - Configuration key to retrieve. Supported keys:
   - `auto-integrate` - Whether to automatically integrate `.prompt.md` files into AGENTS.md
+  - `temp-dir` - Custom temporary directory for clone/download operations
 
 If `KEY` is omitted, displays all configuration values.
 
@@ -1386,6 +1400,7 @@ apm config set KEY VALUE
 **Arguments:**
 - `KEY` - Configuration key to set. Supported keys:
   - `auto-integrate` - Enable/disable automatic integration of `.prompt.md` files
+  - `temp-dir` - Set a custom temporary directory path
 - `VALUE` - Value to set. For boolean keys, use: `true`, `false`, `yes`, `no`, `1`, `0`
 
 **Configuration Keys:**
@@ -1409,6 +1424,30 @@ apm config set auto-integrate false
 # Using alternative boolean values
 apm config set auto-integrate yes
 apm config set auto-integrate 1
+```
+
+**`temp-dir`** - Override the system temporary directory
+- **Type:** String (directory path)
+- **Default:** System temp directory (not stored)
+- **Description:** Set a custom temporary directory for clone and download operations. Useful in corporate Windows environments where endpoint security software restricts access to `%TEMP%`, causing `[WinError 5] Access is denied`.
+- **Resolution order:** `APM_TEMP_DIR` environment variable > `temp_dir` in `~/.apm/config.json` > system default.
+- **Use Cases:**
+  - Set when the default system temp directory is restricted or unavailable
+  - Use the `APM_TEMP_DIR` environment variable for CI pipelines or per-session overrides
+
+**Examples:**
+```bash
+# Set a custom temp directory (Windows)
+apm config set temp-dir C:\apm-temp
+
+# Set a custom temp directory (macOS/Linux)
+apm config set temp-dir /tmp/apm-work
+
+# Check the current temp-dir setting
+apm config get temp-dir
+
+# Or use the environment variable instead
+export APM_TEMP_DIR=/tmp/apm-work
 ```
 
 ## Runtime Management (Experimental)

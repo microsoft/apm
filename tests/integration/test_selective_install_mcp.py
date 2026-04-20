@@ -117,7 +117,7 @@ class TestSelectiveInstallTransitiveMCPIntegration:
     @patch("apm_cli.commands._helpers.check_for_updates", return_value=None)
     @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator.install", return_value=0)
-    @patch("apm_cli.commands.install.GitHubPackageDownloader")
+    @patch("apm_cli.deps.github_downloader.GitHubPackageDownloader")
     def test_lockfile_records_transitive_mcp_servers(
         self, mock_dl_cls, mock_mcp_install, mock_validate, mock_updates, cli_env
     ):
@@ -145,7 +145,7 @@ class TestSelectiveInstallTransitiveMCPIntegration:
     @patch("apm_cli.commands._helpers.check_for_updates", return_value=None)
     @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator.install", return_value=0)
-    @patch("apm_cli.commands.install.GitHubPackageDownloader")
+    @patch("apm_cli.deps.github_downloader.GitHubPackageDownloader")
     def test_install_mcp_receives_transitive_deps(
         self, mock_dl_cls, mock_mcp_install, mock_validate, mock_updates, cli_env
     ):
@@ -172,7 +172,7 @@ class TestDeepChainIntegration:
     @patch("apm_cli.commands._helpers.check_for_updates", return_value=None)
     @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator.install", return_value=0)
-    @patch("apm_cli.commands.install.GitHubPackageDownloader")
+    @patch("apm_cli.deps.github_downloader.GitHubPackageDownloader")
     def test_deep_chain_mcp_in_lockfile(
         self, mock_dl_cls, mock_mcp_install, mock_validate, mock_updates, tmp_path
     ):
@@ -222,7 +222,7 @@ class TestDiamondDependencyIntegration:
     @patch("apm_cli.commands._helpers.check_for_updates", return_value=None)
     @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator.install", return_value=0)
-    @patch("apm_cli.commands.install.GitHubPackageDownloader")
+    @patch("apm_cli.deps.github_downloader.GitHubPackageDownloader")
     def test_diamond_mcp_in_lockfile(
         self, mock_dl_cls, mock_mcp_install, mock_validate, mock_updates, tmp_path
     ):
@@ -276,7 +276,7 @@ class TestMultiPackageSelectiveInstallIntegration:
     @patch("apm_cli.commands._helpers.check_for_updates", return_value=None)
     @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator.install", return_value=0)
-    @patch("apm_cli.commands.install.GitHubPackageDownloader")
+    @patch("apm_cli.deps.github_downloader.GitHubPackageDownloader")
     def test_multiple_packages_mcp_merged(
         self, mock_dl_cls, mock_mcp_install, mock_validate, mock_updates, tmp_path
     ):
@@ -331,7 +331,7 @@ class TestFullInstallTransitiveMCPIntegration:
 
     @patch("apm_cli.commands._helpers.check_for_updates", return_value=None)
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator.install", return_value=0)
-    @patch("apm_cli.commands.install.GitHubPackageDownloader")
+    @patch("apm_cli.deps.github_downloader.GitHubPackageDownloader")
     def test_full_install_collects_transitive_mcp(
         self, mock_dl_cls, mock_mcp_install, mock_updates, cli_env
     ):
@@ -354,7 +354,7 @@ class TestStaleRemovalAfterUpdate:
 
     @patch("apm_cli.commands._helpers.check_for_updates", return_value=None)
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator.install", return_value=0)
-    @patch("apm_cli.commands.install.GitHubPackageDownloader")
+    @patch("apm_cli.deps.github_downloader.GitHubPackageDownloader")
     def test_stale_mcp_removed_on_update(
         self, mock_dl_cls, mock_mcp_install, mock_updates, tmp_path
     ):
@@ -414,7 +414,7 @@ class TestNoMCPWhenOnlyAPM:
     lockfile mcp_servers must be preserved."""
 
     @patch("apm_cli.commands._helpers.check_for_updates", return_value=None)
-    @patch("apm_cli.commands.install.GitHubPackageDownloader")
+    @patch("apm_cli.deps.github_downloader.GitHubPackageDownloader")
     def test_only_apm_preserves_mcp_servers(
         self, mock_dl_cls, mock_updates, cli_env
     ):

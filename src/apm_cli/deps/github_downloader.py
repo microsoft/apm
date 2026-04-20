@@ -195,7 +195,9 @@ class GitHubPackageDownloader:
         if sys.platform == 'win32':
             # 'NUL' fails on some Windows git versions; use an empty temp file.
             import tempfile
-            empty_cfg = os.path.join(tempfile.gettempdir(), '.apm_empty_gitconfig')
+            from ..config import get_apm_temp_dir
+            temp_base = get_apm_temp_dir() or tempfile.gettempdir()
+            empty_cfg = os.path.join(temp_base, '.apm_empty_gitconfig')
             with open(empty_cfg, 'w') as f:
                 pass
             env['GIT_CONFIG_GLOBAL'] = empty_cfg
@@ -410,20 +412,16 @@ class GitHubPackageDownloader:
         return is_github_hostname(host)
 
     def _parse_artifactory_base_url(self) -> Optional[tuple]:
-        """Parse ARTIFACTORY_BASE_URL into (host, prefix, scheme)."""
-        import urllib.parse as urlparse
-        base_url = os.environ.get('ARTIFACTORY_BASE_URL', '').strip().rstrip('/')
-        if not base_url:
+        """Return ``(host, prefix, scheme)`` from the registry proxy config, or ``None``.
+
+        Delegates to :meth:`~apm_cli.deps.registry_proxy.RegistryConfig.from_env`
+        so that env-var precedence and deprecation warnings are handled in one place.
+        """
+        from .registry_proxy import RegistryConfig
+        cfg = RegistryConfig.from_env()
+        if cfg is None:
             return None
-        parsed = urlparse.urlparse(base_url)
-        if parsed.scheme not in ('https', 'http'):
-            _debug(f"ARTIFACTORY_BASE_URL has unsupported scheme: {parsed.scheme}")
-            return None
-        host = parsed.hostname
-        path = parsed.path.strip('/')
-        if not host or not path:
-            return None
-        return (host, path, parsed.scheme)
+        return (cfg.host, cfg.prefix, cfg.scheme)
 
     def _resolve_dep_token(self, dep_ref: Optional[DependencyReference] = None) -> Optional[str]:
         """Resolve the per-dependency auth token via AuthResolver.
@@ -954,7 +952,8 @@ class GitHubPackageDownloader:
         # Create a temporary directory for Git operations
         temp_dir = None
         try:
-            temp_dir = Path(tempfile.mkdtemp())
+            from ..config import get_apm_temp_dir
+            temp_dir = Path(tempfile.mkdtemp(dir=get_apm_temp_dir()))
 
             if is_likely_commit:
                 # For commit SHAs, clone full repository first, then checkout the commit
@@ -1775,8 +1774,10 @@ class GitHubPackageDownloader:
         # tempfile.TemporaryDirectory().__exit__ calls shutil.rmtree without our
         # retry logic, which raises WinError 32 when git processes still hold
         # handles at the end of the with-block.
-        temp_dir = tempfile.mkdtemp()
+        from ..config import get_apm_temp_dir
+        temp_dir = None
         try:
+            temp_dir = tempfile.mkdtemp(dir=get_apm_temp_dir())
             # Sparse checkout always targets "repo/".  If it fails we clone into
             # "repo_clone/" so we never have to rmtree a directory that may still
             # have live git handles from the failed subprocess.
@@ -1886,8 +1887,32 @@ class GitHubPackageDownloader:
             if progress_obj and progress_task_id is not None:
                 progress_obj.update(progress_task_id, completed=90, total=100)
 
+        except PermissionError as exc:
+            exc_path = getattr(exc, 'filename', None)
+            # If temp_dir wasn't created (mkdtemp failed) or the error is within
+            # the temp tree, this is likely a restricted temp directory issue.
+            if temp_dir is None or (exc_path and str(exc_path).startswith(str(temp_dir))):
+                raise RuntimeError(
+                    "Access denied in temporary directory"
+                    + (f" '{temp_dir}'" if temp_dir else "")
+                    + ". Corporate security may restrict this path. "
+                    "Fix: apm config set temp-dir <WRITABLE_PATH>"
+                ) from None
+            raise
+        except OSError as exc:
+            if getattr(exc, 'errno', None) == 13 or getattr(exc, 'winerror', None) == 5:
+                exc_path = getattr(exc, 'filename', None)
+                if temp_dir is None or (exc_path and str(exc_path).startswith(str(temp_dir))):
+                    raise RuntimeError(
+                        "Access denied in temporary directory"
+                        + (f" '{temp_dir}'" if temp_dir else "")
+                        + ". Corporate security may restrict this path. "
+                        "Fix: apm config set temp-dir <WRITABLE_PATH>"
+                    ) from None
+            raise
         finally:
-            _rmtree(temp_dir)
+            if temp_dir:
+                _rmtree(temp_dir)
 
         # Validate the extracted package (after temp dir is cleaned up)
         validation_result = validate_apm_package(target_path)
@@ -1938,6 +1963,7 @@ class GitHubPackageDownloader:
     ) -> PackageInfo:
         """Download an archive from Artifactory and extract a subdirectory."""
         import tempfile
+        from ..config import get_apm_temp_dir
         ref = dep_ref.reference or "main"
         subdir_path = dep_ref.virtual_path
         repo_parts = dep_ref.repo_url.split('/')
@@ -1947,7 +1973,7 @@ class GitHubPackageDownloader:
         if progress_obj and progress_task_id is not None:
             progress_obj.update(progress_task_id, completed=10, total=100)
 
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory(dir=get_apm_temp_dir()) as temp_dir:
             temp_path = Path(temp_dir) / "full_pkg"
             self._download_artifactory_archive(host, prefix, owner, repo, ref, temp_path, scheme=scheme)
             if progress_obj and progress_task_id is not None:
@@ -2095,8 +2121,13 @@ class GitHubPackageDownloader:
             elif dep_ref.is_virtual_collection():
                 return self.download_collection_package(dep_ref, target_path, progress_task_id, progress_obj)
             elif dep_ref.is_virtual_subdirectory():
-                # When PROXY_REGISTRY_ONLY is set, download full archive and extract subdir
-                art_proxy = self._parse_artifactory_base_url()
+                # Mode 1: explicit Artifactory FQDN from lockfile
+                if dep_ref.is_artifactory():
+                    proxy_info = (dep_ref.host, dep_ref.artifactory_prefix, "https")
+                    return self._download_subdirectory_from_artifactory(
+                        dep_ref, target_path, proxy_info, progress_task_id, progress_obj
+                    )
+                # Mode 2: transparent proxy via env var (art_proxy computed above)
                 if self._is_artifactory_only() and art_proxy:
                     return self._download_subdirectory_from_artifactory(
                         dep_ref, target_path, art_proxy, progress_task_id, progress_obj

@@ -315,14 +315,18 @@ class AuthResolver:
         auth_ctx = self.resolve(host, org)
         lines: list[str] = [f"Authentication failed for {operation} on {host}."]
 
+        host_info = auth_ctx.host_info
         if auth_ctx.token:
             lines.append(f"Token was provided (source: {auth_ctx.source}, type: {auth_ctx.token_type}).")
-            host_info = self.classify_host(host)
             if host_info.kind == "ghe_cloud":
                 lines.append(
                     "GHE Cloud Data Residency hosts (*.ghe.com) require "
                     "enterprise-scoped tokens. Ensure your PAT is authorized "
                     "for this enterprise."
+                )
+            elif host_info.kind == "ado":
+                lines.append(
+                    "Verify your ADO_APM_PAT is valid and has Code (Read) scope."
                 )
             elif host.lower() == "github.com":
                 lines.append(
@@ -336,12 +340,18 @@ class AuthResolver:
                     "authorize your token at https://github.com/settings/tokens"
                 )
         else:
-            lines.append("No token available.")
-            lines.append(
-                "Set GITHUB_APM_PAT or GITHUB_TOKEN, or run 'gh auth login'."
-            )
+            if host_info.kind == "ado":
+                lines.append("Azure DevOps authentication required.")
+                lines.append(
+                    "Set the ADO_APM_PAT environment variable with a PAT that has Code (Read) scope."
+                )
+            else:
+                lines.append("No token available.")
+                lines.append(
+                    "Set GITHUB_APM_PAT or GITHUB_TOKEN, or run 'gh auth login'."
+                )
 
-        if org:
+        if org and host_info.kind != "ado":
             lines.append(
                 f"If packages span multiple organizations, set per-org tokens: "
                 f"GITHUB_APM_PAT_{_org_to_env_suffix(org)}"

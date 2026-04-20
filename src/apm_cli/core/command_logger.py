@@ -170,6 +170,7 @@ class InstallLogger(CommandLogger):
     ):
         super().__init__("install", verbose=verbose, dry_run=dry_run)
         self.partial = partial  # True when specific packages are passed to `apm install`
+        self._stale_cleaned_total = 0  # Accumulated by stale_cleanup / orphan_cleanup
 
     # --- Validation phase ---
 
@@ -305,10 +306,76 @@ class InstallLogger(CommandLogger):
             return
         _rich_echo(f"    Package type: {type_label}", color="dim")
 
+    # --- Cleanup phase (stale and orphan file removal) ---
+
+    def stale_cleanup(self, dep_key: str, count: int):
+        """Log per-package stale-file cleanup outcome at default verbosity.
+
+        Stale-file deletion is a destructive operation in the user's
+        tracked workspace (unlike npm's ``node_modules``); it must be
+        visible without ``--verbose``. Rendered as an info line so it
+        groups visually with other phase messages, not as a tree item
+        (the originating package line was emitted earlier in the install
+        sequence and is no longer adjacent).
+        """
+        if count <= 0:
+            return
+        self._stale_cleaned_total += count
+        noun = "file" if count == 1 else "files"
+        _rich_info(f"Cleaned {count} stale {noun} from {dep_key}", symbol="info")
+
+    def orphan_cleanup(self, count: int):
+        """Log post-install orphan-file cleanup outcome at default verbosity.
+
+        Same visibility rationale as :meth:`stale_cleanup`: file deletion
+        in the user's workspace must be visible by default.
+        """
+        if count <= 0:
+            return
+        self._stale_cleaned_total += count
+        noun = "file" if count == 1 else "files"
+        _rich_info(
+            f"Cleaned {count} {noun} from packages no longer in apm.yml",
+            symbol="info",
+        )
+
+    @property
+    def stale_cleaned_total(self) -> int:
+        """Total files removed by stale + orphan cleanup during this install."""
+        return self._stale_cleaned_total
+
+    def cleanup_skipped_user_edit(self, rel_path: str, dep_key: str):
+        """Log a stale-file deletion that was skipped because the user
+        edited the file after APM deployed it.
+
+        Yellow inline at default verbosity -- the user needs to know APM
+        kept the file and a manual decision is pending.
+        """
+        _rich_warning(
+            f"  Kept user-edited file {rel_path} (from {dep_key}); "
+            "delete manually if no longer needed",
+            symbol="warning",
+        )
+
     # --- Install summary ---
 
-    def install_summary(self, apm_count: int, mcp_count: int, errors: int = 0):
-        """Log final install summary."""
+    def install_summary(
+        self,
+        apm_count: int,
+        mcp_count: int,
+        errors: int = 0,
+        stale_cleaned: int = 0,
+    ):
+        """Log final install summary.
+
+        Args:
+            apm_count: Number of APM dependencies installed.
+            mcp_count: Number of MCP servers installed.
+            errors: Number of errors collected during install.
+            stale_cleaned: Total stale + orphan files removed during
+                this install. Reported as a parenthetical so existing
+                callers and assertion patterns continue to work.
+        """
         parts = []
         if apm_count > 0:
             noun = "dependency" if apm_count == 1 else "dependencies"
@@ -317,14 +384,22 @@ class InstallLogger(CommandLogger):
             noun = "server" if mcp_count == 1 else "servers"
             parts.append(f"{mcp_count} MCP {noun}")
 
+        cleanup_suffix = ""
+        if stale_cleaned > 0:
+            file_noun = "file" if stale_cleaned == 1 else "files"
+            cleanup_suffix = f" ({stale_cleaned} stale {file_noun} cleaned)"
+
         if parts:
             summary = " and ".join(parts)
             if errors > 0:
                 _rich_warning(
-                    f"Installed {summary} with {errors} error(s).", symbol="warning"
+                    f"Installed {summary}{cleanup_suffix} with {errors} error(s).",
+                    symbol="warning",
                 )
             else:
-                _rich_success(f"Installed {summary}.", symbol="sparkles")
+                _rich_success(
+                    f"Installed {summary}{cleanup_suffix}.", symbol="sparkles"
+                )
         elif errors > 0:
             _rich_error(
                 f"Installation failed with {errors} error(s).", symbol="error"

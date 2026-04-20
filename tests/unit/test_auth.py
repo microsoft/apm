@@ -461,3 +461,127 @@ class TestBuildErrorContext:
                 msg = resolver.build_error_context("github.com", "clone")
                 assert "GITHUB_APM_PAT" in msg
                 assert "SAML SSO" in msg
+
+
+# ---------------------------------------------------------------------------
+# TestBuildErrorContextADO
+# ---------------------------------------------------------------------------
+
+class TestBuildErrorContextADO:
+    """build_error_context must give ADO-specific guidance for dev.azure.com hosts.
+
+    Issue #625: missing ADO_APM_PAT is described with a generic GitHub error
+    message instead of pointing the user at ADO_APM_PAT and Code (Read) scope.
+    """
+
+    def test_ado_no_token_mentions_ado_pat(self):
+        """No ADO_APM_PAT -> error message must mention ADO_APM_PAT."""
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value=None
+            ):
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
+                assert "ADO_APM_PAT" in msg, (
+                    f"Expected 'ADO_APM_PAT' in error message, got:\n{msg}"
+                )
+
+    def test_ado_no_token_does_not_suggest_github_remediation(self):
+        """ADO error must not suggest GitHub-specific remediation steps."""
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value=None
+            ):
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
+                assert "gh auth login" not in msg, (
+                    f"ADO error message should not mention 'gh auth login', got:\n{msg}"
+                )
+                assert "GITHUB_TOKEN" not in msg, (
+                    f"ADO error message should not mention 'GITHUB_TOKEN', got:\n{msg}"
+                )
+                assert "GITHUB_APM_PAT_MYORG" not in msg, (
+                    "ADO error message should not mention per-org GitHub PAT hint "
+                    f"'GITHUB_APM_PAT_MYORG', got:\n{msg}"
+                )
+
+    def test_ado_no_token_mentions_code_read_scope(self):
+        """ADO error must mention Code (Read) scope so user knows what PAT scope to set."""
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value=None
+            ):
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
+                assert "Code" in msg or "read" in msg.lower(), (
+                    f"Expected Code (Read) scope guidance in error message, got:\n{msg}"
+                )
+
+    def test_ado_no_org_no_token_mentions_ado_pat(self):
+        """No org argument, no ADO_APM_PAT -> error message must still mention ADO_APM_PAT."""
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value=None
+            ):
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("dev.azure.com", "clone")
+                assert "ADO_APM_PAT" in msg, (
+                    f"Expected 'ADO_APM_PAT' in error message, got:\n{msg}"
+                )
+
+    def test_ado_with_token_still_shows_source(self):
+        """When an ADO token IS present but clone fails, source info is shown."""
+        with patch.dict(os.environ, {"ADO_APM_PAT": "mypat"}, clear=True):
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value=None
+            ):
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
+                assert "ADO_APM_PAT" in msg, (
+                    f"Expected token source 'ADO_APM_PAT' in error message, got:\n{msg}"
+                )
+
+    def test_ado_with_token_mentions_scope_guidance(self):
+        """When an ADO token is present but auth fails, PAT validity/scope hint is shown."""
+        with patch.dict(os.environ, {"ADO_APM_PAT": "mypat"}, clear=True):
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value=None
+            ):
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
+                assert "Code (Read)" in msg, (
+                    f"Expected Code (Read) scope guidance in error message, got:\n{msg}"
+                )
+
+    def test_ado_with_token_does_not_suggest_github_remediation(self):
+        """When an ADO token is present but auth fails, GitHub SAML guidance must not appear."""
+        with patch.dict(os.environ, {"ADO_APM_PAT": "mypat"}, clear=True):
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value=None
+            ):
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
+                assert "SAML" not in msg, (
+                    f"ADO error should not mention SAML, got:\n{msg}"
+                )
+                assert "github.com/settings/tokens" not in msg, (
+                    f"ADO error should not mention github.com/settings/tokens, got:\n{msg}"
+                )
+
+    def test_visualstudio_com_gets_ado_remediation(self):
+        """Legacy *.visualstudio.com hosts are also ADO and must get ADO-specific guidance."""
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value=None
+            ):
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("myorg.visualstudio.com", "clone")
+                assert "ADO_APM_PAT" in msg, (
+                    f"Expected 'ADO_APM_PAT' in error message, got:\n{msg}"
+                )
+                assert "gh auth login" not in msg, (
+                    f"ADO error should not mention 'gh auth login', got:\n{msg}"
+                )
+                assert "SAML" not in msg, (
+                    f"ADO error should not mention SAML, got:\n{msg}"
+                )

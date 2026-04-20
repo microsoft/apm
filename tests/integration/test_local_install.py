@@ -380,6 +380,230 @@ class TestLocalPackMixed:
         )
 
 
+class TestRootProjectPrimitives:
+    """Test #714: root project .apm/ integration without a sub-package stub.
+
+    Users should be able to place .apm/ rules directly in their project root
+    alongside apm.yml without creating a dummy ./agent/apm.yml workaround.
+    """
+
+    def _make_project(self, tmp_path, *, apm_deps=None):
+        """Return a project root with .apm/instructions/ and optional deps."""
+        project = tmp_path / "project"
+        project.mkdir()
+
+        deps_section = {"apm": apm_deps} if apm_deps else {}
+        (project / "apm.yml").write_text(yaml.dump({
+            "name": "my-project",
+            "version": "1.0.0",
+            "dependencies": deps_section,
+        }))
+
+        instructions_dir = project / ".apm" / "instructions"
+        instructions_dir.mkdir(parents=True)
+        (instructions_dir / "local-rules.instructions.md").write_text(
+            "---\napplyTo: '**'\n---\n# Local Rules\nFollow these local rules."
+        )
+
+        # Create .claude/rules/ so claude target is auto-detected
+        (project / ".claude" / "rules").mkdir(parents=True)
+        return project
+
+    def test_root_apm_primitives_deployed_with_no_deps(self, tmp_path, apm_command):
+        """root apm.yml with no deps + root .apm/ -> rules deployed.
+
+        Before the fix, apm install returned early with nothing to install
+        and never deployed the local .apm/ rules.
+        """
+        project = self._make_project(tmp_path)
+
+        result = subprocess.run(
+            [apm_command, "install"],
+            cwd=project,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, f"Install failed:\n{combined}"
+
+        deployed = project / ".claude" / "rules" / "local-rules.md"
+        assert deployed.exists(), (
+            f"Root .apm/ rules were NOT deployed to .claude/rules/.\n"
+            f"Output:\n{combined}"
+        )
+        assert "Local Rules" in deployed.read_text()
+
+    def test_root_apm_primitives_deployed_alongside_external_dep(
+        self, tmp_path, apm_command
+    ):
+        """root apm.yml with external dep + root .apm/ -> both rule sets deployed.
+
+        This is the exact scenario from #714: external dependencies in apm.yml
+        and local .apm/ rules at the root. Before the fix, only the external
+        dep's rules were deployed.
+        """
+        ext_pkg = tmp_path / "ext-pkg"
+        ext_pkg.mkdir()
+        (ext_pkg / "apm.yml").write_text(yaml.dump({
+            "name": "ext-pkg",
+            "version": "1.0.0",
+        }))
+        ext_instr = ext_pkg / ".apm" / "instructions"
+        ext_instr.mkdir(parents=True)
+        (ext_instr / "ext-rules.instructions.md").write_text(
+            "---\napplyTo: '**'\n---\n# External Rules\nFrom external package."
+        )
+
+        project = self._make_project(tmp_path, apm_deps=["../ext-pkg"])
+
+        result = subprocess.run(
+            [apm_command, "install"],
+            cwd=project,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, f"Install failed:\n{combined}"
+
+        deployed_names = {f.name for f in (project / ".claude" / "rules").glob("*.md")}
+        assert "local-rules.md" in deployed_names, (
+            f"Root .apm/ rule NOT deployed. Files: {deployed_names}\nOutput:\n{combined}"
+        )
+        assert "ext-rules.md" in deployed_names, (
+            f"External dep rule NOT deployed. Files: {deployed_names}\nOutput:\n{combined}"
+        )
+
+    def test_workaround_sub_package_still_works(self, tmp_path, apm_command):
+        """Old ./agent/apm.yml workaround continues to work (regression guard)."""
+        project = tmp_path / "project"
+        project.mkdir()
+
+        agent_dir = project / "agent"
+        agent_dir.mkdir()
+        (agent_dir / "apm.yml").write_text(yaml.dump({
+            "name": "my-project-agent",
+            "version": "1.0.0",
+        }))
+        agent_instr = agent_dir / ".apm" / "instructions"
+        agent_instr.mkdir(parents=True)
+        (agent_instr / "agent-rules.instructions.md").write_text(
+            "---\napplyTo: '**'\n---\n# Agent Rules\nFrom sub-package stub."
+        )
+
+        (project / "apm.yml").write_text(yaml.dump({
+            "name": "my-project",
+            "version": "1.0.0",
+            "dependencies": {"apm": ["./agent"]},
+        }))
+        (project / ".claude" / "rules").mkdir(parents=True)
+
+        result = subprocess.run(
+            [apm_command, "install"],
+            cwd=project,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, f"Install failed:\n{combined}"
+        assert (project / ".claude" / "rules" / "agent-rules.md").exists(), (
+            f"Sub-package rules NOT deployed.\nOutput:\n{combined}"
+        )
+
+    def test_root_apm_primitives_idempotent(self, tmp_path, apm_command):
+        """Running apm install twice with root .apm/ is idempotent."""
+        project = self._make_project(tmp_path)
+
+        for run in range(2):
+            result = subprocess.run(
+                [apm_command, "install"],
+                cwd=project,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            assert result.returncode == 0, (
+                f"Run {run + 1} failed:\n{result.stdout + result.stderr}"
+            )
+
+        assert (project / ".claude" / "rules" / "local-rules.md").exists()
+
+    def test_root_apm_hooks_deployed(self, tmp_path, apm_command):
+        """root .apm/hooks/ is detected and integrated (not just instructions).
+
+        Guards the _ROOT_PRIM_SUBDIRS list: a project that only has .apm/hooks/
+        must still enter the integration path and not hit the early-return guard.
+        """
+        project = tmp_path / "project"
+        project.mkdir()
+
+        (project / "apm.yml").write_text(yaml.dump({
+            "name": "my-project",
+            "version": "1.0.0",
+        }))
+
+        hooks_dir = project / ".apm" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        (hooks_dir / "on-save.json").write_text(
+            '{"hooks": {"PostToolUse": [{"matcher": "Write", "hooks": [{"type": "command", "command": "echo saved"}]}]}}'
+        )
+
+        # Create .claude/ so claude target is auto-detected
+        (project / ".claude").mkdir(parents=True)
+
+        result = subprocess.run(
+            [apm_command, "install"],
+            cwd=project,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, f"Install failed:\n{combined}"
+        # The hook integrator merges into settings.json; confirm it was created
+        # or that install did not silently early-return (exit 0 with no output).
+        assert "nothing to install" not in combined.lower(), (
+            f"Install returned 'nothing to install' — hooks detection guard may "
+            f"have triggered early return.\nOutput:\n{combined}"
+        )
+
+    def test_root_skill_md_detected(self, tmp_path, apm_command):
+        """A root SKILL.md alone triggers the integration path.
+
+        Guards the (project_root / "SKILL.md").exists() branch in the
+        root-primitive detection logic.
+        """
+        project = tmp_path / "project"
+        project.mkdir()
+
+        (project / "apm.yml").write_text(yaml.dump({
+            "name": "my-project",
+            "version": "1.0.0",
+        }))
+        (project / "SKILL.md").write_text(
+            "# My Skill\nThis skill does something useful."
+        )
+
+        # Create .claude/ so claude target is auto-detected
+        (project / ".claude").mkdir(parents=True)
+
+        result = subprocess.run(
+            [apm_command, "install"],
+            cwd=project,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0, f"Install failed:\n{combined}"
+        assert "nothing to install" not in combined.lower(), (
+            f"Install returned 'nothing to install' — SKILL.md detection may "
+            f"have been skipped.\nOutput:\n{combined}"
+        )
+
+
 class TestLocalMixedWithRemote:
     """Test mixing local and remote dependencies."""
 

@@ -9,7 +9,7 @@ import json
 import os
 import shutil
 import tarfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Dict, List, Optional, Set, Tuple
 
 import yaml
@@ -61,6 +61,16 @@ def _rename_prompt(name: str) -> str:
     if name.endswith(".prompt.md"):
         return name[: -len(".prompt.md")] + ".md"
     return name
+
+
+def _normalize_bare_skill_slug(slug: str) -> str:
+    """Normalize bare-skill slugs derived from dependency virtual paths."""
+    normalized = slug.replace("\\", "/").strip("/")
+    while normalized.startswith("skills/"):
+        normalized = normalized[len("skills/") :].lstrip("/")
+    if normalized == "skills":
+        return ""
+    return PurePosixPath(normalized).as_posix() if normalized else ""
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +140,7 @@ def _collect_bare_skill(
         return
     # Derive a slug: prefer virtual_path (e.g. "frontend-design"), else last
     # segment of repo_url (e.g. "my-skill" from "owner/my-skill")
-    slug = (getattr(dep, "virtual_path", "") or "").strip("/")
+    slug = _normalize_bare_skill_slug(getattr(dep, "virtual_path", "") or "")
     if not slug:
         slug = dep.repo_url.rsplit("/", 1)[-1] if dep.repo_url else "skill"
     for f in sorted(install_path.iterdir()):

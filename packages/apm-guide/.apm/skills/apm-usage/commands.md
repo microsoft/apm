@@ -81,6 +81,6 @@
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
 | `apm config` | Show current configuration | -- |
-| `apm config get [KEY]` | Get a config value | -- |
-| `apm config set KEY VALUE` | Set a config value | -- |
+| `apm config get [KEY]` | Get a config value (`auto-integrate`, `temp-dir`) | -- |
+| `apm config set KEY VALUE` | Set a config value (`auto-integrate`, `temp-dir`) | -- |
 | `apm update` | Update APM itself | `--check` only check |

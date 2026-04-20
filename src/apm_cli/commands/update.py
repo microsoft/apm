@@ -117,8 +117,10 @@ def update(check):
             response.raise_for_status()
 
             # Create temporary file for install script
+            from ..config import get_apm_temp_dir
             with tempfile.NamedTemporaryFile(
-                mode="w", suffix=_get_update_installer_suffix(), delete=False
+                mode="w", suffix=_get_update_installer_suffix(), delete=False,
+                dir=get_apm_temp_dir()
             ) as f:
                 temp_script = f.name
                 f.write(response.text)

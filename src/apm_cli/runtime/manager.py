@@ -105,7 +105,8 @@ class RuntimeManager:
         """Execute an embedded setup script with common utilities."""
         script_args = script_args or []
         
-        with tempfile.TemporaryDirectory() as temp_dir:
+        from ..config import get_apm_temp_dir
+        with tempfile.TemporaryDirectory(dir=get_apm_temp_dir()) as temp_dir:
             temp_path = Path(temp_dir)
             
             if self._is_windows:

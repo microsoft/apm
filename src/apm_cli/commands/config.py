@@ -84,6 +84,12 @@ def config(ctx):
 
             config_table.add_row("Global", "APM CLI Version", get_version())
 
+            from ..config import get_temp_dir as _get_temp_dir
+
+            _temp_dir_val = _get_temp_dir()
+            if _temp_dir_val:
+                config_table.add_row("", "Temp Directory", _temp_dir_val)
+
             console.print(config_table)
 
         except (ImportError, NameError):
@@ -105,6 +111,12 @@ def config(ctx):
             click.echo(f"\n{HIGHLIGHT}Global:{RESET}")
             click.echo(f"  APM CLI Version: {get_version()}")
 
+            from ..config import get_temp_dir as _get_temp_dir_fb
+
+            _temp_dir_fb = _get_temp_dir_fb()
+            if _temp_dir_fb:
+                click.echo(f"  Temp Directory: {_temp_dir_fb}")
+
 
 @config.command(help="Set a configuration value")
 @click.argument("key")
@@ -116,7 +128,7 @@ def set(key, value):
         apm config set auto-integrate false
         apm config set auto-integrate true
     """
-    from ..config import set_auto_integrate
+    from ..config import set_auto_integrate, set_temp_dir
 
     logger = CommandLogger("config set")
     if key == "auto-integrate":
@@ -129,9 +141,17 @@ def set(key, value):
         else:
             logger.error(f"Invalid value '{value}'. Use 'true' or 'false'.")
             sys.exit(1)
+    elif key == "temp-dir":
+        try:
+            set_temp_dir(value)
+            from ..config import get_temp_dir
+            logger.success(f"Temporary directory set to: {get_temp_dir()}")
+        except ValueError as exc:
+            logger.error(str(exc))
+            sys.exit(1)
     else:
         logger.error(f"Unknown configuration key: '{key}'")
-        logger.progress("Valid keys: auto-integrate")
+        logger.progress("Valid keys: auto-integrate, temp-dir")
         logger.progress(
             "This error may indicate a bug in command routing. Please report this issue."
         )
@@ -147,16 +167,22 @@ def get(key):
         apm config get auto-integrate
         apm config get
     """
-    from ..config import get_auto_integrate
+    from ..config import get_auto_integrate, get_temp_dir
 
     logger = CommandLogger("config get")
     if key:
         if key == "auto-integrate":
             value = get_auto_integrate()
             click.echo(f"auto-integrate: {value}")
+        elif key == "temp-dir":
+            value = get_temp_dir()
+            if value is None:
+                click.echo("temp-dir: Not set (using system default)")
+            else:
+                click.echo(f"temp-dir: {value}")
         else:
             logger.error(f"Unknown configuration key: '{key}'")
-            logger.progress("Valid keys: auto-integrate")
+            logger.progress("Valid keys: auto-integrate, temp-dir")
             logger.progress(
                 "This error may indicate a bug in command routing. Please report this issue."
             )
@@ -167,3 +193,5 @@ def get(key):
         # have not been written yet (e.g. auto_integrate on a fresh install).
         logger.progress("APM Configuration:")
         click.echo(f"  auto-integrate: {get_auto_integrate()}")
+        temp_dir = get_temp_dir()
+        click.echo(f"  temp-dir: {temp_dir if temp_dir is not None else 'Not set (using system default)'}")
