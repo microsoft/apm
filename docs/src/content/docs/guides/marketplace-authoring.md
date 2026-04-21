@@ -160,6 +160,38 @@ packages:
 
 `ref` takes precedence over `version`. If both are set, `version` is ignored.
 
+## Managing plugins
+
+Three subcommands let you manage `marketplace.yml` entries without hand-editing YAML.
+
+### Adding a plugin
+
+```bash
+apm marketplace plugin add microsoft/apm-sample-package \
+  --version ">=1.0.0" \
+  --description "Sample package"
+```
+
+`plugin add` takes a `<owner>/<repo>` source, derives the plugin name from the repo, and appends an entry to `packages:`. Pass `--name` to override the derived name, `--subdir` for monorepo paths, `--tag-pattern` for non-default tag layouts, or `--tags` to attach metadata tags. By default the command verifies the source is reachable via `git ls-remote`; pass `--no-verify` to skip that check.
+
+`--version` and `--ref` are mutually exclusive -- use `--ref` to pin an exact SHA, tag, or branch instead of a semver range.
+
+### Updating a plugin
+
+```bash
+apm marketplace plugin set apm-sample-package --version ">=2.0.0"
+```
+
+`plugin set` takes the plugin name (not the source) and updates the specified fields in place. Any option accepted by `plugin add` (except `--name`) can be passed to `plugin set`.
+
+### Removing a plugin
+
+```bash
+apm marketplace plugin remove apm-sample-package --yes
+```
+
+`plugin remove` drops the named entry from `packages:`. Without `--yes` the command prompts for confirmation.
+
 ## The build flow
 
 `apm marketplace build` reads `marketplace.yml`, runs `git ls-remote` against each package source, picks the best-matching ref for each entry, and writes `marketplace.json` atomically (temp file plus rename).
