@@ -13,7 +13,6 @@ atomic-write-then-revalidate pattern:
 
 from __future__ import annotations
 
-import os
 import re
 from io import StringIO
 from pathlib import Path
@@ -22,6 +21,7 @@ from typing import List, Optional
 from ruamel.yaml import YAML
 
 from ..utils.path_security import PathTraversalError, validate_path_segments
+from ._io import atomic_write
 from .errors import MarketplaceYmlError
 from .yml_schema import SOURCE_RE, load_marketplace_yml
 
@@ -60,23 +60,6 @@ def _dump_rt(data) -> str:
     return stream.getvalue()
 
 
-def _atomic_write(path: Path, content: str) -> None:
-    """Write *content* to *path* atomically via tmp + rename."""
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
-    try:
-        with open(tmp_path, "w", encoding="utf-8", newline="") as fh:
-            fh.write(content)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(str(tmp_path), str(path))
-    except BaseException:
-        try:
-            tmp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
-
-
 def _write_and_validate(yml_path: Path, data, original_text: str) -> None:
     """Atomically write *data* and re-validate.
 
@@ -84,12 +67,12 @@ def _write_and_validate(yml_path: Path, data, original_text: str) -> None:
     ``MarketplaceYmlError`` is re-raised.
     """
     new_text = _dump_rt(data)
-    _atomic_write(yml_path, new_text)
+    atomic_write(yml_path, new_text)
     try:
         load_marketplace_yml(yml_path)
     except MarketplaceYmlError:
         # Restore original content before propagating.
-        _atomic_write(yml_path, original_text)
+        atomic_write(yml_path, original_text)
         raise
 
 

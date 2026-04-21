@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
+from ._git_utils import redact_token as _redact_token
 from .git_stderr import translate_git_stderr
 from .publisher import ConsumerTarget, PublishOutcome, PublishPlan, TargetResult
 
@@ -39,15 +40,8 @@ __all__ = [
 ]
 
 # ---------------------------------------------------------------------------
-# Token redaction (same approach as publisher.py / ref_resolver.py)
+# Token redaction -- delegated to _git_utils; alias kept for call-site compat.
 # ---------------------------------------------------------------------------
-
-_TOKEN_RE = re.compile(r"https://[^@]*@")
-
-
-def _redact_token(text: str) -> str:
-    """Remove ``https://<anything>@`` token patterns from *text*."""
-    return _TOKEN_RE.sub("https://***@", text)
 
 
 # ---------------------------------------------------------------------------

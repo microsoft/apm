@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 
 import click
@@ -604,6 +605,8 @@ def validate(name, check_refs, verbose):
 
     except Exception as e:
         logger.error(f"Failed to validate marketplace: {e}")
+        if verbose:
+            click.echo(traceback.format_exc(), err=True)
         sys.exit(1)
 
 
@@ -640,6 +643,13 @@ def build(dry_run, offline, include_prerelease, verbose):
         sys.exit(2)
     except BuildError as exc:
         _render_build_error(logger, exc)
+        if verbose:
+            click.echo(traceback.format_exc(), err=True)
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Build failed: {e}", symbol="error")
+        if verbose:
+            click.echo(traceback.format_exc(), err=True)
         sys.exit(1)
 
     # Render results table
@@ -750,6 +760,7 @@ def outdated(offline, include_prerelease, verbose):
     try:
         rows = []
         upgradable = 0
+        up_to_date = 0
         for entry in yml.packages:
             # Entries with explicit ref (no range) are skipped
             if entry.ref is not None:
@@ -825,6 +836,7 @@ def outdated(offline, include_prerelease, verbose):
             # Determine status
             if current == latest_in_range_tag:
                 status = "[+]"
+                up_to_date += 1
             elif latest_in_range_tag != "--" and current != latest_in_range_tag:
                 status = "[!]"
                 upgradable += 1
@@ -848,9 +860,24 @@ def outdated(offline, include_prerelease, verbose):
 
         _render_outdated_table(logger, rows)
 
+        logger.progress(
+            f"{upgradable} outdated, {up_to_date} up to date",
+            symbol="info",
+        )
+
         if verbose:
             logger.verbose_detail(f"    {upgradable} upgradable entries")
 
+        if upgradable > 0:
+            sys.exit(1)
+
+    except SystemExit:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to check outdated packages: {e}", symbol="error")
+        if verbose:
+            click.echo(traceback.format_exc(), err=True)
+        sys.exit(1)
     finally:
         resolver.close()
 
@@ -1061,6 +1088,8 @@ def check(offline, verbose):
                     error=str(exc)[:60],
                 ))
                 failure_count += 1
+                if verbose:
+                    click.echo(traceback.format_exc(), err=True)
 
         _render_check_table(logger, results)
 
@@ -1838,5 +1867,7 @@ def search(expression, limit, verbose):
         raise
     except Exception as e:
         logger.error(f"Search failed: {e}")
+        if verbose:
+            click.echo(traceback.format_exc(), err=True)
         sys.exit(1)
 

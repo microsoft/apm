@@ -44,6 +44,8 @@ from ..utils.path_security import (
     ensure_path_within,
     validate_path_segments,
 )
+from ._git_utils import redact_token as _redact_token
+from ._io import atomic_write
 from .errors import MarketplaceError, MarketplaceYmlError
 from .git_stderr import translate_git_stderr
 from .ref_resolver import RefResolver
@@ -62,15 +64,8 @@ __all__ = [
 ]
 
 # ---------------------------------------------------------------------------
-# Token redaction (same approach as ref_resolver.py)
+# Token redaction -- delegated to _git_utils; alias kept for call-site compat.
 # ---------------------------------------------------------------------------
-
-_TOKEN_RE = re.compile(r"https://[^@]*@")
-
-
-def _redact_token(text: str) -> str:
-    """Remove ``https://<anything>@`` token patterns from *text*."""
-    return _TOKEN_RE.sub("https://***@", text)
 
 
 # ---------------------------------------------------------------------------
@@ -190,24 +185,17 @@ class PublishState:
         return instance
 
     def _atomic_write(self) -> None:
-        """Write state atomically via temp file + fsync + os.replace."""
+        """Write state atomically via temp file + fsync + os.replace.
+
+        Path validation and directory creation happen here; the actual
+        write is delegated to the shared ``atomic_write()`` helper from
+        ``_io.py``.
+        """
         ensure_path_within(self._state_dir, self._root)
         self._state_dir.mkdir(parents=True, exist_ok=True)
 
-        tmp_path = self._state_path.with_suffix(".json.tmp")
-        try:
-            with open(tmp_path, "w", encoding="utf-8") as fh:
-                json.dump(self._data, fh, indent=2)
-                fh.write("\n")
-                fh.flush()
-                os.fsync(fh.fileno())
-            os.replace(str(tmp_path), str(self._state_path))
-        except BaseException:
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            raise
+        content = json.dumps(self._data, indent=2) + "\n"
+        atomic_write(self._state_path, content)
 
     def begin_run(self, plan: PublishPlan) -> None:
         """Start a new publish run -- writes ``startedAt``."""
