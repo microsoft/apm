@@ -10,7 +10,7 @@
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm install [PKGS...]` | Install packages | `--update` refresh refs, `--force` overwrite, `--dry-run`, `--verbose`, `--only [apm\|mcp]`, `--target`, `--dev`, `-g` global, `--trust-transitive-mcp`, `--parallel-downloads N` |
+| `apm install [PKGS...]` | Install packages | `--update` refresh refs, `--force` overwrite, `--dry-run`, `--verbose`, `--only [apm\|mcp]`, `--target` (comma-separated), `--dev`, `-g` global, `--trust-transitive-mcp`, `--parallel-downloads N` |
 | `apm uninstall PKGS...` | Remove packages | `--dry-run`, `-g` global |
 | `apm prune` | Remove orphaned packages | `--dry-run` |
 | `apm deps list` | List installed packages | `-g` global, `--all` both scopes |
@@ -19,13 +19,13 @@
 | `apm outdated` | Check locked deps via SHA/semver comparison | `-g` global, `-v` verbose, `-j N` parallel checks |
 | `apm deps info PKG` | Alias for `apm view PKG` local metadata | -- |
 | `apm deps clean` | Clean dependency cache | `--dry-run`, `-y` skip confirm |
-| `apm deps update [PKGS...]` | Update specific packages | `--verbose`, `--force`, `--target`, `--parallel-downloads N` |
+| `apm deps update [PKGS...]` | Update specific packages | `--verbose`, `--force`, `--target` (comma-separated), `--parallel-downloads N` |
 
 ## Compilation
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm compile` | Compile agent context | `-o` output, `-t` target, `--chatmode`, `--dry-run`, `--no-links`, `--watch`, `--validate`, `--single-agents`, `-v` verbose, `--local-only`, `--clean`, `--with-constitution/--no-constitution` |
+| `apm compile` | Compile agent context | `-o` output, `-t` target (comma-separated), `--chatmode`, `--dry-run`, `--no-links`, `--watch`, `--validate`, `--single-agents`, `-v` verbose, `--local-only`, `--clean`, `--with-constitution/--no-constitution` |
 
 ## Scripts
 
@@ -57,7 +57,10 @@
 | `apm marketplace browse NAME` | Browse marketplace packages | -- |
 | `apm marketplace update [NAME]` | Update marketplace index | -- |
 | `apm marketplace remove NAME` | Remove a marketplace | `-y` skip confirm |
+| `apm marketplace validate NAME` | Validate marketplace manifest | `--check-refs`, `-v` |
 | `apm search QUERY@MARKETPLACE` | Search marketplace | `--limit N` |
+| `apm install NAME@MKT[#ref]` | Install from marketplace | Optional `#ref` override |
+| `apm view NAME@MARKETPLACE` | View marketplace plugin info | -- |
 
 ## MCP servers
 

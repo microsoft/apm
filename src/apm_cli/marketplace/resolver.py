@@ -10,7 +10,7 @@ The ``@`` disambiguation rule:
 
 import logging
 import re
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from ..utils.path_security import PathTraversalError, validate_path_segments
 from .client import fetch_or_cache
@@ -20,23 +20,50 @@ from .registry import get_marketplace_by_name
 
 logger = logging.getLogger(__name__)
 
-_MARKETPLACE_RE = re.compile(r"^([a-zA-Z0-9._-]+)@([a-zA-Z0-9._-]+)$")
+_MARKETPLACE_RE = re.compile(
+    r"^([a-zA-Z0-9._-]+)@([a-zA-Z0-9._-]+)(?:#(.+))?$"
+)
+
+# Characters that signal a semver range rather than a raw git ref
+_SEMVER_RANGE_CHARS = re.compile(r"[~^<>=!]")
 
 
-def parse_marketplace_ref(specifier: str) -> Optional[Tuple[str, str]]:
-    """Parse a ``NAME@MARKETPLACE`` specifier.
+def parse_marketplace_ref(
+    specifier: str,
+) -> Optional[Tuple[str, str, Optional[str]]]:
+    """Parse a ``NAME@MARKETPLACE[#ref]`` specifier.
+
+    The optional ``#ref`` suffix carries a raw git ref (tag, branch, or
+    SHA).  Semver range characters (``^``, ``~``, ``>=``, ``<``, ``!=``)
+    are **rejected** with a ``ValueError`` -- marketplace refs are raw
+    git refs, not version constraints.
 
     Returns:
-        ``(plugin_name, marketplace_name)`` if the specifier matches,
-        or ``None`` if it does not look like a marketplace ref.
+        ``(plugin_name, marketplace_name, ref_or_none)`` if the
+        specifier matches, or ``None`` if it does not look like a
+        marketplace ref.
+
+    Raises:
+        ValueError: If the ``#`` suffix contains semver range characters.
     """
     s = specifier.strip()
-    # Quick rejection: slashes and colons belong to other formats
-    if "/" in s or ":" in s:
+    # Quick rejection: slashes and colons *before* the fragment belong to
+    # other formats.  Split on ``#`` first so that refs with slashes
+    # (e.g. ``feature/branch``) don't cause a false rejection.
+    head = s.split("#", 1)[0]
+    if "/" in head or ":" in head:
         return None
     match = _MARKETPLACE_RE.match(s)
     if match:
-        return (match.group(1), match.group(2))
+        ref = match.group(3)
+        if ref and _SEMVER_RANGE_CHARS.search(ref):
+            raise ValueError(
+                "Semver ranges are not supported in marketplace refs. "
+                "Use a raw git tag, branch, or SHA instead "
+                "(e.g. 'plugin@mkt#v2.0.0'). "
+                "See: https://microsoft.github.io/apm/guides/marketplaces/"
+            )
+        return (match.group(1), match.group(2), ref)
     return None
 
 
@@ -209,14 +236,29 @@ def resolve_marketplace_plugin(
     plugin_name: str,
     marketplace_name: str,
     *,
+    version_spec: Optional[str] = None,
     auth_resolver: Optional[object] = None,
+    warning_handler: Optional[Callable[[str], None]] = None,
 ) -> Tuple[str, MarketplacePlugin]:
     """Resolve a marketplace plugin reference to a canonical string.
+
+    When *version_spec* is given it is treated as a raw git ref override
+    that replaces the plugin's ``source.ref``.  When ``None`` the ref
+    from the marketplace entry is used as-is.
 
     Args:
         plugin_name: Plugin name within the marketplace.
         marketplace_name: Registered marketplace name.
+        version_spec: Optional raw git ref override (e.g. ``"v2.0.0"``
+            or ``"main"``).  ``None`` uses the marketplace entry's
+            ``source.ref``.
         auth_resolver: Optional ``AuthResolver`` instance.
+        warning_handler: Optional callback for security warnings.  When
+            provided, warnings (immutability violations, shadow detections)
+            are forwarded here instead of being emitted through Python
+            stdlib logging.  Callers typically pass
+            ``CommandLogger.warning`` so warnings render through the CLI
+            output system.
 
     Returns:
         Tuple of (canonical ``owner/repo[#ref]`` string, resolved plugin).
@@ -227,6 +269,14 @@ def resolve_marketplace_plugin(
         MarketplaceFetchError: If the marketplace cannot be fetched.
         ValueError: If the plugin source cannot be resolved.
     """
+
+    def _emit_warning(msg: str) -> None:
+        """Route warning through handler when available, else stdlib."""
+        if warning_handler is not None:
+            warning_handler(msg)
+        else:
+            logger.warning("%s", msg)
+
     source = get_marketplace_by_name(marketplace_name)
     manifest = fetch_or_cache(source, auth_resolver=auth_resolver)
 
@@ -241,11 +291,75 @@ def resolve_marketplace_plugin(
         plugin_root=manifest.plugin_root,
     )
 
+    # ---- Raw ref override ----
+    # When version_spec is provided it is treated as a raw git ref that
+    # overrides whatever ref came from the marketplace source field.
+    if version_spec:
+        base = canonical.split("#", 1)[0]
+        canonical = f"{base}#{version_spec}"
+        logger.debug(
+            "Using raw git ref '%s' for %s@%s",
+            version_spec,
+            plugin_name,
+            marketplace_name,
+        )
+
+    # ---- Ref immutability check (advisory) ----
+    # Record the plugin -> ref mapping (scoped by version) and warn if
+    # it changed since the last install (potential ref-swap attack).
+    # Using the plugin's declared version field ensures legitimate
+    # version bumps never trigger false-positive warnings.
+    current_ref = canonical.split("#", 1)[1] if "#" in canonical else None
+    plugin_version = plugin.version or ""
+    if current_ref:
+        from .version_pins import check_ref_pin, record_ref_pin
+
+        previous_ref = check_ref_pin(
+            marketplace_name, plugin_name, current_ref,
+            version=plugin_version,
+        )
+        if previous_ref is not None:
+            _emit_warning(
+                "Plugin %s@%s ref changed: was '%s', now '%s'. "
+                "This may indicate a ref swap attack."
+                % (
+                    plugin_name,
+                    marketplace_name,
+                    previous_ref,
+                    current_ref,
+                )
+            )
+        record_ref_pin(
+            marketplace_name, plugin_name, current_ref,
+            version=plugin_version,
+        )
+
     logger.debug(
         "Resolved %s@%s -> %s",
         plugin_name,
         marketplace_name,
         canonical,
     )
+
+    # -- Shadow detection (advisory) --
+    # Warn when the same plugin name exists in other registered
+    # marketplaces.  This helps users notice potential name-squatting
+    # where an attacker publishes a same-named plugin in a secondary
+    # marketplace.
+    try:
+        from .shadow_detector import detect_shadows
+
+        shadows = detect_shadows(
+            plugin_name, marketplace_name, auth_resolver=auth_resolver
+        )
+        for shadow in shadows:
+            _emit_warning(
+                "Plugin '%s' also found in marketplace '%s'. "
+                "Verify you are installing from the intended source."
+                % (plugin_name, shadow.marketplace_name)
+            )
+    except Exception:
+        # Shadow detection must never break installation
+        logger.debug("Shadow detection failed", exc_info=True)
 
     return canonical, plugin

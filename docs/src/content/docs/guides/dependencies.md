@@ -121,7 +121,9 @@ APM accepts dependencies in two forms:
 **String format** (simple cases):
 - **Shorthand** (`owner/repo`) — defaults to GitHub
 - **HTTPS URL** (`https://host/owner/repo.git`) — any git host, whole repo
+  - Custom port: `https://host:8443/owner/repo.git` — port is preserved in clone URLs
 - **SSH URL** (`git@host:owner/repo.git`) — any git host, whole repo
+  - Custom port: `ssh://git@host:7999/owner/repo.git` — use the `ssh://` form to specify a port (SCP shorthand `git@host:...` cannot carry a port)
 - **FQDN shorthand** (`host/owner/repo`) — any host, supports nested groups
   - GitLab nested groups: `gitlab.com/group/subgroup/repo`
   - Virtual paths on simple repos: `gitlab.com/owner/repo/file.prompt.md`
@@ -139,9 +141,11 @@ dependencies:
     - git: git@bitbucket.org:team/rules.git
       path: prompts/review.prompt.md
       alias: review                      # local alias (controls install directory name)
+    - git: ssh://git@bitbucket.example.com:7999/project/repo.git  # Bitbucket Datacenter (custom SSH port)
+      ref: v1.0
 ```
 
-Fields: `git` (required), `path`, `ref`, `alias` (all optional). The `git` value is any HTTPS or SSH clone URL.
+Fields: `git` (required), `path`, `ref`, `alias` (all optional). The `git` value is any HTTPS or SSH clone URL. Explicit URL schemes are honored exactly -- see [Transport selection](#transport-selection-ssh-vs-https) for the full contract. Custom ports are preserved across every attempt (including any cross-protocol fallback enabled with `--allow-protocol-fallback`), so `ssh://host:7999/...` retried over HTTPS becomes `https://host:7999/...`.
 
 > **Nested groups (GitLab, Gitea, etc.):** APM treats all path segments after the host as the repo path, so `gitlab.com/group/subgroup/repo` resolves to a repo at `group/subgroup/repo`. Virtual paths on simple 2-segment repos work with shorthand (`gitlab.com/owner/repo/file.prompt.md`). But for **nested-group repos + virtual paths**, use the object format — the shorthand is ambiguous:
 >
@@ -329,7 +333,7 @@ falling back to Copilot. Security scanning runs for global installs.
 | Cross-project coding standards | User |
 
 :::note
-MCP servers are not supported at user scope. Each target uses a different MCP configuration format; user-scope MCP support is planned for a future release.
+MCP servers at user scope (`--global`) are installed only to runtimes with global config paths (Copilot CLI, Codex CLI). Workspace-only runtimes (VS Code, Cursor, OpenCode) are skipped.
 :::
 
 :::caution
@@ -422,6 +426,83 @@ apm install --trust-transitive-mcp
 
 Run `apm install --dry-run` to preview MCP dependency configuration without writing any files. Self-defined deps are validated for required fields and transport values; overlay deps are loaded as-is and unknown fields are ignored.
 
+## Transport selection (SSH vs HTTPS)
+
+APM picks SSH or HTTPS per dependency using a strict, predictable contract.
+
+:::caution[Breaking change in APM 0.8.13]
+APM versions before 0.8.13 silently retried failed clones across protocols.
+Starting in 0.8.13 the behavior is **strict by default**: explicit URL schemes are honored exactly,
+and shorthand uses HTTPS unless `git config url.<base>.insteadOf` rewrites it
+to SSH. To restore the legacy permissive chain temporarily (e.g. while
+migrating CI), set `APM_ALLOW_PROTOCOL_FALLBACK=1` or pass
+`--allow-protocol-fallback`.
+:::
+
+| Dependency form | What APM tries |
+|-----------------|----------------|
+| `ssh://...` or `git@host:...` | SSH only |
+| `https://...` or `http://...` | HTTPS only |
+| Shorthand (`owner/repo`, `host/owner/repo`) with `git config url.<base>.insteadOf` rewriting to SSH | SSH only |
+| Shorthand without a matching `insteadOf` rewrite | HTTPS only |
+
+A failed clone fails loudly, naming the URL and the protocol attempted. APM
+no longer downgrades `ssh://` to HTTPS or vice-versa.
+
+### Honoring `git config insteadOf`
+
+If your machine rewrites HTTPS to SSH for a host, APM matches `git clone`'s
+behavior on that machine. Example:
+
+```bash
+git config --global url."git@github.com:".insteadOf "https://github.com/"
+apm install owner/repo        # APM clones over SSH
+```
+
+No CLI flag is needed. `insteadOf` is consulted only for shorthand
+dependencies; explicit URLs in `apm.yml` are not rewritten.
+
+### Forcing the initial protocol for shorthand
+
+```bash
+apm install owner/repo --ssh        # force SSH for shorthand
+apm install owner/repo --https      # force HTTPS for shorthand
+export APM_GIT_PROTOCOL=ssh         # session default
+```
+
+`--ssh` and `--https` are mutually exclusive and apply only to shorthand
+dependencies. URLs with an explicit scheme ignore them.
+
+### Restoring the legacy permissive chain
+
+```bash
+apm install --allow-protocol-fallback
+export APM_ALLOW_PROTOCOL_FALLBACK=1   # CI / migration window
+```
+
+When fallback runs, each cross-protocol retry emits a `[!]` warning naming
+both protocols. Use this to unblock a pipeline while you fix the root
+cause -- not as a long-term setting.
+
+:::caution[Cross-protocol fallback reuses the same port]
+Fallback reuses the dependency's custom port for both schemes. On
+servers that use different ports per protocol (e.g. Bitbucket
+Datacenter: SSH 7999, HTTPS 7990), the off-protocol URL will be
+wrong. APM emits a `[!]` warning before the first clone attempt when
+a custom port is set and fallback is enabled. To avoid cross-protocol
+retries entirely, leave `--allow-protocol-fallback` disabled (strict
+mode) and pin the dependency with an explicit `ssh://...` or
+`https://...` URL in `apm.yml`. If fallback is enabled, APM may still
+try the other protocol even when the URL uses an explicit scheme --
+pinning only hard-stops cross-protocol retries in strict mode.
+:::
+
+For SSH key selection (ssh-agent, `~/.ssh/config`) and HTTPS token
+resolution, see
+[Authentication](../../getting-started/authentication/#choosing-transport-ssh-vs-https).
+For the CLI flag and env var reference, see
+[`apm install`](../../reference/cli-commands/#apm-install---install-dependencies-and-deploy-local-content).
+
 ## GitHub Authentication Setup
 
 For GitHub and GitHub Enterprise repositories, set up a personal access token:
@@ -461,7 +542,7 @@ If authentication fails, you'll see an error with guidance on token setup.
 For non-GitHub repositories, APM delegates authentication to git — it never sends GitHub tokens to non-GitHub hosts:
 
 - **Public repos**: Work without authentication via HTTPS
-- **Private repos via SSH**: Configure SSH keys for your host — APM falls back to SSH automatically
+- **Private repos via SSH**: Configure SSH keys for your host. Use an `ssh://` or `git@host:` URL, or set up `git config url.<base>.insteadOf` to rewrite shorthand to SSH (see [Transport selection](#transport-selection-ssh-vs-https))
 - **Private repos via HTTPS**: Configure a [git credential helper](https://git-scm.com/docs/gitcredentials) — APM allows credential helpers for non-GitHub hosts
 
 ```bash

@@ -378,6 +378,19 @@ run_e2e_tests() {
         exit 1
     fi
     
+    # Run Transport Selection integration tests (issue #778)
+    # Always-on cases use HTTPS against a public repo. SSH cases auto-skip
+    # when no usable SSH key is available for git@github.com.
+    log_info "Running Transport Selection integration tests..."
+    echo "Command: APM_RUN_INTEGRATION_TESTS=1 pytest tests/integration/test_transport_selection_integration.py -v -s --tb=short"
+
+    if APM_RUN_INTEGRATION_TESTS=1 pytest tests/integration/test_transport_selection_integration.py -v -s --tb=short; then
+        log_success "Transport Selection integration tests passed!"
+    else
+        log_error "Transport Selection integration tests failed!"
+        exit 1
+    fi
+
     # Run Azure DevOps E2E tests (requires ADO_APM_PAT)
     if [[ -n "${ADO_APM_PAT:-}" ]]; then
         log_info "Running Azure DevOps E2E tests..."

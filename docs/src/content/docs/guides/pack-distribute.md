@@ -42,7 +42,8 @@ apm pack
 # Filter by target
 apm pack --target copilot         # only .github/ files
 apm pack --target claude          # only .claude/ files
-apm pack --target all             # both targets
+apm pack --target all             # all targets
+apm pack -t claude,copilot        # multiple targets (comma-separated)
 
 # Bundle format
 apm pack --format plugin          # valid plugin directory structure

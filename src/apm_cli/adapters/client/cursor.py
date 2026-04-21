@@ -25,6 +25,8 @@ class CursorClientAdapter(CopilotClientAdapter):
     of global ``~/.copilot/mcp-config.json``.
     """
 
+    supports_user_scope: bool = False
+
     # ------------------------------------------------------------------ #
     # Config path
     # ------------------------------------------------------------------ #
