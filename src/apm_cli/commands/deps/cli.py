@@ -184,7 +184,7 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
         table.add_column("Version", style="yellow")
         table.add_column("Source", style="blue")
         if insecure_only:
-            table.add_column("HTTP", style="bold red")
+            table.add_column("Origin", style="bold red")
         table.add_column("Prompts", style="magenta", justify="center")
         table.add_column("Instructions", style="green", justify="center")
         table.add_column("Agents", style="cyan", justify="center")
@@ -218,7 +218,7 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
         if insecure_only:
             click.echo(f" Insecure APM Dependencies ({scope_label}):")
             click.echo(
-                f"{'Package':<30} {'Version':<10} {'Source':<12} {'HTTP':<18} "
+                f"{'Package':<30} {'Version':<10} {'Source':<12} {'Origin':<18} "
                 f"{'Prompts':>7} {'Instr':>7} {'Agents':>7} {'Skills':>7} {'Hooks':>7}"
             )
             click.echo("-" * 117)

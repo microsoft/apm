@@ -216,6 +216,7 @@ class TestDepsListCommand(_DepsCmdBase):
         assert result.exit_code == 0
         assert "insecureorg/insecurerepo" in result.output
         assert "safeorg/saferepo" not in result.output
+        assert "Origin" in result.output
         assert "direct" in result.output
 
     def test_list_insecure_shows_transitive_provenance(self):
@@ -246,6 +247,7 @@ class TestDepsListCommand(_DepsCmdBase):
 
         assert result.exit_code == 0
         assert "childorg/childrepo" in result.output
+        assert "Origin" in result.output
         assert "via parentorg/pa" in result.output
 
     def test_list_insecure_reports_clean_when_no_http_locked_deps(self):
