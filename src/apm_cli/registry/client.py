@@ -8,6 +8,33 @@ from urllib.parse import urlparse
 
 _DEFAULT_REGISTRY_URL = "https://api.mcp.github.com"
 
+# Network timeouts for registry HTTP calls. ``connect`` bounds the TCP
+# handshake (typo in --registry / unreachable host) so ``apm install``
+# never hangs in CI; ``read`` bounds slow registries / proxies.
+# Exposed via ``MCP_REGISTRY_CONNECT_TIMEOUT`` / ``MCP_REGISTRY_READ_TIMEOUT``
+# for enterprise tuning, with sane defaults otherwise.
+_DEFAULT_CONNECT_TIMEOUT = 10.0
+_DEFAULT_READ_TIMEOUT = 30.0
+
+
+def _resolve_timeout() -> tuple:
+    """Return the ``(connect, read)`` timeout tuple for registry HTTP calls."""
+    def _read_float(env_key: str, default: float) -> float:
+        raw = os.environ.get(env_key)
+        if not raw:
+            return default
+        try:
+            value = float(raw)
+            if value <= 0:
+                return default
+            return value
+        except (TypeError, ValueError):
+            return default
+    return (
+        _read_float("MCP_REGISTRY_CONNECT_TIMEOUT", _DEFAULT_CONNECT_TIMEOUT),
+        _read_float("MCP_REGISTRY_READ_TIMEOUT", _DEFAULT_READ_TIMEOUT),
+    )
+
 
 class SimpleRegistryClient:
     """Simple client for querying MCP registries for server discovery."""
@@ -60,6 +87,7 @@ class SimpleRegistryClient:
         # Consumed by validate_servers_exist() to fail-closed on overrides.
         self._is_custom_url = registry_url is not None or env_override is not None
         self.session = requests.Session()
+        self._timeout = _resolve_timeout()
 
     def list_servers(self, limit: int = 100, cursor: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         """List all available servers in the registry.
@@ -82,7 +110,7 @@ class SimpleRegistryClient:
         if cursor is not None:
             params['cursor'] = cursor
             
-        response = self.session.get(url, params=params)
+        response = self.session.get(url, params=params, timeout=self._timeout)
         response.raise_for_status()
         data = response.json()
         
@@ -120,7 +148,7 @@ class SimpleRegistryClient:
         url = f"{self.registry_url}/v0/servers/search"
         params = {'q': search_query}
         
-        response = self.session.get(url, params=params)
+        response = self.session.get(url, params=params, timeout=self._timeout)
         response.raise_for_status()
         data = response.json()
         
@@ -149,7 +177,7 @@ class SimpleRegistryClient:
             ValueError: If the server is not found.
         """
         url = f"{self.registry_url}/v0/servers/{server_id}"
-        response = self.session.get(url)
+        response = self.session.get(url, timeout=self._timeout)
         response.raise_for_status()
         data = response.json()
         

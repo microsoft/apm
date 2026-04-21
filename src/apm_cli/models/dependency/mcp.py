@@ -133,12 +133,22 @@ class MCPDependency:
         if not self.name:
             raise ValueError("MCP dependency 'name' must not be empty")
         if not _NAME_REGEX.match(self.name):
-            suggestion = self.name.lstrip('-.')
             raise ValueError(
                 f"Invalid MCP dependency name '{self.name}': "
                 f"must start with a letter, digit, '@', or '_' and contain "
                 f"only [a-zA-Z0-9._@/:=-] (max 128 chars). "
-                f"Fix: rename to '{suggestion}' or similar."
+                f"Example: 'io.github.acme/cool-server' or 'my-server'."
+            )
+        # C2 (defense-in-depth): reject embedded ``..`` segments. The regex
+        # above allows ``a/../../../evil`` because '/', '.', '-' are all in
+        # the character class. Today no code path uses this name as a
+        # filesystem segment, but downstream consumers should be able to
+        # trust the name string.
+        if ".." in self.name.split("/"):
+            raise ValueError(
+                f"Invalid MCP dependency name '{self.name}': must not contain "
+                f"'..' path segments. "
+                f"Example: 'io.github.acme/cool-server' or 'my-server'."
             )
         if self.url is not None:
             scheme = urlparse(self.url).scheme.lower()

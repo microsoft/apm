@@ -20,9 +20,10 @@ It deliberately depends only on stdlib + click (for the typed
 from __future__ import annotations
 
 import contextlib
+import ipaddress
 import os
 from typing import Iterator, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 import click
 
@@ -32,6 +33,61 @@ from ..models.dependency.mcp import _ALLOWED_URL_SCHEMES
 # Defensive cap on registry URL length to keep apm.yml diffs reviewable
 # and to bound any downstream URL parsing/logging surface.
 _MAX_REGISTRY_URL_LENGTH = 2048
+
+
+def _redact_url_credentials(url: str) -> str:
+    """Strip ``user:password@`` from a URL before logging it.
+
+    Registry URLs may legitimately carry credentials for private mirrors
+    (``https://user:token@registry.internal/``); we accept them at the
+    flag layer but never echo them back to the terminal where they could
+    leak via shell history, CI logs, or screenshots.
+
+    Falls back to the original string on any parse error so a misformed
+    URL still surfaces in the error message rather than being swallowed.
+    """
+    try:
+        parsed = urlparse(url)
+        if not parsed.netloc or "@" not in parsed.netloc:
+            return url
+        host = parsed.hostname or ""
+        if parsed.port is not None:
+            host = f"{host}:{parsed.port}"
+        sanitized = parsed._replace(netloc=host)
+        return urlunparse(sanitized)
+    except (ValueError, TypeError):
+        return url
+
+
+def _is_local_or_metadata_host(host: Optional[str]) -> bool:
+    """Return True for loopback, link-local, RFC1918, or cloud-metadata IPs.
+
+    Used to surface a soft warning when ``--registry`` points at the local
+    machine or a cloud metadata endpoint -- both common SSRF sinks. The
+    warning is informational only; we do not block, because local registries
+    are a legitimate dev/CI workflow.
+    """
+    if not host:
+        return False
+    lowered = host.lower()
+    if lowered in ("localhost", "ip6-localhost", "ip6-loopback"):
+        return True
+    try:
+        addr = ipaddress.ip_address(lowered)
+    except ValueError:
+        # urlparse keeps decimal-encoded forms like '2130706433' (== 127.0.0.1)
+        # as the hostname string. Try int parse to catch that obfuscation.
+        try:
+            addr = ipaddress.ip_address(int(lowered))
+        except (ValueError, TypeError):
+            return False
+    return (
+        addr.is_loopback
+        or addr.is_link_local
+        or addr.is_private
+        or addr.is_multicast
+        or addr.is_unspecified
+    )
 
 
 def validate_registry_url(value: Optional[str]) -> Optional[str]:
@@ -102,9 +158,11 @@ def resolve_registry_url(
         if env_value and env_value.rstrip("/") != cli_value:
             if logger is not None:
                 logger.progress(
-                    f"--registry overrides MCP_REGISTRY_URL ({env_value})",
+                    f"--registry overrides MCP_REGISTRY_URL "
+                    f"({_redact_url_credentials(env_value)})",
                     symbol="info",
                 )
+        _maybe_warn_local_host(cli_value, logger)
         return cli_value, "flag"
     if env_value is not None:
         # Defaults are quiet, overrides are visible: surface the env-driven
@@ -112,11 +170,32 @@ def resolve_registry_url(
         # change package resolution. Always emitted (not verbose-gated).
         if logger is not None:
             logger.progress(
-                f"Using MCP registry: {env_value} (from MCP_REGISTRY_URL)",
+                f"Using MCP registry: {_redact_url_credentials(env_value)} "
+                f"(from MCP_REGISTRY_URL)",
                 symbol="info",
             )
+        _maybe_warn_local_host(env_value, logger)
         return env_value, "env"
     return None, "default"
+
+
+def _maybe_warn_local_host(url: str, logger) -> None:
+    """Emit a soft warning when a registry URL targets localhost / RFC1918 /
+    link-local (incl. cloud metadata 169.254.169.254) hosts. Informational
+    only -- local registries are a legitimate workflow."""
+    if logger is None:
+        return
+    try:
+        host = urlparse(url).hostname
+    except (ValueError, TypeError):
+        return
+    if _is_local_or_metadata_host(host):
+        logger.warning(
+            f"--registry host '{host}' is loopback/private/link-local; "
+            f"only registry-resolved installs will reach it. "
+            f"Confirm this is intentional (local dev / private mirror).",
+            symbol="warning",
+        )
 
 
 _REGISTRY_ENV_KEYS = ("MCP_REGISTRY_URL", "MCP_REGISTRY_ALLOW_HTTP")
@@ -156,3 +235,22 @@ def registry_env_override(registry_url: Optional[str]) -> Iterator[None]:
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
+
+
+def validate_mcp_dry_run_entry(name, **kwargs) -> None:
+    """C1: validate the MCP entry that ``apm install --mcp ... --dry-run``
+    would persist, raising :class:`click.UsageError` on rejection.
+
+    Mirrors the validation that real install runs via ``_build_mcp_entry``,
+    so dry-run never previews "success" for an entry the real install
+    would reject. Lives here (not in commands/install.py) per the LOC-budget
+    invariant on that module.
+    """
+    # Local import: ``_build_mcp_entry`` lives in commands/install.py and
+    # imports from this module, so the import must be deferred to call time
+    # to avoid a circular import.
+    from ..commands.install import _build_mcp_entry
+    try:
+        _build_mcp_entry(name, **kwargs)
+    except ValueError as exc:
+        raise click.UsageError(str(exc))

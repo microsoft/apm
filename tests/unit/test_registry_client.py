@@ -49,7 +49,7 @@ class TestSimpleRegistryClient(unittest.TestCase):
         self.assertEqual(servers[0]["name"], "server1")
         self.assertEqual(servers[1]["name"], "server2")
         self.assertEqual(next_cursor, "next-page-token")
-        mock_get.assert_called_once_with(f"{self.client.registry_url}/v0/servers", params={'limit': 100})
+        mock_get.assert_called_once_with(f"{self.client.registry_url}/v0/servers", params={'limit': 100}, timeout=self.client._timeout)
         
     @mock.patch('requests.Session.get')
     def test_list_servers_with_pagination(self, mock_get):
@@ -66,7 +66,8 @@ class TestSimpleRegistryClient(unittest.TestCase):
         # Assertions
         mock_get.assert_called_once_with(
             f"{self.client.registry_url}/v0/servers", 
-            params={"limit": 10, "cursor": "page-token"}
+            params={"limit": 10, "cursor": "page-token"},
+            timeout=self.client._timeout,
         )
         
     @mock.patch('requests.Session.get')
@@ -89,7 +90,8 @@ class TestSimpleRegistryClient(unittest.TestCase):
         # Assertions
         mock_get.assert_called_once_with(
             f"{self.client.registry_url}/v0/servers/search",
-            params={"q": "test"}
+            params={"q": "test"},
+            timeout=self.client._timeout,
         )
         self.assertEqual(len(results), 2)
         self.assertEqual(results[0]["name"], "test-server")
@@ -136,7 +138,8 @@ class TestSimpleRegistryClient(unittest.TestCase):
         self.assertEqual(server_info["version_detail"]["version"], "1.0.0")
         self.assertEqual(server_info["packages"][0]["name"], "test-package")
         mock_get.assert_called_once_with(
-            f"{self.client.registry_url}/v0/servers/123e4567-e89b-12d3-a456-426614174000"
+            f"{self.client.registry_url}/v0/servers/123e4567-e89b-12d3-a456-426614174000",
+            timeout=self.client._timeout,
         )
     
     @mock.patch('apm_cli.registry.client.SimpleRegistryClient.search_servers')

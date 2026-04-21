@@ -394,6 +394,7 @@ _METADATA_HOSTS = {
 from ..install.mcp_registry import (
     validate_registry_url as _validate_registry_url,
     resolve_registry_url as _resolve_registry_url,
+    validate_mcp_dry_run_entry as _validate_mcp_dry_run_entry,
 )
 
 
@@ -1107,6 +1108,12 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
             mcp_manifest_path = get_manifest_path(mcp_scope)
             mcp_apm_dir = get_apm_dir(mcp_scope)
             if dry_run:
+                # C1: validate eagerly so dry-run rejects what real install would.
+                _validate_mcp_dry_run_entry(
+                    mcp_name, transport=transport, url=url, env=env_pairs,
+                    headers=header_pairs, version=mcp_version,
+                    command_argv=command_argv, registry_url=resolved_registry_url,
+                )
                 logger.dry_run_notice(
                     f"would add MCP server '{mcp_name}' to {mcp_manifest_path}"
                 )
