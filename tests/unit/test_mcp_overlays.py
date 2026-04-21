@@ -189,6 +189,81 @@ class TestMCPDependencyModel:
         assert 'command: npx,' in msg, msg
         assert 'args: ["-y", "pkg"]' in msg, msg
 
+    def test_validate_stdio_error_does_not_leak_full_command(self):
+        """Credential-leak guard: the conversational ``Got:`` line must not echo
+        the raw command verbatim.
+
+        Regression for PR #809 panel review (M1): ``Got: command={self.command!r}``
+        leaked tokens like ``--token=ghp_...`` to stderr / CI logs in a redundant
+        framing. The ``Got:`` line must only echo the first token plus a count.
+
+        Note: the structured ``Did you mean:`` suggestion still surfaces the
+        original tokens because that is the user's literal copy-paste recovery
+        path -- the user already has the secret in their YAML. The redundant
+        verbatim ``Got:`` echo was the gratuitous leak surface.
+        """
+        with pytest.raises(ValueError) as exc:
+            MCPDependency.from_dict({
+                "name": "leaky",
+                "registry": False,
+                "transport": "stdio",
+                "command": "npx --token=ghp_SUPERSECRETTOKENVALUE mcp-server",
+            })
+        msg = str(exc.value)
+        assert "Got: command='npx' (2 additional args)" in msg, msg
+        # The ``Got:`` framing must not contain the raw token.
+        got_segment = msg.split("Did you mean:")[0]
+        assert "ghp_SUPERSECRETTOKENVALUE" not in got_segment, (
+            f"`Got:` framing leaked credential token: {got_segment}"
+        )
+
+    def test_validate_stdio_explicit_empty_args_with_spaced_path_ok(self):
+        """``args: []`` is a deliberate 'no extra args' signal and must be accepted.
+
+        Regression for PR #809 panel review (M2): the predicate ``not self.args``
+        treated ``[]`` as falsy and rejected legitimate input like a path with
+        spaces paired with no arguments. Predicate is now ``self.args is None``.
+        """
+        dep = MCPDependency.from_dict({
+            "name": "spaced-path-no-args",
+            "registry": False,
+            "transport": "stdio",
+            "command": "/opt/My App/server",
+            "args": [],
+        })
+        assert dep.command == "/opt/My App/server"
+        assert dep.args == []
+
+    def test_validate_stdio_whitespace_only_command_clear_error(self):
+        """Whitespace-only command must produce a clear, non-degenerate error.
+
+        Regression for PR #809 panel review (S1): ``command: "  "`` previously
+        produced ``Did you mean: command: , args: []`` (nonsensical). Now emits
+        a dedicated empty/whitespace-only message.
+        """
+        with pytest.raises(ValueError, match="empty or whitespace-only"):
+            MCPDependency.from_dict({
+                "name": "blank-cmd",
+                "registry": False,
+                "transport": "stdio",
+                "command": "   ",
+            })
+
+    def test_validate_stdio_non_string_command_rejected(self):
+        """Non-string ``command`` (e.g. YAML list) must raise a clean ValueError.
+
+        Regression for PR #809 panel review (S2): ``command: ["npx", "-y", "x"]``
+        bypassed the whitespace check and crashed in ``validate_path_segments``
+        with an unhandled ``AttributeError`` (``.replace`` on list).
+        """
+        with pytest.raises(ValueError, match="'command' must be a string"):
+            MCPDependency.from_dict({
+                "name": "list-cmd",
+                "registry": False,
+                "transport": "stdio",
+                "command": ["npx", "-y", "evil"],
+            })
+
     def test_to_dict_roundtrip(self):
         dep = MCPDependency(
             name="rt-server",

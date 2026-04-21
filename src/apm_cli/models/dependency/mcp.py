@@ -168,6 +168,12 @@ class MCPDependency:
                         f"(CR/LF) not allowed in keys or values"
                     )
         if self.command is not None:
+            if not isinstance(self.command, str):
+                raise ValueError(
+                    f"MCP dependency '{self.name}': 'command' must be a string, "
+                    f"got {type(self.command).__name__}. "
+                    f"Use 'args' for the argument list."
+                )
             try:
                 validate_path_segments(
                     self.command,
@@ -209,21 +215,30 @@ class MCPDependency:
                 self.transport == 'stdio'
                 and isinstance(self.command, str)
                 and any(ch.isspace() for ch in self.command)
-                and not self.args
+                and self.args is None
             ):
                 # Split on any whitespace (incl. tabs / multiple spaces) so the
                 # fix-it suggestion matches the validation trigger condition
                 # (any character.isspace()), not just literal U+0020.
+                # Note: `args is None` (not `not self.args`) so that an explicit
+                # `args: []` (e.g., paired with a path like '/opt/My App/server')
+                # is treated as a deliberate "no extra args" signal and accepted.
                 command_parts = self.command.strip().split(maxsplit=1)
-                first = command_parts[0] if command_parts else ''
+                if not command_parts:
+                    raise ValueError(
+                        f"Self-defined MCP dependency '{self.name}': "
+                        f"'command' is empty or whitespace-only. "
+                        f"Set 'command' to a binary path, e.g. command: npx"
+                    )
+                first = command_parts[0]
                 rest_tokens = command_parts[1].split() if len(command_parts) > 1 else []
                 suggested_args = '[' + ', '.join(f'"{tok}"' for tok in rest_tokens) + ']'
                 raise ValueError(
                     f"Self-defined MCP dependency '{self.name}': "
                     f"'command' must be a single binary path, not a shell line. "
                     f"APM does not split 'command' on whitespace. "
-                    f"Got: command={self.command!r}. "
-                    f"Did you mean: command: {first}, args: {suggested_args} ? "
+                    f"Got: command={first!r} ({len(rest_tokens)} additional args). "
+                    f"Did you mean: command: {first}, args: {suggested_args}? "
                     f"See https://microsoft.github.io/apm/guides/mcp-servers/ "
                     f"for the canonical stdio shape."
                 )
