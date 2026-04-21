@@ -92,8 +92,23 @@ def mcp_install(ctx):
         apm mcp install api --transport http --url https://example.com/mcp
     """
     from apm_cli.cli import cli
+    from apm_cli.commands.install import (
+        _get_invocation_argv,
+        _split_argv_at_double_dash,
+    )
 
-    forwarded = ["install", "--mcp", *ctx.args]
+    # Click strips the ``--`` separator from ``ctx.args`` even when
+    # ``ignore_unknown_options`` is set, so post-``--`` tokens like
+    # ``-y`` would be re-parsed as Click options when forwarded to
+    # ``cli.main()``.  Re-insert the boundary by inspecting the raw
+    # process argv (same seam the ``install`` command uses).
+    _, post_dd = _split_argv_at_double_dash(_get_invocation_argv())
+    if post_dd:
+        pre_args = ctx.args[: len(ctx.args) - len(post_dd)]
+        forwarded = ["install", "--mcp", *pre_args, "--", *post_dd]
+    else:
+        forwarded = ["install", "--mcp", *ctx.args]
+
     try:
         cli.main(args=forwarded, standalone_mode=False)
     except SystemExit as e:

@@ -72,7 +72,7 @@ apm install --mcp NAME [OPTIONS] [-- COMMAND ARGV...]
 
 `apm mcp install NAME ...` is an alias that forwards to `apm install --mcp NAME ...`.
 
-Inherited flags that still apply: `--runtime`, `--exclude`, `--verbose`. Flags that do **not** apply with `--mcp`: `--global` (MCP entries are workspace-scoped), `--only apm`, `--update`, `--ssh` / `--https` / `--allow-protocol-fallback` -- see [Errors and Conflicts](#errors-and-conflicts).
+Inherited flags that still apply: `--runtime`, `--exclude`, `--verbose`. Flags that do **not** apply with `--mcp`: `--global` (MCP entries are project-scoped), `--only apm`, `--update`, `--ssh` / `--https` / `--allow-protocol-fallback` -- see [Errors and Conflicts](#errors-and-conflicts).
 
 ## What Gets Written
 
@@ -137,7 +137,7 @@ APM validates every `--mcp` entry before writing `apm.yml`. These are guardrails
 
 | Check | Rule | Why |
 |-------|------|-----|
-| `NAME` shape | `^[a-zA-Z0-9@][a-zA-Z0-9._@/:=-]{0,127}$` | Keeps names round-trippable as YAML keys, file paths, and registry identifiers. |
+| `NAME` shape | `^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$` | Keeps names round-trippable as YAML keys, file paths, and registry identifiers. Leading `-` is rejected (argv flag confusion) and leading `.` is rejected (dotfile / relative-path confusion). Leading `_` is allowed for private/internal naming conventions. |
 | `--url` scheme | `http` or `https` only | Blocks `file://`, `gopher://`, and similar exfil vectors. |
 | `--header` content | No CR or LF in keys or values | Prevents header injection / response splitting. |
 | `command` (stdio) | No path-traversal segments (`..`, absolute escapes) | Blocks an entry from pointing the client at a binary outside the project. |
@@ -159,7 +159,7 @@ For the trust boundary on transitive MCP servers (`--trust-transitive-mcp`), see
 | Error | Trigger | Fix |
 |-------|---------|-----|
 | `cannot mix --mcp with positional packages` | `apm install owner/repo --mcp foo` | Run `--mcp` and APM-package installs as separate commands. |
-| `MCP servers are workspace-scoped; --global not supported` | `apm install -g --mcp foo` | MCP servers always land in the project `apm.yml`. Drop `-g`. |
+| `MCP servers are project-scoped; --global is not supported for MCP entries` | `apm install -g --mcp foo` | MCP servers always land in the project `apm.yml`. Drop `-g`. |
 | `cannot use --only apm with --mcp` | Filtering by APM-only while adding an MCP entry. | Drop `--only apm`. |
 | `--header requires --url` | `--header` without an HTTP/SSE endpoint. | Add `--url`, or use `--env` for stdio servers. |
 | `cannot specify both --url and a stdio command` | Mixed remote + post-`--` argv. | Pick one shape. |

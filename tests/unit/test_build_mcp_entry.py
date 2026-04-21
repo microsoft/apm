@@ -118,11 +118,11 @@ class TestValidationRoundtrip:
         assert dep.url == "https://example.com/api"
 
     def test_invalid_name_rejected(self):
-        with pytest.raises(ValueError, match="Invalid MCP name"):
+        with pytest.raises(ValueError, match="Invalid MCP dependency name"):
             _build(name="bad name with spaces", command_argv=("x",))
 
     def test_invalid_url_scheme_rejected(self):
-        with pytest.raises(ValueError, match="scheme must be http"):
+        with pytest.raises(ValueError, match="use http:// or https://"):
             _build(url="file:///etc/passwd")
 
     def test_header_crlf_rejected(self):
@@ -130,7 +130,7 @@ class TestValidationRoundtrip:
             _build(url="https://x/y", headers={"X-A": "v\r\nInjected: 1"})
 
     def test_command_traversal_rejected(self):
-        with pytest.raises(ValueError, match="traversal"):
+        with pytest.raises(ValueError, match=r"'\.\.' path segments"):
             _build(command_argv=("../../../bin/sh",))
 
     def test_empty_name_rejected(self):

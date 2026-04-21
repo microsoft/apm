@@ -518,6 +518,52 @@ class TestMcpInstallAlias:
             result = runner.invoke(mcp, ["install", "foo", "--", "npx", "server"])
             assert result.exit_code == 0
 
+    def test_double_dash_preserved_in_forwarded_args(self):
+        """The ``--`` separator must appear in forwarded args so Click
+        does not re-parse post-``--`` tokens (e.g. ``-y``) as options.
+        Regression test for PR #810 item 3."""
+        runner = make_runner()
+        fake_argv = ["apm", "mcp", "install", "fetch", "--",
+                      "npx", "-y", "@mcp/server-fetch"]
+        with patch("apm_cli.commands.install._get_invocation_argv",
+                    return_value=fake_argv), \
+             patch("apm_cli.cli.cli.main", return_value=0) as mock_main:
+            result = runner.invoke(
+                mcp,
+                ["install", "fetch", "--", "npx", "-y", "@mcp/server-fetch"],
+            )
+        assert result.exit_code == 0
+        forwarded = mock_main.call_args.kwargs.get("args")
+        # The ``--`` must be present between pre- and post-dash tokens.
+        assert "--" in forwarded
+        dd_idx = forwarded.index("--")
+        assert forwarded[:dd_idx] == ["install", "--mcp", "fetch"]
+        assert list(forwarded[dd_idx + 1:]) == ["npx", "-y", "@mcp/server-fetch"]
+
+    def test_dry_run_with_post_dash_args_no_option_error(self):
+        """``apm mcp install fetch --dry-run -- npx -y @mcp/server-fetch``
+        must not raise ``No such option: -y``.
+        Regression test for PR #810 item 3."""
+        runner = make_runner()
+        fake_argv = ["apm", "mcp", "install", "fetch", "--dry-run", "--",
+                      "npx", "-y", "@mcp/server-fetch"]
+        with patch("apm_cli.commands.install._get_invocation_argv",
+                    return_value=fake_argv), \
+             patch("apm_cli.cli.cli.main", return_value=0) as mock_main:
+            result = runner.invoke(
+                mcp,
+                ["install", "fetch", "--dry-run", "--",
+                 "npx", "-y", "@mcp/server-fetch"],
+            )
+        assert result.exit_code == 0
+        assert "No such option" not in (result.output or "")
+        forwarded = mock_main.call_args.kwargs.get("args")
+        assert "--" in forwarded
+        dd_idx = forwarded.index("--")
+        # --dry-run must be before the separator
+        assert "--dry-run" in forwarded[:dd_idx]
+        assert forwarded[dd_idx + 1:] == ["npx", "-y", "@mcp/server-fetch"]
+
 
 # ---------------------------------------------------------------------------
 # Registry env-var honouring (regression for #813)
@@ -573,7 +619,7 @@ class TestMcpRegistryEnvVar:
             with patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
                 runner.invoke(mcp, ["search", "x"])
         printed = " ".join(str(c) for c in mock_console.print.call_args_list)
-        assert "Registry:" in printed and "mcp.internal.example.com" in printed
+        assert "Registry:" in printed and "https://mcp.internal.example.com" in printed
 
     def test_search_no_diag_when_env_var_unset(self, monkeypatch):
         """When MCP_REGISTRY_URL is unset, search stays quiet about the registry URL."""
@@ -601,5 +647,5 @@ class TestMcpRegistryEnvVar:
         assert result.exit_code == 1
         printed = " ".join(str(c) for c in mock_console.print.call_args_list)
         assert "Could not reach MCP registry" in printed
-        assert "busted.internal.example.com" in printed
+        assert "https://busted.internal.example.com" in printed
         assert "MCP_REGISTRY_URL" in printed

@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
-from apm_cli.utils.path_security import validate_path_segments
+from apm_cli.utils.path_security import PathTraversalError, validate_path_segments
 
-_NAME_REGEX = re.compile(r"^[a-zA-Z0-9@][a-zA-Z0-9._@/:=-]{0,127}$")
+_NAME_REGEX = re.compile(r"^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$")
 _ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
 
 
@@ -133,15 +133,20 @@ class MCPDependency:
         if not self.name:
             raise ValueError("MCP dependency 'name' must not be empty")
         if not _NAME_REGEX.match(self.name):
+            suggestion = self.name.lstrip('-.')
             raise ValueError(
-                f"Invalid MCP name '{self.name}': must match "
-                f"^[a-zA-Z0-9@][a-zA-Z0-9._@/:=-]{{0,127}}$"
+                f"Invalid MCP dependency name '{self.name}': "
+                f"must start with a letter, digit, '@', or '_' and contain "
+                f"only [a-zA-Z0-9._@/:=-] (max 128 chars). "
+                f"Fix: rename to '{suggestion}' or similar."
             )
         if self.url is not None:
             scheme = urlparse(self.url).scheme.lower()
             if scheme not in _ALLOWED_URL_SCHEMES:
                 raise ValueError(
-                    f"Invalid --url '{self.url}': scheme must be http or https"
+                    f"Invalid MCP url '{self.url}': scheme '{scheme}' "
+                    f"is not supported; use http:// or https://. "
+                    f"WebSocket URLs (ws/wss) are not supported for MCP transports."
                 )
         if self.headers:
             for k, v in self.headers.items():
@@ -153,7 +158,18 @@ class MCPDependency:
                         f"(CR/LF) not allowed in keys or values"
                     )
         if self.command is not None:
-            validate_path_segments(self.command, context="MCP command")
+            try:
+                validate_path_segments(
+                    self.command,
+                    context="MCP command",
+                    allow_current_dir=True,
+                )
+            except PathTraversalError:
+                raise ValueError(
+                    f"Invalid MCP command '{self.command}': must not contain "
+                    f"'..' path segments. Use an absolute path or a command "
+                    f"name on PATH instead."
+                ) from None
 
         if not strict:
             return

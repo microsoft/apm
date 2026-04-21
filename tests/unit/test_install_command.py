@@ -1248,7 +1248,7 @@ class TestInstallMcpFlag:
         with self._chdir_with_apm_yml():
             result = self.runner.invoke(cli, ["install", "--mcp", "foo", "--global"])
             assert result.exit_code == 2
-            assert "workspace-scoped" in result.output
+            assert "project-scoped" in result.output
 
     def test_e3_mcp_with_only_apm(self):
         with self._chdir_with_apm_yml():
@@ -1391,4 +1391,4 @@ class TestInstallMcpFlag:
                       "--", "npx", "srv"],
             )
             assert result.exit_code == 2
-            assert "Invalid MCP name" in result.output
+            assert "Invalid MCP dependency name" in result.output

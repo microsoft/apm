@@ -728,7 +728,7 @@ def _validate_mcp_conflicts(
     # E2: --global not supported for MCP entries.
     if global_:
         raise click.UsageError(
-            "MCP servers are workspace-scoped; --global not supported"
+            "MCP servers are project-scoped; --global is not supported for MCP entries"
         )
 
     # E3: --only apm conflicts with --mcp.
