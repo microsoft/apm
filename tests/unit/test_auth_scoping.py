@@ -277,9 +277,12 @@ class TestCloneWithFallbackEnv:
             first_url = MockRepo.clone_from.call_args_list[0][0][0]
             env_used = MockRepo.clone_from.call_args_list[0][1]["env"]
             assert first_url == "http://gitlab.company.internal/acme/rules.git"
-            assert "GIT_ASKPASS" not in env_used
+            assert env_used.get("GIT_ASKPASS") == "echo"
             assert env_used.get("GIT_CONFIG_GLOBAL") == dl.git_env["GIT_CONFIG_GLOBAL"]
             assert env_used.get("GIT_CONFIG_NOSYSTEM") == "1"
+            assert env_used.get("GIT_CONFIG_COUNT") == "1"
+            assert env_used.get("GIT_CONFIG_KEY_0") == "credential.helper"
+            assert env_used.get("GIT_CONFIG_VALUE_0") == ""
             assert env_used.get("GIT_TERMINAL_PROMPT") == "0"
 
     def test_insecure_http_dep_with_allow_fallback_tries_http_then_ssh(self):
@@ -315,9 +318,13 @@ class TestCloneWithFallbackEnv:
                 "git@gitlab.company.internal:acme/rules.git",
             ]
             assert "ghp_TESTTOKEN" not in urls[0]
-            assert all("GIT_ASKPASS" not in env_used for env_used in envs)
+            assert envs[0].get("GIT_ASKPASS") == "echo"
             assert envs[0].get("GIT_CONFIG_GLOBAL") == dl.git_env["GIT_CONFIG_GLOBAL"]
             assert envs[0].get("GIT_CONFIG_NOSYSTEM") == "1"
+            assert envs[0].get("GIT_CONFIG_COUNT") == "1"
+            assert envs[0].get("GIT_CONFIG_KEY_0") == "credential.helper"
+            assert envs[0].get("GIT_CONFIG_VALUE_0") == ""
+            assert "GIT_ASKPASS" not in envs[1]
             assert "GIT_CONFIG_GLOBAL" not in envs[1]
             assert "GIT_CONFIG_NOSYSTEM" not in envs[1]
 
@@ -837,7 +844,7 @@ class TestValidatePackageExistsEnv:
     @patch("subprocess.run")
     @patch.dict(os.environ, {}, clear=True)
     def test_explicit_http_validation_preserves_config_isolation(self, mock_run, _mock_cred):
-        """Explicit HTTP validation must not allow git config rewrites to SSH."""
+        """Explicit HTTP validation must block credential helpers and SSH rewrites."""
         from apm_cli.commands.install import _validate_package_exists
 
         mock_run.return_value = Mock(returncode=0)
@@ -847,9 +854,12 @@ class TestValidatePackageExistsEnv:
         call_kwargs = mock_run.call_args
         env_used = call_kwargs.kwargs.get("env") or call_kwargs[1].get("env", {})
 
-        assert env_used.get("GIT_ASKPASS") != "echo"
+        assert env_used.get("GIT_ASKPASS") == "echo"
         assert env_used.get("GIT_CONFIG_NOSYSTEM") == "1"
         assert "GIT_CONFIG_GLOBAL" in env_used
+        assert env_used.get("GIT_CONFIG_COUNT") == "1"
+        assert env_used.get("GIT_CONFIG_KEY_0") == "credential.helper"
+        assert env_used.get("GIT_CONFIG_VALUE_0") == ""
         assert env_used.get("GIT_TERMINAL_PROMPT") == "0"
 
     @patch("apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git", return_value=None)

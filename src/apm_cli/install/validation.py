@@ -180,9 +180,10 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             # credential helpers (SSH keys, macOS Keychain, etc.) can work.
             # This mirrors _clone_with_fallback() which does the same relaxation.
             if is_generic:
-                validate_env = {k: v for k, v in ado_downloader.git_env.items()
-                                if k not in ('GIT_ASKPASS', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM')}
-                validate_env['GIT_TERMINAL_PROMPT'] = '0'
+                validate_env = ado_downloader._build_noninteractive_git_env(
+                    preserve_config_isolation=prefer_web_probe_first,
+                    suppress_credential_helpers=is_insecure,
+                )
             else:
                 validate_env = {**os.environ, **ado_downloader.git_env}
 

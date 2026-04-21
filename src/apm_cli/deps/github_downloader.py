@@ -488,6 +488,37 @@ class GitHubPackageDownloader:
         dep_ctx = self.auth_resolver.resolve_for_dep(dep_ref)
         return dep_ctx.token
 
+    def _build_noninteractive_git_env(
+        self,
+        *,
+        preserve_config_isolation: bool = False,
+        suppress_credential_helpers: bool = False,
+    ) -> Dict[str, str]:
+        """Return a non-interactive git env for unauthenticated git operations."""
+        env = dict(self.git_env)
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        env.pop("GIT_ASKPASS", None)
+
+        if preserve_config_isolation or suppress_credential_helpers:
+            env["GIT_CONFIG_NOSYSTEM"] = "1"
+            if "GIT_CONFIG_GLOBAL" in self.git_env:
+                env["GIT_CONFIG_GLOBAL"] = self.git_env["GIT_CONFIG_GLOBAL"]
+        else:
+            env.pop("GIT_CONFIG_GLOBAL", None)
+            env.pop("GIT_CONFIG_NOSYSTEM", None)
+
+        if suppress_credential_helpers:
+            env["GIT_ASKPASS"] = "echo"
+            env["GIT_CONFIG_COUNT"] = "1"
+            env["GIT_CONFIG_KEY_0"] = "credential.helper"
+            env["GIT_CONFIG_VALUE_0"] = ""
+        else:
+            env.pop("GIT_CONFIG_COUNT", None)
+            env.pop("GIT_CONFIG_KEY_0", None)
+            env.pop("GIT_CONFIG_VALUE_0", None)
+
+        return env
+
     def _resilient_get(self, url: str, headers: Dict[str, str], timeout: int = 30, max_retries: int = 3) -> requests.Response:
         """HTTP GET with retry on 429/503 and rate-limit header awareness (#171).
 
@@ -725,13 +756,15 @@ class GitHubPackageDownloader:
         # mixed allow_fallback plan need the relaxed env so user-configured
         # credential helpers (gh auth, Keychain, ssh-agent passphrase
         # prompts) keep working.
-        def _env_for(use_token_attempt: bool) -> Dict[str, str]:
-            if use_token_attempt:
+        def _env_for(attempt: TransportAttempt) -> Dict[str, str]:
+            if attempt.use_token:
                 return self.git_env
-            relaxed = {k: v for k, v in self.git_env.items()
-                       if k not in ('GIT_ASKPASS', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM')}
-            relaxed['GIT_TERMINAL_PROMPT'] = '0'
-            return relaxed
+            if attempt.scheme == "http":
+                return self._build_noninteractive_git_env(
+                    preserve_config_isolation=True,
+                    suppress_credential_helpers=True,
+                )
+            return self._build_noninteractive_git_env()
 
         plan: TransportPlan = self._transport_selector.select(
             dep_ref=dep_ref,
@@ -953,7 +986,10 @@ class GitHubPackageDownloader:
             ls_env = self.git_env
         else:
             ls_env = self._build_noninteractive_git_env(
-                preserve_config_isolation=bool(getattr(dep_ref, "is_insecure", False))
+                preserve_config_isolation=bool(getattr(dep_ref, "is_insecure", False)),
+                suppress_credential_helpers=bool(
+                    getattr(dep_ref, "is_insecure", False)
+                ),
             )
 
         # Build authenticated URL
