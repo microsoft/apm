@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from .errors import GitLsRemoteError, OfflineMissError
+from ._git_utils import redact_token as _redact_token
 from .git_stderr import translate_git_stderr
 
 __all__ = [
@@ -38,7 +39,6 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-_TOKEN_RE = re.compile(r"https://[^@]*@")
 
 
 @dataclass(frozen=True)
@@ -102,11 +102,6 @@ class RefCache:
 # ---------------------------------------------------------------------------
 # Resolver
 # ---------------------------------------------------------------------------
-
-
-def _redact_token(text: str) -> str:
-    """Remove ``https://<anything>@`` token patterns from *text*."""
-    return _TOKEN_RE.sub("https://***@", text)
 
 
 def _parse_ls_remote_output(output: str) -> List[RemoteRef]:

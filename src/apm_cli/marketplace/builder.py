@@ -18,7 +18,6 @@ fields.  ``packages`` in yml becomes ``plugins`` in json.
 from __future__ import annotations
 
 import json
-import os
 import re
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -33,6 +32,7 @@ from .errors import (
     OfflineMissError,
     RefNotFoundError,
 )
+from ._io import atomic_write
 from .ref_resolver import RefResolver, RemoteRef
 from .semver import SemVer, parse_semver, satisfies_range
 from .tag_pattern import build_tag_regex, render_tag
@@ -502,20 +502,7 @@ class MarketplaceBuilder:
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:
         """Write *content* to *path* atomically via tmp + rename."""
-        tmp_path = path.with_suffix(path.suffix + ".tmp")
-        try:
-            with open(tmp_path, "w", encoding="utf-8", newline="") as fh:
-                fh.write(content)
-                fh.flush()
-                os.fsync(fh.fileno())
-            os.replace(str(tmp_path), str(path))
-        except BaseException:
-            # Clean up tmp file on failure
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            raise
+        atomic_write(path, content)
 
     def _load_existing_json(self, path: Path) -> Optional[Dict[str, Any]]:
         """Load existing marketplace.json for diff, or None."""

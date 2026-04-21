@@ -396,3 +396,37 @@ class TestBuildEdgeCases:
         result = runner.invoke(marketplace, ["build", "--include-prerelease"])
         assert result.exit_code == 0
         assert "v2.0.0-rc.1" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Verbose traceback (L3)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildVerboseTraceback:
+    """build --verbose -- traceback on unexpected failure."""
+
+    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    def test_verbose_shows_traceback_on_unexpected_error(
+        self, MockBuilder, runner, yml_cwd
+    ):
+        """When --verbose is passed and build raises an unexpected error,
+        stderr should contain the full traceback."""
+        mock_inst = MockBuilder.return_value
+        mock_inst.build.side_effect = RuntimeError("unexpected internal failure")
+
+        result = runner.invoke(marketplace, ["build", "--verbose"])
+        assert result.exit_code == 1
+        assert "Traceback" in result.output
+        assert "unexpected internal failure" in result.output
+
+    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    def test_no_traceback_without_verbose(self, MockBuilder, runner, yml_cwd):
+        """Without --verbose the traceback is suppressed."""
+        mock_inst = MockBuilder.return_value
+        mock_inst.build.side_effect = RuntimeError("unexpected internal failure")
+
+        result = runner.invoke(marketplace, ["build"])
+        assert result.exit_code == 1
+        assert "Traceback" not in result.output
+        assert "Build failed" in result.output
