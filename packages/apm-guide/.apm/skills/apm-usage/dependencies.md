@@ -137,6 +137,8 @@ GitHub URLs are stripped to shorthand; non-GitHub hosts keep the FQDN.
 
 ## MCP dependency formats
 
+See also: [MCP Servers guide](../../../../../docs/src/content/docs/guides/mcp-servers.md) for the CLI-first `apm install --mcp` workflow.
+
 ```yaml
 dependencies:
   mcp:

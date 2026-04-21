@@ -149,6 +149,16 @@ When you update `apm.yml`, re-run `apm install` and commit the changed `.github/
 These tools use different configuration formats. Run `apm compile` after installing to generate their native files. See the [Compilation guide](../../guides/compilation/) for details.
 :::
 
+## Add MCP servers
+
+APM also manages MCP servers -- the tools your AI agent calls at runtime.
+
+```bash
+apm install --mcp io.github.github/github-mcp-server
+```
+
+This wires the server into every detected client (Copilot, Claude, Cursor, Codex, OpenCode). See the [MCP Servers guide](../../guides/mcp-servers/) for stdio and remote shapes.
+
 ## Next steps
 
 - [Your First Package](../first-package/) -- create and share your own APM package.
