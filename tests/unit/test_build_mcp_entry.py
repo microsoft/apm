@@ -13,7 +13,7 @@ from apm_cli.models.dependency.mcp import MCPDependency
 
 def _build(name="foo", **kw):
     defaults = dict(transport=None, url=None, env=None, headers=None,
-                    version=None, command_argv=())
+                    version=None, command_argv=(), registry_url=None)
     defaults.update(kw)
     return _build_mcp_entry(name, **defaults)
 
@@ -142,3 +142,36 @@ class TestExplicitTransportOverride:
     def test_explicit_transport_overrides_remote_inference(self):
         entry, _ = _build(url="https://x/y", transport="sse")
         assert entry["transport"] == "sse"
+
+
+class TestRegistryUrlOverlay:
+    """``registry_url`` (--registry CLI flag) is persisted to the entry's
+    ``registry:`` field for reproducible installs across machines."""
+
+    def test_registry_url_alone_promotes_to_dict(self):
+        entry, self_def = _build(name="srv",
+                                  registry_url="https://r.example.com")
+        assert self_def is False
+        assert entry == {"name": "srv", "registry": "https://r.example.com"}
+
+    def test_registry_url_with_version(self):
+        entry, _ = _build(name="srv", version="1.0.0",
+                           registry_url="https://r.example.com")
+        assert entry == {
+            "name": "srv",
+            "version": "1.0.0",
+            "registry": "https://r.example.com",
+        }
+
+    def test_registry_url_with_transport(self):
+        entry, _ = _build(name="srv", transport="stdio",
+                           registry_url="https://r.example.com")
+        assert entry == {
+            "name": "srv",
+            "transport": "stdio",
+            "registry": "https://r.example.com",
+        }
+
+    def test_no_registry_url_keeps_bare_string(self):
+        entry, _ = _build(name="srv")
+        assert entry == "srv"

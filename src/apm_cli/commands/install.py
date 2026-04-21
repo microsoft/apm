@@ -390,6 +390,12 @@ _METADATA_HOSTS = {
     "fd00:ec2::254",     # AWS IPv6 IMDS
 }
 
+# --registry helpers live in apm_cli/install/mcp_registry.py per LOC budget.
+from ..install.mcp_registry import (
+    validate_registry_url as _validate_registry_url,
+    resolve_registry_url as _resolve_registry_url,
+)
+
 
 def _parse_kv_pairs(pairs, *, flag_name):
     """Parse a tuple of ``KEY=VALUE`` strings into a dict.
@@ -422,14 +428,18 @@ def _parse_header_pairs(pairs):
     return _parse_kv_pairs(pairs, flag_name="--header")
 
 
-def _build_mcp_entry(name, *, transport, url, env, headers, version, command_argv):
+def _build_mcp_entry(name, *, transport, url, env, headers, version, command_argv,
+                     registry_url=None):
     """Pure builder. Return ``(entry, is_self_defined)``.
 
     Routing:
     - ``command_argv`` non-empty -> stdio self-defined dict.
     - ``url`` set -> remote self-defined dict (transport defaults to http).
     - else -> registry shorthand (bare string when no overlays, dict when
-      ``version`` is set).
+      ``version`` / ``transport`` / ``registry_url`` is set; the URL is
+      then persisted to the entry's ``registry:`` field for reproducible
+      installs). ``registry_url`` is incompatible with self-defined
+      entries; the CLI layer enforces that via E15.
 
     Round-trips through :class:`MCPDependency.from_dict` (or
     :meth:`from_string`) for the validation chokepoint.  Validation
@@ -472,11 +482,22 @@ def _build_mcp_entry(name, *, transport, url, env, headers, version, command_arg
         entry = {"name": name, "version": version}
         if transport:
             entry["transport"] = transport
+        if registry_url:
+            entry["registry"] = registry_url
         MCPDependency.from_dict(entry)
         return entry, False
 
     if transport:
         entry = {"name": name, "transport": transport}
+        if registry_url:
+            entry["registry"] = registry_url
+        MCPDependency.from_dict(entry)
+        return entry, False
+
+    if registry_url:
+        # No other overlays but a custom registry URL -- promote to dict
+        # form so the URL is captured in apm.yml.
+        entry = {"name": name, "registry": registry_url}
         MCPDependency.from_dict(entry)
         return entry, False
 
@@ -691,8 +712,9 @@ def _validate_mcp_conflicts(
     use_ssh,
     use_https,
     allow_protocol_fallback,
+    registry_url=None,
 ):
-    """Apply conflict matrix E1-E14.  Raises ``click.UsageError`` on hit."""
+    """Apply conflict matrix E1-E15.  Raises ``click.UsageError`` on hit."""
     # E10: flags require --mcp -- run first so users get the right hint.
     if mcp_name is None:
         flag_values = {
@@ -701,8 +723,9 @@ def _validate_mcp_conflicts(
             "env": env,
             "header": headers,
             "mcp_version": mcp_version,
+            "registry": registry_url,
         }
-        for attr, label in _MCP_REQUIRED_FLAGS:
+        for attr, label in (*_MCP_REQUIRED_FLAGS, ("registry", "--registry")):
             if flag_values.get(attr):
                 raise click.UsageError(f"{label} requires --mcp")
         if command_argv:
@@ -768,6 +791,13 @@ def _validate_mcp_conflicts(
             "--env applies to stdio MCPs; use --header for remote"
         )
 
+    # E15: --registry only applies to registry-resolved entries.
+    if registry_url and (url or command_argv):
+        raise click.UsageError(
+            "--registry only applies to registry-resolved MCP servers; "
+            "remove --url or the post-`--` stdio command, or drop --registry"
+        )
+
 
 def _run_mcp_install(
     *,
@@ -787,9 +817,10 @@ def _run_mcp_install(
     manifest_path,
     apm_dir,
     scope,
+    registry_url=None,
 ):
-    """Execute the --mcp install path: validate pairs, build, warn,
-    write to apm.yml, then install via :class:`MCPIntegrator`."""
+    """Execute the --mcp install path. ``registry_url`` is the validated
+    --registry value; the caller resolved precedence vs MCP_REGISTRY_URL."""
     from ..models.dependency.mcp import MCPDependency
 
     env = _parse_env_pairs(env_pairs)
@@ -806,6 +837,7 @@ def _run_mcp_install(
             headers=headers,
             version=mcp_version,
             command_argv=command_argv,
+            registry_url=registry_url,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc))
@@ -835,24 +867,32 @@ def _run_mcp_install(
         dep = MCPDependency.from_dict(entry)
 
     # Install just this MCP via the integrator and update lockfile.
+    # ``registry_env_override`` exports MCP_REGISTRY_URL for THIS call so
+    # MCPServerOperations() (constructed deep inside MCPIntegrator.install)
+    # picks up the override; prior env restored on exit.
     if APM_DEPS_AVAILABLE:
-        try:
-            _existing_lock = LockFile.read(get_lockfile_path(apm_dir))
-            old_servers = builtins.set(_existing_lock.mcp_servers) if _existing_lock else builtins.set()
-            old_configs = builtins.dict(_existing_lock.mcp_configs) if _existing_lock else {}
-            MCPIntegrator.install(
-                [dep], runtime, exclude, verbose,
-                stored_mcp_configs=old_configs,
-                scope=scope,
-            )
-            new_names = MCPIntegrator.get_server_names([dep])
-            new_configs = MCPIntegrator.get_server_configs([dep])
-            merged_names = old_servers | new_names
-            merged_configs = builtins.dict(old_configs)
-            merged_configs.update(new_configs)
-            MCPIntegrator.update_lockfile(merged_names, mcp_configs=merged_configs)
-        except Exception as exc:  # pragma: no cover -- defensive
-            logger.warning(f"MCP server written to apm.yml but integration failed: {exc}")
+        from ..install.mcp_registry import registry_env_override
+
+        if registry_url and logger and verbose:
+            logger.verbose_detail(f"Registry: {registry_url}")
+        with registry_env_override(registry_url):
+            try:
+                _existing_lock = LockFile.read(get_lockfile_path(apm_dir))
+                old_servers = builtins.set(_existing_lock.mcp_servers) if _existing_lock else builtins.set()
+                old_configs = builtins.dict(_existing_lock.mcp_configs) if _existing_lock else {}
+                MCPIntegrator.install(
+                    [dep], runtime, exclude, verbose,
+                    stored_mcp_configs=old_configs,
+                    scope=scope,
+                )
+                new_names = MCPIntegrator.get_server_names([dep])
+                new_configs = MCPIntegrator.get_server_configs([dep])
+                merged_names = old_servers | new_names
+                merged_configs = builtins.dict(old_configs)
+                merged_configs.update(new_configs)
+                MCPIntegrator.update_lockfile(merged_names, mcp_configs=merged_configs)
+            except Exception as exc:  # pragma: no cover -- defensive
+                logger.warning(f"MCP server written to apm.yml but integration failed: {exc}")
 
     verb = "Replaced" if status == "replaced" else "Added"
     logger.success(f"{verb} MCP server '{mcp_name}'", symbol="check")
@@ -974,8 +1014,21 @@ def _run_mcp_install(
     default=None,
     help="Pin MCP registry entry to a specific version.",
 )
+@click.option(
+    "--registry",
+    "registry_url",
+    default=None,
+    metavar="URL",
+    help=(
+        "MCP registry URL (http:// or https://) for resolving --mcp NAME. "
+        "Overrides the MCP_REGISTRY_URL env var. Default: "
+        "https://api.mcp.github.com. Captured in apm.yml on the entry's "
+        "'registry:' field for auditability. Not valid with --url "
+        "or a stdio command (self-defined entries)."
+    ),
+)
 @click.pass_context
-def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, global_, use_ssh, use_https, allow_protocol_fallback, mcp_name, transport, url, env_pairs, header_pairs, mcp_version):
+def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, global_, use_ssh, use_https, allow_protocol_fallback, mcp_name, transport, url, env_pairs, header_pairs, mcp_version, registry_url):
     """Install APM and MCP dependencies from apm.yml (like npm install).
 
     This command automatically detects AI runtimes from your apm.yml scripts and installs
@@ -1019,6 +1072,9 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         else:
             pre_dash_packages = builtins.tuple(packages)
 
+        # Validate --registry (raises UsageError on a bad URL).
+        validated_registry_url = _validate_registry_url(registry_url)
+
         _validate_mcp_conflicts(
             mcp_name=mcp_name,
             packages=packages,
@@ -1035,11 +1091,16 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
             use_ssh=use_ssh,
             use_https=use_https,
             allow_protocol_fallback=allow_protocol_fallback,
+            registry_url=validated_registry_url,
         )
 
         if mcp_name is not None:
             from ..core.scope import (
                 InstallScope, get_apm_dir, get_manifest_path,
+            )
+            # Apply CLI > env > default precedence; emit override diagnostic.
+            resolved_registry_url, _registry_source = _resolve_registry_url(
+                validated_registry_url, logger=logger,
             )
             mcp_scope = InstallScope.PROJECT
             mcp_manifest_path = get_manifest_path(mcp_scope)
@@ -1066,6 +1127,7 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                 manifest_path=mcp_manifest_path,
                 apm_dir=mcp_apm_dir,
                 scope=mcp_scope,
+                registry_url=validated_registry_url,
             )
             return
 

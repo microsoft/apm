@@ -65,6 +65,7 @@ apm install --mcp NAME [OPTIONS] [-- COMMAND ARGV...]
 | `--env KEY=VALUE` | Environment variable for stdio servers. Repeatable. |
 | `--header KEY=VALUE` | HTTP header for remote servers. Repeatable. Requires `--url`. |
 | `--mcp-version VER` | Pin the registry entry to a specific version. |
+| `--registry URL` | Custom MCP registry URL (`http://` or `https://`) for resolving the registry-form `NAME`. Overrides the `MCP_REGISTRY_URL` env var. Captured in `apm.yml` on the entry's `registry:` field for auditability. Not valid with `--url` or a stdio command (self-defined entries). |
 | `--dev` | Add to `devDependencies.mcp` instead of `dependencies.mcp`. |
 | `--force` | Replace an existing entry with the same `NAME` without prompting (CI). |
 | `--dry-run` | Print what would be added; do not write `apm.yml` or touch client configs. |
@@ -139,6 +140,7 @@ APM validates every `--mcp` entry before writing `apm.yml`. These are guardrails
 |-------|------|-----|
 | `NAME` shape | `^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$` | Keeps names round-trippable as YAML keys, file paths, and registry identifiers. Leading `-` is rejected (argv flag confusion) and leading `.` is rejected (dotfile / relative-path confusion). Leading `_` is allowed for private/internal naming conventions. |
 | `--url` scheme | `http` or `https` only | Blocks `file://`, `gopher://`, and similar exfil vectors. |
+| `--registry` scheme | `http` or `https` only; `ws://`, `wss://`, `file://`, `javascript:` rejected | Same allowlist as `--url`. Length capped at 2048 chars. Empty / schemeless values fail with a usage error. |
 | `--header` content | No CR or LF in keys or values | Prevents header injection / response splitting. |
 | `command` (stdio) | No path-traversal segments (`..`, absolute escapes) | Blocks an entry from pointing the client at a binary outside the project. |
 | Internal / metadata `--url` | Warning, not blocked | Catches accidental cloud-metadata-IP URLs without breaking valid intranet servers. |
@@ -166,12 +168,41 @@ For the trust boundary on transitive MCP servers (`--trust-transitive-mcp`), see
 | `stdio transport doesn't accept --url` | `--transport stdio --url ...` | Use post-`--` argv for stdio. |
 | `remote transports don't accept stdio command` | `--transport http -- npx ...` | Drop `--transport http` (or drop the post-`--` argv). |
 | `--env applies to stdio MCPs; use --header for remote` | `--env` on a remote server. | Use `--header` for HTTP/SSE auth. |
+| `--registry only applies to registry-resolved MCP servers; remove --url or the post-`--` stdio command, or drop --registry` | `--registry` combined with `--url` or a stdio command. | `--registry` only steers the registry resolver; self-defined entries do not consult a registry. |
 
 Existing-entry conflicts (`already exists in apm.yml`) are covered in [Updating and Replacing Servers](#updating-and-replacing-servers).
 
 ## Custom registry (enterprise)
 
-`MCP_REGISTRY_URL` overrides the MCP registry endpoint that APM queries. It applies to all `apm mcp` discovery commands (`search`, `list`, `show`) and to `apm install --mcp` when resolving registry-form servers (e.g. `apm install --mcp io.github.github/github-mcp-server`). Defaults to `https://api.mcp.github.com`.
+APM resolves the MCP registry endpoint with the following precedence (highest first):
+
+1. **`apm install --mcp NAME --registry URL`** -- per-install CLI flag. Captured in `apm.yml` on the entry's `registry:` field for auditability so reviewers can see which registry each MCP server was resolved against.
+2. **`MCP_REGISTRY_URL` env var** -- process-level override for `apm mcp` discovery commands and `apm install --mcp` when the flag is not given. Not written to `apm.yml`.
+3. **Default**: `https://api.mcp.github.com`.
+
+Enterprises with **both** a public and a private registry use `--registry` to pick the private one explicitly per server, leaving `MCP_REGISTRY_URL` unset (or pointed at whichever registry should be the default for `apm mcp search/list/show`). The CLI flag wins:
+
+```bash
+# Server resolved against an internal registry, persisted to apm.yml
+apm install --mcp acme/internal-server --registry https://mcp.internal.example.com
+
+# Server resolved against the public default
+apm install --mcp io.github.github/github-mcp-server
+```
+
+In `apm.yml`, the per-server `registry:` URL is captured so reviewers can audit what each MCP server resolves against:
+
+```yaml title="apm.yml"
+dependencies:
+  mcp:
+    - name: acme/internal-server
+      registry: https://mcp.internal.example.com
+    - io.github.github/github-mcp-server
+```
+
+A future [`apm config set mcp-registry-url`](https://github.com/microsoft/apm/issues/818) command will let you set a per-project default registry without exporting an env var. Until then, use the CLI flag for per-server overrides and the env var for shell-scoped defaults.
+
+`MCP_REGISTRY_URL` overrides the MCP registry endpoint that APM queries when no `--registry` flag is present. It applies to all `apm mcp` discovery commands (`search`, `list`, `show`) and to `apm install --mcp` when resolving registry-form servers (e.g. `apm install --mcp io.github.github/github-mcp-server`). Defaults to `https://api.mcp.github.com`.
 
 ```bash
 export MCP_REGISTRY_URL=https://mcp.internal.example.com
@@ -181,14 +212,16 @@ Scope is process-level: it applies to any shell that exports it and to child pro
 
 ### URL validation and security
 
-APM validates `MCP_REGISTRY_URL` at startup. The URL must include a scheme and host (e.g. `https://mcp.internal.example.com`); schemeless values, empty strings, and unsupported schemes (anything other than `http`/`https`) are rejected with an actionable error.
+APM validates `MCP_REGISTRY_URL` and `--registry` at startup. The URL must include a scheme and host (e.g. `https://mcp.internal.example.com`); schemeless values, empty strings, and unsupported schemes (anything other than `http`/`https`) are rejected with an actionable error. URLs longer than 2048 characters are rejected.
 
-Plaintext `http://` is **rejected by default** to prevent token leakage and tampering. For development or air-gapped intranets where TLS is genuinely impractical, opt in explicitly:
+For the **env var** path, plaintext `http://` is **rejected by default** to prevent token leakage and tampering. For development or air-gapped intranets where TLS is genuinely impractical, opt in explicitly:
 
 ```bash
 export MCP_REGISTRY_ALLOW_HTTP=1
 export MCP_REGISTRY_URL=http://mcp.internal.example.com
 ```
+
+For the **`--registry` CLI flag**, both `http://` and `https://` are accepted without an opt-in: the explicit, per-invocation user intent is treated as a strong signal, matching how npm-style tools handle private/local registries on intranets. Production deployments should still prefer `https://`.
 
 When a custom registry is set and unreachable during install pre-flight, APM treats the network error as **fatal** instead of silently assuming servers exist. This prevents a misconfigured or down enterprise registry from quietly approving every MCP dependency. The default registry (`https://api.mcp.github.com`) keeps the existing assume-valid behaviour for transient errors so unrelated network blips do not block installs.
 

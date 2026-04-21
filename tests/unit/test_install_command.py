@@ -1392,3 +1392,183 @@ class TestInstallMcpFlag:
             )
             assert result.exit_code == 2
             assert "Invalid MCP dependency name" in result.output
+
+    # --- --registry flag (PR #810 follow-up 4a) ---
+
+    def test_registry_https_url_persisted_to_apm_yml(self):
+        with self._chdir_with_apm_yml() as tmp, \
+             patch("apm_cli.commands.install._get_invocation_argv",
+                   return_value=["apm", "install", "--mcp", "srv",
+                                 "--registry", "https://mcp.internal.example.com"]), \
+             patch("apm_cli.commands.install.MCPIntegrator"):
+            result = self.runner.invoke(
+                cli, ["install", "--mcp", "srv",
+                      "--registry", "https://mcp.internal.example.com"],
+            )
+            assert result.exit_code == 0, result.output
+            data = yaml.safe_load((tmp / "apm.yml").read_text())
+            mcp = data["dependencies"]["mcp"][0]
+            # Promoted to dict form so the URL is captured.
+            assert isinstance(mcp, dict)
+            assert mcp["name"] == "srv"
+            assert mcp["registry"] == "https://mcp.internal.example.com"
+
+    def test_registry_http_url_accepted_for_enterprise(self):
+        with self._chdir_with_apm_yml() as tmp, \
+             patch("apm_cli.commands.install._get_invocation_argv",
+                   return_value=["apm", "install", "--mcp", "srv",
+                                 "--registry", "http://mcp.internal.local"]), \
+             patch("apm_cli.commands.install.MCPIntegrator"):
+            result = self.runner.invoke(
+                cli, ["install", "--mcp", "srv",
+                      "--registry", "http://mcp.internal.local"],
+            )
+            assert result.exit_code == 0, result.output
+            data = yaml.safe_load((tmp / "apm.yml").read_text())
+            mcp = data["dependencies"]["mcp"][0]
+            assert mcp["registry"] == "http://mcp.internal.local"
+
+    def test_registry_normalizes_trailing_slash(self):
+        with self._chdir_with_apm_yml() as tmp, \
+             patch("apm_cli.commands.install._get_invocation_argv",
+                   return_value=["apm", "install", "--mcp", "srv",
+                                 "--registry", "https://mcp.example.com/"]), \
+             patch("apm_cli.commands.install.MCPIntegrator"):
+            result = self.runner.invoke(
+                cli, ["install", "--mcp", "srv",
+                      "--registry", "https://mcp.example.com/"],
+            )
+            assert result.exit_code == 0, result.output
+            data = yaml.safe_load((tmp / "apm.yml").read_text())
+            assert data["dependencies"]["mcp"][0]["registry"] == \
+                "https://mcp.example.com"
+
+    def test_registry_file_scheme_rejected(self):
+        with self._chdir_with_apm_yml():
+            result = self.runner.invoke(
+                cli, ["install", "--mcp", "srv",
+                      "--registry", "file:///etc/passwd"],
+            )
+            assert result.exit_code == 2
+            assert "--registry" in result.output
+            # file:///path has no netloc -> rejected on missing host.
+            # file://host/path would also be rejected on scheme allowlist.
+            assert "Invalid URL" in result.output
+
+    def test_registry_file_with_host_scheme_rejected(self):
+        with self._chdir_with_apm_yml():
+            result = self.runner.invoke(
+                cli, ["install", "--mcp", "srv",
+                      "--registry", "file://host/etc/passwd"],
+            )
+            assert result.exit_code == 2
+            assert "scheme 'file'" in result.output
+
+    def test_registry_ws_scheme_rejected(self):
+        with self._chdir_with_apm_yml():
+            result = self.runner.invoke(
+                cli, ["install", "--mcp", "srv",
+                      "--registry", "ws://mcp.example.com"],
+            )
+            assert result.exit_code == 2
+            assert "--registry" in result.output
+            assert "scheme 'ws'" in result.output
+
+    def test_registry_javascript_scheme_rejected(self):
+        with self._chdir_with_apm_yml():
+            result = self.runner.invoke(
+                cli, ["install", "--mcp", "srv",
+                      "--registry", "javascript:alert(1)"],
+            )
+            assert result.exit_code == 2
+            assert "--registry" in result.output
+
+    def test_registry_empty_string_rejected(self):
+        with self._chdir_with_apm_yml():
+            result = self.runner.invoke(
+                cli, ["install", "--mcp", "srv", "--registry", ""],
+            )
+            assert result.exit_code == 2
+            assert "--registry" in result.output
+            assert "cannot be empty" in result.output
+
+    def test_registry_schemeless_rejected(self):
+        with self._chdir_with_apm_yml():
+            result = self.runner.invoke(
+                cli, ["install", "--mcp", "srv",
+                      "--registry", "mcp.example.com"],
+            )
+            assert result.exit_code == 2
+            assert "scheme://host" in result.output
+
+    def test_registry_with_self_defined_url_rejected(self):
+        # E15: --registry only applies to registry-resolved entries.
+        with self._chdir_with_apm_yml(), \
+             patch("apm_cli.commands.install._get_invocation_argv",
+                   return_value=["apm", "install", "--mcp", "api",
+                                 "--url", "https://x/y",
+                                 "--registry", "https://r/"]):
+            result = self.runner.invoke(
+                cli, ["install", "--mcp", "api",
+                      "--url", "https://x/y",
+                      "--registry", "https://r/"],
+            )
+            assert result.exit_code == 2
+            assert "--registry only applies" in result.output
+
+    def test_registry_with_stdio_command_rejected(self):
+        # E15: --registry incompatible with self-defined stdio.
+        with self._chdir_with_apm_yml(), \
+             patch("apm_cli.commands.install._get_invocation_argv",
+                   return_value=["apm", "install", "--mcp", "foo",
+                                 "--registry", "https://r/", "--", "npx", "srv"]):
+            result = self.runner.invoke(
+                cli, ["install", "--mcp", "foo",
+                      "--registry", "https://r/", "--", "npx", "srv"],
+            )
+            assert result.exit_code == 2
+            assert "--registry only applies" in result.output
+
+    def test_registry_without_mcp_rejected(self):
+        with self._chdir_with_apm_yml():
+            result = self.runner.invoke(
+                cli, ["install", "--registry", "https://r/"],
+            )
+            assert result.exit_code == 2
+            assert "--registry requires --mcp" in result.output
+
+    def test_registry_flag_overrides_env_var(self):
+        # Precedence: CLI --registry beats MCP_REGISTRY_URL env var.
+        with self._chdir_with_apm_yml() as tmp, \
+             patch("apm_cli.commands.install._get_invocation_argv",
+                   return_value=["apm", "install", "--mcp", "srv",
+                                 "--registry", "https://flag.example.com"]), \
+             patch("apm_cli.commands.install.MCPIntegrator"), \
+             patch.dict(os.environ, {"MCP_REGISTRY_URL": "https://env.example.com"}):
+            result = self.runner.invoke(
+                cli, ["install", "--mcp", "srv", "--verbose",
+                      "--registry", "https://flag.example.com"],
+            )
+            assert result.exit_code == 0, result.output
+            data = yaml.safe_load((tmp / "apm.yml").read_text())
+            assert data["dependencies"]["mcp"][0]["registry"] == \
+                "https://flag.example.com"
+
+    def test_registry_with_version_overlay_persists_both(self):
+        with self._chdir_with_apm_yml() as tmp, \
+             patch("apm_cli.commands.install._get_invocation_argv",
+                   return_value=["apm", "install", "--mcp", "srv",
+                                 "--mcp-version", "1.2.3",
+                                 "--registry", "https://mcp.example.com"]), \
+             patch("apm_cli.commands.install.MCPIntegrator"):
+            result = self.runner.invoke(
+                cli, ["install", "--mcp", "srv",
+                      "--mcp-version", "1.2.3",
+                      "--registry", "https://mcp.example.com"],
+            )
+            assert result.exit_code == 0, result.output
+            mcp = yaml.safe_load((tmp / "apm.yml").read_text())[
+                "dependencies"]["mcp"][0]
+            assert mcp["version"] == "1.2.3"
+            assert mcp["registry"] == "https://mcp.example.com"
+

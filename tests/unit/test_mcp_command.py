@@ -590,6 +590,37 @@ class TestMcpInstallAlias:
         assert "--dry-run" in forwarded[:dd_idx]
         assert forwarded[dd_idx + 1:] == ["npx", "-y", "@mcp/server-fetch"]
 
+    def test_forwards_registry_flag_to_root_install(self):
+        """``apm mcp install fetch --registry https://x.io ...`` must
+        propagate ``--registry`` through the alias forwarding so the
+        root ``apm install --mcp`` handler validates and persists it.
+        Regression for PR #810 follow-up item 4a."""
+        runner = make_runner()
+        fake_argv = ["apm", "mcp", "install", "fetch",
+                     "--registry", "https://r.example.com",
+                     "--transport", "stdio",
+                     "--", "npx", "fetch"]
+        with patch("apm_cli.commands.install._get_invocation_argv",
+                   return_value=fake_argv), \
+             patch("apm_cli.cli.cli.main", return_value=0) as mock_main:
+            result = runner.invoke(
+                mcp,
+                ["install", "fetch",
+                 "--registry", "https://r.example.com",
+                 "--transport", "stdio",
+                 "--", "npx", "fetch"],
+            )
+        assert result.exit_code == 0
+        forwarded = mock_main.call_args.kwargs.get("args")
+        assert forwarded[:3] == ["install", "--mcp", "fetch"]
+        assert "--registry" in forwarded
+        idx = forwarded.index("--registry")
+        assert forwarded[idx + 1] == "https://r.example.com"
+        # --- separator preserved so post-dash tokens are not re-parsed
+        assert "--" in forwarded
+        dd = forwarded.index("--")
+        assert forwarded[dd + 1:] == ["npx", "fetch"]
+
 
 # ---------------------------------------------------------------------------
 # Registry env-var honouring (regression for #813)
