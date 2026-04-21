@@ -55,7 +55,7 @@ The post-`--` form is recommended over `--transport stdio` plus separate fields:
 apm install --mcp NAME [OPTIONS] [-- COMMAND ARGV...]
 ```
 
-`NAME` is the entry that lands under `dependencies.mcp` in `apm.yml`. It must match `^[a-zA-Z0-9@][a-zA-Z0-9._@/:=-]{0,127}$`.
+`NAME` is the entry that lands under `dependencies.mcp` in `apm.yml`. It must match `^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$`.
 
 | Flag | Purpose |
 |------|---------|

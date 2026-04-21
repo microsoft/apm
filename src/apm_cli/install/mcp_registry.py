@@ -107,6 +107,14 @@ def resolve_registry_url(
                 )
         return cli_value, "flag"
     if env_value is not None:
+        # Defaults are quiet, overrides are visible: surface the env-driven
+        # registry redirect so a poisoned MCP_REGISTRY_URL cannot silently
+        # change package resolution. Always emitted (not verbose-gated).
+        if logger is not None:
+            logger.progress(
+                f"Using MCP registry: {env_value} (from MCP_REGISTRY_URL)",
+                symbol="info",
+            )
         return env_value, "env"
     return None, "default"
 

@@ -32,7 +32,7 @@ def _build_registry_with_diag(console, logger):
         if console:
             console.print(f"[muted]Registry: {url}[/muted]")
         else:
-            logger.info(f"Registry: {url}")
+            logger.progress(f"Registry: {url}")
     return registry
 
 
@@ -59,17 +59,18 @@ def _handle_registry_network_error(exc, registry, console, logger, action):
 
     msg = f"Could not {action} MCP registry at {url}"
     if console:
-        console.print(f"\n[red]x[/red] {msg}")
-        console.print(f"[muted]  -> {hint}[/muted]")
+        from ..utils.console import STATUS_SYMBOLS
+        console.print(f"\n{STATUS_SYMBOLS['error']} {msg}", style="red")
+        console.print(f"  -> {hint}", style="dim")
     else:
         logger.error(msg)
         logger.error(hint)
     return True
 
 
-@click.group(help="Browse MCP server registry")
+@click.group(help="Discover, inspect, and install MCP servers")
 def mcp():
-    """Manage MCP server discovery and information."""
+    """Manage MCP server discovery, inspection, and installation."""
     pass
 
 

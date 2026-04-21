@@ -980,39 +980,40 @@ def _run_mcp_install(
     "--mcp",
     "mcp_name",
     default=None,
-    help="Add an MCP server entry to apm.yml. Use with --transport, --url, --env, --header, --mcp-version, or post-`--` stdio command.",
+    metavar="NAME",
+    help="Add an MCP server entry to apm.yml. Use with --transport, --url, --env, --header, --mcp-version, or post-- stdio command.",
 )
 @click.option(
     "--transport",
-    type=click.Choice(["stdio", "http", "sse"]),
+    type=click.Choice(["stdio", "http", "sse", "streamable-http"]),
     default=None,
-    help="MCP transport (stdio, http, sse). Inferred from --url or post-`--` command when omitted.",
+    help="MCP transport (stdio, http, sse, streamable-http). Inferred from --url or post-- command when omitted (requires --mcp).",
 )
 @click.option(
     "--url",
     "url",
     default=None,
-    help="MCP server URL (for http/sse transports).",
+    help="MCP server URL for http/sse/streamable-http transports (requires --mcp).",
 )
 @click.option(
     "--env",
     "env_pairs",
     multiple=True,
     metavar="KEY=VALUE",
-    help="Environment variable for stdio MCP (repeatable).",
+    help="Environment variable for stdio MCP, repeatable (requires --mcp).",
 )
 @click.option(
     "--header",
     "header_pairs",
     multiple=True,
     metavar="KEY=VALUE",
-    help="HTTP header for remote MCP (repeatable).",
+    help="HTTP header for remote MCP, repeatable (requires --mcp and --url).",
 )
 @click.option(
     "--mcp-version",
     "mcp_version",
     default=None,
-    help="Pin MCP registry entry to a specific version.",
+    help="Pin MCP registry entry to a specific version (requires --mcp).",
 )
 @click.option(
     "--registry",
@@ -1031,13 +1032,9 @@ def _run_mcp_install(
 def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, global_, use_ssh, use_https, allow_protocol_fallback, mcp_name, transport, url, env_pairs, header_pairs, mcp_version, registry_url):
     """Install APM and MCP dependencies from apm.yml (like npm install).
 
-    This command automatically detects AI runtimes from your apm.yml scripts and installs
-    MCP servers for all detected and available runtimes. It also installs APM package
-    dependencies from GitHub repositories.
-
-    The --only flag filters by dependency type (apm or mcp). Internally converted
-    to an InstallMode enum for type-safe dispatch.
-
+    Detects AI runtimes from your apm.yml scripts and installs MCP servers for
+    all detected runtimes; also installs APM package dependencies from GitHub.
+    --only filters by type (apm or mcp).
     Examples:
         apm install                             # Install existing deps from apm.yml
         apm install org/pkg1                    # Add package to apm.yml and install
@@ -1048,6 +1045,10 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         apm install --update                    # Update dependencies to latest Git refs
         apm install --dry-run                   # Show what would be installed
         apm install -g org/pkg1                 # Install to user scope (~/.apm/)
+    MCP servers (also: 'apm mcp install'):
+        apm install --mcp io.github.github/github-mcp-server                  # registry shorthand
+        apm install --mcp api --url https://example.com/mcp                   # remote http/sse
+        apm install --mcp fetch -- npx -y @modelcontextprotocol/server-fetch  # stdio (post-- argv)
     """
     try:
         # Create structured logger for install output early so exception
