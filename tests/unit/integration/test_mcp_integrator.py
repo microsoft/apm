@@ -7,9 +7,8 @@ live network calls or installed runtimes.
 """
 
 import json
-import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -96,8 +95,11 @@ class TestDeduplicate:
         assert result[0]["name"] == "foo"
         assert result[1]["name"] == "bar"
 
-    def test_nameless_items_kept_by_identity(self):
-        # Items with no name should be kept (not merged)
+    def test_nameless_items_kept_by_value_inequality(self):
+        # Nameless items that are not equal to each other are both kept.
+        # MCPIntegrator.deduplicate() uses `dep not in result` for nameless
+        # entries, so equality (not identity) governs dedup; two distinct
+        # dicts with different contents are kept.
         dep1 = {"other": "x"}
         dep2 = {"other": "y"}
         result = MCPIntegrator.deduplicate([dep1, dep2])
@@ -110,9 +112,14 @@ class TestDeduplicate:
         assert len(result) == 1
 
     def test_mixed_string_and_object(self):
-        deps = [_make_dep("alpha"), _make_dep("beta"), _make_dep("alpha")]
+        # Strings fall through to `str(dep)` for the name key, so two equal
+        # strings dedup by name like any other named entry, while a distinct
+        # MCPDependency is preserved alongside.
+        deps = ["alpha", _make_dep("beta"), "alpha"]
         result = MCPIntegrator.deduplicate(deps)
         assert len(result) == 2
+        assert result[0] == "alpha"
+        assert result[1].name == "beta"
 
     def test_preserves_order(self):
         names = ["z", "a", "m", "b"]
@@ -345,11 +352,13 @@ class TestBuildSelfDefinedInfo:
             env={"KEY": "val"},
         )
         info = MCPIntegrator._build_self_defined_info(dep)
-        # For stdio without raw: check packages contains env vars
+        # stdio deps without raw must emit a packages entry; assert presence
+        # first so a regression that drops `packages` for stdio is caught
+        # rather than silently passing.
         packages = info.get("packages", [])
-        if packages:
-            env_vars = packages[0].get("environment_variables", [])
-            assert any(e["name"] == "KEY" for e in env_vars)
+        assert packages, "stdio dep must produce a non-empty packages list"
+        env_vars = packages[0].get("environment_variables", [])
+        assert any(e["name"] == "KEY" for e in env_vars)
 
     def test_no_tools_no_override_key(self):
         dep = _make_self_defined("simple", transport="stdio")
@@ -365,10 +374,10 @@ class TestBuildSelfDefinedInfo:
         )
         info = MCPIntegrator._build_self_defined_info(dep)
         packages = info.get("packages", [])
-        if packages:
-            rt_args = packages[0].get("runtime_arguments", [])
-            hints = [a["value_hint"] for a in rt_args]
-            assert "--arg1" in hints
+        assert packages, "stdio dep with args must produce a non-empty packages list"
+        rt_args = packages[0].get("runtime_arguments", [])
+        hints = [a["value_hint"] for a in rt_args]
+        assert "--arg1" in hints
 
 
 # ===========================================================================
@@ -545,7 +554,6 @@ class TestRemoveStaleVscode:
         path.mkdir(parents=True, exist_ok=True)
         mcp_json = path / "mcp.json"
         mcp_json.write_text(json.dumps({"servers": servers}), encoding="utf-8")
-        return mcp_json
 
     def test_removes_stale_server_from_vscode(self, tmp_path):
         vscode_dir = tmp_path / ".vscode"
