@@ -110,10 +110,6 @@ def _check_insecure_dependencies(
     deps, allow_insecure_flag: bool, logger=None
 ) -> None:
     """Check APM dependencies for HTTP (insecure) URLs and enforce security policy."""
-    from ..config import get_allow_insecure
-
-    config_allow_insecure = get_allow_insecure()
-
     for dep in deps:
         dep_is_insecure = getattr(dep, "is_insecure", False) is True
         if not dep_is_insecure:
@@ -131,17 +127,30 @@ def _check_insecure_dependencies(
             else:
                 _rich_error(message)
             sys.exit(1)
-        if not (allow_insecure_flag or config_allow_insecure):
+        if not allow_insecure_flag:
             message = (
                 f"Dependency '{identity}' uses HTTP (insecure). "
-                f"Pass '--allow-insecure' to apm install, or run "
-                f"'apm config set allow-insecure true' to allow HTTP dependencies globally."
+                f"Pass '--allow-insecure' to apm install to confirm this install."
             )
             if logger:
                 logger.error(message)
             else:
                 _rich_error(message)
             sys.exit(1)
+
+
+def _warn_insecure_dependencies(deps, logger=None) -> None:
+    """Emit one warning per insecure dependency before fetch begins."""
+    for dep in deps:
+        if getattr(dep, "is_insecure", False) is not True:
+            continue
+        message = f"Fetching insecurely (no transport auth): {dep.to_canonical()}"
+        if logger:
+            logger.warning(message)
+        else:
+            from ..utils.console import _rich_warning
+
+            _rich_warning(message)
 
 
 def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, logger=None, manifest_path=None, auth_resolver=None, scope=None, allow_insecure=False):
@@ -167,10 +176,7 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
     import tempfile
     from pathlib import Path
 
-    from ..config import get_allow_insecure
-
     apm_yml_path = manifest_path or Path(APM_YML_FILENAME)
-    config_allow_insecure = get_allow_insecure()
 
     # Read current apm.yml
     try:
@@ -287,11 +293,10 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
             continue
 
         if dep_ref.is_insecure:
-            if not (allow_insecure or config_allow_insecure):
+            if not allow_insecure:
                 reason = (
                     f"'{canonical}' uses HTTP (insecure). "
-                    f"Pass '--allow-insecure' or run "
-                    f"'apm config set allow-insecure true' to allow HTTP dependencies."
+                    f"Pass '--allow-insecure' to allow this install."
                 )
                 invalid_outcomes.append((package, reason))
                 if logger:
@@ -486,9 +491,6 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
     MCP servers for all detected and available runtimes. It also installs APM package
     dependencies from GitHub repositories.
 
-    HTTP dependencies require `allow_insecure: true` in apm.yml and either
-    `--allow-insecure` or `apm config set allow-insecure true`.
-
     The --only flag filters by dependency type (apm or mcp). Internally converted
     to an InstallMode enum for type-safe dispatch.
 
@@ -613,6 +615,10 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         dev_apm_deps = apm_package.get_dev_apm_dependencies()
         has_any_apm_deps = bool(apm_deps) or bool(dev_apm_deps)
         mcp_deps = apm_package.get_mcp_dependencies()
+
+        all_apm_deps = list(apm_deps) + list(dev_apm_deps)
+        _check_insecure_dependencies(all_apm_deps, allow_insecure, logger=logger)
+        _warn_insecure_dependencies(all_apm_deps, logger=logger)
 
         all_apm_deps = list(apm_deps) + list(dev_apm_deps)
         _check_insecure_dependencies(all_apm_deps, allow_insecure, logger=logger)

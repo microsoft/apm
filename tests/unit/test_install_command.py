@@ -1132,8 +1132,7 @@ class TestAllowInsecureFlag:
         with tempfile.TemporaryDirectory() as tmp_dir:
             try:
                 os.chdir(tmp_dir)
-                with patch("apm_cli.commands.install._validate_package_exists", return_value=True), \
-                     patch("apm_cli.config.get_allow_insecure", return_value=False):
+                with patch("apm_cli.commands.install._validate_package_exists", return_value=True):
                     result = self.runner.invoke(
                         cli, ["install", "http://my-server.example.com/owner/repo"]
                     )
@@ -1153,10 +1152,10 @@ class TestAllowInsecureFlag:
     @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
     @patch("apm_cli.commands.install.APMPackage")
     @patch("apm_cli.commands.install._install_apm_dependencies")
-    def test_http_dep_addition_passes_with_config_allow_insecure(
+    def test_http_dep_addition_passes_with_allow_insecure_flag(
         self, mock_install_apm, mock_apm_package, mock_validate
     ):
-        """Global config allows adding an HTTP dependency without the CLI flag."""
+        """HTTP dependency can be added when the CLI flag is passed."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             try:
                 os.chdir(tmp_dir)
@@ -1170,10 +1169,9 @@ class TestAllowInsecureFlag:
                     )
                 )
 
-                with patch("apm_cli.config.get_allow_insecure", return_value=True):
-                    result = self.runner.invoke(
-                        cli, ["install", "http://my-server.example.com/owner/repo"]
-                    )
+                result = self.runner.invoke(
+                    cli, ["install", "--allow-insecure", "http://my-server.example.com/owner/repo"]
+                )
 
                 assert result.exit_code == 0
                 with open("apm.yml", encoding="utf-8") as f:
@@ -1196,10 +1194,9 @@ class TestAllowInsecureFlag:
         dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
         dep.allow_insecure = True
 
-        with patch("apm_cli.config.get_allow_insecure", return_value=False):
-            with pytest.raises(SystemExit) as exc_info:
-                _check_insecure_dependencies([dep], allow_insecure_flag=False)
-            assert exc_info.value.code == 1
+        with pytest.raises(SystemExit) as exc_info:
+            _check_insecure_dependencies([dep], allow_insecure_flag=False)
+        assert exc_info.value.code == 1
 
     def test_http_dep_passes_with_allow_insecure_flag(self):
         """_check_insecure_dependencies passes when flag is set and dep has allow_insecure."""
@@ -1209,19 +1206,7 @@ class TestAllowInsecureFlag:
         dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
         dep.allow_insecure = True
 
-        with patch("apm_cli.config.get_allow_insecure", return_value=False):
-            _check_insecure_dependencies([dep], allow_insecure_flag=True)
-
-    def test_http_dep_passes_with_config_allow_insecure(self):
-        """_check_insecure_dependencies passes when global config allow_insecure is true."""
-        from apm_cli.commands.install import _check_insecure_dependencies
-        from apm_cli.models.dependency.reference import DependencyReference
-
-        dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
-        dep.allow_insecure = True
-
-        with patch("apm_cli.config.get_allow_insecure", return_value=True):
-            _check_insecure_dependencies([dep], allow_insecure_flag=False)
+        _check_insecure_dependencies([dep], allow_insecure_flag=True)
 
     def test_http_dep_without_dep_level_allow_insecure_is_blocked(self):
         """_check_insecure_dependencies blocks HTTP dep missing allow_insecure=True on dep."""
@@ -1230,10 +1215,9 @@ class TestAllowInsecureFlag:
 
         dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
 
-        with patch("apm_cli.config.get_allow_insecure", return_value=False):
-            with pytest.raises(SystemExit) as exc_info:
-                _check_insecure_dependencies([dep], allow_insecure_flag=True)
-            assert exc_info.value.code == 1
+        with pytest.raises(SystemExit) as exc_info:
+            _check_insecure_dependencies([dep], allow_insecure_flag=True)
+        assert exc_info.value.code == 1
 
     def test_https_dep_passes_without_flag(self):
         """_check_insecure_dependencies does not block HTTPS deps."""
@@ -1241,12 +1225,10 @@ class TestAllowInsecureFlag:
         from apm_cli.models.dependency.reference import DependencyReference
 
         dep = DependencyReference.parse("owner/repo")
-        with patch("apm_cli.config.get_allow_insecure", return_value=False):
-            _check_insecure_dependencies([dep], allow_insecure_flag=False)
+        _check_insecure_dependencies([dep], allow_insecure_flag=False)
 
     def test_empty_deps_list_passes(self):
         """_check_insecure_dependencies handles empty dep list."""
         from apm_cli.commands.install import _check_insecure_dependencies
 
-        with patch("apm_cli.config.get_allow_insecure", return_value=False):
-            _check_insecure_dependencies([], allow_insecure_flag=False)
+        _check_insecure_dependencies([], allow_insecure_flag=False)

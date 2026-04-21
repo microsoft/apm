@@ -152,8 +152,13 @@ Explicit URL schemes are honored exactly -- see [Transport selection](#transport
 :::caution
 Use HTTP dependencies only on trusted private networks. Declare them with
 `git: http://...` and `allow_insecure: true` in `apm.yml`. Installing them
-still requires `apm install --allow-insecure`, unless
-`apm config set allow-insecure true` is enabled globally.
+still requires `apm install --allow-insecure`.
+
+HTTP has no transport authentication, so anyone who can intercept the
+connection can swap the package contents in transit. APM warns on every
+`http://` fetch, asks for extra confirmation before installing transitive
+HTTP dependencies, and requires `--allow-insecure-transitive` in CI or other
+non-interactive environments.
 :::
 
 > **Nested groups (GitLab, Gitea, etc.):** APM treats all path segments after the host as the repo path, so `gitlab.com/group/subgroup/repo` resolves to a repo at `group/subgroup/repo`. Virtual paths on simple 2-segment repos work with shorthand (`gitlab.com/owner/repo/file.prompt.md`). But for **nested-group repos + virtual paths**, use the object format — the shorthand is ambiguous:
@@ -224,6 +229,9 @@ apm install --dry-run
 ```bash
 # List installed packages
 apm deps list
+
+# Show only installed HTTP-backed packages
+apm deps list --insecure
 
 # Show dependency tree
 apm deps tree

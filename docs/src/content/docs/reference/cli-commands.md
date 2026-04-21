@@ -74,7 +74,7 @@ apm init my-plugin --plugin
 
 ### `apm install` - Install dependencies and deploy local content
 
-Install APM package and MCP server dependencies from `apm.yml` and deploy the project's own `.apm/` content to target directories (like `npm install`). Auto-creates minimal `apm.yml` when packages are specified but no manifest exists. For `http://` dependencies, use `--allow-insecure` or enable the global `allow-insecure` config.
+Install APM package and MCP server dependencies from `apm.yml` and deploy the project's own `.apm/` content to target directories (like `npm install`). Auto-creates minimal `apm.yml` when packages are specified but no manifest exists. For `http://` dependencies, use `--allow-insecure`.
 
 ```bash
 apm install [PACKAGES...] [OPTIONS]
@@ -113,6 +113,7 @@ See [Dependencies: Transport selection](../../guides/dependencies/#transport-sel
 **Behavior:**
 - `apm install` (no args): Installs **all** packages from `apm.yml` and deploys the project's own `.apm/` content
 - `apm install <package>`: Installs **only** the specified package (adds to `apm.yml` if not present)
+- Each `http://` dependency is warned at install time before any fetch begins
 
 **Local `.apm/` Content Deployment:**
 
@@ -738,6 +739,7 @@ apm deps list [OPTIONS]
 **Options:**
 - `-g, --global` - List user-scope packages from `~/.apm/` instead of the current project
 - `--all` - List packages from both project and user scope
+- `--insecure` - Show only installed dependencies locked to `http://` sources
 
 **Examples:**
 ```bash
@@ -749,6 +751,9 @@ apm deps list -g
 
 # Show both scopes
 apm deps list --all
+
+# Show only insecure installed dependencies
+apm deps list --insecure
 ```
 
 **Sample Output:**
@@ -1432,7 +1437,6 @@ apm config get [KEY]
 - `KEY` (optional) - Configuration key to retrieve. Supported keys:
   - `auto-integrate` - Whether to automatically integrate `.prompt.md` files into AGENTS.md
   - `temp-dir` - Custom temporary directory for clone/download operations
-  - `allow-insecure` - Whether HTTP (insecure) dependencies are allowed globally
 
 If `KEY` is omitted, displays all configuration values.
 
@@ -1440,9 +1444,6 @@ If `KEY` is omitted, displays all configuration values.
 ```bash
 # Get auto-integrate setting
 apm config get auto-integrate
-
-# Get allow-insecure setting
-apm config get allow-insecure
 
 # Show all configuration
 apm config get
@@ -1460,7 +1461,6 @@ apm config set KEY VALUE
 - `KEY` - Configuration key to set. Supported keys:
   - `auto-integrate` - Enable/disable automatic integration of `.prompt.md` files
   - `temp-dir` - Set a custom temporary directory path
-  - `allow-insecure` - Allow HTTP (insecure) dependencies globally
 - `VALUE` - Value to set. For boolean keys, use: `true`, `false`, `yes`, `no`, `1`, `0`
 
 **Configuration Keys:**
@@ -1473,11 +1473,6 @@ apm config set KEY VALUE
   - Set to `false` if you want to manually manage which prompts are compiled
   - Set to `true` to ensure all prompts are always included in the context
 
-**`allow-insecure`** - Allow HTTP (insecure) dependencies globally
-- **Type:** Boolean
-- **Default:** `false`
-- **Description:** When enabled, APM skips the requirement to pass `--allow-insecure` at install time for HTTP dependencies. The per-dependency `allow_insecure: true` field in apm.yml is still required. Use this for private network environments where all servers use HTTP.
-
 **Examples:**
 ```bash
 # Enable auto-integration (default)
@@ -1485,12 +1480,6 @@ apm config set auto-integrate true
 
 # Disable auto-integration
 apm config set auto-integrate false
-
-# Allow HTTP dependencies globally (skips --allow-insecure flag requirement)
-apm config set allow-insecure true
-
-# Disable globally (default)
-apm config set allow-insecure false
 ```
 
 **`temp-dir`** - Override the system temporary directory
