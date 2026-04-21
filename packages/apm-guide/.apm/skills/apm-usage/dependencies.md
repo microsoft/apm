@@ -56,7 +56,7 @@ across protocols.
 | Dependency form | What APM tries |
 |-----------------|----------------|
 | `ssh://...` or `git@host:...` | SSH only |
-| `https://...` or `http://...` | HTTPS only |
+| `https://...` or `http://...` | HTTP(S) only |
 | Shorthand with `git config url.<base>.insteadOf` rewriting to SSH | SSH only |
 | Shorthand otherwise | HTTPS only |
 

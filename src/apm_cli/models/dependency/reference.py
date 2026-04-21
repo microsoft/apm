@@ -1123,7 +1123,7 @@ class DependencyReference:
         elif self.artifactory_prefix:
             return f"{scheme}://{netloc}/{self.artifactory_prefix}/{self.repo_url}"
         else:
-            # GitHub format: https://github.com/owner/repo
+            # Git host format: https://github.com/owner/repo
             return f"{scheme}://{netloc}/{self.repo_url}"
 
     def to_clone_url(self) -> str:

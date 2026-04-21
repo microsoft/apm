@@ -670,8 +670,8 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         apm install --update                    # Update dependencies to latest Git refs
         apm install --dry-run                   # Show what would be installed
         apm install -g org/pkg1                 # Install to user scope (~/.apm/)
-        apm install --allow-insecure http://my-server.example.com/owner/repo
-        apm install --allow-insecure-host mirror.example.com
+        apm install --allow-insecure http://my-server.example.com/owner/repo  # Install from HTTP URL with allow_insecure
+        apm install --allow-insecure-host mirror.example.com                  # Allow transitive HTTP dependencies from mirror.example.com
     """
     try:
         # Create structured logger for install output early so exception

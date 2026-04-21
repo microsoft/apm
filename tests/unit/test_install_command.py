@@ -947,6 +947,27 @@ class TestGenericHostSshFirstValidation:
         assert mock_run.call_count == 2  # tried SSH then HTTPS
 
     @patch("subprocess.run")
+    def test_explicit_http_generic_host_tries_http_first(self, mock_run):
+        """Explicit HTTP must probe HTTP before any SSH fallback."""
+        from apm_cli.commands.install import _validate_package_exists
+
+        mock_run.return_value = self._make_completed_process(returncode=0)
+
+        result = _validate_package_exists(
+            "http://gitlab.company.internal/acme/rules.git", verbose=False
+        )
+
+        assert result is True
+        assert mock_run.call_count == 1
+        first_cmd = mock_run.call_args_list[0][0][0]
+        assert any("http://gitlab.company.internal" in arg for arg in first_cmd), (
+            f"Expected HTTP URL in first call, got: {first_cmd}"
+        )
+        assert all("git@" not in arg for arg in first_cmd), (
+            f"Expected no SSH URL in first call, got: {first_cmd}"
+        )
+
+    @patch("subprocess.run")
     def test_github_host_skips_ssh_attempt(self, mock_run):
         """GitHub.com repositories do NOT go through the SSH-first ls-remote path."""
       

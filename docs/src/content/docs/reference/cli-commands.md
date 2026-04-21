@@ -193,9 +193,6 @@ apm install /home/user/repos/my-ai-package
 # Install to user scope (available across all projects)
 apm install -g microsoft/apm-sample-package
 
-# Allow an additional transitive HTTP host
-apm install --allow-insecure-host mirror.example.com
-
 # Install a plugin from a registered marketplace
 apm install code-review@acme-plugins
 

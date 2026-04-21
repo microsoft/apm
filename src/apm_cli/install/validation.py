@@ -172,6 +172,10 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                 dep_ref.repo_url, use_ssh=False, dep_ref=dep_ref, token=_url_token
             )
 
+            explicit_scheme = getattr(dep_ref, "explicit_scheme", None)
+            is_insecure = bool(getattr(dep_ref, "is_insecure", False))
+            prefer_web_probe_first = explicit_scheme in ("http", "https") or is_insecure
+
             # For generic hosts (not GitHub, not ADO), relax the env so native
             # credential helpers (SSH keys, macOS Keychain, etc.) can work.
             # This mirrors _clone_with_fallback() which does the same relaxation.
@@ -185,14 +189,18 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             if verbose_log:
                 verbose_log(f"Trying git ls-remote for {dep_ref.host}")
 
-            # For generic hosts, try SSH first (no credentials needed when SSH
-            # keys are configured) before falling back to HTTPS.
+            # Generic shorthand keeps the legacy SSH-first probe order. Explicit
+            # HTTP(S) should test the web transport first so validation matches
+            # the clone plan closely enough to avoid surprise SSH prompts.
             urls_to_try = []
             if is_generic:
                 ssh_url = ado_downloader._build_repo_url(
                     dep_ref.repo_url, use_ssh=True, dep_ref=dep_ref
                 )
-                urls_to_try = [ssh_url, package_url]
+                if prefer_web_probe_first:
+                    urls_to_try = [package_url, ssh_url]
+                else:
+                    urls_to_try = [ssh_url, package_url]
             else:
                 urls_to_try = [package_url]
 

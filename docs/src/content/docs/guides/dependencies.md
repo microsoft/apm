@@ -460,7 +460,7 @@ migrating CI), set `APM_ALLOW_PROTOCOL_FALLBACK=1` or pass
 | Dependency form | What APM tries |
 |-----------------|----------------|
 | `ssh://...` or `git@host:...` | SSH only |
-| `https://...` or `http://...` | HTTPS only |
+| `https://...` or `http://...` | HTTP(S) only |
 | Shorthand (`owner/repo`, `host/owner/repo`) with `git config url.<base>.insteadOf` rewriting to SSH | SSH only |
 | Shorthand without a matching `insteadOf` rewrite | HTTPS only |
 
