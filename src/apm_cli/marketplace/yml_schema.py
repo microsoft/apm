@@ -39,6 +39,7 @@ __all__ = [
     "MarketplaceBuild",
     "PackageEntry",
     "MarketplaceYmlError",
+    "SOURCE_RE",
     "load_marketplace_yml",
 ]
 
@@ -53,7 +54,8 @@ _SEMVER_RE = re.compile(
 )
 
 # ``owner/repo`` shape -- at least one char on each side of the slash.
-_SOURCE_RE = re.compile(r"^[^/]+/[^/]+$")
+# Used by both yml_schema and yml_editor for source field validation.
+SOURCE_RE = re.compile(r"^[^/]+/[^/]+$")
 
 # Placeholder tokens accepted in ``tag_pattern`` / ``build.tagPattern``.
 _TAG_PLACEHOLDERS = ("{version}", "{name}")
@@ -187,7 +189,7 @@ def _validate_semver(version: str, *, context: str = "version") -> None:
 def _validate_source(source: str, *, index: int) -> None:
     """Validate ``source`` field shape and path safety."""
     ctx = f"packages[{index}].source"
-    if not _SOURCE_RE.match(source):
+    if not SOURCE_RE.match(source):
         raise MarketplaceYmlError(
             f"'{ctx}' must match '<owner>/<repo>' shape, got '{source}'"
         )
@@ -430,6 +432,12 @@ def load_marketplace_yml(path: Path) -> MarketplaceYml:
             "'output' must be a non-empty string"
         )
     output = output.strip()
+
+    # Path-traversal guard -- reject output paths containing ".." segments.
+    try:
+        validate_path_segments(output, context="marketplace.yml output")
+    except PathTraversalError as exc:
+        raise MarketplaceYmlError(str(exc)) from exc
 
     # -- metadata (Anthropic pass-through, preserve verbatim) --
     metadata: Dict[str, Any] = {}

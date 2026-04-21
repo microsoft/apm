@@ -119,6 +119,13 @@ def add(
     logger = CommandLogger("marketplace-plugin-add", verbose=verbose)
     yml = _ensure_yml_exists(logger)
 
+    # --version and --ref are mutually exclusive.
+    if version and ref:
+        raise click.UsageError(
+            "--version and --ref are mutually exclusive. "
+            "Use --version for semver ranges or --ref for git refs."
+        )
+
     parsed_tags = _parse_tags(tags)
 
     # Verify source reachability unless skipped.

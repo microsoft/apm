@@ -1546,3 +1546,77 @@ class TestEdgeCases:
 
         assert results[0].outcome == PublishOutcome.FAILED
         assert "Branch creation failed" in results[0].message
+
+
+# ===================================================================
+# S4: ConsumerTarget validation
+# ===================================================================
+
+
+class TestConsumerTargetValidation:
+    """Branch and repo fields on ConsumerTarget must be validated."""
+
+    def test_branch_with_dotdot_rejected(self, tmp_path: Path) -> None:
+        pub, _ = _make_publisher(tmp_path)
+        targets = [
+            ConsumerTarget(
+                repo="acme-org/svc-a",
+                branch="../malicious",
+            )
+        ]
+        with pytest.raises(PathTraversalError, match="traversal"):
+            pub.plan(targets)
+
+    def test_branch_with_shell_metachar_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        from apm_cli.marketplace.errors import MarketplaceError
+
+        pub, _ = _make_publisher(tmp_path)
+        targets = [
+            ConsumerTarget(
+                repo="acme-org/svc-a",
+                branch="main;rm -rf /",
+            )
+        ]
+        with pytest.raises(MarketplaceError, match="shell metacharacters"):
+            pub.plan(targets)
+
+    def test_repo_with_shell_metachar_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        from apm_cli.marketplace.errors import MarketplaceError
+
+        pub, _ = _make_publisher(tmp_path)
+        targets = [
+            ConsumerTarget(
+                repo="acme-org/svc-a;echo pwned",
+            )
+        ]
+        with pytest.raises(MarketplaceError, match="shell metacharacters"):
+            pub.plan(targets)
+
+    def test_repo_invalid_format_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        from apm_cli.marketplace.errors import MarketplaceError
+
+        pub, _ = _make_publisher(tmp_path)
+        targets = [
+            ConsumerTarget(
+                repo="not a valid repo",
+            )
+        ]
+        with pytest.raises(MarketplaceError, match="owner/repo"):
+            pub.plan(targets)
+
+    def test_valid_target_passes(self, tmp_path: Path) -> None:
+        pub, _ = _make_publisher(tmp_path)
+        targets = [
+            ConsumerTarget(
+                repo="acme-org/svc-a",
+                branch="main",
+            )
+        ]
+        plan = pub.plan(targets)
+        assert plan.marketplace_name == "acme-tools"

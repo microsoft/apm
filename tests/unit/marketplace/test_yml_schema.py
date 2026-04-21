@@ -706,3 +706,36 @@ class TestEdgeCases:
         yml = _write_yml(tmp_path, _minimal_yml())
         result = load_marketplace_yml(yml)
         assert result.build.tag_pattern == "v{version}"
+
+
+# ---------------------------------------------------------------------------
+# S1: Output path traversal guard
+# ---------------------------------------------------------------------------
+
+
+class TestOutputPathTraversalGuard:
+    """The ``output`` field must be rejected if it contains traversal sequences."""
+
+    def test_output_traversal_rejected(self, tmp_path: Path):
+        content = _minimal_yml(output="../../etc/passwd")
+        yml = _write_yml(tmp_path, content)
+        with pytest.raises(MarketplaceYmlError, match="traversal"):
+            load_marketplace_yml(yml)
+
+    def test_output_safe_path_accepted(self, tmp_path: Path):
+        content = _minimal_yml(output="build/marketplace.json")
+        yml = _write_yml(tmp_path, content)
+        result = load_marketplace_yml(yml)
+        assert result.output == "build/marketplace.json"
+
+    def test_output_dotdot_in_middle_rejected(self, tmp_path: Path):
+        content = _minimal_yml(output="build/../../../evil.json")
+        yml = _write_yml(tmp_path, content)
+        with pytest.raises(MarketplaceYmlError, match="traversal"):
+            load_marketplace_yml(yml)
+
+    def test_output_single_dot_rejected(self, tmp_path: Path):
+        content = _minimal_yml(output="./marketplace.json")
+        yml = _write_yml(tmp_path, content)
+        with pytest.raises(MarketplaceYmlError, match="traversal"):
+            load_marketplace_yml(yml)

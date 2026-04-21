@@ -356,3 +356,38 @@ class TestRemoteRef:
         a = RemoteRef(name="refs/tags/v1.0.0", sha="a" * 40)
         b = RemoteRef(name="refs/tags/v2.0.0", sha="b" * 40)
         assert a != b
+
+
+# ---------------------------------------------------------------------------
+# S3: GIT_TERMINAL_PROMPT suppression
+# ---------------------------------------------------------------------------
+
+
+class TestGitTerminalPromptSuppression:
+    """Subprocess calls must include GIT_TERMINAL_PROMPT=0 to prevent hangs."""
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_env_includes_git_terminal_prompt(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        resolver = RefResolver(timeout_seconds=5.0)
+        resolver.list_remote_refs("acme/tools")
+
+        _, kwargs = mock_run.call_args
+        env = kwargs.get("env", {})
+        assert env.get("GIT_TERMINAL_PROMPT") == "0", (
+            "subprocess.run must pass GIT_TERMINAL_PROMPT=0 in env"
+        )
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_env_includes_git_askpass(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
+        resolver = RefResolver(timeout_seconds=5.0)
+        resolver.list_remote_refs("acme/tools")
+
+        _, kwargs = mock_run.call_args
+        env = kwargs.get("env", {})
+        assert env.get("GIT_ASKPASS") == "echo", (
+            "subprocess.run must pass GIT_ASKPASS=echo in env"
+        )
+        resolver.close()
