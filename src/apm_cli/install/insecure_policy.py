@@ -1,12 +1,15 @@
 """HTTP dependency policy helpers shared by install command and pipeline."""
 
-import sys
 import urllib.parse
 from dataclasses import dataclass
 
 import click
 
 from ..utils.github_host import is_valid_fqdn
+
+
+class InsecureDependencyPolicyError(RuntimeError):
+    """Raised when HTTP dependency policy blocks the current install."""
 
 
 @dataclass(frozen=True)
@@ -177,7 +180,7 @@ def _guard_transitive_insecure_dependencies(
         f"Re-run with {suggested_flags} to allow these transitive hosts."
     )
     logger.error(message)
-    sys.exit(1)
+    raise InsecureDependencyPolicyError(message)
 
 
 def _check_insecure_dependencies(
@@ -202,8 +205,8 @@ def _check_insecure_dependencies(
         if not dep_allow_insecure:
             message = _format_insecure_dependency_requirements(url)
             logger.error(message)
-            sys.exit(1)
+            raise InsecureDependencyPolicyError(message)
         if not allow_insecure_flag:
             message = _format_insecure_dependency_requirements(url)
             logger.error(message)
-            sys.exit(1)
+            raise InsecureDependencyPolicyError(message)

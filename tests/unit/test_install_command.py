@@ -1271,15 +1271,16 @@ class TestAllowInsecureFlag:
     def test_http_dep_validation_check(self):
         """_check_insecure_dependencies blocks HTTP dep without allow_insecure flag."""
         from apm_cli.commands.install import _check_insecure_dependencies
+        from apm_cli.install.insecure_policy import InsecureDependencyPolicyError
         from apm_cli.models.dependency.reference import DependencyReference
 
         dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
         dep.allow_insecure = True
         logger = MagicMock()
 
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(InsecureDependencyPolicyError) as exc_info:
             _check_insecure_dependencies([dep], False, logger)
-        assert exc_info.value.code == 1
+        assert "http://my-server.example.com/owner/repo" in str(exc_info.value)
         message = logger.error.call_args.args[0]
         assert "http://my-server.example.com/owner/repo" in message
         assert "allow_insecure: true" in message
@@ -1299,14 +1300,15 @@ class TestAllowInsecureFlag:
     def test_http_dep_without_dep_level_allow_insecure_is_blocked(self):
         """_check_insecure_dependencies blocks HTTP dep missing allow_insecure=True on dep."""
         from apm_cli.commands.install import _check_insecure_dependencies
+        from apm_cli.install.insecure_policy import InsecureDependencyPolicyError
         from apm_cli.models.dependency.reference import DependencyReference
 
         dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
         logger = MagicMock()
 
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(InsecureDependencyPolicyError) as exc_info:
             _check_insecure_dependencies([dep], True, logger)
-        assert exc_info.value.code == 1
+        assert "http://my-server.example.com/owner/repo" in str(exc_info.value)
         message = logger.error.call_args.args[0]
         assert "http://my-server.example.com/owner/repo" in message
         assert "allow_insecure: true" in message
@@ -1402,9 +1404,10 @@ class TestTransitiveInsecureDependencyGuard:
             _InsecureDependencyInfo,
             _guard_transitive_insecure_dependencies,
         )
+        from apm_cli.install.insecure_policy import InsecureDependencyPolicyError
         logger = MagicMock()
 
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(InsecureDependencyPolicyError) as exc_info:
             _guard_transitive_insecure_dependencies(
                 [
                     _InsecureDependencyInfo(
@@ -1418,7 +1421,7 @@ class TestTransitiveInsecureDependencyGuard:
                 allow_insecure_hosts=(),
             )
 
-        assert exc_info.value.code == 1
+        assert "mirror.example.com" in str(exc_info.value)
 
     def test_transitive_guard_allows_same_host_as_direct_insecure_dependency(self):
         """A direct insecure dependency host also permits transitive deps on that host."""
@@ -1473,9 +1476,10 @@ class TestTransitiveInsecureDependencyGuard:
             _InsecureDependencyInfo,
             _guard_transitive_insecure_dependencies,
         )
+        from apm_cli.install.insecure_policy import InsecureDependencyPolicyError
         logger = MagicMock()
 
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(InsecureDependencyPolicyError) as exc_info:
             _guard_transitive_insecure_dependencies(
                 [
                     _InsecureDependencyInfo(
@@ -1494,4 +1498,4 @@ class TestTransitiveInsecureDependencyGuard:
                 allow_insecure_hosts=(),
             )
 
-        assert exc_info.value.code == 1
+        assert "mirror.example.com" in str(exc_info.value)

@@ -70,6 +70,7 @@ from apm_cli.install.insecure_policy import (
     _get_insecure_dependency_url,
     _normalize_allow_insecure_host,
     _warn_insecure_dependencies,
+    InsecureDependencyPolicyError,
 )
 
 # Re-export the pre-deploy security scan so that bare-name call sites inside
@@ -681,6 +682,8 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                 prompt_count = install_result.prompts_integrated
                 agent_count = install_result.agents_integrated
                 apm_diagnostics = install_result.diagnostics
+            except InsecureDependencyPolicyError:
+                sys.exit(1)
             except Exception as e:
                 logger.error(f"Failed to install APM dependencies: {e}")
                 if not verbose:
@@ -769,6 +772,8 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         if not force and apm_diagnostics and apm_diagnostics.has_critical_security:
             sys.exit(1)
 
+    except InsecureDependencyPolicyError:
+        sys.exit(1)
     except Exception as e:
         logger.error(f"Error installing dependencies: {e}")
         if not verbose:
