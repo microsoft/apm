@@ -1289,13 +1289,13 @@ apm marketplace plugin add SOURCE [OPTIONS]
 
 **Options:**
 - `--version TEXT` - Semver range constraint (e.g. `">=1.0.0"`)
-- `--ref TEXT` - Pin to a specific git ref (SHA or tag)
+- `--ref TEXT` - Pin to a git ref (SHA, tag, or HEAD). Mutable refs are auto-resolved to SHA
 - `--description TEXT` - Short description for the entry
 - `--include-prerelease` - Include pre-release versions
 - `--no-verify` - Skip remote repository verification
 - `--verbose` - Enable verbose output
 
-`--version` and `--ref` are mutually exclusive. At least one must be provided.
+`--version` and `--ref` are mutually exclusive. When neither is provided, the current `HEAD` SHA is pinned automatically.
 
 **Examples:**
 ```bash
@@ -1305,8 +1305,11 @@ apm marketplace plugin add acme/code-review --version ">=1.0.0"
 # Pin to a specific tag
 apm marketplace plugin add acme/code-review --ref v2.1.0
 
-# Add with description and skip verification
-apm marketplace plugin add acme/code-review --version "^1.0.0" \
+# Pin to current HEAD (auto-resolved to SHA)
+apm marketplace plugin add acme/code-review
+
+# Add with description and skip verification (requires explicit --ref SHA)
+apm marketplace plugin add acme/code-review --ref abc123...40chars \
   --description "Code review skill" --no-verify
 ```
 
@@ -1323,7 +1326,7 @@ apm marketplace plugin set NAME [OPTIONS]
 
 **Options:**
 - `--version TEXT` - New semver range constraint
-- `--ref TEXT` - New git ref (replaces version if set)
+- `--ref TEXT` - New git ref (SHA, tag, or HEAD). Mutable refs are auto-resolved to SHA
 - `--description TEXT` - New description
 - `--include-prerelease` - Enable pre-release version inclusion
 - `--verbose` - Enable verbose output
@@ -1337,6 +1340,9 @@ apm marketplace plugin set code-review --version ">=2.0.0"
 
 # Switch from version to pinned ref
 apm marketplace plugin set code-review --ref abc1234
+
+# Re-pin to current HEAD SHA
+apm marketplace plugin set code-review --ref HEAD
 
 # Update the description
 apm marketplace plugin set code-review --description "Updated review skill"

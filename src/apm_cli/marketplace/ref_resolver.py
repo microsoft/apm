@@ -245,6 +245,86 @@ class RefResolver:
             self._cache.put(owner_repo, refs)
             return refs
 
+    # -----------------------------------------------------------------
+    # Single-ref resolution (no cache)
+    # -----------------------------------------------------------------
+
+    def resolve_ref_sha(self, owner_repo: str, ref: str = "HEAD") -> str:
+        """Resolve a single ref to its concrete SHA via ``git ls-remote``.
+
+        Unlike ``list_remote_refs`` this queries a single ref and does
+        not cache the result (the caller typically stores the SHA
+        immediately).
+
+        Parameters
+        ----------
+        owner_repo:
+            ``"owner/repo"`` string (no host, no ``.git`` suffix).
+        ref:
+            The ref to resolve (default ``"HEAD"``).
+
+        Returns
+        -------
+        str
+            40-char hex SHA.
+
+        Raises
+        ------
+        GitLsRemoteError
+            When the ref does not exist or the subprocess fails.
+        """
+        url = f"https://github.com/{owner_repo}.git"
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
+        try:
+            result = subprocess.run(
+                ["git", "ls-remote", url, ref],
+                capture_output=True,
+                text=True,
+                timeout=self._timeout,
+                env=env,
+            )
+        except subprocess.TimeoutExpired:
+            raise GitLsRemoteError(
+                package="",
+                summary=f"git ls-remote timed out after {self._timeout}s for '{owner_repo}'.",
+                hint="Increase --timeout or check your network connection.",
+            )
+        except OSError as exc:
+            raise GitLsRemoteError(
+                package="",
+                summary=f"Failed to run git ls-remote for '{owner_repo}'.",
+                hint=f"Ensure git is installed and on PATH. Error: {exc}",
+            )
+
+        if result.returncode != 0:
+            stderr = _redact_token(result.stderr)
+            if self._stderr_translator:
+                translated = translate_git_stderr(
+                    stderr,
+                    exit_code=result.returncode,
+                    operation="ls-remote",
+                    remote=owner_repo,
+                )
+                raise GitLsRemoteError(
+                    package="",
+                    summary=translated.summary,
+                    hint=translated.hint,
+                )
+            raise GitLsRemoteError(
+                package="",
+                summary=f"git ls-remote failed for '{owner_repo}' (exit {result.returncode}).",
+                hint=_redact_token(stderr[:200]) if stderr else "No stderr output.",
+            )
+
+        refs = _parse_ls_remote_output(result.stdout)
+        if not refs:
+            raise GitLsRemoteError(
+                package="",
+                summary=f"Ref '{ref}' not found on remote '{owner_repo}'.",
+                hint="Check that the ref exists and you have access to the repository.",
+            )
+        return refs[0].sha
+
     def close(self) -> None:
         """Release resources (cache, locks)."""
         self._cache.clear()

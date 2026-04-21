@@ -335,6 +335,115 @@ class TestRefResolver:
 
 
 # ---------------------------------------------------------------------------
+# RefResolver.resolve_ref_sha
+# ---------------------------------------------------------------------------
+
+
+class TestResolveRefSha:
+    """Tests for single-ref resolution via resolve_ref_sha."""
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_happy_path_returns_sha(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _make_completed(
+            stdout=f"{_SHA_A}\tHEAD\n",
+        )
+        resolver = RefResolver(timeout_seconds=5.0)
+        sha = resolver.resolve_ref_sha("acme/tools")
+        assert sha == _SHA_A
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_resolves_specific_ref(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _make_completed(
+            stdout=f"{_SHA_B}\trefs/heads/main\n",
+        )
+        resolver = RefResolver(timeout_seconds=5.0)
+        sha = resolver.resolve_ref_sha("acme/tools", ref="main")
+        assert sha == _SHA_B
+        # Verify command uses the ref directly (no --tags --heads).
+        args, kwargs = mock_run.call_args
+        assert args[0] == [
+            "git", "ls-remote",
+            "https://github.com/acme/tools.git",
+            "main",
+        ]
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_ref_not_found_raises(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _make_completed(stdout="")
+        resolver = RefResolver(timeout_seconds=5.0)
+        with pytest.raises(GitLsRemoteError, match="not found"):
+            resolver.resolve_ref_sha("acme/tools", ref="nonexistent")
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_network_failure_raises(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _make_completed(
+            returncode=128,
+            stderr="fatal: unable to access",
+        )
+        resolver = RefResolver(timeout_seconds=5.0)
+        with pytest.raises(GitLsRemoteError):
+            resolver.resolve_ref_sha("acme/tools")
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_timeout_raises(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="git", timeout=5.0)
+        resolver = RefResolver(timeout_seconds=5.0)
+        with pytest.raises(GitLsRemoteError, match="timed out"):
+            resolver.resolve_ref_sha("acme/tools")
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_os_error_raises(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = OSError("git not found")
+        resolver = RefResolver(timeout_seconds=5.0)
+        with pytest.raises(GitLsRemoteError, match="git is installed"):
+            resolver.resolve_ref_sha("acme/tools")
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_does_not_use_cache(self, mock_run: MagicMock) -> None:
+        """resolve_ref_sha never reads from or writes to the cache."""
+        mock_run.return_value = _make_completed(
+            stdout=f"{_SHA_A}\tHEAD\n",
+        )
+        resolver = RefResolver(timeout_seconds=5.0)
+        resolver.resolve_ref_sha("acme/tools")
+        assert len(resolver.cache) == 0  # Not cached.
+        resolver.resolve_ref_sha("acme/tools")
+        assert mock_run.call_count == 2  # Called twice (no cache hit).
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_security_env_vars(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _make_completed(
+            stdout=f"{_SHA_A}\tHEAD\n",
+        )
+        resolver = RefResolver(timeout_seconds=5.0)
+        resolver.resolve_ref_sha("acme/tools")
+        _, kwargs = mock_run.call_args
+        env = kwargs.get("env", {})
+        assert env.get("GIT_TERMINAL_PROMPT") == "0"
+        assert env.get("GIT_ASKPASS") == "echo"
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_token_redacted_in_error(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _make_completed(
+            returncode=128,
+            stderr="fatal: auth failed for https://x-access-token:ghp_secret@github.com/acme/priv.git",
+        )
+        resolver = RefResolver(timeout_seconds=5.0)
+        with pytest.raises(GitLsRemoteError) as exc_info:
+            resolver.resolve_ref_sha("acme/priv")
+        assert "ghp_secret" not in str(exc_info.value)
+        resolver.close()
+
+
+# ---------------------------------------------------------------------------
 # RemoteRef frozen dataclass
 # ---------------------------------------------------------------------------
 
