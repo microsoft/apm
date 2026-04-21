@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Docs site now publishes on stable release only, not every push to `main`. Closes #641
+- Docs site publishes on stable release only, not every push to `main`. Closes #641 (#822)
 
 ## [0.9.0] - 2026-04-21
 
