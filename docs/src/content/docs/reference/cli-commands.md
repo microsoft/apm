@@ -932,7 +932,7 @@ apm mcp install io.github.github/github-mcp-server
 apm mcp install linear --transport http --url https://mcp.linear.app/sse
 ```
 
-Set the [`MCP_REGISTRY_URL`](../../guides/mcp-servers/#custom-registry-enterprise) environment variable to point all `apm mcp` commands and `apm install --mcp` at a custom MCP registry.
+Set the [`MCP_REGISTRY_URL`](../../guides/mcp-servers/#custom-registry-enterprise) environment variable to point all `apm mcp` commands and `apm install --mcp` at a custom MCP registry. The URL must use `https://`; set `MCP_REGISTRY_ALLOW_HTTP=1` to opt in to plaintext `http://` for development. When a custom registry is set and unreachable during install pre-flight, network errors are fatal (the default registry keeps the existing assume-valid behaviour).
 
 #### `apm mcp list` - List MCP servers
 

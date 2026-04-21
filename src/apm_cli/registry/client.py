@@ -3,6 +3,10 @@
 import os
 import requests
 from typing import Dict, List, Optional, Any, Tuple
+from urllib.parse import urlparse
+
+
+_DEFAULT_REGISTRY_URL = "https://api.mcp.github.com"
 
 
 class SimpleRegistryClient:
@@ -14,11 +18,47 @@ class SimpleRegistryClient:
         Args:
             registry_url (str, optional): URL of the MCP registry.
                 If not provided, uses the MCP_REGISTRY_URL environment variable
-                or falls back to the default demo registry.
+                or falls back to the default public registry.
+
+        Raises:
+            ValueError: If the resolved URL is missing a scheme/netloc, uses an
+                unsupported scheme, or uses ``http://`` without
+                ``MCP_REGISTRY_ALLOW_HTTP=1`` opt-in.
         """
-        self.registry_url = registry_url or os.environ.get(
-            "MCP_REGISTRY_URL", "https://api.mcp.github.com"
-        )
+        env_override = os.environ.get("MCP_REGISTRY_URL")
+        # Treat empty-string env var as unset (common shell idiom: ``export FOO=``).
+        if env_override is not None and env_override.strip() == "":
+            env_override = None
+
+        resolved = registry_url or env_override or _DEFAULT_REGISTRY_URL
+        # Normalise: strip whitespace and trailing slashes so path joins
+        # never produce double-slash URLs (e.g. ``https://host//v0/servers``).
+        resolved = resolved.strip().rstrip("/")
+
+        parsed = urlparse(resolved)
+        if not parsed.scheme or not parsed.netloc:
+            raise ValueError(
+                f"Invalid MCP registry URL {resolved!r}: expected scheme://host "
+                f"(e.g. https://mcp.example.com). Check MCP_REGISTRY_URL if set."
+            )
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(
+                f"Unsupported scheme {parsed.scheme!r} in MCP registry URL "
+                f"{resolved!r}: only https:// is supported (http:// requires "
+                f"MCP_REGISTRY_ALLOW_HTTP=1). Check MCP_REGISTRY_URL if set."
+            )
+        if parsed.scheme == "http" and not os.environ.get("MCP_REGISTRY_ALLOW_HTTP"):
+            raise ValueError(
+                f"Insecure MCP registry URL {resolved!r}: http:// is not allowed "
+                f"by default. Set MCP_REGISTRY_ALLOW_HTTP=1 to opt in to plaintext "
+                f"HTTP (not recommended for production). "
+                f"Check MCP_REGISTRY_URL if set."
+            )
+
+        self.registry_url = resolved
+        # True when the URL came from an explicit caller arg or MCP_REGISTRY_URL env var.
+        # Consumed by validate_servers_exist() to fail-closed on overrides.
+        self._is_custom_url = registry_url is not None or env_override is not None
         self.session = requests.Session()
 
     def list_servers(self, limit: int = 100, cursor: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Optional[str]]:

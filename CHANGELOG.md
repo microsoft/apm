@@ -44,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix `apm init` showing overwrite confirmation prompt three times on Windows CP950 terminals (#602)
 - `apm mcp search`, `apm mcp list`, and `apm mcp show` now honour the `MCP_REGISTRY_URL` environment variable (previously hardcoded to the public registry), bringing them in line with `apm install --mcp`. When the variable is set, the discovery commands print a one-line `Registry: <url>` diagnostic and surface the configured URL in network-error messages so misconfigured enterprise registries are obvious (#813)
 
+### Security
+
+- `MCP_REGISTRY_URL` is now validated at startup: schemeless values, empty strings, and unsupported schemes are rejected with actionable errors. Plaintext `http://` is rejected by default; opt in with `MCP_REGISTRY_ALLOW_HTTP=1` for development or air-gapped intranets. When a custom registry is set and unreachable during install pre-flight, APM now fails closed instead of silently assuming all MCP dependencies are valid -- this prevents a misconfigured or down enterprise registry from quietly approving every server. The default registry (`https://api.mcp.github.com`) keeps the existing assume-valid behaviour for transient errors so unrelated network blips do not block installs (#814)
+
 ## [0.8.12] - 2026-04-19
 
 ### Added

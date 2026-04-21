@@ -179,6 +179,19 @@ export MCP_REGISTRY_URL=https://mcp.internal.example.com
 
 Scope is process-level: it applies to any shell that exports it and to child processes APM spawns. There is no per-project override yet. When the variable is set, `apm mcp search/list/show` print a one-line `Registry: <url>` diagnostic so you always know which endpoint was queried.
 
+### URL validation and security
+
+APM validates `MCP_REGISTRY_URL` at startup. The URL must include a scheme and host (e.g. `https://mcp.internal.example.com`); schemeless values, empty strings, and unsupported schemes (anything other than `http`/`https`) are rejected with an actionable error.
+
+Plaintext `http://` is **rejected by default** to prevent token leakage and tampering. For development or air-gapped intranets where TLS is genuinely impractical, opt in explicitly:
+
+```bash
+export MCP_REGISTRY_ALLOW_HTTP=1
+export MCP_REGISTRY_URL=http://mcp.internal.example.com
+```
+
+When a custom registry is set and unreachable during install pre-flight, APM treats the network error as **fatal** instead of silently assuming servers exist. This prevents a misconfigured or down enterprise registry from quietly approving every MCP dependency. The default registry (`https://api.mcp.github.com`) keeps the existing assume-valid behaviour for transient errors so unrelated network blips do not block installs.
+
 ## Next Steps
 
 - [Dependencies & Lockfile](../dependencies/#mcp-dependency-formats) -- the full `apm.yml` MCP grammar (overlays, `${input:...}`, package selection).
