@@ -377,18 +377,16 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
 # MCP CLI helpers (W3 --mcp flag)
 # ---------------------------------------------------------------------------
 
-# F7 shell-expansion residue scan: tokens that would be evaluated by a real
-# shell but are NOT shell-evaluated when an MCP stdio server runs through
-# ``execve``-style spawning.  Warn so users do not assume shell semantics.
-_SHELL_METACHAR_TOKENS = ("$(", "`", ";", "&&", "||", "|", ">>", ">", "<")
-
-# F5 SSRF: well-known cloud metadata endpoints surfaced as constants for
-# explicit allow/deny review.
-_METADATA_HOSTS = {
-    "169.254.169.254",   # AWS / Azure / GCP IMDS
-    "100.100.100.200",   # Alibaba Cloud
-    "fd00:ec2::254",     # AWS IPv6 IMDS
-}
+# F7 / F5 install-time MCP warnings live in apm_cli/install/mcp_warnings.py
+# per LOC budget. Re-bind module-level names for back-compat with tests
+# that still patch ``apm_cli.commands.install._warn_*``.
+from ..install.mcp_warnings import (
+    warn_ssrf_url as _warn_ssrf_url,
+    warn_shell_metachars as _warn_shell_metachars,
+    _SHELL_METACHAR_TOKENS,
+    _METADATA_HOSTS,
+    _is_internal_or_metadata_host,
+)
 
 # --registry helpers live in apm_cli/install/mcp_registry.py per LOC budget.
 from ..install.mcp_registry import (
@@ -610,81 +608,6 @@ def _add_mcp_to_apm_yml(name, entry, *, dev=False, force=False, project_root=Non
     return status, diff
 
 
-def _is_internal_or_metadata_host(host: str) -> bool:
-    """Return True when ``host`` resolves/parses to an internal IP.
-
-    Covers cloud metadata IPs, loopback, link-local, and RFC1918 ranges.
-    Defensive against ``ValueError``/``OSError`` from name resolution.
-    """
-    import ipaddress
-    import socket
-
-    if not host:
-        return False
-    if host in _METADATA_HOSTS:
-        return True
-    candidates: builtins.list = [host]
-    # Strip brackets from IPv6 literals.
-    bare = host.strip("[]")
-    if bare != host:
-        candidates.append(bare)
-    # Resolve hostname when it is not already an IP literal.
-    try:
-        ipaddress.ip_address(bare)
-    except ValueError:
-        try:
-            resolved = socket.gethostbyname(bare)
-            candidates.append(resolved)
-        except (OSError, UnicodeError):
-            pass
-    for c in candidates:
-        try:
-            ip = ipaddress.ip_address(c)
-        except ValueError:
-            continue
-        if ip.is_loopback or ip.is_link_local or ip.is_private:
-            return True
-        if c in _METADATA_HOSTS:
-            return True
-    return False
-
-
-def _warn_ssrf_url(url, logger):
-    """F5: warn (do not block) when URL points at an internal/metadata host."""
-    if not url:
-        return
-    try:
-        from urllib.parse import urlparse
-        host = urlparse(url).hostname or ""
-    except (ValueError, TypeError):
-        return
-    if _is_internal_or_metadata_host(host):
-        logger.warning(
-            f"URL '{url}' points to an internal or metadata address; "
-            f"verify intent before installing."
-        )
-
-
-def _warn_shell_metachars(env, logger):
-    """F7: warn (do not block) when env values contain shell metacharacters.
-
-    MCP stdio servers spawn via ``execve``-style calls with no shell, so
-    these characters are passed literally rather than evaluated.  Users
-    who think they are setting ``FOO=$(secret)`` will be surprised.
-    """
-    if not env:
-        return
-    for key, value in env.items():
-        sval = "" if value is None else str(value)
-        for tok in _SHELL_METACHAR_TOKENS:
-            if tok in sval:
-                logger.warning(
-                    f"Env value for '{key}' contains shell metacharacter "
-                    f"'{tok}'; reminder these are NOT shell-evaluated."
-                )
-                break
-
-
 # Mapping for E10: which flags require --mcp.  Keyed by attribute-style
 # name so we can read directly from the Click handler locals.
 _MCP_REQUIRED_FLAGS = (
@@ -845,7 +768,7 @@ def _run_mcp_install(
 
     # F5 + F7 warnings -- do not block.
     _warn_ssrf_url(url, logger)
-    _warn_shell_metachars(env, logger)
+    _warn_shell_metachars(env, logger, command=entry.get("command"))
 
     # Write to apm.yml.
     status, _diff = _add_mcp_to_apm_yml(

@@ -186,7 +186,7 @@ class TestMCPDependencyModel:
                 "command": "npx\t-y\tpkg",
             })
         msg = str(exc.value)
-        assert 'command: npx,' in msg, msg
+        assert 'command: npx' in msg, msg
         assert 'args: ["-y", "pkg"]' in msg, msg
 
     def test_validate_stdio_error_does_not_leak_full_command(self):
@@ -210,9 +210,9 @@ class TestMCPDependencyModel:
                 "command": "npx --token=ghp_SUPERSECRETTOKENVALUE mcp-server",
             })
         msg = str(exc.value)
-        assert "Got: command='npx' (2 additional args)" in msg, msg
+        assert "command='npx' (2 additional args)" in msg, msg
         # The ``Got:`` framing must not contain the raw token.
-        got_segment = msg.split("Did you mean:")[0]
+        got_segment = msg.split("Fix:")[0]
         assert "ghp_SUPERSECRETTOKENVALUE" not in got_segment, (
             f"`Got:` framing leaked credential token: {got_segment}"
         )
@@ -248,6 +248,51 @@ class TestMCPDependencyModel:
                 "transport": "stdio",
                 "command": "   ",
             })
+
+    def test_validate_stdio_error_uses_multiline_cargo_style_format(self):
+        """Error must render as multi-line Cargo-style for terminal scannability.
+
+        Regression for PR #809 panel review (cli-log + devx follow-up): the
+        original 350-char single-line error defeated the newspaper test and
+        terminal URL detection. Now uses field/rule/got/fix/see structure.
+        """
+        with pytest.raises(ValueError) as exc:
+            MCPDependency.from_dict({
+                "name": "multiline",
+                "registry": False,
+                "transport": "stdio",
+                "command": "npx -y pkg",
+            })
+        msg = str(exc.value)
+        # Each labeled line on its own row, in this order.
+        lines = msg.split("\n")
+        assert len(lines) >= 6, f"expected multi-line format, got: {msg}"
+        assert lines[0].startswith("'command' contains whitespace"), lines[0]
+        assert any(line.lstrip().startswith("Rule:") for line in lines), msg
+        assert any(line.lstrip().startswith("Got:") for line in lines), msg
+        assert any(line.lstrip().startswith("Fix:") for line in lines), msg
+        assert any(line.lstrip().startswith("See:") for line in lines), msg
+        # URL must sit on its own line for terminal click-through.
+        url_lines = [l for l in lines if "https://" in l]
+        assert len(url_lines) == 1 and url_lines[0].count(" ") <= 4, url_lines
+
+    def test_repr_redacts_command_to_avoid_leaking_credentials(self):
+        """``repr(dep)`` must not leak full command (which may carry tokens).
+
+        Regression for PR #809 panel review (sec MEDIUM follow-up): pre-existing
+        ``__repr__`` echoed ``command={self.command!r}`` verbatim while
+        carefully redacting ``env`` and ``headers``. Now shows first token only.
+        """
+        dep = MCPDependency(
+            name="leaky-repr",
+            registry=False,
+            transport="stdio",
+            command="npx --token=ghp_REPRSECRETTOKEN mcp-server",
+            args=["--quiet"],
+        )
+        rep = repr(dep)
+        assert "ghp_REPRSECRETTOKEN" not in rep, rep
+        assert "command='npx'" in rep, rep
 
     def test_validate_stdio_non_string_command_rejected(self):
         """Non-string ``command`` (e.g. YAML list) must raise a clean ValueError.

@@ -118,7 +118,16 @@ class MCPDependency:
         if self.url:
             parts.append(f"url={self.url!r}")
         if self.command:
-            parts.append(f"command={self.command!r}")
+            # Redact: show only the first whitespace-separated token to avoid
+            # leaking embedded credentials (e.g. `--token=...`) in repr output
+            # via debug logs or tracebacks. Mirrors the env/headers redaction
+            # above and the M1 fix in the validation error message.
+            if isinstance(self.command, str):
+                first_tok = self.command.strip().split(maxsplit=1)
+                preview = first_tok[0] if first_tok else ''
+                parts.append(f"command={preview!r}")
+            else:
+                parts.append(f"command=<{type(self.command).__name__}>")
         return f"MCPDependency({', '.join(parts)})"
 
     def validate(self, strict: bool = True) -> None:
@@ -234,11 +243,12 @@ class MCPDependency:
                 rest_tokens = command_parts[1].split() if len(command_parts) > 1 else []
                 suggested_args = '[' + ', '.join(f'"{tok}"' for tok in rest_tokens) + ']'
                 raise ValueError(
-                    f"Self-defined MCP dependency '{self.name}': "
-                    f"'command' must be a single binary path, not a shell line. "
-                    f"APM does not split 'command' on whitespace. "
-                    f"Got: command={first!r} ({len(rest_tokens)} additional args). "
-                    f"Did you mean: command: {first}, args: {suggested_args}? "
-                    f"See https://microsoft.github.io/apm/guides/mcp-servers/ "
-                    f"for the canonical stdio shape."
+                    "\n".join([
+                        f"'command' contains whitespace in MCP dependency '{self.name}'.",
+                        f"  Rule: 'command' must be a single binary path -- APM does not split on whitespace. Use 'args' for additional arguments.",
+                        f"  Got:  command={first!r} ({len(rest_tokens)} additional args)",
+                        f"  Fix:  command: {first}",
+                        f"        args: {suggested_args}",
+                        f"  See:  https://microsoft.github.io/apm/guides/mcp-servers/",
+                    ])
                 )
