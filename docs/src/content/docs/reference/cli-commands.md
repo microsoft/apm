@@ -95,7 +95,7 @@ apm install [PACKAGES...] [OPTIONS]
 - `--verbose` - Show individual file paths and full error details in the diagnostic summary
 - `--trust-transitive-mcp` - Trust self-defined MCP servers from transitive packages (skip re-declaration requirement)
 - `--mcp NAME` - Add an MCP server entry to `apm.yml` and install it. See the [MCP Servers guide](../../guides/mcp-servers/) for the full workflow.
-- `--transport [stdio|http|sse]` - MCP transport (only with `--mcp`). Inferred from `--url` or post-`--` argv when omitted.
+- `--transport [stdio|http|sse|streamable-http]` - MCP transport (only with `--mcp`). Inferred from `--url` or post-`--` argv when omitted.
 - `--url URL` - Endpoint for `http`/`sse` MCP servers (only with `--mcp`). Scheme must be `http` or `https`.
 - `--env KEY=VALUE` - Environment variable for stdio MCP servers (only with `--mcp`). Repeatable.
 - `--header KEY=VALUE` - HTTP header for remote MCP servers (only with `--mcp`). Repeatable. Requires `--url`.

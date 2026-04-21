@@ -60,7 +60,7 @@ apm install --mcp NAME [OPTIONS] [-- COMMAND ARGV...]
 | Flag | Purpose |
 |------|---------|
 | `--mcp NAME` | Add `NAME` to `dependencies.mcp` and install it. Required to enter this code path. |
-| `--transport stdio\|http\|sse` | Override transport. Inferred from `--url` (remote) or post-`--` argv (stdio) when omitted. |
+| `--transport stdio\|http\|sse\|streamable-http` | Override transport. Inferred from `--url` (remote) or post-`--` argv (stdio) when omitted. |
 | `--url URL` | Endpoint for `http` / `sse` transports. Scheme must be `http` or `https`. |
 | `--env KEY=VALUE` | Environment variable for stdio servers. Repeatable. |
 | `--header KEY=VALUE` | HTTP header for remote servers. Repeatable. Requires `--url`. |
@@ -148,8 +148,8 @@ APM validates every `--mcp` entry before writing `apm.yml`. These are guardrails
 
 Self-defined servers (everything except the bare-string registry form) additionally require:
 
-- `transport` -- one of `stdio`, `http`, `sse`. These are MCP transport names, not URL schemes: remote variants connect over HTTPS.
-- `url` -- when `transport` is `http` or `sse`.
+- `transport` -- one of `stdio`, `http`, `sse`, `streamable-http`. These are MCP transport names, not URL schemes: remote variants connect over HTTPS.
+- `url` -- when `transport` is `http`, `sse`, or `streamable-http`.
 - `command` -- when `transport` is `stdio`.
 
 For the trust boundary on transitive MCP servers (`--trust-transitive-mcp`), see [Dependencies: Trust Model](../dependencies/#mcp-dependency-formats) and [Security Model](../../enterprise/security/).

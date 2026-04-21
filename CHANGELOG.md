@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (BREAKING)
 
-- MCP entry validation hardened (security): names must match `^[a-zA-Z0-9@][a-zA-Z0-9._@/:=-]{0,127}$`, URLs must use `http` or `https` schemes, headers reject CR/LF in keys and values, self-defined stdio commands rejected if they contain path-traversal sequences. Migration: most existing `apm.yml` files unaffected; if you hit `Invalid MCP name`, rename per the documented allowlist regex. (#807)
+- MCP entry validation hardened (security): names must match `^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$`, URLs must use `http` or `https` schemes, headers reject CR/LF in keys and values, self-defined stdio commands rejected if they contain path-traversal sequences. Migration: most existing `apm.yml` files unaffected; if you hit `Invalid MCP name`, the error message now includes a valid positive example (e.g. `io.github.acme/cool-server` or `my-server`) to pattern against. (#807)
 - Strict-by-default transport selection: explicit `ssh://`/`https://` URLs no longer silently fall back to the other protocol; shorthand consults `git config url.<base>.insteadOf` and otherwise defaults to HTTPS. Set `APM_ALLOW_PROTOCOL_FALLBACK=1` (or pass `--allow-protocol-fallback`) to restore the legacy permissive chain; cross-protocol retries then emit a `[!]` warning. Closes #328 (#778)
 
 ### Changed
@@ -44,10 +44,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Token resolution now discriminates by port, fixing credential collisions across multiple self-hosted Git instances on the same host. Thanks @edenfunf! (#785)
 - Fix `apm init` showing overwrite confirmation prompt three times on Windows CP950 terminals (#602)
 - `apm mcp search`, `apm mcp list`, and `apm mcp show` now honour the `MCP_REGISTRY_URL` environment variable (previously hardcoded to the public registry), bringing them in line with `apm install --mcp`. When the variable is set, the discovery commands print a one-line `Registry: <url>` diagnostic and surface the configured URL in network-error messages so misconfigured enterprise registries are obvious (#813)
+- `apm install --mcp ... --dry-run` now validates the would-be entry through the same chokepoint the real install uses, so dry-run never previews "success" for an entry `apm install` would reject (empty / whitespace-only / over-128-char / embedded `..` names, invalid transport-conflict combinations) (#810)
+- `SimpleRegistryClient` now applies a `(connect=10s, read=30s)` timeout on every registry HTTP call, removing the unbounded-hang failure mode when a registry is slow or unreachable. Operators can tune via `MCP_REGISTRY_CONNECT_TIMEOUT` / `MCP_REGISTRY_READ_TIMEOUT` env vars; invalid values silently fall back to defaults (#810)
 
 ### Security
 
 - `MCP_REGISTRY_URL` is now validated at startup: schemeless values, empty strings, and unsupported schemes are rejected with actionable errors. Plaintext `http://` is rejected by default; opt in with `MCP_REGISTRY_ALLOW_HTTP=1` for development or air-gapped intranets. When a custom registry is set and unreachable during install pre-flight, APM now fails closed instead of silently assuming all MCP dependencies are valid -- this prevents a misconfigured or down enterprise registry from quietly approving every server. The default registry (`https://api.mcp.github.com`) keeps the existing assume-valid behaviour for transient errors so unrelated network blips do not block installs (#814)
+- MCP dependency names reject embedded `..` path segments (e.g. `a/../../../evil`) at the `MCPDependency.validate()` chokepoint as defense-in-depth on top of the allowlist regex; the rejection error now includes a valid positive example (`io.github.acme/cool-server` or `my-server`) instead of a suggestion that often produced still-invalid names (#810)
+- URLs in `apm install --mcp` diagnostic output route through a urlparse-based credential redactor, so `https://user:token@host/` renders as `https://host/` in log messages and error text; prevents token leakage to CI logs and terminal scrollback (#810)
+- `--registry` / `MCP_REGISTRY_URL` values pointing at loopback, link-local, RFC1918, or cloud-metadata hosts (including decimal-encoded loopback like `http://2130706433/`) now emit an informational `[!]` warning. Defense-in-depth signal on top of the existing allowlist -- does not block the request (#810)
 
 ## [0.8.12] - 2026-04-19
 
