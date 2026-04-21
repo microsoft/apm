@@ -20,7 +20,9 @@ class CodexClientAdapter(MCPClientAdapter):
     a global ~/.codex/config.toml file, following the TOML format for
     MCP server configuration.
     """
-    
+
+    supports_user_scope: bool = True
+
     def __init__(self, registry_url=None):
         """Initialize the Codex CLI client adapter.
         

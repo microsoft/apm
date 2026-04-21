@@ -23,11 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Ref immutability advisory: caches plugin-to-ref pins and warns when a previously pinned plugin's ref changes (#514)
 - Multi-marketplace shadow detection: warns when the same plugin name appears in multiple registered marketplaces (#514)
 
+- Multi-target support: `apm.yml` `target` field now accepts a list (`target: [claude, copilot]`) and CLI `--target` accepts comma-separated values (`-t claude,copilot`). Only specified targets are compiled, installed, and packed -- no redundant output for unused tools. Single-string syntax is fully backward compatible. (#628)
+
 ### Fixed
 
+- VS Code adapter now defaults to `http` transport when `transport_type` is missing from remote registry data, matching Copilot adapter behavior (#654)
 - `apm install` no longer silently drops skills, agents, and commands when a Claude Code plugin also ships `hooks/*.json`. The package-type detection cascade now classifies plugin-shaped packages as `MARKETPLACE_PLUGIN` (which already maps hooks via the plugin synthesizer) before falling back to the hook-only classification, and emits a default-visibility `[!]` warning when a hook-only classification disagrees with the package's directory contents (#780)
 - Preserve custom git ports across protocols: non-default ports on `ssh://` and `https://` dependency URLs (e.g. Bitbucket Datacenter on SSH port 7999, self-hosted GitLab on HTTPS port 8443) are now captured as a first-class `port` field on `DependencyReference` and threaded through all clone URL builders. When the SSH clone fails, the HTTPS fallback reuses the same port instead of silently dropping it (#661, #731)
 - Detect port-like first path segment in SCP shorthand (`git@host:7999/path`) and raise an actionable error suggesting the `ssh://` URL form, instead of silently misparsing the port as part of the repository path (#784)
+- `apm install --global` now installs MCP servers to global-capable runtimes (Copilot CLI, Codex CLI) instead of blanket-skipping all MCP installation at user scope. Note: lockfile-path behavior at `--global` tracked in #794 (#638)
+- `--trust-transitive-mcp` no longer silently ignored when combined with `--global` (#638)
 - Token resolution now discriminates by port, fixing credential collisions across multiple self-hosted Git instances on the same host. Thanks @edenfunf! (#785)
 
 ## [0.8.12] - 2026-04-19
@@ -37,7 +42,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` now automatically discovers and deploys local `.apm/` primitives (skills, instructions, agents, prompts, hooks, commands) to target directories, with local content taking priority over dependencies on collision (#626, #644)
 - Deploy primitives from the project root's own `.apm/` directory alongside declared dependencies, so single-package projects no longer need a sub-package stub to install their own content (#715)
 - Add `temp-dir` configuration key (`apm config set temp-dir PATH`) to override the system temporary directory, resolving `[WinError 5] Access is denied` in corporate Windows environments (#629)
-
 ### Changed
 
 - Refactor `apm install` into a modular engine package (`apm_cli/install/`) with discrete phases (resolve, targets, download, integrate, cleanup, lockfile, finalize, post-deps local) and apply design patterns -- introduce a `DependencySource` Strategy hierarchy with shared `run_integration_template()` Template Method (kills ~300 LOC duplication across local/cached/fresh dep handlers), add `services.py` DI seam to eliminate `_install_mod` indirection, and wrap the pipeline in a typed `InstallService` Application Service consuming a frozen `InstallRequest`. `install/phases/integrate.py` shrinks from 1013 to ~400 LOC; the public `apm install` behaviour and CLI surface are unchanged. Preserves the `#762` cleanup chokepoint and remains backward-compatible (`_install_apm_dependencies` re-export and 55 healthy test patches keep working) (#764)
