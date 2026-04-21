@@ -85,6 +85,11 @@ def marketplace():
     pass
 
 
+from .marketplace_plugin import plugin  # noqa: E402
+
+marketplace.add_command(plugin)
+
+
 # ---------------------------------------------------------------------------
 # marketplace init
 # ---------------------------------------------------------------------------

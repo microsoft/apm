@@ -35,6 +35,7 @@ dependencies = [
     "rich-click>=1.7.0",
     "watchdog>=3.0.0",
     "GitPython>=3.1.0",
+    "ruamel.yaml>=0.18.0",
 ]
 
 [project.optional-dependencies]
