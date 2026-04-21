@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `pr-review-panel` gh-aw workflow that runs `apm-review-panel` on PRs labelled `panel-review` and posts a synthesized verdict via `safe-outputs.add-comment` (#824)
+
 ### Changed
 
 - Docs site publishes on stable release only, not every push to `main`. Closes #641 (#822)
