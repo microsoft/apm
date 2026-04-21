@@ -6,6 +6,7 @@ Lets maintainers programmatically manage package entries in
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -17,6 +18,13 @@ from ..marketplace.errors import (
     MarketplaceYmlError,
     OfflineMissError,
 )
+
+
+# -------------------------------------------------------------------
+# Constants
+# -------------------------------------------------------------------
+
+_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 # -------------------------------------------------------------------
@@ -70,6 +78,90 @@ def _verify_source(logger: CommandLogger, source: str) -> None:
         )
 
 
+def _resolve_ref(
+    logger: CommandLogger,
+    source: str,
+    ref: str | None,
+    version: str | None,
+    no_verify: bool,
+) -> str | None:
+    """Resolve *ref* to a concrete SHA when it is mutable.
+
+    Returns the (possibly resolved) ref string, or ``None`` when
+    *version* is set (version-based pinning, no ref needed).
+    """
+    from ..marketplace.ref_resolver import RefResolver
+
+    # Version-based — no ref resolution needed.
+    if version is not None:
+        return None
+
+    # Already a concrete SHA — store as-is.
+    if ref is not None and _SHA_RE.match(ref):
+        return ref
+
+    # HEAD (explicit or implicit) requires network access.
+    is_head = ref is None or ref.upper() == "HEAD"
+    if is_head:
+        if no_verify:
+            logger.error(
+                "Cannot resolve HEAD ref without network access. "
+                "Provide an explicit --ref SHA.",
+                symbol="error",
+            )
+            sys.exit(2)
+        if ref is not None:
+            logger.warning(
+                "'HEAD' is a mutable ref. Resolving to current SHA for safety.",
+                symbol="warning",
+            )
+        resolver = RefResolver()
+        try:
+            sha = resolver.resolve_ref_sha(source, "HEAD")
+        except GitLsRemoteError as exc:
+            logger.error(
+                f"Failed to resolve HEAD for '{source}': {exc}",
+                symbol="error",
+            )
+            sys.exit(2)
+        logger.progress(
+            f"Resolved HEAD to {sha[:12]}",
+            symbol="info",
+        )
+        return sha
+
+    # Non-HEAD, non-SHA ref — check whether it is a branch name.
+    resolver = RefResolver()
+    try:
+        remote_refs = resolver.list_remote_refs(source)
+    except (GitLsRemoteError, OfflineMissError):
+        # Cannot verify — store as-is.
+        return ref
+
+    for remote_ref in remote_refs:
+        if remote_ref.name == f"refs/heads/{ref}":
+            if no_verify:
+                logger.error(
+                    "Cannot resolve branch ref without network access. "
+                    "Provide an explicit --ref SHA.",
+                    symbol="error",
+                )
+                sys.exit(2)
+            logger.warning(
+                f"'{ref}' is a branch (mutable ref). "
+                "Resolving to current SHA for safety.",
+                symbol="warning",
+            )
+            logger.progress(
+                f"Resolved {ref} to {remote_ref.sha[:12]}",
+                symbol="info",
+            )
+            return remote_ref.sha
+
+    # Not a branch — tag or unknown ref; store as-is.
+    return ref
+
+
 # -------------------------------------------------------------------
 # Click group
 # -------------------------------------------------------------------
@@ -90,7 +182,11 @@ def plugin():
 @click.argument("source")
 @click.option("--name", default=None, help="Package name (default: repo name)")
 @click.option("--version", default=None, help="Semver range (e.g. '>=1.0.0')")
-@click.option("--ref", default=None, help="Pin to SHA or tag")
+@click.option(
+    "--ref",
+    default=None,
+    help="Pin to a git ref (SHA, tag, or HEAD). Mutable refs are auto-resolved to SHA.",
+)
 @click.option("--description", default=None, help="Human-readable description")
 @click.option("--subdir", default=None, help="Subdirectory inside source repo")
 @click.option("--tag-pattern", default=None, help="Tag pattern (e.g. 'v{version}')")
@@ -132,6 +228,9 @@ def add(
     if not no_verify:
         _verify_source(logger, source)
 
+    # Resolve mutable refs to concrete SHAs.
+    ref = _resolve_ref(logger, source, ref, version, no_verify)
+
     try:
         resolved_name = add_plugin_entry(
             yml,
@@ -163,7 +262,11 @@ def add(
 @plugin.command("set", help="Update a plugin entry in marketplace.yml")
 @click.argument("name")
 @click.option("--version", default=None, help="Semver range (e.g. '>=1.0.0')")
-@click.option("--ref", default=None, help="Pin to SHA or tag")
+@click.option(
+    "--ref",
+    default=None,
+    help="Pin to a git ref (SHA, tag, or HEAD). Mutable refs are auto-resolved to SHA.",
+)
 @click.option("--description", default=None, help="Human-readable description")
 @click.option("--subdir", default=None, help="Subdirectory inside source repo")
 @click.option("--tag-pattern", default=None, help="Tag pattern (e.g. 'v{version}')")
@@ -198,6 +301,21 @@ def set_cmd(
             "--version and --ref are mutually exclusive. "
             "Use --version for semver ranges or --ref for git refs."
         )
+
+    # Resolve mutable refs to concrete SHAs.
+    if ref is not None and not _SHA_RE.match(ref):
+        from ..marketplace.yml_schema import load_marketplace_yml
+
+        yml_data = load_marketplace_yml(yml)
+        source = None
+        for pkg in yml_data.packages:
+            if pkg.name.lower() == name.lower():
+                source = pkg.source
+                break
+        if source is None:
+            logger.error(f"Package '{name}' not found", symbol="error")
+            sys.exit(2)
+        ref = _resolve_ref(logger, source, ref, version, no_verify=False)
 
     parsed_tags = _parse_tags(tags)
 

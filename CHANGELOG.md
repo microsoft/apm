@@ -82,6 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enterprise docs IA refactor: hub page + merged team guides, deduped governance content. (#858)
 - Landing page rewritten around the three-pillar spine. (#855)
 - First-package tutorial rewritten end-to-end; fixes `.apm/` anatomy hallucinations. (#866)
+- `apm marketplace plugin add/set`: mutable git refs (`HEAD`, branch names) are now auto-resolved to concrete SHAs for supply-chain safety. When no `--ref` is provided, the current HEAD SHA is pinned automatically. (#790)
 - `apm marketplace init` subcommand to scaffold a richly-commented `marketplace.yml` in the current directory, with an optional `.gitignore` staleness check (#790)
 - `apm marketplace build` subcommand to compile `marketplace.yml` into an Anthropic-compliant `marketplace.json` with `--dry-run`, `--offline`, and `--include-prerelease` flags; APM-only build options are stripped and `metadata:` is passed through verbatim (#790)
 - `apm marketplace outdated` subcommand to report upgradable package versions, distinguishing "latest in range" from "latest overall" so maintainers know when a manual range bump is required (#790)

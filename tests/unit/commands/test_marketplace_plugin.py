@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import textwrap
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import marketplace
+from apm_cli.commands.marketplace_plugin import _resolve_ref, _SHA_RE
+from apm_cli.core.command_logger import CommandLogger
+from apm_cli.marketplace.ref_resolver import RemoteRef
 
 
 # ---------------------------------------------------------------------------
@@ -86,9 +90,10 @@ class TestPluginAdd:
         assert result.exit_code == 2
         assert "already exists" in result.output
 
-    def test_missing_version_and_ref_exits_2(
+    def test_missing_version_and_ref_no_verify_exits_2(
         self, runner, tmp_path, monkeypatch
     ):
+        """With --no-verify and no --ref/--version, auto-resolve fails."""
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
         result = runner.invoke(
@@ -96,7 +101,7 @@ class TestPluginAdd:
             ["plugin", "add", "acme/tool", "--no-verify"],
         )
         assert result.exit_code == 2
-        assert "At least one" in result.output
+        assert "Cannot resolve HEAD" in result.output
 
     def test_version_and_ref_conflict_exits_2(
         self, runner, tmp_path, monkeypatch
@@ -304,3 +309,287 @@ class TestPluginAddMutualExclusivity:
         )
         assert result.exit_code != 0
         assert "mutually exclusive" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# _resolve_ref unit tests
+# ---------------------------------------------------------------------------
+
+_FAKE_SHA = "a" * 40
+_FAKE_SHA_B = "b" * 40
+
+
+class TestResolveRef:
+    """Unit tests for the ``_resolve_ref()`` helper."""
+
+    def _make_logger(self) -> CommandLogger:
+        return CommandLogger("test", verbose=False)
+
+    def test_version_set_returns_none(self):
+        """When version is provided, ref resolution is skipped."""
+        result = _resolve_ref(
+            self._make_logger(), "acme/tools", ref=None,
+            version=">=1.0.0", no_verify=False,
+        )
+        assert result is None
+
+    def test_no_ref_no_verify_exits(self):
+        """No --ref, --no-verify → error (cannot resolve without network)."""
+        with pytest.raises(SystemExit) as exc_info:
+            _resolve_ref(
+                self._make_logger(), "acme/tools", ref=None,
+                version=None, no_verify=True,
+            )
+        assert exc_info.value.code == 2
+
+    @patch(
+        "apm_cli.marketplace.ref_resolver.RefResolver.resolve_ref_sha",
+        return_value=_FAKE_SHA,
+    )
+    def test_no_ref_resolves_head(self, mock_resolve):
+        """No --ref, no --version → auto-resolve HEAD."""
+        result = _resolve_ref(
+            self._make_logger(), "acme/tools", ref=None,
+            version=None, no_verify=False,
+        )
+        assert result == _FAKE_SHA
+        mock_resolve.assert_called_once_with("acme/tools", "HEAD")
+
+    def test_explicit_head_no_verify_exits(self):
+        """--ref HEAD + --no-verify → error."""
+        with pytest.raises(SystemExit) as exc_info:
+            _resolve_ref(
+                self._make_logger(), "acme/tools", ref="HEAD",
+                version=None, no_verify=True,
+            )
+        assert exc_info.value.code == 2
+
+    @patch(
+        "apm_cli.marketplace.ref_resolver.RefResolver.resolve_ref_sha",
+        return_value=_FAKE_SHA,
+    )
+    def test_explicit_head_resolves(self, mock_resolve):
+        """--ref HEAD → warn + resolve."""
+        result = _resolve_ref(
+            self._make_logger(), "acme/tools", ref="HEAD",
+            version=None, no_verify=False,
+        )
+        assert result == _FAKE_SHA
+
+    @patch(
+        "apm_cli.marketplace.ref_resolver.RefResolver.resolve_ref_sha",
+        return_value=_FAKE_SHA,
+    )
+    def test_explicit_head_case_insensitive(self, mock_resolve):
+        """--ref head (lowercase) → treated as HEAD."""
+        result = _resolve_ref(
+            self._make_logger(), "acme/tools", ref="head",
+            version=None, no_verify=False,
+        )
+        assert result == _FAKE_SHA
+
+    def test_sha_returns_as_is(self):
+        """A 40-char hex SHA is returned unchanged."""
+        result = _resolve_ref(
+            self._make_logger(), "acme/tools", ref=_FAKE_SHA,
+            version=None, no_verify=False,
+        )
+        assert result == _FAKE_SHA
+
+    @patch(
+        "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
+        return_value=[
+            RemoteRef(name="refs/heads/main", sha=_FAKE_SHA_B),
+            RemoteRef(name="refs/tags/v1.0.0", sha=_FAKE_SHA),
+        ],
+    )
+    def test_branch_name_resolves_to_sha(self, mock_list):
+        """--ref main (matching refs/heads/main) → warn + resolve."""
+        result = _resolve_ref(
+            self._make_logger(), "acme/tools", ref="main",
+            version=None, no_verify=False,
+        )
+        assert result == _FAKE_SHA_B
+
+    @patch(
+        "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
+        return_value=[
+            RemoteRef(name="refs/heads/main", sha=_FAKE_SHA),
+            RemoteRef(name="refs/tags/v1.0.0", sha=_FAKE_SHA_B),
+        ],
+    )
+    def test_tag_name_returns_as_is(self, mock_list):
+        """--ref v1.0.0 (not a branch) → returned as-is."""
+        result = _resolve_ref(
+            self._make_logger(), "acme/tools", ref="v1.0.0",
+            version=None, no_verify=False,
+        )
+        assert result == "v1.0.0"
+
+
+# ---------------------------------------------------------------------------
+# Integration: plugin add with ref auto-resolution
+# ---------------------------------------------------------------------------
+
+
+class TestPluginAddRefResolution:
+    """Integration tests for ref auto-resolution in ``plugin add``."""
+
+    @patch(
+        "apm_cli.marketplace.ref_resolver.RefResolver.resolve_ref_sha",
+        return_value=_FAKE_SHA,
+    )
+    @patch(
+        "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
+        return_value=[],
+    )
+    def test_add_no_ref_auto_resolves_head(
+        self, mock_list, mock_resolve, runner, tmp_path, monkeypatch,
+    ):
+        """``plugin add <source>`` (no --ref, no --version) pins HEAD SHA."""
+        monkeypatch.chdir(tmp_path)
+        _write_yml(tmp_path)
+        result = runner.invoke(
+            marketplace,
+            ["plugin", "add", "acme/new-tool"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "new-tool" in result.output
+        # Verify the SHA was stored in marketplace.yml.
+        yml_content = (tmp_path / "marketplace.yml").read_text()
+        assert _FAKE_SHA in yml_content
+
+    @patch(
+        "apm_cli.marketplace.ref_resolver.RefResolver.resolve_ref_sha",
+        return_value=_FAKE_SHA,
+    )
+    @patch(
+        "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
+        return_value=[],
+    )
+    def test_add_ref_head_warns_and_resolves(
+        self, mock_list, mock_resolve, runner, tmp_path, monkeypatch,
+    ):
+        """``plugin add <source> --ref HEAD`` warns + stores SHA."""
+        monkeypatch.chdir(tmp_path)
+        _write_yml(tmp_path)
+        result = runner.invoke(
+            marketplace,
+            ["plugin", "add", "acme/new-tool", "--ref", "HEAD"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "mutable ref" in result.output
+        yml_content = (tmp_path / "marketplace.yml").read_text()
+        assert _FAKE_SHA in yml_content
+
+    @patch(
+        "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
+        return_value=[
+            RemoteRef(name="refs/heads/main", sha=_FAKE_SHA),
+        ],
+    )
+    def test_add_ref_branch_warns_and_resolves(
+        self, mock_list, runner, tmp_path, monkeypatch,
+    ):
+        """``plugin add <source> --ref main`` warns + stores branch SHA."""
+        monkeypatch.chdir(tmp_path)
+        _write_yml(tmp_path)
+        result = runner.invoke(
+            marketplace,
+            ["plugin", "add", "acme/new-tool", "--ref", "main"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "mutable ref" in result.output
+        yml_content = (tmp_path / "marketplace.yml").read_text()
+        assert _FAKE_SHA in yml_content
+
+    def test_add_ref_sha_stores_as_is(
+        self, runner, tmp_path, monkeypatch,
+    ):
+        """``plugin add <source> --ref <sha>`` stores SHA directly."""
+        monkeypatch.chdir(tmp_path)
+        _write_yml(tmp_path)
+        result = runner.invoke(
+            marketplace,
+            [
+                "plugin", "add", "acme/new-tool",
+                "--ref", _FAKE_SHA, "--no-verify",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        yml_content = (tmp_path / "marketplace.yml").read_text()
+        assert _FAKE_SHA in yml_content
+
+
+# ---------------------------------------------------------------------------
+# Integration: plugin set with ref auto-resolution
+# ---------------------------------------------------------------------------
+
+
+class TestPluginSetRefResolution:
+    """Integration tests for ref auto-resolution in ``plugin set``."""
+
+    @patch(
+        "apm_cli.marketplace.ref_resolver.RefResolver.resolve_ref_sha",
+        return_value=_FAKE_SHA,
+    )
+    @patch(
+        "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
+        return_value=[],
+    )
+    def test_set_ref_head_resolves(
+        self, mock_list, mock_resolve, runner, tmp_path, monkeypatch,
+    ):
+        """``plugin set <name> --ref HEAD`` resolves to SHA."""
+        monkeypatch.chdir(tmp_path)
+        _write_yml(tmp_path)
+        result = runner.invoke(
+            marketplace,
+            ["plugin", "set", "existing-package", "--ref", "HEAD"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Updated" in result.output
+
+    @patch(
+        "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
+        return_value=[
+            RemoteRef(name="refs/heads/develop", sha=_FAKE_SHA_B),
+        ],
+    )
+    def test_set_ref_branch_resolves(
+        self, mock_list, runner, tmp_path, monkeypatch,
+    ):
+        """``plugin set <name> --ref develop`` resolves branch to SHA."""
+        monkeypatch.chdir(tmp_path)
+        _write_yml(tmp_path)
+        result = runner.invoke(
+            marketplace,
+            ["plugin", "set", "existing-package", "--ref", "develop"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Updated" in result.output
+
+    def test_set_ref_sha_stores_directly(
+        self, runner, tmp_path, monkeypatch,
+    ):
+        """``plugin set <name> --ref <sha>`` stores SHA without network."""
+        monkeypatch.chdir(tmp_path)
+        _write_yml(tmp_path)
+        result = runner.invoke(
+            marketplace,
+            ["plugin", "set", "existing-package", "--ref", _FAKE_SHA],
+        )
+        assert result.exit_code == 0, result.output
+
+    def test_set_ref_nonexistent_package_exits(
+        self, runner, tmp_path, monkeypatch,
+    ):
+        """``plugin set <unknown> --ref HEAD`` errors on missing package."""
+        monkeypatch.chdir(tmp_path)
+        _write_yml(tmp_path)
+        result = runner.invoke(
+            marketplace,
+            ["plugin", "set", "nonexistent", "--ref", "HEAD"],
+        )
+        assert result.exit_code == 2
+        assert "not found" in result.output
