@@ -1,7 +1,14 @@
 """MCP dependency model."""
 
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
+
+from apm_cli.utils.path_security import validate_path_segments
+
+_NAME_REGEX = re.compile(r"^[a-zA-Z0-9@][a-zA-Z0-9._@/:=-]{0,127}$")
+_ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
 
 
 @dataclass
@@ -28,7 +35,9 @@ class MCPDependency:
     @classmethod
     def from_string(cls, s: str) -> "MCPDependency":
         """Create an MCPDependency from a plain string (registry reference)."""
-        return cls(name=s)
+        instance = cls(name=s)
+        instance.validate(strict=False)
+        return instance
 
     @classmethod
     def from_dict(cls, d: dict) -> "MCPDependency":
@@ -57,7 +66,9 @@ class MCPDependency:
         )
 
         if instance.registry is False:
-            instance.validate()
+            instance.validate(strict=True)
+        else:
+            instance.validate(strict=False)
 
         return instance
 
@@ -110,10 +121,44 @@ class MCPDependency:
             parts.append(f"command={self.command!r}")
         return f"MCPDependency({', '.join(parts)})"
 
-    def validate(self) -> None:
-        """Validate the dependency. Raises ValueError on invalid state."""
+    def validate(self, strict: bool = True) -> None:
+        """Validate the dependency. Raises ValueError on invalid state.
+
+        Universal hardening checks (name allowlist, URL scheme, header CRLF,
+        command path-traversal) always run. Self-defined-only checks
+        (transport required, stdio command-required, http/sse url required)
+        run only when ``strict=True``.
+        """
+        # ---- Universal hardening (always) ----
         if not self.name:
             raise ValueError("MCP dependency 'name' must not be empty")
+        if not _NAME_REGEX.match(self.name):
+            raise ValueError(
+                f"Invalid MCP name '{self.name}': must match "
+                f"^[a-zA-Z0-9@][a-zA-Z0-9._@/:=-]{{0,127}}$"
+            )
+        if self.url is not None:
+            scheme = urlparse(self.url).scheme.lower()
+            if scheme not in _ALLOWED_URL_SCHEMES:
+                raise ValueError(
+                    f"Invalid --url '{self.url}': scheme must be http or https"
+                )
+        if self.headers:
+            for k, v in self.headers.items():
+                k_str = str(k) if k is not None else ""
+                v_str = str(v) if v is not None else ""
+                if "\r" in k_str or "\n" in k_str or "\r" in v_str or "\n" in v_str:
+                    raise ValueError(
+                        f"Invalid header '{k_str}={v_str}': control characters "
+                        f"(CR/LF) not allowed in keys or values"
+                    )
+        if self.command is not None:
+            validate_path_segments(self.command, context="MCP command")
+
+        if not strict:
+            return
+
+        # ---- Self-defined-only checks (strict=True) ----
         if self.transport and self.transport not in self._VALID_TRANSPORTS:
             raise ValueError(
                 f"MCP dependency '{self.name}' has unsupported transport "
