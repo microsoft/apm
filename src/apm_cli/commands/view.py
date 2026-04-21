@@ -243,6 +243,113 @@ def display_package_info(
         sys.exit(1)
 
 
+def _display_marketplace_plugin(
+    plugin_name: str,
+    marketplace_name: str,
+    logger: CommandLogger,
+) -> None:
+    """Display metadata for a marketplace plugin.
+
+    Fetches the marketplace manifest, finds the plugin, and renders
+    its entry information (name, version, description, source).
+    """
+    from ..marketplace.errors import MarketplaceFetchError
+    from ..marketplace.models import MarketplaceSource
+    from ..marketplace.registry import get_marketplace_by_name
+    from ..marketplace.client import fetch_or_cache
+
+    # -- Fetch marketplace & plugin --
+    try:
+        source: MarketplaceSource = get_marketplace_by_name(marketplace_name)
+    except Exception as exc:
+        logger.error(str(exc))
+        sys.exit(1)
+
+    try:
+        manifest = fetch_or_cache(source)
+    except MarketplaceFetchError as exc:
+        logger.error(str(exc))
+        logger.progress("Check your network connection and try again.")
+        sys.exit(1)
+
+    plugin = manifest.find_plugin(plugin_name)
+    if plugin is None:
+        from ..marketplace.errors import PluginNotFoundError as _PNF
+
+        logger.error(str(_PNF(plugin_name, marketplace_name)))
+        sys.exit(1)
+
+    # -- Build info lines --
+    title = f"Plugin: {plugin.name} (marketplace: {marketplace_name})"
+
+    # Resolve canonical reference for display
+    resolved_display = None
+    try:
+        from ..marketplace.resolver import resolve_marketplace_plugin
+
+        canonical_str, _resolved = resolve_marketplace_plugin(
+            plugin_name, marketplace_name, plugin,
+        )
+        resolved_display = canonical_str
+    except Exception:
+        pass
+
+    # Determine source display
+    source_display = "--"
+    if isinstance(plugin.source, dict):
+        src_type = plugin.source.get("type", "") or plugin.source.get("source", "")
+        repo = plugin.source.get("repo", "") or plugin.source.get("url", "")
+        ref = plugin.source.get("ref", "")
+        parts = [s for s in [src_type, repo] if s]
+        source_display = " / ".join(parts)
+        if ref:
+            source_display += f" @ {ref}"
+    elif isinstance(plugin.source, str):
+        source_display = plugin.source
+
+    try:
+        from rich.console import Console
+        from rich.panel import Panel
+
+        console = Console()
+        lines = []
+        lines.append(f"[bold]Name:[/bold]        {plugin.name}")
+        if plugin.version:
+            lines.append(f"[bold]Version:[/bold]     {plugin.version}")
+        if plugin.description:
+            lines.append(f"[bold]Description:[/bold] {plugin.description}")
+        lines.append(f"[bold]Source:[/bold]      {source_display}")
+        if resolved_display:
+            lines.append(f"[bold]Resolved:[/bold]    {resolved_display}")
+        if plugin.tags:
+            lines.append(f"[bold]Tags:[/bold]        {', '.join(plugin.tags)}")
+
+        console.print(Panel(
+            "\n".join(lines),
+            title=title,
+            border_style="cyan",
+        ))
+        click.echo("")
+        click.echo(f"  Install: apm install {plugin.name}@{marketplace_name}")
+
+    except ImportError:
+        # Plain-text fallback
+        click.echo(title)
+        click.echo("-" * 60)
+        click.echo(f"  Name:        {plugin.name}")
+        if plugin.version:
+            click.echo(f"  Version:     {plugin.version}")
+        if plugin.description:
+            click.echo(f"  Description: {plugin.description}")
+        click.echo(f"  Source:      {source_display}")
+        if resolved_display:
+            click.echo(f"  Resolved:    {resolved_display}")
+        if plugin.tags:
+            click.echo(f"  Tags:        {', '.join(plugin.tags)}")
+        click.echo("")
+        click.echo(f"  Install: apm install {plugin.name}@{marketplace_name}")
+
+
 def display_versions(package: str, logger: CommandLogger) -> None:
     """Query and display available remote versions (tags/branches).
 
@@ -251,7 +358,21 @@ def display_versions(package: str, logger: CommandLogger) -> None:
     ``DependencyReference``, queries remote refs via
     ``GitHubPackageDownloader.list_remote_refs``, and renders the result
     as a Rich table (with a plain-text fallback).
+
+    When *package* matches the ``NAME@MARKETPLACE`` pattern, the
+    marketplace manifest is fetched instead and the plugin's marketplace
+    metadata is displayed.
     """
+    # -- Marketplace path: NAME@MARKETPLACE --
+    from ..marketplace.resolver import parse_marketplace_ref
+
+    marketplace_ref = parse_marketplace_ref(package)
+    if marketplace_ref is not None:
+        plugin_name, marketplace_name, _version_spec = marketplace_ref
+        _display_marketplace_plugin(plugin_name, marketplace_name, logger)
+        return
+
+    # -- Git-based path (unchanged) --
     try:
         dep_ref = DependencyReference.parse(package)
     except ValueError as exc:
@@ -348,6 +469,15 @@ def view(package: str, field: Optional[str], global_: bool):
         if field == "versions":
             display_versions(package, logger)
             return
+
+    # --- marketplace ref without explicit field -> show versions ---
+    from ..marketplace.resolver import parse_marketplace_ref
+
+    marketplace_ref = parse_marketplace_ref(package)
+    if marketplace_ref is not None:
+        plugin_name, marketplace_name, _version_spec = marketplace_ref
+        _display_marketplace_plugin(plugin_name, marketplace_name, logger)
+        return
 
     # --- default: show local metadata ---
     scope = InstallScope.USER if global_ else InstallScope.PROJECT

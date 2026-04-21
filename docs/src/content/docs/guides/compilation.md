@@ -31,13 +31,20 @@ apm compile                    # Auto-detects target from project structure
 apm compile --target copilot   # Force GitHub Copilot, Cursor, Gemini
 apm compile --target codex     # Force Codex CLI
 apm compile --target claude    # Force Claude Code, Claude Desktop
+apm compile -t claude,copilot  # Multiple targets (comma-separated)
 ```
 
 You can set a persistent target in `apm.yml`:
 ```yaml
 name: my-project
 version: 1.0.0
-target: copilot  # or vscode, claude, codex, or all
+target: copilot  # single target
+```
+
+```yaml
+name: my-project
+version: 1.0.0
+target: [claude, copilot]  # multiple targets -- only these are compiled
 ```
 
 ### Output Files

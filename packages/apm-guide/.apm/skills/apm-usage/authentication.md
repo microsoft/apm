@@ -97,6 +97,28 @@ apm install --verbose your-org/package
 export APM_GIT_CREDENTIAL_TIMEOUT=120
 ```
 
+### Custom-port hosts and per-port credentials
+
+Self-hosted Git instances on non-standard ports (e.g. Bitbucket Datacenter
+on port 7999) are now first-class. APM sends `host=<host>:<port>` to
+`git credential fill` per the [`gitcredentials(7)`](https://git-scm.com/docs/gitcredentials)
+protocol; the credential cache and token resolution are also keyed by
+`(host, port)` so distinct PATs on the same hostname do not collide.
+
+Whether the helper actually returns per-port credentials depends on the
+backend:
+
+| Helper | Honors port-in-host? |
+|---|---|
+| git-credential-manager (GCM) | Yes |
+| macOS Keychain (`osxkeychain`) | Yes (stores full `host:port` as key) |
+| `libsecret` (Linux) | Yes (port in URI) |
+| `gh auth git-credential` | No -- but only used for GitHub hosts, which do not use custom ports |
+
+If APM resolves the wrong credential for a custom-port host, confirm your
+helper keys by `host:port`; otherwise either switch helpers or store the
+credential under a fully qualified `https://<host>:<port>/` URL.
+
 ### SSH connection hangs on corporate/VPN networks
 
 APM tries SSH as a fallback when HTTPS auth is not available. On networks

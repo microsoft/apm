@@ -572,3 +572,120 @@ class TestInfoAlias(_InfoCmdBase):
             stripped = line.strip()
             if stripped.startswith("info "):
                 pytest.fail(f"'info' should be hidden but found in help: {line}")
+
+
+# ------------------------------------------------------------------
+# B4: ``apm view plugin@marketplace`` without ``versions`` field
+# ------------------------------------------------------------------
+
+
+class TestViewMarketplaceNoField(_InfoCmdBase):
+    """``apm view plugin@marketplace`` (no field) shows marketplace plugin."""
+
+    def test_marketplace_ref_shows_plugin(self):
+        """``apm view plugin@mkt`` routes to _display_marketplace_plugin."""
+        from apm_cli.marketplace.models import (
+            MarketplaceManifest,
+            MarketplacePlugin,
+            MarketplaceSource,
+        )
+
+        plugin = MarketplacePlugin(
+            name="my-plugin",
+            source={"type": "github", "repo": "acme/plugin", "ref": "main"},
+            version="2.0.0",
+        )
+        manifest = MarketplaceManifest(name="acme-tools", plugins=(plugin,))
+        source = MarketplaceSource(name="acme-tools", owner="acme", repo="marketplace")
+
+        with patch(
+            "apm_cli.marketplace.registry.get_marketplace_by_name",
+            return_value=source,
+        ), patch(
+            "apm_cli.marketplace.client.fetch_or_cache",
+            return_value=manifest,
+        ):
+            with _force_rich_fallback():
+                result = self.runner.invoke(
+                    cli, ["view", "my-plugin@acme-tools"]
+                )
+
+        assert result.exit_code == 0
+        assert "my-plugin" in result.output
+        assert "acme-tools" in result.output
+
+    def test_marketplace_ref_does_not_require_apm_modules(self):
+        """``apm view plugin@mkt`` works without apm_modules/ directory."""
+        from apm_cli.marketplace.models import (
+            MarketplaceManifest,
+            MarketplacePlugin,
+            MarketplaceSource,
+        )
+
+        plugin = MarketplacePlugin(
+            name="my-plugin",
+            source={"type": "github", "repo": "acme/plugin", "ref": "main"},
+            version="1.0.0",
+        )
+        manifest = MarketplaceManifest(name="acme-tools", plugins=(plugin,))
+        source = MarketplaceSource(name="acme-tools", owner="acme", repo="marketplace")
+
+        with self._chdir_tmp():
+            # No apm_modules/ -- should still succeed
+            with patch(
+                "apm_cli.marketplace.registry.get_marketplace_by_name",
+                return_value=source,
+            ), patch(
+                "apm_cli.marketplace.client.fetch_or_cache",
+                return_value=manifest,
+            ):
+                with _force_rich_fallback():
+                    result = self.runner.invoke(
+                        cli, ["view", "my-plugin@acme-tools"]
+                    )
+
+        assert result.exit_code == 0
+
+    def test_non_marketplace_ref_still_uses_local_path(self):
+        """``apm view org/repo`` still falls through to local metadata lookup."""
+        with self._chdir_tmp() as tmp:
+            self._make_package(
+                tmp, "myorg", "myrepo", version="3.0.0",
+            )
+            os.chdir(tmp)
+            with _force_rich_fallback():
+                result = self.runner.invoke(cli, ["view", "myorg/myrepo"])
+
+        assert result.exit_code == 0
+        assert "3.0.0" in result.output
+
+    def test_marketplace_ref_with_version_fragment(self):
+        """``apm view plugin@mkt#ref`` (no field) shows plugin info."""
+        from apm_cli.marketplace.models import (
+            MarketplaceManifest,
+            MarketplacePlugin,
+            MarketplaceSource,
+        )
+
+        plugin = MarketplacePlugin(
+            name="my-plugin",
+            source={"type": "github", "repo": "acme/plugin", "ref": "v1.0.0"},
+            version="1.0.0",
+        )
+        manifest = MarketplaceManifest(name="acme-tools", plugins=(plugin,))
+        source = MarketplaceSource(name="acme-tools", owner="acme", repo="marketplace")
+
+        with patch(
+            "apm_cli.marketplace.registry.get_marketplace_by_name",
+            return_value=source,
+        ), patch(
+            "apm_cli.marketplace.client.fetch_or_cache",
+            return_value=manifest,
+        ):
+            with _force_rich_fallback():
+                result = self.runner.invoke(
+                    cli, ["view", "my-plugin@acme-tools"]
+                )
+
+        assert result.exit_code == 0
+        assert "1.0.0" in result.output

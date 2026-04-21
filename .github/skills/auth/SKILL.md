@@ -22,3 +22,7 @@ description: >
 ## Key rule
 
 All auth flows MUST go through `AuthResolver`. No direct `os.getenv()` for token variables in application code.
+
+## Canonical reference
+
+The full per-org -> global -> credential-fill -> fallback resolution flow is in [`docs/src/content/docs/getting-started/authentication.md`](../../../docs/src/content/docs/getting-started/authentication.md) (mermaid flowchart). Treat it as the single source of truth; if behavior diverges, fix the diagram in the same PR.
