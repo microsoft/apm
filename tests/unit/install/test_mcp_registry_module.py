@@ -54,9 +54,10 @@ class TestResolveRegistryUrl:
         resolve_registry_url(None, logger=logger)
         assert logger.progress.called
         msg = logger.progress.call_args.args[0]
-        # Use urlparse to check host exactly (not substring) per CodeQL guidance.
-        hosts = {urlparse(tok).hostname for tok in msg.split() if "://" in tok}
-        assert "poisoned.example.com" in hosts
+        # Extract the URL token and compare hostname exactly (urlparse, not substring).
+        urls = [tok for tok in msg.split() if "://" in tok]
+        assert len(urls) == 1
+        assert urlparse(urls[0]).hostname == "poisoned.example.com"
         assert "MCP_REGISTRY_URL" in msg
 
     def test_flag_overrides_env_emits_diagnostic(self, monkeypatch):
@@ -67,8 +68,10 @@ class TestResolveRegistryUrl:
         assert logger.progress.called
         msg = logger.progress.call_args.args[0]
         assert "overrides MCP_REGISTRY_URL" in msg
-        hosts = {urlparse(tok.strip("()")).hostname for tok in msg.split() if "://" in tok}
-        assert "env.example.com" in hosts
+        urls = [urlparse(tok.strip("()")).hostname for tok in msg.split() if "://" in tok]
+        # Hostname-set equality avoids substring matching that CodeQL flags.
+        # Diagnostic mentions only the overridden env URL, not the flag value.
+        assert set(urls) == {"env.example.com"}
 
     def test_default_path_silent(self, monkeypatch):
         """Defaults are quiet; no diagnostic when neither source is set."""
