@@ -1097,6 +1097,17 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         )
 
         if mcp_name is not None:
+            # MCP install routing block. This branch has accreted
+            # significantly (--mcp / --registry / --transport / --env /
+            # --header / --mcp-version + dry-run validation + chaos
+            # fixes). It is the next extraction target.
+            #
+            # WHEN THIS BLOCK GROWS: do NOT just trim cosmetically to
+            # stay under the LOC budget. Engage the python-architecture
+            # skill (.github/skills/python-architecture/SKILL.md) and
+            # propose extracting _maybe_handle_mcp_install() into
+            # apm_cli/install/ with a proper contract and tests.
+            # Modularity gets us back under budget; trimming hides debt.
             from ..core.scope import (
                 InstallScope, get_apm_dir, get_manifest_path,
             )
