@@ -25,7 +25,7 @@ from ..drift import (
 from ..models.results import InstallResult
 from ..core.command_logger import InstallLogger, _ValidationOutcome
 from ..core.target_detection import TargetParamType
-from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success
+from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, _rich_warning
 from ..utils.diagnostics import DiagnosticCollector
 
 
@@ -78,6 +78,41 @@ from ._helpers import (
 set = builtins.set
 list = builtins.list
 dict = builtins.dict
+
+
+# ---------------------------------------------------------------------------
+# Argv `--` boundary helpers (W3 --mcp flag)
+# ---------------------------------------------------------------------------
+#
+# Click's ``nargs=-1`` silently swallows the ``--`` separator and merges
+# everything after it into the positional argument tuple.  For
+# ``apm install --mcp foo -- npx -y srv`` we cannot distinguish that from
+# ``apm install --mcp foo npx -y srv`` once Click is done parsing.
+#
+# We therefore inspect ``sys.argv`` ourselves to detect the boundary and
+# extract the post-``--`` portion as the stdio command argv.  ``--`` IS
+# present in ``sys.argv`` even though Click strips it from the parsed
+# arguments.  The pre-``--`` portion is used to flag conflicts (E1).
+#
+# ``_get_invocation_argv`` exists as a tiny seam so tests using
+# ``CliRunner`` (which does not modify ``sys.argv``) can patch it without
+# resorting to ``monkeypatch.setattr('sys.argv', ...)``.
+
+
+def _get_invocation_argv():
+    """Return the process invocation argv. Wrapped for test injection."""
+    return sys.argv
+
+
+def _split_argv_at_double_dash(argv):
+    """Return ``(clean_argv, command_argv_tuple)``.
+
+    If ``--`` is not present, ``command_argv_tuple`` is ``()``.
+    """
+    if "--" not in argv:
+        return argv, ()
+    idx = argv.index("--")
+    return argv[:idx], builtins.tuple(argv[idx + 1:])
 
 # AuthResolver has no optional deps (stdlib + internal utils only), so it must
 # be imported unconditionally here -- NOT inside the APM_DEPS_AVAILABLE guard.
@@ -339,8 +374,494 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
 
 
 # ---------------------------------------------------------------------------
-# Install command
+# MCP CLI helpers (W3 --mcp flag)
 # ---------------------------------------------------------------------------
+
+# F7 shell-expansion residue scan: tokens that would be evaluated by a real
+# shell but are NOT shell-evaluated when an MCP stdio server runs through
+# ``execve``-style spawning.  Warn so users do not assume shell semantics.
+_SHELL_METACHAR_TOKENS = ("$(", "`", ";", "&&", "||", "|", ">>", ">", "<")
+
+# F5 SSRF: well-known cloud metadata endpoints surfaced as constants for
+# explicit allow/deny review.
+_METADATA_HOSTS = {
+    "169.254.169.254",   # AWS / Azure / GCP IMDS
+    "100.100.100.200",   # Alibaba Cloud
+    "fd00:ec2::254",     # AWS IPv6 IMDS
+}
+
+
+def _parse_kv_pairs(pairs, *, flag_name):
+    """Parse a tuple of ``KEY=VALUE`` strings into a dict.
+
+    Empty input returns ``{}``.  Raises :class:`click.UsageError` (exit
+    code 2) on a missing ``=`` separator or empty key.
+    """
+    result: builtins.dict = {}
+    for raw in pairs or ():
+        if "=" not in raw:
+            raise click.UsageError(
+                f"Invalid {flag_name} '{raw}': expected KEY=VALUE"
+            )
+        key, _, value = raw.partition("=")
+        if not key:
+            raise click.UsageError(
+                f"Invalid {flag_name} '{raw}': key cannot be empty"
+            )
+        result[key] = value
+    return result
+
+
+def _parse_env_pairs(pairs):
+    """Parse ``--env KEY=VAL`` repetitions into a dict."""
+    return _parse_kv_pairs(pairs, flag_name="--env")
+
+
+def _parse_header_pairs(pairs):
+    """Parse ``--header KEY=VAL`` repetitions into a dict."""
+    return _parse_kv_pairs(pairs, flag_name="--header")
+
+
+def _build_mcp_entry(name, *, transport, url, env, headers, version, command_argv):
+    """Pure builder. Return ``(entry, is_self_defined)``.
+
+    Routing:
+    - ``command_argv`` non-empty -> stdio self-defined dict.
+    - ``url`` set -> remote self-defined dict (transport defaults to http).
+    - else -> registry shorthand (bare string when no overlays, dict when
+      ``version`` is set).
+
+    Round-trips through :class:`MCPDependency.from_dict` (or
+    :meth:`from_string`) for the validation chokepoint.  Validation
+    failures surface as :class:`ValueError` from the model.
+    """
+    from ..models.dependency.mcp import MCPDependency
+
+    if command_argv:
+        # Self-defined stdio
+        argv = builtins.list(command_argv)
+        entry: builtins.dict = {
+            "name": name,
+            "registry": False,
+            "transport": "stdio",
+            "command": argv[0],
+        }
+        if len(argv) > 1:
+            entry["args"] = argv[1:]
+        if env:
+            entry["env"] = builtins.dict(env)
+        MCPDependency.from_dict(entry)
+        return entry, True
+
+    if url:
+        # Self-defined remote
+        chosen_transport = transport or "http"
+        entry = {
+            "name": name,
+            "registry": False,
+            "transport": chosen_transport,
+            "url": url,
+        }
+        if headers:
+            entry["headers"] = builtins.dict(headers)
+        MCPDependency.from_dict(entry)
+        return entry, True
+
+    # Registry shorthand
+    if version:
+        entry = {"name": name, "version": version}
+        if transport:
+            entry["transport"] = transport
+        MCPDependency.from_dict(entry)
+        return entry, False
+
+    if transport:
+        entry = {"name": name, "transport": transport}
+        MCPDependency.from_dict(entry)
+        return entry, False
+
+    # Bare string registry shorthand -- no overlays at all.
+    MCPDependency.from_string(name)
+    return name, False
+
+
+def _diff_entry(old, new) -> builtins.list:
+    """Return a short list of ``key: old -> new`` strings for human display."""
+    if isinstance(old, str) and isinstance(new, str):
+        if old == new:
+            return []
+        return [f"  {old} -> {new}"]
+    old_d = {"name": old} if isinstance(old, str) else (old or {})
+    new_d = {"name": new} if isinstance(new, str) else (new or {})
+    keys = builtins.list(old_d.keys()) + [k for k in new_d.keys() if k not in old_d]
+    diff: builtins.list = []
+    for k in keys:
+        ov = old_d.get(k, "<absent>")
+        nv = new_d.get(k, "<absent>")
+        if ov != nv:
+            diff.append(f"  {k}: {ov!r} -> {nv!r}")
+    return diff
+
+
+def _add_mcp_to_apm_yml(name, entry, *, dev=False, force=False, project_root=None,
+                        manifest_path=None, logger=None):
+    """Persist ``entry`` to ``apm.yml`` under ``dependencies.mcp`` (or
+    ``devDependencies.mcp`` when ``dev=True``).
+
+    Idempotency policy (W3 R3, security F8):
+    - Existing entry + ``--force``: replace silently, return
+      ``("replaced", diff)``.
+    - Existing entry + interactive TTY: prompt, return
+      ``("replaced", diff)`` or ``("skipped", diff)``.
+    - Existing entry + non-TTY (CI): raise :class:`click.UsageError` so
+      the CLI exits with code 2.
+    - New entry: append, return ``("added", None)``.
+    """
+    from ..utils.yaml_io import dump_yaml, load_yaml
+
+    apm_yml_path = manifest_path or Path(APM_YML_FILENAME)
+    if not apm_yml_path.exists():
+        raise click.UsageError(
+            f"{apm_yml_path}: no apm.yml found. Run 'apm init' first."
+        )
+    data = load_yaml(apm_yml_path) or {}
+
+    section_name = "devDependencies" if dev else "dependencies"
+    if section_name not in data or not isinstance(data[section_name], builtins.dict):
+        data[section_name] = {}
+    if "mcp" not in data[section_name] or data[section_name]["mcp"] is None:
+        data[section_name]["mcp"] = []
+    mcp_list = data[section_name]["mcp"]
+    if not isinstance(mcp_list, builtins.list):
+        raise click.UsageError(
+            f"{apm_yml_path}: '{section_name}.mcp' must be a list"
+        )
+
+    existing_idx = None
+    existing_entry = None
+    for i, item in enumerate(mcp_list):
+        item_name = item if isinstance(item, str) else (
+            item.get("name") if isinstance(item, builtins.dict) else None
+        )
+        if item_name == name:
+            existing_idx = i
+            existing_entry = item
+            break
+
+    status = "added"
+    diff = None
+    if existing_idx is not None:
+        diff = _diff_entry(existing_entry, entry)
+        if not diff:
+            return "skipped", []
+        is_tty = sys.stdin.isatty() and sys.stdout.isatty()
+        if force:
+            mcp_list[existing_idx] = entry
+            status = "replaced"
+        elif is_tty:
+            if logger:
+                logger.warning(
+                    f"MCP server '{name}' already exists. Replacement diff:"
+                )
+                for line in diff:
+                    logger.verbose_detail(line)
+            else:
+                _rich_warning(
+                    f"MCP server '{name}' already exists. Replacement diff:"
+                )
+                for line in diff:
+                    _rich_echo(line, color="dim")
+            if not click.confirm(f"Replace MCP server '{name}'?", default=False):
+                return "skipped", diff
+            mcp_list[existing_idx] = entry
+            status = "replaced"
+        else:
+            raise click.UsageError(
+                f"MCP server '{name}' already exists in {apm_yml_path}. "
+                f"Use --force to replace (non-interactive)."
+            )
+    else:
+        mcp_list.append(entry)
+
+    data[section_name]["mcp"] = mcp_list
+    dump_yaml(data, apm_yml_path)
+    return status, diff
+
+
+def _is_internal_or_metadata_host(host: str) -> bool:
+    """Return True when ``host`` resolves/parses to an internal IP.
+
+    Covers cloud metadata IPs, loopback, link-local, and RFC1918 ranges.
+    Defensive against ``ValueError``/``OSError`` from name resolution.
+    """
+    import ipaddress
+    import socket
+
+    if not host:
+        return False
+    if host in _METADATA_HOSTS:
+        return True
+    candidates: builtins.list = [host]
+    # Strip brackets from IPv6 literals.
+    bare = host.strip("[]")
+    if bare != host:
+        candidates.append(bare)
+    # Resolve hostname when it is not already an IP literal.
+    try:
+        ipaddress.ip_address(bare)
+    except ValueError:
+        try:
+            resolved = socket.gethostbyname(bare)
+            candidates.append(resolved)
+        except (OSError, UnicodeError):
+            pass
+    for c in candidates:
+        try:
+            ip = ipaddress.ip_address(c)
+        except ValueError:
+            continue
+        if ip.is_loopback or ip.is_link_local or ip.is_private:
+            return True
+        if c in _METADATA_HOSTS:
+            return True
+    return False
+
+
+def _warn_ssrf_url(url, logger):
+    """F5: warn (do not block) when URL points at an internal/metadata host."""
+    if not url:
+        return
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(url).hostname or ""
+    except (ValueError, TypeError):
+        return
+    if _is_internal_or_metadata_host(host):
+        logger.warning(
+            f"URL '{url}' points to an internal or metadata address; "
+            f"verify intent before installing."
+        )
+
+
+def _warn_shell_metachars(env, logger):
+    """F7: warn (do not block) when env values contain shell metacharacters.
+
+    MCP stdio servers spawn via ``execve``-style calls with no shell, so
+    these characters are passed literally rather than evaluated.  Users
+    who think they are setting ``FOO=$(secret)`` will be surprised.
+    """
+    if not env:
+        return
+    for key, value in env.items():
+        sval = "" if value is None else str(value)
+        for tok in _SHELL_METACHAR_TOKENS:
+            if tok in sval:
+                logger.warning(
+                    f"Env value for '{key}' contains shell metacharacter "
+                    f"'{tok}'; reminder these are NOT shell-evaluated."
+                )
+                break
+
+
+# Mapping for E10: which flags require --mcp.  Keyed by attribute-style
+# name so we can read directly from the Click handler locals.
+_MCP_REQUIRED_FLAGS = (
+    ("transport", "--transport"),
+    ("url", "--url"),
+    ("env", "--env"),
+    ("header", "--header"),
+    ("mcp_version", "--mcp-version"),
+)
+
+
+def _validate_mcp_conflicts(
+    *,
+    mcp_name,
+    packages,
+    pre_dash_packages,
+    transport,
+    url,
+    env,
+    headers,
+    mcp_version,
+    command_argv,
+    global_,
+    only,
+    update,
+    use_ssh,
+    use_https,
+    allow_protocol_fallback,
+):
+    """Apply conflict matrix E1-E14.  Raises ``click.UsageError`` on hit."""
+    # E10: flags require --mcp -- run first so users get the right hint.
+    if mcp_name is None:
+        flag_values = {
+            "transport": transport,
+            "url": url,
+            "env": env,
+            "header": headers,
+            "mcp_version": mcp_version,
+        }
+        for attr, label in _MCP_REQUIRED_FLAGS:
+            if flag_values.get(attr):
+                raise click.UsageError(f"{label} requires --mcp")
+        if command_argv:
+            # post-`--` stdio command without --mcp: silently allowed today
+            # (legacy install behaviour).  Do not error.
+            pass
+        return
+
+    # E7/E8: NAME shape.
+    if mcp_name == "":
+        raise click.UsageError("MCP name cannot be empty")
+    if mcp_name.startswith("-"):
+        raise click.UsageError(
+            f"MCP name cannot start with '-'; did you forget a value for --mcp?"
+        )
+
+    # E1: positional packages mixed with --mcp.
+    if pre_dash_packages:
+        raise click.UsageError(
+            "cannot mix --mcp with positional packages"
+        )
+
+    # E2: --global not supported for MCP entries.
+    if global_:
+        raise click.UsageError(
+            "MCP servers are workspace-scoped; --global not supported"
+        )
+
+    # E3: --only apm conflicts with --mcp.
+    if only == "apm":
+        raise click.UsageError("cannot use --only apm with --mcp")
+
+    # E4: transport selection flags do not apply.
+    if use_ssh or use_https or allow_protocol_fallback:
+        raise click.UsageError(
+            "transport selection flags (--ssh/--https/--allow-protocol-fallback) "
+            "don't apply to MCP entries"
+        )
+
+    # E5: --update is for refreshing, not adding.
+    if update:
+        raise click.UsageError("use 'apm update' instead to update MCP entries")
+
+    # E9: --header without --url.
+    if headers and not url:
+        raise click.UsageError("--header requires --url")
+
+    # E11: --url with stdio command.
+    if url and command_argv:
+        raise click.UsageError("cannot specify both --url and a stdio command")
+
+    # E12: --transport stdio with --url.
+    if transport == "stdio" and url:
+        raise click.UsageError("stdio transport doesn't accept --url")
+
+    # E13: remote transports with stdio command.
+    if transport in ("http", "sse", "streamable-http") and command_argv:
+        raise click.UsageError("remote transports don't accept stdio command")
+
+    # E14: --env with --url and no command.
+    if env and url and not command_argv:
+        raise click.UsageError(
+            "--env applies to stdio MCPs; use --header for remote"
+        )
+
+
+def _run_mcp_install(
+    *,
+    mcp_name,
+    transport,
+    url,
+    env_pairs,
+    header_pairs,
+    mcp_version,
+    command_argv,
+    dev,
+    force,
+    runtime,
+    exclude,
+    verbose,
+    logger,
+    manifest_path,
+    apm_dir,
+    scope,
+):
+    """Execute the --mcp install path: validate pairs, build, warn,
+    write to apm.yml, then install via :class:`MCPIntegrator`."""
+    from ..models.dependency.mcp import MCPDependency
+
+    env = _parse_env_pairs(env_pairs)
+    headers = _parse_header_pairs(header_pairs)
+
+    # Build entry (validates through MCPDependency).  Convert ValueError
+    # to UsageError so the CLI exits 2 with the model wording.
+    try:
+        entry, _is_self_defined = _build_mcp_entry(
+            mcp_name,
+            transport=transport,
+            url=url,
+            env=env,
+            headers=headers,
+            version=mcp_version,
+            command_argv=command_argv,
+        )
+    except ValueError as exc:
+        raise click.UsageError(str(exc))
+
+    # F5 + F7 warnings -- do not block.
+    _warn_ssrf_url(url, logger)
+    _warn_shell_metachars(env, logger)
+
+    # Write to apm.yml.
+    status, _diff = _add_mcp_to_apm_yml(
+        mcp_name,
+        entry,
+        dev=dev,
+        force=force,
+        manifest_path=manifest_path,
+        logger=logger,
+    )
+
+    if status == "skipped":
+        logger.progress(f"MCP server '{mcp_name}' unchanged")
+        return
+
+    # Build MCPDependency for install.  ``entry`` may be a bare string.
+    if isinstance(entry, str):
+        dep = MCPDependency.from_string(entry)
+    else:
+        dep = MCPDependency.from_dict(entry)
+
+    # Install just this MCP via the integrator and update lockfile.
+    if APM_DEPS_AVAILABLE:
+        try:
+            _existing_lock = LockFile.read(get_lockfile_path(apm_dir))
+            old_servers = builtins.set(_existing_lock.mcp_servers) if _existing_lock else builtins.set()
+            old_configs = builtins.dict(_existing_lock.mcp_configs) if _existing_lock else {}
+            MCPIntegrator.install(
+                [dep], runtime, exclude, verbose,
+                stored_mcp_configs=old_configs,
+                scope=scope,
+            )
+            new_names = MCPIntegrator.get_server_names([dep])
+            new_configs = MCPIntegrator.get_server_configs([dep])
+            merged_names = old_servers | new_names
+            merged_configs = builtins.dict(old_configs)
+            merged_configs.update(new_configs)
+            MCPIntegrator.update_lockfile(merged_names, mcp_configs=merged_configs)
+        except Exception as exc:  # pragma: no cover -- defensive
+            logger.warning(f"MCP server written to apm.yml but integration failed: {exc}")
+
+    verb = "Replaced" if status == "replaced" else "Added"
+    logger.success(f"{verb} MCP server '{mcp_name}'", symbol="check")
+    if isinstance(entry, builtins.dict):
+        chosen_transport = entry.get("transport") or "registry"
+    else:
+        chosen_transport = "registry"
+    logger.tree_item(f"  transport: {chosen_transport}")
+    logger.tree_item(f"  apm.yml: {manifest_path}")
 
 
 @click.command(
@@ -415,8 +936,46 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
     default=False,
     help="Restore the legacy permissive cross-protocol fallback chain (escape hatch for migrating users; also: APM_ALLOW_PROTOCOL_FALLBACK=1). Caveat: fallback reuses the same port across schemes; on servers that use different SSH and HTTPS ports, omit this flag and pin the dependency with an explicit ssh:// or https:// URL.",
 )
+@click.option(
+    "--mcp",
+    "mcp_name",
+    default=None,
+    help="Add an MCP server entry to apm.yml. Use with --transport, --url, --env, --header, --mcp-version, or post-`--` stdio command.",
+)
+@click.option(
+    "--transport",
+    type=click.Choice(["stdio", "http", "sse"]),
+    default=None,
+    help="MCP transport (stdio, http, sse). Inferred from --url or post-`--` command when omitted.",
+)
+@click.option(
+    "--url",
+    "url",
+    default=None,
+    help="MCP server URL (for http/sse transports).",
+)
+@click.option(
+    "--env",
+    "env_pairs",
+    multiple=True,
+    metavar="KEY=VALUE",
+    help="Environment variable for stdio MCP (repeatable).",
+)
+@click.option(
+    "--header",
+    "header_pairs",
+    multiple=True,
+    metavar="KEY=VALUE",
+    help="HTTP header for remote MCP (repeatable).",
+)
+@click.option(
+    "--mcp-version",
+    "mcp_version",
+    default=None,
+    help="Pin MCP registry entry to a specific version.",
+)
 @click.pass_context
-def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, global_, use_ssh, use_https, allow_protocol_fallback):
+def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, global_, use_ssh, use_https, allow_protocol_fallback, mcp_name, transport, url, env_pairs, header_pairs, mcp_version):
     """Install APM and MCP dependencies from apm.yml (like npm install).
 
     This command automatically detects AI runtimes from your apm.yml scripts and installs
@@ -443,6 +1002,72 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         # scope initialisation below throws).
         is_partial = bool(packages)
         logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=is_partial)
+
+        # ----------------------------------------------------------------
+        # --mcp branch (W3): when --mcp is set, route to the dedicated
+        # MCP-add path.  We compute the post-`--` argv here BEFORE Click's
+        # silent handling: see _split_argv_at_double_dash().
+        # ----------------------------------------------------------------
+        _, command_argv = _split_argv_at_double_dash(_get_invocation_argv())
+        # `packages` from Click already includes the post-`--` items; the
+        # pre-`--` portion is what the user typed as positional packages.
+        if command_argv:
+            split_idx = len(packages) - len(command_argv)
+            if split_idx < 0:
+                split_idx = 0
+            pre_dash_packages = builtins.tuple(packages[:split_idx])
+        else:
+            pre_dash_packages = builtins.tuple(packages)
+
+        _validate_mcp_conflicts(
+            mcp_name=mcp_name,
+            packages=packages,
+            pre_dash_packages=pre_dash_packages,
+            transport=transport,
+            url=url,
+            env=env_pairs,
+            headers=header_pairs,
+            mcp_version=mcp_version,
+            command_argv=command_argv,
+            global_=global_,
+            only=only,
+            update=update,
+            use_ssh=use_ssh,
+            use_https=use_https,
+            allow_protocol_fallback=allow_protocol_fallback,
+        )
+
+        if mcp_name is not None:
+            from ..core.scope import (
+                InstallScope, get_apm_dir, get_manifest_path,
+            )
+            mcp_scope = InstallScope.PROJECT
+            mcp_manifest_path = get_manifest_path(mcp_scope)
+            mcp_apm_dir = get_apm_dir(mcp_scope)
+            if dry_run:
+                logger.dry_run_notice(
+                    f"would add MCP server '{mcp_name}' to {mcp_manifest_path}"
+                )
+                return
+            _run_mcp_install(
+                mcp_name=mcp_name,
+                transport=transport,
+                url=url,
+                env_pairs=env_pairs,
+                header_pairs=header_pairs,
+                mcp_version=mcp_version,
+                command_argv=command_argv,
+                dev=dev,
+                force=force,
+                runtime=runtime,
+                exclude=exclude,
+                verbose=verbose,
+                logger=logger,
+                manifest_path=mcp_manifest_path,
+                apm_dir=mcp_apm_dir,
+                scope=mcp_scope,
+            )
+            return
 
         # Resolve transport selection inputs.
         from ..deps.transport_selection import (
@@ -722,6 +1347,10 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         if not force and apm_diagnostics and apm_diagnostics.has_critical_security:
             sys.exit(1)
 
+    except click.UsageError:
+        # Conflict matrix / argv parser raises UsageError -- let Click
+        # render with exit code 2 and the standard "Usage: ..." prefix.
+        raise
     except Exception as e:
         logger.error(f"Error installing dependencies: {e}")
         if not verbose:

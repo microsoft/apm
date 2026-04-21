@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (BREAKING)
 
+- MCP entry validation hardened (security): names must match `^[a-zA-Z0-9@][a-zA-Z0-9._@/:=-]{0,127}$`, URLs must use `http` or `https` schemes, headers reject CR/LF in keys and values, self-defined stdio commands rejected if they contain path-traversal sequences. Migration: most existing `apm.yml` files unaffected; if you hit `Invalid MCP name`, rename per the documented allowlist regex. (#807)
 - Strict-by-default transport selection: explicit `ssh://`/`https://` URLs no longer silently fall back to the other protocol; shorthand consults `git config url.<base>.insteadOf` and otherwise defaults to HTTPS. Set `APM_ALLOW_PROTOCOL_FALLBACK=1` (or pass `--allow-protocol-fallback`) to restore the legacy permissive chain; cross-protocol retries then emit a `[!]` warning. Closes #328 (#778)
 
 ### Changed
@@ -18,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `apm install --mcp NAME [--transport ...] [--url ...] [--env K=V] [--header K=V] [--mcp-version V] [-- COMMAND ARGS...]` flag for declaratively adding MCP servers to `apm.yml`. Mirrors `apm install` for packages: validates input through `MCPDependency`, writes to `dependencies.mcp` (or `devDependencies.mcp` with `--dev`), and integrates the new server into client adapters. Idempotency policy: in a TTY, prompts before replacing an existing entry; in CI, requires `--force`. Also accessible via `apm mcp install` alias for discoverability. Closes #807
 - `apm install --ssh` / `--https` flags and `APM_GIT_PROTOCOL=ssh|https` env to pick the initial transport for shorthand dependencies (#778)
 - `apm install --allow-protocol-fallback` flag and `APM_ALLOW_PROTOCOL_FALLBACK=1` env as the migration escape hatch for cross-protocol fallback (#778)
 - Add APM Review Panel skill (`.github/skills/apm-review-panel/`) and four new specialist personas (`devx-ux-expert`, `supply-chain-security-expert`, `apm-ceo`, `oss-growth-hacker`) with auto-activating per-persona skills. Routes specialist findings through an APM CEO arbiter for strategic / breaking-change calls, with the OSS growth hacker side-channeling adoption insights via `WIP/growth-strategy.md`. Instrumentation per Handbook Ch. 9 (`The Instrumented Codebase`); PROSE-compliant (thin SKILL.md routers, persona detail lazy-loaded via markdown links, explicit boundaries per persona).
