@@ -360,6 +360,10 @@ Local path dependencies (`./path`, `../path`, `/abs/path`) are rejected at user 
 
 ## MCP Dependency Formats
 
+:::tip[Quick start]
+For the CLI-first walkthrough (`apm install --mcp ...`), see the [MCP Servers guide](../mcp-servers/). This section covers the `apm.yml` manifest format in depth.
+:::
+
 MCP dependencies support three forms: string references, overlay objects, and self-defined servers.
 
 ### String Reference (default)
@@ -390,7 +394,7 @@ mcp:
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | string | Server reference (required) |
-| `transport` | string | `stdio`, `sse`, `http`, or `streamable-http` |
+| `transport` | string | `stdio`, `sse`, `http`, or `streamable-http` (MCP transport names, not URL schemes -- remote variants connect over HTTPS) |
 | `env` | dict | Environment variable overrides |
 | `args` | list or dict | Runtime argument overrides |
 | `version` | string | Pin server version |
@@ -501,6 +505,19 @@ export APM_ALLOW_PROTOCOL_FALLBACK=1   # CI / migration window
 When fallback runs, each cross-protocol retry emits a `[!]` warning naming
 both protocols. Use this to unblock a pipeline while you fix the root
 cause -- not as a long-term setting.
+
+:::caution[Cross-protocol fallback reuses the same port]
+Fallback reuses the dependency's custom port for both schemes. On
+servers that use different ports per protocol (e.g. Bitbucket
+Datacenter: SSH 7999, HTTPS 7990), the off-protocol URL will be
+wrong. APM emits a `[!]` warning before the first clone attempt when
+a custom port is set and fallback is enabled. To avoid cross-protocol
+retries entirely, leave `--allow-protocol-fallback` disabled (strict
+mode) and pin the dependency with an explicit `ssh://...` or
+`https://...` URL in `apm.yml`. If fallback is enabled, APM may still
+try the other protocol even when the URL uses an explicit scheme --
+pinning only hard-stops cross-protocol retries in strict mode.
+:::
 
 For SSH key selection (ssh-agent, `~/.ssh/config`) and HTTPS token
 resolution, see

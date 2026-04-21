@@ -28,6 +28,10 @@ dependencies:
     - github/awesome-copilot/agents/api-architect.agent.md
     # A full APM package with instructions, skills, prompts, hooks...
     - microsoft/apm-sample-package#v1.0.0
+  mcp:
+    # MCP servers -- installed into every detected client
+    - name: io.github.github/github-mcp-server
+      transport: http   # MCP transport name, not URL scheme -- connects over HTTPS
 ```
 
 ```bash
@@ -37,7 +41,7 @@ apm install    # every agent is configured
 
 ## Highlights
 
-- **[One manifest for everything](https://microsoft.github.io/apm/reference/primitive-types/)** — instructions, skills, prompts, agents, hooks, plugins, MCP servers
+- **[One manifest for everything](https://microsoft.github.io/apm/reference/primitive-types/)** — instructions, skills, prompts, agents, hooks, plugins, and [MCP servers](https://microsoft.github.io/apm/guides/mcp-servers/) declared in `apm.yml` and deployed across every client on install
 - **[Install from anywhere](https://microsoft.github.io/apm/guides/dependencies/)** — GitHub, GitLab, Bitbucket, Azure DevOps, GitHub Enterprise, any git host
 - **[Transitive dependencies](https://microsoft.github.io/apm/guides/dependencies/)** — packages can depend on packages; APM resolves the full tree
 - **[Content security](https://microsoft.github.io/apm/enterprise/security/)** — `apm audit` scans for hidden Unicode; `apm install` blocks compromised packages before agents read them
@@ -98,6 +102,14 @@ Or install from a marketplace:
 apm marketplace add github/awesome-copilot
 apm install azure-cloud-development@awesome-copilot
 ```
+
+Or add an MCP server (wired into Copilot, Claude, Cursor, Codex, and OpenCode):
+
+```bash
+apm install --mcp io.github.github/github-mcp-server --transport http   # connects over HTTPS
+```
+
+> *Codex CLI currently does not support remote MCP servers; the install will skip Codex with a notice. Omit `--transport http` to use the local Docker variant on Codex (requires `GITHUB_PERSONAL_ACCESS_TOKEN`).*
 
 See the **[Getting Started guide](https://microsoft.github.io/apm/getting-started/quick-start/)** for the full walkthrough.
 

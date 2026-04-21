@@ -33,6 +33,7 @@ def validate_path_segments(
     *,
     context: str = "path",
     reject_empty: bool = False,
+    allow_current_dir: bool = False,
 ) -> None:
     """Reject path strings containing traversal sequences.
 
@@ -48,14 +49,20 @@ def validate_path_segments(
         Human-readable label for error messages.
     reject_empty : bool
         If *True*, also reject empty segments.
+    allow_current_dir : bool
+        If *True*, ``.`` segments are accepted (e.g. for shell command
+        strings like ``./bin/my-server`` where "here" is meaningful).
+        ``..`` is still rejected.  Defaults to *False* so the strict
+        rule applies to the dependency / virtual-path call sites.
 
     Raises
     ------
     PathTraversalError
         If any segment fails validation.
     """
+    reject = {".."} if allow_current_dir else {".", ".."}
     for segment in path_str.replace("\\", "/").split("/"):
-        if segment in (".", ".."):
+        if segment in reject:
             raise PathTraversalError(
                 f"Invalid {context} '{path_str}': "
                 f"segment '{segment}' is a traversal sequence"

@@ -187,6 +187,131 @@ class TestMCPDependencyModel:
 
 
 # ---------------------------------------------------------------------------
+# Universal hardening checks (strict=False AND strict=True)
+# ---------------------------------------------------------------------------
+class TestMCPDependencyHardening:
+
+    # -- NAME allowlist regex -----------------------------------------------
+
+    @pytest.mark.parametrize("name", [
+        "@scope/name",
+        "name-dash",
+        "name.dot",
+        "name_under",
+        "name123",
+        "a",
+        "org/repo",
+        "io.github.github/github-mcp-server",
+        "microsoft/azure-devops-mcp",
+        "_corp-analytics",
+        "_internal",
+    ])
+    def test_name_regex_accepts_valid(self, name):
+        MCPDependency.from_string(name)  # must not raise
+
+    @pytest.mark.parametrize("name", [
+        "",
+        "-leading",
+        ".leading",
+        "a" * 129,
+        "with space",
+        "with\x00null",
+        "with\nnewline",
+        "with;semi",
+        "with$dollar",
+        "n\u00e4me",  # non-ASCII
+    ])
+    def test_name_regex_rejects_invalid(self, name):
+        with pytest.raises(ValueError):
+            MCPDependency.from_string(name)
+
+    # -- URL scheme allowlist -----------------------------------------------
+
+    @pytest.mark.parametrize("url", ["http://x", "https://x"])
+    def test_url_scheme_accepts_http_https(self, url):
+        dep = MCPDependency(name="srv", url=url)
+        dep.validate(strict=False)
+
+    @pytest.mark.parametrize("url", [
+        "ftp://x",
+        "file:///etc/passwd",
+        "javascript:alert(1)",
+        "gopher://x",
+        "//x",  # scheme-less
+    ])
+    def test_url_scheme_rejects_others(self, url):
+        dep = MCPDependency(name="srv", url=url)
+        with pytest.raises(ValueError, match="use http:// or https://"):
+            dep.validate(strict=False)
+
+    # -- Header CRLF rejection ----------------------------------------------
+
+    def test_headers_normal_pass(self):
+        dep = MCPDependency(name="srv", headers={"Authorization": "Bearer xyz"})
+        dep.validate(strict=False)
+
+    @pytest.mark.parametrize("key,val", [
+        ("X-Bad\rKey", "v"),
+        ("X-Bad\nKey", "v"),
+        ("X-OK", "val\rinjection"),
+        ("X-OK", "val\ninjection"),
+    ])
+    def test_headers_crlf_rejected(self, key, val):
+        dep = MCPDependency(name="srv", headers={key: val})
+        with pytest.raises(ValueError, match="control characters"):
+            dep.validate(strict=False)
+
+    # -- Command path-traversal check ---------------------------------------
+
+    @pytest.mark.parametrize("cmd", ["npx", "/usr/bin/node", "python3", "./bin/my-server", "./server"])
+    def test_command_safe_paths_pass(self, cmd):
+        dep = MCPDependency(name="srv", command=cmd)
+        dep.validate(strict=False)
+
+    @pytest.mark.parametrize("cmd", ["../evil", "bin/../../../sbin/x", r"a\..\b"])
+    def test_command_traversal_rejected(self, cmd):
+        dep = MCPDependency(name="srv", command=cmd)
+        with pytest.raises(ValueError, match=r"'\.\.' path segments"):
+            dep.validate(strict=False)
+
+    # -- from_string now validates ------------------------------------------
+
+    def test_from_string_passes_for_valid_name(self):
+        dep = MCPDependency.from_string("valid-name")
+        assert dep.name == "valid-name"
+
+    def test_from_string_fails_for_invalid_name(self):
+        with pytest.raises(ValueError, match="Invalid MCP dependency name"):
+            MCPDependency.from_string("bad name with space")
+
+    # -- from_dict gating ---------------------------------------------------
+
+    def test_from_dict_registry_runs_universal_only(self):
+        # Registry-resolved (registry not False): strict=False only.
+        # Valid name + valid url + no command should pass even though the
+        # strict=True command-required check would normally fire.
+        dep = MCPDependency.from_dict({
+            "name": "io.github.github/github-mcp-server",
+            "url": "https://example.com",
+        })
+        assert dep.name == "io.github.github/github-mcp-server"
+
+    def test_from_dict_registry_rejects_universal_violations(self):
+        with pytest.raises(ValueError, match="Invalid MCP dependency name"):
+            MCPDependency.from_dict({"name": "bad name"})
+
+    def test_from_dict_self_defined_runs_strict_checks(self):
+        # registry=False with stdio transport but no command -> existing
+        # strict=True check still fires.
+        with pytest.raises(ValueError, match="requires 'command'"):
+            MCPDependency.from_dict({
+                "name": "x",
+                "registry": False,
+                "transport": "stdio",
+            })
+
+
+# ---------------------------------------------------------------------------
 # _build_self_defined_server_info
 # ---------------------------------------------------------------------------
 class TestBuildSelfDefinedServerInfo:

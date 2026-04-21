@@ -65,6 +65,7 @@ export default defineConfig({
 						{ label: 'Skills', slug: 'guides/skills' },
 						{ label: 'Prompts', slug: 'guides/prompts' },
 						{ label: 'Plugins', slug: 'guides/plugins' },
+						{ label: 'MCP Servers', slug: 'guides/mcp-servers' },
 						{ label: 'Dependencies & Lockfile', slug: 'guides/dependencies' },
 						{ label: 'Pack & Distribute', slug: 'guides/pack-distribute' },
 						{ label: 'Private Packages', slug: 'guides/private-packages' },
