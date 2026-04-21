@@ -5,11 +5,13 @@ description: Multi-persona expert panel review of labelled PRs, posting a single
 # Trigger: pull_request (NOT pull_request_target -- gh-aw blocks the latter on
 # public repos). Cost-gate: only runs when a maintainer applies `panel-review`.
 # `synchronize` re-runs on new pushes once the PR carries the label.
-# Default fork policy (no `forks:` field) restricts to same-repo PRs only.
+# `forks: ["*"]` allows fork PRs to be reviewed; the trust gate is the label
+# itself, which only write-access maintainers can apply.
 on:
   pull_request:
     types: [labeled, synchronize]
     names: [panel-review]
+    forks: ["*"]
 
 # Agent job runs READ-ONLY. Safe-output jobs are auto-granted scoped write.
 permissions:
