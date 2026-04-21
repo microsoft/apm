@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `apm install --allow-protocol-fallback` now emits a `[!]` warning before the first clone attempt when a dependency has a custom port and both SSH and HTTPS attempts are planned, explaining that fallback reuses the same port across schemes and suggesting a pinned `ssh://` or `https://` URL for servers that use different ports per protocol (e.g. Bitbucket Datacenter: SSH 7999, HTTPS 7990). Docs note the limitation in the transport-selection and authentication guides. Closes #786
+- `apm install --allow-protocol-fallback` now emits a one-shot `[!]` warning before the first clone attempt when a dependency carries a custom port and both SSH and HTTPS attempts are planned, naming the dependency and recommending either pinning the URL scheme (with fallback disabled) or dropping the flag to fail fast. Servers like Bitbucket Datacenter that serve SSH and HTTPS on different ports can otherwise hit a silent port mismatch. Closes #786 (#789)
 
 ### Added
 

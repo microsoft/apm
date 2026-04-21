@@ -6,8 +6,10 @@ dependency carries a custom port AND the plan attempts both SSH and
 HTTPS, APM emits a ``[!]`` warning before the first clone attempt. The
 same port is reused across schemes, which is incorrect for servers that
 serve SSH and HTTPS on different ports (e.g. Bitbucket Datacenter: SSH
-7999, HTTPS 7990). The warning directs the user to pin the protocol
-with an explicit ``ssh://`` or ``https://`` URL.
+7999, HTTPS 7990). The warning names the offending dependency
+(``{host}/{repo}``), names the planned initial + fallback schemes,
+lists two remediations (pin the URL scheme, or drop
+``--allow-protocol-fallback`` to fail fast), and links to the docs.
 """
 
 import os
@@ -77,7 +79,8 @@ class TestProtocolFallbackPortWarning:
 
     def test_warning_fires_on_ssh_url_with_port_when_fallback_allowed(self):
         """ssh:// URL with port + allow_fallback => plan has SSH and HTTPS =>
-        exactly one ``Custom port`` warning, citing the port."""
+        exactly one warning naming the offender, both schemes, both
+        remediations, and the docs URL."""
         dep = DependencyReference.parse(
             "ssh://git@bitbucket.example.com:7999/project/repo.git"
         )
@@ -90,16 +93,25 @@ class TestProtocolFallbackPortWarning:
         )
         msg = port_warnings[0]
         assert "7999" in msg, f"port missing from warning: {msg!r}"
-        assert "ssh://" in msg and "https://" in msg, (
-            f"warning should suggest pinning with ssh:// or https://: {msg!r}"
+        assert "bitbucket.example.com" in msg, f"host missing from warning: {msg!r}"
+        assert "project/repo" in msg, f"repo missing from warning: {msg!r}"
+        assert "SSH" in msg and "HTTPS" in msg, (
+            f"warning must name both planned schemes: {msg!r}"
         )
-        assert "Bitbucket Datacenter" in msg, (
-            f"warning should cite the Bitbucket Datacenter example: {msg!r}"
+        assert "Pin the URL scheme" in msg, (
+            f"warning must offer the 'pin the URL scheme' remediation: {msg!r}"
+        )
+        assert "--allow-protocol-fallback" in msg, (
+            f"warning must offer the 'drop --allow-protocol-fallback' escape "
+            f"hatch as an alternative: {msg!r}"
+        )
+        assert "microsoft.github.io/apm/" in msg, (
+            f"warning must link to the public docs: {msg!r}"
         )
 
     def test_warning_fires_on_https_url_with_port_when_fallback_allowed(self):
         """https:// URL with port + allow_fallback => plan has HTTPS and SSH =>
-        warning fires."""
+        warning fires, naming the offender and schemes."""
         dep = DependencyReference.parse(
             "https://git.company.internal:8443/team/repo.git"
         )
@@ -110,7 +122,13 @@ class TestProtocolFallbackPortWarning:
         assert len(port_warnings) == 1, (
             f"expected exactly one port warning, got: {port_warnings!r}"
         )
-        assert "8443" in port_warnings[0]
+        msg = port_warnings[0]
+        assert "8443" in msg, f"port missing from warning: {msg!r}"
+        assert "git.company.internal" in msg, f"host missing from warning: {msg!r}"
+        assert "team/repo" in msg, f"repo missing from warning: {msg!r}"
+        assert "SSH" in msg and "HTTPS" in msg, (
+            f"warning must name both planned schemes: {msg!r}"
+        )
 
     def test_warning_silent_in_strict_mode_even_with_custom_port(self):
         """Strict mode (default) only plans one attempt; the warning must not
