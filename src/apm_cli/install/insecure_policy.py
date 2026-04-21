@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 import click
 
-from ..utils.console import _rich_error, _rich_warning
 from ..utils.github_host import is_valid_fqdn
 
 
@@ -79,14 +78,11 @@ def _format_insecure_dependency_warning(info: _InsecureDependencyInfo) -> str:
     return message
 
 
-def _warn_insecure_dependencies(insecure_infos, logger=None) -> None:
+def _warn_insecure_dependencies(insecure_infos, logger, /) -> None:
     """Emit one warning per insecure dependency before fetch begins."""
     for info in insecure_infos:
         message = _format_insecure_dependency_warning(info)
-        if logger:
-            logger.warning(message)
-        else:
-            _rich_warning(message)
+        logger.warning(message)
 
 
 def _normalize_allow_insecure_host(hostname: str) -> str:
@@ -142,10 +138,11 @@ def _get_allowed_transitive_insecure_hosts(
 
 def _guard_transitive_insecure_dependencies(
     insecure_infos,
+    logger,
+    /,
     *,
     allow_insecure: bool,
     allow_insecure_hosts=(),
-    logger=None,
 ) -> None:
     """Block transitive insecure dependencies from unapproved hosts."""
     transitive_infos = [info for info in insecure_infos if info.is_transitive]
@@ -179,15 +176,12 @@ def _guard_transitive_insecure_dependencies(
         "HTTP dependencies on the same host. "
         f"Re-run with {suggested_flags} to allow these transitive hosts."
     )
-    if logger:
-        logger.error(message)
-    else:
-        _rich_error(message)
+    logger.error(message)
     sys.exit(1)
 
 
 def _check_insecure_dependencies(
-    deps, allow_insecure_flag: bool, logger=None
+    deps, allow_insecure_flag: bool, logger, /
 ) -> None:
     """Check direct APM dependencies for HTTP (insecure) URLs and enforce policy.
 
@@ -207,15 +201,9 @@ def _check_insecure_dependencies(
         dep_allow_insecure = getattr(dep, "allow_insecure", False) is True
         if not dep_allow_insecure:
             message = _format_insecure_dependency_requirements(url)
-            if logger:
-                logger.error(message)
-            else:
-                _rich_error(message)
+            logger.error(message)
             sys.exit(1)
         if not allow_insecure_flag:
             message = _format_insecure_dependency_requirements(url)
-            if logger:
-                logger.error(message)
-            else:
-                _rich_error(message)
+            logger.error(message)
             sys.exit(1)

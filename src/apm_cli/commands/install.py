@@ -589,7 +589,7 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         mcp_deps = apm_package.get_mcp_dependencies()
 
         all_apm_deps = list(apm_deps) + list(dev_apm_deps)
-        _check_insecure_dependencies(all_apm_deps, allow_insecure, logger=logger)
+        _check_insecure_dependencies(all_apm_deps, allow_insecure, logger)
 
         # Convert --only string to InstallMode enum
         if only is None:
