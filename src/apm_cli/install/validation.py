@@ -136,7 +136,9 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             result = virtual_downloader.validate_virtual_package_exists(dep_ref)
             if not result and verbose_log:
                 try:
-                    err_ctx = auth_resolver.build_error_context(host, f"accessing {package}", org=org)
+                    err_ctx = auth_resolver.build_error_context(
+                        host, f"accessing {package}", org=org, port=dep_ref.port
+                    )
                     for line in err_ctx.splitlines():
                         verbose_log(line)
                 except Exception:
@@ -234,12 +236,16 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
 
         # For GitHub.com, use AuthResolver with unauth-first fallback
         host = dep_ref.host or default_host()
+        port = dep_ref.port
         org = dep_ref.repo_url.split('/')[0] if dep_ref.repo_url and '/' in dep_ref.repo_url else None
-        host_info = auth_resolver.classify_host(host)
+        host_info = auth_resolver.classify_host(host, port=port)
 
         if verbose_log:
-            ctx = auth_resolver.resolve(host, org=org)
-            verbose_log(f"Auth resolved: host={host}, org={org}, source={ctx.source}, type={ctx.token_type}")
+            ctx = auth_resolver.resolve(host, org=org, port=port)
+            verbose_log(
+                f"Auth resolved: host={host_info.display_name}, org={org}, "
+                f"source={ctx.source}, type={ctx.token_type}"
+            )
 
         def _check_repo(token, git_env):
             """Check repo accessibility via GitHub API (or git ls-remote for non-GitHub)."""
@@ -277,13 +283,16 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             return auth_resolver.try_with_fallback(
                 host, _check_repo,
                 org=org,
+                port=port,
                 unauth_first=True,
                 verbose_callback=verbose_log,
             )
         except Exception:
             if verbose_log:
                 try:
-                    ctx = auth_resolver.build_error_context(host, f"accessing {package}", org=org)
+                    ctx = auth_resolver.build_error_context(
+                        host, f"accessing {package}", org=org, port=port
+                    )
                     for line in ctx.splitlines():
                         verbose_log(line)
                 except Exception:

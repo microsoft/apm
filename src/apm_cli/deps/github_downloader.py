@@ -855,7 +855,11 @@ class GitHubPackageDownloader:
         configured_host = os.environ.get("GITHUB_HOST", "")
         if is_ado and not self.has_ado_token:
             host = dep_host or "dev.azure.com"
-            error_msg += self.auth_resolver.build_error_context(host, "clone", org=dep_ref.ado_organization if dep_ref else None)
+            error_msg += self.auth_resolver.build_error_context(
+                host, "clone",
+                org=dep_ref.ado_organization if dep_ref else None,
+                port=dep_ref.port if dep_ref else None,
+            )
         elif is_generic:
             host_name = dep_host or "the target host"
             error_msg += (
@@ -877,7 +881,9 @@ class GitHubPackageDownloader:
             # Guide the user through setting up authentication.
             host = dep_host or default_host()
             org = dep_ref.repo_url.split('/')[0] if dep_ref and dep_ref.repo_url else None
-            error_msg += self.auth_resolver.build_error_context(host, "clone", org=org)
+            error_msg += self.auth_resolver.build_error_context(
+                host, "clone", org=org, port=dep_ref.port if dep_ref else None,
+            )
         else:
             error_msg += "Please check repository access permissions and authentication setup."
 
@@ -1035,7 +1041,10 @@ class GitHubPackageDownloader:
             else:
                 host = dep_host or default_host()
                 org = repo_url_base.split("/")[0] if repo_url_base else None
-                error_msg += self.auth_resolver.build_error_context(host, "list refs", org=org)
+                error_msg += self.auth_resolver.build_error_context(
+                    host, "list refs", org=org,
+                    port=dep_ref.port if dep_ref else None,
+                )
 
             sanitized = self._sanitize_git_error(str(e))
             error_msg += f" Last error: {sanitized}"
@@ -1157,7 +1166,9 @@ class GitHubPackageDownloader:
                             error_msg = f"Failed to clone repository {dep_ref.repo_url}. "
                             host = dep_ref.host or default_host()
                             org = dep_ref.repo_url.split('/')[0] if dep_ref.repo_url else None
-                            error_msg += self.auth_resolver.build_error_context(host, "resolve reference", org=org)
+                            error_msg += self.auth_resolver.build_error_context(
+                                host, "resolve reference", org=org, port=dep_ref.port,
+                            )
                             raise RuntimeError(error_msg)
                         else:
                             sanitized_error = self._sanitize_git_error(str(e))
@@ -1286,7 +1297,11 @@ class GitHubPackageDownloader:
             elif e.response.status_code == 401 or e.response.status_code == 403:
                 error_msg = f"Authentication failed for Azure DevOps {dep_ref.repo_url}. "
                 if not self.ado_token:
-                    error_msg += self.auth_resolver.build_error_context(host, "download", org=dep_ref.ado_organization if dep_ref else None)
+                    error_msg += self.auth_resolver.build_error_context(
+                        host, "download",
+                        org=dep_ref.ado_organization if dep_ref else None,
+                        port=dep_ref.port if dep_ref else None,
+                    )
                 else:
                     error_msg += "Please check your Azure DevOps PAT permissions."
                 raise RuntimeError(error_msg)
@@ -1339,7 +1354,7 @@ class GitHubPackageDownloader:
             parts = dep_ref.repo_url.split('/')
             if parts:
                 org = parts[0]
-        file_ctx = self.auth_resolver.resolve(host, org)
+        file_ctx = self.auth_resolver.resolve(host, org, port=dep_ref.port)
         token = file_ctx.token
 
         # --- CDN fast-path for github.com without a token ---
@@ -1435,7 +1450,10 @@ class GitHubPackageDownloader:
                     if not token:
                         error_msg += (
                             "Unauthenticated requests are limited to 60/hour (shared per IP). "
-                            + self.auth_resolver.build_error_context(host, "API request (rate limited)", org=owner)
+                            + self.auth_resolver.build_error_context(
+                                host, "API request (rate limited)", org=owner,
+                                port=dep_ref.port if dep_ref else None,
+                            )
                         )
                     else:
                         error_msg += (
@@ -1460,7 +1478,9 @@ class GitHubPackageDownloader:
                         pass  # Fall through to the original error
                 error_msg = f"Authentication failed for {dep_ref.repo_url} (file: {file_path}, ref: {ref}). "
                 if not token:
-                    error_msg += self.auth_resolver.build_error_context(host, "download", org=owner)
+                    error_msg += self.auth_resolver.build_error_context(
+                        host, "download", org=owner, port=dep_ref.port if dep_ref else None,
+                    )
                 elif token and not host.lower().endswith(".ghe.com"):
                     error_msg += (
                         "Both authenticated and unauthenticated access were attempted. "
@@ -2352,7 +2372,9 @@ class GitHubPackageDownloader:
                 error_msg = f"Failed to clone repository {dep_ref.repo_url}. "
                 host = dep_ref.host or default_host()
                 org = dep_ref.repo_url.split('/')[0] if dep_ref.repo_url else None
-                error_msg += self.auth_resolver.build_error_context(host, "clone", org=org)
+                error_msg += self.auth_resolver.build_error_context(
+                    host, "clone", org=org, port=dep_ref.port,
+                )
                 raise RuntimeError(error_msg)
             else:
                 sanitized_error = self._sanitize_git_error(str(e))
