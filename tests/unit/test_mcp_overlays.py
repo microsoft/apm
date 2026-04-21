@@ -101,6 +101,76 @@ class TestMCPDependencyModel:
                 "transport": "stdio",
             })
 
+    def test_validate_self_defined_stdio_shell_string_command_rejected(self):
+        """Reject command containing whitespace when args is empty (the lirantal trap, #122).
+
+        Per schema, 'command' is the binary path and 'args' is the list of arguments.
+        APM does not whitespace-split 'command'. Silently accepting "npx pkg-name" would
+        either mis-execute or rely on downstream shell-splitting.
+        """
+        with pytest.raises(ValueError, match="must be a single binary path"):
+            MCPDependency.from_dict({
+                "name": "lirantal-trap",
+                "registry": False,
+                "transport": "stdio",
+                "command": "npx -y mcp-server-nodejs-api-docs",
+            })
+
+    def test_validate_stdio_shell_string_error_includes_fix_it(self):
+        """Error message must include the corrected command/args shape."""
+        try:
+            MCPDependency.from_dict({
+                "name": "fix-it",
+                "registry": False,
+                "transport": "stdio",
+                "command": "npx -y some-pkg",
+            })
+        except ValueError as e:
+            msg = str(e)
+            assert "command: npx" in msg
+            assert '"-y"' in msg
+            assert '"some-pkg"' in msg
+        else:
+            pytest.fail("expected ValueError")
+
+    def test_validate_stdio_command_with_whitespace_but_args_present_ok(self):
+        """If args is explicitly provided, do not second-guess the command shape.
+
+        A path with spaces is unusual but legal (e.g. /opt/My App/bin/server) and the
+        author has taken responsibility for shape by providing args.
+        """
+        dep = MCPDependency.from_dict({
+            "name": "spaced-path",
+            "registry": False,
+            "transport": "stdio",
+            "command": "/opt/My App/server",
+            "args": ["--port", "3000"],
+        })
+        assert dep.command == "/opt/My App/server"
+        assert dep.args == ["--port", "3000"]
+
+    def test_validate_stdio_single_token_command_ok(self):
+        """The canonical shape (command=binary, args=list) must keep working."""
+        dep = MCPDependency.from_dict({
+            "name": "canonical",
+            "registry": False,
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["-y", "mcp-server-nodejs-api-docs"],
+        })
+        assert dep.command == "npx"
+        assert dep.args == ["-y", "mcp-server-nodejs-api-docs"]
+
+    def test_validate_stdio_command_with_tabs_also_rejected(self):
+        """Whitespace check covers tabs, not just spaces."""
+        with pytest.raises(ValueError, match="must be a single binary path"):
+            MCPDependency.from_dict({
+                "name": "tabbed",
+                "registry": False,
+                "transport": "stdio",
+                "command": "npx\t-y\tpkg",
+            })
+
     def test_to_dict_roundtrip(self):
         dep = MCPDependency(
             name="rt-server",

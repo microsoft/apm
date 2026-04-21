@@ -134,3 +134,21 @@ class MCPDependency:
                     f"Self-defined MCP dependency '{self.name}' with transport "
                     f"'stdio' requires 'command'"
                 )
+            if (
+                self.transport == 'stdio'
+                and isinstance(self.command, str)
+                and any(ch.isspace() for ch in self.command)
+                and not self.args
+            ):
+                first, _, rest = self.command.strip().partition(' ')
+                rest_tokens = rest.split() if rest else []
+                suggested_args = '[' + ', '.join(f'"{tok}"' for tok in rest_tokens) + ']'
+                raise ValueError(
+                    f"Self-defined MCP dependency '{self.name}': "
+                    f"'command' must be a single binary path, not a shell line. "
+                    f"APM does not split 'command' on whitespace. "
+                    f"Got: command={self.command!r}. "
+                    f"Did you mean: command: {first}, args: {suggested_args} ? "
+                    f"See https://microsoft.github.io/apm/guides/mcp-servers/ "
+                    f"for the canonical stdio shape."
+                )
