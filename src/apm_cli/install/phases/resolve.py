@@ -297,7 +297,7 @@ def run(ctx: "InstallContext") -> None:
             if dep.get_identity() in only_identities
         ]
 
-    from apm_cli.commands.install import (
+    from apm_cli.install.insecure_policy import (
         _check_insecure_dependencies,
         _collect_insecure_dependency_infos,
         _guard_transitive_insecure_dependencies,
