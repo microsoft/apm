@@ -92,9 +92,14 @@ class TestProtocolFallbackPortWarning:
             f"expected exactly one port warning, got {len(port_warnings)}: {port_warnings!r}"
         )
         msg = port_warnings[0]
-        assert "7999" in msg, f"port missing from warning: {msg!r}"
-        assert "bitbucket.example.com" in msg, f"host missing from warning: {msg!r}"
-        assert "project/repo" in msg, f"repo missing from warning: {msg!r}"
+        # Assertions anchor on the emitted format ("Custom port ... on
+        # host/repo:" + "See: https://...") instead of bare host/URL
+        # substrings, so the test both documents the wire format and avoids
+        # CodeQL's "incomplete URL substring sanitization" false positive.
+        assert "Custom port 7999 on bitbucket.example.com/project/repo:" in msg, (
+            f"warning must name the offender in 'Custom port {{port}} on "
+            f"{{host}}/{{repo}}:' form: {msg!r}"
+        )
         assert "SSH" in msg and "HTTPS" in msg, (
             f"warning must name both planned schemes: {msg!r}"
         )
@@ -105,8 +110,8 @@ class TestProtocolFallbackPortWarning:
             f"warning must offer the 'drop --allow-protocol-fallback' escape "
             f"hatch as an alternative: {msg!r}"
         )
-        assert "microsoft.github.io/apm/" in msg, (
-            f"warning must link to the public docs: {msg!r}"
+        assert "See: https://microsoft.github.io/apm/" in msg, (
+            f"warning must link to the public docs via the 'See: ' prefix: {msg!r}"
         )
 
     def test_warning_fires_on_https_url_with_port_when_fallback_allowed(self):
@@ -123,9 +128,10 @@ class TestProtocolFallbackPortWarning:
             f"expected exactly one port warning, got: {port_warnings!r}"
         )
         msg = port_warnings[0]
-        assert "8443" in msg, f"port missing from warning: {msg!r}"
-        assert "git.company.internal" in msg, f"host missing from warning: {msg!r}"
-        assert "team/repo" in msg, f"repo missing from warning: {msg!r}"
+        assert "Custom port 8443 on git.company.internal/team/repo:" in msg, (
+            f"warning must name the offender in 'Custom port {{port}} on "
+            f"{{host}}/{{repo}}:' form: {msg!r}"
+        )
         assert "SSH" in msg and "HTTPS" in msg, (
             f"warning must name both planned schemes: {msg!r}"
         )
