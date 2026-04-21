@@ -9,9 +9,9 @@ delegated to an injected :class:`InsteadOfResolver` so unit tests can
 substitute fakes and the orchestrator can re-use a single resolver instance
 across many dependency clones in one ``apm install`` run.
 
-Strict-by-default: explicit ``ssh://`` or ``https://`` URLs are honored
-exactly. Cross-protocol fallback is only attempted when the user opts in
-via ``--allow-protocol-fallback`` or ``APM_ALLOW_PROTOCOL_FALLBACK=1``.
+Strict-by-default: explicit ``ssh://``, ``https://``, and ``http://`` URLs
+are honored exactly. Cross-protocol fallback is only attempted when the user
+opts in via ``--allow-protocol-fallback`` or ``APM_ALLOW_PROTOCOL_FALLBACK=1``.
 """
 
 from __future__ import annotations
@@ -62,10 +62,11 @@ class TransportAttempt:
     """A single clone attempt in the transport plan.
 
     Attributes:
-        scheme: ``"ssh"`` or ``"https"``. Drives the URL builder.
+        scheme: ``"ssh"``, ``"https"``, or ``"http"``. Drives the URL
+            builder.
         use_token: When ``True`` the orchestrator embeds the resolved auth
             token in the HTTPS URL (auth-HTTPS). Only meaningful for
-            ``scheme == "https"``.
+            authenticated HTTPS attempts.
         label: Human-readable description for log/error output.
     """
 
@@ -204,7 +205,21 @@ def protocol_pref_from_env(env: Optional[dict] = None) -> ProtocolPreference:
 
 _AUTH_HTTPS = TransportAttempt(scheme="https", use_token=True, label="authenticated HTTPS")
 _PLAIN_HTTPS = TransportAttempt(scheme="https", use_token=False, label="plain HTTPS")
+_HTTP = TransportAttempt(scheme="http", use_token=False, label="insecure HTTP")
 _SSH = TransportAttempt(scheme="ssh", use_token=False, label="SSH")
+
+
+def _dedup_attempts(attempts: List[TransportAttempt]) -> List[TransportAttempt]:
+    """Deduplicate attempts while preserving order."""
+    seen = set()
+    unique_attempts: List[TransportAttempt] = []
+    for attempt in attempts:
+        key = (attempt.scheme, attempt.use_token)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_attempts.append(attempt)
+    return unique_attempts
 
 
 class TransportSelector:
@@ -247,32 +262,37 @@ class TransportSelector:
         """
         explicit = (getattr(dep_ref, "explicit_scheme", None) or "").lower() or None
 
-        # 1. Explicit scheme on the URL wins for the *initial* attempt.
+        # 1. Explicit scheme on the URL wins for the initial attempt.
         #    In strict mode (default) the plan contains exactly that one attempt.
-        #    With allow_fallback (escape hatch for migration), we fall through to
-        #    the shorthand chain logic below so the legacy permissive behavior is
-        #    preserved exactly (auth-HTTPS-if-token, SSH, plain-HTTPS).
-        if explicit in ("ssh", "https", "http") and not allow_fallback:
+        #    With allow_fallback (escape hatch for migration), we keep the user's
+        #    explicit starting protocol and then append the opposite protocol.
+        if explicit in ("ssh", "https", "http"):
             if explicit == "ssh":
                 initial = [_SSH]
+                chained = [_AUTH_HTTPS, _PLAIN_HTTPS] if has_token else [_PLAIN_HTTPS]
+            elif explicit == "https":
+                initial = [_AUTH_HTTPS] if has_token else [_PLAIN_HTTPS]
+                chained = [_SSH, _PLAIN_HTTPS] if has_token else [_SSH]
             else:
-                # https or http: build an HTTPS attempt either way. Plain `http://`
-                # URLs are normalized to HTTPS here (and never carry a token, so a
-                # cleartext credential leak is impossible) until #700 introduces a
-                # first-class HTTP transport with explicit `--allow-insecure` gating.
-                if explicit == "https":
-                    initial = [_AUTH_HTTPS] if has_token else [_PLAIN_HTTPS]
-                else:
-                    initial = [_PLAIN_HTTPS]
+                # Never embed a token in http:// URLs.
+                initial = [_HTTP]
+                chained = [_SSH]
+
+            if not allow_fallback:
+                return TransportPlan(
+                    attempts=initial,
+                    strict=True,
+                    fallback_hint=FALLBACK_HINT,
+                )
+
             return TransportPlan(
-                attempts=initial,
-                strict=True,
-                fallback_hint=FALLBACK_HINT,
+                attempts=_dedup_attempts(initial + chained),
+                strict=False,
+                fallback_hint=None,
             )
 
-        # 2. Shorthand (no explicit scheme), OR explicit scheme with
-        #    allow_fallback=True (legacy behavior). Consult the CLI preference
-        #    and git insteadOf rewrites to pick the initial protocol.
+        # 2. Shorthand (no explicit scheme). Consult the CLI preference and git
+        #    insteadOf rewrites to pick the initial protocol.
         prefer_ssh = cli_pref == ProtocolPreference.SSH
         prefer_https = cli_pref == ProtocolPreference.HTTPS
         if cli_pref == ProtocolPreference.NONE:
@@ -291,7 +311,8 @@ class TransportSelector:
             initial = [_AUTH_HTTPS] if has_token else [_PLAIN_HTTPS]
             chained = [_SSH, _PLAIN_HTTPS] if has_token else [_SSH]
         else:
-            # Strict-by-default for shorthand-no-rewrite-no-pref: HTTPS only.
+            # Default shorthand initial attempt: HTTPS. If allow_fallback is on,
+            # append SSH (and plain HTTPS after auth) below.
             initial = [_AUTH_HTTPS] if has_token else [_PLAIN_HTTPS]
             chained = [_SSH, _PLAIN_HTTPS] if has_token else [_SSH]
 
@@ -303,12 +324,8 @@ class TransportSelector:
             )
 
         # Permissive: append the chain, dedup while preserving order.
-        seen = set()
-        attempts: List[TransportAttempt] = []
-        for a in initial + chained:
-            key = (a.scheme, a.use_token)
-            if key in seen:
-                continue
-            seen.add(key)
-            attempts.append(a)
-        return TransportPlan(attempts=attempts, strict=False, fallback_hint=None)
+        return TransportPlan(
+            attempts=_dedup_attempts(initial + chained),
+            strict=False,
+            fallback_hint=None,
+        )

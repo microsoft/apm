@@ -297,6 +297,30 @@ def run(ctx: "InstallContext") -> None:
             if dep.get_identity() in only_identities
         ]
 
+    from apm_cli.install.insecure_policy import (
+        _check_insecure_dependencies,
+        _collect_insecure_dependency_infos,
+        _guard_transitive_insecure_dependencies,
+        _warn_insecure_dependencies,
+    )
+
+    _check_insecure_dependencies(
+        ctx.all_apm_deps,
+        ctx.allow_insecure,
+        ctx.logger,
+    )
+    insecure_infos = _collect_insecure_dependency_infos(
+        deps_to_install,
+        dependency_graph,
+    )
+    _warn_insecure_dependencies(insecure_infos, ctx.logger)
+    _guard_transitive_insecure_dependencies(
+        insecure_infos,
+        ctx.logger,
+        allow_insecure=ctx.allow_insecure,
+        allow_insecure_hosts=ctx.allow_insecure_hosts,
+    )
+
     ctx.deps_to_install = deps_to_install
 
     # ------------------------------------------------------------------

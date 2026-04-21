@@ -34,7 +34,6 @@ from ..utils.diagnostics import DiagnosticCollector
 # working via "apm_cli.commands.install._hash_deployed".
 from apm_cli.install.phases.lockfile import compute_deployed_hashes as _hash_deployed
 
-from ..utils.github_host import default_host, is_valid_fqdn
 from ..utils.path_security import safe_rmtree
 
 # Re-export validation leaf helpers so that existing test patches like
@@ -59,6 +58,19 @@ from apm_cli.install.phases.local_content import (
     _copy_local_package,
     _has_local_apm_content,
     _project_has_root_primitives,
+)
+from apm_cli.install.insecure_policy import (
+    _InsecureDependencyInfo,
+    _allow_insecure_host_callback,
+    _check_insecure_dependencies,
+    _collect_insecure_dependency_infos,
+    _format_insecure_dependency_warning,
+    _format_insecure_dependency_requirements,
+    _guard_transitive_insecure_dependencies,
+    _get_insecure_dependency_url,
+    _normalize_allow_insecure_host,
+    _warn_insecure_dependencies,
+    InsecureDependencyPolicyError,
 )
 
 # Re-export the pre-deploy security scan so that bare-name call sites inside
@@ -136,12 +148,7 @@ except ImportError as e:
     _APM_IMPORT_ERROR = str(e)
 
 
-# ---------------------------------------------------------------------------
-# Validation helpers
-# ---------------------------------------------------------------------------
-
-
-def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, logger=None, manifest_path=None, auth_resolver=None, scope=None):
+def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, logger=None, manifest_path=None, auth_resolver=None, scope=None, allow_insecure=False):
     """Validate packages exist and can be accessed, then add to apm.yml dependencies section.
 
     Implements normalize-on-write: any input form (HTTPS URL, SSH URL, FQDN, shorthand)
@@ -205,6 +212,7 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
     valid_outcomes = []  # (canonical, already_present) tuples
     invalid_outcomes = []  # (package, reason) tuples
     _marketplace_provenance = {}  # canonical -> {discovered_via, marketplace_plugin_name}
+    _apm_yml_entries = {}  # canonical -> apm.yml entry (str or dict for HTTP deps)
 
     if logger:
         logger.validation_start(len(packages))
@@ -279,6 +287,21 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
                 logger.validation_fail(package, reason)
             continue
 
+        if dep_ref.is_insecure:
+            if not allow_insecure:
+                # The reason string embeds the full URL already, so skip
+                # logger.validation_fail (which prepends "{package} -- ") to
+                # avoid rendering the URL twice. Use logger.error directly.
+                reason = _format_insecure_dependency_requirements(
+                    _get_insecure_dependency_url(dep_ref)
+                )
+                invalid_outcomes.append((package, reason))
+                if logger:
+                    logger.error(reason)
+                continue
+            dep_ref.allow_insecure = True
+            _apm_yml_entries[canonical] = dep_ref.to_apm_yml_entry()
+
         # Reject local packages at user scope -- relative paths resolve
         # against cwd during validation but against $HOME during copy,
         # causing silent failures.
@@ -350,7 +373,7 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
     # Add validated packages to dependencies (already canonical)
     dep_label = "devDependencies" if dev else "apm.yml"
     for package in validated_packages:
-        current_deps.append(package)
+        current_deps.append(_apm_yml_entries.get(package, package))
         if logger:
             logger.verbose_detail(f"Added {package} to {dep_label}")
 
@@ -829,7 +852,7 @@ def _run_mcp_install(
 
 
 @click.command(
-    help="Install APM and MCP dependencies (auto-creates apm.yml when installing packages)"
+    help="Install APM and MCP dependencies (auto-creates apm.yml; use --allow-insecure for http:// packages)"
 )
 @click.argument("packages", nargs=-1)
 @click.option("--runtime", help="Target specific runtime only (copilot, codex, vscode)")
@@ -872,6 +895,21 @@ def _run_mcp_install(
     type=TargetParamType(),
     default=None,
     help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Overrides auto-detection.",
+)
+@click.option(
+    "--allow-insecure",
+    "allow_insecure",
+    is_flag=True,
+    default=False,
+    help="Allow HTTP (insecure) dependencies. Required when dependencies use http:// URLs.",
+)
+@click.option(
+    "--allow-insecure-host",
+    "allow_insecure_hosts",
+    multiple=True,
+    callback=_allow_insecure_host_callback,
+    metavar="HOSTNAME",
+    help="Allow transitive HTTP (insecure) dependencies from this hostname. Repeat for multiple hosts.",
 )
 @click.option(
     "--global", "-g", "global_",
@@ -953,12 +991,18 @@ def _run_mcp_install(
     ),
 )
 @click.pass_context
-def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, global_, use_ssh, use_https, allow_protocol_fallback, mcp_name, transport, url, env_pairs, header_pairs, mcp_version, registry_url):
+def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, allow_insecure, allow_insecure_hosts, global_, use_ssh, use_https, allow_protocol_fallback, mcp_name, transport, url, env_pairs, header_pairs, mcp_version, registry_url):
     """Install APM and MCP dependencies from apm.yml (like npm install).
 
     Detects AI runtimes from your apm.yml scripts and installs MCP servers for
     all detected runtimes; also installs APM package dependencies from GitHub.
     --only filters by type (apm or mcp).
+
+    HTTP dependencies require `allow_insecure: true` in apm.yml and
+    `--allow-insecure` on the install command. Transitive HTTP dependencies are
+    allowed automatically when they stay on the same host as a direct HTTP
+    dependency, or explicitly with `--allow-insecure-host <hostname>`.
+
     Examples:
         apm install                             # Install existing deps from apm.yml
         apm install org/pkg1                    # Add package to apm.yml and install
@@ -969,6 +1013,9 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         apm install --update                    # Update dependencies to latest Git refs
         apm install --dry-run                   # Show what would be installed
         apm install -g org/pkg1                 # Install to user scope (~/.apm/)
+        apm install --allow-insecure http://my-server.example.com/owner/repo  # Install from HTTP URL with allow_insecure
+        apm install --allow-insecure-host mirror.example.com                  # Allow transitive HTTP dependencies from mirror.example.com
+
     MCP servers (also: 'apm mcp install'):
         apm install --mcp io.github.github/github-mcp-server                  # registry shorthand
         apm install --mcp api --url https://example.com/mcp                   # remote http/sse
@@ -1143,6 +1190,7 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                 packages, dry_run, dev=dev, logger=logger,
                 manifest_path=manifest_path, auth_resolver=auth_resolver,
                 scope=scope,
+                allow_insecure=allow_insecure,
             )
             # Short-circuit: all packages failed validation -- nothing to install
             if outcome.all_failed:
@@ -1174,6 +1222,9 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         dev_apm_deps = apm_package.get_dev_apm_dependencies()
         has_any_apm_deps = bool(apm_deps) or bool(dev_apm_deps)
         mcp_deps = apm_package.get_mcp_dependencies()
+
+        all_apm_deps = list(apm_deps) + list(dev_apm_deps)
+        _check_insecure_dependencies(all_apm_deps, allow_insecure, logger)
 
         # Convert --only string to InstallMode enum
         if only is None:
@@ -1253,6 +1304,8 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                     scope=scope,
                     auth_resolver=auth_resolver,
                     target=target,
+                    allow_insecure=allow_insecure,
+                    allow_insecure_hosts=allow_insecure_hosts,
                     marketplace_provenance=(
                         outcome.marketplace_provenance if packages and outcome else None
                     ),
@@ -1263,6 +1316,8 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                 prompt_count = install_result.prompts_integrated
                 agent_count = install_result.agents_integrated
                 apm_diagnostics = install_result.diagnostics
+            except InsecureDependencyPolicyError:
+                sys.exit(1)
             except Exception as e:
                 logger.error(f"Failed to install APM dependencies: {e}")
                 if not verbose:
@@ -1351,6 +1406,8 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         if not force and apm_diagnostics and apm_diagnostics.has_critical_security:
             sys.exit(1)
 
+    except InsecureDependencyPolicyError:
+        sys.exit(1)
     except click.UsageError:
         # Conflict matrix / argv parser raises UsageError -- let Click
         # render with exit code 2 and the standard "Usage: ..." prefix.
@@ -1401,6 +1458,8 @@ def _install_apm_dependencies(
     scope=None,
     auth_resolver: "AuthResolver" = None,
     target: str = None,
+    allow_insecure: bool = False,
+    allow_insecure_hosts=(),
     marketplace_provenance: dict = None,
     protocol_pref=None,
     allow_protocol_fallback: "Optional[bool]" = None,
@@ -1430,12 +1489,10 @@ def _install_apm_dependencies(
         scope=scope,
         auth_resolver=auth_resolver,
         target=target,
+        allow_insecure=allow_insecure,
+        allow_insecure_hosts=allow_insecure_hosts,
         marketplace_provenance=marketplace_provenance,
         protocol_pref=protocol_pref,
         allow_protocol_fallback=allow_protocol_fallback,
     )
     return InstallService().run(request)
-
-
-
-

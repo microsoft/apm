@@ -126,6 +126,8 @@ fields:
 | `deployed_files` | array of strings | MUST | Every file path APM deployed for this dependency, relative to project root. |
 | `source` | string | MAY | Dependency source. `"local"` for local path dependencies. Omitted for remote (git) dependencies. |
 | `local_path` | string | MAY | Filesystem path (relative or absolute) to the local package. Present only when `source` is `"local"`. |
+| `is_insecure` | boolean | MAY | `true` when the dep was fetched over HTTP (unencrypted). Omitted when `false`. Presence forces re-approval on the next install: the apm.yml entry MUST carry `allow_insecure: true` and the invocation MUST pass `--allow-insecure` (or `--allow-insecure-host` for transitive deps). Absent or `false` means HTTPS/SSH. |
+| `allow_insecure` | boolean | MAY | `true` when the user's manifest explicitly approved the HTTP fetch with `allow_insecure: true`. Persisted alongside `is_insecure` for replay safety: a legacy lockfile with `is_insecure: true` but no `allow_insecure` fail-closes to `allow_insecure: false`, forcing re-approval. Omitted when `false`. |
 
 Fields with empty or default values (empty strings, `false` booleans, empty
 lists) SHOULD be omitted from the serialized output to keep the file concise.

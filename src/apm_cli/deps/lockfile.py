@@ -40,6 +40,8 @@ class LockedDependency:
     is_dev: bool = False  # True for devDependencies
     discovered_via: Optional[str] = None  # Marketplace name (provenance)
     marketplace_plugin_name: Optional[str] = None  # Plugin name in marketplace
+    is_insecure: bool = False  # True when the locked source was http://
+    allow_insecure: bool = False  # True when the manifest explicitly allowed HTTP
 
     def get_unique_key(self) -> str:
         """Returns unique key for this dependency."""
@@ -92,6 +94,10 @@ class LockedDependency:
             result["discovered_via"] = self.discovered_via
         if self.marketplace_plugin_name:
             result["marketplace_plugin_name"] = self.marketplace_plugin_name
+        if self.is_insecure:
+            result["is_insecure"] = True
+        if self.allow_insecure:
+            result["allow_insecure"] = True
         return result
 
     @classmethod
@@ -143,6 +149,8 @@ class LockedDependency:
             is_dev=data.get("is_dev", False),
             discovered_via=data.get("discovered_via"),
             marketplace_plugin_name=data.get("marketplace_plugin_name"),
+            is_insecure=data.get("is_insecure", False),
+            allow_insecure=data.get("allow_insecure", False),
         )
 
     @classmethod
@@ -189,6 +197,24 @@ class LockedDependency:
             source="local" if dep_ref.is_local else None,
             local_path=dep_ref.local_path if dep_ref.is_local else None,
             is_dev=is_dev,
+            is_insecure=dep_ref.is_insecure,
+            allow_insecure=dep_ref.allow_insecure,
+        )
+
+    def to_dependency_ref(self) -> DependencyReference:
+        """Reconstruct a DependencyReference from this locked dependency."""
+        return DependencyReference(
+            repo_url=self.repo_url,
+            host=self.host,
+            port=self.port,
+            reference=self.resolved_ref,
+            virtual_path=self.virtual_path,
+            is_virtual=self.is_virtual,
+            artifactory_prefix=self.registry_prefix,
+            is_local=(self.source == "local"),
+            local_path=self.local_path,
+            is_insecure=self.is_insecure,
+            allow_insecure=self.allow_insecure,
         )
 
 
@@ -362,14 +388,7 @@ class LockFile:
         seen: set = set()
         paths: List[str] = []
         for dep in self.get_all_dependencies():
-            dep_ref = DependencyReference(
-                repo_url=dep.repo_url,
-                host=dep.host,
-                virtual_path=dep.virtual_path,
-                is_virtual=dep.is_virtual,
-                is_local=(dep.source == "local"),
-                local_path=dep.local_path,
-            )
+            dep_ref = dep.to_dependency_ref()
             install_path = dep_ref.get_install_path(apm_modules_dir)
             try:
                 rel_path = install_path.relative_to(apm_modules_dir).as_posix()

@@ -56,7 +56,7 @@ across protocols.
 | Dependency form | What APM tries |
 |-----------------|----------------|
 | `ssh://...` or `git@host:...` | SSH only |
-| `https://...` or `http://...` | HTTPS only |
+| `https://...` or `http://...` | HTTP(S) only |
 | Shorthand with `git config url.<base>.insteadOf` rewriting to SSH | SSH only |
 | Shorthand otherwise | HTTPS only |
 
@@ -193,6 +193,38 @@ When installing from a marketplace, the `#` suffix overrides the `source.ref` fr
 | `plugin@mkt#v2.0.0` | Override with specific tag | `plugin@mkt#v2.0.0` |
 | `plugin@mkt#main` | Override with branch | `plugin@mkt#main` |
 | `plugin@mkt#abc123d` | Override with commit SHA | `plugin@mkt#abc123d` |
+
+## HTTP dependencies (opt-in)
+
+HTTP is never attempted implicitly. A dep fetched over `http://` requires
+dual opt-in on every install:
+
+1. **Manifest approval** -- the apm.yml entry carries `allow_insecure: true`.
+2. **Invocation approval** -- `apm install --allow-insecure` for direct
+   deps, or `--allow-insecure-host HOSTNAME` (repeatable) for transitive
+   deps. Transitive HTTP deps from hosts not listed are blocked.
+
+Example apm.yml entry:
+
+```yaml
+dependencies:
+  apm:
+    - git: http://mirror.example.com/acme/rules.git
+      ref: v1.2.0
+      allow_insecure: true
+```
+
+Example invocation:
+
+```bash
+apm install --allow-insecure --allow-insecure-host mirror.example.com
+```
+
+Mental model: HTTP is opt-in per-dep AND per-invocation. Removing either
+side re-locks the dependency. The lockfile records `is_insecure: true` and
+`allow_insecure: true` on the entry so replays fail-closed when either
+approval is dropped. See `commands.md` for full flag syntax and the
+enterprise security guide for the threat model.
 
 ## What the lockfile pins
 

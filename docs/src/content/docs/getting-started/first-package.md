@@ -23,14 +23,10 @@ This creates:
 
 ```
 my-coding-standards/
-├── apm.yml              # Package manifest
-└── .apm/
-    ├── instructions/    # Coding standards (.instructions.md)
-    ├── prompts/         # Slash commands (.prompt.md)
-    ├── skills/          # Agent skills (SKILL.md)
-    ├── agents/          # Personas (.agent.md)
-    └── hooks/           # Event handlers (.json)
+└── apm.yml              # Package manifest
 ```
+
+> **Note:** By default, `apm init` creates only `apm.yml`. The directory structure below is what you build manually in the following steps.
 
 ## 2. Add an Instruction
 

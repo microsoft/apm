@@ -34,6 +34,8 @@ def _make_request(pkg, **overrides):
         scope=None,
         auth_resolver=None,
         target=None,
+        allow_insecure=False,
+        allow_insecure_hosts=(),
         marketplace_provenance=None,
     )
     base.update(overrides)
@@ -53,6 +55,8 @@ class TestInstallRequest:
         assert request.parallel_downloads == 4
         assert request.only_packages is None
         assert request.target is None
+        assert request.allow_insecure is False
+        assert request.allow_insecure_hosts == ()
 
     def test_only_packages_is_shallow_immutable(self, fake_apm_package):
         # Documents the known limitation: frozen=True locks the
@@ -72,6 +76,8 @@ class TestInstallServiceDelegation:
             force=True,
             parallel_downloads=8,
             target="copilot",
+            allow_insecure=True,
+            allow_insecure_hosts=("mirror.example.com",),
             only_packages=["alpha", "beta"],
             marketplace_provenance={"source": "test-marketplace"},
         )
@@ -88,6 +94,8 @@ class TestInstallServiceDelegation:
         assert kwargs["force"] is True
         assert kwargs["parallel_downloads"] == 8
         assert kwargs["target"] == "copilot"
+        assert kwargs["allow_insecure"] is True
+        assert kwargs["allow_insecure_hosts"] == ("mirror.example.com",)
         assert kwargs["only_packages"] == ["alpha", "beta"]
         assert kwargs["marketplace_provenance"] == {"source": "test-marketplace"}
 
@@ -129,6 +137,8 @@ class TestClickWrapperUsesService:
                 force=True,
                 parallel_downloads=2,
                 target="claude",
+                allow_insecure=True,
+                allow_insecure_hosts=("mirror.example.com",),
             )
 
         assert result == "wrapped-result"
@@ -140,3 +150,5 @@ class TestClickWrapperUsesService:
         assert request.force is True
         assert request.parallel_downloads == 2
         assert request.target == "claude"
+        assert request.allow_insecure is True
+        assert request.allow_insecure_hosts == ("mirror.example.com",)

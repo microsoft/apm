@@ -179,7 +179,7 @@ wheels = [
 
 [[package]]
 name = "apm-cli"
-version = "0.8.12"
+version = "0.9.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },

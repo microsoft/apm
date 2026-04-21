@@ -46,6 +46,8 @@ class InstallContext:
     parallel_downloads: int = 4
     logger: Any = None  # InstallLogger
     target_override: Optional[str] = None  # CLI --target value
+    allow_insecure: bool = False
+    allow_insecure_hosts: Tuple[str, ...] = ()
 
     dry_run: bool = False
     force: bool = False

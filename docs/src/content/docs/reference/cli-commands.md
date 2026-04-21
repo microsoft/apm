@@ -74,7 +74,7 @@ apm init my-plugin --plugin
 
 ### `apm install` - Install dependencies and deploy local content
 
-Install APM package and MCP server dependencies from `apm.yml` and deploy the project's own `.apm/` content to target directories (like `npm install`). Auto-creates minimal `apm.yml` when packages are specified but no manifest exists.
+Install APM package and MCP server dependencies from `apm.yml` and deploy the project's own `.apm/` content to target directories (like `npm install`). Auto-creates minimal `apm.yml` when packages are specified but no manifest exists. For `http://` dependencies, use `--allow-insecure`.
 
 ```bash
 apm install [PACKAGES...] [OPTIONS]
@@ -103,6 +103,8 @@ apm install [PACKAGES...] [OPTIONS]
 - `--registry URL` - Custom MCP registry URL (`http://` or `https://`) for resolving the registry-form `--mcp NAME`. Overrides `MCP_REGISTRY_URL`. Persisted to `apm.yml` for reproducible installs. Not valid with `--url` or a stdio command. Only with `--mcp`.
 - `--dev` - Add packages to [`devDependencies`](../manifest-schema/#5-devdependencies) instead of `dependencies`. Dev deps are installed locally but excluded from `apm pack --format plugin` bundles
 - `-g, --global` - Install to user scope (`~/.apm/`) instead of the current project. Primitives deploy to `~/.copilot/`, `~/.claude/`, etc. MCP servers are only installed for global-capable runtimes (Copilot CLI, Codex CLI); workspace-only runtimes are skipped.
+- `--allow-insecure` - Allow HTTP (insecure) dependencies. Required when adding or installing dependencies that use an `http://` URL.
+- `--allow-insecure-host HOSTNAME` - Allow transitive HTTP (insecure) dependencies from `HOSTNAME`. Repeat the flag to allow multiple hosts.
 - `--ssh` - Force SSH for shorthand (`owner/repo`) dependencies. Mutually exclusive with `--https`. Ignored for URLs with an explicit scheme.
 - `--https` - Force HTTPS for shorthand dependencies. Mutually exclusive with `--ssh`. Default unless `git config url.<base>.insteadOf` rewrites the candidate to SSH.
 - `--allow-protocol-fallback` - Restore the legacy permissive cross-protocol fallback chain (HTTPS-then-SSH or vice-versa). Strict-by-default otherwise. Each retry emits a `[!]` warning naming both protocols. When the dependency URL carries a custom port, APM also emits a one-shot `[!]` warning before the first clone attempt noting that the same port will be reused across schemes (wrong on servers like Bitbucket Datacenter that serve SSH and HTTPS on different ports) -- to avoid the mismatch, omit this flag and pin the dependency with an explicit `ssh://` or `https://` URL.
@@ -119,6 +121,8 @@ See [Dependencies: Transport selection](../../guides/dependencies/#transport-sel
 **Behavior:**
 - `apm install` (no args): Installs **all** packages from `apm.yml` and deploys the project's own `.apm/` content
 - `apm install <package>`: Installs **only** the specified package (adds to `apm.yml` if not present)
+- Each `http://` dependency is warned at install time before any fetch begins
+- Transitive `http://` dependencies are allowed automatically when they use the same host as a direct insecure dependency you approved with `--allow-insecure`; other transitive hosts require `--allow-insecure-host HOSTNAME`
 
 **Local `.apm/` Content Deployment:**
 
@@ -753,6 +757,7 @@ apm deps list [OPTIONS]
 **Options:**
 - `-g, --global` - List user-scope packages from `~/.apm/` instead of the current project
 - `--all` - List packages from both project and user scope
+- `--insecure` - Show only installed dependencies locked to `http://` sources
 
 **Examples:**
 ```bash
@@ -764,6 +769,9 @@ apm deps list -g
 
 # Show both scopes
 apm deps list --all
+
+# Show only insecure installed dependencies
+apm deps list --insecure
 ```
 
 **Sample Output:**
@@ -774,6 +782,20 @@ apm deps list --all
 │ compliance-rules    │ 1.0.0   │ github   │    2    │      1       │   -    │   1    │
 │ design-guidelines   │ 1.0.0   │ github   │    -    │      1       │   1    │   -    │
 └─────────────────────┴─────────┴──────────┴─────────┴──────────────┴────────┴────────┘
+```
+
+With `--insecure`, an additional `Origin` column (rendered bold red) sits
+between `Source` and `Prompts`. Values are `direct` for HTTP deps declared
+in `apm.yml` and `via <parent>` for transitive HTTP deps pulled in by
+another package:
+
+```
+┌─────────────────┬─────────┬──────────┬────────────────┬─────────┬──────────────┬────────┬────────┐
+│ Package         │ Version │ Source   │ Origin         │ Prompts │ Instructions │ Agents │ Skills │
+├─────────────────┼─────────┼──────────┼────────────────┼─────────┼──────────────┼────────┼────────┤
+│ internal-pkg    │ 1.0.0   │ github   │ direct         │    1    │      -       │   -    │   -    │
+│ shared-rules    │ 2.0.0   │ github   │ via acme/pkg   │    -    │      1       │   -    │   -    │
+└─────────────────┴─────────┴──────────┴────────────────┴─────────┴──────────────┴────────┴────────┘
 ```
 
 **Output includes:**
@@ -1514,10 +1536,6 @@ apm config set auto-integrate true
 
 # Disable auto-integration
 apm config set auto-integrate false
-
-# Using alternative boolean values
-apm config set auto-integrate yes
-apm config set auto-integrate 1
 ```
 
 **`temp-dir`** - Override the system temporary directory
