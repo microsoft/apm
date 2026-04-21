@@ -18,6 +18,36 @@ def mcp():
     pass
 
 
+@mcp.command(
+    name="install",
+    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+    help=(
+        "Add an MCP server to apm.yml. Alias for 'apm install --mcp'.\n\n"
+        "Examples:\n\n"
+        "  apm mcp install fetch -- npx -y @modelcontextprotocol/server-fetch\n\n"
+        "  apm mcp install api --transport http --url https://example.com/mcp"
+    ),
+)
+@click.pass_context
+def mcp_install(ctx):
+    """Forward all args to 'apm install --mcp ...'.
+
+    Examples:
+        apm mcp install fetch -- npx -y @modelcontextprotocol/server-fetch
+        apm mcp install api --transport http --url https://example.com/mcp
+    """
+    from apm_cli.cli import cli
+
+    forwarded = ["install", "--mcp", *ctx.args]
+    try:
+        cli.main(args=forwarded, standalone_mode=False)
+    except SystemExit as e:
+        sys.exit(e.code if e.code is not None else 0)
+    except click.ClickException as e:
+        e.show()
+        sys.exit(e.exit_code)
+
+
 @mcp.command(help="Search MCP servers in registry")
 @click.argument("query", required=True)
 @click.option("--limit", default=10, show_default=True, help="Number of results to show")

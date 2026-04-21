@@ -6,6 +6,7 @@ error handling, edge cases.
 
 from unittest.mock import MagicMock, patch
 
+import click
 from click.testing import CliRunner
 
 from apm_cli.commands.mcp import mcp
@@ -439,3 +440,80 @@ class TestMcpGroup:
         assert "search" in result.output
         assert "show" in result.output
         assert "list" in result.output
+
+
+# ---------------------------------------------------------------------------
+# `apm mcp install` alias forwarding tests (T-alias)
+# ---------------------------------------------------------------------------
+
+
+class TestMcpInstallAlias:
+    """The `apm mcp install` subcommand is a thin alias that forwards to
+    `apm install --mcp ...`. These tests verify forwarding semantics and the
+    help surface; end-to-end install behaviour is owned by the install command
+    tests.
+    """
+
+    def test_help_shows_alias_message_and_example(self):
+        runner = make_runner()
+        result = runner.invoke(mcp, ["install", "--help"])
+        assert result.exit_code == 0
+        assert "Alias for 'apm install --mcp'" in result.output
+        assert "apm mcp install fetch" in result.output
+
+    def test_forwards_args_to_root_install_with_mcp_flag(self):
+        """Verify the alias invokes the root `cli` with `install --mcp <argv>`."""
+        runner = make_runner()
+        with patch("apm_cli.cli.cli.main") as mock_main:
+            mock_main.return_value = 0
+            result = runner.invoke(
+                mcp,
+                ["install", "fetch", "--", "npx", "-y", "@modelcontextprotocol/server-fetch"],
+            )
+            assert result.exit_code == 0
+            mock_main.assert_called_once()
+            kwargs = mock_main.call_args.kwargs
+            forwarded = kwargs.get("args") or mock_main.call_args.args[0]
+            assert forwarded[0] == "install"
+            assert forwarded[1] == "--mcp"
+            assert "fetch" in forwarded
+            assert "npx" in forwarded
+            assert "@modelcontextprotocol/server-fetch" in forwarded
+
+    def test_forwards_transport_options(self):
+        runner = make_runner()
+        with patch("apm_cli.cli.cli.main") as mock_main:
+            mock_main.return_value = 0
+            result = runner.invoke(
+                mcp,
+                ["install", "api", "--transport", "http", "--url", "https://example.com/mcp"],
+            )
+            assert result.exit_code == 0
+            forwarded = mock_main.call_args.kwargs.get("args") or mock_main.call_args.args[0]
+            assert forwarded[:3] == ["install", "--mcp", "api"]
+            assert "--transport" in forwarded
+            assert "http" in forwarded
+            assert "--url" in forwarded
+            assert "https://example.com/mcp" in forwarded
+
+    def test_propagates_systemexit_nonzero(self):
+        """Failures from the underlying install propagate as non-zero exit codes."""
+        runner = make_runner()
+        with patch("apm_cli.cli.cli.main", side_effect=SystemExit(2)):
+            result = runner.invoke(mcp, ["install", "foo", "--", "npx", "server"])
+            assert result.exit_code == 2
+
+    def test_propagates_click_exception(self):
+        """ClickException (e.g. conflict errors) propagates with its exit code."""
+        runner = make_runner()
+        err = click.UsageError("conflicting options")
+        with patch("apm_cli.cli.cli.main", side_effect=err):
+            result = runner.invoke(mcp, ["install", "foo", "--transport", "stdio"])
+            assert result.exit_code == err.exit_code
+            assert "conflicting options" in result.output
+
+    def test_success_exit_code_is_zero(self):
+        runner = make_runner()
+        with patch("apm_cli.cli.cli.main", return_value=0):
+            result = runner.invoke(mcp, ["install", "foo", "--", "npx", "server"])
+            assert result.exit_code == 0
