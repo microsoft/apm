@@ -31,8 +31,11 @@ def _format_credential_host(host: str, port: Optional[int]) -> str:
     the credential protocol -- port must be embedded into the host field as
     ``host:port``. Sending a separate ``port=`` line is silently ignored by
     helpers, collapsing two different services into one credential entry.
+
+    Uses ``is not None`` (not truthy) so that ``None`` is the only sentinel
+    for "no port", matching the rest of the port-handling logic.
     """
-    return f"{host}:{port}" if port else host
+    return f"{host}:{port}" if port is not None else host
 
 
 class GitHubTokenManager:

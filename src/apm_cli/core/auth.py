@@ -69,8 +69,12 @@ class HostInfo:
         Use this wherever user-facing text identifies the host — errors, log
         lines, diagnostic output. Bare ``host`` in those places misleads
         users when port is what actually differentiates the target.
+
+        Uses ``is not None`` (not truthy) for symmetry with the
+        ``host_info.port is not None`` checks elsewhere in the resolver and
+        to avoid silently dropping any non-default integer ports.
         """
-        return f"{self.host}:{self.port}" if self.port else self.host
+        return f"{self.host}:{self.port}" if self.port is not None else self.host
 
 
 @dataclass
@@ -310,7 +314,9 @@ class AuthResolver:
                 f"Token from {auth_ctx.source} failed, trying git credential fill "
                 f"for {host_info.display_name}"
             )
-            cred = self._token_manager.resolve_credential_from_git(host, port=port)
+            cred = self._token_manager.resolve_credential_from_git(
+                host_info.host, port=host_info.port
+            )
             if cred:
                 return operation(cred, self._build_git_env(cred))
             raise exc

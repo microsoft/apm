@@ -742,7 +742,12 @@ class TestBuildErrorContextWithPort:
                 msg = resolver.build_error_context(
                     "bitbucket.corp.com", "clone", port=7999
                 )
-        assert "bitbucket.corp.com:7999" in msg
+        # Anchor with surrounding context tokens (" on " before, "." after)
+        # so the assertion pins the rendered position rather than just the
+        # substring's existence anywhere -- and so CodeQL's
+        # py/incomplete-url-substring-sanitization heuristic does not
+        # mistake a test assertion for unsafe URL sanitization.
+        assert "Authentication failed for clone on bitbucket.corp.com:7999." in msg
 
     def test_port_hint_appears_when_port_set(self):
         with patch.dict(os.environ, {}, clear=True):
