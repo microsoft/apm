@@ -17,15 +17,19 @@ permissions:
   pull-requests: read
   issues: read
 
-# Self-referential pin: every workflow run pulls primitives from THIS PR's
-# head SHA. A PR that modifies the panel skill or persona agents reviews
-# itself with those modified primitives -- no manual SHA bumps needed.
-# Mirrors the standard `actions/checkout@${{ github.sha }}` pattern.
+# Pull panel skill + persona agents from microsoft/apm@main.
+# Why main and not ${{ github.sha }}: a malicious PR could otherwise modify
+# the panel skill or persona definitions and trick its own review into
+# APPROVE. Pinning to main means the review always runs against the
+# trusted, already-reviewed panel -- changes to .apm/ only take effect
+# after they themselves have been reviewed and merged.
+# Same rationale as GitHub Actions' guidance to pin `uses:` to a ref,
+# never to the PR's own head.
 imports:
   - uses: shared/apm.md
     with:
       packages:
-        - microsoft/apm@${{ github.sha }}
+        - microsoft/apm@main
 
 tools:
   github:
