@@ -99,6 +99,57 @@ class TestSkipDownloadWithUpdateFlag:
         ) is False
 
 
+class TestDetectRefChange:
+    """Tests for detect_ref_change()."""
+
+    def test_insecure_transport_flip_from_https_to_http_is_drift(self):
+        """Switching to insecure HTTP must force a re-download."""
+        dep = DependencyReference(
+            repo_url="owner/repo",
+            host="gitlab.example.com",
+            is_insecure=True,
+        )
+        locked = LockedDependency(
+            repo_url="owner/repo",
+            host="gitlab.example.com",
+            is_insecure=False,
+        )
+
+        assert detect_ref_change(dep, locked) is True
+
+    def test_insecure_transport_flip_from_http_to_https_is_drift(self):
+        """Switching back to HTTPS must also force a re-download."""
+        dep = DependencyReference(
+            repo_url="owner/repo",
+            host="gitlab.example.com",
+            is_insecure=False,
+        )
+        locked = LockedDependency(
+            repo_url="owner/repo",
+            host="gitlab.example.com",
+            is_insecure=True,
+        )
+
+        assert detect_ref_change(dep, locked) is True
+
+    def test_same_transport_and_ref_is_not_drift(self):
+        """Matching ref + transport must remain a no-drift case."""
+        dep = DependencyReference(
+            repo_url="owner/repo",
+            host="gitlab.example.com",
+            reference="main",
+            is_insecure=False,
+        )
+        locked = LockedDependency(
+            repo_url="owner/repo",
+            host="gitlab.example.com",
+            resolved_ref="main",
+            is_insecure=False,
+        )
+
+        assert detect_ref_change(dep, locked) is False
+
+
 class TestDownloadRefLockfileOverride:
     """Test that lockfile SHA override is gated behind `not update_refs`.
 

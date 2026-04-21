@@ -38,12 +38,13 @@ Scope / non-goals
   formatting-only change that produces the same unique key and is correctly
   treated as no drift.
 
-* **Source/host/scheme changes** — *not* detected.  If a user changes the host
-  or scheme of an otherwise identical package (for example, switching an
-  insecure HTTP dependency to HTTPS), the unique key may not change and
-  ``detect_ref_change()`` will not signal a re-download.  Source-level changes
-  require the user to ``apm remove`` + ``apm install`` the package, or use
-  ``--update``.
+* **Host changes** — *not* detected.  If a user changes the host of an otherwise
+  identical package, the unique key may not change and ``detect_ref_change()``
+  will not signal a re-download.  Host-level changes still require the user to
+  ``apm remove`` + ``apm install`` the package, or use ``--update``.
+* **HTTP transport flips** — detected.  Switching between HTTPS and insecure
+  HTTP toggles ``is_insecure`` and forces a re-download even when the package
+  identity and ref are otherwise unchanged.
 """
 
 from __future__ import annotations
@@ -96,7 +97,12 @@ def detect_ref_change(
         return False  # new package — not drift, just a first install
     # Direct comparison: handles None→value, value→None, and value→value.
     # No truthiness guard on locked_dep.resolved_ref — None != "v1.0.0" is True.
-    return dep_ref.reference != locked_dep.resolved_ref
+    if dep_ref.reference != locked_dep.resolved_ref:
+        return True
+
+    return (getattr(dep_ref, "is_insecure", False) is True) != (
+        getattr(locked_dep, "is_insecure", False) is True
+    )
 
 
 # ---------------------------------------------------------------------------
