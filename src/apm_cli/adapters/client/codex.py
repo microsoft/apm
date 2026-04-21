@@ -1,9 +1,4 @@
-"""OpenAI Codex CLI implementation of MCP client adapter.
-
-This adapter implements the Codex CLI-specific handling of MCP server configuration,
-targeting the global ~/.codex/config.toml file as specified in the MCP installation
-architecture specification.
-"""
+"""OpenAI Codex CLI implementation of MCP client adapter."""
 
 import os
 import toml
@@ -17,13 +12,12 @@ class CodexClientAdapter(MCPClientAdapter):
     """Codex CLI implementation of MCP client adapter.
     
     This adapter handles Codex CLI-specific configuration for MCP servers using
-    a global ~/.codex/config.toml file, following the TOML format for
-    MCP server configuration.
+    a scope-resolved config.toml file, following the TOML format for MCP
+    server configuration.
     """
-
     supports_user_scope: bool = True
 
-    def __init__(self, registry_url=None):
+    def __init__(self, registry_url=None, project_root=None, user_scope=False):
         """Initialize the Codex CLI client adapter.
         
         Args:
@@ -31,17 +25,23 @@ class CodexClientAdapter(MCPClientAdapter):
                 If not provided, uses the MCP_REGISTRY_URL environment variable
                 or falls back to the default GitHub registry.
         """
+        super().__init__(project_root=project_root, user_scope=user_scope)
         self.registry_client = SimpleRegistryClient(registry_url)
         self.registry_integration = RegistryIntegration(registry_url)
+
+    def _get_codex_dir(self):
+        """Return the root directory used for Codex config in the current scope."""
+        if self.user_scope:
+            return Path.home() / ".codex"
+        return self.project_root / ".codex"
     
     def get_config_path(self):
         """Get the path to the Codex CLI MCP configuration file.
         
         Returns:
-            str: Path to ~/.codex/config.toml
+            str: Path to the scope-resolved Codex config.toml
         """
-        codex_dir = Path.home() / ".codex"
-        return str(codex_dir / "config.toml")
+        return str(self._get_codex_dir() / "config.toml")
     
     def update_config(self, config_updates):
         """Update the Codex CLI MCP configuration.
@@ -180,7 +180,7 @@ class CodexClientAdapter(MCPClientAdapter):
         raw = server_info.get("_raw_stdio")
         if raw:
             config["command"] = raw["command"]
-            config["args"] = raw["args"]
+            config["args"] = [self.normalize_project_arg(arg) for arg in raw["args"]]
             if raw.get("env"):
                 config["env"] = raw["env"]
                 self._warn_input_variables(raw["env"], server_info.get("name", ""), "Codex CLI")
@@ -555,4 +555,3 @@ class CodexClientAdapter(MCPClientAdapter):
         
         # If no priority package found, return the first one
         return packages[0] if packages else None
-

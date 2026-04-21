@@ -663,10 +663,20 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         # Continue with MCP installation (existing logic)
         mcp_count = 0
         new_mcp_servers: builtins.set = builtins.set()
+        project_root = Path.cwd()
+        explicit_target = target
+        mcp_apm_config = {
+            "target": apm_package.target,
+            "scripts": apm_package.scripts or {},
+        }
         if should_install_mcp and mcp_deps:
             mcp_count = MCPIntegrator.install(
                 mcp_deps, runtime, exclude, verbose,
                 stored_mcp_configs=old_mcp_configs,
+                apm_config=mcp_apm_config,
+                project_root=project_root,
+                user_scope=(scope is InstallScope.USER),
+                explicit_target=explicit_target,
                 diagnostics=apm_diagnostics,
                 scope=scope,
             )
@@ -676,14 +686,28 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
             # Remove stale MCP servers that are no longer needed
             stale_servers = old_mcp_servers - new_mcp_servers
             if stale_servers:
-                MCPIntegrator.remove_stale(stale_servers, runtime, exclude, scope=scope)
+                MCPIntegrator.remove_stale(
+                    stale_servers,
+                    runtime,
+                    exclude,
+                    project_root=project_root,
+                    user_scope=(scope is InstallScope.USER),
+                    scope=scope,
+                )
 
             # Persist the new MCP server set and configs in the lockfile
             MCPIntegrator.update_lockfile(new_mcp_servers, mcp_configs=new_mcp_configs)
         elif should_install_mcp and not mcp_deps:
             # No MCP deps at all -- remove any old APM-managed servers
             if old_mcp_servers:
-                MCPIntegrator.remove_stale(old_mcp_servers, runtime, exclude, scope=scope)
+                MCPIntegrator.remove_stale(
+                    old_mcp_servers,
+                    runtime,
+                    exclude,
+                    project_root=project_root,
+                    user_scope=(scope is InstallScope.USER),
+                    scope=scope,
+                )
                 MCPIntegrator.update_lockfile(builtins.set(), mcp_configs={})
             logger.verbose_detail("No MCP dependencies found in apm.yml")
         elif not should_install_mcp and old_mcp_servers:
@@ -802,7 +826,4 @@ def _install_apm_dependencies(
         allow_protocol_fallback=allow_protocol_fallback,
     )
     return InstallService().run(request)
-
-
-
 

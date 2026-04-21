@@ -78,8 +78,15 @@ class TestCodexClientAdapter(unittest.TestCase):
         self.temp_dir.cleanup()
     
     def test_get_config_path_default(self):
-        """Test default config path for Codex CLI."""
-        adapter = CodexClientAdapter()
+        """Test project-scope config path for Codex CLI."""
+        project_root = Path(self.temp_dir.name) / "workspace"
+        adapter = CodexClientAdapter(project_root=project_root)
+        expected_path = str(project_root / ".codex" / "config.toml")
+        self.assertEqual(adapter.get_config_path(), expected_path)
+
+    def test_get_config_path_user_scope(self):
+        """Test user-scope config path for Codex CLI."""
+        adapter = CodexClientAdapter(user_scope=True)
         expected_path = str(Path.home() / ".codex" / "config.toml")
         self.assertEqual(adapter.get_config_path(), expected_path)
     
@@ -211,6 +218,31 @@ class TestCodexClientAdapter(unittest.TestCase):
         self.assertIn("mcp_servers", config)
         self.assertIn("azure-devops-mcp", config["mcp_servers"])  # Should extract name after slash
         self.assertNotIn("microsoft/azure-devops-mcp", config["mcp_servers"])  # Should NOT use full path
+
+    def test_self_defined_stdio_normalizes_project_placeholders(self):
+        """Project-local Codex configs normalize VS Code placeholders to '.'."""
+        adapter = CodexClientAdapter(project_root=Path(self.temp_dir.name))
+        server_info = {
+            "id": "stdio-id",
+            "name": "local-filesystem",
+            "_raw_stdio": {
+                "command": "npx",
+                "args": [
+                    "-y",
+                    "@modelcontextprotocol/server-filesystem",
+                    "${workspaceFolder}",
+                    "${projectRoot}",
+                ],
+                "env": {},
+            },
+        }
+
+        config = adapter._format_server_config(server_info)
+
+        self.assertEqual(
+            config["args"],
+            ["-y", "@modelcontextprotocol/server-filesystem", ".", "."],
+        )
 
 
 if __name__ == "__main__":

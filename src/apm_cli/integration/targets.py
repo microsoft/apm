@@ -280,6 +280,7 @@ KNOWN_TARGETS: Dict[str, TargetProfile] = {
         },
         auto_create=False,
         detect_by_dir=True,
+        user_supported="partial",
     ),
 }
 

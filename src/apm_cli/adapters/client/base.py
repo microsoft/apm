@@ -1,6 +1,8 @@
 """Base adapter interface for MCP clients."""
 
+import os
 import re
+from pathlib import Path
 from abc import ABC, abstractmethod
 
 _INPUT_VAR_RE = re.compile(r"\$\{input:([^}]+)\}")
@@ -14,6 +16,18 @@ class MCPClientAdapter(ABC):
     # Adapters that target a global path should override this to ``True``
     # so that ``apm install --global`` can install MCP servers to them.
     supports_user_scope: bool = False
+
+    def __init__(self, project_root=None, user_scope=False):
+        """Initialize the adapter with optional scope-aware path context."""
+        self._project_root = Path(project_root) if project_root is not None else None
+        self.user_scope = user_scope
+
+    @property
+    def project_root(self) -> Path:
+        """Return the explicit project root or the current working directory."""
+        if self._project_root is not None:
+            return self._project_root
+        return Path(os.getcwd())
 
     @abstractmethod
     def get_config_path(self):
@@ -123,3 +137,13 @@ class MCPClientAdapter(ABC):
                     f"'{server_name}' will not be resolved \u2014 "
                     f"{runtime_label} does not support input variable prompts"
                 )
+
+    def normalize_project_arg(self, value):
+        """Normalize workspace placeholders for project-local runtimes."""
+        if (
+            not self.user_scope
+            and isinstance(value, str)
+            and value in {"${workspaceFolder}", "${projectRoot}"}
+        ):
+            return "."
+        return value

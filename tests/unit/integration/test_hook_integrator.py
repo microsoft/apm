@@ -2160,6 +2160,20 @@ class TestScopeResolvedHookDeployment:
         assert result.files_integrated > 0
         assert (self.root / ".claude" / "settings.json").exists()
 
+    def test_codex_hooks_use_scope_resolved_root_dir(self):
+        """Codex hooks at user scope merge into .codex/hooks.json."""
+        codex_target = self._make_target("codex", ".codex")
+        (self.root / ".codex").mkdir()
+        pi = _make_package_info(self.pkg_dir, "scope-pkg")
+        integrator = HookIntegrator()
+
+        result = integrator.integrate_hooks_for_target(
+            codex_target, pi, self.root,
+        )
+
+        assert result.files_integrated > 0
+        assert (self.root / ".codex" / "hooks.json").exists()
+
     def test_script_paths_rewritten_with_scope_root(self):
         """Script paths in hook commands use the scope-resolved root_dir."""
         # Create a hook with a script reference

@@ -669,12 +669,14 @@ class TestForScope:
         copilot = KNOWN_TARGETS["copilot"]
         assert copilot.for_scope(user_scope=False) is copilot
 
-    def test_unsupported_target_returns_none(self):
-        """for_scope returns None for targets that don't support user scope."""
+    def test_codex_is_supported_at_user_scope(self):
+        """Codex resolves cleanly at user scope."""
         from apm_cli.integration.targets import KNOWN_TARGETS
         codex = KNOWN_TARGETS["codex"]
-        assert codex.user_supported is False
-        assert codex.for_scope(user_scope=True) is None
+        assert codex.user_supported == "partial"
+        resolved = codex.for_scope(user_scope=True)
+        assert resolved is not None
+        assert resolved.root_dir == ".codex"
 
     def test_resolves_root_dir_to_user_root(self):
         """for_scope replaces root_dir with user_root_dir."""
@@ -746,13 +748,12 @@ class TestForScope:
             assert targets[0].root_dir == ".github"
 
     def test_resolve_targets_filters_unsupported(self):
-        """resolve_targets at user scope excludes unsupported targets."""
+        """resolve_targets at user scope includes all user-capable targets."""
         from apm_cli.integration.targets import resolve_targets, KNOWN_TARGETS
         from pathlib import Path
         targets = resolve_targets(Path.home(), user_scope=True, explicit_target="all")
         target_names = {t.name for t in targets}
-        # Codex doesn't support user scope
-        assert "codex" not in target_names
+        assert "codex" in target_names
 
 
 # ===================================================================

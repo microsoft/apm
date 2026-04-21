@@ -4,7 +4,7 @@ from ..factory import ClientFactory, PackageManagerFactory
 from .safe_installer import SafeMCPInstaller
 
 
-def configure_client(client_type, config_updates):
+def configure_client(client_type, config_updates, project_root=None, user_scope=False):
     """Configure an MCP client.
     
     Args:
@@ -15,7 +15,11 @@ def configure_client(client_type, config_updates):
         bool: True if successful, False otherwise.
     """
     try:
-        client = ClientFactory.create_client(client_type)
+        client = ClientFactory.create_client(
+            client_type,
+            project_root=project_root,
+            user_scope=user_scope,
+        )
         client.update_config(config_updates)
         return True
     except Exception as e:
@@ -23,7 +27,7 @@ def configure_client(client_type, config_updates):
         return False
 
 
-def install_package(client_type, package_name, version=None, shared_env_vars=None, server_info_cache=None, shared_runtime_vars=None):
+def install_package(client_type, package_name, version=None, shared_env_vars=None, server_info_cache=None, shared_runtime_vars=None, project_root=None, user_scope=False):
     """Install an MCP package for a specific client type.
     
     Args:
@@ -39,7 +43,11 @@ def install_package(client_type, package_name, version=None, shared_env_vars=Non
     """
     try:
         # Use safe installer with conflict detection
-        safe_installer = SafeMCPInstaller(client_type)
+        safe_installer = SafeMCPInstaller(
+            client_type,
+            project_root=project_root,
+            user_scope=user_scope,
+        )
         
         # Pass shared environment and runtime variables and server info cache if available
         if shared_env_vars is not None or server_info_cache is not None or shared_runtime_vars is not None:
@@ -69,7 +77,7 @@ def install_package(client_type, package_name, version=None, shared_env_vars=Non
         }
 
 
-def uninstall_package(client_type, package_name):
+def uninstall_package(client_type, package_name, project_root=None, user_scope=False):
     """Uninstall an MCP package.
     
     Args:
@@ -80,7 +88,11 @@ def uninstall_package(client_type, package_name):
         bool: True if successful, False otherwise.
     """
     try:
-        client = ClientFactory.create_client(client_type)
+        client = ClientFactory.create_client(
+            client_type,
+            project_root=project_root,
+            user_scope=user_scope,
+        )
         package_manager = PackageManagerFactory.create_package_manager()
         
         # Uninstall the package

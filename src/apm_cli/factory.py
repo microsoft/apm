@@ -12,11 +12,13 @@ class ClientFactory:
     """Factory for creating MCP client adapters."""
     
     @staticmethod
-    def create_client(client_type):
+    def create_client(client_type, project_root=None, user_scope=False):
         """Create a client adapter based on the specified type.
         
         Args:
             client_type (str): Type of client adapter to create.
+            project_root: Optional project root for repo-local configs.
+            user_scope: Whether the adapter should use user-scope paths.
         
         Returns:
             MCPClientAdapter: An instance of the specified client adapter.
@@ -36,7 +38,10 @@ class ClientFactory:
         if client_type.lower() not in clients:
             raise ValueError(f"Unsupported client type: {client_type}")
             
-        return clients[client_type.lower()]()
+        return clients[client_type.lower()](
+            project_root=project_root,
+            user_scope=user_scope,
+        )
 
 
 class PackageManagerFactory:

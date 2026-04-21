@@ -399,6 +399,8 @@ class MCPIntegrator:
     def _check_self_defined_servers_needing_installation(
         dep_names: list,
         target_runtimes: list,
+        project_root=None,
+        user_scope: bool = False,
     ) -> list:
         """Return self-defined MCP servers missing from at least one runtime.
 
@@ -416,7 +418,11 @@ class MCPIntegrator:
         runtime_failures = []
         for runtime in target_runtimes:
             try:
-                client = ClientFactory.create_client(runtime)
+                client = ClientFactory.create_client(
+                    runtime,
+                    project_root=project_root,
+                    user_scope=user_scope,
+                )
                 detector = MCPConflictDetector(client)
                 runtime_existing[runtime] = detector.get_existing_server_configs()
             except Exception:
@@ -443,6 +449,8 @@ class MCPIntegrator:
         stale_names: builtins.set,
         runtime: str = None,
         exclude: str = None,
+        project_root=None,
+        user_scope: bool = False,
         logger=None,
         scope=None,
     ) -> None:
@@ -550,9 +558,17 @@ class MCPIntegrator:
                         exc_info=True,
                     )
 
-        # Clean ~/.codex/config.toml (mcp_servers section)
+        # Clean the scope-resolved Codex config.toml (mcp_servers section)
         if "codex" in target_runtimes:
-            codex_cfg = Path.home() / ".codex" / "config.toml"
+            from apm_cli.factory import ClientFactory
+
+            codex_cfg = Path(
+                ClientFactory.create_client(
+                    "codex",
+                    project_root=project_root,
+                    user_scope=user_scope,
+                ).get_config_path()
+            )
             if codex_cfg.exists():
                 try:
                     import toml as _toml
@@ -722,7 +738,9 @@ class MCPIntegrator:
 
         except ImportError:
             mcp_compatible = [
-                rt for rt in detected_runtimes if rt in ["vscode", "copilot", "cursor", "opencode"]
+                rt
+                for rt in detected_runtimes
+                if rt in ["vscode", "copilot", "codex", "cursor", "opencode"]
             ]
             return [rt for rt in mcp_compatible if shutil.which(rt)]
 
@@ -737,6 +755,8 @@ class MCPIntegrator:
         shared_env_vars: dict = None,
         server_info_cache: dict = None,
         shared_runtime_vars: dict = None,
+        project_root=None,
+        user_scope: bool = False,
         logger=None,
     ) -> bool:
         """Install MCP dependencies for a specific runtime.
@@ -745,10 +765,6 @@ class MCPIntegrator:
         """
         try:
             from apm_cli.core.operations import install_package
-            from apm_cli.factory import ClientFactory
-
-            # Get the appropriate client for the runtime
-            client = ClientFactory.create_client(runtime)
 
             all_ok = True
             for dep in mcp_deps:
@@ -763,6 +779,8 @@ class MCPIntegrator:
                         shared_env_vars=shared_env_vars,
                         server_info_cache=server_info_cache,
                         shared_runtime_vars=shared_runtime_vars,
+                        project_root=project_root,
+                        user_scope=user_scope,
                     )
                     if result["failed"]:
                         if logger:
@@ -822,6 +840,9 @@ class MCPIntegrator:
         verbose: bool = False,
         apm_config: dict = None,
         stored_mcp_configs: dict = None,
+        project_root=None,
+        user_scope: bool = False,
+        explicit_target: str = None,
         logger=None,
         diagnostics=None,
         scope=None,
@@ -839,7 +860,10 @@ class MCPIntegrator:
             stored_mcp_configs: Previously stored MCP configs from lockfile
                 for diff-aware installation.  When provided, servers whose
                 manifest config has changed are re-applied automatically.
-            scope: InstallScope (PROJECT or USER).  When USER, only
+            project_root: Project root for repo-local runtime configs.
+            user_scope: Whether runtime configuration is being resolved at user scope.
+            explicit_target: Explicit target selected by CLI or manifest.
+            scope: InstallScope (PROJECT or USER). When USER, only
                 runtimes whose adapter declares ``supports_user_scope``
                 are targeted; workspace-only runtimes are skipped.
 
@@ -1058,6 +1082,20 @@ class MCPIntegrator:
             if exclude:
                 target_runtimes = [r for r in target_runtimes if r != exclude]
 
+            # Codex MCP is project-scoped: only configure it when Codex is an
+            # active project target, mirroring Cursor/OpenCode opt-in behavior.
+            if not user_scope and "codex" in target_runtimes:
+                from apm_cli.integration.targets import active_targets
+
+                root = project_root or Path.cwd()
+                config_target = (
+                    explicit_target
+                    or (apm_config.get("target") if apm_config else None)
+                )
+                active = {t.name for t in active_targets(root, config_target)}
+                if "codex" not in active:
+                    target_runtimes = [r for r in target_runtimes if r != "codex"]
+
             # All runtimes excluded  -- nothing to configure
             if not target_runtimes and installed_runtimes:
                 if logger:
@@ -1168,7 +1206,10 @@ class MCPIntegrator:
                 if valid_servers:
                     servers_to_install = (
                         operations.check_servers_needing_installation(
-                            target_runtimes, valid_servers
+                            target_runtimes,
+                            valid_servers,
+                            project_root=project_root,
+                            user_scope=user_scope,
                         )
                     )
                     already_configured_candidates = [
@@ -1292,6 +1333,8 @@ class MCPIntegrator:
                                     shared_env_vars,
                                     server_info_cache,
                                     shared_runtime_vars,
+                                    project_root=project_root,
+                                    user_scope=user_scope,
                                     logger=logger,
                                 ):
                                     any_ok = True
@@ -1335,6 +1378,8 @@ class MCPIntegrator:
                 MCPIntegrator._check_self_defined_servers_needing_installation(
                     self_defined_names,
                     target_runtimes,
+                    project_root=project_root,
+                    user_scope=user_scope,
                 )
             )
             already_configured_candidates_sd = [
@@ -1414,6 +1459,8 @@ class MCPIntegrator:
                         [dep.name],
                         self_defined_env,
                         self_defined_cache,
+                        project_root=project_root,
+                        user_scope=user_scope,
                         logger=logger,
                     ):
                         any_ok = True

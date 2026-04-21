@@ -23,10 +23,9 @@ class CopilotClientAdapter(MCPClientAdapter):
     a global ~/.copilot/mcp-config.json file, following the JSON format for
     MCP server configuration.
     """
-
     supports_user_scope: bool = True
 
-    def __init__(self, registry_url=None):
+    def __init__(self, registry_url=None, project_root=None, user_scope=False):
         """Initialize the Copilot CLI client adapter.
         
         Args:
@@ -34,6 +33,7 @@ class CopilotClientAdapter(MCPClientAdapter):
                 If not provided, uses the MCP_REGISTRY_URL environment variable
                 or falls back to the default GitHub registry.
         """
+        super().__init__(project_root=project_root, user_scope=user_scope)
         self.registry_client = SimpleRegistryClient(registry_url)
         self.registry_integration = RegistryIntegration(registry_url)
     
