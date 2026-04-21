@@ -11,6 +11,13 @@ from apm_cli.core.auth import AuthResolver, HostInfo, AuthContext
 from apm_cli.core.token_manager import GitHubTokenManager
 
 
+@pytest.fixture(autouse=True)
+def disable_gh_cli_fallback():
+    """Keep auth tests deterministic regardless of local gh login state."""
+    with patch.object(GitHubTokenManager, "resolve_credential_from_gh_cli", return_value=None):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # TestClassifyHost
 # ---------------------------------------------------------------------------
