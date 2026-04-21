@@ -333,7 +333,7 @@ falling back to Copilot. Security scanning runs for global installs.
 | Cross-project coding standards | User |
 
 :::note
-MCP servers are not supported at user scope. Each target uses a different MCP configuration format; user-scope MCP support is planned for a future release.
+MCP servers at user scope (`--global`) are installed only to runtimes with global config paths (Copilot CLI, Codex CLI). Workspace-only runtimes (VS Code, Cursor, OpenCode) are skipped.
 :::
 
 :::caution

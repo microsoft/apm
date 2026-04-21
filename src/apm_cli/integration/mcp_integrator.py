@@ -444,6 +444,7 @@ class MCPIntegrator:
         runtime: str = None,
         exclude: str = None,
         logger=None,
+        scope=None,
     ) -> None:
         """Remove MCP server entries that are no longer required by any dependency.
 
@@ -452,6 +453,10 @@ class MCPIntegrator:
         dependency references (e.g. ``"io.github.github/github-mcp-server"``).
         For Copilot CLI and Codex, config keys are derived from the last path
         segment, so we match against both the full reference and the short name.
+
+        Args:
+            scope: InstallScope (PROJECT or USER).  When USER, only
+                global-capable runtimes are cleaned.
         """
         if not stale_names:
             return
@@ -464,6 +469,21 @@ class MCPIntegrator:
             target_runtimes = builtins.set(all_runtimes)
         if exclude:
             target_runtimes.discard(exclude)
+
+        # Scope filtering: at USER scope, only clean global-capable runtimes.
+        from apm_cli.core.scope import InstallScope
+
+        if scope is InstallScope.USER:
+            from apm_cli.factory import ClientFactory as _CF
+
+            supported = builtins.set()
+            for rt in target_runtimes:
+                try:
+                    if _CF.create_client(rt).supports_user_scope:
+                        supported.add(rt)
+                except ValueError:
+                    pass
+            target_runtimes = supported
 
         # Build an expanded set that includes both the full reference and the
         # last-segment short name so we match config keys in every runtime.
@@ -804,6 +824,7 @@ class MCPIntegrator:
         stored_mcp_configs: dict = None,
         logger=None,
         diagnostics=None,
+        scope=None,
     ) -> int:
         """Install MCP dependencies.
 
@@ -818,6 +839,9 @@ class MCPIntegrator:
             stored_mcp_configs: Previously stored MCP configs from lockfile
                 for diff-aware installation.  When provided, servers whose
                 manifest config has changed are re-applied automatically.
+            scope: InstallScope (PROJECT or USER).  When USER, only
+                runtimes whose adapter declares ``supports_user_scope``
+                are targeted; workspace-only runtimes are skipped.
 
         Returns:
             Number of MCP servers newly configured or updated.
@@ -1055,6 +1079,48 @@ class MCPIntegrator:
                     logger.progress("No runtimes installed, using VS Code as fallback")
                 else:
                     _rich_info("No runtimes installed, using VS Code as fallback")
+
+        # Scope filtering: at USER scope, keep only global-capable runtimes.
+        # Applied after both explicit --runtime and auto-discovery paths.
+        from apm_cli.core.scope import InstallScope
+
+        if scope is InstallScope.USER:
+            from apm_cli.factory import ClientFactory as _CF
+
+            pre_filter = list(target_runtimes)
+            filtered_runtimes = []
+            for rt in target_runtimes:
+                try:
+                    client = _CF.create_client(rt)
+                except ValueError:
+                    continue
+                if client.supports_user_scope:
+                    filtered_runtimes.append(rt)
+            target_runtimes = filtered_runtimes
+            skipped = set(pre_filter) - set(target_runtimes)
+            if skipped:
+                msg = (
+                    f"Skipped workspace-only runtimes at user scope: "
+                    f"{', '.join(sorted(skipped))}"
+                    f" -- omit --global to install these"
+                )
+                if logger:
+                    logger.warning(msg)
+                else:
+                    _rich_info(msg, symbol="info")
+            if not target_runtimes:
+                if logger:
+                    logger.warning(
+                        "No runtimes support user-scope MCP installation "
+                        "(supported: copilot, codex)"
+                    )
+                else:
+                    _rich_warning(
+                        "No runtimes support user-scope MCP installation "
+                        "(supported: copilot, codex)",
+                        symbol="warning",
+                    )
+                return 0
 
         # Use the new registry operations module for better server detection
         configured_count = 0

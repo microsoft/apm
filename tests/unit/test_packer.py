@@ -480,3 +480,85 @@ class TestPackBundleTraversalDeployed:
 
         with pytest.raises(ValueError, match="unsafe path"):
             pack_bundle(project, tmp_path / "out")
+
+
+class TestFilterFilesByTargetList:
+    """Tests for _filter_files_by_target with list target input."""
+
+    def test_list_includes_union_of_prefixes(self):
+        files = [".github/agents/a.md", ".claude/commands/b.md", ".cursor/rules/r.md"]
+        result, mappings = _filter_files_by_target(files, ["claude", "vscode"])
+        assert ".github/agents/a.md" in result
+        assert ".claude/commands/b.md" in result
+        assert ".cursor/rules/r.md" not in result
+        assert mappings == {}
+
+    def test_list_copilot_vscode_dedup(self):
+        """copilot and vscode share .github/ prefix -- should not duplicate."""
+        files = [".github/agents/a.md"]
+        result, mappings = _filter_files_by_target(files, ["copilot", "vscode"])
+        assert result == [".github/agents/a.md"]
+
+    def test_list_single_element_matches_string(self):
+        files = [".github/agents/a.md", ".claude/commands/b.md"]
+        result_list, maps_list = _filter_files_by_target(files, ["vscode"])
+        result_str, maps_str = _filter_files_by_target(files, "vscode")
+        assert result_list == result_str
+        assert maps_list == maps_str
+
+
+class TestPackBundleMultiTarget:
+    """Tests for pack_bundle with list targets."""
+
+    def test_pack_list_target_dry_run(self, tmp_path):
+        """List target passes through to filtering in dry-run mode."""
+        deployed = [".github/agents/a.md", ".claude/commands/b.md", ".cursor/rules/r.md"]
+        project = _setup_project(tmp_path, deployed)
+        out = tmp_path / "build"
+
+        result = pack_bundle(project, out, target=["claude", "vscode"], dry_run=True)
+
+        assert ".github/agents/a.md" in result.files
+        assert ".claude/commands/b.md" in result.files
+        assert ".cursor/rules/r.md" not in result.files
+
+    def test_pack_list_target_creates_bundle(self, tmp_path):
+        """List target produces a valid bundle with files from all listed targets."""
+        deployed = [".github/agents/a.md", ".claude/commands/b.md"]
+        project = _setup_project(tmp_path, deployed)
+        out = tmp_path / "build"
+
+        result = pack_bundle(project, out, target=["claude", "vscode"])
+
+        assert result.bundle_path.exists()
+        assert (result.bundle_path / ".github/agents/a.md").exists()
+        assert (result.bundle_path / ".claude/commands/b.md").exists()
+
+    def test_pack_list_target_enriched_lockfile_target_string(self, tmp_path):
+        """Enriched lockfile should have comma-joined target string."""
+        deployed = [".github/agents/a.md", ".claude/commands/b.md"]
+        project = _setup_project(tmp_path, deployed)
+        out = tmp_path / "build"
+
+        result = pack_bundle(project, out, target=["claude", "vscode"])
+
+        lock_yaml = yaml.safe_load(
+            (result.bundle_path / "apm.lock.yaml").read_text()
+        )
+        assert lock_yaml["pack"]["target"] == "claude,vscode"
+
+    def test_pack_list_config_target_when_no_explicit(self, tmp_path):
+        """When apm.yml has target: [claude, copilot] and no explicit --target."""
+        deployed = [".github/agents/a.md", ".claude/commands/b.md"]
+        project = _setup_project(tmp_path, deployed)
+        out = tmp_path / "build"
+
+        # Rewrite apm.yml with list target
+        apm_yml = {"name": "test-pkg", "version": "1.0.0", "target": ["claude", "copilot"]}
+        (project / "apm.yml").write_text(yaml.dump(apm_yml), encoding="utf-8")
+
+        result = pack_bundle(project, out, target=None, dry_run=True)
+
+        # Should include files from both .github/ (copilot) and .claude/ (claude)
+        assert ".github/agents/a.md" in result.files
+        assert ".claude/commands/b.md" in result.files

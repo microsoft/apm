@@ -8,7 +8,7 @@ primitives should land.  Adding a new target means adding an entry to
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 
 @dataclass(frozen=True)
@@ -314,7 +314,7 @@ def get_integration_prefixes(targets=None) -> tuple:
 
 
 def active_targets_user_scope(
-    explicit_target: "Optional[str]" = None,
+    explicit_target: "Optional[Union[str, List[str]]]" = None,
 ) -> list:
     """Return ``TargetProfile`` instances for user-scope deployment.
 
@@ -325,7 +325,7 @@ def active_targets_user_scope(
 
     1. **Explicit target** (``--target``): returns the matching profile
        if it supports user scope.  ``"all"`` returns every user-capable
-       target.
+       target.  A list of names returns all matching user-capable profiles.
     2. **Directory detection**: profiles whose ``effective_root(user_scope=True)``
        directory exists under ``~/``.
     3. **Fallback**: ``[copilot]`` -- same default as project scope.
@@ -336,6 +336,25 @@ def active_targets_user_scope(
 
     # --- explicit target ---
     if explicit_target:
+        if isinstance(explicit_target, list):
+            profiles: list = []
+            seen: set = set()
+            for t in explicit_target:
+                canonical = t
+                if canonical in ("copilot", "vscode", "agents"):
+                    canonical = "copilot"
+                if canonical == "all":
+                    return [
+                        p for p in KNOWN_TARGETS.values()
+                        if p.user_supported
+                    ]
+                profile = KNOWN_TARGETS.get(canonical)
+                if profile and profile.user_supported and profile.name not in seen:
+                    seen.add(profile.name)
+                    profiles.append(profile)
+            return profiles if profiles else []
+
+        # single string (existing behavior)
         canonical = explicit_target
         if canonical in ("copilot", "vscode", "agents"):
             canonical = "copilot"
@@ -361,7 +380,10 @@ def active_targets_user_scope(
     return [KNOWN_TARGETS["copilot"]]
 
 
-def active_targets(project_root, explicit_target: "Optional[str]" = None) -> list:
+def active_targets(
+    project_root,
+    explicit_target: "Optional[Union[str, List[str]]]" = None,
+) -> list:
     """Return the list of ``TargetProfile`` instances that should be
     deployed into *project_root*.
 
@@ -369,7 +391,7 @@ def active_targets(project_root, explicit_target: "Optional[str]" = None) -> lis
 
     1. **Explicit target** (``--target`` flag or ``apm.yml target:``):
        returns only the matching profile(s).  ``"all"`` returns every
-       known target.
+       known target.  A list of names returns all matching profiles.
     2. **Directory detection**: profiles whose ``root_dir`` already
        exists under *project_root*.
     3. **Fallback**: when nothing is detected, returns ``[copilot]``
@@ -377,9 +399,8 @@ def active_targets(project_root, explicit_target: "Optional[str]" = None) -> lis
 
     Args:
         project_root: The workspace root ``Path``.
-        explicit_target: Canonical target name (``"copilot"``, ``"claude"``,
-            ``"cursor"``, ``"opencode"``, ``"all"``).  ``None`` means
-            auto-detect.
+        explicit_target: Canonical target name, list of canonical names,
+            or ``"all"``/``None``.  ``None`` means auto-detect.
     """
     from pathlib import Path
 
@@ -387,6 +408,22 @@ def active_targets(project_root, explicit_target: "Optional[str]" = None) -> lis
 
     # --- explicit target ---
     if explicit_target:
+        if isinstance(explicit_target, list):
+            profiles: list = []
+            seen: set = set()
+            for t in explicit_target:
+                canonical = t
+                if canonical in ("copilot", "vscode", "agents"):
+                    canonical = "copilot"
+                if canonical == "all":
+                    return list(KNOWN_TARGETS.values())
+                profile = KNOWN_TARGETS.get(canonical)
+                if profile and profile.name not in seen:
+                    seen.add(profile.name)
+                    profiles.append(profile)
+            return profiles if profiles else [KNOWN_TARGETS["copilot"]]
+
+        # single string (existing behavior)
         canonical = explicit_target
         if canonical in ("copilot", "vscode", "agents"):
             canonical = "copilot"
@@ -410,7 +447,7 @@ def active_targets(project_root, explicit_target: "Optional[str]" = None) -> lis
 def resolve_targets(
     project_root,
     user_scope: bool = False,
-    explicit_target: "Optional[str]" = None,
+    explicit_target: "Optional[Union[str, List[str]]]" = None,
 ) -> list:
     """Return scope-resolved ``TargetProfile`` instances.
 
@@ -424,7 +461,8 @@ def resolve_targets(
     Args:
         project_root: Workspace root (``Path.cwd()`` or ``Path.home()``).
         user_scope: When ``True``, resolve for user-level deployment.
-        explicit_target: Canonical target name or ``"all"``.
+        explicit_target: Canonical target name, list of canonical names,
+            or ``"all"``.  ``None`` means auto-detect.
     """
     if user_scope:
         raw = active_targets_user_scope(explicit_target)
