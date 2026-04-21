@@ -36,6 +36,7 @@ from .errors import (
 from .ref_resolver import RefResolver, RemoteRef
 from .semver import SemVer, parse_semver, satisfies_range
 from .tag_pattern import build_tag_regex, render_tag
+from ..utils.path_security import ensure_path_within
 from .yml_schema import MarketplaceYml, PackageEntry, load_marketplace_yml
 
 __all__ = [
@@ -143,7 +144,11 @@ class MarketplaceBuilder:
         if self._options.output_override is not None:
             return self._options.output_override
         yml = self._load_yml()
-        return self._yml_path.parent / yml.output
+        output_path = self._yml_path.parent / yml.output
+        # Containment guard -- reject output paths that escape the project root.
+        project_root = self._yml_path.parent
+        ensure_path_within(output_path, project_root)
+        return output_path
 
     # -- single-entry resolution --------------------------------------------
 

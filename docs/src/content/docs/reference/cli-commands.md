@@ -1434,7 +1434,6 @@ apm marketplace plugin add SOURCE [OPTIONS]
 - `--include-prerelease` - Include pre-release versions
 - `--no-verify` - Skip remote repository verification
 - `--verbose` - Enable verbose output
-- `--marketplace-yml PATH` - Path to `marketplace.yml` (default: `./marketplace.yml`)
 
 `--version` and `--ref` are mutually exclusive. At least one must be provided.
 
@@ -1468,7 +1467,6 @@ apm marketplace plugin set NAME [OPTIONS]
 - `--description TEXT` - New description
 - `--include-prerelease` - Enable pre-release version inclusion
 - `--verbose` - Enable verbose output
-- `--marketplace-yml PATH` - Path to `marketplace.yml` (default: `./marketplace.yml`)
 
 `--version` and `--ref` are mutually exclusive. At least one field option must be specified.
 
@@ -1498,7 +1496,6 @@ apm marketplace plugin remove NAME [OPTIONS]
 **Options:**
 - `--yes` - Skip confirmation prompt
 - `--verbose` - Enable verbose output
-- `--marketplace-yml PATH` - Path to `marketplace.yml` (default: `./marketplace.yml`)
 
 Prompts for confirmation unless `--yes` is passed. In non-interactive environments (CI), use `--yes`.
 

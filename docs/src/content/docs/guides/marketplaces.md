@@ -258,3 +258,7 @@ Shadow detection runs automatically during install -- no configuration required.
 - **Use commit SHAs as refs** -- tags and branches can be moved; commit SHAs cannot.
 - **Keep plugin names unique across marketplaces** -- avoids shadow warnings and reduces confusion.
 - **Review immutability warnings** -- a changed ref for an existing version is a strong signal of tampering.
+
+## Creating your own marketplace
+
+If you want to create and maintain your own marketplace registry, see the [Marketplace Authoring Guide](../../guides/marketplace-authoring/).

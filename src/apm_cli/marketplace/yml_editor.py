@@ -23,7 +23,7 @@ from ruamel.yaml import YAML
 
 from ..utils.path_security import PathTraversalError, validate_path_segments
 from .errors import MarketplaceYmlError
-from .yml_schema import _SOURCE_RE, load_marketplace_yml
+from .yml_schema import SOURCE_RE, load_marketplace_yml
 
 __all__ = [
     "add_plugin_entry",
@@ -110,7 +110,7 @@ def _find_entry_index(packages, name: str) -> int:
 
 def _validate_source(source: str) -> None:
     """Validate that *source* has ``owner/repo`` shape."""
-    if not _SOURCE_RE.match(source):
+    if not SOURCE_RE.match(source):
         raise MarketplaceYmlError(
             f"'source' must match '<owner>/<repo>' shape, got '{source}'"
         )

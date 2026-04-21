@@ -79,6 +79,12 @@ def _redact_token(text: str) -> str:
 
 _BRANCH_UNSAFE_RE = re.compile(r"[^a-zA-Z0-9._-]")
 
+# Pattern for safe git remote URLs (HTTPS or SSH).
+_SAFE_REPO_RE = re.compile(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$")
+
+# Shell metacharacters that must never appear in branch names or repo slugs.
+_SHELL_META_RE = re.compile(r"[;&|`$(){}!<>\"\']")
+
 
 def _sanitise_branch_segment(text: str) -> str:
     """Replace characters that are unsafe for git branch names with hyphens."""
@@ -349,6 +355,30 @@ class MarketplacePublisher:
                 target.path_in_repo,
                 context=f"path_in_repo for {target.repo}",
             )
+
+        # Validate repo and branch for each target
+        for target in targets:
+            # Repo must be a safe "owner/repo" slug with no shell metacharacters.
+            if _SHELL_META_RE.search(target.repo):
+                raise MarketplaceError(
+                    f"Consumer target repo '{target.repo}' contains "
+                    f"prohibited shell metacharacters."
+                )
+            if not _SAFE_REPO_RE.match(target.repo):
+                raise MarketplaceError(
+                    f"Consumer target repo '{target.repo}' must match "
+                    f"'owner/repo' (alphanumeric, dots, hyphens, underscores)."
+                )
+            # Branch must not contain traversal sequences or shell metacharacters.
+            validate_path_segments(
+                target.branch,
+                context=f"consumer target branch for {target.repo}",
+            )
+            if _SHELL_META_RE.search(target.branch):
+                raise MarketplaceError(
+                    f"Consumer target branch '{target.branch}' for "
+                    f"'{target.repo}' contains prohibited shell metacharacters."
+                )
 
         # Compute short hash
         sorted_repos = sorted(t.repo for t in targets)

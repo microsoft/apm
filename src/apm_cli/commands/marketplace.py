@@ -1448,6 +1448,7 @@ def publish(
         sys.exit(1)
 
     # 1d. Check gh availability (unless --no-pr)
+    pr = None
     if not no_pr:
         pr = PrIntegrator()
         available, hint = pr.check_available()
@@ -1501,7 +1502,7 @@ def publish(
     # PR integration
     pr_results = []
     if not no_pr:
-        if not locals().get("pr"):
+        if pr is None:
             pr = PrIntegrator()
 
         for result in results:
@@ -1554,15 +1555,21 @@ def publish(
     # State file path -- use soft_wrap so the path is never split mid-word
     # in narrow terminals (Rich would otherwise break at hyphens).
     state_path = Path.cwd() / ".apm" / "publish-state.json"
-    from rich.text import Text
+    try:
+        from rich.text import Text
 
-    console = _get_console()
-    console.print(
-        Text(f"[i] State file: {state_path}", no_wrap=True),
-        style="blue",
-        highlight=False,
-        soft_wrap=True,
-    )
+        console = _get_console()
+        if console is not None:
+            console.print(
+                Text(f"[i] State file: {state_path}", no_wrap=True),
+                style="blue",
+                highlight=False,
+                soft_wrap=True,
+            )
+        else:
+            click.echo(f"[i] State file: {state_path}")
+    except Exception:
+        click.echo(f"[i] State file: {state_path}")
 
     # Exit code
     failed_count = sum(

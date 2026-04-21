@@ -117,7 +117,7 @@ class TestPluginAdd:
             ],
         )
         assert result.exit_code == 2
-        assert "Cannot specify both" in result.output
+        assert "mutually exclusive" in result.output.lower()
 
     def test_help_renders(self, runner):
         result = runner.invoke(marketplace, ["plugin", "add", "--help"])
@@ -254,3 +254,33 @@ class TestPluginRemove:
         result = runner.invoke(marketplace, ["plugin", "remove", "--help"])
         assert result.exit_code == 0
         assert "Remove a plugin" in result.output
+
+
+# ---------------------------------------------------------------------------
+# UX4: --version/--ref mutual exclusivity in plugin add
+# ---------------------------------------------------------------------------
+
+
+class TestPluginAddMutualExclusivity:
+    """The ``add`` command must reject ``--version`` and ``--ref`` together."""
+
+    def test_version_and_ref_mutually_exclusive(
+        self, runner, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        _write_yml(tmp_path)
+        result = runner.invoke(
+            marketplace,
+            [
+                "plugin",
+                "add",
+                "acme/new-tool",
+                "--version",
+                "1.0.0",
+                "--ref",
+                "main",
+                "--no-verify",
+            ],
+        )
+        assert result.exit_code != 0
+        assert "mutually exclusive" in result.output.lower()

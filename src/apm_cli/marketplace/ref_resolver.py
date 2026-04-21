@@ -16,6 +16,7 @@ Security notes
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import threading
@@ -203,12 +204,14 @@ class RefResolver:
                 raise OfflineMissError(package="", remote=owner_repo)
 
             url = f"https://github.com/{owner_repo}.git"
+            env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
             try:
                 result = subprocess.run(
                     ["git", "ls-remote", "--tags", "--heads", url],
                     capture_output=True,
                     text=True,
                     timeout=self._timeout,
+                    env=env,
                 )
             except subprocess.TimeoutExpired:
                 raise GitLsRemoteError(
