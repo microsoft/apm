@@ -506,7 +506,9 @@ class DependencyReference:
         sub_path = entry.get("path")
         ref_override = entry.get("ref")
         alias_override = entry.get("alias")
-        allow_insecure = bool(entry.get("allow_insecure", False))
+        allow_insecure = entry.get("allow_insecure", False)
+        if not isinstance(allow_insecure, bool):
+            raise ValueError("'allow_insecure' field must be a boolean")
 
         # Validate sub_path if provided
         if sub_path is not None:
@@ -561,7 +563,7 @@ class DependencyReference:
         virtual_path = None
         validated_host = None
 
-        if temp_str.startswith(("git@", "https://", "http://", "ssh://")):
+        if temp_str.lower().startswith(("git@", "https://", "http://", "ssh://")):
             return is_virtual_package, virtual_path, validated_host
 
         check_str = temp_str
@@ -746,7 +748,9 @@ class DependencyReference:
         repo_url = repo_part.strip()
 
         # For virtual packages, extract just the owner/repo part (or org/project/repo for ADO)
-        if is_virtual_package and not repo_url.startswith(("https://", "http://")):
+        repo_url_lower = repo_url.lower()
+
+        if is_virtual_package and not repo_url_lower.startswith(("https://", "http://")):
             parts = repo_url.split("/")
 
             if "_git" in parts:
@@ -780,7 +784,7 @@ class DependencyReference:
                     repo_url = "/".join(parts[:2])
 
         # Normalize to URL format for secure parsing
-        if repo_url.startswith(("https://", "http://")):
+        if repo_url_lower.startswith(("https://", "http://")):
             parsed_url = urllib.parse.urlparse(repo_url)
             host = parsed_url.hostname or ""
             port = parsed_url.port  # capture :PORT from https://host:8443/...
@@ -1073,7 +1077,7 @@ class DependencyReference:
             ado_project=ado_project,
             ado_repo=ado_repo,
             artifactory_prefix=artifactory_prefix,
-            is_insecure=dependency_str.startswith("http://"),
+            is_insecure=urllib.parse.urlparse(dependency_str).scheme.lower() == "http",
         )
 
     def to_apm_yml_entry(self):
@@ -1092,7 +1096,7 @@ class DependencyReference:
                 entry["ref"] = self.reference
             if self.alias:
                 entry["alias"] = self.alias
-            entry["allow_insecure"] = True
+            entry["allow_insecure"] = self.allow_insecure
             return entry
         return self.to_canonical()
 

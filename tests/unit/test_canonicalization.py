@@ -471,6 +471,11 @@ class TestOnlyPackagesFilter:
 class TestHttpInsecureDeps:
     """Tests for HTTP (insecure) dependency parsing and serialization."""
 
+    def test_http_scheme_detection_is_case_insensitive(self):
+        """Parsing an uppercase HTTP scheme still marks the ref as insecure."""
+        dep = DependencyReference.parse("HTTP://my-server.example.com/owner/repo")
+        assert dep.is_insecure is True
+
     def test_http_url_sets_insecure_flag(self):
         """Parsing an http:// URL marks the ref as insecure."""
         dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
@@ -515,6 +520,13 @@ class TestHttpInsecureDeps:
         assert entry["git"] == "http://my-server.example.com/owner/repo"
         assert entry["allow_insecure"] is True
 
+    def test_http_to_apm_yml_entry_preserves_allow_insecure_false(self):
+        """to_apm_yml_entry() preserves an explicit False opt-in state."""
+        dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
+        entry = dep.to_apm_yml_entry()
+        assert isinstance(entry, dict)
+        assert entry["allow_insecure"] is False
+
     def test_http_to_apm_yml_entry_includes_ref(self):
         """to_apm_yml_entry() includes ref when present."""
         dep = DependencyReference.parse("http://my-server.example.com/owner/repo#v1.0")
@@ -550,6 +562,15 @@ class TestHttpInsecureDeps:
         entry = {"git": "http://my-server.example.com/owner/repo"}
         dep = DependencyReference.parse_from_dict(entry)
         assert dep.allow_insecure is False
+
+    def test_parse_from_dict_rejects_non_boolean_allow_insecure(self):
+        """parse_from_dict() rejects non-boolean allow_insecure values."""
+        entry = {
+            "git": "http://my-server.example.com/owner/repo",
+            "allow_insecure": "false",
+        }
+        with pytest.raises(ValueError, match="'allow_insecure' field must be a boolean"):
+            DependencyReference.parse_from_dict(entry)
 
     def test_http_to_github_url_uses_http_scheme(self):
         """to_github_url() uses http:// for HTTP deps."""

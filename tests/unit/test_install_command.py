@@ -842,7 +842,8 @@ class TestInstallGlobalFlag:
                         cli, ["install", "--global", str(local_pkg)]
                     )
 
-                assert "not supported at user scope" in result.output
+                normalized = " ".join(result.output.split())
+                assert "not supported at user scope" in normalized
             finally:
                 os.chdir(self.original_dir)
 
