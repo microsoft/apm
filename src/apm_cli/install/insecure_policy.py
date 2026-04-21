@@ -34,7 +34,7 @@ def _collect_insecure_dependency_infos(
         parent = node.parent if node else None
         insecure_infos.append(
             _InsecureDependencyInfo(
-                url=dep.to_canonical(),
+                url=_get_insecure_dependency_url(dep),
                 is_transitive=parent is not None,
                 introduced_by=(
                     parent.dependency_ref.get_display_name()
@@ -45,6 +45,18 @@ def _collect_insecure_dependency_infos(
         )
 
     return insecure_infos
+
+
+def _get_insecure_dependency_url(dep) -> str:
+    """Return the transport-aware display URL for an insecure dependency."""
+    entry = dep.to_apm_yml_entry()
+    if not isinstance(entry, dict):
+        return entry
+
+    url = entry["git"]
+    if entry.get("ref"):
+        return f"{url}#{entry['ref']}"
+    return url
 
 
 def _format_insecure_dependency_warning(info: _InsecureDependencyInfo) -> str:

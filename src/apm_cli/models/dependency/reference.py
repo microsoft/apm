@@ -198,7 +198,7 @@ class DependencyReference:
         return self.repo_url
 
     def to_canonical(self) -> str:
-        """Return the canonical form of this dependency for storage in apm.yml.
+        """Return the canonical scheme-free identity string for this dependency.
 
         Follows the Docker-style default-registry convention:
         - Default host (github.com) is stripped  ->  owner/repo
@@ -206,9 +206,10 @@ class DependencyReference:
         - Virtual paths are appended              ->  owner/repo/path/to/thing
         - Refs are appended with #                ->  owner/repo#v1.0
         - Local paths are returned as-is          ->  ./packages/my-pkg
-        - HTTP deps preserve the http:// prefix   ->  http://host/owner/repo
 
-        No .git suffix, no git@  -- just the canonical identifier.
+        No .git suffix, no git@, and no transport scheme -- just the canonical
+        identifier. Use ``to_apm_yml_entry()`` when the serialized apm.yml value
+        must preserve an explicit ``http://`` transport.
 
         Returns:
             str: Canonical dependency string
@@ -217,13 +218,6 @@ class DependencyReference:
             return self.local_path
 
         host = self.host or default_host()
-
-        # HTTP deps always include the full http://host/path form
-        if self.is_insecure:
-            result = f"http://{host}/{self.repo_url}"
-            if self.reference:
-                result = f"{result}#{self.reference}"
-            return result
 
         is_default = host.lower() == default_host().lower()
         # Custom port is part of the transport and must travel with the host label.
@@ -277,7 +271,7 @@ class DependencyReference:
 
     @staticmethod
     def canonicalize(raw: str) -> str:
-        """Parse any raw input form and return its canonical storage form.
+        """Parse any raw input form and return its canonical identifier form.
 
         Convenience method that combines parse() + to_canonical().
 
@@ -285,7 +279,7 @@ class DependencyReference:
             raw: Any supported input form (shorthand, FQDN, HTTPS, SSH, etc.)
 
         Returns:
-            str: Canonical form for apm.yml storage
+            str: Canonical scheme-free identifier form
         """
         return DependencyReference.parse(raw).to_canonical()
 
@@ -296,7 +290,7 @@ class DependencyReference:
         the filesystem layout in apm_modules/ which is also host-blind.
 
         For identity-based matching that includes non-default hosts, use get_identity().
-        For the full canonical form suitable for apm.yml storage, use to_canonical().
+        For the transport-aware apm.yml entry, use to_apm_yml_entry().
 
         Returns:
             str: Host-blind canonical string (e.g., "owner/repo")

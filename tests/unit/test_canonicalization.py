@@ -498,18 +498,17 @@ class TestHttpInsecureDeps:
         dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
         assert dep.allow_insecure is False
 
-    def test_http_to_canonical_preserves_scheme(self):
-        """to_canonical() for HTTP dep includes http:// prefix."""
+    def test_http_to_canonical_is_scheme_free(self):
+        """to_canonical() for HTTP dep keeps the canonical identifier scheme-free."""
         dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
         canonical = dep.to_canonical()
-        assert canonical.startswith("http://")
-        assert "my-server.example.com/owner/repo" in canonical
+        assert canonical == "my-server.example.com/owner/repo"
 
     def test_http_to_canonical_with_ref(self):
-        """to_canonical() for HTTP dep with ref includes #ref."""
+        """to_canonical() for HTTP dep with ref stays scheme-free."""
         dep = DependencyReference.parse("http://my-server.example.com/owner/repo#main")
         canonical = dep.to_canonical()
-        assert canonical == "http://my-server.example.com/owner/repo#main"
+        assert canonical == "my-server.example.com/owner/repo#main"
 
     def test_http_to_apm_yml_entry_returns_dict(self):
         """to_apm_yml_entry() for HTTP dep returns a dict with git key."""
