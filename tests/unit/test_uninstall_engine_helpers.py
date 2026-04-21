@@ -9,7 +9,6 @@ in existing integration-style uninstall tests:
 - _cleanup_stale_mcp
 """
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -134,11 +133,19 @@ class TestValidateUninstallPackages:
     def test_malformed_dep_entry_falls_back_to_string_compare(self):
         """A dep entry that raises on parse falls back to string comparison."""
         logger = _make_logger()
-        # "org/repo" as string dep, "org/repo" as package to remove - should match
-        to_remove, not_found = _validate_uninstall_packages(
-            ["org/repo"], ["org/repo"], logger
-        )
+        # Force _parse_dependency_entry to raise so the engine takes the
+        # except (ValueError, TypeError, AttributeError, KeyError) branch
+        # and falls back to direct string comparison against the entry.
+        with patch(
+            "apm_cli.commands.uninstall.engine._parse_dependency_entry",
+            side_effect=ValueError("parse failed"),
+        ):
+            to_remove, not_found = _validate_uninstall_packages(
+                ["org/repo"], ["org/repo"], logger
+            )
         assert "org/repo" in to_remove
+        assert not_found == []
+        logger.error.assert_not_called()
 
     def test_dependency_reference_objects_in_deps(self):
         """DependencyReference objects in deps list are matched correctly."""
