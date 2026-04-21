@@ -173,11 +173,8 @@ def _guard_transitive_insecure_dependencies(
         f"--allow-insecure-host {host}" for host in blocked_hosts
     )
     message = (
-        "Transitive HTTP (insecure) dependencies were found on unapproved host(s): "
-        f"{', '.join(blocked_hosts)}. "
-        "--allow-insecure only covers direct HTTP dependencies and transitive "
-        "HTTP dependencies on the same host. "
-        f"Re-run with {suggested_flags} to allow these transitive hosts."
+        f"Re-run with {suggested_flags} to allow transitive HTTP dependencies "
+        f"from unapproved host(s): {', '.join(blocked_hosts)}."
     )
     logger.error(message)
     raise InsecureDependencyPolicyError(message)

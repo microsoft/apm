@@ -1421,7 +1421,11 @@ class TestTransitiveInsecureDependencyGuard:
                 allow_insecure_hosts=(),
             )
 
-        assert "mirror.example.com" in str(exc_info.value)
+        message = str(exc_info.value)
+        assert message.startswith(
+            "Re-run with --allow-insecure-host mirror.example.com"
+        )
+        assert "unapproved host(s): mirror.example.com" in message
 
     def test_transitive_guard_allows_same_host_as_direct_insecure_dependency(self):
         """A direct insecure dependency host also permits transitive deps on that host."""
@@ -1498,4 +1502,8 @@ class TestTransitiveInsecureDependencyGuard:
                 allow_insecure_hosts=(),
             )
 
-        assert "mirror.example.com" in str(exc_info.value)
+        message = str(exc_info.value)
+        assert message.startswith(
+            "Re-run with --allow-insecure-host mirror.example.com"
+        )
+        assert "unapproved host(s): mirror.example.com" in message
