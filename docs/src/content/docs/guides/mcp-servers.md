@@ -146,7 +146,7 @@ APM validates every `--mcp` entry before writing `apm.yml`. These are guardrails
 
 Self-defined servers (everything except the bare-string registry form) additionally require:
 
-- `transport` -- one of `stdio`, `http`, `sse`.
+- `transport` -- one of `stdio`, `http`, `sse`. These are MCP transport names, not URL schemes: remote variants connect over HTTPS.
 - `url` -- when `transport` is `http` or `sse`.
 - `command` -- when `transport` is `stdio`.
 

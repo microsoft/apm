@@ -376,7 +376,7 @@ mcp:
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | string | Server reference (required) |
-| `transport` | string | `stdio`, `sse`, `http`, or `streamable-http` |
+| `transport` | string | `stdio`, `sse`, `http`, or `streamable-http` (MCP transport names, not URL schemes -- remote variants connect over HTTPS) |
 | `env` | dict | Environment variable overrides |
 | `args` | list or dict | Runtime argument overrides |
 | `version` | string | Pin server version |

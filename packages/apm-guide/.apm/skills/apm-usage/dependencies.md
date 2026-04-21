@@ -147,7 +147,7 @@ dependencies:
 
     # Registry with overlays (object)
     - name: io.github.github/github-mcp-server
-      transport: stdio                          # stdio|sse|http|streamable-http
+      transport: stdio                          # stdio|sse|http|streamable-http (MCP transport names, not URL schemes; remote connects over HTTPS)
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       args: ["--port", "3000"]
