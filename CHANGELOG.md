@@ -52,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm mcp search`, `apm mcp list`, and `apm mcp show` now honour the `MCP_REGISTRY_URL` environment variable (previously hardcoded to the public registry), bringing them in line with `apm install --mcp`. When the variable is set, the discovery commands print a one-line `Registry: <url>` diagnostic and surface the configured URL in network-error messages so misconfigured enterprise registries are obvious (#813)
 - `apm install --mcp ... --dry-run` now validates the would-be entry through the same chokepoint the real install uses, so dry-run never previews "success" for an entry `apm install` would reject (empty / whitespace-only / over-128-char / embedded `..` names, invalid transport-conflict combinations) (#810)
 - `SimpleRegistryClient` now applies a `(connect=10s, read=30s)` timeout on every registry HTTP call, removing the unbounded-hang failure mode when a registry is slow or unreachable. Operators can tune via `MCP_REGISTRY_CONNECT_TIMEOUT` / `MCP_REGISTRY_READ_TIMEOUT` env vars; invalid values silently fall back to defaults (#810)
+- `apm init` Next Steps panel now shows install/marketplace/plugin workflows instead of the dead-end `apm run start` reference; no extra files are created besides `apm.yml` (#649)
 
 ### Security
 
