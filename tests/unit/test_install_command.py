@@ -1390,7 +1390,7 @@ class TestInsecureDependencyWarnings:
             )
         )
 
-        assert "Fetching insecurely (no transport auth)" in message
+        assert "Insecure HTTP fetch (unencrypted)" in message
         assert "http://mirror.example.com/acme/transitive" in message
         assert "transitive, introduced by owner/root-package" in message
 

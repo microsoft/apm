@@ -73,7 +73,7 @@ def _format_insecure_dependency_requirements(url: str) -> str:
 
 def _format_insecure_dependency_warning(info: _InsecureDependencyInfo) -> str:
     """Render the install-time warning text for an insecure dependency."""
-    message = f"Fetching insecurely (no transport auth): {info.url}"
+    message = f"Insecure HTTP fetch (unencrypted): {info.url}"
     if info.is_transitive and info.introduced_by:
         message = (
             f"{message} (transitive, introduced by {info.introduced_by})"
