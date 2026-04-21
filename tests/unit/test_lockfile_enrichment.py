@@ -245,3 +245,108 @@ class TestFilterFilesByTarget:
                 assert f.startswith(".claude/skills/")
         # Either way, the original .github/ path should not sneak through
         assert ".github/skills/../../etc/passwd" not in filtered
+
+
+class TestFilterFilesByTargetList:
+    """Tests for _filter_files_by_target with list targets."""
+
+    def test_list_claude_copilot_includes_both_prefixes(self):
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        files = [".github/agents/a.md", ".claude/commands/b.md", ".cursor/rules/r.md"]
+        filtered, mappings = _filter_files_by_target(files, ["claude", "vscode"])
+        assert ".github/agents/a.md" in filtered
+        assert ".claude/commands/b.md" in filtered
+        # .cursor/ is not in ["claude", "vscode"] prefixes
+        assert ".cursor/rules/r.md" not in filtered
+        # Both are direct matches under their respective prefixes, no mapping needed
+        assert mappings == {}
+
+    def test_list_single_element_same_as_string(self):
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        files = [".github/skills/x/SKILL.md", ".claude/commands/b.md"]
+        filtered_list, maps_list = _filter_files_by_target(files, ["claude"])
+        filtered_str, maps_str = _filter_files_by_target(files, "claude")
+        assert filtered_list == filtered_str
+        assert maps_list == maps_str
+
+    def test_list_claude_cursor_includes_both(self):
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        files = [".claude/skills/s1/SKILL.md", ".cursor/rules/r.md", ".github/agents/a.md"]
+        filtered, mappings = _filter_files_by_target(files, ["claude", "cursor"])
+        assert ".claude/skills/s1/SKILL.md" in filtered
+        assert ".cursor/rules/r.md" in filtered
+        # .github/ is not a direct prefix for either claude or cursor
+        # but cross-target maps may apply
+        assert ".github/agents/a.md" not in filtered
+
+    def test_list_deduplicates_prefixes(self):
+        """copilot and vscode share the same prefix .github/ -- no duplicates."""
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        files = [".github/agents/a.md"]
+        filtered, mappings = _filter_files_by_target(files, ["copilot", "vscode"])
+        assert filtered == [".github/agents/a.md"]
+        assert mappings == {}
+
+    def test_list_cross_map_github_to_claude_and_cursor(self):
+        """When both claude and cursor are targets, cross-mapped files go to one dest."""
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        files = [".github/skills/x/SKILL.md"]
+        filtered, mappings = _filter_files_by_target(files, ["claude", "cursor"])
+        # Both claude and cursor have cross-maps from .github/skills/
+        # Dict.update means cursor map overwrites claude map for same key
+        # So the result maps to cursor's destination
+        assert len(filtered) == 1
+        assert len(mappings) == 1
+
+
+class TestEnrichLockfileListTarget:
+    """Tests for enrich_lockfile_for_pack with list targets."""
+
+    def test_list_target_serializes_as_comma_string(self):
+        lf = _make_lockfile()
+        result = enrich_lockfile_for_pack(lf, fmt="apm", target=["claude", "vscode"])
+        parsed = yaml.safe_load(result)
+
+        assert parsed["pack"]["target"] == "claude,vscode"
+
+    def test_list_target_filters_deployed_files(self):
+        lf = LockFile()
+        dep = LockedDependency(
+            repo_url="owner/repo",
+            resolved_commit="abc123",
+            version="1.0.0",
+            deployed_files=[
+                ".github/agents/a.md",
+                ".claude/commands/c.md",
+                ".cursor/rules/r.md",
+            ],
+        )
+        lf.add_dependency(dep)
+
+        result = enrich_lockfile_for_pack(lf, fmt="apm", target=["claude", "vscode"])
+        parsed = yaml.safe_load(result)
+
+        deployed = parsed["dependencies"][0]["deployed_files"]
+        assert ".github/agents/a.md" in deployed
+        assert ".claude/commands/c.md" in deployed
+        # .cursor/ not in target list
+        assert ".cursor/rules/r.md" not in deployed
+
+    def test_list_target_single_element_equivalent_to_string(self):
+        lf = _make_lockfile()
+        result_list = enrich_lockfile_for_pack(lf, fmt="apm", target=["vscode"])
+        result_str = enrich_lockfile_for_pack(lf, fmt="apm", target="vscode")
+
+        parsed_list = yaml.safe_load(result_list)
+        parsed_str = yaml.safe_load(result_str)
+
+        # Deployed files should be identical
+        assert (
+            parsed_list["dependencies"][0]["deployed_files"]
+            == parsed_str["dependencies"][0]["deployed_files"]
+        )

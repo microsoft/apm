@@ -29,7 +29,7 @@ version:       <string>                    # REQUIRED -- semver (e.g. 1.0.0)
 description:   <string>                    # optional
 author:        <string>                    # optional
 license:       <string>                    # optional -- SPDX (e.g. MIT)
-target:        <enum>                      # optional -- vscode|claude|codex|opencode|all
+target:        <string | list>              # optional -- vscode|claude|codex|opencode|all (or list: [claude, copilot])
 type:          <enum>                      # optional -- instructions|skill|hybrid|prompts
 scripts:       <map<string, string>>       # optional -- named commands
 dependencies:
@@ -39,7 +39,7 @@ devDependencies:                           # optional -- excluded from bundles
   apm:         <list<ApmDependency>>
   mcp:         <list<McpDependency>>
 compilation:                               # optional
-  target:      <enum>                      # vscode|claude|codex|opencode|all
+  target:      <enum>                      # vscode|claude|codex|opencode|all (or list)
   strategy:    <enum>                      # distributed|single-file
   output:      <string>                    # custom output path
   chatmode:    <string>                    # chatmode to prepend
@@ -58,12 +58,24 @@ compilation:                               # optional
 
 ### Target auto-detection
 
+When no target is specified, APM auto-detects from project structure. The `target` field accepts a single string or a list:
+
+```yaml
+# Single target
+target: copilot
+
+# Multiple targets -- only these are compiled/installed
+target: [claude, copilot]
+```
+
+CLI equivalent: `--target claude,copilot` (comma-separated).
+
 | Condition | Detected target |
 |-----------|-----------------|
 | `.github/` exists only | `vscode` |
 | `.claude/` exists only | `claude` |
 | `.codex/` exists | `codex` |
-| Both `.github/` and `.claude/` | `all` |
+| Multiple target folders | `all` |
 | Neither exists | `minimal` (AGENTS.md only) |
 
 ## What to commit

@@ -72,4 +72,6 @@ class InstallService:
             auth_resolver=request.auth_resolver,
             target=request.target,
             marketplace_provenance=request.marketplace_provenance,
+            protocol_pref=request.protocol_pref,
+            allow_protocol_fallback=request.allow_protocol_fallback,
         )

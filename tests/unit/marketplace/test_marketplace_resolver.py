@@ -21,28 +21,32 @@ class TestParseMarketplaceRef:
         assert parse_marketplace_ref("security-checks@acme-tools") == (
             "security-checks",
             "acme-tools",
+            None,
         )
 
     def test_dots(self):
         assert parse_marketplace_ref("my.plugin@my.marketplace") == (
             "my.plugin",
             "my.marketplace",
+            None,
         )
 
     def test_underscores(self):
         assert parse_marketplace_ref("my_plugin@my_marketplace") == (
             "my_plugin",
             "my_marketplace",
+            None,
         )
 
     def test_mixed(self):
         assert parse_marketplace_ref("plugin-v2.0@corp_tools") == (
             "plugin-v2.0",
             "corp_tools",
+            None,
         )
 
     def test_whitespace_stripped(self):
-        assert parse_marketplace_ref("  name@mkt  ") == ("name", "mkt")
+        assert parse_marketplace_ref("  name@mkt  ") == ("name", "mkt", None)
 
     # Negative cases -- not marketplace refs (should return None)
     def test_owner_repo(self):

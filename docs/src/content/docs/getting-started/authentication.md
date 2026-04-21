@@ -282,8 +282,64 @@ git config --global credential.helper osxkeychain  # macOS
 gh auth login                              # GitHub CLI
 ```
 
+#### Custom-port hosts and per-port credentials
+
+For self-hosted Git instances on non-standard ports (e.g. Bitbucket Datacenter on port 7999), APM sends `host=<host>:<port>` to `git credential fill` per the [`gitcredentials(7)`](https://git-scm.com/docs/gitcredentials) protocol. Whether distinct credentials are returned for different ports depends on the helper:
+
+| Helper | Honors port-in-host? |
+|---|---|
+| git-credential-manager (GCM) | Yes |
+| macOS Keychain (`osxkeychain`) | Yes (stores full `host:port` as key) |
+| `libsecret` (Linux) | Yes (port in URI) |
+| `gh auth git-credential` | No -- but only used for GitHub hosts, which do not use custom ports |
+
+If APM resolves the wrong credential for a custom-port host, confirm your helper keys by `host:port`; otherwise either switch helpers or store credentials under fully qualified `https://<host>:<port>/` URLs.
+
 ### SSH connection hangs on corporate/VPN networks
 
-When no token is available, APM tries SSH before falling back to plain HTTPS. Firewalls that silently drop SSH packets (port 22) can make `apm install` appear to hang. APM sets `GIT_SSH_COMMAND="ssh -o ConnectTimeout=30"` so SSH attempts fail within 30 seconds and the fallback proceeds to HTTPS with git credential helpers.
+When APM clones over SSH (because the dependency is an SSH URL, the user
+passed `--ssh`, `git config url.<base>.insteadOf` rewrites to SSH, or
+`--allow-protocol-fallback` is in effect), firewalls that silently drop SSH
+packets (port 22) can make `apm install` appear to hang. APM sets
+`GIT_SSH_COMMAND="ssh -o ConnectTimeout=30"` so SSH attempts fail within 30
+seconds.
 
-If you already set `GIT_SSH_COMMAND` (e.g., for a custom key), APM appends `-o ConnectTimeout=30` unless `ConnectTimeout` is already present in your value.
+If you already set `GIT_SSH_COMMAND` (e.g., for a custom key), APM appends
+`-o ConnectTimeout=30` unless `ConnectTimeout` is already present in your
+value.
+
+If SSH is unreachable from your network, force HTTPS:
+
+```bash
+apm install --https
+export APM_GIT_PROTOCOL=https
+```
+
+## Choosing transport (SSH vs HTTPS)
+
+Authentication and transport are independent decisions:
+
+- **HTTPS** uses the token resolution chain documented above. APM resolves a
+  token per `(host, org)` and embeds it in the clone URL.
+- **SSH** uses your existing ssh-agent and `~/.ssh/config`. APM does not
+  select keys or override agent behavior -- whatever `git clone` would do
+  on the same machine, APM does.
+
+APM picks the transport per dependency using a strict contract (explicit
+URL scheme honored exactly; shorthand uses HTTPS unless
+`git config url.<base>.insteadOf` rewrites it to SSH). For the full
+selection matrix, the `--ssh` / `--https` flags, the `APM_GIT_PROTOCOL`
+env var, and the `--allow-protocol-fallback` escape hatch, see
+[Dependencies: Transport selection](../../guides/dependencies/#transport-selection-ssh-vs-https).
+
+:::caution[Custom ports and cross-protocol fallback]
+When `--allow-protocol-fallback` is in effect, APM reuses the
+dependency URL's port on both SSH and HTTPS attempts. On servers that
+use different ports per protocol (e.g. Bitbucket Datacenter: SSH 7999,
+HTTPS 7990), the off-protocol URL will be wrong. APM emits a `[!]`
+warning before the first clone attempt to flag this. To avoid
+cross-protocol retries, leave `--allow-protocol-fallback` disabled
+(strict mode) and pin the dependency with an explicit `ssh://...` or
+`https://...` URL. If the flag is enabled, APM may still try the
+other protocol even when the URL uses an explicit scheme.
+:::

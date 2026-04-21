@@ -10,6 +10,7 @@ from typing import List, Optional, Dict, Any
 from ...constants import APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from ...models.apm_package import APMPackage, ValidationResult, validate_apm_package
 from ...core.command_logger import CommandLogger
+from ...core.target_detection import TargetParamType
 
 from ._utils import (
     _is_nested_under_package,
@@ -477,12 +478,9 @@ def clean(dry_run: bool, yes: bool):
 )
 @click.option(
     "--target", "-t",
-    type=click.Choice(
-        ["copilot", "claude", "cursor", "opencode", "codex", "vscode", "agents", "all"],
-        case_sensitive=False,
-    ),
+    type=TargetParamType(),
     default=None,
-    help="Force deployment to a specific target (overrides auto-detection)",
+    help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Overrides auto-detection.",
 )
 @click.option(
     "--parallel-downloads",

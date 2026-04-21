@@ -22,6 +22,7 @@ class LockedDependency:
 
     repo_url: str
     host: Optional[str] = None
+    port: Optional[int] = None  # Non-standard SSH/HTTPS port (e.g. 7999 for Bitbucket DC)
     registry_prefix: Optional[str] = None  # Registry path prefix, e.g. "artifactory/github"
     resolved_commit: Optional[str] = None
     resolved_ref: Optional[str] = None
@@ -53,6 +54,8 @@ class LockedDependency:
         result: Dict[str, Any] = {"repo_url": self.repo_url}
         if self.host:
             result["host"] = self.host
+        if self.port:
+            result["port"] = self.port
         if self.registry_prefix:
             result["registry_prefix"] = self.registry_prefix
         if self.resolved_commit:
@@ -108,9 +111,21 @@ class LockedDependency:
                 deployed_files.append(f".github/skills/{skill_name}/")
                 deployed_files.append(f".claude/skills/{skill_name}/")
 
+        # Defensive cast: reject non-numeric or out-of-range ports from tampered lockfiles.
+        _p_raw = data.get("port")
+        port: Optional[int] = None
+        if _p_raw is not None:
+            try:
+                _p_int = int(_p_raw)
+            except (TypeError, ValueError):
+                _p_int = None
+            if _p_int is not None and 1 <= _p_int <= 65535:
+                port = _p_int
+
         return cls(
             repo_url=data["repo_url"],
             host=data.get("host"),
+            port=port,
             registry_prefix=data.get("registry_prefix"),
             resolved_commit=data.get("resolved_commit"),
             resolved_ref=data.get("resolved_ref"),
@@ -163,6 +178,7 @@ class LockedDependency:
         return cls(
             repo_url=dep_ref.repo_url,
             host=host,
+            port=dep_ref.port,
             registry_prefix=registry_prefix,
             resolved_commit=resolved_commit,
             resolved_ref=dep_ref.reference,
