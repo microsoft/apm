@@ -146,3 +146,21 @@ def get_apm_temp_dir() -> Optional[str]:
     if config_val:
         return config_val
     return None
+
+
+def get_allow_insecure() -> bool:
+    """Get the allow-insecure setting.
+
+    Returns:
+        bool: Whether HTTP (insecure) dependencies are allowed globally (default: False).
+    """
+    return get_config().get("allow_insecure", False)
+
+
+def set_allow_insecure(enabled: bool) -> None:
+    """Set the allow-insecure setting.
+
+    Args:
+        enabled: Whether to allow HTTP (insecure) dependencies globally.
+    """
+    update_config({"allow_insecure": enabled})

@@ -659,6 +659,10 @@ class GitHubPackageDownloader:
         else:
             # Determine if this host should receive a GitHub token
             is_github = is_github_hostname(host)
+            # Use http:// only for dependencies explicitly marked as insecure.
+            is_insecure = False
+            if dep_ref is not None:
+                is_insecure = bool(getattr(dep_ref, "is_insecure", False))
             # Thread the user-declared custom port (e.g. 7999 for Bitbucket DC) through
             # the URL builders so neither SSH nor HTTPS attempts silently drop it.
             port = dep_ref.port if dep_ref else None
@@ -667,6 +671,9 @@ class GitHubPackageDownloader:
             elif is_github and github_token:
                 # Only send GitHub tokens to GitHub hosts
                 return build_https_clone_url(host, repo_ref, token=github_token, port=port)
+            elif is_insecure:
+                netloc = f"{host}:{port}" if port else host
+                return f"http://{netloc}/{repo_ref}.git"
             else:
                 # Generic hosts: plain HTTPS, let git credential helpers handle auth
                 return build_https_clone_url(host, repo_ref, token=None, port=port)
@@ -713,6 +720,36 @@ class GitHubPackageDownloader:
             f"is_generic={is_generic}, has_token={has_token}, "
             f"protocol_pref={self._protocol_pref.value}, allow_fallback={self._allow_fallback}"
         )
+
+        # HTTP direct only: return before Method 1/2/3 and keep credential helpers enabled.
+        if dep_ref and getattr(dep_ref, "is_insecure", False):
+            insecure_env = {
+                k: v
+                for k, v in self.git_env.items()
+                if k not in ("GIT_ASKPASS", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM")
+            }
+            insecure_env["GIT_TERMINAL_PROMPT"] = "0"
+            try:
+                http_url = self._build_repo_url(
+                    repo_url_base, use_ssh=False, dep_ref=dep_ref
+                )
+                repo = Repo.clone_from(
+                    http_url,
+                    target_path,
+                    env=insecure_env,
+                    progress=progress_reporter,
+                    **clone_kwargs,
+                )
+                if verbose_callback:
+                    verbose_callback(f"Cloned from: {http_url}")
+                return repo
+            except GitCommandError as e:
+                sanitized_error = self._sanitize_git_error(str(e))
+                raise RuntimeError(
+                    f"Failed to clone insecure HTTP repository {repo_url_base}. "
+                    f"HTTP dependencies do not fall back to SSH or HTTPS. "
+                    f"Last error: {sanitized_error}"
+                ) from e
 
         # Choose the clone env PER ATTEMPT (not per dependency): only the
         # token-bearing attempt should run with the locked-down env that

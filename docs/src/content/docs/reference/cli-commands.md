@@ -74,7 +74,7 @@ apm init my-plugin --plugin
 
 ### `apm install` - Install dependencies and deploy local content
 
-Install APM package and MCP server dependencies from `apm.yml` and deploy the project's own `.apm/` content to target directories (like `npm install`). Auto-creates minimal `apm.yml` when packages are specified but no manifest exists.
+Install APM package and MCP server dependencies from `apm.yml` and deploy the project's own `.apm/` content to target directories (like `npm install`). Auto-creates minimal `apm.yml` when packages are specified but no manifest exists. For `http://` dependencies, use `--allow-insecure` or enable the global `allow-insecure` config.
 
 ```bash
 apm install [PACKAGES...] [OPTIONS]
@@ -96,6 +96,7 @@ apm install [PACKAGES...] [OPTIONS]
 - `--trust-transitive-mcp` - Trust self-defined MCP servers from transitive packages (skip re-declaration requirement)
 - `--dev` - Add packages to [`devDependencies`](../manifest-schema/#5-devdependencies) instead of `dependencies`. Dev deps are installed locally but excluded from `apm pack --format plugin` bundles
 - `-g, --global` - Install to user scope (`~/.apm/`) instead of the current project. Primitives deploy to `~/.copilot/`, `~/.claude/`, etc. MCP servers are only installed for global-capable runtimes (Copilot CLI, Codex CLI); workspace-only runtimes are skipped.
+- `--allow-insecure` - Allow HTTP (insecure) dependencies. Required when adding or installing dependencies that use an `http://` URL.
 - `--ssh` - Force SSH for shorthand (`owner/repo`) dependencies. Mutually exclusive with `--https`. Ignored for URLs with an explicit scheme.
 - `--https` - Force HTTPS for shorthand dependencies. Mutually exclusive with `--ssh`. Default unless `git config url.<base>.insteadOf` rewrites the candidate to SSH.
 - `--allow-protocol-fallback` - Restore the legacy permissive cross-protocol fallback chain (HTTPS-then-SSH or vice-versa). Strict-by-default otherwise. Each retry emits a `[!]` warning naming both protocols.
@@ -1431,6 +1432,7 @@ apm config get [KEY]
 - `KEY` (optional) - Configuration key to retrieve. Supported keys:
   - `auto-integrate` - Whether to automatically integrate `.prompt.md` files into AGENTS.md
   - `temp-dir` - Custom temporary directory for clone/download operations
+  - `allow-insecure` - Whether HTTP (insecure) dependencies are allowed globally
 
 If `KEY` is omitted, displays all configuration values.
 
@@ -1438,6 +1440,9 @@ If `KEY` is omitted, displays all configuration values.
 ```bash
 # Get auto-integrate setting
 apm config get auto-integrate
+
+# Get allow-insecure setting
+apm config get allow-insecure
 
 # Show all configuration
 apm config get
@@ -1455,6 +1460,7 @@ apm config set KEY VALUE
 - `KEY` - Configuration key to set. Supported keys:
   - `auto-integrate` - Enable/disable automatic integration of `.prompt.md` files
   - `temp-dir` - Set a custom temporary directory path
+  - `allow-insecure` - Allow HTTP (insecure) dependencies globally
 - `VALUE` - Value to set. For boolean keys, use: `true`, `false`, `yes`, `no`, `1`, `0`
 
 **Configuration Keys:**
@@ -1467,6 +1473,11 @@ apm config set KEY VALUE
   - Set to `false` if you want to manually manage which prompts are compiled
   - Set to `true` to ensure all prompts are always included in the context
 
+**`allow-insecure`** - Allow HTTP (insecure) dependencies globally
+- **Type:** Boolean
+- **Default:** `false`
+- **Description:** When enabled, APM skips the requirement to pass `--allow-insecure` at install time for HTTP dependencies. The per-dependency `allow_insecure: true` field in apm.yml is still required. Use this for private network environments where all servers use HTTP.
+
 **Examples:**
 ```bash
 # Enable auto-integration (default)
@@ -1475,9 +1486,11 @@ apm config set auto-integrate true
 # Disable auto-integration
 apm config set auto-integrate false
 
-# Using alternative boolean values
-apm config set auto-integrate yes
-apm config set auto-integrate 1
+# Allow HTTP dependencies globally (skips --allow-insecure flag requirement)
+apm config set allow-insecure true
+
+# Disable globally (default)
+apm config set allow-insecure false
 ```
 
 **`temp-dir`** - Override the system temporary directory

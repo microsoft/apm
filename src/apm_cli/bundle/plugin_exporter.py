@@ -401,8 +401,11 @@ def _dep_install_path(dep: LockedDependency, apm_modules_dir: Path) -> Path:
         host=dep.host,
         virtual_path=dep.virtual_path,
         is_virtual=dep.is_virtual,
+        artifactory_prefix=dep.registry_prefix,
         is_local=(dep.source == "local"),
         local_path=dep.local_path,
+        is_insecure=dep.is_insecure,
+        allow_insecure=dep.allow_insecure,
     )
     return dep_ref.get_install_path(apm_modules_dir)
 

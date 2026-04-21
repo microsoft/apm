@@ -11,6 +11,7 @@ Also tests the drift detection helpers in ``apm_cli/drift.py``:
 
 from unittest.mock import Mock
 
+from apm_cli.deps.lockfile import LockFile, LockedDependency
 from apm_cli.drift import build_download_ref, detect_config_drift, detect_orphans, detect_ref_change
 from apm_cli.models.apm_package import DependencyReference
 
@@ -229,6 +230,29 @@ class TestDownloadRefLockfileOverride:
         assert ref.repo_url == "owner/repo"
         assert ref.reference == "abc123def456"
 
+    def test_http_lockfile_restores_insecure_scheme(self):
+        """HTTP deps should restore the locked insecure scheme on replay."""
+        dep = DependencyReference(
+            repo_url="acme/rules",
+            host="git.company.internal",
+            reference=None,
+        )
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="acme/rules",
+                host="git.company.internal",
+                resolved_commit="abc123def456",
+                is_insecure=True,
+                allow_insecure=True,
+            )
+        )
+
+        ref = build_download_ref(dep, lockfile, update_refs=False, ref_changed=False)
+        assert ref.host == "git.company.internal"
+        assert ref.reference == "abc123def456"
+        assert ref.is_insecure is True
+
 
 class TestPreDownloadRefLockfileOverride:
     """Same as TestDownloadRefLockfileOverride but for the parallel pre-download path.
@@ -268,6 +292,29 @@ class TestPreDownloadRefLockfileOverride:
 
         ref = build_download_ref(dep, lockfile, update_refs=False, ref_changed=False)
         assert ref.reference == "abc123def456"
+
+
+class TestLockedDependencyHttpRoundTrip:
+    """Tests for lockfile preservation of HTTP dependency metadata."""
+
+    def test_to_yaml_round_trip_preserves_http_fields(self):
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="acme/rules",
+                host="git.company.internal",
+                resolved_commit="abc123def456",
+                is_insecure=True,
+                allow_insecure=True,
+            )
+        )
+
+        parsed = LockFile.from_yaml(lockfile.to_yaml())
+        dep = parsed.get_dependency("acme/rules")
+
+        assert dep is not None
+        assert dep.is_insecure is True
+        assert dep.allow_insecure is True
 
 
 class TestRefChangedDetection:

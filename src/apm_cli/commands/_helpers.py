@@ -140,6 +140,11 @@ def _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir: Path
                     host=dep.host,
                     virtual_path=dep.virtual_path,
                     is_virtual=dep.is_virtual,
+                    artifactory_prefix=dep.registry_prefix,
+                    is_local=(dep.source == "local"),
+                    local_path=dep.local_path,
+                    is_insecure=dep.is_insecure,
+                    allow_insecure=dep.allow_insecure,
                 )
                 install_path = dep_ref.get_install_path(apm_modules_dir)
                 try:

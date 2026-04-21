@@ -1113,3 +1113,139 @@ class TestContentHashFallback:
             assert not fallback_triggered, (
                 "Fallback must not trigger when content_hash is None"
             )
+
+
+class TestAllowInsecureFlag:
+    """Tests for --allow-insecure flag and HTTP dependency security checks."""
+
+    def setup_method(self):
+        self.runner = CliRunner()
+        try:
+            self.original_dir = os.getcwd()
+        except FileNotFoundError:
+            self.original_dir = str(Path(__file__).parent.parent.parent)
+            os.chdir(self.original_dir)
+
+    def test_http_dep_rejected_without_allow_insecure_flag(self):
+        """Adding http:// package without --allow-insecure is rejected."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            try:
+                os.chdir(tmp_dir)
+                with patch("apm_cli.commands.install._validate_package_exists", return_value=True), \
+                     patch("apm_cli.config.get_allow_insecure", return_value=False):
+                    result = self.runner.invoke(
+                        cli, ["install", "http://my-server.example.com/owner/repo"]
+                    )
+            finally:
+                os.chdir(self.original_dir)
+            assert "allow-insecure" in result.output or "insecure" in result.output.lower()
+
+    def test_install_help_mentions_allow_insecure_for_http_deps(self):
+        """Install help should mention the HTTP allow-insecure flow."""
+        result = self.runner.invoke(cli, ["install", "--help"])
+
+        assert result.exit_code == 0
+        normalized = " ".join(result.output.split())
+        assert "use --allow-insecure for http:// packages" in normalized
+
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
+    @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
+    @patch("apm_cli.commands.install.APMPackage")
+    @patch("apm_cli.commands.install._install_apm_dependencies")
+    def test_http_dep_addition_passes_with_config_allow_insecure(
+        self, mock_install_apm, mock_apm_package, mock_validate
+    ):
+        """Global config allows adding an HTTP dependency without the CLI flag."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            try:
+                os.chdir(tmp_dir)
+                mock_pkg_instance = MagicMock()
+                mock_pkg_instance.get_apm_dependencies.return_value = []
+                mock_pkg_instance.get_mcp_dependencies.return_value = []
+                mock_apm_package.from_apm_yml.return_value = mock_pkg_instance
+                mock_install_apm.return_value = InstallResult(
+                    diagnostics=MagicMock(
+                        has_diagnostics=False, has_critical_security=False
+                    )
+                )
+
+                with patch("apm_cli.config.get_allow_insecure", return_value=True):
+                    result = self.runner.invoke(
+                        cli, ["install", "http://my-server.example.com/owner/repo"]
+                    )
+
+                assert result.exit_code == 0
+                with open("apm.yml", encoding="utf-8") as f:
+                    config = yaml.safe_load(f)
+
+                assert config["dependencies"]["apm"] == [
+                    {
+                        "git": "http://my-server.example.com/owner/repo",
+                        "allow_insecure": True,
+                    }
+                ]
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_http_dep_validation_check(self):
+        """_check_insecure_dependencies blocks HTTP dep without allow_insecure flag."""
+        from apm_cli.commands.install import _check_insecure_dependencies
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
+        dep.allow_insecure = True
+
+        with patch("apm_cli.config.get_allow_insecure", return_value=False):
+            with pytest.raises(SystemExit) as exc_info:
+                _check_insecure_dependencies([dep], allow_insecure_flag=False)
+            assert exc_info.value.code == 1
+
+    def test_http_dep_passes_with_allow_insecure_flag(self):
+        """_check_insecure_dependencies passes when flag is set and dep has allow_insecure."""
+        from apm_cli.commands.install import _check_insecure_dependencies
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
+        dep.allow_insecure = True
+
+        with patch("apm_cli.config.get_allow_insecure", return_value=False):
+            _check_insecure_dependencies([dep], allow_insecure_flag=True)
+
+    def test_http_dep_passes_with_config_allow_insecure(self):
+        """_check_insecure_dependencies passes when global config allow_insecure is true."""
+        from apm_cli.commands.install import _check_insecure_dependencies
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
+        dep.allow_insecure = True
+
+        with patch("apm_cli.config.get_allow_insecure", return_value=True):
+            _check_insecure_dependencies([dep], allow_insecure_flag=False)
+
+    def test_http_dep_without_dep_level_allow_insecure_is_blocked(self):
+        """_check_insecure_dependencies blocks HTTP dep missing allow_insecure=True on dep."""
+        from apm_cli.commands.install import _check_insecure_dependencies
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
+
+        with patch("apm_cli.config.get_allow_insecure", return_value=False):
+            with pytest.raises(SystemExit) as exc_info:
+                _check_insecure_dependencies([dep], allow_insecure_flag=True)
+            assert exc_info.value.code == 1
+
+    def test_https_dep_passes_without_flag(self):
+        """_check_insecure_dependencies does not block HTTPS deps."""
+        from apm_cli.commands.install import _check_insecure_dependencies
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep = DependencyReference.parse("owner/repo")
+        with patch("apm_cli.config.get_allow_insecure", return_value=False):
+            _check_insecure_dependencies([dep], allow_insecure_flag=False)
+
+    def test_empty_deps_list_passes(self):
+        """_check_insecure_dependencies handles empty dep list."""
+        from apm_cli.commands.install import _check_insecure_dependencies
+
+        with patch("apm_cli.config.get_allow_insecure", return_value=False):
+            _check_insecure_dependencies([], allow_insecure_flag=False)

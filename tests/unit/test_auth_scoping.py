@@ -252,6 +252,39 @@ class TestCloneWithFallbackEnv:
         assert "ghp_TESTTOKEN" in first_url
         assert _url_host(first_url) == "github.com"
 
+    def test_insecure_http_dep_does_not_fallback_to_ssh(self):
+        """HTTP deps should clone with HTTP only and never try SSH fallback."""
+        dl = _make_downloader(github_token="ghp_TESTTOKEN")
+        dep = _dep("http://gitlab.company.internal/acme/rules.git")
+
+        dl.auth_resolver._cache.clear()
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "ghp_TESTTOKEN"}, clear=True), \
+             patch(
+                 "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+                 return_value=None,
+             ), \
+             patch('apm_cli.deps.github_downloader.Repo') as MockRepo:
+            MockRepo.clone_from.side_effect = GitCommandError("clone", "failed")
+            target = Path(tempfile.mkdtemp())
+            try:
+                with pytest.raises(
+                    RuntimeError,
+                    match="do not fall back to SSH or HTTPS",
+                ):
+                    dl._clone_with_fallback(dep.repo_url, target, dep_ref=dep)
+            finally:
+                import shutil
+                shutil.rmtree(target, ignore_errors=True)
+
+            assert MockRepo.clone_from.call_count == 1
+            first_url = MockRepo.clone_from.call_args_list[0][0][0]
+            env_used = MockRepo.clone_from.call_args_list[0][1]["env"]
+            assert first_url == "http://gitlab.company.internal/acme/rules.git"
+            assert "GIT_ASKPASS" not in env_used
+            assert "GIT_CONFIG_GLOBAL" not in env_used
+            assert "GIT_CONFIG_NOSYSTEM" not in env_used
+            assert env_used.get("GIT_TERMINAL_PROMPT") == "0"
+
     def test_generic_host_error_message_mentions_credential_helpers(self):
         """When all methods fail for a generic host, the error suggests credential helpers."""
         dl = _make_downloader(github_token="ghp_TESTTOKEN")

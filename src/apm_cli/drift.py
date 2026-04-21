@@ -38,12 +38,12 @@ Scope / non-goals
   formatting-only change that produces the same unique key and is correctly
   treated as no drift.
 
-* **Source/host changes** — *not* detected.  If a user changes the host of
-  an otherwise identical package (e.g. adding an enterprise FQDN prefix), the
-  unique key (``repo_url``, host-blind for the default host) may not change
-  and ``detect_ref_change()`` will not signal a re-download.  Host-level
-  changes require the user to ``apm remove`` + ``apm install`` the package, or
-  use ``--update``.
+* **Source/host/scheme changes** — *not* detected.  If a user changes the host
+  or scheme of an otherwise identical package (for example, switching an
+  insecure HTTP dependency to HTTPS), the unique key may not change and
+  ``detect_ref_change()`` will not signal a re-download.  Source-level changes
+  require the user to ``apm remove`` + ``apm install`` the package, or use
+  ``--update``.
 """
 
 from __future__ import annotations
@@ -249,6 +249,9 @@ def build_download_ref(
                 overrides["artifactory_prefix"] = locked_dep.registry_prefix
             elif isinstance(getattr(locked_dep, "host", None), str) and locked_dep.host != dep_ref.host:
                 overrides["host"] = locked_dep.host
+
+            if getattr(locked_dep, "is_insecure", False) is True:
+                overrides["is_insecure"] = True
 
             # Use locked commit SHA for byte-for-byte reproducibility.
             if locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
