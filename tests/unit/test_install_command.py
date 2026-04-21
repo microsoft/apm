@@ -1158,10 +1158,11 @@ class TestAllowInsecureFlag:
                 with patch("apm_cli.commands.install._validate_package_exists", return_value=True):
                     result = self.runner.invoke(
                         cli, ["install", "http://my-server.example.com/owner/repo"]
-                    )
+                     )
             finally:
                 os.chdir(self.original_dir)
-            assert "allow-insecure" in result.output or "insecure" in result.output.lower()
+            assert "allow_insecure: true" in result.output
+            assert "--allow-insecure" in result.output
 
     def test_install_help_mentions_allow_insecure_for_http_deps(self):
         """Install help should mention the HTTP allow-insecure flow."""
@@ -1275,9 +1276,15 @@ class TestAllowInsecureFlag:
         dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
         dep.allow_insecure = True
 
-        with pytest.raises(SystemExit) as exc_info:
+        with patch("apm_cli.install.insecure_policy._rich_error") as mock_error, pytest.raises(
+            SystemExit
+        ) as exc_info:
             _check_insecure_dependencies([dep], allow_insecure_flag=False)
         assert exc_info.value.code == 1
+        message = mock_error.call_args.args[0]
+        assert "http://my-server.example.com/owner/repo" in message
+        assert "allow_insecure: true" in message
+        assert "--allow-insecure" in message
 
     def test_http_dep_passes_with_allow_insecure_flag(self):
         """_check_insecure_dependencies passes when flag is set and dep has allow_insecure."""
@@ -1296,9 +1303,15 @@ class TestAllowInsecureFlag:
 
         dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
 
-        with pytest.raises(SystemExit) as exc_info:
+        with patch("apm_cli.install.insecure_policy._rich_error") as mock_error, pytest.raises(
+            SystemExit
+        ) as exc_info:
             _check_insecure_dependencies([dep], allow_insecure_flag=True)
         assert exc_info.value.code == 1
+        message = mock_error.call_args.args[0]
+        assert "http://my-server.example.com/owner/repo" in message
+        assert "allow_insecure: true" in message
+        assert "--allow-insecure" in message
 
     def test_https_dep_passes_without_flag(self):
         """_check_insecure_dependencies does not block HTTPS deps."""

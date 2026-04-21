@@ -65,7 +65,9 @@ from apm_cli.install.insecure_policy import (
     _check_insecure_dependencies,
     _collect_insecure_dependency_infos,
     _format_insecure_dependency_warning,
+    _format_insecure_dependency_requirements,
     _guard_transitive_insecure_dependencies,
+    _get_insecure_dependency_url,
     _normalize_allow_insecure_host,
     _warn_insecure_dependencies,
 )
@@ -251,9 +253,8 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
 
         if dep_ref.is_insecure:
             if not allow_insecure:
-                reason = (
-                    f"'{canonical}' uses HTTP (insecure). "
-                    f"Pass '--allow-insecure' to allow this install."
+                reason = _format_insecure_dependency_requirements(
+                    _get_insecure_dependency_url(dep_ref)
                 )
                 invalid_outcomes.append((package, reason))
                 if logger:

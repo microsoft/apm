@@ -59,6 +59,16 @@ def _get_insecure_dependency_url(dep) -> str:
     return url
 
 
+def _format_insecure_dependency_requirements(url: str) -> str:
+    """Render the canonical remediation message for an HTTP dependency."""
+    return (
+        f"{url} -- HTTP dependency (no transport encryption)\n"
+        "To install:\n"
+        "  1. Set allow_insecure: true on the dep in apm.yml\n"
+        "  2. Pass --allow-insecure to apm install"
+    )
+
+
 def _format_insecure_dependency_warning(info: _InsecureDependencyInfo) -> str:
     """Render the install-time warning text for an insecure dependency."""
     message = f"Fetching insecurely (no transport auth): {info.url}"
@@ -193,24 +203,17 @@ def _check_insecure_dependencies(
         dep_is_insecure = getattr(dep, "is_insecure", False) is True
         if not dep_is_insecure:
             continue
-        identity = dep.get_identity()
+        url = _get_insecure_dependency_url(dep)
         dep_allow_insecure = getattr(dep, "allow_insecure", False) is True
         if not dep_allow_insecure:
-            message = (
-                f"Dependency '{identity}' uses HTTP (insecure) but "
-                f"'allow_insecure: true' is not set in its apm.yml entry. "
-                f"Add 'allow_insecure: true' to the dependency, or use a HTTPS URL instead."
-            )
+            message = _format_insecure_dependency_requirements(url)
             if logger:
                 logger.error(message)
             else:
                 _rich_error(message)
             sys.exit(1)
         if not allow_insecure_flag:
-            message = (
-                f"Dependency '{identity}' uses HTTP (insecure). "
-                f"Pass '--allow-insecure' to apm install to confirm this install."
-            )
+            message = _format_insecure_dependency_requirements(url)
             if logger:
                 logger.error(message)
             else:
