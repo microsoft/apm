@@ -195,6 +195,17 @@ class TestPluginSet:
         assert result.exit_code == 0
         assert "Update a plugin" in result.output
 
+    def test_set_no_fields_errors(self, runner, tmp_path, monkeypatch):
+        """Calling ``plugin set`` with no field flags produces an error."""
+        monkeypatch.chdir(tmp_path)
+        _write_yml(tmp_path)
+        result = runner.invoke(
+            marketplace,
+            ["plugin", "set", "existing-package"],
+        )
+        assert result.exit_code == 1
+        assert "No fields specified" in result.output
+
 
 # ---------------------------------------------------------------------------
 # plugin remove
@@ -212,18 +223,20 @@ class TestPluginRemove:
         assert result.exit_code == 0, result.output
         assert "Removed" in result.output
 
-    def test_without_yes_non_interactive_exits(
+    def test_without_yes_non_interactive_cancels(
         self, runner, tmp_path, monkeypatch
     ):
-        """Non-interactive mode (CliRunner has no TTY) rejects without --yes."""
+        """Non-interactive mode (CliRunner has no TTY) cancels gracefully."""
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
         result = runner.invoke(
             marketplace,
             ["plugin", "remove", "existing-package"],
         )
-        # Should exit non-zero because CliRunner is not a TTY.
-        assert result.exit_code != 0
+        # click.confirm raises Abort when stdin is not a TTY;
+        # the command catches it and prints "Cancelled.".
+        assert result.exit_code == 0
+        assert "Cancelled." in result.output
 
     def test_package_not_found_exits_2(
         self, runner, tmp_path, monkeypatch

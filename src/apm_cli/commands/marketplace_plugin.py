@@ -42,11 +42,6 @@ def _ensure_yml_exists(logger: CommandLogger) -> Path:
     return path
 
 
-def _is_interactive() -> bool:
-    """Return True if both stdin and stdout are attached to a TTY."""
-    return sys.stdin.isatty() and sys.stdout.isatty()
-
-
 def _parse_tags(raw: str | None) -> list[str] | None:
     """Split a comma-separated tag string into a list, or return None."""
     if raw is None:
@@ -80,7 +75,7 @@ def _verify_source(logger: CommandLogger, source: str) -> None:
 # -------------------------------------------------------------------
 
 
-@click.group(help="Manage plugin entries in marketplace.yml")
+@click.group(help="Manage plugins in marketplace.yml (add, set, remove)")
 def plugin():
     """Add, update, or remove packages in marketplace.yml."""
     pass
@@ -172,7 +167,6 @@ def add(
     default=None,
     help="Include prerelease versions",
 )
-@click.option("--no-verify", is_flag=True, help="Skip remote reachability check")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def set_cmd(
     name,
@@ -183,7 +177,6 @@ def set_cmd(
     tag_pattern,
     tags,
     include_prerelease,
-    no_verify,
     verbose,
 ):
     """Update fields on an existing plugin entry."""
@@ -210,6 +203,14 @@ def set_cmd(
     if include_prerelease is not None:
         fields["include_prerelease"] = include_prerelease
 
+    if not fields:
+        logger.error(
+            "No fields specified. Pass at least one option "
+            "(e.g. --version, --ref, --description).",
+            symbol="error",
+        )
+        sys.exit(1)
+
     try:
         update_plugin_entry(yml, name, **fields)
     except MarketplaceYmlError as exc:
@@ -226,7 +227,7 @@ def set_cmd(
 
 @plugin.command(help="Remove a plugin from marketplace.yml")
 @click.argument("name")
-@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt.")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def remove(name, yes, verbose):
     """Remove a plugin entry from marketplace.yml."""
@@ -237,21 +238,14 @@ def remove(name, yes, verbose):
 
     # Confirmation gate.
     if not yes:
-        if _is_interactive():
-            answer = click.prompt(
-                f"Remove plugin '{name}' from marketplace.yml? [y/N]",
-                default="n",
-                show_default=False,
+        try:
+            click.confirm(
+                f"Remove plugin '{name}' from marketplace.yml?",
+                abort=True,
             )
-            if answer.lower() not in ("y", "yes"):
-                logger.warning("Aborted.", symbol="warning")
-                sys.exit(0)
-        else:
-            logger.error(
-                "Non-interactive mode requires --yes (-y) to confirm removal.",
-                symbol="error",
-            )
-            sys.exit(1)
+        except click.Abort:
+            click.echo("Cancelled.")
+            return
 
     try:
         remove_plugin_entry(yml, name)

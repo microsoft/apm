@@ -1276,6 +1276,101 @@ apm marketplace publish --no-pr
 
 Run history and PR URLs are recorded in `.apm/publish-state.json` so re-runs can detect existing PRs.
 
+#### `apm marketplace plugin add` - Add a plugin entry
+
+Add a plugin entry to `marketplace.yml`.
+
+```bash
+apm marketplace plugin add SOURCE [OPTIONS]
+```
+
+**Arguments:**
+- `SOURCE` - GitHub `owner/repo` reference
+
+**Options:**
+- `--version TEXT` - Semver range constraint (e.g. `">=1.0.0"`)
+- `--ref TEXT` - Pin to a specific git ref (SHA or tag)
+- `--description TEXT` - Short description for the entry
+- `--include-prerelease` - Include pre-release versions
+- `--no-verify` - Skip remote repository verification
+- `--verbose` - Enable verbose output
+- `--marketplace-yml PATH` - Path to `marketplace.yml` (default: `./marketplace.yml`)
+
+`--version` and `--ref` are mutually exclusive. At least one must be provided.
+
+**Examples:**
+```bash
+# Add a plugin with a version range
+apm marketplace plugin add acme/code-review --version ">=1.0.0"
+
+# Pin to a specific tag
+apm marketplace plugin add acme/code-review --ref v2.1.0
+
+# Add with description and skip verification
+apm marketplace plugin add acme/code-review --version "^1.0.0" \
+  --description "Code review skill" --no-verify
+```
+
+#### `apm marketplace plugin set` - Update a plugin entry
+
+Update fields on an existing plugin entry in `marketplace.yml`.
+
+```bash
+apm marketplace plugin set NAME [OPTIONS]
+```
+
+**Arguments:**
+- `NAME` - Name of the existing plugin entry
+
+**Options:**
+- `--version TEXT` - New semver range constraint
+- `--ref TEXT` - New git ref (replaces version if set)
+- `--description TEXT` - New description
+- `--include-prerelease` - Enable pre-release version inclusion
+- `--verbose` - Enable verbose output
+- `--marketplace-yml PATH` - Path to `marketplace.yml` (default: `./marketplace.yml`)
+
+`--version` and `--ref` are mutually exclusive. At least one field option must be specified.
+
+**Examples:**
+```bash
+# Widen the version range
+apm marketplace plugin set code-review --version ">=2.0.0"
+
+# Switch from version to pinned ref
+apm marketplace plugin set code-review --ref abc1234
+
+# Update the description
+apm marketplace plugin set code-review --description "Updated review skill"
+```
+
+#### `apm marketplace plugin remove` - Remove a plugin entry
+
+Remove a plugin entry from `marketplace.yml`.
+
+```bash
+apm marketplace plugin remove NAME [OPTIONS]
+```
+
+**Arguments:**
+- `NAME` - Name of the plugin entry to remove
+
+**Options:**
+- `--yes` - Skip confirmation prompt
+- `--verbose` - Enable verbose output
+- `--marketplace-yml PATH` - Path to `marketplace.yml` (default: `./marketplace.yml`)
+
+Prompts for confirmation unless `--yes` is passed. In non-interactive environments (CI), use `--yes`.
+
+**Examples:**
+```bash
+# Remove with confirmation prompt
+apm marketplace plugin remove code-review
+
+# Skip confirmation (CI-friendly)
+apm marketplace plugin remove code-review --yes
+```
+
 ### `apm search` - Search plugins in a marketplace
 
 Search for plugins by name or description within a specific marketplace.

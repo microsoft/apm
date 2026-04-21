@@ -38,7 +38,7 @@ from ..marketplace.ref_resolver import RefResolver, RemoteRef
 from ..marketplace.semver import SemVer, parse_semver, satisfies_range
 from ..marketplace.yml_schema import load_marketplace_yml
 from ..utils.path_security import PathTraversalError, validate_path_segments
-from ._helpers import _get_console
+from ._helpers import _get_console, _is_interactive
 
 # Restore builtins shadowed by subcommand names
 list = builtins.list
@@ -69,14 +69,6 @@ def _load_yml_or_exit(logger):
         logger.error(f"marketplace.yml schema error: {exc}", symbol="error")
         sys.exit(2)
 
-
-def _is_interactive():
-    """Return True if both stdin and stdout are attached to a TTY.
-
-    Centralised helper so that commands needing interactive confirmation
-    can share a single detection point.
-    """
-    return sys.stdin.isatty() and sys.stdout.isatty()
 
 
 @click.group(help="Manage plugin marketplaces for discovery and governance")
