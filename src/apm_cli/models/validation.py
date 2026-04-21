@@ -127,6 +127,12 @@ class ValidationResult:
             return f"[x] Package is invalid with {len(self.errors)} error(s)"
 
 
+# Canonical order of the directories that mark a Claude Code marketplace
+# plugin.  Tests assert this ordering on ``DetectionEvidence.plugin_dirs_present``
+# so adding a new directory here is a public-API change.
+_PLUGIN_DIRS: Tuple[str, ...] = ("agents", "skills", "commands")
+
+
 def _has_hook_json(package_path: Path) -> bool:
     """Check if the package has hook JSON files in hooks/ or .apm/hooks/."""
     for hooks_dir in [package_path / "hooks", package_path / APM_DIR / "hooks"]:
@@ -135,41 +141,109 @@ def _has_hook_json(package_path: Path) -> bool:
     return False
 
 
+@dataclass(frozen=True)
+class DetectionEvidence:
+    """Snapshot of the file-system signals that drove classification.
+
+    Returned from :func:`gather_detection_evidence` and consumed by
+    install-time observability (verbose detection traces, near-miss
+    warnings, deploy-summary labelling).  Kept independent of
+    :func:`detect_package_type` so that the classification function can
+    keep its existing ``(PackageType, Optional[Path])`` return signature
+    while observability code can pull richer detail on demand.
+    """
+
+    has_apm_yml: bool
+    has_skill_md: bool
+    has_hook_json: bool
+    plugin_json_path: Optional[Path]
+    plugin_dirs_present: Tuple[str, ...]
+    has_claude_plugin_dir: bool = False
+
+    @property
+    def has_plugin_evidence(self) -> bool:
+        """True if any signal indicates this is a marketplace plugin.
+
+        ``.claude-plugin/`` is treated as first-class evidence so that a
+        Claude Code plugin without a ``plugin.json`` (name derived from
+        the directory) classifies as ``MARKETPLACE_PLUGIN`` instead of
+        falling through to ``HOOK_PACKAGE``.  ``normalize_plugin_directory``
+        handles the missing-manifest case gracefully.
+        """
+        return (
+            self.plugin_json_path is not None
+            or bool(self.plugin_dirs_present)
+            or self.has_claude_plugin_dir
+        )
+
+
+def gather_detection_evidence(package_path: Path) -> DetectionEvidence:
+    """Collect all package-type signals from a directory in one pass.
+
+    Pure: no side-effects, no file mutations.  Cheap (a handful of stat
+    calls).  See :class:`DetectionEvidence` for the shape of the return
+    value.
+    """
+    from ..utils.helpers import find_plugin_json
+
+    plugin_dirs_present = tuple(
+        name for name in _PLUGIN_DIRS if (package_path / name).is_dir()
+    )
+    return DetectionEvidence(
+        has_apm_yml=(package_path / APM_YML_FILENAME).exists(),
+        has_skill_md=(package_path / SKILL_MD_FILENAME).exists(),
+        has_hook_json=_has_hook_json(package_path),
+        plugin_json_path=find_plugin_json(package_path),
+        plugin_dirs_present=plugin_dirs_present,
+        has_claude_plugin_dir=(package_path / ".claude-plugin").is_dir(),
+    )
+
+
 def detect_package_type(
     package_path: Path,
 ) -> Tuple[PackageType, Optional[Path]]:
     """Classify a package directory into a ``PackageType``.
 
-    This is the **single source of truth** for the detection cascade.
-    The function is pure — no side-effects, no file mutations.
+    Single source of truth for the detection cascade.  Pure: no
+    side-effects, no file mutations.
+
+    Cascade order (first match wins):
+
+    1. ``HYBRID`` -- both ``apm.yml`` and ``SKILL.md`` present.
+    2. ``APM_PACKAGE`` -- ``apm.yml`` only.
+    3. ``CLAUDE_SKILL`` -- ``SKILL.md`` only.
+    4. ``MARKETPLACE_PLUGIN`` -- ``plugin.json``, a ``.claude-plugin/``
+       directory, *or* one of ``agents/``, ``skills/``, ``commands/``.
+       This must precede the hook-only branch because the
+       marketplace-plugin synthesizer (``_map_plugin_artifacts``) already
+       maps ``hooks/`` alongside agents/skills/commands -- so a Claude
+       Code plugin that ships both hooks and skills must classify as
+       ``MARKETPLACE_PLUGIN``, not ``HOOK_PACKAGE``, otherwise the
+       skills are silently dropped.  ``.claude-plugin/`` is treated as
+       first-class evidence so plugins without a ``plugin.json``
+       (manifest-less Claude Code plugins) still classify correctly;
+       ``normalize_plugin_directory`` handles missing manifests.
+       See microsoft/apm#780.
+    5. ``HOOK_PACKAGE`` -- ``hooks/*.json`` only, no plugin evidence.
+    6. ``INVALID`` -- nothing recognisable.
 
     Returns:
-        A ``(package_type, plugin_json_path)`` tuple.
-        *plugin_json_path* is non-None only for ``MARKETPLACE_PLUGIN``.
+        A ``(package_type, plugin_json_path)`` tuple.  *plugin_json_path*
+        is non-None only when ``MARKETPLACE_PLUGIN`` was matched via an
+        actual ``plugin.json`` file (not via directory evidence alone).
     """
-    from ..utils.helpers import find_plugin_json
+    evidence = gather_detection_evidence(package_path)
 
-    has_apm_yml = (package_path / APM_YML_FILENAME).exists()
-    has_skill_md = (package_path / SKILL_MD_FILENAME).exists()
-
-    if has_apm_yml and has_skill_md:
+    if evidence.has_apm_yml and evidence.has_skill_md:
         return PackageType.HYBRID, None
-    if has_apm_yml:
+    if evidence.has_apm_yml:
         return PackageType.APM_PACKAGE, None
-    if has_skill_md:
+    if evidence.has_skill_md:
         return PackageType.CLAUDE_SKILL, None
-    if _has_hook_json(package_path):
+    if evidence.has_plugin_evidence:
+        return PackageType.MARKETPLACE_PLUGIN, evidence.plugin_json_path
+    if evidence.has_hook_json:
         return PackageType.HOOK_PACKAGE, None
-
-    plugin_json_path = find_plugin_json(package_path)
-    has_plugin_evidence = (
-        plugin_json_path is not None
-        or (package_path / "agents").is_dir()
-        or (package_path / "skills").is_dir()
-        or (package_path / "commands").is_dir()
-    )
-    if has_plugin_evidence:
-        return PackageType.MARKETPLACE_PLUGIN, plugin_json_path
 
     return PackageType.INVALID, None
 

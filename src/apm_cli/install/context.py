@@ -52,6 +52,8 @@ class InstallContext:
     verbose: bool = False
     dev: bool = False
     only_packages: Optional[List[str]] = None
+    protocol_pref: Any = None  # ProtocolPreference (NONE/SSH/HTTPS) for shorthand transport
+    allow_protocol_fallback: Optional[bool] = None  # None => read APM_ALLOW_PROTOCOL_FALLBACK env
 
     # ------------------------------------------------------------------
     # Resolve phase outputs

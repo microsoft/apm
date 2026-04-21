@@ -3,7 +3,7 @@
 import builtins
 import sys
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import click
 
@@ -24,6 +24,7 @@ from ..drift import (
 )
 from ..models.results import InstallResult
 from ..core.command_logger import InstallLogger, _ValidationOutcome
+from ..core.target_detection import TargetParamType
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success
 from ..utils.diagnostics import DiagnosticCollector
 
@@ -193,16 +194,20 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
                 mkt_ref = None
 
             if mkt_ref is not None:
-                plugin_name, marketplace_name = mkt_ref
+                plugin_name, marketplace_name, version_spec = mkt_ref
                 try:
+                    warning_handler = None
                     if logger:
+                        warning_handler = lambda msg: logger.warning(msg)
                         logger.verbose_detail(
                             f"    Resolving {plugin_name}@{marketplace_name} via marketplace..."
                         )
                     canonical_str, resolved_plugin = resolve_marketplace_plugin(
                         plugin_name,
                         marketplace_name,
+                        version_spec=version_spec,
                         auth_resolver=auth_resolver,
+                        warning_handler=warning_handler,
                     )
                     if logger:
                         logger.verbose_detail(
@@ -379,21 +384,39 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
     "--target",
     "-t",
     "target",
-    type=click.Choice(
-        ["copilot", "claude", "cursor", "opencode", "codex", "vscode", "agents", "all"],
-        case_sensitive=False,
-    ),
+    type=TargetParamType(),
     default=None,
-    help="Force deployment to a specific target (overrides auto-detection)",
+    help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Overrides auto-detection.",
 )
 @click.option(
     "--global", "-g", "global_",
     is_flag=True,
     default=False,
-    help="Install to user scope (~/.apm/) instead of the current project",
+    help="Install to user scope (~/.apm/) instead of the current project. MCP servers target global-capable runtimes only (Copilot CLI, Codex CLI).",
+)
+@click.option(
+    "--ssh",
+    "use_ssh",
+    is_flag=True,
+    default=False,
+    help="Prefer SSH transport for shorthand (owner/repo) dependencies. Mutually exclusive with --https.",
+)
+@click.option(
+    "--https",
+    "use_https",
+    is_flag=True,
+    default=False,
+    help="Prefer HTTPS transport for shorthand (owner/repo) dependencies. Mutually exclusive with --ssh.",
+)
+@click.option(
+    "--allow-protocol-fallback",
+    "allow_protocol_fallback",
+    is_flag=True,
+    default=False,
+    help="Restore the legacy permissive cross-protocol fallback chain (escape hatch for migrating users; also: APM_ALLOW_PROTOCOL_FALLBACK=1). Caveat: fallback reuses the same port across schemes; on servers that use different SSH and HTTPS ports, omit this flag and pin the dependency with an explicit ssh:// or https:// URL.",
 )
 @click.pass_context
-def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, global_):
+def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, global_, use_ssh, use_https, allow_protocol_fallback):
     """Install APM and MCP dependencies from apm.yml (like npm install).
 
     This command automatically detects AI runtimes from your apm.yml scripts and installs
@@ -420,6 +443,24 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         # scope initialisation below throws).
         is_partial = bool(packages)
         logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=is_partial)
+
+        # Resolve transport selection inputs.
+        from ..deps.transport_selection import (
+            ProtocolPreference,
+            is_fallback_allowed,
+            protocol_pref_from_env,
+        )
+        if use_ssh and use_https:
+            _rich_error("Options --ssh and --https are mutually exclusive.", symbol="error")
+            sys.exit(2)
+        if use_ssh:
+            protocol_pref = ProtocolPreference.SSH
+        elif use_https:
+            protocol_pref = ProtocolPreference.HTTPS
+        else:
+            protocol_pref = protocol_pref_from_env()
+        # CLI flag OR env var enables fallback.
+        allow_protocol_fallback = allow_protocol_fallback or is_fallback_allowed()
 
         # Resolve scope
         from ..core.scope import InstallScope, get_apm_dir, get_manifest_path, get_modules_dir, ensure_user_dirs, warn_unsupported_user_scope
@@ -514,13 +555,6 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         # Determine what to install based on install mode
         should_install_apm = install_mode != InstallMode.MCP
         should_install_mcp = install_mode != InstallMode.APM
-        # MCP servers are workspace-scoped (.vscode/mcp.json); skip at user scope
-        if scope is InstallScope.USER:
-            should_install_mcp = False
-            if logger:
-                logger.verbose_detail(
-                    "MCP servers skipped at user scope (workspace-scoped concept)"
-                )
 
         # Compute the canonical only_packages list once -- used both by
         # the dry-run orphan preview and the actual install path.  When
@@ -593,6 +627,8 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                     marketplace_provenance=(
                         outcome.marketplace_provenance if packages and outcome else None
                     ),
+                    protocol_pref=protocol_pref,
+                    allow_protocol_fallback=allow_protocol_fallback,
                 )
                 apm_count = install_result.installed_count
                 prompt_count = install_result.prompts_integrated
@@ -632,6 +668,7 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                 mcp_deps, runtime, exclude, verbose,
                 stored_mcp_configs=old_mcp_configs,
                 diagnostics=apm_diagnostics,
+                scope=scope,
             )
             new_mcp_servers = MCPIntegrator.get_server_names(mcp_deps)
             new_mcp_configs = MCPIntegrator.get_server_configs(mcp_deps)
@@ -639,14 +676,14 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
             # Remove stale MCP servers that are no longer needed
             stale_servers = old_mcp_servers - new_mcp_servers
             if stale_servers:
-                MCPIntegrator.remove_stale(stale_servers, runtime, exclude)
+                MCPIntegrator.remove_stale(stale_servers, runtime, exclude, scope=scope)
 
             # Persist the new MCP server set and configs in the lockfile
             MCPIntegrator.update_lockfile(new_mcp_servers, mcp_configs=new_mcp_configs)
         elif should_install_mcp and not mcp_deps:
             # No MCP deps at all -- remove any old APM-managed servers
             if old_mcp_servers:
-                MCPIntegrator.remove_stale(old_mcp_servers, runtime, exclude)
+                MCPIntegrator.remove_stale(old_mcp_servers, runtime, exclude, scope=scope)
                 MCPIntegrator.update_lockfile(builtins.set(), mcp_configs={})
             logger.verbose_detail("No MCP dependencies found in apm.yml")
         elif not should_install_mcp and old_mcp_servers:
@@ -732,6 +769,8 @@ def _install_apm_dependencies(
     auth_resolver: "AuthResolver" = None,
     target: str = None,
     marketplace_provenance: dict = None,
+    protocol_pref=None,
+    allow_protocol_fallback: "Optional[bool]" = None,
 ):
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.
@@ -759,6 +798,8 @@ def _install_apm_dependencies(
         auth_resolver=auth_resolver,
         target=target,
         marketplace_provenance=marketplace_provenance,
+        protocol_pref=protocol_pref,
+        allow_protocol_fallback=allow_protocol_fallback,
     )
     return InstallService().run(request)
 

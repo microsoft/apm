@@ -37,3 +37,5 @@ class InstallRequest:
     auth_resolver: Optional["AuthResolver"] = None
     target: Optional[str] = None
     marketplace_provenance: Optional[Dict[str, Any]] = None
+    protocol_pref: Any = None  # ProtocolPreference (NONE/SSH/HTTPS) for shorthand transport
+    allow_protocol_fallback: Optional[bool] = None  # None => read APM_ALLOW_PROTOCOL_FALLBACK env

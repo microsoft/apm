@@ -60,6 +60,21 @@ class HostInfo:
     kind: str  # "github" | "ghe_cloud" | "ghes" | "ado" | "generic"
     has_public_repos: bool
     api_base: str
+    port: Optional[int] = None  # Non-standard git port (e.g. 7999 for Bitbucket DC)
+
+    @property
+    def display_name(self) -> str:
+        """``host:port`` when a custom port is set, else bare ``host``.
+
+        Use this wherever user-facing text identifies the host — errors, log
+        lines, diagnostic output. Bare ``host`` in those places misleads
+        users when port is what actually differentiates the target.
+
+        Uses ``is not None`` (not truthy) for symmetry with the
+        ``host_info.port is not None`` checks elsewhere in the resolver and
+        to avoid silently dropping any non-default integer ports.
+        """
+        return f"{self.host}:{self.port}" if self.port is not None else self.host
 
 
 @dataclass
@@ -96,8 +111,15 @@ class AuthResolver:
     # -- host classification ------------------------------------------------
 
     @staticmethod
-    def classify_host(host: str) -> HostInfo:
-        """Return a ``HostInfo`` describing *host*."""
+    def classify_host(host: str, port: Optional[int] = None) -> HostInfo:
+        """Return a ``HostInfo`` describing *host*.
+
+        ``port`` is carried through onto the returned ``HostInfo`` so that
+        downstream code (cache keys, credential-helper input, error text)
+        can discriminate between the same hostname on different ports.
+        Host-kind classification itself is transport-agnostic -- the port
+        never influences whether a host is GitHub/GHES/ADO/generic.
+        """
         h = host.lower()
 
         if h == "github.com":
@@ -106,6 +128,7 @@ class AuthResolver:
                 kind="github",
                 has_public_repos=True,
                 api_base="https://api.github.com",
+                port=port,
             )
 
         if h.endswith(".ghe.com"):
@@ -114,6 +137,7 @@ class AuthResolver:
                 kind="ghe_cloud",
                 has_public_repos=False,
                 api_base=f"https://{host}/api/v3",
+                port=port,
             )
 
         if is_azure_devops_hostname(host):
@@ -122,6 +146,7 @@ class AuthResolver:
                 kind="ado",
                 has_public_repos=True,
                 api_base="https://dev.azure.com",
+                port=port,
             )
 
         # GHES: GITHUB_HOST is set to a non-github.com, non-ghe.com FQDN
@@ -133,6 +158,7 @@ class AuthResolver:
                     kind="ghes",
                     has_public_repos=True,
                     api_base=f"https://{host}/api/v3",
+                    port=port,
                 )
 
         # Generic FQDN (GitLab, Bitbucket, self-hosted, etc.)
@@ -141,6 +167,7 @@ class AuthResolver:
             kind="generic",
             has_public_repos=True,
             api_base=f"https://{host}/api/v3",
+            port=port,
         )
 
     # -- token type detection -----------------------------------------------
@@ -178,9 +205,26 @@ class AuthResolver:
 
     # -- core resolution ----------------------------------------------------
 
-    def resolve(self, host: str, org: Optional[str] = None) -> AuthContext:
-        """Resolve auth for *(host, org)*.  Cached & thread-safe."""
-        key = (host.lower() if host else host, org.lower() if org else org)
+    def resolve(
+        self,
+        host: str,
+        org: Optional[str] = None,
+        *,
+        port: Optional[int] = None,
+    ) -> AuthContext:
+        """Resolve auth for *(host, port, org)*.  Cached & thread-safe.
+
+        ``port`` discriminates the cache key so that the same hostname on
+        different ports (e.g. Bitbucket Datacenter with SSH on 7999 and a
+        second HTTPS instance on 7990) never collapses to a single
+        ``AuthContext``. Also flows into ``git credential fill`` so git's
+        helpers can return port-specific credentials.
+        """
+        key = (
+            host.lower() if host else host,
+            port,
+            org.lower() if org else "",
+        )
         with self._lock:
             cached = self._cache.get(key)
             if cached is not None:
@@ -188,11 +232,11 @@ class AuthResolver:
 
             # Hold lock during entire credential resolution to prevent duplicate
             # credential-helper popups when parallel downloads resolve the same
-            # (host, org) concurrently.  The first caller fills the cache; all
-            # subsequent callers for the same key become O(1) cache hits.
+            # (host, port, org) concurrently.  The first caller fills the cache;
+            # all subsequent callers for the same key become O(1) cache hits.
             # Bounded by APM_GIT_CREDENTIAL_TIMEOUT (default 60s). No deadlock
             # risk: single lock, never nested.
-            host_info = self.classify_host(host)
+            host_info = self.classify_host(host, port=port)
             token, source = self._resolve_token(host_info, org)
             token_type = self.detect_token_type(token) if token else "unknown"
             git_env = self._build_git_env(token)
@@ -208,14 +252,18 @@ class AuthResolver:
             return ctx
 
     def resolve_for_dep(self, dep_ref: "DependencyReference") -> AuthContext:
-        """Resolve auth from a ``DependencyReference``."""
+        """Resolve auth from a ``DependencyReference``.
+
+        Threads ``dep_ref.port`` through so the resolver (and any downstream
+        git credential helper) can discriminate same-host multi-port setups.
+        """
         host = dep_ref.host or default_host()
         org: Optional[str] = None
         if dep_ref.repo_url:
             parts = dep_ref.repo_url.split("/")
             if parts:
                 org = parts[0]
-        return self.resolve(host, org)
+        return self.resolve(host, org, port=dep_ref.port)
 
     # -- fallback strategy --------------------------------------------------
 
@@ -225,6 +273,7 @@ class AuthResolver:
         operation: Callable[..., T],
         *,
         org: Optional[str] = None,
+        port: Optional[int] = None,
         unauth_first: bool = False,
         verbose_callback: Optional[Callable[[str], None]] = None,
     ) -> T:
@@ -247,7 +296,7 @@ class AuthResolver:
         (e.g. a github.com PAT tried on ``*.ghe.com``), the method
         retries with ``git credential fill`` before giving up.
         """
-        auth_ctx = self.resolve(host, org)
+        auth_ctx = self.resolve(host, org, port=port)
         host_info = auth_ctx.host_info
         git_env = auth_ctx.git_env
 
@@ -261,15 +310,20 @@ class AuthResolver:
                 raise exc
             if host_info.kind == "ado":
                 raise exc
-            _log(f"Token from {auth_ctx.source} failed, trying git credential fill for {host}")
-            cred = self._token_manager.resolve_credential_from_git(host)
+            _log(
+                f"Token from {auth_ctx.source} failed, trying git credential fill "
+                f"for {host_info.display_name}"
+            )
+            cred = self._token_manager.resolve_credential_from_git(
+                host_info.host, port=host_info.port
+            )
             if cred:
                 return operation(cred, self._build_git_env(cred))
             raise exc
 
         # Hosts that never have public repos → auth-only
         if host_info.kind in ("ghe_cloud", "ado"):
-            _log(f"Auth-only attempt for {host_info.kind} host {host}")
+            _log(f"Auth-only attempt for {host_info.kind} host {host_info.display_name}")
             try:
                 return operation(auth_ctx.token, git_env)
             except Exception as exc:
@@ -278,7 +332,7 @@ class AuthResolver:
         if unauth_first:
             # Validation path: save rate limits, EMU-safe
             try:
-                _log(f"Trying unauthenticated access to {host}")
+                _log(f"Trying unauthenticated access to {host_info.display_name}")
                 return operation(None, git_env)
             except Exception:
                 if auth_ctx.token:
@@ -292,7 +346,10 @@ class AuthResolver:
             # Download path: auth-first for higher rate limits
             if auth_ctx.token:
                 try:
-                    _log(f"Trying authenticated access to {host} (source: {auth_ctx.source})")
+                    _log(
+                        f"Trying authenticated access to {host_info.display_name} "
+                        f"(source: {auth_ctx.source})"
+                    )
                     return operation(auth_ctx.token, git_env)
                 except Exception as exc:
                     if host_info.has_public_repos:
@@ -303,19 +360,25 @@ class AuthResolver:
                             return _try_credential_fallback(exc)
                     return _try_credential_fallback(exc)
             else:
-                _log(f"No token available, trying unauthenticated access to {host}")
+                _log(f"No token available, trying unauthenticated access to {host_info.display_name}")
                 return operation(None, git_env)
 
     # -- error context ------------------------------------------------------
 
     def build_error_context(
-        self, host: str, operation: str, org: Optional[str] = None
+        self,
+        host: str,
+        operation: str,
+        org: Optional[str] = None,
+        *,
+        port: Optional[int] = None,
     ) -> str:
         """Build an actionable error message for auth failures."""
-        auth_ctx = self.resolve(host, org)
-        lines: list[str] = [f"Authentication failed for {operation} on {host}."]
-
+        auth_ctx = self.resolve(host, org, port=port)
         host_info = auth_ctx.host_info
+        display = host_info.display_name
+        lines: list[str] = [f"Authentication failed for {operation} on {display}."]
+
         if auth_ctx.token:
             lines.append(f"Token was provided (source: {auth_ctx.source}, type: {auth_ctx.token_type}).")
             if host_info.kind == "ghe_cloud":
@@ -357,6 +420,15 @@ class AuthResolver:
                 f"GITHUB_APM_PAT_{_org_to_env_suffix(org)}"
             )
 
+        # When a custom port is in play, helpers that key by hostname alone
+        # (some `gh` integrations, older keychain backends) can silently
+        # return the wrong credential. Point the user at the concrete fix.
+        if host_info.port is not None:
+            lines.append(
+                f"[i] Host '{display}' -- verify your credential helper stores per-port entries "
+                f"(some helpers key by host only)."
+            )
+
         lines.append("Run with --verbose for detailed auth diagnostics.")
         return "\n".join(lines)
 
@@ -394,7 +466,9 @@ class AuthResolver:
 
         # 3. Git credential helper (not for ADO — uses its own PAT)
         if host_info.kind not in ("ado",):
-            credential = self._token_manager.resolve_credential_from_git(host_info.host)
+            credential = self._token_manager.resolve_credential_from_git(
+                host_info.host, port=host_info.port
+            )
             if credential:
                 return credential, "git-credential-fill"
 

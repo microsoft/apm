@@ -37,6 +37,60 @@ class TestLockedDependency:
         assert locked.repo_url == "owner/repo"
         assert locked.resolved_commit == "abc123"
 
+    def test_port_round_trip_ssh(self):
+        """Custom SSH port survives to_dict → from_dict."""
+        dep = LockedDependency(
+            repo_url="team/repo",
+            host="bitbucket.example.com",
+            port=7999,
+        )
+        data = dep.to_dict()
+        assert data["port"] == 7999
+        restored = LockedDependency.from_dict(data)
+        assert restored.port == 7999
+        assert restored.host == "bitbucket.example.com"
+
+    def test_port_round_trip_https(self):
+        """Custom HTTPS port survives to_dict → from_dict."""
+        dep = LockedDependency(
+            repo_url="team/repo",
+            host="git.internal",
+            port=8443,
+        )
+        data = dep.to_dict()
+        assert data["port"] == 8443
+        restored = LockedDependency.from_dict(data)
+        assert restored.port == 8443
+
+    def test_port_omitted_when_none(self):
+        """port should not appear in the serialized dict when unset."""
+        dep = LockedDependency(repo_url="owner/repo", host="github.com")
+        data = dep.to_dict()
+        assert "port" not in data
+
+    def test_port_defensive_cast_invalid(self):
+        """Garbage port values in a lockfile are rejected (defensive read)."""
+        # Non-numeric string
+        dep = LockedDependency.from_dict({"repo_url": "o/r", "port": "not-a-port"})
+        assert dep.port is None
+        # Out-of-range
+        dep = LockedDependency.from_dict({"repo_url": "o/r", "port": 99999})
+        assert dep.port is None
+        dep = LockedDependency.from_dict({"repo_url": "o/r", "port": 0})
+        assert dep.port is None
+        dep = LockedDependency.from_dict({"repo_url": "o/r", "port": -1})
+        assert dep.port is None
+
+    def test_port_from_dependency_ref(self):
+        """from_dependency_ref carries port through."""
+        dep_ref = DependencyReference(
+            repo_url="team/repo",
+            host="bitbucket.example.com",
+            port=7999,
+        )
+        locked = LockedDependency.from_dependency_ref(dep_ref, "abc123", 1, None)
+        assert locked.port == 7999
+
     def test_deployed_file_hashes_round_trip(self):
         dep = LockedDependency(
             repo_url="owner/repo",

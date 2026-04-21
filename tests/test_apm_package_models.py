@@ -1089,6 +1089,133 @@ class TestDetectPackageType:
         pkg_type, _ = detect_package_type(tmp_path)
         assert pkg_type == PackageType.APM_PACKAGE
 
+    def test_marketplace_plugin_wins_over_hooks_via_agents_dir(self, tmp_path):
+        """Regression: a Claude plugin that ships hooks AND agents/ must
+        classify as MARKETPLACE_PLUGIN so the plugin synthesizer maps
+        agents alongside hooks. See microsoft/apm#780.
+        """
+        hooks_dir = tmp_path / "hooks"
+        hooks_dir.mkdir()
+        (hooks_dir / "hooks.json").write_text("{}")
+        (tmp_path / "agents").mkdir()
+        pkg_type, pj_path = detect_package_type(tmp_path)
+        assert pkg_type == PackageType.MARKETPLACE_PLUGIN
+        assert pj_path is None
+
+    def test_marketplace_plugin_wins_over_hooks_via_plugin_json(self, tmp_path):
+        """Regression: hooks must not pre-empt classification when a
+        plugin.json is present. See microsoft/apm#780.
+        """
+        hooks_dir = tmp_path / "hooks"
+        hooks_dir.mkdir()
+        (hooks_dir / "hooks.json").write_text("{}")
+        (tmp_path / "plugin.json").write_text('{"name": "test"}')
+        pkg_type, pj_path = detect_package_type(tmp_path)
+        assert pkg_type == PackageType.MARKETPLACE_PLUGIN
+        assert pj_path is not None
+        assert pj_path.name == "plugin.json"
+
+    def test_obra_superpowers_layout(self, tmp_path):
+        """Full-fidelity reproducer for microsoft/apm#780: the
+        obra/superpowers repo ships hooks/hooks.json alongside
+        .claude-plugin/plugin.json + agents/ + skills/ + commands/.
+        Pre-fix, this classified as HOOK_PACKAGE and the skills,
+        agent, and commands were silently dropped.
+        """
+        # Hooks (the trap that was firing first).
+        (tmp_path / "hooks").mkdir()
+        (tmp_path / "hooks" / "hooks.json").write_text("{}")
+        # Plugin shape.
+        (tmp_path / ".claude-plugin").mkdir()
+        (tmp_path / ".claude-plugin" / "plugin.json").write_text(
+            '{"name": "superpowers"}'
+        )
+        (tmp_path / "agents").mkdir()
+        (tmp_path / "agents" / "code-reviewer.md").write_text("# agent")
+        (tmp_path / "skills").mkdir()
+        (tmp_path / "skills" / "tdd").mkdir()
+        (tmp_path / "skills" / "tdd" / "SKILL.md").write_text("# tdd")
+        (tmp_path / "commands").mkdir()
+        (tmp_path / "commands" / "foo.md").write_text("# cmd")
+        pkg_type, pj_path = detect_package_type(tmp_path)
+        assert pkg_type == PackageType.MARKETPLACE_PLUGIN
+        assert pj_path is not None
+        assert pj_path.name == "plugin.json"
+
+
+class TestGatherDetectionEvidence:
+    """Tests for the evidence-gathering helper that powers observability."""
+
+    def test_empty_directory(self, tmp_path):
+        from apm_cli.models.validation import gather_detection_evidence
+
+        evidence = gather_detection_evidence(tmp_path)
+        assert evidence.has_apm_yml is False
+        assert evidence.has_skill_md is False
+        assert evidence.has_hook_json is False
+        assert evidence.plugin_json_path is None
+        assert evidence.plugin_dirs_present == ()
+        assert evidence.has_plugin_evidence is False
+
+    def test_records_plugin_dirs_in_canonical_order(self, tmp_path):
+        from apm_cli.models.validation import gather_detection_evidence
+
+        # Create in non-canonical order; expect canonical order in result.
+        (tmp_path / "commands").mkdir()
+        (tmp_path / "agents").mkdir()
+        (tmp_path / "skills").mkdir()
+        evidence = gather_detection_evidence(tmp_path)
+        assert evidence.plugin_dirs_present == ("agents", "skills", "commands")
+        assert evidence.has_plugin_evidence is True
+
+    def test_obra_superpowers_evidence(self, tmp_path):
+        """Evidence on the #780 repro should expose every signal the
+        UX layer needs to explain the classification.
+        """
+        from apm_cli.models.validation import gather_detection_evidence
+
+        (tmp_path / "hooks").mkdir()
+        (tmp_path / "hooks" / "hooks.json").write_text("{}")
+        (tmp_path / ".claude-plugin").mkdir()
+        (tmp_path / ".claude-plugin" / "plugin.json").write_text(
+            '{"name": "superpowers"}'
+        )
+        (tmp_path / "agents").mkdir()
+        (tmp_path / "skills").mkdir()
+        (tmp_path / "commands").mkdir()
+        evidence = gather_detection_evidence(tmp_path)
+        assert evidence.has_hook_json is True
+        assert evidence.plugin_json_path is not None
+        assert evidence.plugin_dirs_present == ("agents", "skills", "commands")
+        assert evidence.has_claude_plugin_dir is True
+        assert evidence.has_plugin_evidence is True
+
+    def test_claude_plugin_dir_alone_is_plugin_evidence(self, tmp_path):
+        """A bare ``.claude-plugin/`` directory (no plugin.json, no
+        agents/skills/commands) must still classify as plugin evidence
+        so a Claude Code plugin without a manifest is not silently
+        treated as hooks-only.  See microsoft/apm#780.
+        """
+        from src.apm_cli.models.validation import (
+            detect_package_type,
+            gather_detection_evidence,
+        )
+
+        (tmp_path / ".claude-plugin").mkdir()
+        (tmp_path / "hooks").mkdir()
+        (tmp_path / "hooks" / "hooks.json").write_text("{}")
+
+        evidence = gather_detection_evidence(tmp_path)
+        assert evidence.has_claude_plugin_dir is True
+        assert evidence.plugin_dirs_present == ()
+        assert evidence.plugin_json_path is None
+        assert evidence.has_plugin_evidence is True
+
+        pkg_type, pj_path = detect_package_type(tmp_path)
+        assert pkg_type == PackageType.MARKETPLACE_PLUGIN
+        # No plugin.json file present -> path is None even though we matched.
+        assert pj_path is None
+
 
 class TestGitReferenceUtils:
     """Test Git reference parsing utilities."""

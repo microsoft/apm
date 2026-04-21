@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import builtins
 import sys
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional
 
 from ..models.results import InstallResult
 from ..utils.console import _rich_error
@@ -54,6 +54,8 @@ def run_install_pipeline(
     auth_resolver: "AuthResolver" = None,
     target: str = None,
     marketplace_provenance: dict = None,
+    protocol_pref=None,
+    allow_protocol_fallback: "Optional[bool]" = None,
 ):
     """Install APM package dependencies.
 
@@ -136,6 +138,8 @@ def run_install_pipeline(
         auth_resolver=auth_resolver,
         target_override=target,
         marketplace_provenance=marketplace_provenance,
+        protocol_pref=protocol_pref,
+        allow_protocol_fallback=allow_protocol_fallback,
         all_apm_deps=all_apm_deps,
         root_has_local_primitives=_root_has_local_primitives,
         old_local_deployed=_old_local_deployed,

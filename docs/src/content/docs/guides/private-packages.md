@@ -45,6 +45,18 @@ dependencies:
       ref: v1.0.0
 ```
 
+Self-hosted servers that use non-default git ports (e.g. Bitbucket Datacenter on SSH port 7999) are supported — specify the port in the URL. Use the `ssh://` form, not SCP shorthand, since `git@host:path` cannot carry a port:
+
+```yaml
+dependencies:
+  apm:
+    - git: ssh://git@bitbucket.example.com:7999/project/repo.git
+      ref: v1.0.0
+    - git: https://git.internal:8443/team/repo.git      # custom HTTPS port
+```
+
+APM reuses the same port across protocols during clone fallback (so `ssh://host:7999/...` falls back to `https://host:7999/...`). If your host serves SSH and HTTPS on different ports and SSH is unreachable, pin the protocol that matches the port you need.
+
 ## Share with your team
 
 Every developer needs read access to the private repository and the appropriate token in their environment. For teams, a fine-grained PAT scoped to the organization works well — no write access required.
