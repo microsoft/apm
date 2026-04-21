@@ -342,6 +342,10 @@ Local path dependencies (`./path`, `../path`, `/abs/path`) are rejected at user 
 
 ## MCP Dependency Formats
 
+:::tip[Quick start]
+For the CLI-first walkthrough (`apm install --mcp ...`), see the [MCP Servers guide](../mcp-servers/). This section covers the `apm.yml` manifest format in depth.
+:::
+
 MCP dependencies support three forms: string references, overlay objects, and self-defined servers.
 
 ### String Reference (default)

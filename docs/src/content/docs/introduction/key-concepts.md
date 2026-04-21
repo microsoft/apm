@@ -59,7 +59,7 @@ scripts:
   docs-codex: "codex generate-docs.prompt.md -m github/gpt-4o-mini"
 dependencies:
   mcp:
-    - ghcr.io/github/github-mcp-server
+    - io.github.github/github-mcp-server
 ```
 
 **Share and reuse across projects:**

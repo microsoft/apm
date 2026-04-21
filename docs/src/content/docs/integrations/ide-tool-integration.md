@@ -430,6 +430,10 @@ apm compile --watch
 
 ## MCP (Model Context Protocol) Integration
 
+:::tip[New: declarative install]
+Use `apm install --mcp NAME` (or its alias `apm mcp install NAME`) to add servers from the command line in one step. See the [MCP Servers guide](../../guides/mcp-servers/) for the full workflow. This page covers per-IDE config-file locations and runtime targeting.
+:::
+
 APM provides first-class support for MCP servers, including registry-based servers that publish stdio packages (npm, pypi, docker) or HTTP/SSE remote endpoints.
 
 ### Auto-Discovery from Packages
@@ -521,11 +525,11 @@ When installing registry MCP servers, APM selects the best available package for
 dependencies:
   mcp:
     # Simple registry references (resolved via MCP registry)
-    - ghcr.io/github/github-mcp-server
-    - ghcr.io/modelcontextprotocol/filesystem-server
+    - io.github.github/github-mcp-server
+    - io.github.modelcontextprotocol/filesystem-server
 
     # Registry server with overlays
-    - name: ghcr.io/modelcontextprotocol/postgres-server
+    - name: io.github.modelcontextprotocol/postgres-server
       transport: stdio
       package: npm
       args: ["--connection-string", "postgresql://localhost/mydb"]
@@ -548,7 +552,7 @@ apm install
 apm mcp search github
 
 # Show server details
-apm mcp info ghcr.io/github/github-mcp-server
+apm mcp show io.github.github/github-mcp-server
 
 # List available MCP servers
 apm mcp list
@@ -576,9 +580,9 @@ dependencies:
 
 | Runtime | `${input:...}` support |
 |---------|----------------------|
-| VS Code | ✅ Prompts user at runtime |
-| Copilot CLI | ❌ Use environment variables instead |
-| Codex | ❌ Use environment variables instead |
+| VS Code | Yes -- prompts user at runtime |
+| Copilot CLI | No -- use environment variables instead |
+| Codex | No -- use environment variables instead |
 
 ## Roadmap
 
