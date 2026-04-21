@@ -930,6 +930,8 @@ apm mcp install io.github.github/github-mcp-server
 apm mcp install linear --transport http --url https://mcp.linear.app/sse
 ```
 
+Set the [`MCP_REGISTRY_URL`](../../guides/mcp-servers/#custom-registry-enterprise) environment variable to point `apm install --mcp` at a custom MCP registry.
+
 #### `apm mcp list` - List MCP servers
 
 List all available MCP servers from the registry.
