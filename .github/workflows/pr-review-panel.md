@@ -17,14 +17,15 @@ permissions:
   pull-requests: read
   issues: read
 
-# Pulls panel skill + persona agents from microsoft/apm at a pinned SHA.
-# Uses the documented `imports: shared/apm.md` form (v0.68 schema requires this
-# shape; the older bare-list `dependencies:` shorthand is not accepted).
+# Self-referential pin: every workflow run pulls primitives from THIS PR's
+# head SHA. A PR that modifies the panel skill or persona agents reviews
+# itself with those modified primitives -- no manual SHA bumps needed.
+# Mirrors the standard `actions/checkout@${{ github.sha }}` pattern.
 imports:
   - uses: shared/apm.md
     with:
       packages:
-        - microsoft/apm#4f345ead68e186db861340a50d26242be57a8f5d
+        - microsoft/apm@${{ github.sha }}
 
 tools:
   github:
