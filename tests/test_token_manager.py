@@ -296,7 +296,7 @@ class TestGetTokenWithCredentialFallback:
             ) as mock_cred:
                 token = manager.get_token_with_credential_fallback('modules', 'github.com')
                 assert token == 'cred-token'
-                mock_cred.assert_called_once_with('github.com')
+                mock_cred.assert_called_once_with('github.com', port=None)
 
     def test_caches_credential_result(self):
         """Second call uses cache, subprocess not invoked again."""
@@ -330,10 +330,74 @@ class TestGetTokenWithCredentialFallback:
             with patch.object(
                 GitHubTokenManager,
                 'resolve_credential_from_git',
-                side_effect=lambda h: f'tok-{h}',
+                side_effect=lambda h, port=None: f'tok-{h}',
             ) as mock_cred:
                 tok1 = manager.get_token_with_credential_fallback('modules', 'github.com')
                 tok2 = manager.get_token_with_credential_fallback('modules', 'gitlab.com')
                 assert tok1 == 'tok-github.com'
                 assert tok2 == 'tok-gitlab.com'
                 assert mock_cred.call_count == 2
+
+    def test_same_host_different_ports_separate_cache(self):
+        """Same host on different ports must not cross-contaminate credentials."""
+        with patch.dict(os.environ, {}, clear=True):
+            manager = GitHubTokenManager()
+            with patch.object(
+                GitHubTokenManager,
+                'resolve_credential_from_git',
+                side_effect=lambda h, port=None: f'tok-{h}-{port}',
+            ) as mock_cred:
+                tok_a = manager.get_token_with_credential_fallback(
+                    'modules', 'bitbucket.corp.com', port=7990
+                )
+                tok_b = manager.get_token_with_credential_fallback(
+                    'modules', 'bitbucket.corp.com', port=7991
+                )
+                assert tok_a == 'tok-bitbucket.corp.com-7990'
+                assert tok_b == 'tok-bitbucket.corp.com-7991'
+                assert mock_cred.call_count == 2
+
+    def test_same_host_same_port_hits_cache(self):
+        """Identical (host, port) pair is cached -- only one subprocess call."""
+        with patch.dict(os.environ, {}, clear=True):
+            manager = GitHubTokenManager()
+            with patch.object(
+                GitHubTokenManager,
+                'resolve_credential_from_git',
+                return_value='tok',
+            ) as mock_cred:
+                manager.get_token_with_credential_fallback(
+                    'modules', 'bitbucket.corp.com', port=7990
+                )
+                manager.get_token_with_credential_fallback(
+                    'modules', 'bitbucket.corp.com', port=7990
+                )
+                mock_cred.assert_called_once()
+
+
+class TestCredentialFillPortEmbedding:
+    """Port is embedded into the host= field per gitcredentials(7).
+
+    There is no standalone ``port=`` attribute in the credential protocol --
+    if we ever sent one, helpers would ignore it and return the wrong token.
+    """
+
+    def test_port_embedded_in_host_field(self):
+        """host=host:port, not a separate port= line."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch('subprocess.run', return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git(
+                'bitbucket.corp.com', port=7999
+            )
+            sent = mock_run.call_args.kwargs['input']
+        assert sent == "protocol=https\nhost=bitbucket.corp.com:7999\n\n"
+        # Guard against the gitcredentials(7) anti-pattern:
+        assert "\nport=" not in sent
+
+    def test_no_port_leaves_host_bare(self):
+        """Backward compatible: port=None produces the original input."""
+        mock_result = MagicMock(returncode=0, stdout="password=tok\n")
+        with patch('subprocess.run', return_value=mock_result) as mock_run:
+            GitHubTokenManager.resolve_credential_from_git('github.com')
+            sent = mock_run.call_args.kwargs['input']
+        assert sent == "protocol=https\nhost=github.com\n\n"
