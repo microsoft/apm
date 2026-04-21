@@ -29,7 +29,7 @@ imports:
   - uses: shared/apm.md
     with:
       packages:
-        - microsoft/apm@main
+        - microsoft/apm#main
 
 tools:
   github:
