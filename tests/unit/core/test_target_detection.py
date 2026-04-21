@@ -9,7 +9,12 @@ from apm_cli.core.target_detection import (
     should_compile_agents_md,
     should_compile_claude_md,
     get_target_description,
+    TargetParamType,
+    VALID_TARGET_VALUES,
 )
+
+import click
+import pytest
 
 
 class TestDetectTarget:
@@ -425,3 +430,181 @@ class TestDetectTargetOpencode:
     def test_opencode_no_compile_claude_md(self):
         """OpenCode target should NOT compile CLAUDE.md."""
         assert should_compile_claude_md("opencode") is False
+
+
+# ---------------------------------------------------------------------------
+# TargetParamType tests
+# ---------------------------------------------------------------------------
+
+class TestTargetParamType:
+    """Tests for TargetParamType Click parameter type."""
+
+    def setup_method(self):
+        self.tp = TargetParamType()
+
+    # -- Valid target values set ------------------------------------------
+
+    def test_valid_target_values_includes_canonical(self):
+        """VALID_TARGET_VALUES contains all canonical targets."""
+        for name in ("vscode", "claude", "cursor", "opencode", "codex"):
+            assert name in VALID_TARGET_VALUES
+
+    def test_valid_target_values_includes_aliases(self):
+        """VALID_TARGET_VALUES contains user-facing aliases."""
+        for name in ("copilot", "agents"):
+            assert name in VALID_TARGET_VALUES
+
+    def test_valid_target_values_includes_all(self):
+        """VALID_TARGET_VALUES contains 'all'."""
+        assert "all" in VALID_TARGET_VALUES
+
+    # -- None passthrough -------------------------------------------------
+
+    def test_none_returns_none(self):
+        """None value passes through unchanged."""
+        assert self.tp.convert(None, None, None) is None
+
+    # -- Already-converted list passthrough -------------------------------
+
+    def test_list_passthrough(self):
+        """A list value passes through unchanged."""
+        lst = ["claude", "vscode"]
+        assert self.tp.convert(lst, None, None) is lst
+
+    # -- Single target (backward compat: returns string) ------------------
+
+    def test_single_claude(self):
+        assert self.tp.convert("claude", None, None) == "claude"
+
+    def test_single_copilot(self):
+        assert self.tp.convert("copilot", None, None) == "copilot"
+
+    def test_single_vscode(self):
+        assert self.tp.convert("vscode", None, None) == "vscode"
+
+    def test_single_cursor(self):
+        assert self.tp.convert("cursor", None, None) == "cursor"
+
+    def test_single_opencode(self):
+        assert self.tp.convert("opencode", None, None) == "opencode"
+
+    def test_single_codex(self):
+        assert self.tp.convert("codex", None, None) == "codex"
+
+    def test_single_agents(self):
+        assert self.tp.convert("agents", None, None) == "agents"
+
+    def test_single_all(self):
+        """'all' returns string 'all' for backward compat."""
+        assert self.tp.convert("all", None, None) == "all"
+
+    def test_single_target_returns_string_type(self):
+        """Single target must return str, not list."""
+        result = self.tp.convert("claude", None, None)
+        assert isinstance(result, str)
+
+    # -- Case insensitivity -----------------------------------------------
+
+    def test_uppercase_accepted(self):
+        assert self.tp.convert("CLAUDE", None, None) == "claude"
+
+    def test_mixed_case_accepted(self):
+        assert self.tp.convert("Claude", None, None) == "claude"
+
+    def test_mixed_case_multi(self):
+        result = self.tp.convert("Claude,Copilot", None, None)
+        assert result == ["claude", "vscode"]
+
+    # -- Multi-target (returns list) --------------------------------------
+
+    def test_multi_claude_copilot(self):
+        """claude,copilot → ['claude', 'vscode'] (alias resolved)."""
+        result = self.tp.convert("claude,copilot", None, None)
+        assert result == ["claude", "vscode"]
+
+    def test_multi_preserves_order(self):
+        """Order of user input is preserved."""
+        result = self.tp.convert("cursor,claude", None, None)
+        assert result == ["cursor", "claude"]
+
+    def test_multi_returns_list_type(self):
+        """Multi-target must return list, not str."""
+        result = self.tp.convert("claude,cursor", None, None)
+        assert isinstance(result, list)
+
+    def test_multi_three_targets(self):
+        result = self.tp.convert("claude,cursor,codex", None, None)
+        assert result == ["claude", "cursor", "codex"]
+
+    # -- Alias deduplication ----------------------------------------------
+
+    def test_copilot_vscode_deduplicates(self):
+        """copilot,vscode → 'vscode' (both alias to same canonical)."""
+        result = self.tp.convert("copilot,vscode", None, None)
+        # Both map to "vscode"; collapses to single string.
+        assert result == "vscode"
+
+    def test_copilot_agents_deduplicates(self):
+        """copilot,agents → 'vscode' (both alias to same canonical)."""
+        result = self.tp.convert("copilot,agents", None, None)
+        assert result == "vscode"
+
+    def test_copilot_agents_vscode_deduplicates(self):
+        """copilot,agents,vscode → 'vscode' (all alias to same)."""
+        result = self.tp.convert("copilot,agents,vscode", None, None)
+        assert result == "vscode"
+
+    def test_copilot_claude_deduplicates_alias(self):
+        """copilot,claude → ['vscode', 'claude'] (alias resolved)."""
+        result = self.tp.convert("copilot,claude", None, None)
+        assert result == ["vscode", "claude"]
+
+    # -- Whitespace and formatting ----------------------------------------
+
+    def test_spaces_around_comma(self):
+        result = self.tp.convert("claude , copilot", None, None)
+        assert result == ["claude", "vscode"]
+
+    def test_trailing_comma_ignored(self):
+        result = self.tp.convert("claude,", None, None)
+        assert result == "claude"
+
+    def test_leading_comma_ignored(self):
+        result = self.tp.convert(",claude", None, None)
+        assert result == "claude"
+
+    def test_double_comma_ignored(self):
+        result = self.tp.convert("claude,,cursor", None, None)
+        assert result == ["claude", "cursor"]
+
+    # -- Error cases ------------------------------------------------------
+
+    def test_invalid_single_target(self):
+        """Invalid target name produces clean error."""
+        with pytest.raises(click.exceptions.BadParameter, match="'invalid' is not a valid target"):
+            self.tp.convert("invalid", None, None)
+
+    def test_invalid_in_multi(self):
+        """Invalid target in comma list produces clean error."""
+        with pytest.raises(click.exceptions.BadParameter, match="'nope' is not a valid target"):
+            self.tp.convert("claude,nope", None, None)
+
+    def test_all_combined_with_other_rejected(self):
+        """'all' combined with other targets is rejected."""
+        with pytest.raises(click.exceptions.BadParameter, match="cannot be combined"):
+            self.tp.convert("all,claude", None, None)
+
+    def test_target_combined_with_all_rejected(self):
+        """Target followed by 'all' is also rejected."""
+        with pytest.raises(click.exceptions.BadParameter, match="cannot be combined"):
+            self.tp.convert("claude,all", None, None)
+
+    def test_empty_string_rejected(self):
+        """Empty string is rejected."""
+        with pytest.raises(click.exceptions.BadParameter, match="must not be empty"):
+            self.tp.convert("", None, None)
+
+    def test_only_commas_rejected(self):
+        """Only commas (no actual values) is rejected."""
+        with pytest.raises(click.exceptions.BadParameter, match="must not be empty"):
+            self.tp.convert(",,,", None, None)

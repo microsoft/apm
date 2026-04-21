@@ -208,6 +208,70 @@ class TestDevDependencies:
         assert pkg.get_dev_mcp_dependencies() == []
 
 
+class TestTargetField:
+    """Tests for target field supporting both str and list[str]."""
+
+    def test_target_string(self, tmp_path):
+        """target: copilot → stored as string."""
+        yml = _write_apm_yml(tmp_path, {
+            "name": "test-pkg",
+            "version": "1.0.0",
+            "target": "copilot",
+        })
+
+        pkg = APMPackage.from_apm_yml(yml)
+
+        assert pkg.target == "copilot"
+        assert isinstance(pkg.target, str)
+
+    def test_target_list(self, tmp_path):
+        """target: [claude, copilot] → stored as list."""
+        yml = _write_apm_yml(tmp_path, {
+            "name": "test-pkg",
+            "version": "1.0.0",
+            "target": ["claude", "copilot"],
+        })
+
+        pkg = APMPackage.from_apm_yml(yml)
+
+        assert pkg.target == ["claude", "copilot"]
+        assert isinstance(pkg.target, list)
+
+    def test_target_missing(self, tmp_path):
+        """No target field → None."""
+        yml = _write_apm_yml(tmp_path, {
+            "name": "test-pkg",
+            "version": "1.0.0",
+        })
+
+        pkg = APMPackage.from_apm_yml(yml)
+
+        assert pkg.target is None
+
+    def test_target_single_item_list(self, tmp_path):
+        """target: [copilot] → stored as single-element list."""
+        yml = _write_apm_yml(tmp_path, {
+            "name": "test-pkg",
+            "version": "1.0.0",
+            "target": ["copilot"],
+        })
+
+        pkg = APMPackage.from_apm_yml(yml)
+
+        assert pkg.target == ["copilot"]
+        assert isinstance(pkg.target, list)
+
+    def test_target_direct_construction_string(self):
+        """APMPackage can be constructed with target as string."""
+        pkg = APMPackage(name="t", version="1.0.0", target="claude")
+        assert pkg.target == "claude"
+
+    def test_target_direct_construction_list(self):
+        """APMPackage can be constructed with target as list."""
+        pkg = APMPackage(name="t", version="1.0.0", target=["claude", "copilot"])
+        assert pkg.target == ["claude", "copilot"]
+
+
 class TestClearCache:
     """Tests for clear_apm_yml_cache."""
 

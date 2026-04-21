@@ -24,6 +24,20 @@ import sys
 from typing import Dict, Optional, Tuple
 
 
+def _format_credential_host(host: str, port: Optional[int]) -> str:
+    """Embed a custom port into the git credential ``host`` field.
+
+    Per ``gitcredentials(7)``, there is no standalone ``port=`` attribute in
+    the credential protocol -- port must be embedded into the host field as
+    ``host:port``. Sending a separate ``port=`` line is silently ignored by
+    helpers, collapsing two different services into one credential entry.
+
+    Uses ``is not None`` (not truthy) so that ``None`` is the only sentinel
+    for "no port", matching the rest of the port-handling logic.
+    """
+    return f"{host}:{port}" if port is not None else host
+
+
 class GitHubTokenManager:
     """Manages GitHub token environment setup for different AI runtimes."""
     
@@ -50,7 +64,9 @@ class GitHubTokenManager:
             preserve_existing: If True, never overwrite existing environment variables
         """
         self.preserve_existing = preserve_existing
-        self._credential_cache: Dict[str, Optional[str]] = {}
+        # Keyed by (host, port): same hostname on different ports may have
+        # distinct credentials, so a host-only key would cross-contaminate.
+        self._credential_cache: Dict[Tuple[str, Optional[int]], Optional[str]] = {}
     
     @staticmethod
     def _is_valid_credential_token(token: str) -> bool:
@@ -92,23 +108,27 @@ class GitHubTokenManager:
         return max(1, min(val, cls.MAX_CREDENTIAL_TIMEOUT))
 
     @staticmethod
-    def resolve_credential_from_git(host: str) -> Optional[str]:
+    def resolve_credential_from_git(host: str, port: Optional[int] = None) -> Optional[str]:
         """Resolve a credential from the git credential store.
-        
+
         Uses `git credential fill` to query the user's configured credential
         helpers (macOS Keychain, Windows Credential Manager, gh CLI, etc.).
         This is the same mechanism git clone uses internally.
-        
+
         Args:
             host: The git host to resolve credentials for (e.g., "github.com")
-            
+            port: Optional non-standard git port (e.g. 7999 for Bitbucket DC).
+                Embedded into the ``host`` field per ``gitcredentials(7)`` --
+                a standalone ``port=`` line is not part of the protocol.
+
         Returns:
             The password/token from the credential store, or None if unavailable
         """
+        host_field = _format_credential_host(host, port)
         try:
             result = subprocess.run(
                 ['git', 'credential', 'fill'],
-                input=f"protocol=https\nhost={host}\n\n",
+                input=f"protocol=https\nhost={host_field}\n\n",
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -173,30 +193,42 @@ class GitHubTokenManager:
                 return token
         return None
     
-    def get_token_with_credential_fallback(self, purpose: str, host: str, env: Optional[Dict[str, str]] = None) -> Optional[str]:
+    def get_token_with_credential_fallback(
+        self,
+        purpose: str,
+        host: str,
+        env: Optional[Dict[str, str]] = None,
+        *,
+        port: Optional[int] = None,
+    ) -> Optional[str]:
         """Get token for a purpose, falling back to git credential helpers.
-        
+
         Tries environment variables first (via get_token_for_purpose), then
         queries the git credential store as a last resort. Results are cached
-        per host to avoid repeated subprocess calls.
-        
+        per ``(host, port)`` to avoid repeated subprocess calls while keeping
+        same-host-different-port credentials separate.
+
         Args:
             purpose: Token purpose ('modules', etc.)
             host: Git host to resolve credentials for (e.g., "github.com")
             env: Environment to check (defaults to os.environ)
-            
+            port: Optional non-standard git port. Flows through to
+                ``resolve_credential_from_git`` so credential helpers can
+                return port-specific credentials.
+
         Returns:
             Best available token, or None if not available from any source
         """
         token = self.get_token_for_purpose(purpose, env)
         if token:
             return token
-        
-        if host in self._credential_cache:
-            return self._credential_cache[host]
-        
-        credential = self.resolve_credential_from_git(host)
-        self._credential_cache[host] = credential
+
+        cache_key = (host, port)
+        if cache_key in self._credential_cache:
+            return self._credential_cache[cache_key]
+
+        credential = self.resolve_credential_from_git(host, port=port)
+        self._credential_cache[cache_key] = credential
         return credential
     
     def validate_tokens(self, env: Optional[Dict[str, str]] = None) -> Tuple[bool, str]:
