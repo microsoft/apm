@@ -24,18 +24,6 @@ from ._helpers import (
     _validate_project_name,
 )
 
-START_PROMPT_FILENAME = "start.prompt.md"
-
-START_PROMPT_TEMPLATE = """\
----
-name: start
----
-You are a helpful assistant working on this project.
-
-Help me understand the codebase and suggest improvements.
-"""
-
-
 @click.command(help="Initialize a new APM project")
 @click.argument("project_name", required=False)
 @click.option(
@@ -118,16 +106,6 @@ def init(ctx, project_name, yes, plugin, verbose):
         # Create apm.yml (with devDependencies for plugin mode)
         _create_minimal_apm_yml(config, plugin=plugin)
 
-        # Create start.prompt.md for regular projects (not plugin mode)
-        start_prompt_created = False
-        if not plugin:
-            start_prompt_path = Path(START_PROMPT_FILENAME)
-            if not start_prompt_path.exists():
-                start_prompt_path.write_text(START_PROMPT_TEMPLATE, encoding="utf-8")
-                start_prompt_created = True
-            else:
-                logger.progress(f"{START_PROMPT_FILENAME} already exists, skipping")
-
         # Create plugin.json for plugin mode
         if plugin:
             _create_plugin_json(config)
@@ -141,8 +119,6 @@ def init(ctx, project_name, yes, plugin, verbose):
                 files_data = [
                     ("*", APM_YML_FILENAME, "Project configuration"),
                 ]
-                if start_prompt_created:
-                    files_data.append(("*", START_PROMPT_FILENAME, "Starter prompt"))
                 if plugin:
                     files_data.append(("*", "plugin.json", "Plugin metadata"))
                 table = _create_files_table(files_data, title="Created Files")
@@ -150,8 +126,6 @@ def init(ctx, project_name, yes, plugin, verbose):
         except (ImportError, NameError):
             logger.progress("Created:")
             click.echo("  * apm.yml - Project configuration")
-            if start_prompt_created:
-                click.echo(f"  * {START_PROMPT_FILENAME} - Starter prompt")
             if plugin:
                 click.echo("  * plugin.json - Plugin metadata")
 
@@ -165,10 +139,10 @@ def init(ctx, project_name, yes, plugin, verbose):
             ]
         else:
             next_steps = [
-                "Install a runtime:       apm runtime setup copilot",
-                "Add APM dependencies:    apm install <owner>/<repo>",
-                "Edit your prompt:        start.prompt.md (or .apm/prompts/start.prompt.md)",
-                "Run your first workflow: apm run start",
+                "Install a skill:                apm install github/awesome-copilot/skills/documentation-writer",
+                "Install a marketplace plugin:   apm install frontend-web-dev@awesome-copilot",
+                "Install a versioned package:    apm install microsoft/apm-sample-package#v1.0.0",
+                "Author your own plugin:         apm pack --format plugin",
             ]
 
         try:
@@ -181,6 +155,26 @@ def init(ctx, project_name, yes, plugin, verbose):
             logger.progress("Next steps:")
             for step in next_steps:
                 click.echo(f"  * {step}")
+
+        # Footer with links
+        try:
+            console = _get_console()
+            if console:
+                console.print(
+                    "  Docs: https://microsoft.github.io/apm  |  "
+                    "Star: https://github.com/microsoft/apm",
+                    style="dim",
+                )
+            else:
+                click.echo(
+                    "  Docs: https://microsoft.github.io/apm  |  "
+                    "Star: https://github.com/microsoft/apm"
+                )
+        except (ImportError, NameError):
+            click.echo(
+                "  Docs: https://microsoft.github.io/apm  |  "
+                "Star: https://github.com/microsoft/apm"
+            )
 
     except Exception as e:
         logger.error(f"Error initializing project: {e}")

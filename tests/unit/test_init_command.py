@@ -46,7 +46,7 @@ class TestInitCommand:
                 assert result.exit_code == 0
                 assert "APM project initialized successfully!" in result.output
                 assert Path("apm.yml").exists()
-                assert Path("start.prompt.md").exists()
+                assert not Path("start.prompt.md").exists()
                 # No extra template files created
                 assert not Path("hello-world.prompt.md").exists()
                 assert not Path("README.md").exists()
@@ -65,7 +65,7 @@ class TestInitCommand:
                 assert result.exit_code == 0
                 assert "APM project initialized successfully!" in result.output
                 assert Path("apm.yml").exists()
-                assert Path("start.prompt.md").exists()
+                assert not Path("start.prompt.md").exists()
                 # No extra template files created
                 assert not Path("hello-world.prompt.md").exists()
             finally:
@@ -86,7 +86,7 @@ class TestInitCommand:
                 assert project_path.exists()
                 assert project_path.is_dir()
                 assert (project_path / "apm.yml").exists()
-                assert (project_path / "start.prompt.md").exists()
+                assert not (project_path / "start.prompt.md").exists()
                 # No extra template files created
                 assert not (project_path / "hello-world.prompt.md").exists()
                 assert not (project_path / "README.md").exists()
@@ -291,8 +291,8 @@ class TestInitCommand:
                     assert "scripts" in config
                     assert config["scripts"] == {}
 
-                # start.prompt.md created
-                assert (project_path / "start.prompt.md").exists()
+                # start.prompt.md NOT created (apm init creates only apm.yml)
+                assert not (project_path / "start.prompt.md").exists()
                 # No extra template files created
                 assert not (project_path / "hello-world.prompt.md").exists()
                 assert not (project_path / "README.md").exists()
@@ -346,68 +346,35 @@ class TestInitCommand:
             finally:
                 os.chdir(self.original_dir)  # restore CWD before TemporaryDirectory cleanup
 
-    def test_init_creates_start_prompt_md(self):
-        """Test that init creates start.prompt.md with correct content."""
+    def test_init_next_steps_panel_content(self):
+        """Test that next steps show install workflows, not apm run start."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
                 result = self.runner.invoke(cli, ["init", "--yes"])
 
                 assert result.exit_code == 0
-                prompt_path = Path("start.prompt.md")
-                assert prompt_path.exists()
-
-                content = prompt_path.read_text(encoding="utf-8")
-                assert "---" in content
-                assert "name: start" in content
-                assert "You are a helpful assistant" in content
-            finally:
-                os.chdir(self.original_dir)
-
-    def test_init_does_not_overwrite_existing_start_prompt(self):
-        """Test that init preserves existing start.prompt.md (brownfield)."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            os.chdir(tmp_dir)
-            try:
-                # Create existing start.prompt.md with custom content
-                Path("start.prompt.md").write_text(
-                    "---\nname: start\n---\nMy custom prompt\n", encoding="utf-8"
-                )
-
-                result = self.runner.invoke(cli, ["init", "--yes"])
-
-                assert result.exit_code == 0
-                content = Path("start.prompt.md").read_text(encoding="utf-8")
-                assert "My custom prompt" in content
-                assert "start.prompt.md already exists" in result.output
-            finally:
-                os.chdir(self.original_dir)
-
-    def test_init_next_steps_no_compile(self):
-        """Test that next steps do not reference apm compile."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            os.chdir(tmp_dir)
-            try:
-                result = self.runner.invoke(cli, ["init", "--yes"])
-
-                assert result.exit_code == 0
+                # New v5 panel content
+                assert "apm install" in result.output
+                assert "apm pack" in result.output
+                assert "https://microsoft.github.io/apm" in result.output
+                # Old dead-end content must be gone
                 assert "apm compile" not in result.output
-                assert "Edit your prompt" in result.output
-                assert "start.prompt.md" in result.output
-                assert "apm run start" in result.output
+                assert "apm run start" not in result.output
+                assert "start.prompt.md" not in result.output
             finally:
                 os.chdir(self.original_dir)
 
-    def test_init_created_files_table_includes_start_prompt(self):
-        """Test that Created Files table lists start.prompt.md."""
+    def test_init_created_files_table_no_start_prompt(self):
+        """Test that Created Files table does NOT list start.prompt.md."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
                 result = self.runner.invoke(cli, ["init", "--yes"])
 
                 assert result.exit_code == 0
-                # start.prompt.md appears in the Created Files table
-                assert "start.prompt.md" in result.output
+                assert "apm.yml" in result.output
+                assert "start.prompt.md" not in result.output
             finally:
                 os.chdir(self.original_dir)
 
