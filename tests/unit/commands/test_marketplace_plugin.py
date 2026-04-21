@@ -195,6 +195,26 @@ class TestPluginSet:
         assert result.exit_code == 0
         assert "Update a plugin" in result.output
 
+    def test_version_and_ref_conflict_exits_2(
+        self, runner, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        _write_yml(tmp_path)
+        result = runner.invoke(
+            marketplace,
+            [
+                "plugin",
+                "set",
+                "existing-package",
+                "--version",
+                ">=2.0.0",
+                "--ref",
+                "abc",
+            ],
+        )
+        assert result.exit_code == 2
+        assert "mutually exclusive" in result.output.lower()
+
     def test_set_no_fields_errors(self, runner, tmp_path, monkeypatch):
         """Calling ``plugin set`` with no field flags produces an error."""
         monkeypatch.chdir(tmp_path)

@@ -1307,6 +1307,21 @@ class TestTokenRedaction:
 # ===================================================================
 
 
+class TestRunGitEnv:
+    """Tests for _run_git() subprocess environment hardening."""
+
+    def test_git_terminal_prompt_disabled(self, tmp_path: Path) -> None:
+        """_run_git() must pass GIT_TERMINAL_PROMPT=0 and GIT_ASKPASS=echo."""
+        pub, runner = _make_publisher(tmp_path)
+        pub._run_git(["git", "status"])
+
+        assert len(runner.calls) == 1
+        _, kwargs = runner.calls[0]
+        env = kwargs.get("env", {})
+        assert env.get("GIT_TERMINAL_PROMPT") == "0"
+        assert env.get("GIT_ASKPASS") == "echo"
+
+
 class TestSafeForcePush:
     """Tests for MarketplacePublisher.safe_force_push()."""
 
