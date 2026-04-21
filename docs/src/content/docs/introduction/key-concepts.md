@@ -23,7 +23,7 @@ my-project/
 └── apm.yml              # Project configuration and dependency manifest
 ```
 
-> **Note:** `apm init` creates only `apm.yml`. Add primitives manually or install them with `apm install`. See [Your First Package](../../getting-started/first-package/) for a step-by-step guide.
+> **Note:** By default, `apm init` creates only `apm.yml`. Add primitives manually or install them with `apm install`. See [Your First Package](../../getting-started/first-package/) for a step-by-step guide.
 
 ### Intelligent Compilation
 
