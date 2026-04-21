@@ -4,12 +4,38 @@ Tests cover: search, show, list commands with rich console and fallback paths,
 error handling, edge cases.
 """
 
+import re
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import click
 from click.testing import CliRunner
 
 from apm_cli.commands.mcp import mcp
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+_URL_RE = re.compile(r"https?://[^\s\[\]<>'\"]+")
+
+
+def _printed_urls(printed: str) -> list:
+    """Parse all http(s) URLs out of console-printed text.
+
+    Returns a list of ``(scheme, hostname)`` tuples produced by
+    ``urllib.parse.urlparse``.  Tests that need to assert a specific URL
+    appears in CLI output should compare against this structured form
+    rather than substring-matching on the raw blob -- the substring form
+    is flagged by CodeQL's ``py/incomplete-url-substring-sanitization``
+    rule as an unsafe sanitiser pattern.
+    """
+    out = []
+    for match in _URL_RE.findall(printed):
+        parsed = urlparse(match)
+        out.append((parsed.scheme, parsed.hostname))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -619,7 +645,8 @@ class TestMcpRegistryEnvVar:
             with patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
                 runner.invoke(mcp, ["search", "x"])
         printed = " ".join(str(c) for c in mock_console.print.call_args_list)
-        assert "Registry:" in printed and "https://mcp.internal.example.com" in printed
+        assert "Registry:" in printed
+        assert ("https", "mcp.internal.example.com") in _printed_urls(printed)
 
     def test_search_no_diag_when_env_var_unset(self, monkeypatch):
         """When MCP_REGISTRY_URL is unset, search stays quiet about the registry URL."""
@@ -647,5 +674,5 @@ class TestMcpRegistryEnvVar:
         assert result.exit_code == 1
         printed = " ".join(str(c) for c in mock_console.print.call_args_list)
         assert "Could not reach MCP registry" in printed
-        assert "https://busted.internal.example.com" in printed
+        assert ("https", "busted.internal.example.com") in _printed_urls(printed)
         assert "MCP_REGISTRY_URL" in printed
