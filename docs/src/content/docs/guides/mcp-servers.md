@@ -171,17 +171,13 @@ Existing-entry conflicts (`already exists in apm.yml`) are covered in [Updating 
 
 ## Custom registry (enterprise)
 
-`MCP_REGISTRY_URL` overrides the MCP registry endpoint that `apm install --mcp` queries when resolving registry-form servers (e.g. `apm install --mcp io.github.github/github-mcp-server`). Defaults to `https://api.mcp.github.com`.
+`MCP_REGISTRY_URL` overrides the MCP registry endpoint that APM queries. It applies to all `apm mcp` discovery commands (`search`, `list`, `show`) and to `apm install --mcp` when resolving registry-form servers (e.g. `apm install --mcp io.github.github/github-mcp-server`). Defaults to `https://api.mcp.github.com`.
 
 ```bash
 export MCP_REGISTRY_URL=https://mcp.internal.example.com
 ```
 
-Scope is process-level: it applies to any shell that exports it and to child processes APM spawns. There is no per-project override yet.
-
-:::caution
-Today only `apm install --mcp` honours `MCP_REGISTRY_URL`. The discovery commands (`apm mcp search`, `apm mcp list`, `apm mcp show`) currently hardcode the public registry -- tracked separately and will be aligned in a future release.
-:::
+Scope is process-level: it applies to any shell that exports it and to child processes APM spawns. There is no per-project override yet. When the variable is set, `apm mcp search/list/show` print a one-line `Registry: <url>` diagnostic so you always know which endpoint was queried.
 
 ## Next Steps
 

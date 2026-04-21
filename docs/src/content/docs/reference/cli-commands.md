@@ -910,6 +910,8 @@ Browse and discover MCP servers from the GitHub MCP Registry.
 apm mcp COMMAND [OPTIONS]
 ```
 
+All `apm mcp` subcommands and `apm install --mcp` honour the [`MCP_REGISTRY_URL`](../../guides/mcp-servers/#custom-registry-enterprise) environment variable for custom (e.g. enterprise) MCP registries.
+
 #### `apm mcp install` - Add an MCP server (alias)
 
 Alias for [`apm install --mcp`](#apm-install---install-dependencies-and-deploy-local-content). Forwards every argument and flag. See the [MCP Servers guide](../../guides/mcp-servers/) for the full reference.
@@ -930,7 +932,7 @@ apm mcp install io.github.github/github-mcp-server
 apm mcp install linear --transport http --url https://mcp.linear.app/sse
 ```
 
-Set the [`MCP_REGISTRY_URL`](../../guides/mcp-servers/#custom-registry-enterprise) environment variable to point `apm install --mcp` at a custom MCP registry.
+Set the [`MCP_REGISTRY_URL`](../../guides/mcp-servers/#custom-registry-enterprise) environment variable to point all `apm mcp` commands and `apm install --mcp` at a custom MCP registry.
 
 #### `apm mcp list` - List MCP servers
 

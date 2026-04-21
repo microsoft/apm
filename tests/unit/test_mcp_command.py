@@ -517,3 +517,89 @@ class TestMcpInstallAlias:
         with patch("apm_cli.cli.cli.main", return_value=0):
             result = runner.invoke(mcp, ["install", "foo", "--", "npx", "server"])
             assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# Registry env-var honouring (regression for #813)
+# ---------------------------------------------------------------------------
+
+class TestMcpRegistryEnvVar:
+    """All apm mcp commands must pass `RegistryIntegration()` with no positional URL,
+    so the ``MCP_REGISTRY_URL`` fallback in ``SimpleRegistryClient`` actually fires.
+    Regression for issue #813.
+    """
+
+    def _assert_no_positional_url(self, mock_cls):
+        """Assert RegistryIntegration was constructed without a positional URL arg."""
+        assert mock_cls.called, "RegistryIntegration was not constructed"
+        for call in mock_cls.call_args_list:
+            args, kwargs = call
+            assert not args, (
+                f"RegistryIntegration() called with positional url={args!r}; "
+                "must be no-arg so MCP_REGISTRY_URL env var fallback fires"
+            )
+            url = kwargs.get("registry_url")
+            assert url is None, (
+                f"RegistryIntegration(registry_url={url!r}) hardcodes the URL; "
+                "must be None so MCP_REGISTRY_URL env var fallback fires"
+            )
+
+    def test_search_uses_no_arg_constructor(self):
+        runner = make_runner()
+        with patch_registry(search_result=FAKE_SERVERS) as mock_cls:
+            runner.invoke(mcp, ["search", "cool"])
+        self._assert_no_positional_url(mock_cls)
+
+    def test_show_uses_no_arg_constructor(self):
+        runner = make_runner()
+        with patch_registry(detail_result=FAKE_SERVER_DETAIL) as mock_cls:
+            runner.invoke(mcp, ["show", "io.github.acme/cool-server"])
+        self._assert_no_positional_url(mock_cls)
+
+    def test_list_uses_no_arg_constructor(self):
+        runner = make_runner()
+        with patch_registry(list_result=FAKE_SERVERS) as mock_cls:
+            runner.invoke(mcp, ["list"])
+        self._assert_no_positional_url(mock_cls)
+
+    def test_search_diag_line_when_env_var_set(self, monkeypatch):
+        """When MCP_REGISTRY_URL is set, search emits a one-line registry diagnostic."""
+        monkeypatch.setenv("MCP_REGISTRY_URL", "https://mcp.internal.example.com")
+        runner = make_runner()
+        mock_console = MagicMock()
+        # Make registry.client.registry_url reflect the env var (RegistryIntegration is mocked out).
+        with patch_registry(search_result=FAKE_SERVERS) as mock_cls:
+            mock_cls.return_value.client.registry_url = "https://mcp.internal.example.com"
+            with patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
+                runner.invoke(mcp, ["search", "x"])
+        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        assert "Registry:" in printed and "mcp.internal.example.com" in printed
+
+    def test_search_no_diag_when_env_var_unset(self, monkeypatch):
+        """When MCP_REGISTRY_URL is unset, search stays quiet about the registry URL."""
+        monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
+        runner = make_runner()
+        mock_console = MagicMock()
+        with patch_registry(search_result=FAKE_SERVERS) as mock_cls:
+            mock_cls.return_value.client.registry_url = "https://api.mcp.github.com"
+            with patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
+                runner.invoke(mcp, ["search", "x"])
+        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        assert "Registry:" not in printed
+
+    def test_search_request_exception_mentions_env_var_when_set(self, monkeypatch):
+        """RequestException error path names the URL and hints at MCP_REGISTRY_URL when set."""
+        import requests as _requests
+        monkeypatch.setenv("MCP_REGISTRY_URL", "https://busted.internal.example.com")
+        runner = make_runner()
+        mock_console = MagicMock()
+        with patch_registry() as mock_cls:
+            mock_cls.return_value.client.registry_url = "https://busted.internal.example.com"
+            mock_cls.return_value.search_packages.side_effect = _requests.ConnectionError("boom")
+            with patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
+                result = runner.invoke(mcp, ["search", "x"])
+        assert result.exit_code == 1
+        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        assert "Could not reach MCP registry" in printed
+        assert "busted.internal.example.com" in printed
+        assert "MCP_REGISTRY_URL" in printed

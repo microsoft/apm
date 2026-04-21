@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--trust-transitive-mcp` no longer silently ignored when combined with `--global` (#638)
 - Token resolution now discriminates by port, fixing credential collisions across multiple self-hosted Git instances on the same host. Thanks @edenfunf! (#785)
 - Fix `apm init` showing overwrite confirmation prompt three times on Windows CP950 terminals (#602)
+- `apm mcp search`, `apm mcp list`, and `apm mcp show` now honour the `MCP_REGISTRY_URL` environment variable (previously hardcoded to the public registry), bringing them in line with `apm install --mcp`. When the variable is set, the discovery commands print a one-line `Registry: <url>` diagnostic and surface the configured URL in network-error messages so misconfigured enterprise registries are obvious (#813)
 
 ## [0.8.12] - 2026-04-19
 

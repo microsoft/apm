@@ -1,6 +1,7 @@
 """APM mcp command group."""
 
 import builtins
+import os
 import sys
 
 import click
@@ -10,6 +11,60 @@ from ._helpers import _get_console
 
 # Restore builtin since a subcommand is named ``list``
 list = builtins.list
+
+MCP_REGISTRY_ENV = "MCP_REGISTRY_URL"
+
+
+def _build_registry_with_diag(console, logger):
+    """Construct ``RegistryIntegration`` honouring ``MCP_REGISTRY_URL``.
+
+    Emits a one-line diagnostic naming the resolved registry URL whenever
+    the env var is set, so enterprise users can confirm they are hitting
+    the override and not the public default. Stays silent for the default
+    public registry (defaults are quiet, overrides are visible).
+    """
+    from ..registry.integration import RegistryIntegration
+
+    registry = RegistryIntegration()
+    override = os.environ.get(MCP_REGISTRY_ENV)
+    if override:
+        url = registry.client.registry_url
+        if console:
+            console.print(f"[muted]Registry: {url}[/muted]")
+        else:
+            logger.info(f"Registry: {url}")
+    return registry
+
+
+def _handle_registry_network_error(exc, registry, console, logger, action):
+    """Render a registry network failure with env-var-aware guidance.
+
+    ``action`` is a short verb phrase like ``"reach"`` so the message reads
+    naturally: ``Could not <action> MCP registry at <url>``. Returns once
+    the message is emitted; caller is responsible for ``sys.exit(1)``.
+    """
+    if registry is None:
+        # Fell over before the registry was constructed; let the caller
+        # emit its generic error path with the original exception.
+        return False
+    url = registry.client.registry_url
+    override = os.environ.get(MCP_REGISTRY_ENV)
+    if override:
+        hint = (
+            f"{MCP_REGISTRY_ENV} is set -- verify the URL is correct and "
+            "reachable."
+        )
+    else:
+        hint = "The registry may be temporarily unavailable. Retry shortly."
+
+    msg = f"Could not {action} MCP registry at {url}"
+    if console:
+        console.print(f"\n[red]x[/red] {msg}")
+        console.print(f"[muted]  -> {hint}[/muted]")
+    else:
+        logger.error(msg)
+        logger.error(hint)
+    return True
 
 
 @click.group(help="Browse MCP server registry")
@@ -56,13 +111,12 @@ def mcp_install(ctx):
 def search(ctx, query, limit, verbose):
     """Search for MCP servers in the registry."""
     logger = CommandLogger("mcp-search", verbose=verbose)
+    registry = None
     try:
-        from ..registry.integration import RegistryIntegration
-
-        registry = RegistryIntegration("https://api.mcp.github.com")
+        console = _get_console()
+        registry = _build_registry_with_diag(console, logger)
         servers = registry.search_packages(query)[:limit]
 
-        console = _get_console()
         if not console:
             # Fallback for non-rich environments
             logger.progress(f"Searching for: {query}", symbol="search")
@@ -130,6 +184,13 @@ def search(ctx, query, limit, verbose):
             )
 
     except Exception as e:
+        try:
+            import requests
+            if isinstance(e, requests.RequestException) and \
+                    _handle_registry_network_error(e, registry, _get_console(), logger, "reach"):
+                sys.exit(1)
+        except ImportError:
+            pass
         logger.error(f"Error searching registry: {e}")
         sys.exit(1)
 
@@ -141,12 +202,11 @@ def search(ctx, query, limit, verbose):
 def show(ctx, server_name, verbose):
     """Show detailed information about an MCP server."""
     logger = CommandLogger("mcp-show", verbose=verbose)
+    registry = None
     try:
-        from ..registry.integration import RegistryIntegration
-
-        registry = RegistryIntegration("https://api.mcp.github.com")
-
         console = _get_console()
+        registry = _build_registry_with_diag(console, logger)
+
         if not console:
             # Fallback for non-rich environments
             logger.progress(f"Getting details for: {server_name}", symbol="search")
@@ -317,6 +377,13 @@ def show(ctx, server_name, verbose):
         console.print(install_table)
 
     except Exception as e:
+        try:
+            import requests
+            if isinstance(e, requests.RequestException) and \
+                    _handle_registry_network_error(e, registry, _get_console(), logger, "reach"):
+                sys.exit(1)
+        except ImportError:
+            pass
         logger.error(f"Error getting server details: {e}")
         sys.exit(1)
 
@@ -328,12 +395,11 @@ def show(ctx, server_name, verbose):
 def list(ctx, limit, verbose):
     """List all available MCP servers in the registry."""
     logger = CommandLogger("mcp-list", verbose=verbose)
+    registry = None
     try:
-        from ..registry.integration import RegistryIntegration
-
-        registry = RegistryIntegration("https://api.mcp.github.com")
-
         console = _get_console()
+        registry = _build_registry_with_diag(console, logger)
+
         if not console:
             # Fallback for non-rich environments
             logger.progress("Fetching available MCP servers...", symbol="search")
@@ -405,5 +471,12 @@ def list(ctx, limit, verbose):
         )
 
     except Exception as e:
+        try:
+            import requests
+            if isinstance(e, requests.RequestException) and \
+                    _handle_registry_network_error(e, registry, _get_console(), logger, "reach"):
+                sys.exit(1)
+        except ImportError:
+            pass
         logger.error(f"Error listing servers: {e}")
         sys.exit(1)
