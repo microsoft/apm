@@ -14,8 +14,8 @@ Design
 * **Byte integrity**: the publisher NEVER modifies or regenerates
   ``marketplace.json`` content.  It only copies the file as-is from
   the marketplace source repo.
-* **Token redaction**: stderr from git subprocesses is redacted using
-  the same ``_TOKEN_RE`` pattern as ``ref_resolver.py``.
+* **Token redaction**: stderr from git subprocesses is redacted via
+  ``_git_utils.redact_token``.
 * **Atomic writes**: state files and consumer ``apm.yml`` updates use
   write-tmp + ``os.fsync`` + ``os.replace``.
 * **Error isolation**: failures in one target never abort other targets.
@@ -813,6 +813,7 @@ class MarketplacePublisher:
         timeout: int = _GIT_TIMEOUT,
     ) -> subprocess.CompletedProcess:
         """Run a git command via the injectable runner."""
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
         return self._runner(
             cmd,
             cwd=cwd,
@@ -820,6 +821,7 @@ class MarketplacePublisher:
             text=True,
             timeout=timeout,
             check=True,
+            env=env,
         )
 
     # -- safe force push ----------------------------------------------------

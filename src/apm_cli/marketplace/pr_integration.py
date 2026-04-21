@@ -12,7 +12,7 @@ Design
   updates PRs.  Safe-force-push coordination is the caller's
   responsibility.
 * **Token redaction**: stderr from ``gh`` subprocesses is redacted
-  using the same ``_TOKEN_RE`` pattern as ``publisher.py``.
+  via ``_git_utils.redact_token``.
 * **Error isolation**: a failing ``gh`` call returns ``PrState.FAILED``
   rather than raising -- callers can continue with other targets.
 """
