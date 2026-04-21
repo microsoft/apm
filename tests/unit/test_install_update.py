@@ -303,6 +303,7 @@ class TestDownloadRefLockfileOverride:
         assert ref.host == "git.company.internal"
         assert ref.reference == "abc123def456"
         assert ref.is_insecure is True
+        assert ref.allow_insecure is True
 
 
 class TestPreDownloadRefLockfileOverride:

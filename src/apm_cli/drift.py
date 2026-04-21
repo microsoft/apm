@@ -258,6 +258,9 @@ def build_download_ref(
 
             if getattr(locked_dep, "is_insecure", False) is True:
                 overrides["is_insecure"] = True
+                overrides["allow_insecure"] = getattr(
+                    locked_dep, "allow_insecure", False
+                )
 
             # Use locked commit SHA for byte-for-byte reproducibility.
             if locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
