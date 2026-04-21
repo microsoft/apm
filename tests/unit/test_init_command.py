@@ -220,6 +220,51 @@ class TestInitCommand:
             finally:
                 os.chdir(self.original_dir)  # restore CWD before TemporaryDirectory cleanup
 
+    def test_init_existing_project_confirm_prompt_shown_once(self):
+        """Test that overwrite confirmation prompt appears exactly once (#602).
+
+        On Windows CP950 terminals, Rich Confirm.ask() could fail on encoding,
+        retry internally, then fall back to click.confirm(), showing the prompt
+        three times. After the fix, only click.confirm() is used.
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+
+                # Create existing apm.yml
+                Path("apm.yml").write_text("name: existing-project\nversion: 0.1.0\n")
+
+                # Say yes to overwrite, then provide interactive setup input
+                user_input = "y\nmy-project\n1.0.0\nA description\nAuthor\ny\n"
+                result = self.runner.invoke(cli, ["init"], input=user_input)
+
+                assert result.exit_code == 0
+                # The overwrite prompt must appear exactly once
+                assert result.output.count("Continue and overwrite?") == 1
+            finally:
+                os.chdir(self.original_dir)  # restore CWD before TemporaryDirectory cleanup
+
+    def test_init_existing_project_confirm_uses_click(self):
+        """Test that overwrite confirmation uses click.confirm, not Rich (#602)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+
+                # Create existing apm.yml
+                Path("apm.yml").write_text("name: existing-project\nversion: 0.1.0\n")
+
+                with patch("apm_cli.commands.init.click.confirm", return_value=True) as mock_confirm:
+                    result = self.runner.invoke(cli, ["init", "--yes"])
+                    # --yes skips the prompt entirely, so confirm should NOT be called
+                    mock_confirm.assert_not_called()
+
+                with patch("apm_cli.commands.init.click.confirm", return_value=False) as mock_confirm:
+                    result = self.runner.invoke(cli, ["init"])
+                    mock_confirm.assert_called_once_with("Continue and overwrite?")
+                    assert "Initialization cancelled" in result.output
+            finally:
+                os.chdir(self.original_dir)  # restore CWD before TemporaryDirectory cleanup
+
     def test_init_validates_project_structure(self):
         """Test that init creates minimal project structure."""
         with tempfile.TemporaryDirectory() as tmp_dir:

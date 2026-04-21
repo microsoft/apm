@@ -19,7 +19,6 @@ from ._helpers import (
     _create_plugin_json,
     _get_console,
     _get_default_config,
-    _lazy_confirm,
     _rich_blank_line,
     _validate_plugin_name,
     _validate_project_name,
@@ -84,14 +83,7 @@ def init(ctx, project_name, yes, plugin, verbose):
             logger.warning("apm.yml already exists")
 
             if not yes:
-                Confirm = _lazy_confirm()
-                if Confirm:
-                    try:
-                        confirm = Confirm.ask("Continue and overwrite?")
-                    except Exception:
-                        confirm = click.confirm("Continue and overwrite?")
-                else:
-                    confirm = click.confirm("Continue and overwrite?")
+                confirm = click.confirm("Continue and overwrite?")
 
                 if not confirm:
                     logger.progress("Initialization cancelled.")

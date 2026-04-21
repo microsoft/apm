@@ -21,6 +21,7 @@ from ..constants import (
     GITIGNORE_FILENAME,
 )
 from ..utils.console import _rich_echo, _rich_info, _rich_warning
+from ..update_policy import get_update_hint_message, is_self_update_enabled
 from ..version import get_build_sha, get_version
 from ..utils.version_checker import check_for_updates
 
@@ -240,6 +241,10 @@ def print_version(ctx, param, value):
 def _check_and_notify_updates():
     """Check for updates and notify user non-blockingly."""
     try:
+        # Skip notifications when self-update is disabled by distribution policy.
+        if not is_self_update_enabled():
+            return
+
         # Skip version check in E2E test mode to avoid interfering with tests
         if os.environ.get("APM_E2E_TESTS", "").lower() in ("1", "true", "yes"):
             return
@@ -260,7 +265,7 @@ def _check_and_notify_updates():
             )
 
             # Show update command using helper for consistency
-            _rich_echo("Run apm update to upgrade", color="yellow", bold=True)
+            _rich_echo(get_update_hint_message(), color="yellow", bold=True)
 
             # Add a blank line for visual separation
             click.echo()

@@ -260,6 +260,15 @@ class TestScanInstalledPackages:
 class TestCheckAndNotifyUpdates:
     """Tests for _check_and_notify_updates."""
 
+    def test_skips_when_self_update_disabled(self):
+        """Returns immediately when distribution disables self-update."""
+        with patch(
+            "apm_cli.commands._helpers.is_self_update_enabled", return_value=False
+        ):
+            with patch("apm_cli.commands._helpers.check_for_updates") as mock_check:
+                _check_and_notify_updates()
+                mock_check.assert_not_called()
+
     def test_skips_in_e2e_test_mode(self):
         """Returns immediately when APM_E2E_TESTS=1 is set."""
         with patch.dict(os.environ, {"APM_E2E_TESTS": "1"}):

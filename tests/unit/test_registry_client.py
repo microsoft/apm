@@ -49,7 +49,7 @@ class TestSimpleRegistryClient(unittest.TestCase):
         self.assertEqual(servers[0]["name"], "server1")
         self.assertEqual(servers[1]["name"], "server2")
         self.assertEqual(next_cursor, "next-page-token")
-        mock_get.assert_called_once_with(f"{self.client.registry_url}/v0/servers", params={'limit': 100})
+        mock_get.assert_called_once_with(f"{self.client.registry_url}/v0/servers", params={'limit': 100}, timeout=self.client._timeout)
         
     @mock.patch('requests.Session.get')
     def test_list_servers_with_pagination(self, mock_get):
@@ -66,7 +66,8 @@ class TestSimpleRegistryClient(unittest.TestCase):
         # Assertions
         mock_get.assert_called_once_with(
             f"{self.client.registry_url}/v0/servers", 
-            params={"limit": 10, "cursor": "page-token"}
+            params={"limit": 10, "cursor": "page-token"},
+            timeout=self.client._timeout,
         )
         
     @mock.patch('requests.Session.get')
@@ -89,7 +90,8 @@ class TestSimpleRegistryClient(unittest.TestCase):
         # Assertions
         mock_get.assert_called_once_with(
             f"{self.client.registry_url}/v0/servers/search",
-            params={"q": "test"}
+            params={"q": "test"},
+            timeout=self.client._timeout,
         )
         self.assertEqual(len(results), 2)
         self.assertEqual(results[0]["name"], "test-server")
@@ -136,7 +138,8 @@ class TestSimpleRegistryClient(unittest.TestCase):
         self.assertEqual(server_info["version_detail"]["version"], "1.0.0")
         self.assertEqual(server_info["packages"][0]["name"], "test-package")
         mock_get.assert_called_once_with(
-            f"{self.client.registry_url}/v0/servers/123e4567-e89b-12d3-a456-426614174000"
+            f"{self.client.registry_url}/v0/servers/123e4567-e89b-12d3-a456-426614174000",
+            timeout=self.client._timeout,
         )
     
     @mock.patch('apm_cli.registry.client.SimpleRegistryClient.search_servers')
@@ -395,6 +398,95 @@ class TestSimpleRegistryClient(unittest.TestCase):
                 "xgithub/server",
             )
         )
+
+
+
+class TestSimpleRegistryClientValidation(unittest.TestCase):
+    """URL validation at construction (#814).
+
+    SimpleRegistryClient must reject malformed registry URLs at startup so
+    misconfiguration surfaces immediately instead of producing cryptic HTTP
+    failures later. Plaintext http:// is rejected by default; opt in via
+    MCP_REGISTRY_ALLOW_HTTP=1.
+    """
+
+    def setUp(self):
+        # Snapshot env vars touched by these tests so we always restore them.
+        self._saved = {
+            k: os.environ.get(k)
+            for k in ("MCP_REGISTRY_URL", "MCP_REGISTRY_ALLOW_HTTP")
+        }
+        for k in self._saved:
+            os.environ.pop(k, None)
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def test_default_url_passes(self):
+        c = SimpleRegistryClient()
+        self.assertEqual(c.registry_url, "https://api.mcp.github.com")
+        self.assertFalse(c._is_custom_url)
+
+    def test_explicit_https_url_passes(self):
+        c = SimpleRegistryClient("https://mcp.example.com")
+        self.assertEqual(c.registry_url, "https://mcp.example.com")
+        self.assertTrue(c._is_custom_url)
+
+    def test_trailing_slash_and_whitespace_stripped(self):
+        c = SimpleRegistryClient("  https://mcp.example.com/  ")
+        self.assertEqual(c.registry_url, "https://mcp.example.com")
+
+    def test_schemeless_url_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            SimpleRegistryClient("mcp.example.com")
+        self.assertIn("MCP_REGISTRY_URL", str(cm.exception))
+        self.assertIn("scheme://host", str(cm.exception))
+
+    def test_http_url_rejected_without_opt_in(self):
+        with self.assertRaises(ValueError) as cm:
+            SimpleRegistryClient("http://mcp.example.com")
+        self.assertIn("MCP_REGISTRY_ALLOW_HTTP", str(cm.exception))
+
+    def test_http_url_accepted_with_allow_env(self):
+        os.environ["MCP_REGISTRY_ALLOW_HTTP"] = "1"
+        c = SimpleRegistryClient("http://mcp.example.com")
+        self.assertEqual(c.registry_url, "http://mcp.example.com")
+        self.assertTrue(c._is_custom_url)
+
+    def test_unsupported_scheme_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            SimpleRegistryClient("ftp://mcp.example.com")
+        self.assertIn("ftp", str(cm.exception))
+        self.assertIn("only https://", str(cm.exception))
+
+    def test_empty_env_var_treated_as_unset(self):
+        os.environ["MCP_REGISTRY_URL"] = ""
+        c = SimpleRegistryClient()
+        self.assertEqual(c.registry_url, "https://api.mcp.github.com")
+        self.assertFalse(c._is_custom_url)
+
+    def test_whitespace_only_env_var_treated_as_unset(self):
+        os.environ["MCP_REGISTRY_URL"] = "   "
+        c = SimpleRegistryClient()
+        self.assertEqual(c.registry_url, "https://api.mcp.github.com")
+        self.assertFalse(c._is_custom_url)
+
+    def test_env_var_override_marks_custom(self):
+        os.environ["MCP_REGISTRY_URL"] = "https://internal.example.com/"
+        c = SimpleRegistryClient()
+        self.assertEqual(c.registry_url, "https://internal.example.com")
+        self.assertTrue(c._is_custom_url)
+
+    def test_env_var_invalid_rejected(self):
+        os.environ["MCP_REGISTRY_URL"] = "not-a-url"
+        with self.assertRaises(ValueError) as cm:
+            SimpleRegistryClient()
+        self.assertIn("MCP_REGISTRY_URL", str(cm.exception))
+
 
 
 if __name__ == "__main__":
