@@ -118,7 +118,16 @@ class MCPDependency:
         if self.url:
             parts.append(f"url={self.url!r}")
         if self.command:
-            parts.append(f"command={self.command!r}")
+            # Redact: show only the first whitespace-separated token to avoid
+            # leaking embedded credentials (e.g. `--token=...`) in repr output
+            # via debug logs or tracebacks. Mirrors the env/headers redaction
+            # above and the M1 fix in the validation error message.
+            if isinstance(self.command, str):
+                first_tok = self.command.strip().split(maxsplit=1)
+                preview = first_tok[0] if first_tok else ''
+                parts.append(f"command={preview!r}")
+            else:
+                parts.append(f"command=<{type(self.command).__name__}>")
         return f"MCPDependency({', '.join(parts)})"
 
     def validate(self, strict: bool = True) -> None:
@@ -168,6 +177,12 @@ class MCPDependency:
                         f"(CR/LF) not allowed in keys or values"
                     )
         if self.command is not None:
+            if not isinstance(self.command, str):
+                raise ValueError(
+                    f"MCP dependency '{self.name}': 'command' must be a string, "
+                    f"got {type(self.command).__name__}. "
+                    f"Use 'args' for the argument list."
+                )
             try:
                 validate_path_segments(
                     self.command,
@@ -204,4 +219,36 @@ class MCPDependency:
                 raise ValueError(
                     f"Self-defined MCP dependency '{self.name}' with transport "
                     f"'stdio' requires 'command'"
+                )
+            if (
+                self.transport == 'stdio'
+                and isinstance(self.command, str)
+                and any(ch.isspace() for ch in self.command)
+                and self.args is None
+            ):
+                # Split on any whitespace (incl. tabs / multiple spaces) so the
+                # fix-it suggestion matches the validation trigger condition
+                # (any character.isspace()), not just literal U+0020.
+                # Note: `args is None` (not `not self.args`) so that an explicit
+                # `args: []` (e.g., paired with a path like '/opt/My App/server')
+                # is treated as a deliberate "no extra args" signal and accepted.
+                command_parts = self.command.strip().split(maxsplit=1)
+                if not command_parts:
+                    raise ValueError(
+                        f"Self-defined MCP dependency '{self.name}': "
+                        f"'command' is empty or whitespace-only. "
+                        f"Set 'command' to a binary path, e.g. command: npx"
+                    )
+                first = command_parts[0]
+                rest_tokens = command_parts[1].split() if len(command_parts) > 1 else []
+                suggested_args = '[' + ', '.join(f'"{tok}"' for tok in rest_tokens) + ']'
+                raise ValueError(
+                    "\n".join([
+                        f"'command' contains whitespace in MCP dependency '{self.name}'.",
+                        f"  Rule: 'command' must be a single binary path -- APM does not split on whitespace. Use 'args' for additional arguments.",
+                        f"  Got:  command={first!r} ({len(rest_tokens)} additional args)",
+                        f"  Fix:  command: {first}",
+                        f"        args: {suggested_args}",
+                        f"  See:  https://microsoft.github.io/apm/guides/mcp-servers/",
+                    ])
                 )

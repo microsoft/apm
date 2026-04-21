@@ -1,31 +1,36 @@
-"""SSRF + shell-metacharacter advisory warnings for MCP install.
+"""MCP install-time, non-blocking safety warnings (F5 SSRF + F7 shell metachars).
 
-Extracted from ``apm_cli.commands.install`` to keep the CLI module under the
-architectural LOC budget (see ``tests/unit/install/test_architecture_invariants``).
-The helpers here emit non-blocking warnings that help users spot surprising
-behaviour without refusing the install:
+Extracted from ``commands/install.py`` per the architecture-invariants
+LOC budget. These checks fire during ``apm install --mcp`` to surface
+likely-misconfiguration to the user without blocking the operation.
 
-* :func:`warn_ssrf_url` (F5) -- flag URLs pointing at cloud-metadata/internal
-  IPs so an accidental mis-configured registry or remote server is visible
-  rather than silent.
-* :func:`warn_shell_metachars` (F7) -- remind users that MCP stdio servers
-  spawn via ``execve`` with no shell, so ``$(...)``/backticks/pipes in
-  ``env`` values (and, when provided, the ``command`` string) are passed
-  literally rather than evaluated.
+Categories:
 
-These functions are pure advisories -- they never raise, never block, and
-always route messages through the caller's logger so they flow through the
-standard ``CommandLogger`` / ``DiagnosticCollector`` pipeline.
+- **F5 (SSRF)**: warn when a self-defined remote MCP URL points at
+  internal/metadata addresses (loopback, link-local, RFC1918, cloud IMDS).
+- **F7 (Shell metachars)**: warn when env values OR the stdio ``command``
+  field contain shell metacharacters. MCP stdio servers spawn via
+  ``execve``-style calls (no shell), so metacharacters are passed
+  literally rather than evaluated -- a confused user expecting shell
+  semantics will get surprising behavior.
+
+These are deliberately *warnings*, not errors, because legitimate paths
+exist (e.g. a private homelab MCP server bound to a loopback address).
 """
 
 from __future__ import annotations
 
-# F7 shell-expansion residue scan: tokens a real shell would evaluate but
-# which the ``execve``-style spawn of an MCP stdio server will NOT evaluate.
+import ipaddress
+import socket
+from typing import Iterable, Optional
+
+
+# F7: tokens that would be evaluated by a real shell but are NOT evaluated
+# when an MCP stdio server runs through ``execve``-style spawning.
 _SHELL_METACHAR_TOKENS = ("$(", "`", ";", "&&", "||", "|", ">>", ">", "<")
 
-# F5 SSRF: well-known cloud metadata endpoints, surfaced as constants so
-# allow/deny review stays explicit.
+# F5: well-known cloud metadata endpoints surfaced as constants for
+# explicit allow/deny review.
 _METADATA_HOSTS = {
     "169.254.169.254",   # AWS / Azure / GCP IMDS
     "100.100.100.200",   # Alibaba Cloud
@@ -34,22 +39,21 @@ _METADATA_HOSTS = {
 
 
 def _is_internal_or_metadata_host(host: str) -> bool:
-    """Return True when ``host`` parses/resolves to an internal IP.
+    """Return True when ``host`` resolves/parses to an internal IP.
 
     Covers cloud metadata IPs, loopback, link-local, and RFC1918 ranges.
     Defensive against ``ValueError``/``OSError`` from name resolution.
     """
-    import ipaddress
-    import socket
-
     if not host:
         return False
     if host in _METADATA_HOSTS:
         return True
     candidates: list = [host]
+    # Strip brackets from IPv6 literals.
     bare = host.strip("[]")
     if bare != host:
         candidates.append(bare)
+    # Resolve hostname when it is not already an IP literal.
     try:
         ipaddress.ip_address(bare)
     except ValueError:
@@ -70,7 +74,7 @@ def _is_internal_or_metadata_host(host: str) -> bool:
     return False
 
 
-def warn_ssrf_url(url, logger):
+def warn_ssrf_url(url: Optional[str], logger) -> None:
     """F5: warn (do not block) when URL points at an internal/metadata host."""
     if not url:
         return
@@ -86,21 +90,33 @@ def warn_ssrf_url(url, logger):
         )
 
 
-def warn_shell_metachars(env, logger):
-    """F7: warn (do not block) when env values contain shell metacharacters.
+def warn_shell_metachars(env, logger, command: Optional[str] = None) -> None:
+    """F7: warn (do not block) on shell metacharacters in env values or stdio command.
 
     MCP stdio servers spawn via ``execve``-style calls with no shell, so
-    these characters are passed literally rather than evaluated.  Users
-    who think they are setting ``FOO=$(secret)`` will be surprised.
+    these characters are passed literally rather than evaluated. Users who
+    think they are setting ``FOO=$(secret)`` will be surprised.
+
+    Also covers ``command`` itself (e.g. ``command: "npx|curl evil.com"``)
+    which would otherwise pass the whitespace-rejection guard but still
+    indicate a confused user expecting shell evaluation.
     """
-    if not env:
-        return
-    for key, value in env.items():
-        sval = "" if value is None else str(value)
+    if env:
+        for key, value in env.items():
+            sval = "" if value is None else str(value)
+            for tok in _SHELL_METACHAR_TOKENS:
+                if tok in sval:
+                    logger.warning(
+                        f"Env value for '{key}' contains shell metacharacter "
+                        f"'{tok}'; reminder these are NOT shell-evaluated."
+                    )
+                    break
+    if command and isinstance(command, str):
         for tok in _SHELL_METACHAR_TOKENS:
-            if tok in sval:
+            if tok in command:
                 logger.warning(
-                    f"Env value for '{key}' contains shell metacharacter "
-                    f"'{tok}'; reminder these are NOT shell-evaluated."
+                    f"'command' contains shell metacharacter '{tok}'; "
+                    f"reminder MCP stdio servers run via execve (no shell). "
+                    f"This will be passed literally."
                 )
                 break

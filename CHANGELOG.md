@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - MCP entry validation hardened (security): names must match `^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$`, URLs must use `http` or `https` schemes, headers reject CR/LF in keys and values, self-defined stdio commands rejected if they contain path-traversal sequences. Migration: most existing `apm.yml` files unaffected; if you hit `Invalid MCP name`, the error message now includes a valid positive example (e.g. `io.github.acme/cool-server` or `my-server`) to pattern against. (#807)
 - Strict-by-default transport selection: explicit `ssh://`/`https://` URLs no longer silently fall back to the other protocol; shorthand consults `git config url.<base>.insteadOf` and otherwise defaults to HTTPS. Set `APM_ALLOW_PROTOCOL_FALLBACK=1` (or pass `--allow-protocol-fallback`) to restore the legacy permissive chain; cross-protocol retries then emit a `[!]` warning. Closes #328 (#778)
+- Self-defined stdio MCP entries with `command` containing whitespace and no `args` are now rejected at parse time with a fix-it error pointing at the canonical `command: <binary>, args: [<token>, ...]` shape. Previously silently accepted; APM never split `command` on whitespace, so the loose shape mis-executed downstream. Closes #806, refs #122 (#809)
 
 ### Changed
 

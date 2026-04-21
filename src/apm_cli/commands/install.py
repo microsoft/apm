@@ -397,16 +397,15 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
 # MCP CLI helpers (W3 --mcp flag)
 # ---------------------------------------------------------------------------
 
-# F7/F5 helpers live in apm_cli/install/mcp_warnings.py per LOC budget.
-# Re-bind as module attributes so existing test patches against
-# apm_cli.commands.install._warn_* / _is_internal_or_metadata_host /
-# _SHELL_METACHAR_TOKENS / _METADATA_HOSTS keep working unchanged.
+# F7 / F5 install-time MCP warnings live in apm_cli/install/mcp_warnings.py
+# per LOC budget. Re-bind module-level names for back-compat with tests
+# that still patch ``apm_cli.commands.install._warn_*``.
 from ..install.mcp_warnings import (
     warn_ssrf_url as _warn_ssrf_url,
     warn_shell_metachars as _warn_shell_metachars,
-    _is_internal_or_metadata_host,
     _SHELL_METACHAR_TOKENS,
     _METADATA_HOSTS,
+    _is_internal_or_metadata_host,
 )
 
 # --registry helpers live in apm_cli/install/mcp_registry.py per LOC budget.
@@ -789,7 +788,7 @@ def _run_mcp_install(
 
     # F5 + F7 warnings -- do not block.
     _warn_ssrf_url(url, logger)
-    _warn_shell_metachars(env, logger)
+    _warn_shell_metachars(env, logger, command=entry.get("command"))
 
     # Write to apm.yml.
     status, _diff = _add_mcp_to_apm_yml(
