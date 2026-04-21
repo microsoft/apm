@@ -169,6 +169,20 @@ For the trust boundary on transitive MCP servers (`--trust-transitive-mcp`), see
 
 Existing-entry conflicts (`already exists in apm.yml`) are covered in [Updating and Replacing Servers](#updating-and-replacing-servers).
 
+## Custom registry (enterprise)
+
+`MCP_REGISTRY_URL` overrides the MCP registry endpoint that `apm install --mcp` queries when resolving registry-form servers (e.g. `apm install --mcp io.github.github/github-mcp-server`). Defaults to `https://api.mcp.github.com`.
+
+```bash
+export MCP_REGISTRY_URL=https://mcp.internal.example.com
+```
+
+Scope is process-level: it applies to any shell that exports it and to child processes APM spawns. There is no per-project override yet.
+
+:::caution
+Today only `apm install --mcp` honours `MCP_REGISTRY_URL`. The discovery commands (`apm mcp search`, `apm mcp list`, `apm mcp show`) currently hardcode the public registry -- tracked separately and will be aligned in a future release.
+:::
+
 ## Next Steps
 
 - [Dependencies & Lockfile](../dependencies/#mcp-dependency-formats) -- the full `apm.yml` MCP grammar (overlays, `${input:...}`, package selection).
