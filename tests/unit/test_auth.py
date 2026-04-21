@@ -585,3 +585,219 @@ class TestBuildErrorContextADO:
                 assert "SAML" not in msg, (
                     f"ADO error should not mention SAML, got:\n{msg}"
                 )
+
+
+# ---------------------------------------------------------------------------
+# TestHostInfoPort -- port field + display_name property
+# ---------------------------------------------------------------------------
+
+class TestHostInfoPort:
+    def test_port_defaults_to_none(self):
+        hi = HostInfo(host="github.com", kind="github", has_public_repos=True, api_base="x")
+        assert hi.port is None
+
+    def test_display_name_without_port(self):
+        hi = HostInfo(host="github.com", kind="github", has_public_repos=True, api_base="x")
+        assert hi.display_name == "github.com"
+
+    def test_display_name_with_port(self):
+        hi = HostInfo(
+            host="bitbucket.corp.com",
+            kind="generic",
+            has_public_repos=True,
+            api_base="x",
+            port=7999,
+        )
+        assert hi.display_name == "bitbucket.corp.com:7999"
+
+    def test_classify_host_attaches_port(self):
+        hi = AuthResolver.classify_host("bitbucket.corp.com", port=7999)
+        assert hi.kind == "generic"
+        assert hi.port == 7999
+        assert hi.display_name == "bitbucket.corp.com:7999"
+
+    def test_classify_host_port_is_transport_agnostic(self):
+        """Port does not influence host-kind classification."""
+        # github.com on a weird port is still 'github', not 'generic'.
+        hi = AuthResolver.classify_host("github.com", port=8443)
+        assert hi.kind == "github"
+        assert hi.port == 8443
+
+
+# ---------------------------------------------------------------------------
+# TestResolvePortDiscrimination -- same host, different ports must not
+# collapse into one cache entry and must return each port's credential.
+# ---------------------------------------------------------------------------
+
+class TestResolvePortDiscrimination:
+    def test_same_host_different_ports_are_separate_cache_entries(self):
+        """Widened cache key: (host, port, org) discriminates by port."""
+        with patch.dict(os.environ, {}, clear=True):
+            resolver = AuthResolver()
+            calls: list = []
+
+            def fake_cred(host, port=None):
+                calls.append((host, port))
+                return f"tok-{host}-{port}"
+
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", side_effect=fake_cred
+            ):
+                ctx_a = resolver.resolve("bitbucket.corp.com", port=7990)
+                ctx_b = resolver.resolve("bitbucket.corp.com", port=7991)
+
+        assert ctx_a.token == "tok-bitbucket.corp.com-7990"
+        assert ctx_b.token == "tok-bitbucket.corp.com-7991"
+        assert ctx_a is not ctx_b
+        assert calls == [
+            ("bitbucket.corp.com", 7990),
+            ("bitbucket.corp.com", 7991),
+        ]
+
+    def test_same_port_hits_cache(self):
+        """Calling resolve() twice with the same (host, port, org) hits the cache."""
+        with patch.dict(os.environ, {}, clear=True):
+            resolver = AuthResolver()
+
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value="tok"
+            ) as mock_cred:
+                ctx_1 = resolver.resolve("bitbucket.corp.com", port=7990)
+                ctx_2 = resolver.resolve("bitbucket.corp.com", port=7990)
+
+        assert ctx_1 is ctx_2
+        assert mock_cred.call_count == 1
+
+    def test_port_none_vs_port_set_are_separate(self):
+        """resolve(host) and resolve(host, port=443) produce distinct entries."""
+        with patch.dict(os.environ, {}, clear=True):
+            resolver = AuthResolver()
+
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value="tok"
+            ) as mock_cred:
+                resolver.resolve("bitbucket.corp.com")
+                resolver.resolve("bitbucket.corp.com", port=443)
+
+        assert mock_cred.call_count == 2
+
+    def test_resolve_for_dep_threads_port(self):
+        """resolve_for_dep propagates dep_ref.port into the resolver."""
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep = DependencyReference.parse(
+            "ssh://git@bitbucket.corp.com:7999/team/repo.git"
+        )
+        assert dep.port == 7999
+
+        with patch.dict(os.environ, {}, clear=True):
+            resolver = AuthResolver()
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value="p"
+            ) as mock_cred:
+                ctx = resolver.resolve_for_dep(dep)
+
+        assert ctx.host_info.port == 7999
+        assert ctx.host_info.display_name == "bitbucket.corp.com:7999"
+        mock_cred.assert_called_once_with("bitbucket.corp.com", port=7999)
+
+    def test_resolve_for_dep_threads_port_from_https_url(self):
+        """https://host:port/... also carries the port into the resolver."""
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep = DependencyReference.parse(
+            "https://bitbucket.corp.com:7990/team/repo.git"
+        )
+        assert dep.port == 7990
+
+        with patch.dict(os.environ, {}, clear=True):
+            resolver = AuthResolver()
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value="p"
+            ) as mock_cred:
+                ctx = resolver.resolve_for_dep(dep)
+
+        assert ctx.host_info.port == 7990
+        mock_cred.assert_called_once_with("bitbucket.corp.com", port=7990)
+
+    def test_host_info_carries_port(self):
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "t"}, clear=True):
+            resolver = AuthResolver()
+            ctx = resolver.resolve("gitlab.corp.com", port=8443)
+            assert ctx.host_info.port == 8443
+            assert ctx.host_info.display_name == "gitlab.corp.com:8443"
+
+
+# ---------------------------------------------------------------------------
+# TestBuildErrorContextWithPort
+# ---------------------------------------------------------------------------
+
+class TestBuildErrorContextWithPort:
+    def test_error_message_uses_display_name(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value=None
+            ):
+                resolver = AuthResolver()
+                msg = resolver.build_error_context(
+                    "bitbucket.corp.com", "clone", port=7999
+                )
+        # Anchor with surrounding context tokens (" on " before, "." after)
+        # so the assertion pins the rendered position rather than just the
+        # substring's existence anywhere -- and so CodeQL's
+        # py/incomplete-url-substring-sanitization heuristic does not
+        # mistake a test assertion for unsafe URL sanitization.
+        assert "Authentication failed for clone on bitbucket.corp.com:7999." in msg
+
+    def test_port_hint_appears_when_port_set(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value=None
+            ):
+                resolver = AuthResolver()
+                msg = resolver.build_error_context(
+                    "bitbucket.corp.com", "clone", port=7999
+                )
+        assert "per-port" in msg, (
+            f"Expected per-port hint when port is set, got:\n{msg}"
+        )
+
+    def test_no_port_hint_when_port_missing(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value=None
+            ):
+                resolver = AuthResolver()
+                msg = resolver.build_error_context("github.com", "clone")
+        assert "per-port" not in msg
+
+
+# ---------------------------------------------------------------------------
+# TestTryWithFallbackWithPort
+# ---------------------------------------------------------------------------
+
+class TestTryWithFallbackWithPort:
+    def test_port_threads_into_credential_fallback(self):
+        """When env token fails on ghe_cloud, credential fill is called with port."""
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "bad"}, clear=True):
+            captured: list = []
+
+            def fake_cred(host, port=None):
+                captured.append((host, port))
+                return "good"
+
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", side_effect=fake_cred
+            ):
+                resolver = AuthResolver()
+
+                def op(token, env):
+                    if token == "bad":
+                        raise RuntimeError("rejected")
+                    return "ok"
+
+                result = resolver.try_with_fallback(
+                    "contoso.ghe.com", op, port=8443
+                )
+        assert result == "ok"
+        assert captured == [("contoso.ghe.com", 8443)]

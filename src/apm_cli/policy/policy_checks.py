@@ -439,21 +439,27 @@ def _check_compilation_target(
             message="No compilation target set in manifest",
         )
 
+    # Normalize target to a list for uniform checking
+    target_list = target if isinstance(target, list) else [target]
+
     if enforce:
-        if target != enforce:
+        if enforce not in target_list:
             return CheckResult(
                 name="compilation-target",
                 passed=False,
-                message=f"Target '{target}' does not match enforced '{enforce}'",
+                message=f"Enforced target '{enforce}' not present in {target_list}",
                 details=[f"target: {target}, enforced: {enforce}"],
             )
-    elif allow is not None and target not in allow:
-        return CheckResult(
-            name="compilation-target",
-            passed=False,
-            message=f"Target '{target}' not in allowed list {allow}",
-            details=[f"target: {target}, allowed: {allow}"],
-        )
+    elif allow is not None:
+        allow_set = set(allow) if isinstance(allow, list) else {allow}
+        disallowed = [t for t in target_list if t not in allow_set]
+        if disallowed:
+            return CheckResult(
+                name="compilation-target",
+                passed=False,
+                message=f"Target(s) {disallowed} not in allowed list {sorted(allow_set)}",
+                details=[f"target: {target}, allowed: {sorted(allow_set)}"],
+            )
 
     return CheckResult(
         name="compilation-target",
