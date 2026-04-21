@@ -10,7 +10,7 @@
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm install [PKGS...]` | Install packages | `--update` refresh refs, `--force` overwrite, `--dry-run`, `--verbose`, `--only [apm\|mcp]`, `--target` (comma-separated), `--dev`, `-g` global, `--trust-transitive-mcp`, `--parallel-downloads N` |
+| `apm install [PKGS...]` | Install packages | `--update` refresh refs, `--force` overwrite, `--dry-run`, `--verbose`, `--only [apm\|mcp]`, `--target` (comma-separated), `--dev`, `-g` global, `--trust-transitive-mcp`, `--parallel-downloads N`, `--mcp NAME` add MCP entry, `--transport`, `--url`, `--env KEY=VAL`, `--header KEY=VAL`, `--mcp-version`, `--registry URL` custom MCP registry |
 | `apm uninstall PKGS...` | Remove packages | `--dry-run`, `-g` global |
 | `apm prune` | Remove orphaned packages | `--dry-run` |
 | `apm deps list` | List installed packages | `-g` global, `--all` both scopes |
@@ -66,9 +66,12 @@
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
+| `apm mcp install NAME [-- CMD...]` | Add an MCP server (alias for `apm install --mcp`) | `--transport`, `--url`, `--env`, `--header`, `--mcp-version`, `--registry URL`, `--dev`, `--force`, `--dry-run` |
 | `apm mcp list` | List MCP servers in project | `--limit N` |
 | `apm mcp search QUERY` | Search MCP registry | `--limit N` |
 | `apm mcp show SERVER` | Show server details | -- |
+
+Set `MCP_REGISTRY_URL` (default `https://api.mcp.github.com`) to point all `apm mcp` commands and `apm install --mcp` at a custom MCP registry. The URL is validated at startup and must use `https://`; set `MCP_REGISTRY_ALLOW_HTTP=1` to opt in to plaintext `http://` for development. When the override is set and the registry is unreachable during install pre-flight, APM fails closed.
 
 ## Runtime management (experimental)
 

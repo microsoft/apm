@@ -99,39 +99,9 @@ Reference script inputs using the `${input:name}` syntax:
 - Start time: ${input:start_time}
 ```
 
-## MCP Tool Integration (Phase 2 - Coming Soon)
+## MCP servers in prompts
 
-> **Note**: MCP integration is planned work. Currently, prompts work with natural language instructions only.
-
-**Future capability** - Prompts will be able to use MCP servers for external tools:
-
-```yaml
----
-description: Future MCP-enabled prompt
-mcp:
-  - kubernetes-mcp    # For cluster access
-  - github-mcp        # For repository operations  
-  - slack-mcp         # For team communication
----
-```
-
-**Current workaround**: Use detailed natural language instructions:
-```markdown
----
-description: Current approach without MCP tools
----
-
-# Kubernetes Analysis
-
-Please analyze the Kubernetes cluster by:
-1. Examining the deployment configurations I'll provide
-2. Reviewing resource usage patterns
-3. Suggesting optimization opportunities
-
-[Include relevant data in the prompt or as context]
-```
-
-See [MCP Integration](../../integrations/ide-tool-integration/#mcp-model-context-protocol-integration) for MCP server configuration and usage.
+Prompts can declare MCP server dependencies in their frontmatter under the `mcp:` key (see the deployment-health-check example below). To add an MCP server to your project, see the [MCP Servers guide](../mcp-servers/).
 
 ## Writing Effective Prompts
 

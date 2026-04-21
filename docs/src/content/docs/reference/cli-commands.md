@@ -94,6 +94,13 @@ apm install [PACKAGES...] [OPTIONS]
 - `--parallel-downloads INTEGER` - Max concurrent package downloads (default: 4, 0 to disable)
 - `--verbose` - Show individual file paths and full error details in the diagnostic summary
 - `--trust-transitive-mcp` - Trust self-defined MCP servers from transitive packages (skip re-declaration requirement)
+- `--mcp NAME` - Add an MCP server entry to `apm.yml` and install it. See the [MCP Servers guide](../../guides/mcp-servers/) for the full workflow.
+- `--transport [stdio|http|sse|streamable-http]` - MCP transport (only with `--mcp`). Inferred from `--url` or post-`--` argv when omitted.
+- `--url URL` - Endpoint for `http`/`sse` MCP servers (only with `--mcp`). Scheme must be `http` or `https`.
+- `--env KEY=VALUE` - Environment variable for stdio MCP servers (only with `--mcp`). Repeatable.
+- `--header KEY=VALUE` - HTTP header for remote MCP servers (only with `--mcp`). Repeatable. Requires `--url`.
+- `--mcp-version VER` - Pin a registry MCP entry to a specific version (only with `--mcp`).
+- `--registry URL` - Custom MCP registry URL (`http://` or `https://`) for resolving the registry-form `--mcp NAME`. Overrides `MCP_REGISTRY_URL`. Persisted to `apm.yml` for reproducible installs. Not valid with `--url` or a stdio command. Only with `--mcp`.
 - `--dev` - Add packages to [`devDependencies`](../manifest-schema/#5-devdependencies) instead of `dependencies`. Dev deps are installed locally but excluded from `apm pack --format plugin` bundles
 - `-g, --global` - Install to user scope (`~/.apm/`) instead of the current project. Primitives deploy to `~/.copilot/`, `~/.claude/`, etc. MCP servers are only installed for global-capable runtimes (Copilot CLI, Codex CLI); workspace-only runtimes are skipped.
 - `--ssh` - Force SSH for shorthand (`owner/repo`) dependencies. Mutually exclusive with `--https`. Ignored for URLs with an explicit scheme.
@@ -178,6 +185,10 @@ apm install --exclude codex
 
 # Trust self-defined MCP servers from transitive packages
 apm install --trust-transitive-mcp
+
+# Add an MCP server in one shot (writes apm.yml + wires every detected client)
+apm install --mcp filesystem -- npx -y @modelcontextprotocol/server-filesystem /workspace
+apm install --mcp io.github.github/github-mcp-server
 
 # Install as a dev dependency (excluded from plugin bundles)
 apm install --dev owner/test-helpers
@@ -899,6 +910,30 @@ Browse and discover MCP servers from the GitHub MCP Registry.
 ```bash
 apm mcp COMMAND [OPTIONS]
 ```
+
+All `apm mcp` subcommands and `apm install --mcp` honour the [`MCP_REGISTRY_URL`](../../guides/mcp-servers/#custom-registry-enterprise) environment variable for custom (e.g. enterprise) MCP registries.
+
+#### `apm mcp install` - Add an MCP server (alias)
+
+Alias for [`apm install --mcp`](#apm-install---install-dependencies-and-deploy-local-content). Forwards every argument and flag. See the [MCP Servers guide](../../guides/mcp-servers/) for the full reference.
+
+```bash
+apm mcp install NAME [OPTIONS] [-- COMMAND ARGV...]
+```
+
+**Examples:**
+```bash
+# stdio (post-`--` argv)
+apm mcp install filesystem -- npx -y @modelcontextprotocol/server-filesystem /workspace
+
+# Registry
+apm mcp install io.github.github/github-mcp-server
+
+# Remote
+apm mcp install linear --transport http --url https://mcp.linear.app/sse
+```
+
+Set the [`MCP_REGISTRY_URL`](../../guides/mcp-servers/#custom-registry-enterprise) environment variable to point all `apm mcp` commands and `apm install --mcp` at a custom MCP registry. The URL must use `https://`; set `MCP_REGISTRY_ALLOW_HTTP=1` to opt in to plaintext `http://` for development. When a custom registry is set and unreachable during install pre-flight, network errors are fatal (the default registry keeps the existing assume-valid behaviour).
 
 #### `apm mcp list` - List MCP servers
 

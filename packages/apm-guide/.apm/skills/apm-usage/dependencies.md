@@ -137,6 +137,8 @@ GitHub URLs are stripped to shorthand; non-GitHub hosts keep the FQDN.
 
 ## MCP dependency formats
 
+See also: [MCP Servers guide](../../../../../docs/src/content/docs/guides/mcp-servers.md) for the CLI-first `apm install --mcp` workflow.
+
 ```yaml
 dependencies:
   mcp:
@@ -145,7 +147,7 @@ dependencies:
 
     # Registry with overlays (object)
     - name: io.github.github/github-mcp-server
-      transport: stdio                          # stdio|sse|http|streamable-http
+      transport: stdio                          # stdio|sse|http|streamable-http (MCP transport names, not URL schemes; remote connects over HTTPS)
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       args: ["--port", "3000"]
