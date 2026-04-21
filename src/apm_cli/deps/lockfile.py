@@ -201,6 +201,22 @@ class LockedDependency:
             allow_insecure=dep_ref.allow_insecure,
         )
 
+    def to_dependency_ref(self) -> DependencyReference:
+        """Reconstruct a DependencyReference from this locked dependency."""
+        return DependencyReference(
+            repo_url=self.repo_url,
+            host=self.host,
+            port=self.port,
+            reference=self.resolved_ref,
+            virtual_path=self.virtual_path,
+            is_virtual=self.is_virtual,
+            artifactory_prefix=self.registry_prefix,
+            is_local=(self.source == "local"),
+            local_path=self.local_path,
+            is_insecure=self.is_insecure,
+            allow_insecure=self.allow_insecure,
+        )
+
 
 @dataclass
 class LockFile:
@@ -372,17 +388,7 @@ class LockFile:
         seen: set = set()
         paths: List[str] = []
         for dep in self.get_all_dependencies():
-            dep_ref = DependencyReference(
-                repo_url=dep.repo_url,
-                host=dep.host,
-                virtual_path=dep.virtual_path,
-                is_virtual=dep.is_virtual,
-                artifactory_prefix=dep.registry_prefix,
-                is_local=(dep.source == "local"),
-                local_path=dep.local_path,
-                is_insecure=dep.is_insecure,
-                allow_insecure=dep.allow_insecure,
-            )
+            dep_ref = dep.to_dependency_ref()
             install_path = dep_ref.get_install_path(apm_modules_dir)
             try:
                 rel_path = install_path.relative_to(apm_modules_dir).as_posix()

@@ -306,6 +306,40 @@ class TestDownloadRefLockfileOverride:
         assert ref.allow_insecure is True
 
 
+class TestLockedDependencyToDependencyRef:
+    """Tests for LockedDependency.to_dependency_ref()."""
+
+    def test_to_dependency_ref_preserves_install_path_fields(self):
+        """Reconstructed refs keep the fields used by install path resolution."""
+        locked = LockedDependency(
+            repo_url="team/repo",
+            host="gitlab.example.com",
+            port=8443,
+            registry_prefix="artifactory/github",
+            resolved_ref="main",
+            virtual_path="prompts/review.prompt.md",
+            is_virtual=True,
+            source="local",
+            local_path="./packages/repo",
+            is_insecure=True,
+            allow_insecure=True,
+        )
+
+        dep_ref = locked.to_dependency_ref()
+
+        assert dep_ref.repo_url == "team/repo"
+        assert dep_ref.host == "gitlab.example.com"
+        assert dep_ref.port == 8443
+        assert dep_ref.reference == "main"
+        assert dep_ref.virtual_path == "prompts/review.prompt.md"
+        assert dep_ref.is_virtual is True
+        assert dep_ref.artifactory_prefix == "artifactory/github"
+        assert dep_ref.is_local is True
+        assert dep_ref.local_path == "./packages/repo"
+        assert dep_ref.is_insecure is True
+        assert dep_ref.allow_insecure is True
+
+
 class TestPreDownloadRefLockfileOverride:
     """Same as TestDownloadRefLockfileOverride but for the parallel pre-download path.
 

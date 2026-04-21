@@ -121,8 +121,6 @@ def _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir: Path
     (depth > 1 from ``apm.lock``), using ``get_install_path()`` for
     consistency with how packages are actually installed.
     """
-    from ..models.apm_package import DependencyReference
-
     expected = builtins.set()
     for dep in declared_deps:
         install_path = dep.get_install_path(apm_modules_dir)
@@ -135,17 +133,7 @@ def _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir: Path
     if lockfile:
         for dep in lockfile.get_all_dependencies():
             if dep.depth is not None and dep.depth > 1:
-                dep_ref = DependencyReference(
-                    repo_url=dep.repo_url,
-                    host=dep.host,
-                    virtual_path=dep.virtual_path,
-                    is_virtual=dep.is_virtual,
-                    artifactory_prefix=dep.registry_prefix,
-                    is_local=(dep.source == "local"),
-                    local_path=dep.local_path,
-                    is_insecure=dep.is_insecure,
-                    allow_insecure=dep.allow_insecure,
-                )
+                dep_ref = dep.to_dependency_ref()
                 install_path = dep_ref.get_install_path(apm_modules_dir)
                 try:
                     relative_path = install_path.relative_to(apm_modules_dir)
