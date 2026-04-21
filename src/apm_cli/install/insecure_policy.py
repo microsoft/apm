@@ -61,14 +61,32 @@ def _get_insecure_dependency_url(dep) -> str:
     return url
 
 
-def _format_insecure_dependency_requirements(url: str) -> str:
-    """Render the canonical remediation message for an HTTP dependency."""
-    return (
-        f"{url} -- HTTP dependency (no transport encryption)\n"
-        "To install:\n"
-        "  1. Set allow_insecure: true on the dep in apm.yml\n"
-        "  2. Pass --allow-insecure to apm install"
-    )
+def _format_insecure_dependency_requirements(
+    url: str,
+    *,
+    missing_dep_allow: bool = True,
+    missing_cli_flag: bool = True,
+) -> str:
+    """Render the canonical remediation message for an HTTP dependency.
+
+    Args:
+        url: The HTTP dependency URL (with scheme) to include in the message.
+        missing_dep_allow: True when the dep entry in apm.yml lacks
+            ``allow_insecure: true``. When False, that step is omitted.
+        missing_cli_flag: True when ``--allow-insecure`` was not passed on
+            the command line. When False, that step is omitted.
+
+    Both flags default to True to preserve the full two-step recipe for the
+    add-time validation path (where the dep isn't in apm.yml yet).
+    """
+    lines = [f"{url} -- HTTP dependency (unencrypted)", "To install:"]
+    step = 1
+    if missing_dep_allow:
+        lines.append(f"  {step}. Set allow_insecure: true on the dep in apm.yml")
+        step += 1
+    if missing_cli_flag:
+        lines.append(f"  {step}. Pass --allow-insecure to apm install")
+    return "\n".join(lines)
 
 
 def _format_insecure_dependency_warning(info: _InsecureDependencyInfo) -> str:
@@ -200,10 +218,22 @@ def _check_insecure_dependencies(
         url = _get_insecure_dependency_url(dep)
         dep_allow_insecure = getattr(dep, "allow_insecure", False) is True
         if not dep_allow_insecure:
-            message = _format_insecure_dependency_requirements(url)
+            # Manifest is missing allow_insecure: true. The CLI flag may or
+            # may not be set; only ask the user to edit the steps that are
+            # actually missing.
+            message = _format_insecure_dependency_requirements(
+                url,
+                missing_dep_allow=True,
+                missing_cli_flag=not allow_insecure_flag,
+            )
             logger.error(message)
             raise InsecureDependencyPolicyError(message)
         if not allow_insecure_flag:
-            message = _format_insecure_dependency_requirements(url)
+            # Manifest is already set; only the CLI flag is missing.
+            message = _format_insecure_dependency_requirements(
+                url,
+                missing_dep_allow=False,
+                missing_cli_flag=True,
+            )
             logger.error(message)
             raise InsecureDependencyPolicyError(message)

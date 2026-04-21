@@ -508,7 +508,26 @@ class GitHubPackageDownloader:
         preserve_config_isolation: bool = False,
         suppress_credential_helpers: bool = False,
     ) -> Dict[str, str]:
-        """Return a non-interactive git env for unauthenticated git operations."""
+        """Return a non-interactive git env for unauthenticated git operations.
+
+        Credential-helper policy (intentional two-stage design):
+
+        1. Start by clearing ``GIT_ASKPASS`` unconditionally. The default
+           APM env sets ``GIT_ASKPASS=echo`` for all authenticated ops; for
+           unauthenticated fallback attempts (HTTPS/SSH without a token), we
+           want the user's system credential helpers (e.g. macOS Keychain,
+           Windows credential manager, SSH agent) to resolve naturally.
+        2. Then re-set the full credential-helper *suppression* fence ONLY
+           when ``suppress_credential_helpers=True`` (HTTP transport). This
+           blocks all four credential channels: ``GIT_ASKPASS``,
+           ``GIT_TERMINAL_PROMPT``, ``GIT_CONFIG_NOSYSTEM``, and
+           ``credential.helper=`` (via ``GIT_CONFIG_COUNT/KEY/VALUE``).
+
+        Do NOT invert or flatten this pop-then-conditionally-restore pattern
+        without re-auditing every caller: removing step 1 would leak
+        credentials through user helpers on HTTPS/SSH fallbacks; removing
+        step 2 would leak them over plaintext HTTP.
+        """
         env = dict(self.git_env)
         env["GIT_TERMINAL_PROMPT"] = "0"
         env.pop("GIT_ASKPASS", None)

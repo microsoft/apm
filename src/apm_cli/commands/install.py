@@ -289,12 +289,15 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
 
         if dep_ref.is_insecure:
             if not allow_insecure:
+                # The reason string embeds the full URL already, so skip
+                # logger.validation_fail (which prepends "{package} -- ") to
+                # avoid rendering the URL twice. Use logger.error directly.
                 reason = _format_insecure_dependency_requirements(
                     _get_insecure_dependency_url(dep_ref)
                 )
                 invalid_outcomes.append((package, reason))
                 if logger:
-                    logger.validation_fail(package, reason)
+                    logger.error(reason)
                 continue
             dep_ref.allow_insecure = True
             _apm_yml_entries[canonical] = dep_ref.to_apm_yml_entry()

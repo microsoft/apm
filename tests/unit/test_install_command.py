@@ -1283,8 +1283,10 @@ class TestAllowInsecureFlag:
         assert "http://my-server.example.com/owner/repo" in str(exc_info.value)
         message = logger.error.call_args.args[0]
         assert "http://my-server.example.com/owner/repo" in message
-        assert "allow_insecure: true" in message
+        # Manifest is already set (allow_insecure: true on the dep), so only
+        # the CLI flag step should be mentioned - not the manifest edit step.
         assert "--allow-insecure" in message
+        assert "Set allow_insecure: true" not in message
 
     def test_http_dep_passes_with_allow_insecure_flag(self):
         """_check_insecure_dependencies passes when flag is set and dep has allow_insecure."""
@@ -1311,8 +1313,10 @@ class TestAllowInsecureFlag:
         assert "http://my-server.example.com/owner/repo" in str(exc_info.value)
         message = logger.error.call_args.args[0]
         assert "http://my-server.example.com/owner/repo" in message
-        assert "allow_insecure: true" in message
-        assert "--allow-insecure" in message
+        # CLI flag is already set, so only the manifest edit step should be
+        # mentioned - not the CLI flag step.
+        assert "Set allow_insecure: true" in message
+        assert "Pass --allow-insecure" not in message
 
     def test_https_dep_passes_without_flag(self):
         """_check_insecure_dependencies does not block HTTPS deps."""
