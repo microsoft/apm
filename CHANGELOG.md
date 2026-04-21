@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --global` now installs MCP servers to global-capable runtimes (Copilot CLI, Codex CLI) instead of blanket-skipping all MCP installation at user scope. Note: lockfile-path behavior at `--global` tracked in #794 (#638)
 - `--trust-transitive-mcp` no longer silently ignored when combined with `--global` (#638)
 - Token resolution now discriminates by port, fixing credential collisions across multiple self-hosted Git instances on the same host. Thanks @edenfunf! (#785)
+- Fix `apm init` showing overwrite confirmation prompt three times on Windows CP950 terminals (#602)
 
 ## [0.8.12] - 2026-04-19
 
