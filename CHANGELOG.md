@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Documentation site is now deployed only when a new APM version is released (GitHub release `published` event), instead of on every push to `main`. PR builds still run for validation but no longer publish, eliminating the window where docs referenced features not yet in the latest released binary. Prerelease tags do not update the public site; manual `workflow_dispatch` is still supported for re-publishing. Closes #641
+
 ## [0.9.0] - 2026-04-21
 
 ### Changed (BREAKING)
