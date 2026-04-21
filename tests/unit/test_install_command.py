@@ -905,6 +905,8 @@ class TestGenericHostSshFirstValidation:
     @patch("subprocess.run")
     def test_generic_host_falls_back_to_https_when_ssh_fails(self, mock_run):
         """HTTPS fallback is used for generic hosts when SSH ls-remote fails."""
+        from urllib.parse import urlsplit
+
         from apm_cli.commands.install import _validate_package_exists
 
         # SSH probe fails, HTTPS succeeds
@@ -919,15 +921,23 @@ class TestGenericHostSshFirstValidation:
 
         assert result is True
         assert mock_run.call_count == 2
-        # First call: SSH
+        # First call: SSH (SCP-style URLs are not parseable by urlsplit, so
+        # keep the substring check scoped to the SSH prefix form git@host:).
         first_cmd = mock_run.call_args_list[0][0][0]
-        assert any("git@git.example.org" in arg for arg in first_cmd), (
+        assert any("git@git.example.org:" in arg for arg in first_cmd), (
             f"Expected SSH URL in first call, got: {first_cmd}"
         )
-        # Second call: HTTPS
+        # Second call: HTTPS -- parse scheme + netloc explicitly to avoid
+        # substring false-positives.
         second_cmd = mock_run.call_args_list[1][0][0]
-        assert any("https://git.example.org" in arg for arg in second_cmd), (
-            f"Expected HTTPS URL in second call, got: {second_cmd}"
+        https_arg_found = False
+        for arg in second_cmd:
+            parts = urlsplit(arg)
+            if parts.scheme == "https" and parts.netloc == "git.example.org":
+                https_arg_found = True
+                break
+        assert https_arg_found, (
+            f"Expected https://git.example.org URL in second call, got: {second_cmd}"
         )
 
     @patch("subprocess.run")
@@ -949,6 +959,8 @@ class TestGenericHostSshFirstValidation:
     @patch("subprocess.run")
     def test_explicit_http_generic_host_tries_http_first(self, mock_run):
         """Explicit HTTP must probe HTTP before any SSH fallback."""
+        from urllib.parse import urlsplit
+
         from apm_cli.commands.install import _validate_package_exists
 
         mock_run.return_value = self._make_completed_process(returncode=0)
@@ -960,8 +972,17 @@ class TestGenericHostSshFirstValidation:
         assert result is True
         assert mock_run.call_count == 1
         first_cmd = mock_run.call_args_list[0][0][0]
-        assert any("http://gitlab.company.internal" in arg for arg in first_cmd), (
-            f"Expected HTTP URL in first call, got: {first_cmd}"
+        # Parse each arg as a URL and check scheme + netloc explicitly to
+        # avoid substring false-positives (e.g. the hostname appearing in a
+        # path segment or query value on an otherwise-SSH URL).
+        http_arg_found = False
+        for arg in first_cmd:
+            parts = urlsplit(arg)
+            if parts.scheme == "http" and parts.netloc == "gitlab.company.internal":
+                http_arg_found = True
+                break
+        assert http_arg_found, (
+            f"Expected http://gitlab.company.internal URL in first call, got: {first_cmd}"
         )
         assert all("git@" not in arg for arg in first_cmd), (
             f"Expected no SSH URL in first call, got: {first_cmd}"
