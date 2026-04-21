@@ -464,7 +464,7 @@ class FreshDependencySource(DependencySource):
                             if dep_ref.repo_url and "/" in dep_ref.repo_url
                             else None
                         )
-                        _ctx = ctx.auth_resolver.resolve(_host, org=_org)
+                        _ctx = ctx.auth_resolver.resolve(_host, org=_org, port=dep_ref.port)
                         logger.package_auth(_ctx.source, _ctx.token_type or "none")
                     except Exception:
                         pass

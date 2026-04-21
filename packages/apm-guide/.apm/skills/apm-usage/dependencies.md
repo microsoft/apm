@@ -137,6 +137,8 @@ GitHub URLs are stripped to shorthand; non-GitHub hosts keep the FQDN.
 
 ## MCP dependency formats
 
+See also: [MCP Servers guide](../../../../../docs/src/content/docs/guides/mcp-servers.md) for the CLI-first `apm install --mcp` workflow.
+
 ```yaml
 dependencies:
   mcp:
@@ -145,7 +147,7 @@ dependencies:
 
     # Registry with overlays (object)
     - name: io.github.github/github-mcp-server
-      transport: stdio                          # stdio|sse|http|streamable-http
+      transport: stdio                          # stdio|sse|http|streamable-http (MCP transport names, not URL schemes; remote connects over HTTPS)
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       args: ["--port", "3000"]
@@ -179,6 +181,18 @@ dependencies:
 | Branch | `owner/repo#main` | Development -- tracks latest |
 | Commit SHA | `owner/repo#abc123d` | Maximum reproducibility |
 | No ref | `owner/repo` | Resolves default branch at install time |
+| Marketplace ref | `plugin@marketplace#ref` | Override marketplace source ref |
+
+## Marketplace ref override
+
+When installing from a marketplace, the `#` suffix overrides the `source.ref` from the marketplace entry:
+
+| Syntax | Meaning | Example |
+|--------|---------|---------|
+| `plugin@mkt` | Use marketplace source ref | `plugin@mkt` |
+| `plugin@mkt#v2.0.0` | Override with specific tag | `plugin@mkt#v2.0.0` |
+| `plugin@mkt#main` | Override with branch | `plugin@mkt#main` |
+| `plugin@mkt#abc123d` | Override with commit SHA | `plugin@mkt#abc123d` |
 
 ## What the lockfile pins
 

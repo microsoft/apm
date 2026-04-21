@@ -781,3 +781,118 @@ class TestNestedGroupSupport:
         """HTTPS URLs can't embed virtual paths even with nested groups."""
         with pytest.raises(ValueError, match="virtual file extension"):
             DependencyReference.parse("https://gitlab.com/group/subgroup/file.prompt.md")
+
+
+class TestSCPPortDetection:
+    """Detect port-like first path segment in SCP shorthand (git@host:port/path).
+
+    SCP shorthand uses ':' as the path separator and cannot carry a port.
+    When the first path segment is a valid TCP port (1-65535), APM should
+    raise a ValueError with an actionable suggestion to use ssh:// instead.
+    """
+
+    def test_scp_with_port_7999_raises(self):
+        """Bitbucket Datacenter: git@host:7999/project/repo.git."""
+        with pytest.raises(ValueError, match="ssh://"):
+            DependencyReference.parse("git@bitbucket.example.com:7999/project/repo.git")
+
+    def test_scp_with_port_22_raises(self):
+        """Default SSH port 22 should still be detected."""
+        with pytest.raises(ValueError, match="ssh://"):
+            DependencyReference.parse("git@host.example.com:22/owner/repo.git")
+
+    def test_scp_with_port_65535_raises(self):
+        """Max valid TCP port should trigger detection."""
+        with pytest.raises(ValueError, match="ssh://"):
+            DependencyReference.parse("git@host.example.com:65535/owner/repo.git")
+
+    def test_scp_with_port_1_raises(self):
+        """Min valid TCP port should trigger detection."""
+        with pytest.raises(ValueError, match="ssh://"):
+            DependencyReference.parse("git@host.example.com:1/owner/repo.git")
+
+    def test_scp_with_leading_zeros_raises(self):
+        """Leading zeros: 007999 -> int 7999, still a valid port."""
+        with pytest.raises(ValueError, match="ssh://"):
+            DependencyReference.parse("git@host.example.com:007999/project/repo.git")
+
+    def test_scp_port_only_no_path_raises(self):
+        """git@host:7999 with no repo path after the port."""
+        with pytest.raises(ValueError, match="no repository path follows"):
+            DependencyReference.parse("git@host.example.com:7999")
+
+    def test_scp_port_trailing_slash_no_path_raises(self):
+        """git@host:7999/ — trailing slash but empty remaining path."""
+        with pytest.raises(ValueError, match="no repository path follows"):
+            DependencyReference.parse("git@host.example.com:7999/")
+
+    def test_scp_port_with_ref_raises_and_preserves_ref(self):
+        """Port-like segment with #ref should be caught; suggestion preserves the ref."""
+        with pytest.raises(
+            ValueError,
+            match=r"ssh://git@host\.example\.com:7999/project/repo\.git#main",
+        ):
+            DependencyReference.parse("git@host.example.com:7999/project/repo.git#main")
+
+    def test_scp_port_with_alias_raises_and_preserves_alias(self):
+        """Port-like segment with @alias should be caught; suggestion preserves the alias."""
+        with pytest.raises(
+            ValueError,
+            match=r"ssh://git@host\.example\.com:7999/project/repo\.git@my-alias",
+        ):
+            DependencyReference.parse("git@host.example.com:7999/project/repo.git@my-alias")
+
+    def test_scp_port_with_ref_and_alias_preserves_both(self):
+        """Suggestion should include both #ref and @alias when present."""
+        with pytest.raises(
+            ValueError,
+            match=r"ssh://git@host\.example\.com:7999/project/repo\.git#v1\.0@my-alias",
+        ):
+            DependencyReference.parse("git@host.example.com:7999/project/repo.git#v1.0@my-alias")
+
+    def test_suggestion_includes_git_suffix(self):
+        """When the user wrote .git, the suggestion should preserve it."""
+        with pytest.raises(
+            ValueError,
+            match=r"ssh://git@host\.example\.com:7999/project/repo\.git",
+        ):
+            DependencyReference.parse("git@host.example.com:7999/project/repo.git")
+
+    def test_suggestion_omits_git_suffix_when_absent(self):
+        """When the user omitted .git, the suggestion should not add it."""
+        with pytest.raises(ValueError) as excinfo:
+            DependencyReference.parse("git@host.example.com:7999/project/repo")
+        msg = str(excinfo.value)
+        assert "ssh://git@host.example.com:7999/project/repo" in msg
+        assert not msg.endswith(".git")
+
+    def test_port_zero_not_detected(self):
+        """Port 0 is invalid -- should NOT trigger port detection, parses as org name."""
+        dep = DependencyReference.parse("git@host.example.com:0/repo")
+        assert dep.repo_url == "0/repo"
+        assert dep.port is None
+
+    def test_port_out_of_range_not_detected(self):
+        """99999 > 65535 -- not a valid port, should NOT trigger port detection."""
+        dep = DependencyReference.parse("git@host.example.com:99999/repo")
+        assert dep.repo_url == "99999/repo"
+        assert dep.port is None
+
+    def test_normal_org_name_not_detected(self):
+        """Non-numeric org name should parse normally."""
+        dep = DependencyReference.parse("git@gitlab.com:acme/repo.git")
+        assert dep.repo_url == "acme/repo"
+        assert dep.port is None
+
+    def test_alphanumeric_first_segment_not_detected(self):
+        """'v2' is not purely numeric -- should parse normally."""
+        dep = DependencyReference.parse("git@gitlab.com:v2/repo.git")
+        assert dep.repo_url == "v2/repo"
+        assert dep.port is None
+
+    def test_ssh_protocol_with_port_still_works(self):
+        """ssh:// URL form with port must continue working (regression guard)."""
+        dep = DependencyReference.parse("ssh://git@bitbucket.example.com:7999/project/repo.git")
+        assert dep.host == "bitbucket.example.com"
+        assert dep.port == 7999
+        assert dep.repo_url == "project/repo"

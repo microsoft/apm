@@ -39,7 +39,7 @@ mcp:
 compilation:
   target:
     allow: [vscode, claude]             # permitted targets
-    enforce: null                       # force specific target
+    enforce: null                       # force specific target (must be present in target list)
   strategy:
     enforce: null                       # distributed | single-file
   source_attribution: false             # require attribution

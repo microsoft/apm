@@ -290,6 +290,14 @@ def _mcp_servers_to_apm_deps(
 
     Every entry gets ``registry: false`` (self-defined, not registry lookups).
 
+    All resulting entries are routed through ``MCPDependency.from_dict()``
+    so plugin-synthesized servers must clear the same security validation
+    chokepoint as CLI-authored or manually edited entries (name shape, URL
+    scheme allowlist, header CRLF, command path-traversal). Entries that
+    fail validation are skipped with a warning rather than crashing the
+    plugin install -- a single malformed server should not block the
+    whole plugin.
+
     Args:
         servers: Mapping of server name -> server config dict.
         plugin_path: Plugin root (used for log context only).
@@ -297,6 +305,8 @@ def _mcp_servers_to_apm_deps(
     Returns:
         List of dicts consumable by ``MCPDependency.from_dict()``.
     """
+    from ..models.dependency.mcp import MCPDependency
+
     logger = logging.getLogger("apm")
     deps: List[Dict[str, Any]] = []
 
@@ -330,6 +340,18 @@ def _mcp_servers_to_apm_deps(
             dep["env"] = cfg["env"]
         if "tools" in cfg:
             dep["tools"] = cfg["tools"]
+
+        # Route through the validation chokepoint. Plugins are an ingress
+        # path: a malicious plugin could otherwise smuggle path traversal,
+        # CRLF, or unsafe URL schemes that bypass MCPDependency.validate().
+        try:
+            MCPDependency.from_dict(dep)
+        except (ValueError, Exception) as exc:
+            logger.warning(
+                "Skipping invalid MCP server '%s' from plugin '%s': %s",
+                name, plugin_path.name, exc,
+            )
+            continue
 
         deps.append(dep)
 

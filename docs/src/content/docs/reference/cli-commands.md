@@ -81,24 +81,31 @@ apm install [PACKAGES...] [OPTIONS]
 ```
 
 **Arguments:**
-- `PACKAGES` - Optional APM packages to add and install. Accepts shorthand (`owner/repo`), HTTPS URLs, SSH URLs, FQDN shorthand (`host/owner/repo`), local filesystem paths (`./path`, `../path`, `/absolute/path`, `~/path`), or marketplace references (`NAME@MARKETPLACE`). All forms are normalized to canonical format in `apm.yml`.
+- `PACKAGES` - Optional APM packages to add and install. Accepts shorthand (`owner/repo`), HTTPS URLs, SSH URLs, FQDN shorthand (`host/owner/repo`), local filesystem paths (`./path`, `../path`, `/absolute/path`, `~/path`), or marketplace references (`NAME@MARKETPLACE[#ref]`). All forms are normalized to canonical format in `apm.yml`.
 
 **Options:**
 - `--runtime TEXT` - Target specific runtime only (copilot, codex, vscode)
 - `--exclude TEXT` - Exclude specific runtime from installation
 - `--only [apm|mcp]` - Install only specific dependency type
-- `--target [copilot|claude|cursor|codex|opencode|all]` - Force deployment to a specific target (overrides auto-detection)
+- `--target [copilot|claude|cursor|codex|opencode|all]` - Force deployment to specific target(s). Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Overrides auto-detection
 - `--update` - Update dependencies to latest Git references  
 - `--force` - Overwrite locally-authored files on collision; bypass security scan blocks
 - `--dry-run` - Show what would be installed without installing
 - `--parallel-downloads INTEGER` - Max concurrent package downloads (default: 4, 0 to disable)
 - `--verbose` - Show individual file paths and full error details in the diagnostic summary
 - `--trust-transitive-mcp` - Trust self-defined MCP servers from transitive packages (skip re-declaration requirement)
+- `--mcp NAME` - Add an MCP server entry to `apm.yml` and install it. See the [MCP Servers guide](../../guides/mcp-servers/) for the full workflow.
+- `--transport [stdio|http|sse|streamable-http]` - MCP transport (only with `--mcp`). Inferred from `--url` or post-`--` argv when omitted.
+- `--url URL` - Endpoint for `http`/`sse` MCP servers (only with `--mcp`). Scheme must be `http` or `https`.
+- `--env KEY=VALUE` - Environment variable for stdio MCP servers (only with `--mcp`). Repeatable.
+- `--header KEY=VALUE` - HTTP header for remote MCP servers (only with `--mcp`). Repeatable. Requires `--url`.
+- `--mcp-version VER` - Pin a registry MCP entry to a specific version (only with `--mcp`).
+- `--registry URL` - Custom MCP registry URL (`http://` or `https://`) for resolving the registry-form `--mcp NAME`. Overrides `MCP_REGISTRY_URL`. Persisted to `apm.yml` for reproducible installs. Not valid with `--url` or a stdio command. Only with `--mcp`.
 - `--dev` - Add packages to [`devDependencies`](../manifest-schema/#5-devdependencies) instead of `dependencies`. Dev deps are installed locally but excluded from `apm pack --format plugin` bundles
-- `-g, --global` - Install to user scope (`~/.apm/`) instead of the current project. Primitives deploy to `~/.copilot/`, `~/.claude/`, etc.
+- `-g, --global` - Install to user scope (`~/.apm/`) instead of the current project. Primitives deploy to `~/.copilot/`, `~/.claude/`, etc. MCP servers are only installed for global-capable runtimes (Copilot CLI, Codex CLI); workspace-only runtimes are skipped.
 - `--ssh` - Force SSH for shorthand (`owner/repo`) dependencies. Mutually exclusive with `--https`. Ignored for URLs with an explicit scheme.
 - `--https` - Force HTTPS for shorthand dependencies. Mutually exclusive with `--ssh`. Default unless `git config url.<base>.insteadOf` rewrites the candidate to SSH.
-- `--allow-protocol-fallback` - Restore the legacy permissive cross-protocol fallback chain (HTTPS-then-SSH or vice-versa). Strict-by-default otherwise. Each retry emits a `[!]` warning naming both protocols.
+- `--allow-protocol-fallback` - Restore the legacy permissive cross-protocol fallback chain (HTTPS-then-SSH or vice-versa). Strict-by-default otherwise. Each retry emits a `[!]` warning naming both protocols. When the dependency URL carries a custom port, APM also emits a one-shot `[!]` warning before the first clone attempt noting that the same port will be reused across schemes (wrong on servers like Bitbucket Datacenter that serve SSH and HTTPS on different ports) -- to avoid the mismatch, omit this flag and pin the dependency with an explicit `ssh://` or `https://` URL.
 
 **Transport env vars:**
 
@@ -179,6 +186,10 @@ apm install --exclude codex
 # Trust self-defined MCP servers from transitive packages
 apm install --trust-transitive-mcp
 
+# Add an MCP server in one shot (writes apm.yml + wires every detected client)
+apm install --mcp filesystem -- npx -y @modelcontextprotocol/server-filesystem /workspace
+apm install --mcp io.github.github/github-mcp-server
+
 # Install as a dev dependency (excluded from plugin bundles)
 apm install --dev owner/test-helpers
 
@@ -191,6 +202,9 @@ apm install -g microsoft/apm-sample-package
 
 # Install a plugin from a registered marketplace
 apm install code-review@acme-plugins
+
+# Install a specific ref from a marketplace
+apm install code-review@acme-plugins#v2.0.0
 ```
 
 **Auto-Bootstrap Behavior:**
@@ -485,7 +499,7 @@ apm pack [OPTIONS]
 
 **Options:**
 - `-o, --output PATH` - Output directory (default: `./build`)
-- `-t, --target [copilot|vscode|claude|cursor|codex|opencode|all]` - Filter files by target. Auto-detects from `apm.yml` if not specified. `vscode` is an alias for `copilot`
+- `-t, --target [copilot|vscode|claude|cursor|codex|opencode|all]` - Filter files by target. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Auto-detects from `apm.yml` if not specified. `vscode` is an alias for `copilot`
 - `--archive` - Produce a `.tar.gz` archive instead of a directory
 - `--dry-run` - List files that would be packed without writing anything
 - `--format [apm|plugin]` - Bundle format (default: `apm`). `plugin` produces a standalone plugin directory with `plugin.json`
@@ -610,6 +624,9 @@ apm update
 - Downloads and runs the official platform installer (`install.sh` on macOS/Linux, `install.ps1` on Windows)
 - Preserves existing configuration and projects
 - Shows progress and success/failure status
+- Some package-manager distributions can disable self-update at build time. 
+  In those builds, `apm update` prints a distributor-defined guidance message
+  (for example, a `brew upgrade` command) and exits without running the installer.
 
 **Version Checking:**
 APM automatically checks for updates (at most once per day) when running any command. If a newer version is available, you'll see a yellow warning:
@@ -620,6 +637,8 @@ Run apm update to upgrade
 ```
 
 This check is non-blocking and cached to avoid slowing down the CLI.
+
+In distributions that disable self-update at build time, this startup update notification is skipped.
 
 **Manual Update:**
 If the automatic update fails, you can always update manually:
@@ -645,7 +664,7 @@ apm view PACKAGE [FIELD] [OPTIONS]
 ```
 
 **Arguments:**
-- `PACKAGE` - Package name, usually `owner/repo` or a short repo name
+- `PACKAGE` - Package name: `owner/repo`, short repo name, or `NAME@MARKETPLACE` for marketplace plugins
 - `FIELD` - Optional field selector. Supported value: `versions`
 
 **Options:**
@@ -662,6 +681,9 @@ apm view apm-sample-package
 # List remote tags and branches without cloning
 apm view microsoft/apm-sample-package versions
 
+# View available versions for a marketplace plugin
+apm view code-review@acme-plugins
+
 # Inspect a package from user scope
 apm view microsoft/apm-sample-package -g
 ```
@@ -671,6 +693,7 @@ apm view microsoft/apm-sample-package -g
 - Shows package name, version, description, source, install path, context files, workflows, and hooks
 - `versions` lists remote tags and branches without cloning the repository
 - `versions` does not require the package to be installed locally
+- `NAME@MARKETPLACE` syntax shows the marketplace plugin metadata (name, version, source, description, tags)
 
 ### `apm outdated` - Check locked dependencies for updates
 
@@ -704,8 +727,10 @@ apm outdated -j 8
 - Reads the current lockfile (`apm.lock.yaml`; legacy `apm.lock` is migrated automatically)
 - For tag-pinned deps: compares the locked semver tag against the latest available remote tag
 - For branch-pinned deps: compares the locked commit SHA against the remote branch tip SHA
+- For marketplace deps: compares the installed ref against the marketplace entry's current `source.ref`
 - For deps with no ref: compares against the default branch (main/master) tip SHA
-- Displays `Package`, `Current`, `Latest`, and `Status` columns
+- Displays `Package`, `Current`, `Latest`, `Status`, and `Source` columns
+- `Source` shows `marketplace: <name>` for marketplace-sourced deps
 - Status values are `up-to-date`, `outdated`, and `unknown`
 - Local dependencies and Artifactory dependencies are skipped
 
@@ -857,7 +882,7 @@ apm deps update [PACKAGES...] [OPTIONS]
 - `--verbose, -v` - Show detailed update information
 - `--force` - Overwrite locally-authored files on collision
 - `-g, --global` - Update user-scope dependencies (`~/.apm/`)
-- `--target, -t` - Force deployment to a specific target (copilot, claude, cursor, opencode, vscode, agents, all)
+- `--target, -t` - Force deployment to specific target(s). Accepts comma-separated values (e.g., `-t claude,copilot`). Valid values: copilot, claude, cursor, opencode, vscode, agents, all
 - `--parallel-downloads` - Max concurrent downloads (default: 4)
 
 **Examples:**
@@ -885,6 +910,30 @@ Browse and discover MCP servers from the GitHub MCP Registry.
 ```bash
 apm mcp COMMAND [OPTIONS]
 ```
+
+All `apm mcp` subcommands and `apm install --mcp` honour the [`MCP_REGISTRY_URL`](../../guides/mcp-servers/#custom-registry-enterprise) environment variable for custom (e.g. enterprise) MCP registries.
+
+#### `apm mcp install` - Add an MCP server (alias)
+
+Alias for [`apm install --mcp`](#apm-install---install-dependencies-and-deploy-local-content). Forwards every argument and flag. See the [MCP Servers guide](../../guides/mcp-servers/) for the full reference.
+
+```bash
+apm mcp install NAME [OPTIONS] [-- COMMAND ARGV...]
+```
+
+**Examples:**
+```bash
+# stdio (post-`--` argv)
+apm mcp install filesystem -- npx -y @modelcontextprotocol/server-filesystem /workspace
+
+# Registry
+apm mcp install io.github.github/github-mcp-server
+
+# Remote
+apm mcp install linear --transport http --url https://mcp.linear.app/sse
+```
+
+Set the [`MCP_REGISTRY_URL`](../../guides/mcp-servers/#custom-registry-enterprise) environment variable to point all `apm mcp` commands and `apm install --mcp` at a custom MCP registry. The URL must use `https://`; set `MCP_REGISTRY_ALLOW_HTTP=1` to opt in to plaintext `http://` for development. When a custom registry is set and unreachable during install pre-flight, network errors are fatal (the default registry keeps the existing assume-valid behaviour).
 
 #### `apm mcp list` - List MCP servers
 
@@ -1084,6 +1133,30 @@ apm marketplace remove acme-plugins
 apm marketplace remove acme-plugins --yes
 ```
 
+#### `apm marketplace validate` - Validate a marketplace manifest
+
+Validate `marketplace.json` for schema errors and duplicate plugin names.
+
+```bash
+apm marketplace validate NAME [OPTIONS]
+```
+
+**Arguments:**
+- `NAME` - Name of the marketplace to validate
+
+**Options:**
+- `--check-refs` - Verify version refs are reachable (network). *Not yet implemented.*
+- `-v, --verbose` - Show detailed output
+
+**Examples:**
+```bash
+# Validate a marketplace
+apm marketplace validate acme-plugins
+
+# Verbose output
+apm marketplace validate acme-plugins --verbose
+```
+
 ### `apm search` - Search plugins in a marketplace
 
 Search for plugins by name or description within a specific marketplace.
@@ -1199,7 +1272,7 @@ apm compile [OPTIONS]
 
 **Options:**
 - `-o, --output TEXT` - Output file path (for single-file mode)
-- `-t, --target [vscode|agents|claude|codex|opencode|all]` - Target agent format. `agents` is an alias for `vscode`. Auto-detects if not specified.
+- `-t, --target [vscode|agents|claude|codex|opencode|all]` - Target agent format. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). `agents` is an alias for `vscode`. Auto-detects if not specified.
 - `--chatmode TEXT` - Chatmode to prepend to the AGENTS.md file
 - `--dry-run` - Preview compilation without writing files (shows placement decisions)
 - `--no-links` - Skip markdown link resolution
@@ -1227,7 +1300,13 @@ You can also set a persistent target in `apm.yml`:
 ```yaml
 name: my-project
 version: 1.0.0
-target: vscode  # or claude, codex, opencode, or all
+target: vscode  # single target
+```
+
+```yaml
+name: my-project
+version: 1.0.0
+target: [claude, copilot]  # multiple targets -- only these are compiled/installed
 ```
 
 **Target Formats (explicit):**
@@ -1268,6 +1347,9 @@ apm compile --target vscode    # AGENTS.md + .github/ only
 apm compile --target claude    # CLAUDE.md + .claude/ only
 apm compile --target opencode  # AGENTS.md + .opencode/ only
 apm compile --target all       # All formats (default)
+
+# Multiple targets (comma-separated)
+apm compile -t claude,copilot  # Both CLAUDE.md and AGENTS.md
 
 # Compile injecting Spec Kit constitution (auto-detected)
 apm compile --with-constitution

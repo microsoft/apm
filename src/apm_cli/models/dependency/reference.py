@@ -665,10 +665,40 @@ class DependencyReference:
         else:
             repo_part = ssh_repo_part
 
-        if repo_part.endswith(".git"):
+        had_git_suffix = repo_part.endswith(".git")
+        if had_git_suffix:
             repo_part = repo_part[:-4]
 
         repo_url = repo_part.strip()
+
+        # SCP syntax (git@host:path) uses ':' as the path separator, so it
+        # cannot carry a port.  Detect when the first segment is a valid TCP
+        # port number (1-65535) and raise an actionable error instead of
+        # silently misparsing the port as part of the repo path.
+        segments = repo_url.split("/", 1)
+        first_segment = segments[0]
+        if re.fullmatch(r"[0-9]+", first_segment):
+            port_candidate = int(first_segment)
+            if 1 <= port_candidate <= 65535:
+                remaining_path = segments[1] if len(segments) > 1 else ""
+                if remaining_path:
+                    git_suffix = ".git" if had_git_suffix else ""
+                    ref_suffix = f"#{reference}" if reference else ""
+                    alias_suffix = f"@{alias}" if alias else ""
+                    suggested = f"ssh://git@{host}:{port_candidate}/{remaining_path}{git_suffix}{ref_suffix}{alias_suffix}"
+                    raise ValueError(
+                        f"It looks like '{first_segment}' in 'git@{host}:{repo_url}' "
+                        f"is a port number, but SCP-style URLs (git@host:path) cannot "
+                        f"carry a port. Use the ssh:// URL form instead:\n"
+                        f"  {suggested}"
+                    )
+                else:
+                    raise ValueError(
+                        f"It looks like '{first_segment}' in 'git@{host}:{first_segment}' "
+                        f"is a port number, but no repository path follows it. "
+                        f"SCP-style URLs (git@host:path) cannot carry a port. "
+                        f"Use the ssh:// URL form: ssh://git@{host}:{port_candidate}/<owner>/<repo>.git"
+                    )
 
         # Security: reject traversal sequences in SSH repo paths
         validate_path_segments(
