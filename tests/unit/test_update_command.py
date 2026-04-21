@@ -1,5 +1,7 @@
 """Tests for the platform-aware update command."""
 
+import os
+import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
@@ -14,6 +16,20 @@ class TestUpdateCommand(unittest.TestCase):
 
     def setUp(self):
         self.runner = CliRunner()
+        # Pin APM_TEMP_DIR to an isolated temp directory so the installer
+        # script that `apm update` writes via `get_apm_temp_dir()` lands in
+        # a hermetic, writable location regardless of developer-machine
+        # environment / ~/.apm/config.json contents.
+        self._tempdir = tempfile.TemporaryDirectory()
+        self._prev_apm_temp_dir = os.environ.get("APM_TEMP_DIR")
+        os.environ["APM_TEMP_DIR"] = self._tempdir.name
+
+    def tearDown(self):
+        if self._prev_apm_temp_dir is None:
+            os.environ.pop("APM_TEMP_DIR", None)
+        else:
+            os.environ["APM_TEMP_DIR"] = self._prev_apm_temp_dir
+        self._tempdir.cleanup()
 
     def test_manual_update_command_uses_windows_installer(self):
         """Windows manual update instructions should point to aka.ms/apm-windows."""
@@ -168,6 +184,19 @@ class TestUpdateCommandLogic(unittest.TestCase):
 
     def setUp(self):
         self.runner = CliRunner()
+        # Same hermetic isolation as TestUpdateCommand: pin APM_TEMP_DIR to
+        # a per-test temp directory so the installer script written by
+        # `apm update` cannot escape into a developer-configured path.
+        self._tempdir = tempfile.TemporaryDirectory()
+        self._prev_apm_temp_dir = os.environ.get("APM_TEMP_DIR")
+        os.environ["APM_TEMP_DIR"] = self._tempdir.name
+
+    def tearDown(self):
+        if self._prev_apm_temp_dir is None:
+            os.environ.pop("APM_TEMP_DIR", None)
+        else:
+            os.environ["APM_TEMP_DIR"] = self._prev_apm_temp_dir
+        self._tempdir.cleanup()
 
     @patch("apm_cli.commands.update.get_version", return_value="unknown")
     def test_update_dev_version_warns_and_returns(self, mock_version):
@@ -272,6 +301,7 @@ class TestUpdateCommandLogic(unittest.TestCase):
 
         def tracking_unlink(path):
             deleted_paths.append(path)
+            original_unlink(path)
 
         mock_response = Mock()
         mock_response.text = "echo install"
