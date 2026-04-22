@@ -2,7 +2,7 @@
 title: "Adoption Playbook"
 description: "A phased guide to rolling out APM from a pilot team to organization-wide adoption."
 sidebar:
-  order: 7
+  order: 3
 ---
 
 APM adoption follows a proven pattern: start small, prove value, expand.

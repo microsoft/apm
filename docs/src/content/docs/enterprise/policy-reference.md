@@ -1,7 +1,7 @@
 ---
 title: Policy Reference
 sidebar:
-  order: 5
+  order: 7
 ---
 
 :::caution[Experimental Feature]
@@ -871,6 +871,6 @@ manifest:
 
 ## Related
 
-- [Governance & Compliance](../../enterprise/governance/) -- conceptual overview of APM's governance model
+- [Governance](../../enterprise/governance-guide/) -- conceptual overview, bypass contract, and rollout playbook
 - [CI Policy Enforcement](../../guides/ci-policy-setup/) -- step-by-step CI setup tutorial
 - [GitHub Rulesets](../../integrations/github-rulesets/) -- enforce policy as a required status check

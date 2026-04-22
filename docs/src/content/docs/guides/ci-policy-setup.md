@@ -239,7 +239,7 @@ Combine with `-o <path>` to write to a file.
 
 ## Related
 
-- [Governance & Compliance](../../enterprise/governance/) -- conceptual overview of APM's governance model
+- [Governance](../../enterprise/governance-guide/) -- conceptual overview, bypass contract, and rollout playbook
 - [`apm-policy.yml`](../../enterprise/apm-policy/) -- mental model and how the policy file works
 - [Policy Reference](../../enterprise/policy-reference/) -- full `apm-policy.yml` schema reference
 - [GitHub Rulesets](../../integrations/github-rulesets/) -- enforce policy as a required status check

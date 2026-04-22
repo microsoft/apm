@@ -160,7 +160,7 @@ The status check name must match the **job name** in your workflow file (e.g., `
 ## Related
 
 - [CI Policy Enforcement](../../guides/ci-policy-setup/) -- step-by-step CI setup for policy enforcement
-- [Governance & Compliance](../../enterprise/governance/) -- conceptual overview of APM's governance model
+- [Governance](../../enterprise/governance-guide/) -- conceptual overview, bypass contract, and rollout playbook
 - [Policy Reference](../../enterprise/policy-reference/) -- full `apm-policy.yml` schema reference
 - [CI/CD Pipelines](../ci-cd/) -- general CI integration guide
 - [Manifest Schema](../../reference/manifest-schema/) -- manifest and lock file reference
