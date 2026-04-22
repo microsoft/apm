@@ -503,6 +503,148 @@ dependencies:
   max_depth: 5  # Tightens from 10 to 5
 ```
 
+---
+
+## Install-time enforcement
+
+:::note[Planned]
+Install-time policy enforcement (issue #827) is in active development. The behaviour described below reflects the design that will ship; sections marked `TODO` will be filled with verbatim CLI output once the implementation lands.
+:::
+
+### 1. What APM policy is
+
+`apm-policy.yml` is the contract an organization publishes to govern which packages, MCP servers, compilation targets, and manifest shapes its repositories may use. The schema is documented above; this section covers how that contract is enforced at `apm install` time.
+
+### 2. Discovery and applicability
+
+APM auto-discovers policy from `<org>/.github/apm-policy.yml` for any GitHub remote — both `github.com` and GitHub Enterprise (GHE). Repositories on non-GitHub remotes (ADO, GitLab, plain git) currently fall through with no policy applied; this is tracked as a follow-up. Repositories with no detectable git remote (unpacked bundles, temp directories) emit an explicit "could not determine org" line and skip discovery.
+
+The `--policy <override>` flag is **audit-only today** — it works on `apm audit --ci` but is not yet wired through `apm install`/`apm update`. Use the escape hatches in section 8 if you need to bypass install-time enforcement for a single invocation.
+
+### 3. Inheritance and composition
+
+Policy resolves through the same three-level chain documented in [Inheritance](#inheritance) above: enterprise hub -> org -> repo override. The merge is **tighten-only**: a child can narrow allow lists, add deny entries, and escalate enforcement, but never relax a parent constraint. The full merge rule table is in [Tighten-only merge rules](#tighten-only-merge-rules); install-time enforcement uses the same resolved effective policy as `apm audit --ci`.
+
+### 4. What gets enforced
+
+Install-time enforcement runs the same rule families documented in [Check reference](#check-reference):
+
+- **Dependencies** — `allow`, `deny`, `require` (presence + optional version pin), `max_depth`.
+- **MCP** — `allow`, `deny`, `transport.allow`, `self_defined`, `trust_transitive`.
+- **Compilation** — `target.allow` / `target.enforce` (target-aware, evaluated against the resolved target list).
+- **Manifest** — `required_fields`, `scripts`, `content_types.allow`.
+- **Unmanaged files** — `action` against the configured `directories`.
+
+### 5. When enforcement runs
+
+| Command | Behaviour |
+|---------|-----------|
+| `apm install` | NEW — runs the policy gate after dependency resolution and before integration / target writes. Blocks before any files are deployed. |
+| `apm install <pkg>` | NEW — snapshots `apm.yml`, runs the gate, rolls back the manifest on a block. |
+| `apm install --mcp` | NEW — dedicated MCP preflight on the `--mcp` branch. |
+| `apm update` | NEW — same gate as `apm install`. |
+| `apm install --dry-run` | NEW — read-only preflight; renders "would be blocked by policy" verdicts without mutating anything. |
+| `apm audit --ci` | Existing — runs the same checks against the on-disk manifest + lockfile. |
+
+`pack` and `bundle` are out of scope: they are author-side operations on packages being published, not consumers of dependencies.
+
+### 6. Enforcement levels
+
+`enforcement` is documented in [Top-level fields](#enforcement). The same three values (`off` / `warn` / `block`) apply at install time.
+
+`require_resolution: project-wins` has a specific, narrow semantic that applies identically at install and audit time:
+
+- It downgrades **version-pin mismatches** on required packages from a block to a warning. The repo's declared version is honoured.
+- It does **NOT** downgrade missing required packages — those still block under `enforcement: block`.
+- It does **NOT** override an inherited org `deny` — a parent's deny always wins over a child's allow or local declaration.
+
+### 7. How install-time enforcement prevents disallowed sources
+
+```
+TODO: snippet from W4 live matrix — L2 (deny-list block, enforcement=block).
+Show the verbatim install output: gate fails before integration; clear
+"blocked by policy" diagnostic; non-zero exit.
+```
+
+```
+TODO: snippet from W4 live matrix — L4 (required missing, enforcement=block).
+```
+
+```
+TODO: snippet from W4 live matrix — L13 (transitive dep blocked).
+```
+
+### 8. Escape hatches
+
+**Non-bypass contract:** every escape hatch below is single-invocation, is not persisted to disk, and does **NOT** change CI behaviour. `apm audit --ci` will still fail the PR for the same policy violation. These hatches exist to unblock local debugging, not to circumvent governance.
+
+| Hatch | Scope |
+|-------|-------|
+| `--no-policy` flag | Available on `apm install`, `apm install <pkg>`, `apm install --mcp`, and `apm update`. Skips discovery and enforcement for one invocation; emits a loud warning. |
+| `APM_POLICY_DISABLE=1` env var | Equivalent to `--no-policy`. Same loud warning. |
+
+`APM_POLICY` is reserved for a future override env var and is **not** equivalent to `APM_POLICY_DISABLE`.
+
+### 9. Cache and offline behaviour
+
+Resolved effective policy is cached under `apm_modules/.policy-cache/`. Default TTL is `cache.ttl` from the policy itself (`3600` seconds). Beyond TTL, APM will serve a stale cache on refresh failure with a loud warning, up to a hard ceiling of 7 days (`MAX_STALE_TTL`). `--no-cache` forces a fresh fetch and ignores any cached entry. Cache writes are atomic (temp file + rename) to survive concurrent installs.
+
+### 9.5. Network failure semantics
+
+When discovery cannot reach the policy source, APM behaves as follows:
+
+- **Cached, stale within 7 days** — use the cached policy and emit a warning naming the cache age and the fetch error. Enforcement still applies.
+- **Cache miss or stale beyond 7 days, fetch fails** — emit a loud warning every invocation; **do NOT block the install**. This is a fail-open default, ratified to keep developers unblocked when GitHub is unreachable.
+- **Garbage response** (HTTP 200 with non-YAML body, e.g. captive portal HTML) — treated identically to a fetch failure: warn loudly, fall back to cache if present, otherwise proceed without enforcement.
+
+Organizations that need fail-closed semantics on fetch failure can track the planned `policy.fetch_failure: warn|block` schema knob in the follow-up issue (link TBD post-merge).
+
+### 10. Troubleshooting
+
+```
+TODO (W3-docs-final): every install-time policy error message paired with
+its actionable next step. Sourced from CommandLogger string table once W2
+lands. Cover at minimum:
+  - auth failure       -> "check `gh auth status` and GITHUB_APM_PAT"
+  - unreachable        -> "retry, check VPN/firewall, or use --no-policy"
+  - malformed policy   -> "contact your org admin to fix <source>"
+  - blocked dependency -> "remove <dep> from apm.yml, contact admin to
+                          update <source>, or use --no-policy"
+  - missing required   -> "add <dep> to apm.yml or contact admin"
+  - target mismatch    -> "adjust compilation.target or --target flag"
+```
+
+### 11. For org admins
+
+Checklist to publish a policy:
+
+1. Create `<org>/.github/apm-policy.yml` in the org's `.github` repository.
+2. Start from the [Standard org policy](#standard-org-policy) example above and trim it to the minimum that reflects your governance posture.
+3. Set `enforcement: warn` first. Let CI surface diagnostics across consuming repos for one cycle without breaking installs.
+4. When the warn-cycle is clean, switch to `enforcement: block`. Communicate the change in your org's CHANGELOG/announcements channel — `apm install` will start failing for any non-compliant repo.
+5. Use `extends:` to layer team-specific policies on top of the org baseline rather than forking the file.
+
+Recommended starter:
+
+```yaml
+name: "<Org> APM Policy"
+version: "0.1.0"
+enforcement: warn
+
+dependencies:
+  allow:
+    - "<org>/**"
+  max_depth: 5
+
+mcp:
+  self_defined: warn
+
+manifest:
+  required_fields: [version, description]
+```
+
+---
+
 ## Related
 
 - [Governance & Compliance](../../enterprise/governance/) -- conceptual overview of APM's governance model

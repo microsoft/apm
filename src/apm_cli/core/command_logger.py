@@ -6,6 +6,7 @@ from apm_cli.utils.console — no new output primitives.
 """
 
 from dataclasses import dataclass
+from typing import Optional
 
 from apm_cli.utils.console import (
     _rich_echo,
@@ -355,6 +356,118 @@ class InstallLogger(CommandLogger):
             f"  Kept user-edited file {rel_path} (from {dep_key}); "
             "delete manually if no longer needed",
             symbol="warning",
+        )
+
+    # --- Policy phase ---
+
+    def policy_resolved(
+        self,
+        source: str,
+        cached: bool,
+        enforcement: str,
+        age_seconds: Optional[int] = None,
+    ):
+        """Log policy discovery outcome.
+
+        Verbose by default; always shown when ``enforcement == "block"``
+        (users must know blocking is active).
+
+        Format: ``[i] Policy: <source> (cached, fetched 5m ago) -- enforcement=block``
+        """
+        parts = [f"Policy: {source}"]
+
+        if cached:
+            cache_detail = "cached"
+            if age_seconds is not None:
+                if age_seconds < 60:
+                    cache_detail += f", fetched {age_seconds}s ago"
+                else:
+                    minutes = age_seconds // 60
+                    unit = "m" if minutes < 60 else "h"
+                    value = minutes if minutes < 60 else minutes // 60
+                    cache_detail += f", fetched {value}{unit} ago"
+            parts.append(f"({cache_detail})")
+        parts.append(f"-- enforcement={enforcement}")
+
+        message = " ".join(parts)
+
+        if enforcement == "block":
+            # Always visible — blocking installs is a big deal
+            _rich_warning(message, symbol="warning")
+        elif self.verbose:
+            _rich_info(message, symbol="info")
+        # Non-verbose + non-block: silent (no noise for warn/off)
+
+    def policy_violation(self, dep_ref: str, reason: str, severity: str):
+        """Record a policy violation for a dependency.
+
+        Pushes to ``DiagnosticCollector`` under ``CATEGORY_POLICY`` for
+        the end-of-install summary.  When ``severity == "block"``, also
+        prints an inline error so the user sees the failure immediately
+        (before the summary).
+
+        Args:
+            dep_ref: Dependency reference (e.g. ``"acme/evil-pkg"``).
+            reason: Actionable reason text per rubber-duck I9.
+            severity: ``"block"`` or ``"warn"``.
+        """
+        from apm_cli.utils.diagnostics import CATEGORY_POLICY
+
+        self.diagnostics.policy(
+            message=reason,
+            package=dep_ref,
+            severity=severity,
+        )
+
+        if severity == "block":
+            _rich_error(f"Policy violation: {dep_ref} -- {reason}", symbol="error")
+
+    def policy_disabled(self, reason: str):
+        """Log a loud warning that policy enforcement is disabled.
+
+        Emitted when ``--no-policy`` or ``APM_POLICY_DISABLE=1`` is
+        active.  Always visible (never silenceable) — matches the
+        ``--allow-insecure`` pattern.
+        """
+        _rich_warning(
+            f"Policy enforcement disabled ({reason}). "
+            "This does NOT bypass 'apm audit --ci'.",
+            symbol="warning",
+        )
+
+    # --- Policy violation reason helpers ---
+
+    @staticmethod
+    def _policy_reason_auth(source: str) -> str:
+        """Actionable reason for auth failure during policy fetch."""
+        return (
+            f"Could not authenticate to fetch policy from {source} "
+            "-- check `gh auth status` and `GITHUB_APM_PAT`"
+        )
+
+    @staticmethod
+    def _policy_reason_unreachable(source: str) -> str:
+        """Actionable reason for unreachable policy source."""
+        return (
+            f"Policy source {source} is unreachable "
+            "-- retry, check VPN/firewall, or use `--no-policy` to bypass"
+        )
+
+    @staticmethod
+    def _policy_reason_malformed(source: str) -> str:
+        """Actionable reason for malformed policy file."""
+        return (
+            f"Policy at {source} is malformed "
+            "-- contact your org admin to fix the policy file"
+        )
+
+    @staticmethod
+    def _policy_reason_blocked(dep_ref: str, source: str) -> str:
+        """Actionable reason for a blocked dependency."""
+        return (
+            f"Blocked by org policy at {source} "
+            f"-- remove `{dep_ref}` from apm.yml, contact admin to update policy, "
+            "or use `--no-policy` for one-off bypass"
         )
 
     # --- Install summary ---

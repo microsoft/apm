@@ -13,7 +13,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from apm_cli.policy.discovery import (
+    CACHE_SCHEMA_VERSION,
     DEFAULT_CACHE_TTL,
+    MAX_STALE_TTL,
     PolicyFetchResult,
     _auto_discover,
     _cache_key,
@@ -28,11 +30,17 @@ from apm_cli.policy.discovery import (
     _write_cache,
     discover_policy,
 )
-from apm_cli.policy.parser import PolicyValidationError
+from apm_cli.policy.parser import PolicyValidationError, load_policy
 from apm_cli.policy.schema import ApmPolicy
 
 # Minimal valid YAML that produces a valid ApmPolicy
 VALID_POLICY_YAML = "name: test-policy\nversion: '1.0'\nenforcement: warn\n"
+
+
+def _make_test_policy(yaml_str: str = VALID_POLICY_YAML) -> ApmPolicy:
+    """Parse YAML string into an ApmPolicy for test setup."""
+    policy, _ = load_policy(yaml_str)
+    return policy
 
 
 class TestParseRemoteUrl(unittest.TestCase):
@@ -167,7 +175,7 @@ class TestCacheReadWrite(unittest.TestCase):
             root = Path(tmpdir)
             repo_ref = "contoso/.github"
 
-            _write_cache(repo_ref, VALID_POLICY_YAML, root)
+            _write_cache(repo_ref, _make_test_policy(), root)
 
             result = _read_cache(repo_ref, root)
             self.assertIsNotNone(result)
@@ -180,7 +188,7 @@ class TestCacheReadWrite(unittest.TestCase):
             root = Path(tmpdir)
             repo_ref = "contoso/.github"
 
-            _write_cache(repo_ref, VALID_POLICY_YAML, root)
+            _write_cache(repo_ref, _make_test_policy(), root)
 
             # Backdate the metadata to make it expired
             cache_dir = _get_cache_dir(root)
@@ -203,7 +211,7 @@ class TestCacheReadWrite(unittest.TestCase):
             root = Path(tmpdir)
             repo_ref = "contoso/.github"
 
-            _write_cache(repo_ref, VALID_POLICY_YAML, root)
+            _write_cache(repo_ref, _make_test_policy(), root)
 
             # Corrupt the meta file
             cache_dir = _get_cache_dir(root)
@@ -411,7 +419,7 @@ class TestFetchFromRepo(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             repo_ref = "contoso/.github"
-            _write_cache(repo_ref, VALID_POLICY_YAML, root)
+            _write_cache(repo_ref, _make_test_policy(), root)
 
             # Should hit cache, no API call needed
             result = _fetch_from_repo(repo_ref, root, no_cache=False)
@@ -574,7 +582,7 @@ class TestDiscoverPolicy(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             # Pre-populate cache
-            _write_cache("contoso/.github", VALID_POLICY_YAML, root)
+            _write_cache("contoso/.github", _make_test_policy(), root)
 
             result = discover_policy(root, no_cache=False)
             self.assertTrue(result.found)

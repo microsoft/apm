@@ -17,7 +17,7 @@ from .matcher import check_dependency_allowed, check_mcp_allowed, matches_patter
 from .inheritance import merge_policies, resolve_policy_chain, PolicyInheritanceError
 from .discovery import PolicyFetchResult, discover_policy
 from .models import CIAuditResult, CheckResult
-from .policy_checks import run_policy_checks
+from .policy_checks import run_dependency_policy_checks, run_policy_checks
 
 __all__ = [
     "ApmPolicy",
@@ -40,6 +40,7 @@ __all__ = [
     "matches_pattern",
     "merge_policies",
     "resolve_policy_chain",
+    "run_dependency_policy_checks",
     "run_policy_checks",
     "validate_policy",
     "CIAuditResult",
