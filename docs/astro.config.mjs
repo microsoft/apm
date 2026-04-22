@@ -87,6 +87,7 @@ export default defineConfig({
 						{ label: 'Adoption Playbook', slug: 'enterprise/adoption-playbook' },
 						{ label: 'Security Model', slug: 'enterprise/security' },
 						{ label: 'Governance', slug: 'enterprise/governance-guide' },
+						{ label: 'Registry Proxy & Air-gapped', slug: 'enterprise/registry-proxy' },
 						{ label: 'Policy Files', slug: 'enterprise/apm-policy' },
 						{ label: 'Policy Reference', slug: 'enterprise/policy-reference' },
 					],

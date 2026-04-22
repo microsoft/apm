@@ -323,6 +323,8 @@ You are NOT guaranteed:
 
 ## 9. Air-gapped and offline
 
+This section covers offline **policy** enforcement (the `apm-policy.yml` cache). For offline **dependency traffic** (routing installs through Artifactory), see [Registry Proxy & Air-gapped](../registry-proxy/).
+
 **For air-gapped CI, run `apm audit --ci --policy ./vendored-policy.yml` as your gating check; do not rely on `apm install` enforcement.**
 
 | Network state | Install gate | Install `--mcp` | `apm audit --ci --policy <file>` | `apm audit --ci` (auto-discovery) |

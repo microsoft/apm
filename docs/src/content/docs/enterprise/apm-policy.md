@@ -2,7 +2,7 @@
 title: "Policy Files"
 description: "One org-wide policy file with tighten-only inheritance for AI agent dependencies, MCP servers, and compilation targets."
 sidebar:
-  order: 6
+  order: 7
 ---
 
 For the full enterprise rollout playbook and bypass contract, see the [Governance Guide](../governance-guide/).

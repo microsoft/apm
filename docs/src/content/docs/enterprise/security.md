@@ -81,6 +81,8 @@ These controls make the decision visible, but they do **not** make HTTP safe:
 - On the first HTTP fetch (or any update fetched over HTTP), the lockfile's `resolved_commit` and `content_hash` come from that same untrusted channel. They improve replay detection later, but they do not establish trustworthy provenance for the initial fetch.
 - APM explicitly suppresses git credential helpers for HTTP clone and `ls-remote` operations so stored tokens from Keychain, Credential Manager, `gh auth`, or other helpers are not sent over plaintext HTTP.
 
+For routing all dependency traffic through an enterprise proxy (Artifactory or compatible), see [Registry Proxy & Air-gapped](../registry-proxy/).
+
 ## Content scanning
 
 ### The threat
