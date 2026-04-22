@@ -90,6 +90,7 @@ class AuthContext:
     token_type: str  # "fine-grained", "classic", "oauth", "github-app", "unknown"
     host_info: HostInfo
     git_env: dict = field(compare=False, repr=False)
+    auth_scheme: str = "basic"  # "basic" | "bearer". Determines how _build_git_env injects credentials.
 
 
 # ---------------------------------------------------------------------------
@@ -237,9 +238,9 @@ class AuthResolver:
             # Bounded by APM_GIT_CREDENTIAL_TIMEOUT (default 60s). No deadlock
             # risk: single lock, never nested.
             host_info = self.classify_host(host, port=port)
-            token, source = self._resolve_token(host_info, org)
+            token, source, scheme = self._resolve_token(host_info, org)
             token_type = self.detect_token_type(token) if token else "unknown"
-            git_env = self._build_git_env(token)
+            git_env = self._build_git_env(token, scheme=scheme, host_kind=host_info.kind)
 
             ctx = AuthContext(
                 token=token,
@@ -247,6 +248,7 @@ class AuthResolver:
                 token_type=token_type,
                 host_info=host_info,
                 git_env=git_env,
+                auth_scheme=scheme,
             )
             self._cache[key] = ctx
             return ctx
@@ -308,6 +310,7 @@ class AuthResolver:
             """Retry with git-credential-fill when an env-var token fails."""
             if auth_ctx.source in ("git-credential-fill", "none"):
                 raise exc
+            # ADO uses ADO_APM_PAT + AAD bearer fallback; credential fill is out of scope.
             if host_info.kind == "ado":
                 raise exc
             _log(
@@ -321,13 +324,52 @@ class AuthResolver:
                 return operation(cred, self._build_git_env(cred))
             raise exc
 
-        # Hosts that never have public repos → auth-only
-        if host_info.kind in ("ghe_cloud", "ado"):
+        # ADO bearer fallback machinery (PAT was tried first; bearer is the safety net)
+        ado_bearer_fallback_available = (
+            auth_ctx.host_info.kind == "ado"
+            and auth_ctx.source == "ADO_APM_PAT"
+        )
+
+        def _try_ado_bearer_fallback(exc: Exception) -> T:
+            """Retry ADO operation with AAD bearer when PAT fails with 401."""
+            if not ado_bearer_fallback_available:
+                raise exc
+            exc_msg = str(exc)
+            if "401" not in exc_msg and "Unauthorized" not in exc_msg:
+                raise exc
+            from apm_cli.core.azure_cli import AzureCliBearerProvider, AzureCliBearerError
+            provider = AzureCliBearerProvider()
+            if not provider.is_available():
+                raise exc
+            try:
+                bearer = provider.get_bearer_token()
+                bearer_env = self._build_git_env(bearer, scheme="bearer", host_kind="ado")
+                result = operation(bearer, bearer_env)
+                # Success on fallback -- emit deferred diagnostic warning
+                self._emit_stale_pat_diagnostic(auth_ctx.host_info.display_name)
+                return result
+            except AzureCliBearerError:
+                pass  # Bearer acquisition itself failed; fall through to original error
+            except Exception:
+                # Bearer also failed (Case 4). Re-raise the ORIGINAL PAT exception.
+                pass
+            raise exc
+
+        # Hosts that never have public repos -> auth-only
+        if host_info.kind == "ghe_cloud":
             _log(f"Auth-only attempt for {host_info.kind} host {host_info.display_name}")
             try:
                 return operation(auth_ctx.token, git_env)
             except Exception as exc:
                 return _try_credential_fallback(exc)
+
+        # ADO: auth-first with bearer fallback when PAT fails
+        if host_info.kind == "ado":
+            _log(f"Auth-only attempt for {host_info.kind} host {host_info.display_name}")
+            try:
+                return operation(auth_ctx.token, git_env)
+            except Exception as exc:
+                return _try_ado_bearer_fallback(exc)
 
         if unauth_first:
             # Validation path: save rate limits, EMU-safe
@@ -372,11 +414,86 @@ class AuthResolver:
         org: Optional[str] = None,
         *,
         port: Optional[int] = None,
+        dep_url: Optional[str] = None,
     ) -> str:
         """Build an actionable error message for auth failures."""
         auth_ctx = self.resolve(host, org, port=port)
         host_info = auth_ctx.host_info
         display = host_info.display_name
+
+        # --- ADO-specific error cases ---
+        if host_info.kind == "ado":
+            from apm_cli.core.azure_cli import AzureCliBearerProvider
+            provider = AzureCliBearerProvider()
+            az_available = provider.is_available()
+            pat_set = bool(os.environ.get("ADO_APM_PAT"))
+
+            org_part = ""
+            source_url = dep_url or ""
+            if source_url:
+                parts = source_url.replace("https://", "").split("/")
+                if len(parts) >= 2 and (parts[0] in ("dev.azure.com",) or parts[0].endswith(".visualstudio.com")):
+                    org_part = parts[1] if len(parts) > 1 else ""
+
+            token_url = f"https://dev.azure.com/{org_part}/_usersSettings/tokens" if org_part else "https://dev.azure.com/<org>/_usersSettings/tokens"
+
+            if pat_set:
+                if az_available:
+                    # Case 4: PAT rejected and bearer also rejected
+                    return (
+                        f"\n    ADO_APM_PAT was rejected (HTTP 401) -- the token may be expired or revoked.\n"
+                        f"    az cli bearer was also rejected (HTTP 403).\n\n"
+                        f"    To fix:\n"
+                        f"      1. Unset the stale PAT:  unset ADO_APM_PAT\n"
+                        f"      2. Re-authenticate:      az login\n"
+                        f"      3. Retry:                apm install\n\n"
+                        f"    Docs: https://aka.ms/apm-ado-auth"
+                    )
+                # PAT set but rejected, no az -> bare PAT failure
+                return (
+                    f"\n    ADO_APM_PAT was rejected by Azure DevOps (HTTP 401).\n"
+                    f"    The token may be expired, revoked, or scoped to a different org.\n\n"
+                    f"    Generate a new PAT at {token_url}\n"
+                    f"    with Code (Read) scope.\n\n"
+                    f"    Docs: https://aka.ms/apm-ado-auth"
+                )
+
+            # No PAT set
+            if not az_available:
+                # Case 1: no az, no PAT
+                return (
+                    f"\n    Azure DevOps requires authentication. Set a Personal Access Token:\n\n"
+                    f"      export ADO_APM_PAT=your_token\n\n"
+                    f"    Create one at {token_url}\n"
+                    f"    with Code (Read) scope.\n\n"
+                    f"    Docs: https://aka.ms/apm-ado-auth"
+                )
+
+            # az is available; check if logged in by trying to get tenant
+            tenant = provider.get_current_tenant_id()
+            if tenant is None:
+                # Case 3: az present, not logged in
+                return (
+                    f"\n    Azure DevOps requires authentication. You have two options:\n\n"
+                    f"    1. Sign in with Azure CLI (recommended for Entra ID users):\n"
+                    f"         az login\n"
+                    f"         apm install                   # retry -- no env var needed\n\n"
+                    f"    2. Use a Personal Access Token:\n"
+                    f"         export ADO_APM_PAT=your_token\n\n"
+                    f"    Docs: https://aka.ms/apm-ado-auth"
+                )
+
+            # Case 2: az returned token (tenant known) but ADO rejected it
+            return (
+                f"\n    Your az cli session (tenant: {tenant}) returned a bearer token,\n"
+                f"    but Azure DevOps rejected it (HTTP 401).\n\n"
+                f"    Check that you are signed into the correct tenant:\n"
+                f"      az account show\n"
+                f"      az login --tenant <correct-tenant-id>\n\n"
+                f"    Docs: https://aka.ms/apm-ado-auth"
+            )
+
+        # --- Non-ADO error paths (unchanged) ---
         lines: list[str] = [f"Authentication failed for {operation} on {display}."]
 
         if auth_ctx.token:
@@ -386,10 +503,6 @@ class AuthResolver:
                     "GHE Cloud Data Residency hosts (*.ghe.com) require "
                     "enterprise-scoped tokens. Ensure your PAT is authorized "
                     "for this enterprise."
-                )
-            elif host_info.kind == "ado":
-                lines.append(
-                    "Verify your ADO_APM_PAT is valid and has Code (Read) scope."
                 )
             elif host.lower() == "github.com":
                 lines.append(
@@ -403,16 +516,10 @@ class AuthResolver:
                     "authorize your token at https://github.com/settings/tokens"
                 )
         else:
-            if host_info.kind == "ado":
-                lines.append("Azure DevOps authentication required.")
-                lines.append(
-                    "Set the ADO_APM_PAT environment variable with a PAT that has Code (Read) scope."
-                )
-            else:
-                lines.append("No token available.")
-                lines.append(
-                    "Set GITHUB_APM_PAT or GITHUB_TOKEN, or run 'gh auth login'."
-                )
+            lines.append("No token available.")
+            lines.append(
+                "Set GITHUB_APM_PAT or GITHUB_TOKEN, or run 'gh auth login'."
+            )
 
         if org and host_info.kind != "ado":
             lines.append(
@@ -436,43 +543,69 @@ class AuthResolver:
 
     def _resolve_token(
         self, host_info: HostInfo, org: Optional[str]
-    ) -> tuple[Optional[str], str]:
-        """Walk the token resolution chain.  Returns (token, source).
+    ) -> tuple[Optional[str], str, str]:
+        """Walk the token resolution chain.  Returns (token, source, scheme).
 
-        Resolution order:
+        Resolution order (GitHub-like hosts):
         1. Per-org env var ``GITHUB_APM_PAT_{ORG}`` (any host)
-        2. Global env vars ``GITHUB_APM_PAT`` → ``GITHUB_TOKEN`` → ``GH_TOKEN``
-           (any host — if the token is wrong for the target host,
+        2. Global env vars ``GITHUB_APM_PAT`` -> ``GITHUB_TOKEN`` -> ``GH_TOKEN``
+           (any host -- if the token is wrong for the target host,
            ``try_with_fallback`` retries with git credentials)
         3. Git credential helper (any host except ADO)
+
+        Resolution order (ADO):
+        1. ``ADO_APM_PAT`` env var -> scheme ``"basic"``
+        2. AAD bearer via ``az cli`` -> scheme ``"bearer"``
+        3. None -> source ``"none"``
 
         All token-bearing requests use HTTPS, which is the transport
         security boundary.  Host-gating global env vars is unnecessary
         and creates DX friction for multi-host setups.
         """
-        # 1. Per-org env var (GitHub-like hosts only — ADO uses ADO_APM_PAT)
+        if host_info.kind == "ado":
+            # ADO resolution chain: PAT env -> AAD bearer -> none
+            pat = os.environ.get("ADO_APM_PAT")
+            if pat:
+                return pat, "ADO_APM_PAT", "basic"
+            # Try AAD bearer via az cli (lazy import to avoid module-load cost on non-ADO paths)
+            from apm_cli.core.azure_cli import AzureCliBearerProvider, AzureCliBearerError
+            provider = AzureCliBearerProvider()
+            if provider.is_available():
+                try:
+                    bearer = provider.get_bearer_token()
+                    return bearer, GitHubTokenManager.ADO_BEARER_SOURCE, "bearer"
+                except AzureCliBearerError:
+                    # az is on PATH but token acquisition failed (e.g., not logged in).
+                    # Fall through to token=None; build_error_context will render Case 3.
+                    pass
+            return None, "none", "basic"
+
+        # ADO uses ADO_APM_PAT (single var) + AAD bearer fallback;
+        # per-org vars and credential fill are out of scope.
+
+        # 1. Per-org env var (GitHub-like hosts only)
         if org and host_info.kind not in ("ado",):
             env_name = f"GITHUB_APM_PAT_{_org_to_env_suffix(org)}"
             token = os.environ.get(env_name)
             if token:
-                return token, env_name
+                return token, env_name, "basic"
 
         # 2. Global env var chain (any host)
         purpose = self._purpose_for_host(host_info)
         token = self._token_manager.get_token_for_purpose(purpose)
         if token:
             source = self._identify_env_source(purpose)
-            return token, source
+            return token, source, "basic"
 
-        # 3. Git credential helper (not for ADO — uses its own PAT)
+        # 3. Git credential helper (not for ADO)
         if host_info.kind not in ("ado",):
             credential = self._token_manager.resolve_credential_from_git(
                 host_info.host, port=host_info.port
             )
             if credential:
-                return credential, "git-credential-fill"
+                return credential, "git-credential-fill", "basic"
 
-        return None, "none"
+        return None, "none", "basic"
 
     @staticmethod
     def _purpose_for_host(host_info: HostInfo) -> str:
@@ -488,15 +621,44 @@ class AuthResolver:
         return "env"
 
     @staticmethod
-    def _build_git_env(token: Optional[str] = None) -> dict:
-        """Pre-built env dict for subprocess git calls."""
+    def _build_git_env(
+        token: Optional[str] = None,
+        *,
+        scheme: str = "basic",
+        host_kind: str = "github",
+    ) -> dict:
+        """Pre-built env dict for subprocess git calls.
+
+        For ADO bearer tokens (scheme='bearer'), injects an Authorization header
+        via GIT_CONFIG_COUNT/KEY/VALUE env vars (see github_host.build_ado_bearer_git_env).
+        For all other cases, behavior is unchanged.
+        """
         env = os.environ.copy()
         env["GIT_TERMINAL_PROMPT"] = "0"
         # On Windows, GIT_ASKPASS='' can cause issues; use 'echo' instead
         env["GIT_ASKPASS"] = "" if sys.platform != "win32" else "echo"
         if token:
             env["GIT_TOKEN"] = token
+        if scheme == "bearer" and token and host_kind == "ado":
+            from apm_cli.utils.github_host import build_ado_bearer_git_env
+            env.update(build_ado_bearer_git_env(token))
         return env
+
+    def _emit_stale_pat_diagnostic(self, host_display: str) -> None:
+        """Emit a [!] warning when PAT was rejected but bearer succeeded."""
+        try:
+            from apm_cli.utils.console import _rich_warning
+            _rich_warning(
+                f"ADO_APM_PAT was rejected for {host_display} (HTTP 401); "
+                f"fell back to az cli bearer.",
+                symbol="warning",
+            )
+            _rich_warning(
+                "    Consider unsetting the stale variable.",
+                symbol="warning",
+            )
+        except ImportError:
+            pass  # console module not importable in some test contexts
 
 
 # ---------------------------------------------------------------------------
