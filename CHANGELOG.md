@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `apm install` now enforces org `apm-policy.yml` at install time, not only in `apm audit --ci` — covering dependency deny/allow/required lists, MCP server deny/transport/trust-transitive rules, and `compilation.target.allow` constraints; transitive MCP servers from APM packages are checked before runtime config is written (#827)
 
+### Fixed
+
+- Warn-mode policy violations now render in the `apm install` summary (previously recorded but not displayed because logger and install_result used different `DiagnosticCollector` instances) (#827, closes #834)
+- `apm-policy.yml` `extends:` chains now support N-level inheritance up to `MAX_CHAIN_DEPTH=5` with cycle detection and partial-chain warnings; previously only one parent level was resolved (#827, closes #831)
+
 ## [0.9.0] - 2026-04-21
 
 ### Changed (BREAKING)
