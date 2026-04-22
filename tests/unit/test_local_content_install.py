@@ -174,13 +174,28 @@ class TestIntegrateLocalContent:
 
     @patch("apm_cli.install.services.integrate_package_primitives")
     def test_package_info_install_path_is_project_root(self, mock_integrate, tmp_path):
-        """The synthetic PackageInfo must point to project_root, not .apm/."""
+        """The synthetic PackageInfo must point to project_root at project scope."""
         mock_integrate.return_value = _zero_counters()
 
         _integrate_local_content(tmp_path, **_make_integrators())
 
         package_info = mock_integrate.call_args[0][0]
         assert package_info.install_path == tmp_path
+
+    @patch("apm_cli.install.services.integrate_package_primitives")
+    def test_user_scope_install_path_is_apm_dir_not_home(self, mock_integrate, tmp_path):
+        """At user scope, install_path must be <project_root>/.apm/, not
+        project_root itself (which is $HOME).  Scanning $HOME recursively
+        causes hangs and macOS privacy dialogs.  Fixes #830."""
+        from apm_cli.core.scope import InstallScope
+
+        mock_integrate.return_value = _zero_counters()
+        (tmp_path / ".apm").mkdir(exist_ok=True)
+
+        _integrate_local_content(tmp_path, **_make_integrators(), scope=InstallScope.USER)
+
+        package_info = mock_integrate.call_args[0][0]
+        assert package_info.install_path == tmp_path / ".apm"
 
     @patch("apm_cli.install.services.integrate_package_primitives")
     def test_returns_zero_counters_when_nothing_deployed(self, mock_integrate, tmp_path):
