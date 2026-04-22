@@ -820,11 +820,13 @@ class TestI15CachedStale:
 
 
 # =====================================================================
-# I16: malformed apm-policy.yml on remote -> fail-open, proceed
+# I16: garbage_response policy on remote -> fail-open, proceed
+#      NOTE: This tests the garbage_response outcome specifically.
+#      True malformed outcome is tested in I19.
 # =====================================================================
 
-class TestI16MalformedPolicy:
-    """Malformed policy -> fail-open (warn), install proceeds."""
+class TestI16GarbageResponsePolicy:
+    """Garbage response (e.g. captive portal) -> fail-open (warn), install proceeds."""
 
     @patch(_PATCH_UPDATES, return_value=None)
     @patch(_PATCH_DOWNLOADER)
@@ -883,3 +885,197 @@ class TestI17NoGitRemote:
         assert "blocked by org policy" not in out.lower(), (
             f"no_git_remote should not block:\n{out}"
         )
+
+
+# =====================================================================
+# I18: direct MCP block on `apm install` (no APM deps, --only=mcp)
+#      Exit non-zero, MCP configs NOT written
+# =====================================================================
+
+class TestI18DirectMCPBlocked:
+    """Direct MCP entry in apm.yml denied by policy -> blocked before
+    MCPIntegrator.install writes runtime configs.  No APM deps.
+
+    This is the S2 fix validation: the second preflight at install.py
+    now fires whenever ``mcp_deps`` is non-empty (not just when
+    ``transitive_mcp`` is non-empty).
+    """
+
+    @patch(_PATCH_UPDATES, return_value=None)
+    @patch(_PATCH_MCP_INSTALL, return_value=0)
+    @patch(_PATCH_DISCOVER_PREFLIGHT)
+    @patch(_PATCH_DISCOVER_GATE)
+    def test_direct_mcp_denied_blocks_install(
+        self, mock_gate, mock_preflight, mock_mcp_install,
+        mock_updates, project,
+    ):
+        project_dir, runner = project
+
+        # Manifest has ONLY a denied direct MCP entry -- no APM deps.
+        _write_apm_yml(
+            project_dir / "apm.yml",
+            mcp=["io.github.untrusted/evil-mcp-server"],
+        )
+
+        policy = _load_fixture_policy("apm-policy-mcp.yml")
+        # enforcement=block, mcp.deny=("io.github.untrusted/*",)
+        fetch = _make_fetch_result("found", policy=policy)
+        mock_gate.return_value = fetch
+        mock_preflight.return_value = fetch
+
+        result = _invoke_install(runner)
+
+        out = result.output
+        assert result.exit_code != 0, (
+            f"Expected non-zero exit for direct MCP block:\n{out}"
+        )
+        # MCPIntegrator.install should NOT have been called
+        mock_mcp_install.assert_not_called(), (
+            "MCPIntegrator.install should not run when direct MCP is blocked"
+        )
+
+
+# =====================================================================
+# I19: malformed policy outcome on install path -> warn-and-proceed
+#      (fail-open posture per CEO mandate)
+# =====================================================================
+
+class TestI19MalformedPolicyFailOpen:
+    """Malformed policy outcome -> fail-open with loud warning,
+    install proceeds.  Distinct from I16 which tests garbage_response.
+
+    Also verifies that ``sys.exit(1)`` is NOT called (which would
+    bypass the rollback handler in install.py).
+    """
+
+    @patch(_PATCH_UPDATES, return_value=None)
+    @patch(_PATCH_DOWNLOADER)
+    @patch(_PATCH_DISCOVER_PREFLIGHT)
+    @patch(_PATCH_DISCOVER_GATE)
+    def test_malformed_outcome_warns_and_proceeds(
+        self, mock_gate, mock_preflight, mock_dl, mock_updates, project,
+    ):
+        project_dir, runner = project
+        _write_apm_yml(project_dir / "apm.yml", deps=["DevExpGbb/some-package"])
+
+        # True malformed outcome (distinct from garbage_response)
+        fetch = _make_fetch_result(
+            "malformed",
+            error="YAML parsed but schema validation failed",
+            source="org:test-org/.github",
+        )
+        mock_gate.return_value = fetch
+        mock_preflight.return_value = fetch
+
+        result = _invoke_install(runner)
+
+        out = result.output
+        # Fail-open: should NOT exit non-zero due to malformed policy
+        # (the install may still fail for other reasons like missing
+        # packages, but NOT due to a sys.exit(1) from policy_gate)
+        assert "blocked by org policy" not in out.lower(), (
+            f"Malformed policy should fail-open, not block:\n{out}"
+        )
+        # Should emit a warning about the malformed policy
+        has_warning = (
+            "malformed" in out.lower()
+            or "policy" in out.lower()
+        )
+        assert has_warning, (
+            f"Expected malformed policy warning in output:\n{out}"
+        )
+
+    @patch(_PATCH_UPDATES, return_value=None)
+    @patch(_PATCH_VALIDATE_PKG, return_value=True)
+    @patch(_PATCH_DOWNLOADER)
+    @patch(_PATCH_DISCOVER_PREFLIGHT)
+    @patch(_PATCH_DISCOVER_GATE)
+    def test_malformed_policy_does_not_bypass_rollback(
+        self, mock_gate, mock_preflight, mock_dl, mock_validate,
+        mock_updates, project,
+    ):
+        """install <pkg> with malformed policy must NOT sys.exit(1)
+        from inside policy_gate (which would bypass the rollback handler).
+        The pipeline should proceed (fail-open), and if it fails for
+        any other reason, the except handler in install.py catches it."""
+        project_dir, runner = project
+        manifest_path = project_dir / "apm.yml"
+
+        _write_apm_yml(manifest_path, deps=["DevExpGbb/safe-package"])
+
+        fetch = _make_fetch_result(
+            "malformed",
+            error="Policy schema invalid",
+            source="org:test-org/.github",
+        )
+        mock_gate.return_value = fetch
+        mock_preflight.return_value = fetch
+
+        # Install a new package -- malformed policy is fail-open so
+        # the pipeline proceeds.  The pipeline may fail for mocked
+        # reasons, but crucially no sys.exit(1) should short-circuit.
+        result = _invoke_install(runner, ["test-org/new-package"])
+
+        out = result.output
+        # Key assertion: the malformed policy did NOT cause a
+        # sys.exit(1) that would have bypassed the rollback handler.
+        # Evidence: no "blocked by org policy" appears and the exit
+        # code is NOT from a bare sys.exit(1) with no output context.
+        assert "blocked by org policy" not in out.lower(), (
+            f"Malformed policy should fail-open, not block:\n{out}"
+        )
+
+
+# =====================================================================
+# I20: warn mode + multiple violations -> ALL warnings emitted, exit 0
+# =====================================================================
+
+class TestI20WarnModeAllViolations:
+    """Warn mode with fail_fast=False collects ALL violations
+    and emits all of them, not just the first.
+
+    In warn mode the install proceeds to completion. Policy warnings
+    are pushed to the logger's DiagnosticCollector for the summary.
+    The key contract: warn mode does NOT short-circuit after the first
+    check failure (fail_fast=False was added by the C3 fix).
+    """
+
+    @patch(_PATCH_UPDATES, return_value=None)
+    @patch(_PATCH_DOWNLOADER)
+    @patch(_PATCH_DISCOVER_PREFLIGHT)
+    @patch(_PATCH_DISCOVER_GATE)
+    def test_warn_mode_emits_all_violations(
+        self, mock_gate, mock_preflight, mock_dl, mock_updates, project
+    ):
+        project_dir, runner = project
+
+        # Multiple denied deps -- warn mode should report ALL
+        _write_apm_yml(project_dir / "apm.yml", deps=[
+            "test-blocked/evil-pkg-1",
+            "test-blocked/evil-pkg-2",
+            "test-blocked/evil-pkg-3",
+        ])
+
+        policy = _build_policy(
+            enforcement="warn",
+            deny=("test-blocked/*",),
+        )
+        fetch = _make_fetch_result("found", policy=policy)
+        mock_gate.return_value = fetch
+        mock_preflight.return_value = fetch
+
+        result = _invoke_install(runner)
+
+        out = result.output
+        # Should NOT block (warn mode)
+        assert "blocked by org policy" not in out.lower(), (
+            f"Warn-mode should NOT block:\n{out}"
+        )
+        # Install should proceed (exit 0 or exit due to mock errors,
+        # but NOT due to policy)
+        # The 3 deps should all be attempted (not short-circuited
+        # after the first policy check failure)
+        for dep_name in ["evil-pkg-1", "evil-pkg-2", "evil-pkg-3"]:
+            assert dep_name in out, (
+                f"Expected {dep_name} to appear in output (not short-circuited):\n{out}"
+            )

@@ -172,6 +172,11 @@ def run_install_pipeline(
         # targets (denied deps never reach integration).
         # PolicyViolationError halts the pipeline cleanly.
         # --------------------------------------------------------------
+
+        # Populate direct MCP deps from the manifest so the policy gate
+        # can enforce MCP allow/deny rules on them (S2 fix).
+        ctx.direct_mcp_deps = apm_package.get_mcp_dependencies()
+
         from .phases import policy_gate as _policy_gate_phase
         from .phases.policy_gate import PolicyViolationError
 

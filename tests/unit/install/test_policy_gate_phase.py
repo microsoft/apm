@@ -229,18 +229,22 @@ class TestOutcomeEmpty:
 
 
 class TestOutcomeMalformed:
-    """outcome=malformed -> sys.exit(1) (fail-closed)."""
+    """outcome=malformed -> fail-open with loud warning (CEO mandate).
+
+    Fail-closed via schema knob is a follow-up (#829).
+    """
 
     @patch(_PATCH_DISCOVER)
-    def test_malformed_exits(self, mock_discover):
+    def test_malformed_warns_and_proceeds(self, mock_discover):
         mock_discover.return_value = _make_fetch_result(
             "malformed", policy=None, error="bad yaml"
         )
 
         ctx = _make_ctx()
-        with pytest.raises(SystemExit) as exc_info:
-            run(ctx)
-        assert exc_info.value.code == 1
+        run(ctx)  # should NOT raise or sys.exit
+
+        assert ctx.policy_enforcement_active is False
+        assert ctx.policy_fetch.outcome == "malformed"
 
 
 class TestOutcomeCacheMissFetchFail:
@@ -612,3 +616,139 @@ class TestNoLogger:
         run(ctx)  # Should not raise
 
         assert ctx.policy_enforcement_active is False
+
+
+# =====================================================================
+# Test: fail_fast=False in warn mode (Fix #4)
+# =====================================================================
+
+
+class TestWarnModeFailFast:
+    """Warn mode passes fail_fast=False so all violations are collected."""
+
+    @patch(_PATCH_CHECKS, return_value=_passing_audit())
+    @patch(_PATCH_DISCOVER)
+    def test_warn_mode_passes_fail_fast_false(self, mock_discover, mock_checks):
+        policy = ApmPolicy(enforcement="warn")
+        mock_discover.return_value = _make_fetch_result(
+            "found", policy=policy, enforcement="warn"
+        )
+        ctx = _make_ctx()
+        run(ctx)
+
+        mock_checks.assert_called_once()
+        assert mock_checks.call_args[1]["fail_fast"] is False
+
+    @patch(_PATCH_CHECKS, return_value=_passing_audit())
+    @patch(_PATCH_DISCOVER)
+    def test_block_mode_passes_fail_fast_true(self, mock_discover, mock_checks):
+        policy = ApmPolicy(enforcement="block")
+        mock_discover.return_value = _make_fetch_result(
+            "found", policy=policy, enforcement="block"
+        )
+        ctx = _make_ctx()
+        run(ctx)
+
+        mock_checks.assert_called_once()
+        assert mock_checks.call_args[1]["fail_fast"] is True
+
+
+# =====================================================================
+# Test: project-wins warnings emitted for passed=True with details
+# =====================================================================
+
+
+class TestProjectWinsWarnings:
+    """Checks with passed=True but non-empty details emit warn-severity
+    policy_violation (e.g. project-wins version-pin mismatches)."""
+
+    @patch(_PATCH_CHECKS)
+    @patch(_PATCH_DISCOVER)
+    def test_passed_with_details_emits_warning(self, mock_discover, mock_checks):
+        policy = ApmPolicy(enforcement="warn")
+        mock_discover.return_value = _make_fetch_result(
+            "found", policy=policy, enforcement="warn"
+        )
+        # Simulate a project-wins check: passed=True, but with warning details
+        audit = CIAuditResult(checks=[
+            CheckResult(
+                name="required-package-version",
+                passed=True,
+                message="Required package versions match (warnings: 1)",
+                details=["acme/pkg: required 1.0.0, installed 1.1.0 (project-wins)"],
+            ),
+        ])
+        mock_checks.return_value = audit
+
+        mock_logger = MagicMock()
+        ctx = _make_ctx(logger=mock_logger)
+        run(ctx)
+
+        # policy_violation should be called with severity="warn" for the
+        # passed-but-has-details check
+        mock_logger.policy_violation.assert_called_once()
+        call_kwargs = mock_logger.policy_violation.call_args[1]
+        assert call_kwargs["severity"] == "warn"
+
+    @patch(_PATCH_CHECKS)
+    @patch(_PATCH_DISCOVER)
+    def test_passed_without_details_no_warning(self, mock_discover, mock_checks):
+        policy = ApmPolicy(enforcement="warn")
+        mock_discover.return_value = _make_fetch_result(
+            "found", policy=policy, enforcement="warn"
+        )
+        audit = CIAuditResult(checks=[
+            CheckResult(
+                name="dependency-allowlist",
+                passed=True,
+                message="No dependency allow list configured",
+            ),
+        ])
+        mock_checks.return_value = audit
+
+        mock_logger = MagicMock()
+        ctx = _make_ctx(logger=mock_logger)
+        run(ctx)
+
+        # No policy_violation should be called for passed checks without details
+        mock_logger.policy_violation.assert_not_called()
+
+
+# =====================================================================
+# Test: direct MCP deps wired into policy gate (Fix #1)
+# =====================================================================
+
+
+class TestDirectMCPDepsWired:
+    """policy_gate reads ctx.direct_mcp_deps and passes to checks."""
+
+    @patch(_PATCH_CHECKS, return_value=_passing_audit())
+    @patch(_PATCH_DISCOVER)
+    def test_direct_mcp_deps_passed_to_checks(self, mock_discover, mock_checks):
+        policy = ApmPolicy(enforcement="block")
+        mock_discover.return_value = _make_fetch_result(
+            "found", policy=policy, enforcement="block"
+        )
+        fake_mcp = [MagicMock(name="evil-server")]
+        ctx = _make_ctx()
+        ctx.direct_mcp_deps = fake_mcp
+
+        run(ctx)
+
+        mock_checks.assert_called_once()
+        assert mock_checks.call_args[1]["mcp_deps"] is fake_mcp
+
+    @patch(_PATCH_CHECKS, return_value=_passing_audit())
+    @patch(_PATCH_DISCOVER)
+    def test_no_direct_mcp_deps_passes_none(self, mock_discover, mock_checks):
+        policy = ApmPolicy(enforcement="block")
+        mock_discover.return_value = _make_fetch_result(
+            "found", policy=policy, enforcement="block"
+        )
+        ctx = _make_ctx()
+        # direct_mcp_deps not set -> getattr returns None
+
+        run(ctx)
+
+        mock_checks.assert_called_once()
+        assert mock_checks.call_args[1]["mcp_deps"] is None

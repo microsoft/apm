@@ -523,11 +523,15 @@ Install-time enforcement does **NOT** emit JSON or SARIF. The output is human-re
 
 APM auto-discovers policy from `<org>/.github/apm-policy.yml` for any GitHub remote — both `github.com` and GitHub Enterprise (GHE). Repositories on non-GitHub remotes (ADO, GitLab, plain git) currently fall through with no policy applied; this is tracked as a follow-up. Repositories with no detectable git remote (unpacked bundles, temp directories) emit an explicit "could not determine org" line and skip discovery.
 
-The `--policy <override>` flag is **audit-only today** — it works on `apm audit --ci` but is not yet wired through `apm install`/`apm update`. Use the escape hatches in section 8 if you need to bypass install-time enforcement for a single invocation.
+The `--policy <override>` flag is **audit-only today** — it works on `apm audit --ci` but is not yet wired through `apm install`. Use the escape hatches in section 8 if you need to bypass install-time enforcement for a single invocation.
 
 ### 3. Inheritance and composition
 
-Policy resolves through the same three-level chain documented in [Inheritance](#inheritance) above: enterprise hub -> org -> repo override. The merge is **tighten-only**: a child can narrow allow lists, add deny entries, and escalate enforcement, but never relax a parent constraint. The full merge rule table is in [Tighten-only merge rules](#tighten-only-merge-rules); install-time enforcement uses the same resolved effective policy as `apm audit --ci`.
+Policy resolves through the chain documented in [Inheritance](#inheritance) above: enterprise hub -> org -> repo override. The merge is **tighten-only**: a child can narrow allow lists, add deny entries, and escalate enforcement, but never relax a parent constraint. The full merge rule table is in [Tighten-only merge rules](#tighten-only-merge-rules).
+
+:::caution[Install-time chain depth]
+Install-time enforcement currently resolves a **single parent** via `extends:`. `apm audit --ci` resolves the full multi-level chain (grandparent and beyond). Install-time multi-level resolution is tracked in [#831](https://github.com/microsoft/apm/issues/831).
+:::
 
 ### 4. What gets enforced
 
@@ -546,7 +550,7 @@ Install-time enforcement runs the same rule families documented in [Check refere
 | `apm install` | NEW — runs the policy gate after dependency resolution and before integration / target writes. Blocks before any files are deployed. |
 | `apm install <pkg>` | NEW — snapshots `apm.yml`, runs the gate, rolls back the manifest on a block. |
 | `apm install --mcp` | NEW — dedicated MCP preflight on the `--mcp` branch. |
-| `apm update` | NEW — same gate as `apm install`. |
+| `apm deps update` | NEW — runs the install pipeline, so the same gate applies. |
 | `apm install --dry-run` | NEW — read-only preflight; renders "would be blocked by policy" verdicts without mutating anything. |
 | `apm audit --ci` | Existing — runs the same checks against the on-disk manifest + lockfile. |
 
@@ -684,7 +688,7 @@ $ echo $?
 
 | Hatch | Scope |
 |-------|-------|
-| `--no-policy` flag | Available on `apm install`, `apm install <pkg>`, `apm install --mcp`, and `apm update`. Skips discovery and enforcement for one invocation; emits a loud warning. |
+| `--no-policy` flag | Available on `apm install`, `apm install <pkg>`, and `apm install --mcp`. Skips discovery and enforcement for one invocation; emits a loud warning. Not currently exposed on `apm deps update`. |
 | `APM_POLICY_DISABLE=1` env var | Equivalent to `--no-policy`. Same loud warning. |
 
 `APM_POLICY` is reserved for a future override env var and is **not** equivalent to `APM_POLICY_DISABLE`.

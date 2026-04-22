@@ -116,6 +116,7 @@ class InstallContext:
     policy_fetch: Any = None  # Optional[PolicyFetchResult] from discovery
     policy_enforcement_active: bool = False
     no_policy: bool = False  # W2-escape-hatch will wire --no-policy here
+    direct_mcp_deps: Optional[List[Any]] = None  # Direct MCP deps from apm.yml for policy gate
 
     # ------------------------------------------------------------------
     # Post-deps local content tracking (F3)

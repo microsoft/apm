@@ -141,14 +141,17 @@ follow-up. Repositories with no detectable git remote (unpacked bundles, temp
 dirs) emit an explicit "could not determine org" line and skip discovery.
 
 The `--policy <override>` flag is **audit-only today** — it works on
-`apm audit --ci` but is not yet wired through `apm install` / `apm update`.
+`apm audit --ci` but is not yet wired through `apm install`.
 
 ### 3. Inheritance and composition
 
-Policy resolves through the same three-level chain: enterprise hub -> org ->
-repo override. The merge is **tighten-only** (see "Inheritance rules" above).
-Install-time enforcement uses the same resolved effective policy as
-`apm audit --ci`.
+Policy resolves through the chain: enterprise hub -> org -> repo override.
+The merge is **tighten-only** (see "Inheritance rules" above).
+
+**Install-time chain depth:** install-time enforcement currently resolves a
+**single parent** via `extends:`. `apm audit --ci` resolves the full
+multi-level chain. Multi-level resolution at install time is tracked in
+[#831](https://github.com/microsoft/apm/issues/831).
 
 ### 4. What gets enforced
 
@@ -165,7 +168,7 @@ Install-time enforcement uses the same resolved effective policy as
 | `apm install` | NEW — gate runs after resolve, before integration / target writes |
 | `apm install <pkg>` | NEW — snapshot apm.yml, run gate, rollback on block |
 | `apm install --mcp` | NEW — dedicated MCP preflight |
-| `apm update` | NEW — same gate as `apm install` |
+| `apm deps update` | NEW — runs the install pipeline, so the same gate applies |
 | `apm install --dry-run` | NEW — read-only preflight; renders "would be blocked" |
 | `apm audit --ci` | Existing — same checks against on-disk manifest + lockfile |
 
@@ -265,7 +268,7 @@ fail the PR for the same policy violation.
 
 | Hatch | Scope |
 |-------|-------|
-| `--no-policy` | On `apm install`, `apm install <pkg>`, `apm install --mcp`, `apm update`. Skips discovery + enforcement; loud warning. |
+| `--no-policy` | On `apm install`, `apm install <pkg>`, `apm install --mcp`. Skips discovery + enforcement; loud warning. Not on `apm deps update`. |
 | `APM_POLICY_DISABLE=1` | Env var equivalent. Same loud warning. |
 
 `APM_POLICY` is reserved for a future override env var and is **not**

@@ -15,7 +15,6 @@ AFTER the targets phase when the effective target is known
 from __future__ import annotations
 
 import os
-import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -93,14 +92,17 @@ def run(ctx: "InstallContext") -> None:
         ctx.policy_enforcement_active = False
         return
 
-    # malformed -- fail-closed always (config bug)
+    # malformed -- fail-open with loud warning (CEO mandate: matches
+    # cache_miss_fetch_fail/garbage_response posture; fail-closed is a
+    # follow-up via #829 with an explicit schema knob).
     if outcome == "malformed":
         if logger:
             from apm_cli.core.command_logger import InstallLogger
             reason = InstallLogger._policy_reason_malformed(source)
-            from apm_cli.utils.console import _rich_error
-            _rich_error(reason, symbol="error")
-        sys.exit(1)
+            from apm_cli.utils.console import _rich_warning
+            _rich_warning(reason, symbol="warning")
+        ctx.policy_enforcement_active = False
+        return
 
     # cache_miss_fetch_fail / garbage_response -- loud warn, no enforce
     if outcome in ("cache_miss_fetch_fail", "garbage_response"):
@@ -166,7 +168,7 @@ def run(ctx: "InstallContext") -> None:
     # ------------------------------------------------------------------
     from apm_cli.policy.policy_checks import run_dependency_policy_checks
 
-    mcp_deps = getattr(ctx, "mcp_deps_to_install", None)
+    mcp_deps = getattr(ctx, "direct_mcp_deps", None)
 
     audit_result = run_dependency_policy_checks(
         ctx.deps_to_install,
@@ -175,6 +177,7 @@ def run(ctx: "InstallContext") -> None:
         mcp_deps=mcp_deps,
         effective_target=None,  # target-aware checks after targets phase
         fetch_outcome=fetch_result.outcome,
+        fail_fast=(enforcement == "block"),
     )
 
     # ------------------------------------------------------------------
@@ -182,21 +185,33 @@ def run(ctx: "InstallContext") -> None:
     # ------------------------------------------------------------------
     has_blocking = False
     for check in audit_result.checks:
-        if check.passed:
-            continue
-        severity = "block" if enforcement == "block" else "warn"
-        reason = check.message
-        # Include detail lines for richer diagnostics
-        if check.details:
-            reason = f"{check.message}: {', '.join(check.details[:5])}"
-        if logger:
-            logger.policy_violation(
-                dep_ref=check.name,
-                reason=reason,
-                severity=severity,
-            )
-        if severity == "block":
-            has_blocking = True
+        if not check.passed:
+            severity = "block" if enforcement == "block" else "warn"
+            reason = check.message
+            # Include detail lines for richer diagnostics
+            if check.details:
+                reason = f"{check.message}: {', '.join(check.details[:5])}"
+            if logger:
+                logger.policy_violation(
+                    dep_ref=check.name,
+                    reason=reason,
+                    severity=severity,
+                )
+            if severity == "block":
+                has_blocking = True
+        elif check.details:
+            # project-wins version-pin mismatches are passed=True with
+            # warning details (policy_checks.py:228-235).  Emit them so
+            # warn-mode surfaces all diagnostics.
+            if logger:
+                reason = check.message
+                if check.details:
+                    reason = f"{check.message}: {', '.join(check.details[:5])}"
+                logger.policy_violation(
+                    dep_ref=check.name,
+                    reason=reason,
+                    severity="warn",
+                )
 
     if has_blocking:
         raise PolicyViolationError(

@@ -1485,15 +1485,16 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                 logger.verbose_detail(f"Collected {len(transitive_mcp)} transitive MCP dependency(ies)")
                 mcp_deps = MCPIntegrator.deduplicate(mcp_deps + transitive_mcp)
 
-        # ── S1 fix (#827-C2): enforce policy on transitive MCP ──────
-        # The pipeline gate phase (policy_gate.py) already checked direct
-        # APM deps but could not see transitive MCP servers -- those are
-        # only known after collect_transitive() above.  Run a second
-        # preflight against the *merged* MCP set BEFORE MCPIntegrator
-        # writes runtime configs.  On PolicyBlockError we abort the MCP
-        # write but leave already-installed APM packages in place (they
-        # were approved by the gate phase).
-        if should_install_mcp and mcp_deps and transitive_mcp:
+        # -- S1/S2 fix (#827-C2/C3): enforce policy on ALL MCP deps ----
+        # The pipeline gate phase (policy_gate.py) checks direct APM deps
+        # and direct MCP deps from apm.yml.  However, transitive MCP
+        # servers (discovered via collect_transitive above) are only known
+        # after APM packages are installed.  Run a second preflight
+        # against the *merged* MCP set (direct + transitive) BEFORE
+        # MCPIntegrator writes runtime configs.  On PolicyBlockError we
+        # abort the MCP write but leave already-installed APM packages
+        # in place (they were approved by the gate phase).
+        if should_install_mcp and mcp_deps:
             from apm_cli.policy.install_preflight import (
                 PolicyBlockError as _TransitivePBE,
                 run_policy_preflight as _transitive_preflight,
@@ -1509,7 +1510,7 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                 )
             except _TransitivePBE:
                 logger.error(
-                    "Transitive MCP server(s) blocked by org policy. "
+                    "MCP server(s) blocked by org policy. "
                     "APM packages remain installed; MCP configs were NOT written."
                 )
                 logger.render_summary()
