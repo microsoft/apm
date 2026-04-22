@@ -1,0 +1,11 @@
+# Project in an unpacked bundle (no .git/ directory).
+# Tests rubber-duck I5 outcome #8: "Could not determine org from git remote;
+# policy auto-discovery skipped".
+# This directory intentionally has NO .git/ subdirectory.
+name: unpacked-bundle-project
+version: "1.0.0"
+description: Project extracted from a tarball with no git context
+
+dependencies:
+  apm:
+    - DevExpGbb/some-package

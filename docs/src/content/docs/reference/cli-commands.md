@@ -108,6 +108,8 @@ apm install [PACKAGES...] [OPTIONS]
 - `--ssh` - Force SSH for shorthand (`owner/repo`) dependencies. Mutually exclusive with `--https`. Ignored for URLs with an explicit scheme.
 - `--https` - Force HTTPS for shorthand dependencies. Mutually exclusive with `--ssh`. Default unless `git config url.<base>.insteadOf` rewrites the candidate to SSH.
 - `--allow-protocol-fallback` - Restore the legacy permissive cross-protocol fallback chain (HTTPS-then-SSH or vice-versa). Strict-by-default otherwise. Each retry emits a `[!]` warning naming both protocols. When the dependency URL carries a custom port, APM also emits a one-shot `[!]` warning before the first clone attempt noting that the same port will be reused across schemes (wrong on servers like Bitbucket Datacenter that serve SSH and HTTPS on different ports) -- to avoid the mismatch, omit this flag and pin the dependency with an explicit `ssh://` or `https://` URL.
+- `--no-policy` -- Skip org policy enforcement for this invocation. Loudly logged. Does NOT bypass `apm audit --ci`. Available on `apm install`, `apm install <pkg>`, and `apm install --mcp <name>`.
+  - Equivalent env var: `APM_POLICY_DISABLE=1` (applies to the entire shell session). Note: `apm deps update` runs the install pipeline and is gated by policy but does not currently expose a `--no-policy` flag -- use `APM_POLICY_DISABLE=1` as the only escape hatch there.
 
 **Transport env vars:**
 
@@ -422,9 +424,10 @@ apm audit [PACKAGE] [OPTIONS]
 - `-v, --verbose` - Show info-level findings and file details
 - `-f, --format [text|json|sarif|markdown]` - Output format: `text` (default), `json` (machine-readable), `sarif` (GitHub Code Scanning), `markdown` (step summaries). Cannot be combined with `--strip` or `--dry-run`.
 - `-o, --output PATH` - Write report to file. Auto-detects format from extension (`.sarif`, `.sarif.json` → SARIF; `.json` → JSON; `.md` → Markdown) when `--format` is not specified.
-- `--ci` - Run lockfile consistency checks for CI/CD gates. Exit 0 if clean, 1 if violations found.
-- `--policy SOURCE` - *(Experimental)* Policy source: `org` (auto-discover from org), file path, or URL. Used with `--ci` to run policy checks on top of baseline.
-- `--no-cache` - Force fresh policy fetch (skip cache). Only relevant with `--policy`.
+- `--ci` - Run lockfile consistency checks for CI/CD gates. Exit 0 if clean, 1 if violations found. Auto-discovers org policy from the org `.github` repo unless `--no-policy` is set.
+- `--policy SOURCE` - *(Experimental)* Override discovery: `org` (auto-discover from org), file path, or URL. Without this flag, `--ci` auto-discovers.
+- `--no-policy` - Skip policy discovery and enforcement entirely. Equivalent to `APM_POLICY_DISABLE=1`.
+- `--no-cache` - Force fresh policy fetch (skip cache). Only relevant with policy discovery active.
 - `--no-fail-fast` - Run all checks even after a failure. By default, CI mode stops at the first failing check to save time.
 
 **Examples:**
@@ -459,17 +462,20 @@ apm audit -o report.sarif
 # JSON report to file
 apm audit -f json -o results.json
 
-# CI lockfile consistency gate
+# CI lockfile consistency gate (auto-discovers org policy)
 apm audit --ci
 
-# CI gate with org policy checks
+# CI gate skipping policy discovery (baseline checks only)
+apm audit --ci --no-policy
+
+# CI gate with explicit policy source (overrides auto-discovery)
 apm audit --ci --policy org
 
 # CI gate with local policy file
 apm audit --ci --policy ./apm-policy.yml
 
 # Force fresh policy fetch
-apm audit --ci --policy org --no-cache
+apm audit --ci --no-cache
 
 # Run all checks (no fail-fast) for full diagnostic report
 apm audit --ci --policy org --no-fail-fast
@@ -492,6 +498,51 @@ apm audit --ci --policy org --no-fail-fast
 - **Critical**: Tag characters (U+E0001–E007F), bidi overrides (U+202A–E, U+2066–9), variation selectors 17–256 (U+E0100–E01EF, Glassworm attack vector)
 - **Warning**: Zero-width spaces/joiners (U+200B–D), variation selectors 1–15 (U+FE00–FE0E), bidi marks (U+200E–F, U+061C), invisible operators (U+2061–4), annotation markers (U+FFF9–B), deprecated formatting (U+206A–F), soft hyphen (U+00AD), mid-file BOM
 - **Info**: Non-breaking spaces, unusual whitespace, emoji presentation selector (U+FE0F). ZWJ between emoji characters is context-downgraded to info.
+
+### `apm policy` - Inspect organization policy
+
+Diagnostic commands for the organization-level `apm-policy.yml` resolved by APM at install / audit time. See [Policy Reference](../../enterprise/policy-reference/) for the full schema and enforcement model.
+
+#### `apm policy status` - Show resolved policy state
+
+Show what policy APM resolved for the current project: discovery outcome, source, enforcement level, cache age, `extends:` chain, and effective rule counts. Trust-but-verify diagnostic for admins and CI gates.
+
+```bash
+apm policy status [OPTIONS]
+```
+
+**Options:**
+- `--policy-source SOURCE` - Override discovery: `org`, file path, or URL. Same shape as `apm install --policy`.
+- `--no-cache` - Force fresh fetch (skip cache).
+- `--json` / `-o json` - Machine-readable output for SIEM ingestion or CI inspection.
+- `--check` - Exit non-zero (1) when no usable policy is found. Default is always 0; use `--check` for CI pre-checks.
+
+**Exit codes:**
+
+| Mode | `outcome=found` | Anything else (absent, error, disabled, ...) |
+|------|-----------------|-----------------------------------------------|
+| default | 0 | 0 |
+| `--check` | 0 | 1 |
+
+The default is exit-0 so the command is safe for human and SIEM use; `--check` opts into a CI-friendly contract similar to `npm audit` / `pip check`. To gate on policy compliance (rule violations) instead of resolvability, use `apm audit --ci`.
+
+**Examples:**
+```bash
+# Show resolved org policy state
+apm policy status
+
+# Force fresh fetch (bypass cache)
+apm policy status --no-cache
+
+# Machine-readable JSON for SIEM
+apm policy status --json
+
+# Inspect a specific policy without committing it
+apm policy status --policy-source ./draft-policy.yml
+
+# CI gate: fail the job if no usable policy is resolved
+apm policy status --check
+```
 
 ### `apm pack` - Create a portable bundle
 
@@ -906,6 +957,8 @@ apm deps update [PACKAGES...] [OPTIONS]
 - `-g, --global` - Update user-scope dependencies (`~/.apm/`)
 - `--target, -t` - Force deployment to specific target(s). Accepts comma-separated values (e.g., `-t claude,copilot`). Valid values: copilot, claude, cursor, opencode, vscode, agents, all
 - `--parallel-downloads` - Max concurrent downloads (default: 4)
+
+**Policy enforcement:** `apm deps update` runs the install pipeline and is therefore gated by org `apm-policy.yml`. There is no `--no-policy` flag on this command -- the only escape hatch is `APM_POLICY_DISABLE=1` for the shell session. See [Policy reference](../../enterprise/policy-reference/#install-time-enforcement).
 
 **Examples:**
 ```bash

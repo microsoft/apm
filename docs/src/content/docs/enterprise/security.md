@@ -266,6 +266,7 @@ For GitHub, a fine-grained PAT with read-only `Contents` permission on the repos
 | Typosquatting | Similar package names on registry | Dependencies are full git URLs |
 | Build-time injection | Malicious build steps execute | No build step — files are copied |
 | Hidden content injection | Not applicable (binary packages) | Pre-deploy scan blocks critical hidden Unicode; `apm audit` for on-demand checks |
+| Compromised policy intermediary | Not applicable (no policy layer) | A malicious mirror or MITM returns valid YAML with relaxed rules. Mitigated by [`policy.hash` consumer-side pin](../policy-reference/#96-hash-pin-policyhash-consumer-side-verification) which verifies raw bytes against a project-pinned digest. |
 
 ## Frequently asked questions
 

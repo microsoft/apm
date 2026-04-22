@@ -1,0 +1,6 @@
+# Fixture 10b: Extends cycle -- B extends A (rubber-duck I10)
+# Sibling: apm-policy-extends-cycle.yml (extends to this)
+name: cycle-policy-b
+version: "1.0.0"
+extends: cycle-policy-a
+enforcement: block

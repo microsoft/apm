@@ -28,6 +28,7 @@ from apm_cli.commands.marketplace import marketplace, search as marketplace_sear
 from apm_cli.commands.mcp import mcp
 from apm_cli.commands.outdated import outdated as outdated_cmd
 from apm_cli.commands.pack import pack_cmd, unpack_cmd
+from apm_cli.commands.policy import policy
 from apm_cli.commands.prune import prune
 from apm_cli.commands.run import preview, run
 from apm_cli.commands.runtime import runtime
@@ -82,6 +83,7 @@ cli.add_command(list_cmd, name="list")
 cli.add_command(config)
 cli.add_command(runtime)
 cli.add_command(mcp)
+cli.add_command(policy)
 cli.add_command(outdated_cmd, name="outdated")
 cli.add_command(marketplace)
 cli.add_command(marketplace_search, name="search")

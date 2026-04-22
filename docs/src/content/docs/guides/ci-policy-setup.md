@@ -86,6 +86,10 @@ This catches lockfile/manifest drift, missing files, and hidden Unicode — with
 
 Add `--policy org` to run the full 16 policy checks on top of baseline:
 
+:::note
+Since this release, `apm audit --ci` auto-discovers the org policy. `--policy org` remains valid as an explicit override; use `--no-policy` to skip discovery.
+:::
+
 ```yaml
       - name: Run policy checks
         run: apm audit --ci --policy org --no-cache -f sarif -o policy-report.sarif

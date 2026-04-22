@@ -59,6 +59,7 @@ from apm_cli.install.phases.local_content import (
     _has_local_apm_content,
     _project_has_root_primitives,
 )
+from apm_cli.install.errors import PolicyViolationError
 from apm_cli.install.insecure_policy import (
     _InsecureDependencyInfo,
     _allow_insecure_host_callback,
@@ -85,6 +86,64 @@ from ._helpers import (
     _rich_blank_line,
     _update_gitignore_for_apm_modules,
 )
+
+
+# ---------------------------------------------------------------------------
+# Manifest snapshot + rollback (W2-pkg-rollback, #827)
+# ---------------------------------------------------------------------------
+# When the user runs ``apm install <pkg>``, ``_validate_and_add_packages_to_apm_yml``
+# mutates ``apm.yml`` BEFORE the install pipeline runs.  If the pipeline fails
+# (policy block, download error, etc.) the failed package would stay in
+# ``apm.yml`` forever.  These helpers snapshot the raw bytes before mutation
+# and atomically restore on failure.
+# ---------------------------------------------------------------------------
+
+def _restore_manifest_from_snapshot(
+    manifest_path: "Path",
+    snapshot: bytes,
+) -> None:
+    """Atomically restore ``apm.yml`` from a raw-bytes snapshot.
+
+    Uses temp-file + ``os.replace`` to avoid torn writes, mirroring the
+    W1 cache atomic-write pattern (``discovery.py``).
+    """
+    import os
+    import tempfile
+
+    fd, tmp_name = tempfile.mkstemp(
+        prefix="apm-restore-", dir=str(manifest_path.parent),
+    )
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(snapshot)
+        os.replace(tmp_name, str(manifest_path))
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def _maybe_rollback_manifest(
+    manifest_path: "Path",
+    snapshot: "bytes | None",
+    logger: "InstallLogger",
+) -> None:
+    """Restore ``apm.yml`` from *snapshot* if one was captured, then log.
+
+    No-op when *snapshot* is ``None`` (i.e. the command was not
+    ``apm install <pkg>`` or the manifest did not exist before mutation).
+    """
+    if snapshot is None:
+        return
+    try:
+        _restore_manifest_from_snapshot(manifest_path, snapshot)
+        logger.progress("apm.yml restored to its previous state.")
+    except Exception:
+        # Best-effort: if the restore itself fails, warn but don't mask
+        # the original exception that triggered the rollback.
+        logger.warning("Failed to restore apm.yml to its previous state.")
 
 # CRITICAL: Shadow Python builtins that share names with Click commands
 set = builtins.set
@@ -990,8 +1049,15 @@ def _run_mcp_install(
         "or a stdio command (self-defined entries)."
     ),
 )
+@click.option(
+    "--no-policy",
+    "no_policy",
+    is_flag=True,
+    default=False,
+    help="Skip org policy enforcement for this invocation. Loudly logged. Does NOT bypass apm audit --ci.",
+)
 @click.pass_context
-def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, allow_insecure, allow_insecure_hosts, global_, use_ssh, use_https, allow_protocol_fallback, mcp_name, transport, url, env_pairs, header_pairs, mcp_version, registry_url):
+def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, allow_insecure, allow_insecure_hosts, global_, use_ssh, use_https, allow_protocol_fallback, mcp_name, transport, url, env_pairs, header_pairs, mcp_version, registry_url, no_policy):
     """Install APM and MCP dependencies from apm.yml (like npm install).
 
     Detects AI runtimes from your apm.yml scripts and installs MCP servers for
@@ -1027,6 +1093,14 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         # scope initialisation below throws).
         is_partial = bool(packages)
         logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=is_partial)
+
+        # W2-pkg-rollback (#827): snapshot bytes captured BEFORE
+        # _validate_and_add_packages_to_apm_yml mutates apm.yml.
+        # Initialised to None here so exception handlers always have it.
+        _manifest_snapshot: "bytes | None" = None
+        # manifest_path is set later (scope-dependent); keep a stable ref
+        # so exception handlers can use it without NameError.
+        _snapshot_manifest_path: "Path | None" = None
 
         # ----------------------------------------------------------------
         # --mcp branch (W3): when --mcp is set, route to the dedicated
@@ -1088,6 +1162,43 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
             mcp_scope = InstallScope.PROJECT
             mcp_manifest_path = get_manifest_path(mcp_scope)
             mcp_apm_dir = get_apm_dir(mcp_scope)
+            # -- W2-mcp-preflight: policy enforcement before MCP install --
+            # Build a lightweight MCPDependency for policy evaluation.
+            # This mirrors _build_mcp_entry routing but we only need the
+            # fields that policy checks inspect (name, transport, registry).
+            from ..models.dependency.mcp import MCPDependency as _MCPDep
+            from ..policy.install_preflight import (
+                PolicyBlockError,
+                run_policy_preflight,
+            )
+
+            _is_self_defined = bool(url or command_argv)
+            _preflight_transport = transport
+            if _preflight_transport is None:
+                if command_argv:
+                    _preflight_transport = "stdio"
+                elif url:
+                    _preflight_transport = "http"
+            _preflight_dep = _MCPDep(
+                name=mcp_name,
+                transport=_preflight_transport,
+                registry=False if _is_self_defined else None,
+                url=url,
+            )
+
+            try:
+                _pf_result, _pf_active = run_policy_preflight(
+                    project_root=Path.cwd(),
+                    mcp_deps=[_preflight_dep],
+                    no_policy=no_policy,
+                    logger=logger,
+                    dry_run=dry_run,
+                )
+            except PolicyBlockError:
+                # Diagnostics already emitted by the helper + logger.
+                logger.render_summary()
+                sys.exit(1)
+
             if dry_run:
                 # C1: validate eagerly so dry-run rejects what real install would.
                 _validate_mcp_dry_run_entry(
@@ -1186,6 +1297,15 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
 
         # If packages are specified, validate and add them to apm.yml first
         if packages:
+            # ── W2-pkg-rollback (#827): snapshot raw bytes BEFORE mutation ──
+            # _validate_and_add_packages_to_apm_yml does a YAML round-trip
+            # (load + dump) which may alter whitespace, key ordering, or
+            # trailing newlines.  We snapshot the raw bytes so rollback is
+            # byte-exact -- no YAML drift.
+            if manifest_path.exists():
+                _manifest_snapshot = manifest_path.read_bytes()
+                _snapshot_manifest_path = manifest_path
+
             validated_packages, outcome = _validate_and_add_packages_to_apm_yml(
                 packages, dry_run, dev=dev, logger=logger,
                 manifest_path=manifest_path, auth_resolver=auth_resolver,
@@ -1245,6 +1365,24 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
 
         # Show what will be installed if dry run
         if dry_run:
+            # -- W2-dry-run (#827): policy preflight in preview mode --
+            # Runs discovery + checks against direct manifest deps (not
+            # resolved/transitive -- dry-run does not run the resolver).
+            # Block-severity violations render as "Would be blocked by
+            # policy" without raising.  Documented limitation: transitive
+            # deps are NOT evaluated since the resolver does not run.
+            from apm_cli.policy.install_preflight import run_policy_preflight as _dr_preflight
+
+            _dr_apm_deps = builtins.list(apm_deps) + builtins.list(dev_apm_deps)
+            _dr_preflight(
+                project_root=project_root,
+                apm_deps=_dr_apm_deps,
+                mcp_deps=mcp_deps if should_install_mcp else None,
+                no_policy=no_policy,
+                logger=logger,
+                dry_run=True,
+            )
+
             from apm_cli.install.presentation.dry_run import render_and_exit
 
             render_and_exit(
@@ -1311,15 +1449,20 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                     ),
                     protocol_pref=protocol_pref,
                     allow_protocol_fallback=allow_protocol_fallback,
+                    no_policy=no_policy,
                 )
                 apm_count = install_result.installed_count
                 prompt_count = install_result.prompts_integrated
                 agent_count = install_result.agents_integrated
                 apm_diagnostics = install_result.diagnostics
             except InsecureDependencyPolicyError:
+                _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
                 sys.exit(1)
             except Exception as e:
-                logger.error(f"Failed to install APM dependencies: {e}")
+                _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
+                # #832: surface PolicyViolationError verbatim (no double-nesting).
+                msg = str(e) if isinstance(e, PolicyViolationError) else f"Failed to install APM dependencies: {e}"
+                logger.error(msg)
                 if not verbose:
                     logger.progress("Run with --verbose for detailed diagnostics")
                 sys.exit(1)
@@ -1333,6 +1476,7 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
             clear_apm_yml_cache()
 
         # Collect transitive MCP dependencies from resolved APM packages
+        transitive_mcp = []
         apm_modules_path = get_modules_dir(scope)
         if should_install_mcp and apm_modules_path.exists():
             lock_path = get_lockfile_path(apm_dir)
@@ -1343,6 +1487,37 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
             if transitive_mcp:
                 logger.verbose_detail(f"Collected {len(transitive_mcp)} transitive MCP dependency(ies)")
                 mcp_deps = MCPIntegrator.deduplicate(mcp_deps + transitive_mcp)
+
+        # -- S1/S2 fix (#827-C2/C3): enforce policy on ALL MCP deps ----
+        # The pipeline gate phase (policy_gate.py) checks direct APM deps
+        # and direct MCP deps from apm.yml.  However, transitive MCP
+        # servers (discovered via collect_transitive above) are only known
+        # after APM packages are installed.  Run a second preflight
+        # against the *merged* MCP set (direct + transitive) BEFORE
+        # MCPIntegrator writes runtime configs.  On PolicyBlockError we
+        # abort the MCP write but leave already-installed APM packages
+        # in place (they were approved by the gate phase).
+        if should_install_mcp and mcp_deps:
+            from apm_cli.policy.install_preflight import (
+                PolicyBlockError as _TransitivePBE,
+                run_policy_preflight as _transitive_preflight,
+            )
+
+            try:
+                _transitive_preflight(
+                    project_root=project_root,
+                    mcp_deps=mcp_deps,
+                    no_policy=no_policy,
+                    logger=logger,
+                    dry_run=False,
+                )
+            except _TransitivePBE:
+                logger.error(
+                    "MCP server(s) blocked by org policy. "
+                    "APM packages remain installed; MCP configs were NOT written."
+                )
+                logger.render_summary()
+                sys.exit(1)
 
         # Continue with MCP installation (existing logic)
         mcp_count = 0
@@ -1407,12 +1582,14 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
             sys.exit(1)
 
     except InsecureDependencyPolicyError:
+        _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
         sys.exit(1)
     except click.UsageError:
         # Conflict matrix / argv parser raises UsageError -- let Click
         # render with exit code 2 and the standard "Usage: ..." prefix.
         raise
     except Exception as e:
+        _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
         logger.error(f"Error installing dependencies: {e}")
         if not verbose:
             logger.progress("Run with --verbose for detailed diagnostics")
@@ -1463,6 +1640,7 @@ def _install_apm_dependencies(
     marketplace_provenance: dict = None,
     protocol_pref=None,
     allow_protocol_fallback: "Optional[bool]" = None,
+    no_policy: bool = False,
 ):
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.
@@ -1494,5 +1672,6 @@ def _install_apm_dependencies(
         marketplace_provenance=marketplace_provenance,
         protocol_pref=protocol_pref,
         allow_protocol_fallback=allow_protocol_fallback,
+        no_policy=no_policy,
     )
     return InstallService().run(request)

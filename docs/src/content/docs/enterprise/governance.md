@@ -133,6 +133,8 @@ For step-by-step setup including SARIF integration and GitHub Code Scanning, see
 
 `apm audit --ci --policy org` enforces organization-wide rules defined in `apm-policy.yml`. This adds 16 policy checks on top of the 6 baseline checks.
 
+Policy enforcement applies at both `apm install` (blocks before files are written) and `apm audit --ci` (CI gate). See [Install-time enforcement](../policy-reference/#install-time-enforcement).
+
 ### How it works
 
 1. **Define policy** — create `apm-policy.yml` in your org's `.github` repository.
