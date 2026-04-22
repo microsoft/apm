@@ -18,7 +18,7 @@ Experimental flags are ergonomic and UX toggles only. They MUST NOT gate securit
 
 ### `apm experimental list`
 
-List every registered flag with its current state. This is the default when no subcommand is given.
+List every registered flag with its current state. This is the default when no subcommand is given. Normal output is just the table; add `--verbose` to also print the config path and the introductory preamble.
 
 ```bash
 apm experimental list [OPTIONS]
@@ -27,7 +27,8 @@ apm experimental list [OPTIONS]
 **Options:**
 - `--enabled` - Show only flags that are currently enabled.
 - `--disabled` - Show only flags that are currently disabled.
-- `-v, --verbose` - Print the config file path used for overrides.
+- `--json` - Emit a JSON array to stdout with `name`, `enabled`, `default`, `description`, and `source` fields.
+- `-v, --verbose` - Print the config file path used for overrides and the introductory preamble.
 
 **Example:**
 
@@ -39,16 +40,45 @@ $ apm experimental list
   Tip: apm experimental enable <name>
 ```
 
+Verbose output keeps the same table and adds the extra context lines:
+
+```bash
+$ apm experimental list --verbose
+Config file: ~/.apm/config.json
+Experimental features let you try new behaviour before it becomes default.
+...table output...
+```
+
+Use `--json` for scripts and automation. It suppresses the table, colour, and intro preamble, and still honours `--enabled` / `--disabled` filters:
+
+```bash
+$ apm experimental list --json
+[
+  {
+    "name": "verbose_version",
+    "enabled": false,
+    "default": false,
+    "description": "Show Python version, platform, and install path in 'apm --version'.",
+    "source": "default"
+  }
+]
+```
+
+The JSON `name` field uses the canonical registry key. For command arguments, APM still accepts either kebab-case (`verbose-version`) or snake_case (`verbose_version`). For clean machine-readable stdout, use `--json` without `--verbose`.
+
 ### `apm experimental enable`
 
 Enable a flag. The override is persisted immediately.
 
 ```bash
-apm experimental enable NAME
+apm experimental enable NAME [OPTIONS]
 ```
 
 **Arguments:**
 - `NAME` - Flag name. Accepted in either kebab-case (`verbose-version`) or snake_case (`verbose_version`).
+
+**Options:**
+- `-v, --verbose` - Print the config file path used for overrides.
 
 **Example:**
 
@@ -72,8 +102,11 @@ Run 'apm experimental list' to see all available features.
 Disable a flag. If the flag was not enabled, this is a no-op.
 
 ```bash
-apm experimental disable NAME
+apm experimental disable NAME [OPTIONS]
 ```
+
+**Options:**
+- `-v, --verbose` - Print the config file path used for overrides.
 
 **Example:**
 
@@ -84,7 +117,7 @@ $ apm experimental disable verbose-version
 
 ### `apm experimental reset`
 
-Remove overrides and restore default state. With no argument, all overrides are cleared; a confirmation prompt lists exactly what will change.
+Remove overrides and restore default state. With no argument, all overrides are cleared; a confirmation prompt lists exactly what will change. Bulk reset also removes malformed overrides for registered flags, such as a string value where a boolean is expected.
 
 ```bash
 apm experimental reset [NAME] [OPTIONS]
@@ -95,6 +128,7 @@ apm experimental reset [NAME] [OPTIONS]
 
 **Options:**
 - `-y, --yes` - Skip the confirmation prompt (bulk reset only).
+- `-v, --verbose` - Print the config file path used for overrides.
 
 **Example:**
 
@@ -143,7 +177,7 @@ New flags are proposed via [CONTRIBUTING.md](https://github.com/microsoft/apm/bl
 
 Overrides are written to `~/.apm/config.json` under the `experimental` key and persist across CLI invocations. They are global to the user account and do not vary per project or per shell session. The canonical way to clear overrides is `apm experimental reset`; editing the file by hand is supported but unnecessary.
 
-Pass `-v` / `--verbose` to any subcommand to print the config file path in use.
+Pass `-v` / `--verbose` to any subcommand after the subcommand name (for example `apm experimental list --verbose`) to print the config file path in use.
 
 When a flag's behaviour is considered stable, it graduates: the gated code becomes the default path and the flag is removed from the registry in a future release.
 
@@ -151,3 +185,4 @@ When a flag's behaviour is considered stable, it graduates: the gated code becom
 
 - **"Unknown experimental feature"** - the name is not in the registry. Run `apm experimental list` to see the current set. Suggestions printed below the error use fuzzy matching on registered names.
 - **Unknown keys in config** - a flag that was enabled on a previous APM version may have been removed or renamed. `apm experimental list` surfaces a note when stale keys are present; `apm experimental reset` clears them.
+- **Malformed values in config** - if a registered flag has a non-boolean override in `~/.apm/config.json`, `apm experimental reset --yes` removes the bad value and restores the default.

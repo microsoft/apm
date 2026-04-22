@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `apm experimental list --json` emits machine-readable flag state to stdout and honours `--enabled` / `--disabled` filters (#849)
+- `--verbose` / `-v` now works on every `apm experimental` subcommand, including `apm experimental list --verbose` (#849)
+
+### Changed
+
+- `apm experimental list` no longer prints its intro preamble by default; use `--verbose` to include it (#849)
+
+### Fixed
+
+- `apm experimental reset` now removes malformed overrides for registered boolean flags (for example string values) instead of reporting "Nothing to reset" while leaving the bad config behind (#849)
+
 ## [0.9.1] - 2026-04-22
 
 ### Added
