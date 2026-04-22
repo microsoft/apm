@@ -180,6 +180,105 @@ class TestDepsListCommand(_DepsCmdBase):
         assert result.exit_code == 0
         assert "2.3.1" in result.output
 
+    def test_list_insecure_filters_to_http_locked_deps(self):
+        """--insecure only shows installed packages locked to HTTP sources."""
+        with self._chdir_tmp() as tmp:
+            self._make_package(tmp, "safeorg", "saferepo")
+            self._make_package(tmp, "insecureorg", "insecurerepo")
+
+            secure_dep = MagicMock()
+            secure_dep.get_unique_key.return_value = "safeorg/saferepo"
+            secure_dep.is_insecure = False
+            secure_dep.resolved_by = None
+
+            insecure_dep = MagicMock()
+            insecure_dep.get_unique_key.return_value = "insecureorg/insecurerepo"
+            insecure_dep.is_insecure = True
+            insecure_dep.resolved_by = None
+
+            mock_lockfile = MagicMock()
+            mock_lockfile.dependencies = {
+                "safeorg/saferepo": secure_dep,
+                "insecureorg/insecurerepo": insecure_dep,
+            }
+
+            mock_lf_path = MagicMock()
+            mock_lf_path.exists.return_value = True
+
+            with (
+                patch("apm_cli.core.scope.get_apm_dir", return_value=tmp),
+                patch("apm_cli.deps.lockfile.LockFile.read", return_value=mock_lockfile),
+                patch("apm_cli.deps.lockfile.get_lockfile_path", return_value=mock_lf_path),
+                _force_rich_fallback(),
+            ):
+                result = self.runner.invoke(cli, ["deps", "list", "--insecure"])
+
+        assert result.exit_code == 0
+        assert "insecureorg/insecurerepo" in result.output
+        assert "safeorg/saferepo" not in result.output
+        assert "Origin" in result.output
+        assert "direct" in result.output
+
+    def test_list_insecure_shows_transitive_provenance(self):
+        """--insecure shows which parent introduced a transitive HTTP dep."""
+        with self._chdir_tmp() as tmp:
+            self._make_package(tmp, "childorg", "childrepo")
+
+            insecure_dep = MagicMock()
+            insecure_dep.get_unique_key.return_value = "childorg/childrepo"
+            insecure_dep.is_insecure = True
+            insecure_dep.resolved_by = "parentorg/parentrepo"
+
+            mock_lockfile = MagicMock()
+            mock_lockfile.dependencies = {
+                "childorg/childrepo": insecure_dep,
+            }
+
+            mock_lf_path = MagicMock()
+            mock_lf_path.exists.return_value = True
+
+            with (
+                patch("apm_cli.core.scope.get_apm_dir", return_value=tmp),
+                patch("apm_cli.deps.lockfile.LockFile.read", return_value=mock_lockfile),
+                patch("apm_cli.deps.lockfile.get_lockfile_path", return_value=mock_lf_path),
+                _force_rich_fallback(),
+            ):
+                result = self.runner.invoke(cli, ["deps", "list", "--insecure"])
+
+        assert result.exit_code == 0
+        assert "childorg/childrepo" in result.output
+        assert "Origin" in result.output
+        assert "via parentorg/pa" in result.output
+
+    def test_list_insecure_reports_clean_when_no_http_locked_deps(self):
+        """--insecure reports a clean result when no installed dep is insecure."""
+        with self._chdir_tmp() as tmp:
+            self._make_package(tmp, "safeorg", "saferepo")
+
+            secure_dep = MagicMock()
+            secure_dep.get_unique_key.return_value = "safeorg/saferepo"
+            secure_dep.is_insecure = False
+            secure_dep.resolved_by = None
+
+            mock_lockfile = MagicMock()
+            mock_lockfile.dependencies = {
+                "safeorg/saferepo": secure_dep,
+            }
+
+            mock_lf_path = MagicMock()
+            mock_lf_path.exists.return_value = True
+
+            with (
+                patch("apm_cli.core.scope.get_apm_dir", return_value=tmp),
+                patch("apm_cli.deps.lockfile.LockFile.read", return_value=mock_lockfile),
+                patch("apm_cli.deps.lockfile.get_lockfile_path", return_value=mock_lf_path),
+                _force_rich_fallback(),
+            ):
+                result = self.runner.invoke(cli, ["deps", "list", "--insecure"])
+
+        assert result.exit_code == 0
+        assert "No insecure APM dependencies installed" in result.output
+
 
 class TestDepsTreeCommand(_DepsCmdBase):
     """Tests for apm deps tree."""

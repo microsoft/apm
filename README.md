@@ -8,6 +8,11 @@ GitHub Copilot · Claude Code · Cursor · OpenCode · Codex
 
 **[Documentation](https://microsoft.github.io/apm/)** · **[Quick Start](https://microsoft.github.io/apm/getting-started/quick-start/)** · **[CLI Reference](https://microsoft.github.io/apm/reference/cli-commands/)**
 
+---
+
+> **Portable by manifest. Secure by default. Governed by policy.**
+> One file describes every agent's context; one command reproduces it everywhere; one policy controls what an org will allow.
+
 ## Why APM
 
 AI coding agents need context to be useful — standards, prompts, skills, plugins — but today every developer sets this up manually. Nothing is portable nor reproducible. There's no manifest for it.
@@ -39,16 +44,36 @@ git clone <org/repo> && cd <repo>
 apm install    # every agent is configured
 ```
 
-## Highlights
+## The three promises
 
-- **[One manifest for everything](https://microsoft.github.io/apm/reference/primitive-types/)** — instructions, skills, prompts, agents, hooks, plugins, and [MCP servers](https://microsoft.github.io/apm/guides/mcp-servers/) declared in `apm.yml` and deployed across every client on install
+### 1. Portable by manifest
+
+One `apm.yml` describes every primitive your agents need — instructions, skills, prompts, agents, hooks, plugins, MCP servers — and `apm install` reproduces the exact same setup across every client on every machine. `apm.lock.yaml` pins the resolved tree the way `package-lock.json` does for npm.
+
+- **[One manifest for everything](https://microsoft.github.io/apm/reference/primitive-types/)** — declared once, deployed across Copilot, Claude, Cursor, OpenCode, Codex
 - **[Install from anywhere](https://microsoft.github.io/apm/guides/dependencies/)** — GitHub, GitLab, Bitbucket, Azure DevOps, GitHub Enterprise, any git host
 - **[Transitive dependencies](https://microsoft.github.io/apm/guides/dependencies/)** — packages can depend on packages; APM resolves the full tree
-- **[Content security](https://microsoft.github.io/apm/enterprise/security/)** — `apm audit` scans for hidden Unicode; `apm install` blocks compromised packages before agents read them
-- **[Author plugins](https://microsoft.github.io/apm/guides/plugins/)** — build Copilot, Claude, and Cursor plugins with dependency management and security scanning, then export standard `plugin.json`
-- **[Marketplaces](https://microsoft.github.io/apm/guides/marketplaces/)** — install plugins from curated registries in one command; deployed across all targets, locked, scanned, and [governed by `apm-policy.yaml`](https://microsoft.github.io/apm/enterprise/security/)
+- **[Author plugins](https://microsoft.github.io/apm/guides/plugins/)** — build Copilot, Claude, and Cursor plugins with dependency management, then export standard `plugin.json`
+- **[Marketplaces](https://microsoft.github.io/apm/guides/marketplaces/)** — install plugins from curated registries in one command, deployed across all targets and locked
 - **[Pack & distribute](https://microsoft.github.io/apm/guides/pack-distribute/)** — `apm pack` bundles your configuration as a zipped package or a standalone plugin
 - **[CI/CD ready](https://github.com/microsoft/apm-action)** — GitHub Action for automated workflows
+
+### 2. Secure by default
+
+Agent context is executable in effect — a prompt is a program for an LLM. APM treats it that way. Every install scans for hidden Unicode that can hijack agent behavior; the lockfile pins integrity hashes; transitive MCP servers are gated by trust prompts.
+
+- **[Content security](https://microsoft.github.io/apm/enterprise/security/)** — `apm install` blocks compromised packages before agents read them; `apm audit` runs the same checks on demand
+- **[Lockfile integrity](https://microsoft.github.io/apm/enterprise/governance/)** — `apm.lock` records resolved sources and content hashes for full provenance
+- **[MCP trust boundaries](https://microsoft.github.io/apm/guides/mcp-servers/)** — transitive MCP servers require explicit consent
+
+### 3. Governed by policy
+
+`apm-policy.yml` lets a security team say *"these are the only sources, scopes, and primitives this org will allow"* and have every `apm install` enforce it — with tighten-only inheritance from enterprise to org to repo, a published bypass contract, and audit-mode CI gates.
+
+- **[Governance Guide](https://microsoft.github.io/apm/enterprise/governance-guide/)** — the canonical enterprise reference: enforcement points, bypass contract, air-gapped story, failure semantics, rollout playbook
+- **[Policy reference](https://microsoft.github.io/apm/enterprise/policy-reference/)** — every check, every field, every default
+- **[Adoption playbook](https://microsoft.github.io/apm/enterprise/adoption-playbook/)** — staged rollout from warn to block across hundreds of repos
+- **[GitHub rulesets integration](https://microsoft.github.io/apm/integrations/github-rulesets/)** — wire `apm audit --ci` into branch protection
 
 ## Get Started
 

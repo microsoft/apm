@@ -24,7 +24,6 @@ from ._helpers import (
     _validate_project_name,
 )
 
-
 @click.command(help="Initialize a new APM project")
 @click.argument("project_name", required=False)
 @click.option(
@@ -140,10 +139,10 @@ def init(ctx, project_name, yes, plugin, verbose):
             ]
         else:
             next_steps = [
-                "Install a runtime:       apm runtime setup copilot",
-                "Add APM dependencies:    apm install <owner>/<repo>",
-                "Compile agent context:   apm compile",
-                "Run your first workflow: apm run start",
+                "Install a skill:                apm install github/awesome-copilot/skills/documentation-writer",
+                "Install a marketplace plugin:   apm install frontend-web-dev@awesome-copilot",
+                "Install a versioned package:    apm install microsoft/apm-sample-package#v1.0.0",
+                "Author your own plugin:         apm pack --format plugin",
             ]
 
         try:
@@ -156,6 +155,26 @@ def init(ctx, project_name, yes, plugin, verbose):
             logger.progress("Next steps:")
             for step in next_steps:
                 click.echo(f"  * {step}")
+
+        # Footer with links
+        try:
+            console = _get_console()
+            if console:
+                console.print(
+                    "  Docs: https://microsoft.github.io/apm  |  "
+                    "Star: https://github.com/microsoft/apm",
+                    style="dim",
+                )
+            else:
+                click.echo(
+                    "  Docs: https://microsoft.github.io/apm  |  "
+                    "Star: https://github.com/microsoft/apm"
+                )
+        except (ImportError, NameError):
+            click.echo(
+                "  Docs: https://microsoft.github.io/apm  |  "
+                "Star: https://github.com/microsoft/apm"
+            )
 
     except Exception as e:
         logger.error(f"Error initializing project: {e}")

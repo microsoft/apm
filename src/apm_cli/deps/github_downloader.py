@@ -48,6 +48,7 @@ from .transport_selection import (
     GitConfigInsteadOfResolver,
     InsteadOfResolver,
     ProtocolPreference,
+    TransportAttempt,
     TransportPlan,
     TransportSelector,
     is_fallback_allowed,
@@ -501,6 +502,56 @@ class GitHubPackageDownloader:
         dep_ctx = self.auth_resolver.resolve_for_dep(dep_ref)
         return dep_ctx.token
 
+    def _build_noninteractive_git_env(
+        self,
+        *,
+        preserve_config_isolation: bool = False,
+        suppress_credential_helpers: bool = False,
+    ) -> Dict[str, str]:
+        """Return a non-interactive git env for unauthenticated git operations.
+
+        Credential-helper policy (intentional two-stage design):
+
+        1. Start by clearing ``GIT_ASKPASS`` unconditionally. The default
+           APM env sets ``GIT_ASKPASS=echo`` for all authenticated ops; for
+           unauthenticated fallback attempts (HTTPS/SSH without a token), we
+           want the user's system credential helpers (e.g. macOS Keychain,
+           Windows credential manager, SSH agent) to resolve naturally.
+        2. Then re-set the full credential-helper *suppression* fence ONLY
+           when ``suppress_credential_helpers=True`` (HTTP transport). This
+           blocks all four credential channels: ``GIT_ASKPASS``,
+           ``GIT_TERMINAL_PROMPT``, ``GIT_CONFIG_NOSYSTEM``, and
+           ``credential.helper=`` (via ``GIT_CONFIG_COUNT/KEY/VALUE``).
+
+        Do NOT invert or flatten this pop-then-conditionally-restore pattern
+        without re-auditing every caller: removing step 1 would leak
+        credentials through user helpers on HTTPS/SSH fallbacks; removing
+        step 2 would leak them over plaintext HTTP.
+        """
+        env = dict(self.git_env)
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        env.pop("GIT_ASKPASS", None)
+
+        if preserve_config_isolation or suppress_credential_helpers:
+            env["GIT_CONFIG_NOSYSTEM"] = "1"
+            if "GIT_CONFIG_GLOBAL" in self.git_env:
+                env["GIT_CONFIG_GLOBAL"] = self.git_env["GIT_CONFIG_GLOBAL"]
+        else:
+            env.pop("GIT_CONFIG_GLOBAL", None)
+            env.pop("GIT_CONFIG_NOSYSTEM", None)
+
+        if suppress_credential_helpers:
+            env["GIT_ASKPASS"] = "echo"
+            env["GIT_CONFIG_COUNT"] = "1"
+            env["GIT_CONFIG_KEY_0"] = "credential.helper"
+            env["GIT_CONFIG_VALUE_0"] = ""
+        else:
+            env.pop("GIT_CONFIG_COUNT", None)
+            env.pop("GIT_CONFIG_KEY_0", None)
+            env.pop("GIT_CONFIG_VALUE_0", None)
+
+        return env
+
     def _resilient_get(self, url: str, headers: Dict[str, str], timeout: int = 30, max_retries: int = 3) -> requests.Response:
         """HTTP GET with retry on 429/503 and rate-limit header awareness (#171).
 
@@ -636,6 +687,7 @@ class GitHubPackageDownloader:
 
         # Check if this is Azure DevOps (either via dep_ref or host detection)
         is_ado = (dep_ref and dep_ref.is_azure_devops()) or is_azure_devops_hostname(host)
+        is_insecure = bool(getattr(dep_ref, "is_insecure", False)) if dep_ref is not None else False
 
         # Use provided token or fall back to instance default. Pass an empty
         # string ("") explicitly to suppress the per-instance token (used by
@@ -678,6 +730,9 @@ class GitHubPackageDownloader:
             port = dep_ref.port if dep_ref else None
             if use_ssh:
                 return build_ssh_url(host, repo_ref, port=port)
+            elif is_insecure:
+                netloc = f"{host}:{port}" if port else host
+                return f"http://{netloc}/{repo_ref}.git"
             elif is_github and github_token:
                 # Only send GitHub tokens to GitHub hosts
                 return build_https_clone_url(host, repo_ref, token=github_token, port=port)
@@ -690,9 +745,9 @@ class GitHubPackageDownloader:
 
         The transport selector decides protocol order and strictness based on
         the user's URL form, CLI/env preferences, and git ``insteadOf`` config.
-        Strict-by-default: explicit ``ssh://`` and ``https://`` URLs no longer
-        silently fall back to a different protocol. To restore the legacy
-        permissive chain, set ``--allow-protocol-fallback`` or
+        Strict-by-default: explicit ``ssh://``, ``https://``, and ``http://``
+        URLs no longer silently fall back to a different protocol. To restore
+        the legacy permissive chain, set ``--allow-protocol-fallback`` or
         ``APM_ALLOW_PROTOCOL_FALLBACK=1``.
 
         Args:
@@ -734,13 +789,15 @@ class GitHubPackageDownloader:
         # mixed allow_fallback plan need the relaxed env so user-configured
         # credential helpers (gh auth, Keychain, ssh-agent passphrase
         # prompts) keep working.
-        def _env_for(use_token_attempt: bool) -> Dict[str, str]:
-            if use_token_attempt:
+        def _env_for(attempt: TransportAttempt) -> Dict[str, str]:
+            if attempt.use_token:
                 return self.git_env
-            relaxed = {k: v for k, v in self.git_env.items()
-                       if k not in ('GIT_ASKPASS', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM')}
-            relaxed['GIT_TERMINAL_PROMPT'] = '0'
-            return relaxed
+            if attempt.scheme == "http":
+                return self._build_noninteractive_git_env(
+                    preserve_config_isolation=True,
+                    suppress_credential_helpers=True,
+                )
+            return self._build_noninteractive_git_env()
 
         plan: TransportPlan = self._transport_selector.select(
             dep_ref=dep_ref,
@@ -768,11 +825,11 @@ class GitHubPackageDownloader:
             and any(a.scheme == "ssh" for a in plan.attempts)
             and any(a.scheme == "https" for a in plan.attempts)
         ):
-            # NOTE: dedup key is case-sensitive. GitHub/Bitbucket hostnames
-            # are case-insensitive per RFC, so "Example.com" and
-            # "example.com" dedup as distinct identities -- worst case is a
-            # duplicate warning. Follow-up issue tracks normalization.
-            warn_key = (dep_host, repo_url_base, dep_port)
+            warn_key = (
+                dep_host.lower() if dep_host else dep_host,
+                repo_url_base,
+                dep_port,
+            )
             if warn_key not in self._fallback_port_warned:
                 self._fallback_port_warned.add(warn_key)
                 initial_scheme = plan.attempts[0].scheme.upper()
@@ -828,7 +885,7 @@ class GitHubPackageDownloader:
             try:
                 _debug(f"Attempting clone with {attempt.label} (URL sanitized)")
                 repo = Repo.clone_from(
-                    url, target_path, env=_env_for(attempt.use_token),
+                    url, target_path, env=_env_for(attempt),
                     progress=progress_reporter, **clone_kwargs,
                 )
                 if verbose_callback:
@@ -1012,11 +1069,12 @@ class GitHubPackageDownloader:
         if dep_token:
             ls_env = self.git_env
         else:
-            ls_env = {
-                k: v for k, v in self.git_env.items()
-                if k not in ("GIT_ASKPASS", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM")
-            }
-            ls_env["GIT_TERMINAL_PROMPT"] = "0"
+            ls_env = self._build_noninteractive_git_env(
+                preserve_config_isolation=bool(getattr(dep_ref, "is_insecure", False)),
+                suppress_credential_helpers=bool(
+                    getattr(dep_ref, "is_insecure", False)
+                ),
+            )
 
         # Build authenticated URL
         remote_url = self._build_repo_url(

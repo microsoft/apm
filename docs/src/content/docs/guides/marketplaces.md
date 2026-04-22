@@ -197,17 +197,7 @@ apm marketplace update
 
 ## Registry proxy support
 
-When `PROXY_REGISTRY_URL` is set, marketplace commands (`add`, `browse`, `search`, `update`) fetch `marketplace.json` through the registry proxy (Artifactory Archive Entry Download) before falling back to the GitHub Contents API. When `PROXY_REGISTRY_ONLY=1` is also set, the GitHub API fallback is blocked entirely, enabling fully air-gapped marketplace discovery.
-
-```bash
-export PROXY_REGISTRY_URL="https://art.corp.example.com/artifactory/github"
-export PROXY_REGISTRY_ONLY=1  # optional: block direct GitHub access
-
-apm marketplace add anthropics/skills   # fetches via Artifactory
-apm marketplace browse skills           # fetches via Artifactory
-```
-
-This builds on the same proxy infrastructure used by `apm install`. See the [Registry Proxy guide](../registry-proxy/) for full configuration details.
+Marketplace commands (`add`, `browse`, `search`, `update`) honor the `PROXY_REGISTRY_URL` and `PROXY_REGISTRY_ONLY` environment variables, fetching `marketplace.json` through the configured proxy with optional GitHub Contents API fallback. See [Registry Proxy & Air-gapped](../../enterprise/registry-proxy/) for full configuration, the bypass-prevention contract, and the air-gapped CI playbook.
 
 ## Manage marketplaces
 

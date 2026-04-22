@@ -1,13 +1,15 @@
 """Tests for the apm install command auto-bootstrap feature."""
 
 import contextlib
-import pytest
-import tempfile
 import os
-import yaml
+import tempfile
+import types
 from pathlib import Path
-from click.testing import CliRunner
 from unittest.mock import patch, MagicMock
+
+import pytest
+import yaml
+from click.testing import CliRunner
 
 from apm_cli.models.results import InstallResult
 
@@ -842,7 +844,8 @@ class TestInstallGlobalFlag:
                         cli, ["install", "--global", str(local_pkg)]
                     )
 
-                assert "not supported at user scope" in result.output
+                normalized = " ".join(result.output.split())
+                assert "not supported at user scope" in normalized
             finally:
                 os.chdir(self.original_dir)
 
@@ -902,6 +905,8 @@ class TestGenericHostSshFirstValidation:
     @patch("subprocess.run")
     def test_generic_host_falls_back_to_https_when_ssh_fails(self, mock_run):
         """HTTPS fallback is used for generic hosts when SSH ls-remote fails."""
+        from urllib.parse import urlsplit
+
         from apm_cli.commands.install import _validate_package_exists
 
         # SSH probe fails, HTTPS succeeds
@@ -916,15 +921,23 @@ class TestGenericHostSshFirstValidation:
 
         assert result is True
         assert mock_run.call_count == 2
-        # First call: SSH
+        # First call: SSH (SCP-style URLs are not parseable by urlsplit, so
+        # keep the substring check scoped to the SSH prefix form git@host:).
         first_cmd = mock_run.call_args_list[0][0][0]
-        assert any("git@git.example.org" in arg for arg in first_cmd), (
+        assert any("git@git.example.org:" in arg for arg in first_cmd), (
             f"Expected SSH URL in first call, got: {first_cmd}"
         )
-        # Second call: HTTPS
+        # Second call: HTTPS -- parse scheme + netloc explicitly to avoid
+        # substring false-positives.
         second_cmd = mock_run.call_args_list[1][0][0]
-        assert any("https://git.example.org" in arg for arg in second_cmd), (
-            f"Expected HTTPS URL in second call, got: {second_cmd}"
+        https_arg_found = False
+        for arg in second_cmd:
+            parts = urlsplit(arg)
+            if parts.scheme == "https" and parts.netloc == "git.example.org":
+                https_arg_found = True
+                break
+        assert https_arg_found, (
+            f"Expected https://git.example.org URL in second call, got: {second_cmd}"
         )
 
     @patch("subprocess.run")
@@ -942,6 +955,38 @@ class TestGenericHostSshFirstValidation:
 
         assert result is False
         assert mock_run.call_count == 2  # tried SSH then HTTPS
+
+    @patch("subprocess.run")
+    def test_explicit_http_generic_host_tries_http_first(self, mock_run):
+        """Explicit HTTP must probe HTTP before any SSH fallback."""
+        from urllib.parse import urlsplit
+
+        from apm_cli.commands.install import _validate_package_exists
+
+        mock_run.return_value = self._make_completed_process(returncode=0)
+
+        result = _validate_package_exists(
+            "http://gitlab.company.internal/acme/rules.git", verbose=False
+        )
+
+        assert result is True
+        assert mock_run.call_count == 1
+        first_cmd = mock_run.call_args_list[0][0][0]
+        # Parse each arg as a URL and check scheme + netloc explicitly to
+        # avoid substring false-positives (e.g. the hostname appearing in a
+        # path segment or query value on an otherwise-SSH URL).
+        http_arg_found = False
+        for arg in first_cmd:
+            parts = urlsplit(arg)
+            if parts.scheme == "http" and parts.netloc == "gitlab.company.internal":
+                http_arg_found = True
+                break
+        assert http_arg_found, (
+            f"Expected http://gitlab.company.internal URL in first call, got: {first_cmd}"
+        )
+        assert all("git@" not in arg for arg in first_cmd), (
+            f"Expected no SSH URL in first call, got: {first_cmd}"
+        )
 
     @patch("subprocess.run")
     def test_github_host_skips_ssh_attempt(self, mock_run):
@@ -1113,6 +1158,380 @@ class TestContentHashFallback:
             assert not fallback_triggered, (
                 "Fallback must not trigger when content_hash is None"
             )
+
+
+class TestAllowInsecureFlag:
+    """Tests for --allow-insecure flag and HTTP dependency security checks."""
+
+    def setup_method(self):
+        self.runner = CliRunner()
+        try:
+            self.original_dir = os.getcwd()
+        except FileNotFoundError:
+            self.original_dir = str(Path(__file__).parent.parent.parent)
+            os.chdir(self.original_dir)
+
+    def test_http_dep_rejected_without_allow_insecure_flag(self):
+        """Adding http:// package without --allow-insecure is rejected."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            try:
+                os.chdir(tmp_dir)
+                with patch("apm_cli.commands.install._validate_package_exists", return_value=True):
+                    result = self.runner.invoke(
+                        cli, ["install", "http://my-server.example.com/owner/repo"]
+                     )
+            finally:
+                os.chdir(self.original_dir)
+            assert "allow_insecure: true" in result.output
+            assert "--allow-insecure" in result.output
+
+    def test_install_help_mentions_allow_insecure_for_http_deps(self):
+        """Install help should mention the HTTP allow-insecure flow."""
+        result = self.runner.invoke(cli, ["install", "--help"])
+
+        assert result.exit_code == 0
+        normalized = " ".join(result.output.split())
+        assert "use --allow-insecure for http:// packages" in normalized
+        assert "--allow-insecure-host HOSTNAME" in result.output
+
+    def test_allow_insecure_host_rejects_non_hostname(self):
+        """The explicit transitive host option only accepts bare hostnames."""
+        result = self.runner.invoke(
+            cli,
+            [
+                "install",
+                "--allow-insecure-host",
+                "https://mirror.example.com",
+                "owner/repo",
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "Invalid value for '--allow-insecure-host'" in result.output
+
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
+    @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
+    @patch("apm_cli.commands.install.APMPackage")
+    @patch("apm_cli.commands.install._install_apm_dependencies")
+    def test_http_dep_addition_passes_with_allow_insecure_flag(
+        self, mock_install_apm, mock_apm_package, mock_validate
+    ):
+        """HTTP dependency can be added when the CLI flag is passed."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            try:
+                os.chdir(tmp_dir)
+                mock_pkg_instance = MagicMock()
+                mock_pkg_instance.get_apm_dependencies.return_value = []
+                mock_pkg_instance.get_mcp_dependencies.return_value = []
+                mock_apm_package.from_apm_yml.return_value = mock_pkg_instance
+                mock_install_apm.return_value = InstallResult(
+                    diagnostics=MagicMock(
+                        has_diagnostics=False, has_critical_security=False
+                    )
+                )
+
+                result = self.runner.invoke(
+                    cli, ["install", "--allow-insecure", "http://my-server.example.com/owner/repo"]
+                )
+
+                assert result.exit_code == 0
+                with open("apm.yml", encoding="utf-8") as f:
+                    config = yaml.safe_load(f)
+
+                assert config["dependencies"]["apm"] == [
+                    {
+                        "git": "http://my-server.example.com/owner/repo",
+                        "allow_insecure": True,
+                    }
+                ]
+                assert mock_install_apm.call_args.kwargs["allow_insecure"] is True
+                assert mock_install_apm.call_args.kwargs["allow_insecure_hosts"] == ()
+            finally:
+                os.chdir(self.original_dir)
+
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
+    @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
+    @patch("apm_cli.commands.install.APMPackage")
+    @patch("apm_cli.commands.install._install_apm_dependencies")
+    def test_allow_insecure_host_is_passed_to_install_engine(
+        self, mock_install_apm, mock_apm_package, mock_validate
+    ):
+        """The explicit transitive host option is threaded into the install engine."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            try:
+                os.chdir(tmp_dir)
+                mock_pkg_instance = MagicMock()
+                mock_pkg_instance.get_apm_dependencies.return_value = [MagicMock()]
+                mock_pkg_instance.get_mcp_dependencies.return_value = []
+                mock_pkg_instance.get_dev_apm_dependencies.return_value = []
+                mock_apm_package.from_apm_yml.return_value = mock_pkg_instance
+                mock_install_apm.return_value = InstallResult(
+                    diagnostics=MagicMock(
+                        has_diagnostics=False, has_critical_security=False
+                    )
+                )
+
+                result = self.runner.invoke(
+                    cli,
+                    [
+                        "install",
+                        "--allow-insecure-host",
+                        "mirror.example.com",
+                        "owner/repo",
+                    ],
+                )
+
+                assert result.exit_code == 0
+                assert (
+                    mock_install_apm.call_args.kwargs["allow_insecure_hosts"]
+                    == ("mirror.example.com",)
+                )
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_http_dep_validation_check(self):
+        """_check_insecure_dependencies blocks HTTP dep without allow_insecure flag."""
+        from apm_cli.commands.install import _check_insecure_dependencies
+        from apm_cli.install.insecure_policy import InsecureDependencyPolicyError
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
+        dep.allow_insecure = True
+        logger = MagicMock()
+
+        with pytest.raises(InsecureDependencyPolicyError) as exc_info:
+            _check_insecure_dependencies([dep], False, logger)
+        assert "http://my-server.example.com/owner/repo" in str(exc_info.value)
+        message = logger.error.call_args.args[0]
+        assert "http://my-server.example.com/owner/repo" in message
+        # Manifest is already set (allow_insecure: true on the dep), so only
+        # the CLI flag step should be mentioned - not the manifest edit step.
+        assert "--allow-insecure" in message
+        assert "Set allow_insecure: true" not in message
+
+    def test_http_dep_passes_with_allow_insecure_flag(self):
+        """_check_insecure_dependencies passes when flag is set and dep has allow_insecure."""
+        from apm_cli.commands.install import _check_insecure_dependencies
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
+        dep.allow_insecure = True
+        logger = MagicMock()
+
+        _check_insecure_dependencies([dep], True, logger)
+
+    def test_http_dep_without_dep_level_allow_insecure_is_blocked(self):
+        """_check_insecure_dependencies blocks HTTP dep missing allow_insecure=True on dep."""
+        from apm_cli.commands.install import _check_insecure_dependencies
+        from apm_cli.install.insecure_policy import InsecureDependencyPolicyError
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
+        logger = MagicMock()
+
+        with pytest.raises(InsecureDependencyPolicyError) as exc_info:
+            _check_insecure_dependencies([dep], True, logger)
+        assert "http://my-server.example.com/owner/repo" in str(exc_info.value)
+        message = logger.error.call_args.args[0]
+        assert "http://my-server.example.com/owner/repo" in message
+        # CLI flag is already set, so only the manifest edit step should be
+        # mentioned - not the CLI flag step.
+        assert "Set allow_insecure: true" in message
+        assert "Pass --allow-insecure" not in message
+
+    def test_https_dep_passes_without_flag(self):
+        """_check_insecure_dependencies does not block HTTPS deps."""
+        from apm_cli.commands.install import _check_insecure_dependencies
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep = DependencyReference.parse("owner/repo")
+        _check_insecure_dependencies([dep], False, MagicMock())
+
+    def test_empty_deps_list_passes(self):
+        """_check_insecure_dependencies handles empty dep list."""
+        from apm_cli.commands.install import _check_insecure_dependencies
+
+        _check_insecure_dependencies([], False, MagicMock())
+
+
+class TestInsecureDependencyWarnings:
+    """Tests for install-time insecure dependency warnings."""
+
+    def test_collect_insecure_dependency_infos_marks_direct_dependency(self):
+        """Direct HTTP dependencies are collected without parent provenance."""
+        from apm_cli.commands.install import (
+            _InsecureDependencyInfo,
+            _collect_insecure_dependency_infos,
+        )
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep = DependencyReference.parse("http://mirror.example.com/acme/rules")
+        tree = MagicMock()
+        tree.get_node.return_value = None
+        graph = MagicMock(dependency_tree=tree)
+
+        infos = _collect_insecure_dependency_infos([dep], graph)
+
+        assert infos == [
+            _InsecureDependencyInfo(
+                url="http://mirror.example.com/acme/rules",
+                is_transitive=False,
+                introduced_by=None,
+            )
+        ]
+
+    def test_collect_insecure_dependency_infos_marks_transitive_dependency(self):
+        """Transitive HTTP dependencies carry introducer information."""
+        from apm_cli.commands.install import _collect_insecure_dependency_infos
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep = DependencyReference.parse("http://mirror.example.com/acme/transitive")
+        parent_ref = DependencyReference.parse("owner/root-package")
+        parent_node = types.SimpleNamespace(dependency_ref=parent_ref)
+        node = types.SimpleNamespace(parent=parent_node)
+        tree = MagicMock()
+        tree.get_node.return_value = node
+        graph = MagicMock(dependency_tree=tree)
+
+        infos = _collect_insecure_dependency_infos([dep], graph)
+
+        assert len(infos) == 1
+        assert infos[0].url == "http://mirror.example.com/acme/transitive"
+        assert infos[0].is_transitive is True
+        assert infos[0].introduced_by == "owner/root-package"
+
+    def test_format_insecure_dependency_warning_for_transitive_dep(self):
+        """Transitive warning strings include the introducer."""
+        from apm_cli.commands.install import (
+            _InsecureDependencyInfo,
+            _format_insecure_dependency_warning,
+        )
+
+        message = _format_insecure_dependency_warning(
+            _InsecureDependencyInfo(
+                url="http://mirror.example.com/acme/transitive",
+                is_transitive=True,
+                introduced_by="owner/root-package",
+            )
+        )
+
+        assert "Insecure HTTP fetch (unencrypted)" in message
+        assert "http://mirror.example.com/acme/transitive" in message
+        assert "transitive, introduced by owner/root-package" in message
+
+
+class TestTransitiveInsecureDependencyGuard:
+    """Tests for host-based consent around transitive insecure dependencies."""
+
+    def test_transitive_guard_blocks_unapproved_host(self):
+        """Transitive insecure deps are blocked when their host is not approved."""
+        from apm_cli.commands.install import (
+            _InsecureDependencyInfo,
+            _guard_transitive_insecure_dependencies,
+        )
+        from apm_cli.install.insecure_policy import InsecureDependencyPolicyError
+        logger = MagicMock()
+
+        with pytest.raises(InsecureDependencyPolicyError) as exc_info:
+            _guard_transitive_insecure_dependencies(
+                [
+                    _InsecureDependencyInfo(
+                        url="http://mirror.example.com/acme/transitive",
+                        is_transitive=True,
+                        introduced_by="owner/root-package",
+                    )
+                ],
+                logger,
+                allow_insecure=False,
+                allow_insecure_hosts=(),
+            )
+
+        message = str(exc_info.value)
+        assert message.startswith(
+            "Re-run with --allow-insecure-host mirror.example.com"
+        )
+        assert "unapproved host(s): mirror.example.com" in message
+
+    def test_transitive_guard_allows_same_host_as_direct_insecure_dependency(self):
+        """A direct insecure dependency host also permits transitive deps on that host."""
+        from apm_cli.commands.install import (
+            _InsecureDependencyInfo,
+            _guard_transitive_insecure_dependencies,
+        )
+        logger = MagicMock()
+
+        _guard_transitive_insecure_dependencies(
+            [
+                _InsecureDependencyInfo(
+                    url="http://mirror.example.com/acme/direct",
+                    is_transitive=False,
+                    introduced_by=None,
+                ),
+                _InsecureDependencyInfo(
+                    url="http://mirror.example.com/acme/transitive",
+                    is_transitive=True,
+                    introduced_by="owner/root-package",
+                ),
+            ],
+            logger,
+            allow_insecure=True,
+            allow_insecure_hosts=(),
+        )
+
+    def test_transitive_guard_accepts_explicit_host(self):
+        """Explicitly allowed hosts permit transitive insecure dependencies."""
+        from apm_cli.commands.install import (
+            _InsecureDependencyInfo,
+            _guard_transitive_insecure_dependencies,
+        )
+        logger = MagicMock()
+
+        _guard_transitive_insecure_dependencies(
+            [
+                _InsecureDependencyInfo(
+                    url="http://mirror.example.com/acme/transitive",
+                    is_transitive=True,
+                    introduced_by="owner/root-package",
+                )
+            ],
+            logger,
+            allow_insecure=False,
+            allow_insecure_hosts=("mirror.example.com",),
+        )
+
+    def test_transitive_guard_blocks_different_host_without_explicit_allowance(self):
+        """A direct insecure host does not permit transitive deps on other hosts."""
+        from apm_cli.commands.install import (
+            _InsecureDependencyInfo,
+            _guard_transitive_insecure_dependencies,
+        )
+        from apm_cli.install.insecure_policy import InsecureDependencyPolicyError
+        logger = MagicMock()
+
+        with pytest.raises(InsecureDependencyPolicyError) as exc_info:
+            _guard_transitive_insecure_dependencies(
+                [
+                    _InsecureDependencyInfo(
+                        url="http://my-server.example.com/acme/direct",
+                        is_transitive=False,
+                        introduced_by=None,
+                    ),
+                    _InsecureDependencyInfo(
+                        url="http://mirror.example.com/acme/transitive",
+                        is_transitive=True,
+                        introduced_by="owner/root-package",
+                    ),
+                ],
+                logger,
+                allow_insecure=True,
+                allow_insecure_hosts=(),
+            )
+
+        message = str(exc_info.value)
+        assert message.startswith(
+            "Re-run with --allow-insecure-host mirror.example.com"
+        )
+        assert "unapproved host(s): mirror.example.com" in message
 
 
 # ---------------------------------------------------------------------------

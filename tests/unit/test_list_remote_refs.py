@@ -306,6 +306,34 @@ class TestListRemoteRefsGitHub:
         assert used_env.get("GIT_TERMINAL_PROMPT") == "0"
 
     @patch("apm_cli.deps.github_downloader.git.cmd.Git")
+    def test_insecure_http_host_no_token_suppresses_credential_helpers(self, MockGitCmd):
+        """HTTP ls-remote must block credential helpers and preserve config isolation."""
+        dl = _build_downloader()
+        dep = _make_dep_ref(host="gitlab.example.com")
+        dep.is_insecure = True
+
+        dl._resolve_dep_token = MagicMock(return_value=None)
+        dl._build_repo_url = MagicMock(return_value="http://gitlab.example.com/owner/repo.git")
+        dl.git_env["GIT_ASKPASS"] = "echo"
+        dl.git_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
+        dl.git_env["GIT_CONFIG_NOSYSTEM"] = "1"
+
+        mock_git = MockGitCmd.return_value
+        mock_git.ls_remote.return_value = SAMPLE_LS_REMOTE
+
+        dl.list_remote_refs(dep)
+
+        call_kwargs = mock_git.ls_remote.call_args
+        used_env = call_kwargs.kwargs.get("env")
+        assert used_env.get("GIT_ASKPASS") == "echo"
+        assert used_env.get("GIT_CONFIG_GLOBAL") == "/dev/null"
+        assert used_env.get("GIT_CONFIG_NOSYSTEM") == "1"
+        assert used_env.get("GIT_CONFIG_COUNT") == "1"
+        assert used_env.get("GIT_CONFIG_KEY_0") == "credential.helper"
+        assert used_env.get("GIT_CONFIG_VALUE_0") == ""
+        assert used_env.get("GIT_TERMINAL_PROMPT") == "0"
+
+    @patch("apm_cli.deps.github_downloader.git.cmd.Git")
     def test_git_command_error_raises_runtime_error(self, MockGitCmd):
         """GitCommandError is wrapped in RuntimeError with auth context."""
         dl = _build_downloader()

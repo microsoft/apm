@@ -46,6 +46,8 @@ class InstallContext:
     parallel_downloads: int = 4
     logger: Any = None  # InstallLogger
     target_override: Optional[str] = None  # CLI --target value
+    allow_insecure: bool = False
+    allow_insecure_hosts: Tuple[str, ...] = ()
 
     dry_run: bool = False
     force: bool = False
@@ -107,6 +109,14 @@ class InstallContext:
     total_commands_integrated: int = 0  # integrate
     total_hooks_integrated: int = 0  # integrate
     total_links_resolved: int = 0  # integrate
+
+    # ------------------------------------------------------------------
+    # policy_gate
+    # ------------------------------------------------------------------
+    policy_fetch: Any = None  # Optional[PolicyFetchResult] from discovery
+    policy_enforcement_active: bool = False
+    no_policy: bool = False  # W2-escape-hatch will wire --no-policy here
+    direct_mcp_deps: Optional[List[Any]] = None  # Direct MCP deps from apm.yml for policy gate
 
     # ------------------------------------------------------------------
     # Post-deps local content tracking (F3)

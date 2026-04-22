@@ -60,6 +60,10 @@ class DependencyReference:
         None  # e.g., "artifactory/github" (repo key path)
     )
 
+    # HTTP (insecure) dependency fields
+    is_insecure: bool = False  # True when the dependency URL uses http://
+    allow_insecure: bool = False  # True if this HTTP dep is explicitly allowed
+
     # Supported file extensions for virtual packages
     VIRTUAL_FILE_EXTENSIONS = (
         ".prompt.md",
@@ -194,7 +198,7 @@ class DependencyReference:
         return self.repo_url
 
     def to_canonical(self) -> str:
-        """Return the canonical form of this dependency for storage in apm.yml.
+        """Return the canonical scheme-free identity string for this dependency.
 
         Follows the Docker-style default-registry convention:
         - Default host (github.com) is stripped  ->  owner/repo
@@ -203,7 +207,9 @@ class DependencyReference:
         - Refs are appended with #                ->  owner/repo#v1.0
         - Local paths are returned as-is          ->  ./packages/my-pkg
 
-        No .git suffix, no https://, no git@  -- just the canonical identifier.
+        No .git suffix, no git@, and no transport scheme -- just the canonical
+        identifier. Use ``to_apm_yml_entry()`` when the serialized apm.yml value
+        must preserve an explicit ``http://`` transport.
 
         Returns:
             str: Canonical dependency string
@@ -212,6 +218,7 @@ class DependencyReference:
             return self.local_path
 
         host = self.host or default_host()
+
         is_default = host.lower() == default_host().lower()
         # Custom port is part of the transport and must travel with the host label.
         host_label = f"{host}:{self.port}" if self.port else host
@@ -264,7 +271,7 @@ class DependencyReference:
 
     @staticmethod
     def canonicalize(raw: str) -> str:
-        """Parse any raw input form and return its canonical storage form.
+        """Parse any raw input form and return its canonical identifier form.
 
         Convenience method that combines parse() + to_canonical().
 
@@ -272,7 +279,7 @@ class DependencyReference:
             raw: Any supported input form (shorthand, FQDN, HTTPS, SSH, etc.)
 
         Returns:
-            str: Canonical form for apm.yml storage
+            str: Canonical scheme-free identifier form
         """
         return DependencyReference.parse(raw).to_canonical()
 
@@ -283,7 +290,7 @@ class DependencyReference:
         the filesystem layout in apm_modules/ which is also host-blind.
 
         For identity-based matching that includes non-default hosts, use get_identity().
-        For the full canonical form suitable for apm.yml storage, use to_canonical().
+        For the transport-aware apm.yml entry, use to_apm_yml_entry().
 
         Returns:
             str: Host-blind canonical string (e.g., "owner/repo")
@@ -493,6 +500,9 @@ class DependencyReference:
         sub_path = entry.get("path")
         ref_override = entry.get("ref")
         alias_override = entry.get("alias")
+        allow_insecure = entry.get("allow_insecure", False)
+        if not isinstance(allow_insecure, bool):
+            raise ValueError("'allow_insecure' field must be a boolean")
 
         # Validate sub_path if provided
         if sub_path is not None:
@@ -506,6 +516,7 @@ class DependencyReference:
 
         # Parse the git URL using the standard parser
         dep = cls.parse(git_url)
+        dep.allow_insecure = allow_insecure
 
         # Apply overrides from the object fields
         if ref_override is not None:
@@ -546,7 +557,7 @@ class DependencyReference:
         virtual_path = None
         validated_host = None
 
-        if temp_str.startswith(("git@", "https://", "http://", "ssh://")):
+        if temp_str.lower().startswith(("git@", "https://", "http://", "ssh://")):
             return is_virtual_package, virtual_path, validated_host
 
         check_str = temp_str
@@ -731,7 +742,9 @@ class DependencyReference:
         repo_url = repo_part.strip()
 
         # For virtual packages, extract just the owner/repo part (or org/project/repo for ADO)
-        if is_virtual_package and not repo_url.startswith(("https://", "http://")):
+        repo_url_lower = repo_url.lower()
+
+        if is_virtual_package and not repo_url_lower.startswith(("https://", "http://")):
             parts = repo_url.split("/")
 
             if "_git" in parts:
@@ -765,7 +778,7 @@ class DependencyReference:
                     repo_url = "/".join(parts[:2])
 
         # Normalize to URL format for secure parsing
-        if repo_url.startswith(("https://", "http://")):
+        if repo_url_lower.startswith(("https://", "http://")):
             parsed_url = urllib.parse.urlparse(repo_url)
             host = parsed_url.hostname or ""
             port = parsed_url.port  # capture :PORT from https://host:8443/...
@@ -1058,7 +1071,28 @@ class DependencyReference:
             ado_project=ado_project,
             ado_repo=ado_repo,
             artifactory_prefix=artifactory_prefix,
+            is_insecure=urllib.parse.urlparse(dependency_str).scheme.lower() == "http",
         )
+
+    def to_apm_yml_entry(self):
+        """Return the entry to store in apm.yml.
+
+        For HTTP (insecure) deps, returns a dict with 'git' and 'allow_insecure' keys.
+        For all other deps, returns the canonical string (same as to_canonical()).
+
+        Returns:
+            str or dict: String for HTTPS/SSH/local deps; dict for HTTP deps.
+        """
+        if self.is_insecure:
+            host = self.host or default_host()
+            entry = {"git": f"http://{host}/{self.repo_url}"}
+            if self.reference:
+                entry["ref"] = self.reference
+            if self.alias:
+                entry["alias"] = self.alias
+            entry["allow_insecure"] = self.allow_insecure
+            return entry
+        return self.to_canonical()
 
     def to_github_url(self) -> str:
         """Convert to full repository URL.
@@ -1073,16 +1107,18 @@ class DependencyReference:
         host = self.host or default_host()
         netloc = f"{host}:{self.port}" if self.port else host
 
+        scheme = "http" if self.is_insecure else "https"
+
         if self.is_azure_devops():
             # ADO format: https://dev.azure.com/org/project/_git/repo
             project = urllib.parse.quote(self.ado_project, safe="")
             repo = urllib.parse.quote(self.ado_repo, safe="")
             return f"https://{netloc}/{self.ado_organization}/{project}/_git/{repo}"
         elif self.artifactory_prefix:
-            return f"https://{netloc}/{self.artifactory_prefix}/{self.repo_url}"
+            return f"{scheme}://{netloc}/{self.artifactory_prefix}/{self.repo_url}"
         else:
-            # GitHub format: https://github.com/owner/repo
-            return f"https://{netloc}/{self.repo_url}"
+            # Git host format: https://github.com/owner/repo
+            return f"{scheme}://{netloc}/{self.repo_url}"
 
     def to_clone_url(self) -> str:
         """Convert to a clone-friendly URL (same as to_github_url for most purposes)."""

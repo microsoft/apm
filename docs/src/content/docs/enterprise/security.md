@@ -2,7 +2,7 @@
 title: "Security Model"
 description: "How APM handles supply chain security for AI agents — attack surface boundaries, content scanning, dependency provenance, path safety, and MCP trust."
 sidebar:
-  order: 3
+  order: 4
 ---
 
 This page documents APM's security posture for enterprise security reviews, compliance audits, and supply chain assessments.
@@ -60,6 +60,28 @@ The `resolved_commit` field is a full 40-character SHA, not a branch name or tag
 ### No registry
 
 APM does not use a package registry. Dependencies are specified as git repository URLs in `apm.yml`. This eliminates the registry compromise vector entirely — there is no centralized service that can be poisoned to redirect installs.
+
+### HTTP (insecure) dependencies
+
+APM supports `http://` git dependencies for private mirrors and air-gapped
+environments, but only behind explicit approval on both the manifest and CLI
+surfaces:
+
+- `allow_insecure: true` on the dependency entry records that the project
+  intentionally permits HTTP for that dependency.
+- `apm install --allow-insecure` approves direct HTTP dependencies for the
+  current install run.
+- Transitive HTTP dependencies inherit approval only when they come from the
+  same host as an approved direct HTTP dependency. Additional transitive hosts
+  require `--allow-insecure-host HOSTNAME`.
+
+These controls make the decision visible, but they do **not** make HTTP safe:
+
+- HTTP has no transport encryption or server authentication. A machine-in-the-middle can modify repository contents or refs in transit.
+- On the first HTTP fetch (or any update fetched over HTTP), the lockfile's `resolved_commit` and `content_hash` come from that same untrusted channel. They improve replay detection later, but they do not establish trustworthy provenance for the initial fetch.
+- APM explicitly suppresses git credential helpers for HTTP clone and `ls-remote` operations so stored tokens from Keychain, Credential Manager, `gh auth`, or other helpers are not sent over plaintext HTTP.
+
+For routing all dependency traffic through an enterprise proxy (Artifactory or compatible), see [Registry Proxy & Air-gapped](../registry-proxy/).
 
 ## Content scanning
 
@@ -246,6 +268,7 @@ For GitHub, a fine-grained PAT with read-only `Contents` permission on the repos
 | Typosquatting | Similar package names on registry | Dependencies are full git URLs |
 | Build-time injection | Malicious build steps execute | No build step — files are copied |
 | Hidden content injection | Not applicable (binary packages) | Pre-deploy scan blocks critical hidden Unicode; `apm audit` for on-demand checks |
+| Compromised policy intermediary | Not applicable (no policy layer) | A malicious mirror or MITM returns valid YAML with relaxed rules. Mitigated by [`policy.hash` consumer-side pin](../policy-reference/#96-hash-pin-policyhash-consumer-side-verification) which verifies raw bytes against a project-pinned digest. |
 
 ## Frequently asked questions
 

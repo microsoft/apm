@@ -88,11 +88,13 @@ class TestPolicyDiscoveryE2E(unittest.TestCase):
     def test_cache_write_and_read(self):
         """Policy is cached after fetch and served from cache on next call."""
         from apm_cli.policy.discovery import _read_cache, _write_cache
+        from apm_cli.policy.parser import load_policy as _lp
 
         policy_yaml = 'name: cached-test\nversion: "1.0.0"\n'
         repo_ref = "test-org/.github"
+        policy_obj, _ = _lp(policy_yaml)
 
-        _write_cache(repo_ref, policy_yaml, self.project_root)
+        _write_cache(repo_ref, policy_obj, self.project_root)
 
         result = _read_cache(repo_ref, self.project_root)
         self.assertIsNotNone(result)
@@ -102,11 +104,13 @@ class TestPolicyDiscoveryE2E(unittest.TestCase):
     def test_cache_respects_ttl(self):
         """Expired cache returns None."""
         from apm_cli.policy.discovery import _read_cache, _write_cache
+        from apm_cli.policy.parser import load_policy as _lp
 
         policy_yaml = 'name: expired-test\nversion: "1.0.0"\n'
         repo_ref = "test-org/.github"
+        policy_obj, _ = _lp(policy_yaml)
 
-        _write_cache(repo_ref, policy_yaml, self.project_root)
+        _write_cache(repo_ref, policy_obj, self.project_root)
 
         result = _read_cache(repo_ref, self.project_root, ttl=0)
         self.assertIsNone(result)
@@ -114,10 +118,12 @@ class TestPolicyDiscoveryE2E(unittest.TestCase):
     def test_no_cache_bypass(self):
         """File override takes precedence even with populated cache."""
         from apm_cli.policy.discovery import _write_cache, discover_policy
+        from apm_cli.policy.parser import load_policy as _lp
 
         # Pre-populate cache
         policy_yaml = 'name: cached\nversion: "1.0.0"\n'
-        _write_cache("test-org/.github", policy_yaml, self.project_root)
+        policy_obj, _ = _lp(policy_yaml)
+        _write_cache("test-org/.github", policy_obj, self.project_root)
 
         # File override wins regardless of cache state
         fixture = FIXTURES_DIR / "org-policy.yml"

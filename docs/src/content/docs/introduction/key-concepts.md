@@ -10,29 +10,20 @@ Context components are the configurable tools that deploy proven prompt engineer
 
 APM implements Context - the configurable tools that deploy prompt engineering and context engineering techniques to transform unreliable AI interactions into engineered systems.
 
-### Initialize a project with AI-Native structure
+### Initialize a project
 
 ```bash
-apm init my-project  # Creates complete Context scaffolding + apm.yml
+apm init my-project  # Creates apm.yml -- the only file apm init produces
 ```
 
 ### Generated Project Structure
 
 ```yaml
 my-project/
-├── apm.yml              # Project configuration and script definitions
-├── SKILL.md             # Package meta-guide for AI discovery
-└── .apm/
-    ├── agents/          # Role-based AI expertise with tool boundaries
-    │   ├── backend-dev.agent.md        # API development specialist
-    │   └── frontend-dev.agent.md       # UI development specialist
-    ├── instructions/    # Targeted guidance by file type and domain  
-    │   ├── security.instructions.md    # applyTo: "auth/**"
-    │   └── testing.instructions.md     # applyTo: "**/*test*"
-    └── prompts/         # Reusable agent workflows
-        ├── code-review.prompt.md       # Systematic review process
-        └── feature-spec.prompt.md      # Spec-first development
+└── apm.yml              # Project configuration and dependency manifest
 ```
+
+> **Note:** By default, `apm init` creates only `apm.yml`. Add primitives manually or install them with `apm install`. See [Your First Package](../../getting-started/first-package/) for a step-by-step guide.
 
 ### Intelligent Compilation
 
