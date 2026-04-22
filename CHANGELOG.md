@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --dry-run` previews policy verdicts ("would be blocked by policy") without writing files (#827)
 - `apm install <pkg>` rolls back `apm.yml` to its pre-mutation snapshot when the install pipeline fails a policy check (#827)
 - `policy.fetch_failure: warn|block` schema knob on `apm-policy.yml` and matching project-side `policy.fetch_failure_default` opt-in in `apm.yml`: when set to `block`, install / `apm audit --ci` fail closed if the org policy cannot be fetched, parsed, or returns garbage. Both default to `warn` for backwards compatibility (closes #829)
-- `apm policy status` diagnostic command: prints discovery outcome, source, enforcement, cache age, `extends:` chain, and rule counts in table or `--json` form. Always exits 0 so it is safe for CI / SIEM ingestion. Supports `--policy-source` and `--no-cache` overrides (#827)
+- `apm policy status` diagnostic command: prints discovery outcome, source, enforcement, cache age, `extends:` chain, and rule counts in table or `--json` form. Default exit is 0 (safe for human / SIEM use); pass `--check` to exit 1 when no usable policy is resolved, suitable for CI pre-checks. Supports `--policy-source` and `--no-cache` overrides (#827, #832)
 - `apm audit --ci` auto-discovers the org policy when `--policy-source` (alias `--policy`) is not provided, mirroring the install-time discovery path so CI catches sideloaded files via unmanaged-files checks; `--no-policy` flag added to skip discovery for a single invocation (#827)
 
 ### Changed
@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Consolidated `PolicyBlockError` and `PolicyViolationError` into a single `PolicyViolationError` class in `apm_cli.install.errors`; `PolicyBlockError` remains a back-compat alias re-exported from `apm_cli.policy.install_preflight` (#832)
 - Extracted the 9-outcome policy-discovery routing table into `apm_cli.policy.outcome_routing.route_discovery_outcome()`; both the install pipeline gate and the MCP preflight now delegate to one shared implementation (#832)
 - Removed the unused `no_policy=` parameter from `discover_policy_with_chain`; callers should use the documented `APM_POLICY_DISABLE=1` env var or the `--no-policy` CLI flag instead (#832)
+- `apm audit --no-policy` help text rewritten to describe the positive behaviour ("Skip org policy discovery and enforcement. Overridden when --policy is passed explicitly.") so `apm audit --help` no longer hides the primary effect behind a negative caveat (#832)
 
 ### Removed
 

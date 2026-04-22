@@ -401,3 +401,65 @@ class TestStatusAsciiOnly:
         assert _ascii_only(json_result.output), (
             f"non-ASCII JSON for outcome={outcome}: {json_result.output!r}"
         )
+
+
+class TestStatusCheckFlag:
+    """``--check`` flips exit code to 1 when no usable policy is found."""
+
+    def test_check_exits_zero_when_outcome_is_found(self, runner):
+        result_obj = PolicyFetchResult(outcome="found", policy=_rich_policy())
+        with patch(
+            "apm_cli.commands.policy.discover_policy_with_chain",
+            return_value=result_obj,
+        ):
+            result = runner.invoke(policy_group, ["status", "--check"])
+        assert result.exit_code == 0, result.output
+
+    @pytest.mark.parametrize(
+        "outcome",
+        [
+            "absent",
+            "cache_miss_fetch_fail",
+            "garbage_response",
+            "malformed",
+            "no_git_remote",
+            "disabled",
+            "empty",
+        ],
+    )
+    def test_check_exits_one_when_policy_unresolvable(self, runner, outcome):
+        result_obj = PolicyFetchResult(outcome=outcome)
+        if outcome == "empty":
+            result_obj.policy = _rich_policy()
+        with patch(
+            "apm_cli.commands.policy.discover_policy_with_chain",
+            return_value=result_obj,
+        ):
+            result = runner.invoke(policy_group, ["status", "--check"])
+        assert result.exit_code == 1, (
+            f"outcome={outcome} should exit 1 with --check, got "
+            f"{result.exit_code}\noutput:\n{result.output}"
+        )
+
+    def test_check_exits_one_on_discovery_exception(self, runner):
+        with patch(
+            "apm_cli.commands.policy.discover_policy_with_chain",
+            side_effect=RuntimeError("boom"),
+        ):
+            result = runner.invoke(policy_group, ["status", "--check"])
+        assert result.exit_code == 1
+        assert "cache_miss_fetch_fail" in result.output
+
+    def test_check_with_json_output(self, runner):
+        """--check still emits JSON; only the exit code changes."""
+        result_obj = PolicyFetchResult(outcome="absent")
+        with patch(
+            "apm_cli.commands.policy.discover_policy_with_chain",
+            return_value=result_obj,
+        ):
+            result = runner.invoke(
+                policy_group, ["status", "--check", "--json"]
+            )
+        assert result.exit_code == 1
+        payload = json.loads(result.output)
+        assert payload["outcome"] == "absent"

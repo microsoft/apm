@@ -309,12 +309,24 @@ def policy():
     default="table",
     help="Output format (default: table).",
 )
-def status(policy_source, no_cache, as_json, output_format):
+@click.option(
+    "--check",
+    "check",
+    is_flag=True,
+    help=(
+        "Exit non-zero (1) when no usable policy is found. "
+        "Use in CI to gate on policy resolvability; default exit is "
+        "always 0 for human / SIEM use."
+    ),
+)
+def status(policy_source, no_cache, as_json, output_format, check):
     """Render a diagnostic snapshot of the active APM policy.
 
-    Always exits 0 -- discovery failures are reported in the output, never
-    via process exit code, so the command is safe for CI and SIEM
-    pipelines.
+    Default exit code is always 0 -- discovery failures are reported in
+    the output, never via process exit code, so the command is safe for
+    human and SIEM use. Pass ``--check`` to make the command exit 1 when
+    no usable policy is resolved (anything other than ``outcome=found``),
+    which is suitable for CI pre-checks.
     """
     logger = CommandLogger("policy status")
     project_root = Path.cwd()
@@ -361,4 +373,6 @@ def status(policy_source, no_cache, as_json, output_format):
     finally:
         logger.render_summary()
 
+    if check and report["outcome"] != "found":
+        sys.exit(1)
     sys.exit(0)

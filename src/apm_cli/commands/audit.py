@@ -452,8 +452,8 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
     "no_policy",
     is_flag=True,
     help=(
-        "Skip auto-discovery of org policy in --ci mode. "
-        "Has no effect when --policy is passed explicitly."
+        "Skip org policy discovery and enforcement. "
+        "Overridden when --policy is passed explicitly."
     ),
 )
 @click.option(

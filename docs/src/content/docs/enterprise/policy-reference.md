@@ -750,7 +750,7 @@ Compute the pin on Linux with `sha256sum .github/apm-policy.yml | awk '{print "s
 
 ### 9.7. `apm policy status`: diagnostic snapshot
 
-Inspect the current policy posture without running an install or audit. Always exits 0, so it is safe for CI / SIEM ingestion:
+Inspect the current policy posture without running an install or audit. The default exit code is always 0, so it is safe for human and SIEM use:
 
 ```shell
 $ apm policy status
@@ -787,6 +787,12 @@ Flags:
 - `--policy-source <ref>` overrides discovery (path, `owner/repo`, `https://...`, or `org`).
 - `--no-cache` forces a fresh fetch.
 - `--json` / `-o json` switches to JSON output.
+- `--check` exits non-zero (1) when no usable policy is found (anything other than `outcome=found`). Use this for CI pre-checks that must fail when org policy is unreachable or misconfigured. Default behaviour (without `--check`) remains exit-0.
+
+```shell
+$ apm policy status --check          # exits 1 if outcome != "found"
+$ apm policy status --check --json   # exit 1 + JSON body for CI tooling
+```
 
 ### 9.8. `apm audit --ci` auto-discovery
 

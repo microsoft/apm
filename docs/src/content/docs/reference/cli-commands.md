@@ -515,8 +515,16 @@ apm policy status [OPTIONS]
 - `--policy-source SOURCE` - Override discovery: `org`, file path, or URL. Same shape as `apm install --policy`.
 - `--no-cache` - Force fresh fetch (skip cache).
 - `--json` / `-o json` - Machine-readable output for SIEM ingestion or CI inspection.
+- `--check` - Exit non-zero (1) when no usable policy is found. Default is always 0; use `--check` for CI pre-checks.
 
-**Exit code:** Always 0 - this is a diagnostic, not a gate. Use `apm audit --ci` to gate on policy compliance.
+**Exit codes:**
+
+| Mode | `outcome=found` | Anything else (absent, error, disabled, ...) |
+|------|-----------------|-----------------------------------------------|
+| default | 0 | 0 |
+| `--check` | 0 | 1 |
+
+The default is exit-0 so the command is safe for human and SIEM use; `--check` opts into a CI-friendly contract similar to `npm audit` / `pip check`. To gate on policy compliance (rule violations) instead of resolvability, use `apm audit --ci`.
 
 **Examples:**
 ```bash
@@ -531,6 +539,9 @@ apm policy status --json
 
 # Inspect a specific policy without committing it
 apm policy status --policy-source ./draft-policy.yml
+
+# CI gate: fail the job if no usable policy is resolved
+apm policy status --check
 ```
 
 ### `apm pack` - Create a portable bundle
