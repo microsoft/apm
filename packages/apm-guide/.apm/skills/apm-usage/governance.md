@@ -287,25 +287,58 @@ atomic (temp file + rename).
 - **Cached, stale within 7 days:** use cache + warn naming age and error.
   Enforcement still applies.
 - **Cache miss or stale beyond 7 days, fetch fails:** loud warning every
-  invocation; **do NOT block the install**. Fail-open default, ratified to
-  keep developers unblocked when GitHub is unreachable.
+  invocation; **do NOT block the install** by default (closes #829).
 - **Garbage response** (HTTP 200 with non-YAML body, e.g. captive portal):
-  treated as fetch failure — warn loudly, cache fallback if present, otherwise
-  proceed without enforcement.
+  same posture as fetch failure -- warn loudly, cache fallback if present.
 
-Orgs needing fail-closed semantics: track the planned
-`policy.fetch_failure: warn|block` schema knob (follow-up issue link TBD).
+Opt in to fail-closed semantics with the `policy.fetch_failure: warn|block`
+knob on `apm-policy.yml` (applies when a cached policy is available) or
+`policy.fetch_failure_default: warn|block` in the project's `apm.yml`
+(applies when no policy is available at all). Both default to `warn`.
+
+### 9.6. Hash pin (`policy.hash`)
+
+Consumer-side bytes-pin in `apm.yml` -- the `pip --require-hashes`
+equivalent for `apm-policy.yml`. Closes the compromised-mirror /
+captive-portal vector where a 200 OK with valid-looking but tampered YAML
+would otherwise install.
+
+```yaml
+policy:
+  hash: "sha256:<hex>"
+  hash_algorithm: sha256   # optional; sha256 (default), sha384, sha512
+```
+
+Hash is computed on the raw UTF-8 bytes of the leaf policy (before YAML
+parsing). A mismatch is **always** fail-closed regardless of
+`policy.fetch_failure*` settings. Malformed pins are rejected at parse
+time. MD5 / SHA-1 not accepted.
+
+### 9.7. Diagnostic command
+
+`apm policy status` prints discovery outcome, source, enforcement, cache
+age, `extends` chain, and rule counts (table or `--json`). Always exits 0
+so it is safe for CI / SIEM ingestion. Supports `--policy-source` and
+`--no-cache`.
+
+### 9.8. `apm audit --ci` auto-discovery
+
+When `--policy` (alias `--policy-source`) is omitted, `apm audit --ci`
+auto-discovers the org policy from the git remote, mirroring the install
+path. Use `--no-policy` to skip discovery for a single invocation.
 
 ### 10. Errors and exit codes
 
-All discovery outcomes exit `0` except `found` under `enforcement: block` with at
-least one violation, which exits `1` and aborts before integration. Under
-`enforcement: warn`, violations render in the post-install summary and exit `0`.
+All discovery outcomes exit `0` except `found` under `enforcement: block`
+with at least one violation (exit `1`) and `hash_mismatch` (always exit
+`1`).
 
 Discovery outcomes APM can emit (see `PolicyFetchResult.outcome`):
 `found`, `absent`, `cached_stale`, `cache_miss_fetch_fail`, `garbage_response`,
-`malformed`, `disabled`, `no_git_remote`, `empty`. Fetch-failure outcomes are
-fail-open: APM warns loudly but does not block.
+`malformed`, `disabled`, `no_git_remote`, `empty`, `hash_mismatch`.
+`hash_mismatch` is always fail-closed; the other fetch-failure outcomes
+are fail-open by default and become fail-closed when the project opts in
+via `policy.fetch_failure_default: block`.
 
 Violation classes:
 

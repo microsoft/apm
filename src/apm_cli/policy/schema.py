@@ -102,6 +102,7 @@ class ApmPolicy:
     version: str = ""
     extends: Optional[str] = None  # "org", "<owner>/<repo>", or URL
     enforcement: str = "warn"  # warn | block | off
+    fetch_failure: str = "warn"  # warn | block (closes #829)
     cache: PolicyCache = field(default_factory=PolicyCache)
     dependencies: DependencyPolicy = field(default_factory=DependencyPolicy)
     mcp: McpPolicy = field(default_factory=McpPolicy)

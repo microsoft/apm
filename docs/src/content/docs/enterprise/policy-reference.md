@@ -680,6 +680,56 @@ $ echo $?
 1
 ```
 
+#### `apm policy status`: diagnostic snapshot
+
+Inspect the current policy posture without running an install or audit. Always exits 0, so it is safe for CI / SIEM ingestion:
+
+```shell
+$ apm policy status
+                APM Policy Status
++--------------------+-----------------------------------+
+| Field              | Value                             |
++--------------------+-----------------------------------+
+| Outcome            | found                             |
+| Source             | org:contoso/.github               |
+| Enforcement        | block                             |
+| Cache age          | 12m ago                           |
+| Extends chain      | none                              |
+| Effective rules    | 3 dependency denies; 2 mcp denies |
++--------------------+-----------------------------------+
+```
+
+JSON output for CI / scripting:
+
+```shell
+$ apm policy status --json
+{
+  "outcome": "found",
+  "source": "org:contoso/.github",
+  "enforcement": "block",
+  "cache_age_seconds": 720,
+  "extends_chain": [],
+  "rule_counts": { ... },
+  "rule_summary": ["3 dependency denies", "2 mcp denies"]
+}
+```
+
+Flags:
+
+- `--policy-source <ref>` overrides discovery (path, `owner/repo`, `https://...`, or `org`).
+- `--no-cache` forces a fresh fetch.
+- `--json` / `-o json` switches to JSON output.
+
+#### `apm audit --ci`: auto-discovery
+
+When `--policy` (alias `--policy-source`) is omitted, `apm audit --ci` mirrors the install-time discovery path: it auto-discovers the org policy from the git remote, applying the same checks CI runs in production. Add `--no-policy` to skip discovery for a single invocation:
+
+```shell
+$ apm audit --ci                     # auto-discovers org policy
+$ apm audit --ci --policy <local>    # explicit override
+$ apm audit --ci --no-policy         # baseline checks only
+```
+
 ### 8. Escape hatches
 
 **Non-bypass contract:** every escape hatch below is single-invocation, is not persisted to disk, and does **NOT** change CI behaviour. `apm audit --ci` will still fail the PR for the same policy violation. These hatches exist to unblock local debugging, not to circumvent governance.
@@ -700,8 +750,39 @@ Resolved effective policy is cached under `apm_modules/.policy-cache/`. Default 
 When discovery cannot reach the policy source, APM behaves as follows:
 
 - **Cached, stale within 7 days** — use the cached policy and emit a warning naming the cache age and the fetch error. Enforcement still applies.
-- **Cache miss or stale beyond 7 days, fetch fails** — emit a loud warning every invocation; **do NOT block the install**. This is a fail-open default, ratified to keep developers unblocked when GitHub is unreachable.
-- **Garbage response** (HTTP 200 with non-YAML body, e.g. captive portal HTML) — treated identically to a fetch failure: warn loudly, fall back to cache if present, otherwise proceed without enforcement.
+- **Cache miss or stale beyond 7 days, fetch fails** — emit a loud warning every invocation; **do NOT block the install** by default (closes #829: ratified to keep developers unblocked when GitHub is unreachable). Opt in to fail-closed behaviour with `policy.fetch_failure: block` on the org policy (applies when a cached policy is available) or `policy.fetch_failure_default: block` in the project's `apm.yml` (applies when no policy is available at all). Both default to `warn`.
+- **Garbage response** (HTTP 200 with non-YAML body, e.g. captive portal HTML) — same posture as fetch failure: warn loudly by default, block when the project pins `policy.fetch_failure_default: block`.
+
+Example -- consumer-side opt-in to fail-closed semantics in `apm.yml`:
+
+```yaml
+name: my-project
+version: '1.0'
+policy:
+  fetch_failure_default: block
+```
+
+### 9.6. Hash pin: `policy.hash` (consumer-side verification)
+
+The org-side fetch_failure knob does not protect against a successful 200 OK response that happens to return *valid* YAML constructed by a compromised mirror, captive portal, or man-in-the-middle. To close that gap, projects can pin the exact bytes they expect to receive from the org policy source -- the `pip --require-hashes` equivalent for `apm-policy.yml`:
+
+```yaml
+name: my-project
+version: '1.0'
+policy:
+  hash: "sha256:6a8c...e2f1"        # SHA-256 of the raw apm-policy.yml bytes
+  hash_algorithm: sha256             # optional; sha256 (default), sha384, sha512
+```
+
+Compute the digest from the canonical org-policy file:
+
+```bash
+shasum -a 256 .github/apm-policy.yml | awk '{print "sha256:" $1}'
+```
+
+When set, every install / `apm policy status` / `apm audit --ci` verifies the hash of the fetched leaf policy bytes (UTF-8 encoded, **before** YAML parsing -- so re-serialized semantically-equivalent YAML still fails). A mismatch is **always** fail-closed regardless of `policy.fetch_failure` / `policy.fetch_failure_default`. The pin applies only to the leaf policy; parents in an `extends:` chain remain the leaf author's responsibility.
+
+A malformed pin (unsupported algorithm, wrong length, non-hex) is rejected at parse time -- silently ignoring it would defeat the security guarantee. MD5 and SHA-1 are not accepted.
 
 Organizations that need fail-closed semantics on fetch failure can track the planned `policy.fetch_failure: warn|block` schema knob in the follow-up issue (link TBD post-merge).
 
@@ -722,6 +803,7 @@ Each row maps a `PolicyFetchResult.outcome` to its exit impact, severity, the me
 | `disabled` | `0` | warn | `Policy enforcement disabled by --no-policy for this invocation. This does NOT bypass apm audit --ci. CI will still fail the PR for the same policy violation.` | Single-invocation only. Drop the flag / env var to re-enable. |
 | `no_git_remote` | `0` | warn | `Could not determine org from git remote; policy auto-discovery skipped` | Run inside a checkout with a GitHub remote, or set the remote with `git remote add origin <url>`. |
 | `empty` | `0` | warn | `Org policy is present but empty; no enforcement applied` | Org admin should populate the policy file (see section 11) or remove it. |
+| `hash_mismatch` | `1` (always) | error | `Policy hash mismatch: pinned hash does not match fetched policy. Update apm.yml policy.hash or contact your org admin.` | Inspect the diff between expected and actual digest in the error output. If the org legitimately rotated the policy, recompute and update `policy.hash` in `apm.yml`. Otherwise, treat as a potential supply-chain compromise and contact your org admin. |
 
 #### Violation classes
 

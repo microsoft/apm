@@ -34,15 +34,138 @@ import requests
 import yaml
 
 from .parser import PolicyValidationError, load_policy
+from .project_config import (
+    ALLOWED_HASH_ALGORITHMS,
+    _DEFAULT_HASH_ALGORITHM,
+    _HASH_HEX_LEN,
+    _HEX_RE,
+    ProjectPolicyConfigError,
+    compute_policy_hash,
+    read_project_policy_hash_pin,
+)
 from .schema import ApmPolicy
 
 logger = logging.getLogger(__name__)
+
+
+def _split_hash_pin(expected_hash: str) -> Tuple[str, str]:
+    """Split an ``"<algo>:<hex>"`` pin into (algorithm, lowercase_hex).
+
+    Bare hex (no prefix) is interpreted as sha256 for backwards
+    compatibility -- callers that care about the algorithm should pass a
+    fully-qualified pin. Raises :class:`ProjectPolicyConfigError` on a
+    structurally invalid pin (unsupported algorithm, wrong length, non
+    hex). The discovery helpers translate that into a fail-closed
+    ``hash_mismatch`` outcome rather than crashing.
+    """
+    raw = expected_hash.strip()
+    if ":" in raw:
+        algo, _, hex_part = raw.partition(":")
+        algo = algo.strip().lower()
+    else:
+        algo = _DEFAULT_HASH_ALGORITHM
+        hex_part = raw
+    hex_part = hex_part.strip().lower()
+    if algo not in ALLOWED_HASH_ALGORITHMS:
+        raise ProjectPolicyConfigError(
+            f"Unsupported policy.hash algorithm '{algo}'"
+        )
+    expected_len = _HASH_HEX_LEN[algo]
+    if len(hex_part) != expected_len or not _HEX_RE.match(hex_part):
+        raise ProjectPolicyConfigError(
+            f"policy.hash is not a valid {algo} digest"
+        )
+    return algo, hex_part
+
+
+def _compute_hash_normalized(content: str, expected_hash: Optional[str]) -> str:
+    """Compute the digest of *content* under the algorithm declared by
+    *expected_hash*, returning the canonical ``"<algo>:<hex>"`` form.
+
+    When *expected_hash* is ``None`` the default algorithm (sha256) is
+    used so the cache always carries a digest for later pin verification.
+    """
+    algo = _DEFAULT_HASH_ALGORITHM
+    if expected_hash:
+        try:
+            algo, _ = _split_hash_pin(expected_hash)
+        except ProjectPolicyConfigError:
+            algo = _DEFAULT_HASH_ALGORITHM
+    digest = compute_policy_hash(content, algo)
+    return f"{algo}:{digest}"
+
+
+def _verify_hash_pin(
+    content: object,
+    expected_hash: Optional[str],
+    source_label: str,
+) -> Optional[PolicyFetchResult]:
+    """Verify fetched policy bytes against the project's pin (#827).
+
+    Returns ``None`` when there is no pin, or the digest matches. On
+    mismatch -- or on a structurally invalid pin, which is treated as a
+    mismatch to stay fail-closed -- returns a :class:`PolicyFetchResult`
+    with ``outcome="hash_mismatch"`` that callers must propagate. The
+    hash is computed on the raw UTF-8 bytes that get parsed (matching
+    ``yaml.safe_load`` semantics) so a malicious mirror cannot bypass the
+    check by re-serializing semantically-equivalent YAML.
+    """
+    if expected_hash is None:
+        return None
+
+    raw_bytes: bytes
+    if isinstance(content, bytes):
+        raw_bytes = content
+    elif isinstance(content, str):
+        raw_bytes = content.encode("utf-8")
+    else:
+        return PolicyFetchResult(
+            outcome="hash_mismatch",
+            source=source_label,
+            error=(
+                f"Policy hash mismatch from {source_label}: "
+                "no content available to verify against pin"
+            ),
+            expected_hash=expected_hash,
+        )
+
+    try:
+        algo, expected_hex = _split_hash_pin(expected_hash)
+    except ProjectPolicyConfigError as exc:
+        return PolicyFetchResult(
+            outcome="hash_mismatch",
+            source=source_label,
+            error=(
+                f"Policy hash mismatch from {source_label}: "
+                f"invalid pin ({exc})"
+            ),
+            expected_hash=expected_hash,
+        )
+
+    digest = hashlib.new(algo)
+    digest.update(raw_bytes)
+    actual_hex = digest.hexdigest().lower()
+    if actual_hex == expected_hex:
+        return None
+
+    expected_norm = f"{algo}:{expected_hex}"
+    actual_norm = f"{algo}:{actual_hex}"
+    return PolicyFetchResult(
+        outcome="hash_mismatch",
+        source=source_label,
+        error=(
+            f"Policy hash mismatch from {source_label}: "
+            f"expected {expected_norm}, got {actual_norm}"
+        ),
+        expected_hash=expected_norm,
+        raw_bytes_hash=actual_norm,
+    )
 
 # Cache location: apm_modules/.policy-cache/<hash>.yml + <hash>.meta.json
 POLICY_CACHE_DIR = ".policy-cache"
 DEFAULT_CACHE_TTL = 3600  # 1 hour
 MAX_STALE_TTL = 7 * 24 * 3600  # 7 days -- stale cache usable on refresh failure
-CACHE_SCHEMA_VERSION = "2"  # Bump when cache format changes to auto-invalidate
+CACHE_SCHEMA_VERSION = "3"  # Bump when cache format changes to auto-invalidate
 
 
 @dataclass
@@ -61,6 +184,8 @@ class PolicyFetchResult:
     * ``garbage_response``    -- 200 OK but body is not valid YAML
     * ``no_git_remote``       -- cannot determine org from git remote
     * ``empty``               -- valid policy with no actionable rules
+    * ``hash_mismatch``       -- ``policy.hash`` pin in apm.yml does not match
+                                 the fetched policy bytes (always fail-closed)
     """
 
     policy: Optional[ApmPolicy] = None
@@ -74,6 +199,13 @@ class PolicyFetchResult:
     fetch_error: Optional[str] = None  # Network/parse error on refresh attempt
     outcome: str = ""  # See docstring for valid values
 
+    # -- Hash-pin fields (#827 supply-chain hardening) --
+    # raw_bytes_hash is the digest of the leaf policy bytes off the wire,
+    # in canonical "<algo>:<hex>" form. Persisted to the cache so subsequent
+    # cached reads can verify against the project's pin without re-fetching.
+    raw_bytes_hash: Optional[str] = None
+    expected_hash: Optional[str] = None  # The pin that was checked, if any
+
     @property
     def found(self) -> bool:
         return self.policy is not None
@@ -83,6 +215,7 @@ def discover_policy_with_chain(
     project_root: Path,
     *,
     no_policy: bool = False,
+    expected_hash: Optional[str] = None,
 ) -> PolicyFetchResult:
     """Discover policy with full inheritance chain resolution.
 
@@ -98,6 +231,13 @@ def discover_policy_with_chain(
     no_policy:
         When ``True`` **or** ``APM_POLICY_DISABLE=1`` is set, short-circuit
         to ``outcome="disabled"`` without any network I/O.
+    expected_hash:
+        Optional pin in ``"<algo>:<hex>"`` form (sourced from
+        ``policy.hash`` in the project's ``apm.yml``). When set, the
+        digest of the leaf policy bytes must match exactly; otherwise the
+        result outcome is set to ``"hash_mismatch"`` and ``policy`` is
+        cleared. The pin applies only to the **leaf** -- parent policies
+        in an ``extends:`` chain are the leaf author's responsibility.
 
     Returns
     -------
@@ -109,8 +249,25 @@ def discover_policy_with_chain(
     if no_policy or os.environ.get("APM_POLICY_DISABLE") == "1":
         return PolicyFetchResult(outcome="disabled")
 
+    # -- Resolve project-side hash pin (#827) --------------------------
+    # An explicit *expected_hash* argument always wins (test seam, future
+    # CLI override). Otherwise fall back to ``policy.hash`` in the
+    # project's apm.yml. A malformed pin surfaces as ``hash_mismatch``
+    # rather than a crash so install fails closed with a clear error.
+    if expected_hash is None:
+        try:
+            pin = read_project_policy_hash_pin(project_root)
+        except ProjectPolicyConfigError as exc:
+            return PolicyFetchResult(
+                outcome="hash_mismatch",
+                source="apm.yml",
+                error=f"Invalid policy.hash in apm.yml: {exc}",
+            )
+        if pin is not None:
+            expected_hash = pin.normalized
+
     # -- Base discovery ------------------------------------------------
-    fetch_result = discover_policy(project_root)
+    fetch_result = discover_policy(project_root, expected_hash=expected_hash)
 
     # -- Chain resolution if leaf has extends: -------------------------
     if (
@@ -370,6 +527,7 @@ def discover_policy(
     *,
     policy_override: Optional[str] = None,
     no_cache: bool = False,
+    expected_hash: Optional[str] = None,
 ) -> PolicyFetchResult:
     """Discover and load the applicable policy for a project.
 
@@ -378,49 +536,88 @@ def discover_policy(
     2. If policy_override is a URL -> fetch from URL
     3. If policy_override is "org" -> auto-discover from org
     4. If policy_override is None -> auto-discover from org
+
+    The optional ``expected_hash`` (``"<algo>:<hex>"``) pins the leaf
+    policy bytes; mismatches return ``outcome="hash_mismatch"`` and
+    must always be treated fail-closed by callers.
     """
     if policy_override:
         path = Path(policy_override)
         if path.exists() and path.is_file():
-            return _load_from_file(path)
+            return _load_from_file(path, expected_hash=expected_hash)
         if policy_override.startswith("http://"):
             return PolicyFetchResult(
                 error="Refusing plaintext http:// policy URL -- use https://",
                 source=f"url:{policy_override}",
             )
         if policy_override.startswith("https://"):
-            return _fetch_from_url(policy_override, project_root, no_cache=no_cache)
+            return _fetch_from_url(
+                policy_override,
+                project_root,
+                no_cache=no_cache,
+                expected_hash=expected_hash,
+            )
         if policy_override != "org":
             # Try as owner/repo reference
             return _fetch_from_repo(
-                policy_override, project_root, no_cache=no_cache
+                policy_override,
+                project_root,
+                no_cache=no_cache,
+                expected_hash=expected_hash,
             )
 
     # Auto-discover from git remote
-    return _auto_discover(project_root, no_cache=no_cache)
+    return _auto_discover(
+        project_root, no_cache=no_cache, expected_hash=expected_hash
+    )
 
 
-def _load_from_file(path: Path) -> PolicyFetchResult:
+def _load_from_file(
+    path: Path, *, expected_hash: Optional[str] = None
+) -> PolicyFetchResult:
     """Load policy from a local file."""
     try:
-        policy, _warnings = load_policy(path)
-        outcome = "empty" if _is_policy_empty(policy) else "found"
-        return PolicyFetchResult(
-            policy=policy, source=f"file:{path}", outcome=outcome
-        )
-    except PolicyValidationError as e:
-        return PolicyFetchResult(
-            error=f"Invalid policy file {path}: {e}", outcome="malformed"
-        )
+        # Read raw bytes ourselves so we can verify the pin against the
+        # exact bytes that get parsed (matches the on-the-wire semantics
+        # used by the URL/repo fetchers).
+        content = path.read_text(encoding="utf-8")
     except Exception as e:
         return PolicyFetchResult(
             error=f"Failed to read {path}: {e}",
             outcome="cache_miss_fetch_fail",
         )
 
+    source_label = f"file:{path}"
+    mismatch = _verify_hash_pin(content, expected_hash, source_label)
+    if mismatch is not None:
+        return mismatch
+
+    try:
+        policy, _warnings = load_policy(content)
+        outcome = "empty" if _is_policy_empty(policy) else "found"
+        actual_hash = (
+            _compute_hash_normalized(content, expected_hash)
+            if expected_hash is not None
+            else None
+        )
+        return PolicyFetchResult(
+            policy=policy,
+            source=source_label,
+            outcome=outcome,
+            raw_bytes_hash=actual_hash,
+            expected_hash=expected_hash,
+        )
+    except PolicyValidationError as e:
+        return PolicyFetchResult(
+            error=f"Invalid policy file {path}: {e}", outcome="malformed"
+        )
+
 
 def _auto_discover(
-    project_root: Path, *, no_cache: bool = False
+    project_root: Path,
+    *,
+    no_cache: bool = False,
+    expected_hash: Optional[str] = None,
 ) -> PolicyFetchResult:
     """Auto-discover policy from org's .github repo.
 
@@ -440,7 +637,9 @@ def _auto_discover(
     if host and host != "github.com":
         repo_ref = f"{host}/{repo_ref}"
 
-    return _fetch_from_repo(repo_ref, project_root, no_cache=no_cache)
+    return _fetch_from_repo(
+        repo_ref, project_root, no_cache=no_cache, expected_hash=expected_hash
+    )
 
 
 def _extract_org_from_git_remote(
@@ -511,6 +710,7 @@ def _fetch_from_url(
     project_root: Path,
     *,
     no_cache: bool = False,
+    expected_hash: Optional[str] = None,
 ) -> PolicyFetchResult:
     """Fetch policy YAML from a direct URL."""
     source_label = f"url:{url}"
@@ -518,7 +718,9 @@ def _fetch_from_url(
 
     # Use URL as cache key
     if not no_cache:
-        cache_entry = _read_cache_entry(url, project_root)
+        cache_entry = _read_cache_entry(
+            url, project_root, expected_hash=expected_hash
+        )
         if cache_entry is not None and not cache_entry.stale:
             outcome = "empty" if _is_policy_empty(cache_entry.policy) else "found"
             return PolicyFetchResult(
@@ -527,6 +729,8 @@ def _fetch_from_url(
                 cached=True,
                 cache_age_seconds=cache_entry.age_seconds,
                 outcome=outcome,
+                raw_bytes_hash=cache_entry.raw_bytes_hash or None,
+                expected_hash=expected_hash,
             )
 
     fetch_error: Optional[str] = None
@@ -570,6 +774,14 @@ def _fetch_from_url(
     if garbage_result is not None:
         return garbage_result
 
+    # Hash pin verification (#827) -- BEFORE parse, on raw bytes off wire.
+    # A mismatch is a hard failure regardless of cache_entry availability:
+    # falling back to a "good" cache when the pin doesn't match would mask
+    # exactly the compromise this pin is designed to catch.
+    mismatch = _verify_hash_pin(content, expected_hash, source_label)
+    if mismatch is not None:
+        return mismatch
+
     try:
         policy, _warnings = load_policy(content)
     except PolicyValidationError as e:
@@ -580,9 +792,22 @@ def _fetch_from_url(
         )
 
     chain_refs = [url]
-    _write_cache(url, policy, project_root, chain_refs=chain_refs)
+    actual_hash = _compute_hash_normalized(content, expected_hash)
+    _write_cache(
+        url,
+        policy,
+        project_root,
+        chain_refs=chain_refs,
+        raw_bytes_hash=actual_hash,
+    )
     outcome = "empty" if _is_policy_empty(policy) else "found"
-    return PolicyFetchResult(policy=policy, source=source_label, outcome=outcome)
+    return PolicyFetchResult(
+        policy=policy,
+        source=source_label,
+        outcome=outcome,
+        raw_bytes_hash=actual_hash,
+        expected_hash=expected_hash,
+    )
 
 
 def _fetch_from_repo(
@@ -590,6 +815,7 @@ def _fetch_from_repo(
     project_root: Path,
     *,
     no_cache: bool = False,
+    expected_hash: Optional[str] = None,
 ) -> PolicyFetchResult:
     """Fetch apm-policy.yml from a GitHub repo via Contents API.
 
@@ -599,7 +825,9 @@ def _fetch_from_repo(
     cache_entry: Optional[_CacheEntry] = None
 
     if not no_cache:
-        cache_entry = _read_cache_entry(repo_ref, project_root)
+        cache_entry = _read_cache_entry(
+            repo_ref, project_root, expected_hash=expected_hash
+        )
         if cache_entry is not None and not cache_entry.stale:
             outcome = "empty" if _is_policy_empty(cache_entry.policy) else "found"
             return PolicyFetchResult(
@@ -608,6 +836,8 @@ def _fetch_from_repo(
                 cached=True,
                 cache_age_seconds=cache_entry.age_seconds,
                 outcome=outcome,
+                raw_bytes_hash=cache_entry.raw_bytes_hash or None,
+                expected_hash=expected_hash,
             )
 
     content, error = _fetch_github_contents(repo_ref, "apm-policy.yml")
@@ -629,6 +859,11 @@ def _fetch_from_repo(
     if garbage_result is not None:
         return garbage_result
 
+    # Hash pin verification (#827) -- BEFORE parse, on raw bytes off wire.
+    mismatch = _verify_hash_pin(content, expected_hash, source_label)
+    if mismatch is not None:
+        return mismatch
+
     try:
         policy, _warnings = load_policy(content)
     except PolicyValidationError as e:
@@ -639,9 +874,22 @@ def _fetch_from_repo(
         )
 
     chain_refs = [repo_ref]
-    _write_cache(repo_ref, policy, project_root, chain_refs=chain_refs)
+    actual_hash = _compute_hash_normalized(content, expected_hash)
+    _write_cache(
+        repo_ref,
+        policy,
+        project_root,
+        chain_refs=chain_refs,
+        raw_bytes_hash=actual_hash,
+    )
     outcome = "empty" if _is_policy_empty(policy) else "found"
-    return PolicyFetchResult(policy=policy, source=source_label, outcome=outcome)
+    return PolicyFetchResult(
+        policy=policy,
+        source=source_label,
+        outcome=outcome,
+        raw_bytes_hash=actual_hash,
+        expected_hash=expected_hash,
+    )
 
 
 def _fetch_github_contents(
@@ -756,6 +1004,7 @@ class _CacheEntry:
     stale: bool  # True if past TTL (but within MAX_STALE_TTL)
     chain_refs: List[str] = field(default_factory=list)
     fingerprint: str = ""
+    raw_bytes_hash: str = ""  # "<algo>:<hex>" of leaf bytes off wire (#827)
 
 
 def _get_cache_dir(project_root: Path) -> Path:
@@ -778,6 +1027,7 @@ def _policy_to_dict(policy: ApmPolicy) -> dict:
         "name": policy.name,
         "version": policy.version,
         "enforcement": policy.enforcement,
+        "fetch_failure": policy.fetch_failure,
         "cache": {"ttl": policy.cache.ttl},
         "dependencies": {
             "allow": _opt_list(policy.dependencies.allow),
@@ -936,13 +1186,21 @@ def _read_cache_entry(
     repo_ref: str,
     project_root: Path,
     ttl: int = DEFAULT_CACHE_TTL,
+    *,
+    expected_hash: Optional[str] = None,
 ) -> Optional[_CacheEntry]:
     """Read cache entry with stale-awareness.
 
     Returns:
     * ``_CacheEntry(stale=False)`` -- within TTL, ready for immediate use
     * ``_CacheEntry(stale=True)``  -- past TTL but within MAX_STALE_TTL
-    * ``None``                     -- no cache file, corrupt, or past MAX_STALE_TTL
+    * ``None``                     -- no cache file, corrupt, past MAX_STALE_TTL,
+                                       or pin verification failure (#827).
+
+    When *expected_hash* is provided the cached ``raw_bytes_hash`` is
+    compared against it; a mismatch invalidates the cache entry so the
+    caller falls through to a fresh fetch where the pin can be verified
+    against authoritative bytes off the wire.
     """
     cache_dir = _get_cache_dir(project_root)
     key = _cache_key(repo_ref)
@@ -965,6 +1223,21 @@ def _read_cache_entry(
         if age > MAX_STALE_TTL:
             return None  # Past MAX_STALE_TTL, unusable
 
+        raw_bytes_hash = meta.get("raw_bytes_hash", "") or ""
+
+        # Pin verification (#827): if the project pinned a hash and the
+        # cache was written without one (legacy entry) or with a different
+        # one, ignore the cache so the fetcher can verify the pin against
+        # fresh authoritative bytes.
+        if expected_hash is not None:
+            try:
+                exp_algo, exp_hex = _split_hash_pin(expected_hash)
+                expected_norm = f"{exp_algo}:{exp_hex}"
+            except ProjectPolicyConfigError:
+                return None
+            if raw_bytes_hash.lower() != expected_norm:
+                return None
+
         policy, _warnings = load_policy(policy_file)
 
         # Determine source label
@@ -980,6 +1253,7 @@ def _read_cache_entry(
             stale=age > ttl,
             chain_refs=meta.get("chain_refs", [repo_ref]),
             fingerprint=meta.get("fingerprint", ""),
+            raw_bytes_hash=raw_bytes_hash,
         )
     except Exception:
         return None
@@ -1014,12 +1288,18 @@ def _write_cache(
     project_root: Path,
     *,
     chain_refs: Optional[List[str]] = None,
+    raw_bytes_hash: Optional[str] = None,
 ) -> None:
     """Write merged effective policy and metadata to cache atomically.
 
     Uses temp file + ``os.replace()`` to prevent torn writes from parallel
     installs.  Both the policy file and metadata sidecar are written
     atomically and independently.
+
+    The optional ``raw_bytes_hash`` (canonical ``"<algo>:<hex>"``) is the
+    digest of the leaf bytes off the wire and is persisted to the meta
+    sidecar so subsequent cached reads can verify against the project's
+    pin without re-fetching (#827).
     """
     cache_dir = _get_cache_dir(project_root)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -1054,6 +1334,7 @@ def _write_cache(
         "chain_refs": chain_refs if chain_refs is not None else [repo_ref],
         "schema_version": CACHE_SCHEMA_VERSION,
         "fingerprint": fingerprint,
+        "raw_bytes_hash": raw_bytes_hash or "",
     }
     tmp_meta = cache_dir / f"{key}.{uid}.meta.json.tmp"
     try:

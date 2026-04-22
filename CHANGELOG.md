@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--no-policy` flag on `apm install` / `install <pkg>` / `install --mcp` and `APM_POLICY_DISABLE=1` env var to skip org policy enforcement for a single invocation; loudly logged and does NOT bypass `apm audit --ci` (#827)
 - `apm install --dry-run` previews policy verdicts ("would be blocked by policy") without writing files (#827)
 - `apm install <pkg>` rolls back `apm.yml` to its pre-mutation snapshot when the install pipeline fails a policy check (#827)
+- `policy.fetch_failure: warn|block` schema knob on `apm-policy.yml` and matching project-side `policy.fetch_failure_default` opt-in in `apm.yml`: when set to `block`, install / `apm audit --ci` fail closed if the org policy cannot be fetched, parsed, or returns garbage. Both default to `warn` for backwards compatibility (closes #829)
+- `apm policy status` diagnostic command: prints discovery outcome, source, enforcement, cache age, `extends:` chain, and rule counts in table or `--json` form. Always exits 0 so it is safe for CI / SIEM ingestion. Supports `--policy-source` and `--no-cache` overrides (#827)
+- `apm audit --ci` auto-discovers the org policy when `--policy-source` (alias `--policy`) is not provided, mirroring the install-time discovery path so CI catches sideloaded files via unmanaged-files checks; `--no-policy` flag added to skip discovery for a single invocation (#827)
 
 ### Changed
 
@@ -29,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `apm install` now enforces org `apm-policy.yml` at install time, not only in `apm audit --ci` — covering dependency deny/allow/required lists, MCP server deny/transport/trust-transitive rules, and `compilation.target.allow` constraints; transitive MCP servers from APM packages are checked before runtime config is written (#827)
   - **Migration**: If your org publishes `enforcement: block`, your next `apm install` may fail where it previously succeeded. Preview verdicts with `apm install --dry-run` before upgrading.
+- `policy.hash` pin in `apm.yml` (with optional `policy.hash_algorithm: sha256|sha384|sha512`) for consumer-side verification of fetched org-policy bytes -- the `pip --require-hashes` equivalent for `apm-policy.yml`. A mismatch is always fail-closed regardless of `policy.fetch_failure` setting and closes the compromised-intermediary / captive-portal / garbage-response vector where a 200 OK with valid-looking but tampered YAML would otherwise install (#827)
 
 ### Fixed
 

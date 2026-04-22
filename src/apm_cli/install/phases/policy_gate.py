@@ -57,6 +57,24 @@ def run(ctx: "InstallContext") -> None:
     if outcome == "disabled":
         return
 
+    # hash_mismatch (#827) -- ALWAYS fail closed regardless of
+    # ``policy.fetch_failure`` / ``fetch_failure_default``. A pin
+    # mismatch is an explicit project-side trust assertion violation,
+    # not a transient fetch failure.
+    if outcome == "hash_mismatch":
+        if logger:
+            logger.policy_discovery_miss(
+                outcome="hash_mismatch",
+                source=source,
+                error=fetch_result.error or fetch_result.fetch_error,
+            )
+        ctx.policy_enforcement_active = False
+        raise PolicyViolationError(
+            "Install blocked: policy hash mismatch -- pinned policy.hash "
+            f"does not match fetched policy bytes (source={source or 'unknown'}). "
+            "Update apm.yml policy.hash or contact your org admin."
+        )
+
     # 5 of 9 non-found / non-disabled outcomes go through the canonical
     # logger helper for consistent wording (Logging C1/C2, UX F1/F2/F4).
     if outcome in (
@@ -74,6 +92,19 @@ def run(ctx: "InstallContext") -> None:
                 error=fetch_result.error or fetch_result.fetch_error,
             )
         ctx.policy_enforcement_active = False
+
+        # Fail-closed gate (closes #829): when project-side
+        # ``policy.fetch_failure_default == "block"``, refuse to install
+        # on fetch / parse failure outcomes. ``absent``, ``no_git_remote``,
+        # ``empty`` are NOT fetch failures -- they mean "no org policy".
+        if outcome in ("malformed", "cache_miss_fetch_fail", "garbage_response"):
+            project_default = _read_project_fetch_failure_default(ctx)
+            if project_default == "block":
+                raise PolicyViolationError(
+                    "Install blocked: org policy could not be fetched / parsed "
+                    "and project apm.yml has policy.fetch_failure_default=block "
+                    f"(outcome={outcome}, source={source or 'unknown'})"
+                )
         return
 
     # cached_stale -- warn but STILL enforce
@@ -90,6 +121,14 @@ def run(ctx: "InstallContext") -> None:
                 outcome="cached_stale",
                 source=source,
                 error=fetch_result.fetch_error,
+            )
+        # Fail-closed (closes #829): cached_stale means the refresh
+        # failed but a cached policy is present. Honor the cached
+        # policy's ``fetch_failure`` knob.
+        if fetch_result.policy is not None and fetch_result.policy.fetch_failure == "block":
+            raise PolicyViolationError(
+                "Install blocked: org policy refresh failed and the cached "
+                f"policy declares fetch_failure=block (source={source or 'unknown'})"
             )
 
     # found -- normal path
@@ -202,6 +241,20 @@ def _is_policy_disabled(ctx: "InstallContext") -> bool:
         return True
 
     return False
+
+
+def _read_project_fetch_failure_default(ctx: "InstallContext") -> str:
+    """Resolve project-side ``policy.fetch_failure_default`` (closes #829).
+
+    Reads from ctx attribute first (test-friendly override) then falls
+    back to parsing ``<project_root>/apm.yml``. Default is ``"warn"``.
+    """
+    explicit = getattr(ctx, "policy_fetch_failure_default", None)
+    if isinstance(explicit, str) and explicit in {"warn", "block"}:
+        return explicit
+    from apm_cli.policy.project_config import read_project_fetch_failure_default
+
+    return read_project_fetch_failure_default(ctx.project_root)
 
 
 def _discover_with_chain(ctx: "InstallContext"):

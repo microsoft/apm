@@ -497,6 +497,18 @@ class InstallLogger(CommandLogger):
             )
             return
 
+        if outcome == "hash_mismatch":
+            # #827: always-error posture -- pinned policy.hash does not
+            # match fetched bytes. Show both expected and actual via the
+            # error message so the admin can compare without re-fetching.
+            _rich_error(
+                f"Policy hash mismatch: pinned hash does not match fetched "
+                f"policy ({err_text}). Update apm.yml policy.hash or "
+                "contact your org admin.",
+                symbol="error",
+            )
+            return
+
         # Defensive: unknown outcome -- emit a conservative warning
         if error:
             _rich_warning(

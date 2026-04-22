@@ -100,6 +100,27 @@ def run_policy_preflight(
     # -- Discovery (chain-aware: resolves extends: + merges) -----------
     fetch_result = discover_policy_with_chain(project_root)
 
+    # hash_mismatch (#827) -- ALWAYS fail-closed regardless of the
+    # ``fetch_failure_default`` knob. A pin mismatch is a deliberate
+    # project-side trust assertion, not a transient failure.
+    if fetch_result.outcome == "hash_mismatch":
+        logger.policy_discovery_miss(
+            outcome="hash_mismatch",
+            source=fetch_result.source,
+            error=fetch_result.error or fetch_result.fetch_error,
+        )
+        if dry_run:
+            return fetch_result, False
+        from .models import CIAuditResult as _CIAuditResult
+
+        raise PolicyBlockError(
+            "Policy enforcement blocked installation: policy hash mismatch "
+            "(pinned policy.hash does not match fetched policy bytes). "
+            "Update apm.yml policy.hash or contact your org admin.",
+            audit_result=_CIAuditResult(checks=[]),
+            policy_source=fetch_result.source or "unknown",
+        )
+
     # Outcome routing (plan section B)
     if not fetch_result.found:
         logger.policy_discovery_miss(
@@ -107,6 +128,29 @@ def run_policy_preflight(
             source=fetch_result.source,
             error=fetch_result.error or fetch_result.fetch_error,
         )
+
+        # Fail-closed gate (closes #829): fetch / parse failure outcomes
+        # honor project-side ``policy.fetch_failure_default``. ``absent``,
+        # ``no_git_remote``, ``empty`` are NOT failures -- skip the gate.
+        if (
+            not dry_run
+            and fetch_result.outcome
+            in ("malformed", "cache_miss_fetch_fail", "garbage_response")
+        ):
+            from .project_config import read_project_fetch_failure_default
+
+            project_default = read_project_fetch_failure_default(project_root)
+            if project_default == "block":
+                from .models import CIAuditResult as _CIAuditResult
+
+                empty = _CIAuditResult(checks=[])
+                raise PolicyBlockError(
+                    "Policy enforcement blocked installation: org policy "
+                    f"could not be fetched / parsed (outcome={fetch_result.outcome}) "
+                    "and project apm.yml has policy.fetch_failure_default=block",
+                    audit_result=empty,
+                    policy_source=fetch_result.source or "unknown",
+                )
         return fetch_result, False
 
     policy: ApmPolicy = fetch_result.policy  # type: ignore[assignment]
@@ -119,6 +163,28 @@ def run_policy_preflight(
         enforcement=enforcement,
         age_seconds=fetch_result.cache_age_seconds,
     )
+
+    # cached_stale fail-closed (closes #829): refresh failed but a cached
+    # policy is present. Honor the cached policy's ``fetch_failure``.
+    if (
+        not dry_run
+        and fetch_result.outcome == "cached_stale"
+        and policy.fetch_failure == "block"
+    ):
+        # Surface as a discovery-miss warning for context, then block.
+        logger.policy_discovery_miss(
+            outcome="cached_stale",
+            source=fetch_result.source,
+            error=fetch_result.fetch_error,
+        )
+        from .models import CIAuditResult as _CIAuditResult
+
+        raise PolicyBlockError(
+            "Policy enforcement blocked installation: org policy refresh "
+            "failed and the cached policy declares fetch_failure=block",
+            audit_result=_CIAuditResult(checks=[]),
+            policy_source=fetch_result.source or "unknown",
+        )
 
     if enforcement == "off":
         return fetch_result, False

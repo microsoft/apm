@@ -620,7 +620,7 @@ class TestAutoDiscover(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             result = _auto_discover(Path(tmpdir), no_cache=True)
             mock_fetch.assert_called_once_with(
-                "contoso/.github", Path(tmpdir), no_cache=True
+                "contoso/.github", Path(tmpdir), no_cache=True, expected_hash=None
             )
             self.assertTrue(result.found)
 
@@ -638,6 +638,7 @@ class TestAutoDiscover(unittest.TestCase):
                 "ghe.example.com/contoso/.github",
                 Path(tmpdir),
                 no_cache=True,
+                expected_hash=None,
             )
 
     @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
