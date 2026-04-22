@@ -151,7 +151,7 @@ graph TD
 
 ### 5a. Install pipeline gate
 
-Runs after dependency resolution and before file targets. Enforces the dependency, MCP, and (post-targets) compilation-target rules against the resolved set. On `enforcement: block`, raises `PolicyViolationError` and aborts before any file is written. On `enforcement: warn`, logs every violation with `[x]` lines and continues.
+Runs after dependency resolution and before file targets. Enforces the dependency, MCP, and (post-targets) compilation-target rules against the resolved set. On `enforcement: block`, the CLI emits an inline `[x] Policy violation: ...` line per finding, raises `PolicyViolationError`, and aborts before any file is written. On `enforcement: warn`, every finding is recorded as a `[!]` warn diagnostic that surfaces in the end-of-install summary; install continues to completion.
 
 ### 5b. Install `--mcp <ref>` preflight
 

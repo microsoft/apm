@@ -72,10 +72,11 @@ dependencies:
 mcp:
   transport:
     allow: [http, stdio]   # block sse and streamable-http
-  trust_transitive: false  # do not auto-install MCPs from transitive deps
 ```
 
-Twelve lines, three rules: only contoso and microsoft packages are allowed, untrusted-org is blocked outright, MCP transports are restricted, and MCPs from transitive packages require explicit opt-in.
+Three rules: only contoso and microsoft packages are allowed, untrusted-org is blocked outright, and MCP transports are restricted to `http` and `stdio`.
+
+> **Note on transitive MCPs:** the `mcp.trust_transitive` policy field is currently parsed but not enforced — the actual gate is the `--trust-transitive-mcp` CLI flag (defaults to deny). See [Governance Guide §5a](../governance-guide/#5a-what-does-not-enforce-policy) for the full list of parsed-but-not-enforced fields.
 
 ---
 
@@ -85,7 +86,9 @@ Policy is evaluated at two points. Both use the same policy file and the same me
 
 ### Install time (preflight gate)
 
-`apm install` reads the discovered policy before resolving dependencies. Violations halt the install with a non-zero exit code; nothing is written to disk. This protects developers who run `apm install` locally — they cannot accidentally deploy a denied package even without CI.
+`apm install` resolves the dependency tree, then runs the policy gate against the resolved set, then writes any files. A blocking violation halts the install with a non-zero exit code; nothing is written to disk. This protects developers who run `apm install` locally — they cannot accidentally deploy a denied package even without CI.
+
+> **Bypass note:** `apm install --no-policy` and the `APM_POLICY_DISABLE=1` environment variable skip this gate locally. They also skip 16 of the 22 checks when `apm audit --ci` runs in the same shell. See the [Governance Guide bypass contract](../governance-guide/#7-the-bypass--non-bypass-contract) for the full surface.
 
 ### CI time (audit gate)
 
@@ -130,16 +133,14 @@ dependencies:
     - untrusted-org/random-skills
 ```
 
-`apm install` halts before any file is written:
+`apm install` halts before any file is written. The CLI emits a single-line violation followed by a remediation hint:
 
 ```
-[x] Policy violation: dependency 'untrusted-org/random-skills' is denied by org policy
-    Policy: contoso/.github/apm-policy.yml
-    Rule:   dependencies.deny matches 'untrusted-org/**'
-    Action: install aborted, no files deployed
-
-Run `apm audit --ci --policy org` for full report. Override with `--no-policy` (not recommended).
+[x] Policy violation: untrusted-org/random-skills -- denied by pattern: untrusted-org/**
+    Run `apm audit --ci --policy org` for the full report.
 ```
+
+Exit code is non-zero so CI fails. Run `apm audit --ci --policy org` (in CI or locally) for the full SARIF report including which policy file in the inheritance chain produced the rule.
 
 In CI, `apm audit --ci --policy org` produces the same finding as a SARIF result. GitHub Code Scanning renders it inline on the PR diff with the offending line annotated. The PR cannot be merged until the violation is resolved or the policy is amended through the org's own change-management process.
 
