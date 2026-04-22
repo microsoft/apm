@@ -18,12 +18,17 @@ fields.  ``packages`` in yml becomes ``plugins`` in json.
 from __future__ import annotations
 
 import json
+import logging
 import re
+import urllib.error
+import urllib.request
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+import yaml
 
 from .errors import (
     BuildError,
@@ -38,6 +43,8 @@ from .semver import SemVer, parse_semver, satisfies_range
 from .tag_pattern import build_tag_regex, render_tag
 from ..utils.path_security import ensure_path_within
 from .yml_schema import MarketplaceYml, PackageEntry, load_marketplace_yml
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "ResolvedPackage",
@@ -379,6 +386,74 @@ class MarketplaceBuilder:
                 ordered.append(results[idx])
         return ordered
 
+    # -- remote description fetcher -----------------------------------------
+
+    @staticmethod
+    def _fetch_remote_description(pkg: ResolvedPackage) -> Optional[str]:
+        """Best-effort: fetch ``description`` from the package's remote apm.yml.
+
+        Returns the description string or ``None`` on any error.  This is
+        purely cosmetic enrichment -- failures are silently logged at debug
+        level and never propagate.
+        """
+        try:
+            path_prefix = f"{pkg.subdir}/" if pkg.subdir else ""
+            url = (
+                f"https://raw.githubusercontent.com/"
+                f"{pkg.source_repo}/{pkg.sha}/{path_prefix}apm.yml"
+            )
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
+                raw = resp.read().decode("utf-8")
+            data = yaml.safe_load(raw)
+            if isinstance(data, dict):
+                desc = data.get("description")
+                if isinstance(desc, str) and desc:
+                    logger.debug(
+                        "Fetched description for %s from remote apm.yml",
+                        pkg.name,
+                    )
+                    return desc
+        except Exception:  # noqa: BLE001 -- best-effort enrichment
+            logger.debug(
+                "Could not fetch remote description for %s",
+                pkg.name,
+                exc_info=True,
+            )
+        return None
+
+    def _prefetch_descriptions(
+        self, resolved: List[ResolvedPackage]
+    ) -> Dict[str, str]:
+        """Concurrently fetch remote descriptions for packages that lack one.
+
+        Returns a mapping of ``{package_name: description}`` for successful
+        fetches.  Skipped entirely when ``--offline`` is set.
+        """
+        if self._options.offline:
+            return {}
+
+        need_fetch = [pkg for pkg in resolved if not pkg.description]
+        if not need_fetch:
+            return {}
+
+        results: Dict[str, str] = {}
+        workers = min(self._options.concurrency, len(need_fetch))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            future_to_name = {
+                pool.submit(self._fetch_remote_description, pkg): pkg.name
+                for pkg in need_fetch
+            }
+            for future in as_completed(future_to_name):
+                name = future_to_name[future]
+                try:
+                    desc = future.result()
+                    if desc:
+                        results[name] = desc
+                except Exception:  # noqa: BLE001 -- best-effort
+                    pass
+        return results
+
     # -- composition --------------------------------------------------------
 
     def compose_marketplace_json(
@@ -400,6 +475,9 @@ class MarketplaceBuilder:
             An ``OrderedDict``-style dict ready to be serialised as JSON.
         """
         yml = self._load_yml()
+
+        # Pre-fetch descriptions for packages that don't have one
+        remote_descriptions = self._prefetch_descriptions(resolved)
 
         doc: Dict[str, Any] = OrderedDict()
         doc["name"] = yml.name
@@ -426,6 +504,8 @@ class MarketplaceBuilder:
             plugin["name"] = pkg.name
             if pkg.description:
                 plugin["description"] = pkg.description
+            elif pkg.name in remote_descriptions:
+                plugin["description"] = remote_descriptions[pkg.name]
             plugin["tags"] = list(pkg.tags)
 
             source: Dict[str, Any] = OrderedDict()
