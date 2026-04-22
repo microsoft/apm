@@ -193,29 +193,15 @@ def integrate_local_content(
     """
     from ..models.apm_package import APMPackage, PackageInfo, PackageType
 
-    # For user-scope installs, project_root is Path.home().  The local
-    # package should only scan ~/.apm/ (the actual primitives directory),
-    # NOT the entire home directory -- otherwise discover_primitives()
-    # does a recursive glob of ~/ which hangs and triggers macOS privacy
-    # dialogs.  See #626 + #452 interaction bug.
-    if scope is not None:
-        from ..core.scope import InstallScope
-        if scope is InstallScope.USER:
-            apm_dir = project_root / ".apm"
-        else:
-            apm_dir = project_root
-    else:
-        apm_dir = project_root
-
     local_pkg = APMPackage(
         name="_local",
         version="0.0.0",
-        package_path=apm_dir,
+        package_path=project_root,
         source="local",
     )
     local_info = PackageInfo(
         package=local_pkg,
-        install_path=apm_dir,
+        install_path=project_root,
         package_type=PackageType.APM_PACKAGE,
     )
 
