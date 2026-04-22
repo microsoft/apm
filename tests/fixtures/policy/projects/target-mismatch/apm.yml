@@ -1,0 +1,12 @@
+# Project targeting claude when policy only allows vscode.
+# Against apm-policy-target-allow.yml: compilation.target.allow=[vscode]
+# Expected: blocked after targets.run(ctx) when effective target is claude
+#           (rubber-duck I6).
+name: target-mismatch-project
+version: "1.0.0"
+description: Project with a disallowed compilation target
+target: claude
+
+dependencies:
+  apm:
+    - DevExpGbb/some-package

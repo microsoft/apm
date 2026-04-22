@@ -167,9 +167,18 @@ class TestCiPolicyNotFound:
 
 class TestCiPolicyFetchError:
     def test_fetch_error_exits_1(self, runner, tmp_path, monkeypatch):
-        """If policy fetch has an error, exit 1."""
+        """If policy fetch has an error AND project opts in to fail-closed, exit 1."""
         monkeypatch.chdir(tmp_path)
         _setup_clean_project(tmp_path)
+
+        # #829: post-warn-default behaviour requires opting in via
+        # policy.fetch_failure_default=block to fail closed on fetch error.
+        (tmp_path / "apm.yml").write_text(
+            "name: test-project\nversion: '1.0.0'\n"
+            "dependencies:\n  apm:\n    - owner/repo#v1.0.0\n"
+            "policy:\n  fetch_failure_default: block\n",
+            encoding="utf-8",
+        )
 
         mock_result = PolicyFetchResult(error="Network timeout")
 

@@ -825,11 +825,11 @@ class GitHubPackageDownloader:
             and any(a.scheme == "ssh" for a in plan.attempts)
             and any(a.scheme == "https" for a in plan.attempts)
         ):
-            # NOTE: dedup key is case-sensitive. GitHub/Bitbucket hostnames
-            # are case-insensitive per RFC, so "Example.com" and
-            # "example.com" dedup as distinct identities -- worst case is a
-            # duplicate warning. Follow-up issue tracks normalization.
-            warn_key = (dep_host, repo_url_base, dep_port)
+            warn_key = (
+                dep_host.lower() if dep_host else dep_host,
+                repo_url_base,
+                dep_port,
+            )
             if warn_key not in self._fallback_port_warned:
                 self._fallback_port_warned.add(warn_key)
                 initial_scheme = plan.attempts[0].scheme.upper()

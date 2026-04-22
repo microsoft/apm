@@ -22,6 +22,7 @@ from .schema import (
 
 # Valid enum values for schema fields
 _VALID_ENFORCEMENT = {"warn", "block", "off"}
+_VALID_FETCH_FAILURE = {"warn", "block"}
 _VALID_REQUIRE_RESOLUTION = {"project-wins", "policy-wins", "block"}
 _VALID_SELF_DEFINED = {"deny", "warn", "allow"}
 _VALID_SCRIPTS = {"allow", "deny"}
@@ -35,6 +36,7 @@ _KNOWN_TOP_LEVEL_KEYS = {
     "version",
     "extends",
     "enforcement",
+    "fetch_failure",
     "cache",
     "dependencies",
     "mcp",
@@ -77,6 +79,18 @@ def validate_policy(data: dict) -> Tuple[List[str], List[str]]:
     if enforcement is not None and enforcement not in _VALID_ENFORCEMENT:
         errors.append(
             f"enforcement must be one of {sorted(_VALID_ENFORCEMENT)}, got '{enforcement}'"
+        )
+
+    # fetch_failure (closes #829): controls fail-closed behavior on
+    # policy fetch / parse failure. Default "warn" (back-compat).
+    fetch_failure = data.get("fetch_failure")
+    if isinstance(fetch_failure, bool):
+        fetch_failure = _YAML_BOOL_COERCE.get(fetch_failure, str(fetch_failure))
+        data["fetch_failure"] = fetch_failure
+    if fetch_failure is not None and fetch_failure not in _VALID_FETCH_FAILURE:
+        errors.append(
+            f"fetch_failure must be one of {sorted(_VALID_FETCH_FAILURE)}, "
+            f"got '{fetch_failure}'"
         )
 
     # cache.ttl
@@ -209,6 +223,7 @@ def _build_policy(data: dict) -> ApmPolicy:
         version=data.get("version", "") or "",
         extends=data.get("extends"),
         enforcement=data.get("enforcement", ApmPolicy.enforcement),
+        fetch_failure=data.get("fetch_failure", ApmPolicy.fetch_failure),
         cache=cache,
         dependencies=dependencies,
         mcp=mcp,
