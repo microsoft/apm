@@ -70,16 +70,27 @@ def _make_fetch(
 class TestEscapeHatches:
     """no_policy and APM_POLICY_DISABLE short-circuit to disabled."""
 
-    def test_no_policy_true_returns_disabled(self):
-        result = discover_policy_with_chain(Path("/fake"), no_policy=True)
-        assert result.outcome == "disabled"
-        assert result.policy is None
-
     def test_env_var_disable_returns_disabled(self):
         with patch.dict(os.environ, {"APM_POLICY_DISABLE": "1"}):
             result = discover_policy_with_chain(Path("/fake"))
         assert result.outcome == "disabled"
         assert result.policy is None
+
+    def test_env_var_disable_short_circuits_before_io(self):
+        """#832: ``no_policy`` parameter was removed; env var is the only escape hatch.
+
+        The CLI ``--no-policy`` flag is now enforced by the install
+        pipeline gate / preflight helpers BEFORE they call
+        ``discover_policy_with_chain``, so the function only needs the
+        env-var defence-in-depth check.
+        """
+        # Patch the inner discovery to fail loudly so we know the early
+        # short-circuit fired without doing any I/O.
+        with patch.dict(os.environ, {"APM_POLICY_DISABLE": "1"}), patch(
+            _PATCH_DISCOVER, side_effect=AssertionError("must not be called")
+        ):
+            result = discover_policy_with_chain(Path("/fake"))
+        assert result.outcome == "disabled"
 
     def test_env_var_not_set_proceeds(self):
         """Without the env var, discovery actually runs."""

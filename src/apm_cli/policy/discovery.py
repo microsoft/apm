@@ -44,6 +44,7 @@ from .project_config import (
     read_project_policy_hash_pin,
 )
 from .schema import ApmPolicy
+from ..utils.path_security import PathTraversalError, ensure_path_within
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +215,6 @@ class PolicyFetchResult:
 def discover_policy_with_chain(
     project_root: Path,
     *,
-    no_policy: bool = False,
     expected_hash: Optional[str] = None,
 ) -> PolicyFetchResult:
     """Discover policy with full inheritance chain resolution.
@@ -228,9 +228,6 @@ def discover_policy_with_chain(
     ----------
     project_root:
         Project root directory (used for git-remote org extraction and cache).
-    no_policy:
-        When ``True`` **or** ``APM_POLICY_DISABLE=1`` is set, short-circuit
-        to ``outcome="disabled"`` without any network I/O.
     expected_hash:
         Optional pin in ``"<algo>:<hex>"`` form (sourced from
         ``policy.hash`` in the project's ``apm.yml``). When set, the
@@ -239,14 +236,26 @@ def discover_policy_with_chain(
         cleared. The pin applies only to the **leaf** -- parent policies
         in an ``extends:`` chain are the leaf author's responsibility.
 
+    Notes
+    -----
+    The escape hatch (``--no-policy`` flag, ``APM_POLICY_DISABLE=1``
+    env var) is enforced by the **callers** (the install pipeline gate
+    and the preflight helpers in ``install_preflight``) **before** this
+    function is invoked, so neither needs a ``no_policy`` parameter
+    here.  The env-var check below remains as a defence-in-depth so
+    third-party callers cannot accidentally bypass the disable switch.
+
     Returns
     -------
     PolicyFetchResult
         With merged effective policy and real chain_refs when inheritance
         is present.  Outcome follows the 9-outcome matrix (section B).
     """
-    # -- Escape hatches ------------------------------------------------
-    if no_policy or os.environ.get("APM_POLICY_DISABLE") == "1":
+    # -- Escape hatch (defence-in-depth) -------------------------------
+    # The CLI's --no-policy flag is handled by callers; this env-var
+    # check stays so third-party use of the API still respects the
+    # global disable switch.
+    if os.environ.get("APM_POLICY_DISABLE") == "1":
         return PolicyFetchResult(outcome="disabled")
 
     # -- Resolve project-side hash pin (#827) --------------------------
@@ -1008,8 +1017,29 @@ class _CacheEntry:
 
 
 def _get_cache_dir(project_root: Path) -> Path:
-    """Get the policy cache directory."""
-    return project_root / "apm_modules" / POLICY_CACHE_DIR
+    """Get the policy cache directory.
+
+    Path-security guard (#832): the resulting path is asserted to live
+    within ``project_root``.  This catches the edge case where
+    ``apm_modules`` itself is a symlink that points outside the
+    project root -- a configuration that, while unusual, would let
+    cache reads/writes escape the project tree.
+    """
+    base = project_root / "apm_modules"
+    candidate = base / POLICY_CACHE_DIR
+    # Resolve both ends and assert containment under ``project_root``,
+    # not under ``base`` -- otherwise a symlinked apm_modules pointing
+    # outside the project would resolve through the symlink on both
+    # sides and the check would silently pass.
+    try:
+        ensure_path_within(candidate, project_root)
+    except PathTraversalError:
+        raise PathTraversalError(
+            f"Policy cache path '{candidate}' resolves outside "
+            f"project root '{project_root}' -- refusing to read or "
+            "write the cache here."
+        )
+    return candidate
 
 
 def _cache_key(repo_ref: str) -> str:

@@ -17,31 +17,51 @@ import os
 from pathlib import Path
 from typing import Optional, Tuple
 
+# #832: Canonical exception type lives in ``apm_cli.install.errors``.
+# ``PolicyBlockError`` remains as an alias re-exported below so external
+# call sites that imported it from this module keep working.
+from apm_cli.install.errors import PolicyViolationError
+
 from .discovery import PolicyFetchResult, discover_policy_with_chain
 from .models import CIAuditResult
+from .outcome_routing import route_discovery_outcome
 from .policy_checks import run_dependency_policy_checks
 from .schema import ApmPolicy
 
 
-class PolicyBlockError(Exception):
-    """Raised when policy enforcement blocks installation.
-
-    Attributes:
-        audit_result: The :class:`CIAuditResult` containing failed checks.
-        policy_source: Human-readable policy source for diagnostics.
-    """
-
-    def __init__(
-        self, message: str, *, audit_result: CIAuditResult, policy_source: str
-    ):
-        super().__init__(message)
-        self.audit_result = audit_result
-        self.policy_source = policy_source
+# Deprecated alias kept for backward compatibility (#832).  New code
+# should ``raise``/``except`` :class:`PolicyViolationError` directly.
+PolicyBlockError = PolicyViolationError
 
 
 # Maximum lines to emit per severity bucket in dry-run preview.
 # Overflow is collapsed into a single tail line pointing to ``apm audit``.
 _DRY_RUN_PREVIEW_LIMIT = 5
+
+
+def _extract_dep_ref(detail: str, check_name: str) -> str:
+    """Extract a dep ref from a ``CheckResult.details`` line.
+
+    Contract: dependency-level checks in ``policy_checks.py`` produce
+    detail lines of the form ``"{ref}: {reason}"`` (see e.g.
+    ``_check_dependency_allowlist`` -- ``violations.append(f"{ref}: {reason}")``).
+    Splitting on the first ``":"`` yields the ref family without the
+    version suffix, which is what users want to see in the diagnostic.
+
+    Defensively falls back to ``check_name`` when the detail string is
+    empty or does not match the contract -- so a malformed check result
+    still surfaces something identifying instead of an empty string.
+    """
+    if not detail:
+        return check_name
+    if ":" in detail:
+        head = detail.split(":", 1)[0].strip()
+        if head:
+            return head
+        # Pathological "leading colon" -- fall back to check_name
+        # rather than returning the raw detail (which is just noise).
+        return check_name
+    return detail.strip() or check_name
 
 
 def run_policy_preflight(
@@ -72,7 +92,7 @@ def run_policy_preflight(
         ``warning``).
     dry_run:
         When ``True``, run discovery and checks but emit preview-style
-        verdicts instead of raising :class:`PolicyBlockError`.
+        verdicts instead of raising :class:`PolicyViolationError`.
         Block-severity violations render as
         ``"[!] Would be blocked by policy: <dep> -- <reason>"``
         and warn-severity as ``"[!] Policy warning: <dep> -- <reason>"``.
@@ -86,10 +106,11 @@ def run_policy_preflight(
 
     Raises
     ------
-    PolicyBlockError
+    PolicyViolationError
         When ``enforcement == "block"`` and at least one check fails
         **and** ``dry_run is False``.
         The caller should abort the install and exit non-zero.
+        ``PolicyBlockError`` is a deprecated alias for the same class.
     """
     # -- Escape hatches ------------------------------------------------
     if no_policy or os.environ.get("APM_POLICY_DISABLE") == "1":
@@ -100,91 +121,24 @@ def run_policy_preflight(
     # -- Discovery (chain-aware: resolves extends: + merges) -----------
     fetch_result = discover_policy_with_chain(project_root)
 
-    # hash_mismatch (#827) -- ALWAYS fail-closed regardless of the
-    # ``fetch_failure_default`` knob. A pin mismatch is a deliberate
-    # project-side trust assertion, not a transient failure.
-    if fetch_result.outcome == "hash_mismatch":
-        logger.policy_discovery_miss(
-            outcome="hash_mismatch",
-            source=fetch_result.source,
-            error=fetch_result.error or fetch_result.fetch_error,
-        )
-        if dry_run:
-            return fetch_result, False
-        from .models import CIAuditResult as _CIAuditResult
+    # -- Route the outcome through the shared 9-outcome table ---------
+    # Logging + fail-closed gating live in ``policy/outcome_routing.py``
+    # so this preflight and the install-pipeline gate stay aligned.
+    from .project_config import read_project_fetch_failure_default
 
-        raise PolicyBlockError(
-            "Policy enforcement blocked installation: policy hash mismatch "
-            "(pinned policy.hash does not match fetched policy bytes). "
-            "Update apm.yml policy.hash or contact your org admin.",
-            audit_result=_CIAuditResult(checks=[]),
-            policy_source=fetch_result.source or "unknown",
-        )
+    fetch_failure_default = read_project_fetch_failure_default(project_root)
 
-    # Outcome routing (plan section B)
-    if not fetch_result.found:
-        logger.policy_discovery_miss(
-            outcome=fetch_result.outcome,
-            source=fetch_result.source,
-            error=fetch_result.error or fetch_result.fetch_error,
-        )
-
-        # Fail-closed gate (closes #829): fetch / parse failure outcomes
-        # honor project-side ``policy.fetch_failure_default``. ``absent``,
-        # ``no_git_remote``, ``empty`` are NOT failures -- skip the gate.
-        if (
-            not dry_run
-            and fetch_result.outcome
-            in ("malformed", "cache_miss_fetch_fail", "garbage_response")
-        ):
-            from .project_config import read_project_fetch_failure_default
-
-            project_default = read_project_fetch_failure_default(project_root)
-            if project_default == "block":
-                from .models import CIAuditResult as _CIAuditResult
-
-                empty = _CIAuditResult(checks=[])
-                raise PolicyBlockError(
-                    "Policy enforcement blocked installation: org policy "
-                    f"could not be fetched / parsed (outcome={fetch_result.outcome}) "
-                    "and project apm.yml has policy.fetch_failure_default=block",
-                    audit_result=empty,
-                    policy_source=fetch_result.source or "unknown",
-                )
-        return fetch_result, False
-
-    policy: ApmPolicy = fetch_result.policy  # type: ignore[assignment]
-    enforcement = policy.enforcement
-
-    # Log discovery success
-    logger.policy_resolved(
-        source=fetch_result.source,
-        cached=fetch_result.cached,
-        enforcement=enforcement,
-        age_seconds=fetch_result.cache_age_seconds,
+    policy = route_discovery_outcome(
+        fetch_result,
+        logger=logger,
+        fetch_failure_default=fetch_failure_default,
+        raise_blocking_errors=not dry_run,
     )
 
-    # cached_stale fail-closed (closes #829): refresh failed but a cached
-    # policy is present. Honor the cached policy's ``fetch_failure``.
-    if (
-        not dry_run
-        and fetch_result.outcome == "cached_stale"
-        and policy.fetch_failure == "block"
-    ):
-        # Surface as a discovery-miss warning for context, then block.
-        logger.policy_discovery_miss(
-            outcome="cached_stale",
-            source=fetch_result.source,
-            error=fetch_result.fetch_error,
-        )
-        from .models import CIAuditResult as _CIAuditResult
+    if policy is None:
+        return fetch_result, False
 
-        raise PolicyBlockError(
-            "Policy enforcement blocked installation: org policy refresh "
-            "failed and the cached policy declares fetch_failure=block",
-            audit_result=_CIAuditResult(checks=[]),
-            policy_source=fetch_result.source or "unknown",
-        )
+    enforcement = policy.enforcement
 
     if enforcement == "off":
         return fetch_result, False
@@ -204,8 +158,12 @@ def run_policy_preflight(
             block_lines: list[tuple[str, str]] = []
             warn_lines: list[tuple[str, str]] = []
             for check in audit_result.failed_checks:
-                for detail in check.details:
-                    dep_ref = detail.split(":")[0].strip() if ":" in detail else detail
+                # #832: fall back to ``check.name`` when ``details`` is
+                # empty so a failed check is never silently omitted from
+                # the dry-run preview.
+                items = check.details or [check.name]
+                for detail in items:
+                    dep_ref = _extract_dep_ref(detail, check.name)
                     if enforcement == "block":
                         block_lines.append((dep_ref, detail))
                     else:
@@ -237,8 +195,11 @@ def run_policy_preflight(
         else:
             # -- Real install: push each violation to DiagnosticCollector
             for check in audit_result.failed_checks:
-                for detail in check.details:
-                    dep_ref = detail.split(":")[0].strip() if ":" in detail else detail
+                # Same fallback as dry-run: never silently drop a failed
+                # check that happens to have empty ``details``.
+                items = check.details or [check.name]
+                for detail in items:
+                    dep_ref = _extract_dep_ref(detail, check.name)
                     logger.policy_violation(
                         dep_ref=dep_ref,
                         reason=detail,
@@ -247,8 +208,8 @@ def run_policy_preflight(
                     )
 
         if enforcement == "block" and not dry_run:
-            raise PolicyBlockError(
-                f"Policy enforcement blocked installation: "
+            raise PolicyViolationError(
+                f"Install blocked by org policy: "
                 f"{len(audit_result.failed_checks)} check(s) failed",
                 audit_result=audit_result,
                 policy_source=fetch_result.source,

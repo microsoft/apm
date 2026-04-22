@@ -111,12 +111,19 @@ def test_install_py_under_legacy_budget():
     security-critical gate: without it, transitive MCP servers
     bypass policy enforcement entirely (panel blocker S1).
     The pending --mcp extraction will recover this budget.
+
+    PR #832 (review fix) raised 1675 -> 1680 to land the
+    PolicyViolationError unwrap in the install error handler so the
+    user sees the policy message verbatim instead of double-nested
+    under "Failed to install ... Failed to resolve ..." (+5 lines:
+    one import + four error-handler lines). Recovered by the same
+    pending --mcp extraction.
     """
     install_py = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "commands" / "install.py"
     assert install_py.is_file()
     n = _line_count(install_py)
-    assert n <= 1675, (
-        f"commands/install.py grew to {n} LOC (budget 1675). "
+    assert n <= 1680, (
+        f"commands/install.py grew to {n} LOC (budget 1680). "
         "Do NOT trim cosmetically -- engage the python-architecture skill "
         "(.github/skills/python-architecture/SKILL.md) and propose an "
         "extraction into apm_cli/install/."

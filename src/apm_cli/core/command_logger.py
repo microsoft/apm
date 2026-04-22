@@ -442,7 +442,13 @@ class InstallLogger(CommandLogger):
 
         if outcome == "no_git_remote":
             # UX F2: this is a normal state for fresh `git init`, unpacked
-            # bundles, or temp dirs -- info, not a warning.
+            # bundles, or temp dirs -- info, not a warning.  Verbose-gated
+            # for the same reason as ``absent`` (#832): the vast majority
+            # of users have no org policy configured and don't need to
+            # see a line for it on every install (fresh checkouts, CI
+            # environments, unpacked tarballs).
+            if not self.verbose:
+                return
             _rich_info(
                 "Could not determine org from git remote; "
                 "policy auto-discovery skipped",

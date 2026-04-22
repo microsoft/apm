@@ -17,12 +17,16 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
+from apm_cli.install.errors import PolicyViolationError
+
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
 
 
-class PolicyViolationError(RuntimeError):
-    """Raised when block-severity policy violations halt the install."""
+# Re-export for backward compatibility: prior to #832 this class was
+# defined here, and external test/integration code imports it via
+# ``from apm_cli.install.phases.policy_gate import PolicyViolationError``.
+__all__ = ["PolicyViolationError", "run"]
 
 
 def run(ctx: "InstallContext") -> None:
@@ -44,112 +48,33 @@ def run(ctx: "InstallContext") -> None:
     fetch_result = _discover_with_chain(ctx)
     ctx.policy_fetch = fetch_result
 
-    outcome = fetch_result.outcome
     logger = ctx.logger
     source = fetch_result.source
 
     # ------------------------------------------------------------------
-    # 2. Route on outcome
+    # 2. Route outcome through the shared 9-outcome table.
+    # Logging + fail-closed gating live in one place
+    # (``policy/outcome_routing.py``) so this phase and the
+    # ``install --mcp`` / ``install --dry-run`` preflight stay aligned.
     # ------------------------------------------------------------------
+    from apm_cli.policy.outcome_routing import route_discovery_outcome
 
-    # disabled -- discovery itself returned disabled (shouldn't reach
-    # here from the escape-hatch above, but defensive)
-    if outcome == "disabled":
-        return
+    fetch_failure_default = _read_project_fetch_failure_default(ctx)
 
-    # hash_mismatch (#827) -- ALWAYS fail closed regardless of
-    # ``policy.fetch_failure`` / ``fetch_failure_default``. A pin
-    # mismatch is an explicit project-side trust assertion violation,
-    # not a transient fetch failure.
-    if outcome == "hash_mismatch":
-        if logger:
-            logger.policy_discovery_miss(
-                outcome="hash_mismatch",
-                source=source,
-                error=fetch_result.error or fetch_result.fetch_error,
-            )
-        ctx.policy_enforcement_active = False
-        raise PolicyViolationError(
-            "Install blocked: policy hash mismatch -- pinned policy.hash "
-            f"does not match fetched policy bytes (source={source or 'unknown'}). "
-            "Update apm.yml policy.hash or contact your org admin."
-        )
-
-    # 5 of 9 non-found / non-disabled outcomes go through the canonical
-    # logger helper for consistent wording (Logging C1/C2, UX F1/F2/F4).
-    if outcome in (
-        "absent",
-        "no_git_remote",
-        "empty",
-        "malformed",
-        "cache_miss_fetch_fail",
-        "garbage_response",
-    ):
-        if logger:
-            logger.policy_discovery_miss(
-                outcome=outcome,
-                source=source,
-                error=fetch_result.error or fetch_result.fetch_error,
-            )
-        ctx.policy_enforcement_active = False
-
-        # Fail-closed gate (closes #829): when project-side
-        # ``policy.fetch_failure_default == "block"``, refuse to install
-        # on fetch / parse failure outcomes. ``absent``, ``no_git_remote``,
-        # ``empty`` are NOT fetch failures -- they mean "no org policy".
-        if outcome in ("malformed", "cache_miss_fetch_fail", "garbage_response"):
-            project_default = _read_project_fetch_failure_default(ctx)
-            if project_default == "block":
-                raise PolicyViolationError(
-                    "Install blocked: org policy could not be fetched / parsed "
-                    "and project apm.yml has policy.fetch_failure_default=block "
-                    f"(outcome={outcome}, source={source or 'unknown'})"
-                )
-        return
-
-    # cached_stale -- warn but STILL enforce
-    if outcome == "cached_stale":
-        if logger:
-            age = fetch_result.cache_age_seconds
-            logger.policy_resolved(
-                source=source,
-                cached=True,
-                enforcement=fetch_result.policy.enforcement,
-                age_seconds=age,
-            )
-            logger.policy_discovery_miss(
-                outcome="cached_stale",
-                source=source,
-                error=fetch_result.fetch_error,
-            )
-        # Fail-closed (closes #829): cached_stale means the refresh
-        # failed but a cached policy is present. Honor the cached
-        # policy's ``fetch_failure`` knob.
-        if fetch_result.policy is not None and fetch_result.policy.fetch_failure == "block":
-            raise PolicyViolationError(
-                "Install blocked: org policy refresh failed and the cached "
-                f"policy declares fetch_failure=block (source={source or 'unknown'})"
-            )
-
-    # found -- normal path
-    if outcome == "found":
-        if logger:
-            logger.policy_resolved(
-                source=source,
-                cached=fetch_result.cached,
-                enforcement=fetch_result.policy.enforcement,
-                age_seconds=fetch_result.cache_age_seconds,
-            )
+    policy = route_discovery_outcome(
+        fetch_result,
+        logger=logger,
+        fetch_failure_default=fetch_failure_default,
+        raise_blocking_errors=True,
+    )
 
     # ------------------------------------------------------------------
-    # 3. Enforcement gate (found / cached_stale paths)
+    # 3. Enforcement gate (found / cached_stale paths only)
     # ------------------------------------------------------------------
-    if outcome not in ("found", "cached_stale"):
-        # Defensive: unrecognised outcome -- do not enforce
+    if policy is None:
         ctx.policy_enforcement_active = False
         return
 
-    policy = fetch_result.policy
     enforcement = policy.enforcement
 
     # enforcement: off -- nothing to do
@@ -217,7 +142,9 @@ def run(ctx: "InstallContext") -> None:
 
     if has_blocking:
         raise PolicyViolationError(
-            "Install blocked by org policy -- see violations above"
+            "Install blocked by org policy -- see violations above",
+            audit_result=audit_result,
+            policy_source=source or "unknown",
         )
 
 

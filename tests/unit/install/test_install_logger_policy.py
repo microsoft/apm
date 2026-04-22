@@ -119,9 +119,23 @@ class TestPolicyDiscoveryMiss:
 
     @patch("apm_cli.core.command_logger._rich_info")
     @patch("apm_cli.core.command_logger._rich_warning")
-    def test_no_git_remote_uses_info_not_warning(self, mock_warning, mock_info):
-        """UX F2: no_git_remote is a normal state, render as info."""
+    def test_no_git_remote_silent_in_non_verbose(self, mock_warning, mock_info):
+        """UX F2 + #832: no_git_remote is verbose-gated.
+
+        Fresh checkouts, CI environments, and unpacked tarballs have no
+        git remote -- emitting a line on every install is unconditional
+        noise for the majority of users without an org policy.
+        """
         logger = InstallLogger(verbose=False)
+        logger.policy_discovery_miss(outcome="no_git_remote")
+        mock_info.assert_not_called()
+        mock_warning.assert_not_called()
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    @patch("apm_cli.core.command_logger._rich_warning")
+    def test_no_git_remote_visible_in_verbose(self, mock_warning, mock_info):
+        """UX F2: when verbose, render as info (not warning)."""
+        logger = InstallLogger(verbose=True)
         logger.policy_discovery_miss(outcome="no_git_remote")
         mock_info.assert_called_once()
         mock_warning.assert_not_called()

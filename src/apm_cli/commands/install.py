@@ -59,6 +59,7 @@ from apm_cli.install.phases.local_content import (
     _has_local_apm_content,
     _project_has_root_primitives,
 )
+from apm_cli.install.errors import PolicyViolationError
 from apm_cli.install.insecure_policy import (
     _InsecureDependencyInfo,
     _allow_insecure_host_callback,
@@ -1459,7 +1460,9 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                 sys.exit(1)
             except Exception as e:
                 _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
-                logger.error(f"Failed to install APM dependencies: {e}")
+                # #832: surface PolicyViolationError verbatim (no double-nesting).
+                msg = str(e) if isinstance(e, PolicyViolationError) else f"Failed to install APM dependencies: {e}"
+                logger.error(msg)
                 if not verbose:
                     logger.progress("Run with --verbose for detailed diagnostics")
                 sys.exit(1)

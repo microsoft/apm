@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, List, Optional
 from ..models.results import InstallResult
 from ..utils.console import _rich_error
 from ..utils.diagnostics import DiagnosticCollector
+from .errors import PolicyViolationError
 
 if TYPE_CHECKING:
     from ..core.auth import AuthResolver
@@ -353,5 +354,16 @@ def run_install_pipeline(
 
         return _finalize_phase.run(ctx)
 
+    except PolicyViolationError:
+        # #832: surface policy violations cleanly to the user.  The
+        # outer ``except Exception`` below would otherwise wrap the
+        # message into ``RuntimeError("Failed to resolve APM dependencies:
+        # Install blocked by org policy ...")`` and the caller in
+        # ``commands/install.py`` would wrap it AGAIN as
+        # ``"Failed to install APM dependencies: Failed to resolve APM
+        # dependencies: Install blocked by org policy ..."``.  Re-raising
+        # the typed exception lets the caller render the policy message
+        # as-is.
+        raise
     except Exception as e:
         raise RuntimeError(f"Failed to resolve APM dependencies: {e}")

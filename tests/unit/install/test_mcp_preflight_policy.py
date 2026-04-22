@@ -565,10 +565,12 @@ class TestDiscoveryOutcomes:
         assert active is False
 
     def test_no_git_remote_outcome(self):
-        """no_git_remote outcome -> enforcement_active=False, info line.
+        """no_git_remote outcome -> enforcement_active=False, silent in non-verbose.
 
-        UX F2: this is a normal state for fresh `git init`, unpacked
-        bundles, or temp dirs -- info, not a warning.
+        UX F2 + #832: this is a normal state for fresh `git init`,
+        unpacked bundles, or temp dirs.  Verbose-gated so the majority
+        of users without an org policy don't see a line on every
+        install (fresh checkouts, CI, unpacked tarballs).
         """
         fetch = PolicyFetchResult(
             policy=None,
@@ -576,7 +578,23 @@ class TestDiscoveryOutcomes:
             outcome="no_git_remote",
         )
 
-        logger = _make_logger()
+        # Non-verbose: no info / warning emitted at all.
+        logger = _make_logger(verbose=False)
+        with _patch_discover(fetch), \
+             patch("apm_cli.core.command_logger._rich_info") as mock_info, \
+             patch("apm_cli.core.command_logger._rich_warning") as mock_warning:
+            result, active = run_policy_preflight(
+                project_root=Path("/tmp/fake"),
+                mcp_deps=[_make_mcp_dep("anything/server")],
+                logger=logger,
+            )
+
+        assert active is False
+        assert mock_info.call_count == 0
+        assert mock_warning.call_count == 0
+
+        # Verbose: the info line surfaces with the explanatory text.
+        logger = _make_logger(verbose=True)
         with _patch_discover(fetch), \
              patch("apm_cli.core.command_logger._rich_info") as mock_info:
             result, active = run_policy_preflight(
@@ -587,7 +605,6 @@ class TestDiscoveryOutcomes:
 
         assert active is False
         assert mock_info.call_count >= 1
-        # Check that at least one call mentions git remote
         info_messages = [str(c) for c in mock_info.call_args_list]
         assert any("git remote" in msg for msg in info_messages)
 
