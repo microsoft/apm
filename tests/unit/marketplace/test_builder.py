@@ -1135,3 +1135,151 @@ class TestEmptyPackages:
         assert len(report.resolved) == 0
         data = json.loads(report.output_path.read_text("utf-8"))
         assert data["plugins"] == []
+
+
+# ---------------------------------------------------------------------------
+# Duplicate package name warnings
+# ---------------------------------------------------------------------------
+
+
+class TestDuplicateNameWarnings:
+    """Tests for defence-in-depth duplicate name detection in the builder."""
+
+    def test_no_warnings_when_names_unique(self, tmp_path: Path) -> None:
+        yml = """\
+        name: test-mkt
+        description: Test
+        version: 1.0.0
+        owner:
+          name: Test
+        packages:
+          - name: pkg-alpha
+            source: acme/pkg-alpha
+            version: "^1.0.0"
+          - name: pkg-beta
+            source: acme/pkg-beta
+            version: "^1.0.0"
+        """
+        refs = {
+            "acme/pkg-alpha": _make_refs("v1.0.0"),
+            "acme/pkg-beta": _make_refs("v1.0.0"),
+        }
+        report = _build_with_mock(tmp_path, yml, refs)
+        assert report.warnings == ()
+
+    def test_duplicate_names_produce_warning(self, tmp_path: Path) -> None:
+        """Bypass yml_schema by feeding resolved packages directly."""
+        yml_path = _write_yml(tmp_path, """\
+        name: test-mkt
+        description: Test
+        version: 1.0.0
+        owner:
+          name: Test
+        packages:
+          - name: alpha
+            source: acme/alpha
+            version: "^1.0.0"
+        """)
+        refs = {"acme/alpha": _make_refs("v1.0.0")}
+        builder = MarketplaceBuilder(yml_path)
+        builder._resolver = _MockRefResolver(refs)  # type: ignore[assignment]
+
+        # Craft two resolved packages with the same name but different paths.
+        dupes = [
+            ResolvedPackage(
+                name="learning",
+                source_repo="acme/repo",
+                subdir="general/learning",
+                ref="v1.0.0",
+                sha=_SHA_A,
+                requested_version="^1.0.0",
+                description=None,
+                tags=(),
+                is_prerelease=False,
+            ),
+            ResolvedPackage(
+                name="learning",
+                source_repo="acme/repo",
+                subdir="special/learning",
+                ref="v1.0.0",
+                sha=_SHA_B,
+                requested_version="^1.0.0",
+                description=None,
+                tags=(),
+                is_prerelease=False,
+            ),
+        ]
+        builder.compose_marketplace_json(dupes)
+        warnings = getattr(builder, "_compose_warnings", ())
+        assert len(warnings) == 1
+        assert "Duplicate package name 'learning'" in warnings[0]
+        assert "general/learning" in warnings[0]
+        assert "special/learning" in warnings[0]
+
+    def test_duplicate_names_without_subdir_uses_repository(
+        self, tmp_path: Path,
+    ) -> None:
+        """When subdir is absent, the warning should reference the repository."""
+        yml_path = _write_yml(tmp_path, """\
+        name: test-mkt
+        description: Test
+        version: 1.0.0
+        owner:
+          name: Test
+        packages:
+          - name: alpha
+            source: acme/alpha
+            version: "^1.0.0"
+        """)
+        builder = MarketplaceBuilder(yml_path)
+        builder._resolver = _MockRefResolver({  # type: ignore[assignment]
+            "acme/alpha": _make_refs("v1.0.0"),
+        })
+
+        dupes = [
+            ResolvedPackage(
+                name="tool",
+                source_repo="acme/tool-a",
+                subdir=None,
+                ref="v1.0.0",
+                sha=_SHA_A,
+                requested_version="^1.0.0",
+                description=None,
+                tags=(),
+                is_prerelease=False,
+            ),
+            ResolvedPackage(
+                name="tool",
+                source_repo="acme/tool-b",
+                subdir=None,
+                ref="v1.0.0",
+                sha=_SHA_B,
+                requested_version="^1.0.0",
+                description=None,
+                tags=(),
+                is_prerelease=False,
+            ),
+        ]
+        builder.compose_marketplace_json(dupes)
+        warnings = getattr(builder, "_compose_warnings", ())
+        assert len(warnings) == 1
+        assert "acme/tool-a" in warnings[0]
+        assert "acme/tool-b" in warnings[0]
+
+    def test_build_report_carries_warnings(self, tmp_path: Path) -> None:
+        """BuildReport.warnings is empty for a clean build."""
+        yml = """\
+        name: test-mkt
+        description: Test
+        version: 1.0.0
+        owner:
+          name: Test
+        packages:
+          - name: solo
+            source: acme/solo
+            version: "^1.0.0"
+        """
+        refs = {"acme/solo": _make_refs("v1.0.0")}
+        report = _build_with_mock(tmp_path, yml, refs)
+        assert isinstance(report.warnings, tuple)
+        assert len(report.warnings) == 0

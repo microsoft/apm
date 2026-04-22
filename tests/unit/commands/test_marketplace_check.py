@@ -16,6 +16,11 @@ from apm_cli.marketplace.errors import (
     OfflineMissError,
 )
 from apm_cli.marketplace.ref_resolver import RemoteRef
+from apm_cli.marketplace.yml_schema import (
+    MarketplaceOwner,
+    MarketplaceYml,
+    PackageEntry,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -340,3 +345,79 @@ class TestCheckEdgeCases:
         result = runner.invoke(marketplace, ["check"])
         assert result.exit_code == 1
         assert "Unexpected" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Duplicate package name detection
+# ---------------------------------------------------------------------------
+
+
+class TestCheckDuplicateNames:
+    """Defence-in-depth duplicate name check in the check command."""
+
+    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.load_marketplace_yml")
+    def test_duplicate_names_warned(
+        self, mock_load, MockResolver, runner, tmp_path, monkeypatch,
+    ):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "marketplace.yml").write_text("---\n", encoding="utf-8")
+
+        # Return a MarketplaceYml with duplicate package names
+        mock_load.return_value = MarketplaceYml(
+            name="test",
+            description="Test",
+            version="1.0.0",
+            owner=MarketplaceOwner(name="Owner"),
+            packages=(
+                PackageEntry(
+                    name="learning", source="acme/repo", subdir="general",
+                    version="^1.0.0",
+                ),
+                PackageEntry(
+                    name="learning", source="acme/repo", subdir="special",
+                    version="^1.0.0",
+                ),
+            ),
+        )
+
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/tags/v1.0.0", sha=_SHA_A),
+        ]
+        mock_inst.close = MagicMock()
+
+        result = runner.invoke(marketplace, ["check"])
+        assert "Duplicate package name 'learning'" in result.output
+
+    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.load_marketplace_yml")
+    def test_no_warning_when_unique(
+        self, mock_load, MockResolver, runner, tmp_path, monkeypatch,
+    ):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "marketplace.yml").write_text("---\n", encoding="utf-8")
+
+        mock_load.return_value = MarketplaceYml(
+            name="test",
+            description="Test",
+            version="1.0.0",
+            owner=MarketplaceOwner(name="Owner"),
+            packages=(
+                PackageEntry(
+                    name="alpha", source="acme/alpha", version="^1.0.0",
+                ),
+                PackageEntry(
+                    name="beta", source="acme/beta", version="^1.0.0",
+                ),
+            ),
+        )
+
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/tags/v1.0.0", sha=_SHA_A),
+        ]
+        mock_inst.close = MagicMock()
+
+        result = runner.invoke(marketplace, ["check"])
+        assert "Duplicate" not in result.output

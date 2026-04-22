@@ -72,6 +72,7 @@ class BuildReport:
 
     resolved: Tuple[ResolvedPackage, ...]
     errors: Tuple[Tuple[str, str], ...]  # (package name, error message) pairs
+    warnings: Tuple[str, ...]  # non-fatal diagnostic messages
     unchanged_count: int
     added_count: int
     updated_count: int
@@ -438,6 +439,24 @@ class MarketplaceBuilder:
 
             plugins.append(plugin)
 
+        # Defence-in-depth: detect duplicate plugin names and record
+        # warnings so the command layer can alert the maintainer.
+        seen_names: Dict[str, str] = {}
+        build_warnings: list[str] = []
+        for p in plugins:
+            pname = p["name"]
+            src = p.get("source", {})
+            src_label = src.get("path") or src.get("repository", "?")
+            if pname in seen_names:
+                build_warnings.append(
+                    f"Duplicate package name '{pname}': "
+                    f"'{seen_names[pname]}' and '{src_label}'. "
+                    f"Consumers will see duplicate entries in browse."
+                )
+            else:
+                seen_names[pname] = src_label
+        self._compose_warnings = tuple(build_warnings)
+
         doc["plugins"] = plugins
         return doc
 
@@ -528,6 +547,7 @@ class MarketplaceBuilder:
         errors = getattr(self, "_resolve_errors", ())
 
         new_json = self.compose_marketplace_json(resolved)
+        build_warnings = getattr(self, "_compose_warnings", ())
         output_path = self._output_path()
 
         # Load existing for diff
@@ -547,6 +567,7 @@ class MarketplaceBuilder:
         return BuildReport(
             resolved=tuple(resolved),
             errors=tuple(errors),
+            warnings=tuple(build_warnings),
             unchanged_count=unchanged,
             added_count=added,
             updated_count=updated,

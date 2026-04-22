@@ -12,6 +12,11 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import marketplace
+from apm_cli.marketplace.yml_schema import (
+    MarketplaceOwner,
+    MarketplaceYml,
+    PackageEntry,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -384,3 +389,89 @@ class TestDoctorEdgeCases:
 
         result = runner.invoke(marketplace, ["doctor"])
         assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# Check 5: duplicate package names
+# ---------------------------------------------------------------------------
+
+
+class TestDoctorDuplicateNames:
+    """Defence-in-depth duplicate name check in the doctor command."""
+
+    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.load_marketplace_yml")
+    def test_duplicate_names_flagged(
+        self, mock_load, mock_run, runner, tmp_path, monkeypatch,
+    ):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "marketplace.yml").write_text("---\n", encoding="utf-8")
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+        ]
+        mock_load.return_value = MarketplaceYml(
+            name="test",
+            description="Test",
+            version="1.0.0",
+            owner=MarketplaceOwner(name="Owner"),
+            packages=(
+                PackageEntry(
+                    name="learning", source="acme/repo", subdir="general",
+                    version="^1.0.0",
+                ),
+                PackageEntry(
+                    name="learning", source="acme/repo", subdir="special",
+                    version="^1.0.0",
+                ),
+            ),
+        )
+
+        result = runner.invoke(marketplace, ["doctor"])
+        assert "duplicate" in result.output.lower()
+        assert "learning" in result.output
+
+    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.load_marketplace_yml")
+    def test_no_duplicate_names_shows_pass(
+        self, mock_load, mock_run, runner, tmp_path, monkeypatch,
+    ):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "marketplace.yml").write_text("---\n", encoding="utf-8")
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+        ]
+        mock_load.return_value = MarketplaceYml(
+            name="test",
+            description="Test",
+            version="1.0.0",
+            owner=MarketplaceOwner(name="Owner"),
+            packages=(
+                PackageEntry(
+                    name="alpha", source="acme/alpha", version="^1.0.0",
+                ),
+                PackageEntry(
+                    name="beta", source="acme/beta", version="^1.0.0",
+                ),
+            ),
+        )
+
+        result = runner.invoke(marketplace, ["doctor"])
+        assert result.exit_code == 0
+        assert "No duplicate package names" in result.output
+
+    @patch("apm_cli.commands.marketplace.subprocess.run")
+    def test_no_duplicate_check_when_yml_absent(
+        self, mock_run, runner, tmp_path, monkeypatch,
+    ):
+        """When marketplace.yml is missing, duplicate check is skipped."""
+        monkeypatch.chdir(tmp_path)
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+        ]
+
+        result = runner.invoke(marketplace, ["doctor"])
+        assert result.exit_code == 0
+        assert "duplicate" not in result.output.lower()

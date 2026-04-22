@@ -98,6 +98,37 @@ def _load_yml_or_exit(logger):
         sys.exit(2)
 
 
+def _warn_duplicate_names(logger, yml):
+    """Emit a warning for each duplicate package name in *yml*."""
+    seen: dict[str, int] = {}
+    for idx, entry in enumerate(yml.packages):
+        lower = entry.name.lower()
+        if lower in seen:
+            logger.warning(
+                f"Duplicate package name '{entry.name}' "
+                f"(packages[{seen[lower]}] and packages[{idx}]). "
+                f"Consumers will see duplicate entries in browse.",
+                symbol="warning",
+            )
+        else:
+            seen[lower] = idx
+
+
+def _find_duplicate_names(yml):
+    """Return a diagnostic string if *yml* contains duplicate package names."""
+    seen: dict[str, int] = {}
+    duplicates: list[str] = []
+    for idx, entry in enumerate(yml.packages):
+        lower = entry.name.lower()
+        if lower in seen:
+            duplicates.append(
+                f"'{entry.name}' (packages[{seen[lower]}] and packages[{idx}])"
+            )
+        else:
+            seen[lower] = idx
+    if duplicates:
+        return f"Duplicate names: {', '.join(duplicates)}"
+    return ""
 
 @click.group(cls=MarketplaceGroup, help="Manage marketplaces for discovery and governance")
 def marketplace():
@@ -684,6 +715,10 @@ def build(dry_run, offline, include_prerelease, verbose):
     # Render results table
     _render_build_table(logger, report)
 
+    # Surface duplicate-name warnings from the builder
+    for warn_msg in report.warnings:
+        logger.warning(warn_msg, symbol="warning")
+
     if dry_run:
         logger.progress(
             "Dry run -- marketplace.json not written", symbol="info"
@@ -1032,6 +1067,10 @@ def check(offline, verbose):
 
     yml = _load_yml_or_exit(logger)
 
+    # Defence-in-depth: flag duplicate package names (yml_schema
+    # also rejects them, but an extra check keeps diagnostics visible).
+    _warn_duplicate_names(logger, yml)
+
     if offline:
         logger.progress(
             "Offline mode -- only schema and cached-ref checks",
@@ -1279,9 +1318,10 @@ def doctor(verbose):
     yml_found = yml_path.exists()
     yml_detail = ""
     yml_parsed = False
+    yml_obj = None
     if yml_found:
         try:
-            load_marketplace_yml(yml_path)
+            yml_obj = load_marketplace_yml(yml_path)
             yml_parsed = True
             yml_detail = "marketplace.yml found and valid"
         except MarketplaceYmlError as exc:
@@ -1295,6 +1335,24 @@ def doctor(verbose):
         detail=yml_detail,
         informational=True,
     ))
+
+    # Check 5: duplicate package names (defence-in-depth)
+    if yml_obj is not None:
+        dup_detail = _find_duplicate_names(yml_obj)
+        if dup_detail:
+            checks.append(_DoctorCheck(
+                name="duplicate names",
+                passed=False,
+                detail=dup_detail,
+                informational=True,
+            ))
+        else:
+            checks.append(_DoctorCheck(
+                name="duplicate names",
+                passed=True,
+                detail="No duplicate package names",
+                informational=True,
+            ))
 
     _render_doctor_table(logger, checks)
 

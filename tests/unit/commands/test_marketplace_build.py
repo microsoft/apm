@@ -82,6 +82,7 @@ def _make_report(
     return BuildReport(
         resolved=resolved,
         errors=errors,
+        warnings=(),
         unchanged_count=unchanged,
         added_count=added,
         updated_count=updated,
