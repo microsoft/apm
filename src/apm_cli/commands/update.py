@@ -50,7 +50,14 @@ def _get_installer_run_command(script_path: str) -> list[str]:
 
 @click.command(help="Update APM to the latest version")
 @click.option("--check", is_flag=True, help="Only check for updates without installing")
-def update(check):
+@click.option(
+    "--no-policy",
+    "no_policy",
+    is_flag=True,
+    default=False,
+    help="Skip org policy enforcement for this invocation. Loudly logged. Does NOT bypass apm audit --ci.",
+)
+def update(check, no_policy):
     """Update APM CLI to the latest version (like npm update -g npm).
 
     This command fetches and installs the latest version of APM using the

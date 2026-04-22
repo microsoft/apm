@@ -76,4 +76,5 @@ class InstallService:
             marketplace_provenance=request.marketplace_provenance,
             protocol_pref=request.protocol_pref,
             allow_protocol_fallback=request.allow_protocol_fallback,
+            no_policy=request.no_policy,
         )

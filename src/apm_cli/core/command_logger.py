@@ -426,12 +426,13 @@ class InstallLogger(CommandLogger):
         """Log a loud warning that policy enforcement is disabled.
 
         Emitted when ``--no-policy`` or ``APM_POLICY_DISABLE=1`` is
-        active.  Always visible (never silenceable) — matches the
+        active.  Always visible (never silenceable) -- matches the
         ``--allow-insecure`` pattern.
         """
         _rich_warning(
-            f"Policy enforcement disabled ({reason}). "
-            "This does NOT bypass 'apm audit --ci'.",
+            f"Policy enforcement disabled by {reason} for this invocation. "
+            "This does NOT bypass apm audit --ci. "
+            "CI will still fail the PR for the same policy violation.",
             symbol="warning",
         )
 

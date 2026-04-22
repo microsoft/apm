@@ -1048,8 +1048,15 @@ def _run_mcp_install(
         "or a stdio command (self-defined entries)."
     ),
 )
+@click.option(
+    "--no-policy",
+    "no_policy",
+    is_flag=True,
+    default=False,
+    help="Skip org policy enforcement for this invocation. Loudly logged. Does NOT bypass apm audit --ci.",
+)
 @click.pass_context
-def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, allow_insecure, allow_insecure_hosts, global_, use_ssh, use_https, allow_protocol_fallback, mcp_name, transport, url, env_pairs, header_pairs, mcp_version, registry_url):
+def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, allow_insecure, allow_insecure_hosts, global_, use_ssh, use_https, allow_protocol_fallback, mcp_name, transport, url, env_pairs, header_pairs, mcp_version, registry_url, no_policy):
     """Install APM and MCP dependencies from apm.yml (like npm install).
 
     Detects AI runtimes from your apm.yml scripts and installs MCP servers for
@@ -1182,8 +1189,9 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                 _pf_result, _pf_active = run_policy_preflight(
                     project_root=Path.cwd(),
                     mcp_deps=[_preflight_dep],
-                    no_policy=getattr(ctx, "no_policy", False),
+                    no_policy=no_policy,
                     logger=logger,
+                    dry_run=dry_run,
                 )
             except PolicyBlockError:
                 # Diagnostics already emitted by the helper + logger.
@@ -1356,6 +1364,24 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
 
         # Show what will be installed if dry run
         if dry_run:
+            # -- W2-dry-run (#827): policy preflight in preview mode --
+            # Runs discovery + checks against direct manifest deps (not
+            # resolved/transitive -- dry-run does not run the resolver).
+            # Block-severity violations render as "Would be blocked by
+            # policy" without raising.  Documented limitation: transitive
+            # deps are NOT evaluated since the resolver does not run.
+            from apm_cli.policy.install_preflight import run_policy_preflight as _dr_preflight
+
+            _dr_apm_deps = builtins.list(apm_deps) + builtins.list(dev_apm_deps)
+            _dr_preflight(
+                project_root=project_root,
+                apm_deps=_dr_apm_deps,
+                mcp_deps=mcp_deps if should_install_mcp else None,
+                no_policy=no_policy,
+                logger=logger,
+                dry_run=True,
+            )
+
             from apm_cli.install.presentation.dry_run import render_and_exit
 
             render_and_exit(
@@ -1422,6 +1448,7 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                     ),
                     protocol_pref=protocol_pref,
                     allow_protocol_fallback=allow_protocol_fallback,
+                    no_policy=no_policy,
                 )
                 apm_count = install_result.installed_count
                 prompt_count = install_result.prompts_integrated
@@ -1578,6 +1605,7 @@ def _install_apm_dependencies(
     marketplace_provenance: dict = None,
     protocol_pref=None,
     allow_protocol_fallback: "Optional[bool]" = None,
+    no_policy: bool = False,
 ):
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.
@@ -1609,5 +1637,6 @@ def _install_apm_dependencies(
         marketplace_provenance=marketplace_provenance,
         protocol_pref=protocol_pref,
         allow_protocol_fallback=allow_protocol_fallback,
+        no_policy=no_policy,
     )
     return InstallService().run(request)

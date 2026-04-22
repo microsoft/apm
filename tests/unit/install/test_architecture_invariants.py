@@ -98,12 +98,18 @@ def test_install_py_under_legacy_budget():
     policy enforcement wiring inside the --mcp branch. A python-
     architect extraction of the --mcp branch into
     apm_cli/install/_mcp_install.py should recover this budget.
+
+    Issue #827 (W2-dry-run) raised 1625 -> 1650 to add policy
+    preflight in preview mode to the --dry-run block (+17 lines).
+    The call lives in install.py because it coordinates between
+    policy discovery and the existing render_and_exit presenter.
+    The pending --mcp extraction will recover all #827 headroom.
     """
     install_py = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "commands" / "install.py"
     assert install_py.is_file()
     n = _line_count(install_py)
-    assert n <= 1625, (
-        f"commands/install.py grew to {n} LOC (budget 1625). "
+    assert n <= 1650, (
+        f"commands/install.py grew to {n} LOC (budget 1650). "
         "Do NOT trim cosmetically -- engage the python-architecture skill "
         "(.github/skills/python-architecture/SKILL.md) and propose an "
         "extraction into apm_cli/install/."

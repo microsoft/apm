@@ -46,6 +46,7 @@ def run_policy_preflight(
     mcp_deps=None,
     no_policy: bool = False,
     logger,
+    dry_run: bool = False,
 ) -> Tuple[Optional[PolicyFetchResult], bool]:
     """Discover + enforce policy for a non-pipeline command site.
 
@@ -62,7 +63,15 @@ def run_policy_preflight(
         CLI ``--no-policy`` flag value.
     logger:
         An :class:`InstallLogger` (or any object exposing
-        ``policy_disabled``, ``policy_resolved``, ``policy_violation``).
+        ``policy_disabled``, ``policy_resolved``, ``policy_violation``,
+        ``warning``).
+    dry_run:
+        When ``True``, run discovery and checks but emit preview-style
+        verdicts instead of raising :class:`PolicyBlockError`.
+        Block-severity violations render as
+        ``"[!] Would be blocked by policy: <dep> -- <reason>"``
+        and warn-severity as ``"[!] Policy warning: <dep> -- <reason>"``.
+        The function always returns normally in dry-run mode.
 
     Returns
     -------
@@ -73,7 +82,8 @@ def run_policy_preflight(
     Raises
     ------
     PolicyBlockError
-        When ``enforcement == "block"`` and at least one check fails.
+        When ``enforcement == "block"`` and at least one check fails
+        **and** ``dry_run is False``.
         The caller should abort the install and exit non-zero.
     """
     # -- Escape hatches ------------------------------------------------
@@ -117,13 +127,27 @@ def run_policy_preflight(
         # Emit diagnostics via logger
         for check in audit_result.failed_checks:
             for detail in check.details:
-                logger.policy_violation(
-                    dep_ref=detail.split(":")[0].strip() if ":" in detail else detail,
-                    reason=detail,
-                    severity="block" if enforcement == "block" else "warn",
-                )
+                dep_ref = detail.split(":")[0].strip() if ":" in detail else detail
+                if dry_run:
+                    # W2-dry-run: preview verdicts -- never raise, never
+                    # push to DiagnosticCollector.  Uses logger.warning()
+                    # so output renders with [!] symbol consistently.
+                    if enforcement == "block":
+                        logger.warning(
+                            f"Would be blocked by policy: {dep_ref} -- {detail}"
+                        )
+                    else:
+                        logger.warning(
+                            f"Policy warning: {dep_ref} -- {detail}"
+                        )
+                else:
+                    logger.policy_violation(
+                        dep_ref=dep_ref,
+                        reason=detail,
+                        severity="block" if enforcement == "block" else "warn",
+                    )
 
-        if enforcement == "block":
+        if enforcement == "block" and not dry_run:
             raise PolicyBlockError(
                 f"Policy enforcement blocked installation: "
                 f"{len(audit_result.failed_checks)} check(s) failed",

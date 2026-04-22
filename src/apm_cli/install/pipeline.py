@@ -58,6 +58,7 @@ def run_install_pipeline(
     marketplace_provenance: dict = None,
     protocol_pref=None,
     allow_protocol_fallback: "Optional[bool]" = None,
+    no_policy: bool = False,
 ):
     """Install APM package dependencies.
 
@@ -149,6 +150,7 @@ def run_install_pipeline(
         all_apm_deps=all_apm_deps,
         root_has_local_primitives=_root_has_local_primitives,
         old_local_deployed=_old_local_deployed,
+        no_policy=no_policy,
     )
 
     # ------------------------------------------------------------------
@@ -184,6 +186,21 @@ def run_install_pipeline(
         from .phases import targets as _targets_phase
 
         _targets_phase.run(ctx)
+
+        # --------------------------------------------------------------
+        # Phase 2.5: Post-targets target-aware policy check (#827)
+        # Target/compilation policy rules need the effective target
+        # which is only known after targets.run().  Dependency checks
+        # already ran in policy_gate; this phase filters to
+        # compilation-target checks only.
+        # PolicyViolationError halts the pipeline cleanly.
+        # --------------------------------------------------------------
+        from .phases import policy_target_check as _policy_target_check_phase
+
+        try:
+            _policy_target_check_phase.run(ctx)
+        except PolicyViolationError:
+            raise  # re-raise through the outer except -> RuntimeError wrapper
 
         # --------------------------------------------------------------
         # Seam: read phase outputs into locals for remaining code.
