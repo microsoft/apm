@@ -268,8 +268,8 @@ Three SOC 2-relevant questions answered directly from git:
 
 - **Change authorization.** Every change to `apm.lock.yaml` is reviewed in a pull
   request before merge. The PR record is the change-authorization evidence.
-- **Change history.** `git log apm.lock.yaml` produces a complete, signed history
-  of every dependency change with author, timestamp, and commit message.
+- **Change history.** `git log apm.lock.yaml` produces a complete, tamper-evident
+  history in git of every dependency change with author, timestamp, and commit message.
 - **Point-in-time state.** `git show <ref>:apm.lock.yaml` reproduces the exact
   dependency set active at any tag, branch, or commit -- including past releases.
 
