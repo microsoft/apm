@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- ADO AAD bearer-token authentication: `apm install` now accepts Microsoft Entra ID bearer tokens for Azure DevOps via `az account get-access-token`, in addition to the existing `ADO_APM_PAT` flow. Resolution precedence is PAT-first, then `az`-bearer, then fail. Stale-PAT 401s silently fall back to bearer with a `[!]` warning. `--verbose` surfaces the resolved source (`AAD_BEARER_AZ_CLI` or `ADO_APM_PAT`) once per host. Unblocks orgs that have disabled PAT creation. Closes #852
+
 ## [0.9.1] - 2026-04-22
 
 ### Added
