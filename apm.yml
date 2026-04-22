@@ -4,3 +4,11 @@ description: "APM - Agent Package Manager. The developer toolchain for agent pri
 author: Microsoft
 license: MIT
 target: all
+
+compilation:
+  exclude:
+    - "tests/**"
+    - "templates/**"
+    - "packages/**"
+    - "build/**"
+    - "docs/node_modules/**"
