@@ -1,6 +1,6 @@
 """APM marketplace command group.
 
-Manages plugin marketplace discovery and governance. Follows the same
+Manages marketplace discovery and governance. Follows the same
 Click group pattern as ``mcp.py``.
 """
 
@@ -41,6 +41,33 @@ from ..marketplace.yml_schema import load_marketplace_yml
 from ..utils.path_security import PathTraversalError, validate_path_segments
 from ._helpers import _get_console, _is_interactive
 
+
+# ---------------------------------------------------------------------------
+# Custom group for organised --help output
+# ---------------------------------------------------------------------------
+
+
+class MarketplaceGroup(click.Group):
+    """Custom group that organises commands by audience."""
+
+    _sections = {
+        "Consumer commands": ["add", "list", "browse", "update", "remove", "validate"],
+        "Authoring commands": ["init", "build", "check", "outdated", "doctor", "publish", "package"],
+    }
+
+    def format_commands(self, ctx, formatter):
+        for section_name, cmd_names in self._sections.items():
+            commands = []
+            for name in cmd_names:
+                cmd = self.get_command(ctx, name)
+                if cmd is None:
+                    continue
+                help_text = cmd.get_short_help_str(limit=150)
+                commands.append((name, help_text))
+            if commands:
+                with formatter.section(section_name):
+                    formatter.write_dl(commands)
+
 # Restore builtins shadowed by subcommand names
 list = builtins.list
 
@@ -72,15 +99,15 @@ def _load_yml_or_exit(logger):
 
 
 
-@click.group(help="Manage plugin marketplaces for discovery and governance")
+@click.group(cls=MarketplaceGroup, help="Manage marketplaces for discovery and governance")
 def marketplace():
-    """Register, browse, and search plugin marketplaces."""
+    """Register, browse, and search marketplaces."""
     pass
 
 
-from .marketplace_plugin import plugin  # noqa: E402
+from .marketplace_plugin import package  # noqa: E402
 
-marketplace.add_command(plugin)
+marketplace.add_command(package)
 
 
 # ---------------------------------------------------------------------------
@@ -95,8 +122,10 @@ marketplace.add_command(plugin)
     is_flag=True,
     help="Skip the .gitignore staleness check",
 )
+@click.option("--name", default=None, help="Marketplace name (default: my-marketplace)")
+@click.option("--owner", default=None, help="Owner name for the marketplace")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
-def init(force, no_gitignore_check, verbose):
+def init(force, no_gitignore_check, name, owner, verbose):
     """Create a richly-commented marketplace.yml scaffold."""
     from ..marketplace.init_template import render_marketplace_yml_template
 
@@ -112,7 +141,7 @@ def init(force, no_gitignore_check, verbose):
         sys.exit(1)
 
     # Write template
-    template_text = render_marketplace_yml_template()
+    template_text = render_marketplace_yml_template(name=name, owner=owner)
     try:
         yml_path.write_text(template_text, encoding="utf-8")
     except OSError as exc:
@@ -181,7 +210,7 @@ def _check_gitignore_for_marketplace_json(logger):
 # ---------------------------------------------------------------------------
 
 
-@marketplace.command(help="Register a plugin marketplace")
+@marketplace.command(help="Register a marketplace")
 @click.argument("repo", required=True)
 @click.option("--name", "-n", default=None, help="Display name (defaults to repo name)")
 @click.option("--branch", "-b", default="main", show_default=True, help="Branch to use")
@@ -530,7 +559,7 @@ def remove(name, yes, verbose):
 @marketplace.command(help="Validate a marketplace manifest")
 @click.argument("name", required=True)
 @click.option(
-    "--check-refs", is_flag=True, help="Verify version refs are reachable (network)"
+    "--check-refs", is_flag=True, hidden=True, help="Verify version refs are reachable (network)"
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def validate(name, check_refs, verbose):
@@ -1778,7 +1807,7 @@ def _render_publish_footer(logger, updated, failed, total, dry_run):
     name="search",
     help="Search plugins in a marketplace (QUERY@MARKETPLACE)",
 )
-@click.argument("expression", required=True)
+@click.argument("expression", required=True, metavar="QUERY@MARKETPLACE")
 @click.option("--limit", default=20, show_default=True, help="Max results to show")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def search(expression, limit, verbose):

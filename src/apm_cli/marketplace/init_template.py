@@ -6,8 +6,8 @@ against :func:`~apm_cli.marketplace.yml_schema.load_marketplace_yml`.
 
 from __future__ import annotations
 
-# The template is a plain string literal so it can be returned verbatim
-# without runtime formatting.  Every line is pure ASCII.
+# The template uses Python str.format() with named placeholders for
+# {name} and {owner}.  Literal braces (e.g. in tagPattern) are doubled.
 
 _TEMPLATE = """\
 # APM marketplace descriptor
@@ -19,38 +19,38 @@ _TEMPLATE = """\
 # For the full schema, see:
 #   https://microsoft.github.io/apm/guides/marketplace-authoring/
 
-name: my-marketplace
+name: {name}
 description: A short description of what your marketplace offers
 
 # Semantic version of this marketplace (bump on release)
 version: 0.1.0
 
 owner:
-  name: acme-org
-  url: https://github.com/acme-org
-  # email: maintainers@acme-org.example       # optional
+  name: {owner}
+  url: https://github.com/{owner}
+  # email: maintainers@{owner}.example       # optional
 
 # APM-only build options (stripped from compiled marketplace.json)
 build:
-  # Default tag pattern used to resolve {version} for each package.
-  # Supports {name} and {version} placeholders. Override per-package below.
-  tagPattern: "v{version}"
+  # Default tag pattern used to resolve {{version}} for each package.
+  # Supports {{name}} and {{version}} placeholders. Override per-package below.
+  tagPattern: "v{{version}}"
 
 # Opaque pass-through metadata (copied verbatim to marketplace.json).
 # Use this for Anthropic-recognised or marketplace-specific fields.
 metadata:
-  # Example: maintained by acme-org
+  # Example: maintained by {owner}
   homepage: https://example.com
 
 packages:
   - name: example-package
     description: Human-readable description of the package
-    source: acme-org/example-package
+    source: {owner}/example-package
     version: "^1.0.0"
     # Optional overrides:
     # subdir: path/inside/repo
-    # tagPattern: "example-package-v{version}"
-    # includePrerelease: false
+    # tagPattern: "example-package-v{{version}}"
+    # include_prerelease: false
     # ref: abcdef1234  # pin to explicit SHA/tag/branch (overrides version range)
 
   # Alternative: pin a package to an explicit branch or SHA instead of a
@@ -58,11 +58,25 @@ packages:
   #
   # - name: pinned-package
   #   description: Pinned to a specific commit
-  #   source: acme-org/pinned-package
+  #   source: {owner}/pinned-package
   #   ref: main
 """
 
 
-def render_marketplace_yml_template() -> str:
-    """Return the scaffold content for a new ``marketplace.yml``."""
-    return _TEMPLATE
+def render_marketplace_yml_template(
+    name: str | None = None,
+    owner: str | None = None,
+) -> str:
+    """Return the scaffold content for a new ``marketplace.yml``.
+
+    Parameters
+    ----------
+    name:
+        Marketplace name. Defaults to ``my-marketplace``.
+    owner:
+        Owner name. Defaults to ``acme-org``.
+    """
+    return _TEMPLATE.format(
+        name=name or "my-marketplace",
+        owner=owner or "acme-org",
+    )

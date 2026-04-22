@@ -1,4 +1,4 @@
-"""Tests for ``apm marketplace plugin {add,set,remove}`` CLI commands."""
+"""Tests for ``apm marketplace package {add,set,remove}`` CLI commands."""
 
 from __future__ import annotations
 
@@ -51,18 +51,18 @@ def runner():
 
 
 # ---------------------------------------------------------------------------
-# plugin add
+# package add
 # ---------------------------------------------------------------------------
 
 
-class TestPluginAdd:
+class TestPackageAdd:
     def test_happy_path_no_verify(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
         result = runner.invoke(
             marketplace,
             [
-                "plugin",
+                "package",
                 "add",
                 "acme/new-tool",
                 "--version",
@@ -79,7 +79,7 @@ class TestPluginAdd:
         result = runner.invoke(
             marketplace,
             [
-                "plugin",
+                "package",
                 "add",
                 "acme/existing-package",
                 "--version",
@@ -98,7 +98,7 @@ class TestPluginAdd:
         _write_yml(tmp_path)
         result = runner.invoke(
             marketplace,
-            ["plugin", "add", "acme/tool", "--no-verify"],
+            ["package", "add", "acme/tool", "--no-verify"],
         )
         assert result.exit_code == 2
         assert "Cannot resolve HEAD" in result.output
@@ -111,7 +111,7 @@ class TestPluginAdd:
         result = runner.invoke(
             marketplace,
             [
-                "plugin",
+                "package",
                 "add",
                 "acme/tool",
                 "--version",
@@ -125,9 +125,9 @@ class TestPluginAdd:
         assert "mutually exclusive" in result.output.lower()
 
     def test_help_renders(self, runner):
-        result = runner.invoke(marketplace, ["plugin", "add", "--help"])
+        result = runner.invoke(marketplace, ["package", "add", "--help"])
         assert result.exit_code == 0
-        assert "Add a plugin" in result.output
+        assert "Add a package" in result.output
 
     def test_verify_calls_ref_resolver(
         self, runner, tmp_path, monkeypatch
@@ -142,7 +142,7 @@ class TestPluginAdd:
         result = runner.invoke(
             marketplace,
             [
-                "plugin",
+                "package",
                 "add",
                 "acme/verified-tool",
                 "--version",
@@ -154,11 +154,11 @@ class TestPluginAdd:
 
 
 # ---------------------------------------------------------------------------
-# plugin set
+# package set
 # ---------------------------------------------------------------------------
 
 
-class TestPluginSet:
+class TestPackageSet:
     def test_happy_path_update_version(
         self, runner, tmp_path, monkeypatch
     ):
@@ -167,7 +167,7 @@ class TestPluginSet:
         result = runner.invoke(
             marketplace,
             [
-                "plugin",
+                "package",
                 "set",
                 "existing-package",
                 "--version",
@@ -185,7 +185,7 @@ class TestPluginSet:
         result = runner.invoke(
             marketplace,
             [
-                "plugin",
+                "package",
                 "set",
                 "nonexistent",
                 "--version",
@@ -196,9 +196,9 @@ class TestPluginSet:
         assert "not found" in result.output
 
     def test_help_renders(self, runner):
-        result = runner.invoke(marketplace, ["plugin", "set", "--help"])
+        result = runner.invoke(marketplace, ["package", "set", "--help"])
         assert result.exit_code == 0
-        assert "Update a plugin" in result.output
+        assert "Update a package" in result.output
 
     def test_version_and_ref_conflict_exits_2(
         self, runner, tmp_path, monkeypatch
@@ -208,7 +208,7 @@ class TestPluginSet:
         result = runner.invoke(
             marketplace,
             [
-                "plugin",
+                "package",
                 "set",
                 "existing-package",
                 "--version",
@@ -221,29 +221,29 @@ class TestPluginSet:
         assert "mutually exclusive" in result.output.lower()
 
     def test_set_no_fields_errors(self, runner, tmp_path, monkeypatch):
-        """Calling ``plugin set`` with no field flags produces an error."""
+        """Calling ``package set`` with no field flags produces an error."""
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
         result = runner.invoke(
             marketplace,
-            ["plugin", "set", "existing-package"],
+            ["package", "set", "existing-package"],
         )
         assert result.exit_code == 1
         assert "No fields specified" in result.output
 
 
 # ---------------------------------------------------------------------------
-# plugin remove
+# package remove
 # ---------------------------------------------------------------------------
 
 
-class TestPluginRemove:
+class TestPackageRemove:
     def test_happy_path_with_yes(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
         result = runner.invoke(
             marketplace,
-            ["plugin", "remove", "existing-package", "--yes"],
+            ["package", "remove", "existing-package", "--yes"],
         )
         assert result.exit_code == 0, result.output
         assert "Removed" in result.output
@@ -256,7 +256,7 @@ class TestPluginRemove:
         _write_yml(tmp_path)
         result = runner.invoke(
             marketplace,
-            ["plugin", "remove", "existing-package"],
+            ["package", "remove", "existing-package"],
         )
         # click.confirm raises Abort when stdin is not a TTY;
         # the command catches it and prints "Cancelled.".
@@ -270,23 +270,23 @@ class TestPluginRemove:
         _write_yml(tmp_path)
         result = runner.invoke(
             marketplace,
-            ["plugin", "remove", "nonexistent", "--yes"],
+            ["package", "remove", "nonexistent", "--yes"],
         )
         assert result.exit_code == 2
         assert "not found" in result.output
 
     def test_help_renders(self, runner):
-        result = runner.invoke(marketplace, ["plugin", "remove", "--help"])
+        result = runner.invoke(marketplace, ["package", "remove", "--help"])
         assert result.exit_code == 0
-        assert "Remove a plugin" in result.output
+        assert "Remove a package" in result.output
 
 
 # ---------------------------------------------------------------------------
-# UX4: --version/--ref mutual exclusivity in plugin add
+# UX4: --version/--ref mutual exclusivity in package add
 # ---------------------------------------------------------------------------
 
 
-class TestPluginAddMutualExclusivity:
+class TestPackageAddMutualExclusivity:
     """The ``add`` command must reject ``--version`` and ``--ref`` together."""
 
     def test_version_and_ref_mutually_exclusive(
@@ -297,7 +297,7 @@ class TestPluginAddMutualExclusivity:
         result = runner.invoke(
             marketplace,
             [
-                "plugin",
+                "package",
                 "add",
                 "acme/new-tool",
                 "--version",
@@ -428,12 +428,12 @@ class TestResolveRef:
 
 
 # ---------------------------------------------------------------------------
-# Integration: plugin add with ref auto-resolution
+# Integration: package add with ref auto-resolution
 # ---------------------------------------------------------------------------
 
 
-class TestPluginAddRefResolution:
-    """Integration tests for ref auto-resolution in ``plugin add``."""
+class TestPackageAddRefResolution:
+    """Integration tests for ref auto-resolution in ``package add``."""
 
     @patch(
         "apm_cli.marketplace.ref_resolver.RefResolver.resolve_ref_sha",
@@ -446,12 +446,12 @@ class TestPluginAddRefResolution:
     def test_add_no_ref_auto_resolves_head(
         self, mock_list, mock_resolve, runner, tmp_path, monkeypatch,
     ):
-        """``plugin add <source>`` (no --ref, no --version) pins HEAD SHA."""
+        """``package add <source>`` (no --ref, no --version) pins HEAD SHA."""
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
         result = runner.invoke(
             marketplace,
-            ["plugin", "add", "acme/new-tool"],
+            ["package", "add", "acme/new-tool"],
         )
         assert result.exit_code == 0, result.output
         assert "new-tool" in result.output
@@ -470,12 +470,12 @@ class TestPluginAddRefResolution:
     def test_add_ref_head_warns_and_resolves(
         self, mock_list, mock_resolve, runner, tmp_path, monkeypatch,
     ):
-        """``plugin add <source> --ref HEAD`` warns + stores SHA."""
+        """``package add <source> --ref HEAD`` warns + stores SHA."""
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
         result = runner.invoke(
             marketplace,
-            ["plugin", "add", "acme/new-tool", "--ref", "HEAD"],
+            ["package", "add", "acme/new-tool", "--ref", "HEAD"],
         )
         assert result.exit_code == 0, result.output
         assert "mutable ref" in result.output
@@ -491,12 +491,12 @@ class TestPluginAddRefResolution:
     def test_add_ref_branch_warns_and_resolves(
         self, mock_list, runner, tmp_path, monkeypatch,
     ):
-        """``plugin add <source> --ref main`` warns + stores branch SHA."""
+        """``package add <source> --ref main`` warns + stores branch SHA."""
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
         result = runner.invoke(
             marketplace,
-            ["plugin", "add", "acme/new-tool", "--ref", "main"],
+            ["package", "add", "acme/new-tool", "--ref", "main"],
         )
         assert result.exit_code == 0, result.output
         assert "mutable ref" in result.output
@@ -506,13 +506,13 @@ class TestPluginAddRefResolution:
     def test_add_ref_sha_stores_as_is(
         self, runner, tmp_path, monkeypatch,
     ):
-        """``plugin add <source> --ref <sha>`` stores SHA directly."""
+        """``package add <source> --ref <sha>`` stores SHA directly."""
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
         result = runner.invoke(
             marketplace,
             [
-                "plugin", "add", "acme/new-tool",
+                "package", "add", "acme/new-tool",
                 "--ref", _FAKE_SHA, "--no-verify",
             ],
         )
@@ -522,12 +522,12 @@ class TestPluginAddRefResolution:
 
 
 # ---------------------------------------------------------------------------
-# Integration: plugin set with ref auto-resolution
+# Integration: package set with ref auto-resolution
 # ---------------------------------------------------------------------------
 
 
-class TestPluginSetRefResolution:
-    """Integration tests for ref auto-resolution in ``plugin set``."""
+class TestPackageSetRefResolution:
+    """Integration tests for ref auto-resolution in ``package set``."""
 
     @patch(
         "apm_cli.marketplace.ref_resolver.RefResolver.resolve_ref_sha",
@@ -540,12 +540,12 @@ class TestPluginSetRefResolution:
     def test_set_ref_head_resolves(
         self, mock_list, mock_resolve, runner, tmp_path, monkeypatch,
     ):
-        """``plugin set <name> --ref HEAD`` resolves to SHA."""
+        """``package set <name> --ref HEAD`` resolves to SHA."""
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
         result = runner.invoke(
             marketplace,
-            ["plugin", "set", "existing-package", "--ref", "HEAD"],
+            ["package", "set", "existing-package", "--ref", "HEAD"],
         )
         assert result.exit_code == 0, result.output
         assert "Updated" in result.output
@@ -559,12 +559,12 @@ class TestPluginSetRefResolution:
     def test_set_ref_branch_resolves(
         self, mock_list, runner, tmp_path, monkeypatch,
     ):
-        """``plugin set <name> --ref develop`` resolves branch to SHA."""
+        """``package set <name> --ref develop`` resolves branch to SHA."""
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
         result = runner.invoke(
             marketplace,
-            ["plugin", "set", "existing-package", "--ref", "develop"],
+            ["package", "set", "existing-package", "--ref", "develop"],
         )
         assert result.exit_code == 0, result.output
         assert "Updated" in result.output
@@ -572,24 +572,24 @@ class TestPluginSetRefResolution:
     def test_set_ref_sha_stores_directly(
         self, runner, tmp_path, monkeypatch,
     ):
-        """``plugin set <name> --ref <sha>`` stores SHA without network."""
+        """``package set <name> --ref <sha>`` stores SHA without network."""
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
         result = runner.invoke(
             marketplace,
-            ["plugin", "set", "existing-package", "--ref", _FAKE_SHA],
+            ["package", "set", "existing-package", "--ref", _FAKE_SHA],
         )
         assert result.exit_code == 0, result.output
 
     def test_set_ref_nonexistent_package_exits(
         self, runner, tmp_path, monkeypatch,
     ):
-        """``plugin set <unknown> --ref HEAD`` errors on missing package."""
+        """``package set <unknown> --ref HEAD`` errors on missing package."""
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
         result = runner.invoke(
             marketplace,
-            ["plugin", "set", "nonexistent", "--ref", "HEAD"],
+            ["package", "set", "nonexistent", "--ref", "HEAD"],
         )
         assert result.exit_code == 2
         assert "not found" in result.output

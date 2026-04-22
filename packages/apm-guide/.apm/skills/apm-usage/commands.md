@@ -72,9 +72,9 @@
 | `apm marketplace check` | Validate yml and verify refs resolve | `--offline`, `-v` |
 | `apm marketplace doctor` | Diagnose git, network, auth, yml readiness | `-v` |
 | `apm marketplace publish` | Open PRs on consumer repos from `consumer-targets.yml` | `--targets PATH`, `--dry-run`, `--no-pr`, `--draft`, `--allow-downgrade`, `--allow-ref-change`, `--parallel N`, `-y` |
-| `apm marketplace plugin add <source>` | Add a plugin entry to `marketplace.yml` | `--name`, `--version`, `--ref` (mutable refs auto-resolved to SHA), `--description`, `--subdir`, `--tag-pattern`, `--tags`, `--include-prerelease`, `--no-verify` |
-| `apm marketplace plugin set <name>` | Update fields on an existing plugin entry | `--version`, `--ref` (mutable refs auto-resolved to SHA), `--description`, `--subdir`, `--tag-pattern`, `--tags`, `--include-prerelease` |
-| `apm marketplace plugin remove <name>` | Remove a plugin entry from `marketplace.yml` | `--yes` |
+| `apm marketplace package add <source>` | Add a package entry to `marketplace.yml` | `--name`, `--version`, `--ref` (mutable refs auto-resolved to SHA), `-d`/`--description`, `-s`/`--subdir`, `--tag-pattern`, `--tags`, `--include-prerelease`, `--no-verify` |
+| `apm marketplace package set <name>` | Update fields on an existing package entry | `--version`, `--ref` (mutable refs auto-resolved to SHA), `--description`, `--subdir`, `--tag-pattern`, `--tags`, `--include-prerelease` |
+| `apm marketplace package remove <name>` | Remove a package entry from `marketplace.yml` | `--yes` |
 
 ## MCP servers
 

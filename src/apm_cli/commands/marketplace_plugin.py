@@ -1,4 +1,4 @@
-"""``apm marketplace plugin {add,set,remove}`` subgroup.
+"""``apm marketplace package {add,set,remove}`` subgroup.
 
 Lets maintainers programmatically manage package entries in
 ``marketplace.yml`` instead of hand-editing YAML.
@@ -167,18 +167,18 @@ def _resolve_ref(
 # -------------------------------------------------------------------
 
 
-@click.group(help="Manage plugins in marketplace.yml (add, set, remove)")
-def plugin():
+@click.group(help="Manage packages in marketplace.yml (add, set, remove)")
+def package():
     """Add, update, or remove packages in marketplace.yml."""
     pass
 
 
 # -------------------------------------------------------------------
-# plugin add
+# package add
 # -------------------------------------------------------------------
 
 
-@plugin.command(help="Add a plugin to marketplace.yml")
+@package.command(help="Add a package to marketplace.yml")
 @click.argument("source")
 @click.option("--name", default=None, help="Package name (default: repo name)")
 @click.option("--version", default=None, help="Semver range (e.g. '>=1.0.0')")
@@ -187,8 +187,8 @@ def plugin():
     default=None,
     help="Pin to a git ref (SHA, tag, or HEAD). Mutable refs are auto-resolved to SHA.",
 )
-@click.option("--description", default=None, help="Human-readable description")
-@click.option("--subdir", default=None, help="Subdirectory inside source repo")
+@click.option("-d", "--description", default=None, help="Human-readable description")
+@click.option("-s", "--subdir", default=None, help="Subdirectory inside source repo")
 @click.option("--tag-pattern", default=None, help="Tag pattern (e.g. 'v{version}')")
 @click.option("--tags", default=None, help="Comma-separated tags")
 @click.option(
@@ -209,10 +209,10 @@ def add(
     no_verify,
     verbose,
 ):
-    """Add a plugin entry to marketplace.yml."""
+    """Add a package entry to marketplace.yml."""
     from ..marketplace.yml_editor import add_plugin_entry
 
-    logger = CommandLogger("marketplace-plugin-add", verbose=verbose)
+    logger = CommandLogger("marketplace-package-add", verbose=verbose)
     yml = _ensure_yml_exists(logger)
 
     # --version and --ref are mutually exclusive.
@@ -249,17 +249,17 @@ def add(
         sys.exit(2)
 
     logger.success(
-        f"Added plugin '{resolved_name}' from {source}",
+        f"Added package '{resolved_name}' from {source}",
         symbol="check",
     )
 
 
 # -------------------------------------------------------------------
-# plugin set
+# package set
 # -------------------------------------------------------------------
 
 
-@plugin.command("set", help="Update a plugin entry in marketplace.yml")
+@package.command("set", help="Update a package entry in marketplace.yml")
 @click.argument("name")
 @click.option("--version", default=None, help="Semver range (e.g. '>=1.0.0')")
 @click.option(
@@ -289,10 +289,10 @@ def set_cmd(
     include_prerelease,
     verbose,
 ):
-    """Update fields on an existing plugin entry."""
+    """Update fields on an existing package entry."""
     from ..marketplace.yml_editor import update_plugin_entry
 
-    logger = CommandLogger("marketplace-plugin-set", verbose=verbose)
+    logger = CommandLogger("marketplace-package-set", verbose=verbose)
     yml = _ensure_yml_exists(logger)
 
     # --version and --ref are mutually exclusive.
@@ -349,30 +349,30 @@ def set_cmd(
         logger.error(str(exc), symbol="error")
         sys.exit(2)
 
-    logger.success(f"Updated plugin '{name}'", symbol="check")
+    logger.success(f"Updated package '{name}'", symbol="check")
 
 
 # -------------------------------------------------------------------
-# plugin remove
+# package remove
 # -------------------------------------------------------------------
 
 
-@plugin.command(help="Remove a plugin from marketplace.yml")
+@package.command(help="Remove a package from marketplace.yml")
 @click.argument("name")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt.")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def remove(name, yes, verbose):
-    """Remove a plugin entry from marketplace.yml."""
+    """Remove a package entry from marketplace.yml."""
     from ..marketplace.yml_editor import remove_plugin_entry
 
-    logger = CommandLogger("marketplace-plugin-remove", verbose=verbose)
+    logger = CommandLogger("marketplace-package-remove", verbose=verbose)
     yml = _ensure_yml_exists(logger)
 
     # Confirmation gate.
     if not yes:
         try:
             click.confirm(
-                f"Remove plugin '{name}' from marketplace.yml?",
+                f"Remove package '{name}' from marketplace.yml?",
                 abort=True,
             )
         except click.Abort:
@@ -385,4 +385,4 @@ def remove(name, yes, verbose):
         logger.error(str(exc), symbol="error")
         sys.exit(2)
 
-    logger.success(f"Removed plugin '{name}'", symbol="check")
+    logger.success(f"Removed package '{name}'", symbol="check")

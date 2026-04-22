@@ -1416,12 +1416,12 @@ apm marketplace publish --no-pr
 
 Run history and PR URLs are recorded in `.apm/publish-state.json` so re-runs can detect existing PRs.
 
-#### `apm marketplace plugin add` - Add a plugin entry
+#### `apm marketplace package add` - Add a package entry
 
-Add a plugin entry to `marketplace.yml`.
+Add a package entry to `marketplace.yml`.
 
 ```bash
-apm marketplace plugin add SOURCE [OPTIONS]
+apm marketplace package add SOURCE [OPTIONS]
 ```
 
 **Arguments:**
@@ -1430,7 +1430,8 @@ apm marketplace plugin add SOURCE [OPTIONS]
 **Options:**
 - `--version TEXT` - Semver range constraint (e.g. `">=1.0.0"`)
 - `--ref TEXT` - Pin to a git ref (SHA, tag, or HEAD). Mutable refs are auto-resolved to SHA
-- `--description TEXT` - Short description for the entry
+- `-d`, `--description TEXT` - Short description for the entry
+- `-s`, `--subdir TEXT` - Subdirectory inside source repo
 - `--include-prerelease` - Include pre-release versions
 - `--no-verify` - Skip remote repository verification
 - `--verbose` - Enable verbose output
@@ -1439,30 +1440,30 @@ apm marketplace plugin add SOURCE [OPTIONS]
 
 **Examples:**
 ```bash
-# Add a plugin with a version range
-apm marketplace plugin add acme/code-review --version ">=1.0.0"
+# Add a package with a version range
+apm marketplace package add acme/code-review --version ">=1.0.0"
 
 # Pin to a specific tag
-apm marketplace plugin add acme/code-review --ref v2.1.0
+apm marketplace package add acme/code-review --ref v2.1.0
 
 # Pin to current HEAD (auto-resolved to SHA)
-apm marketplace plugin add acme/code-review
+apm marketplace package add acme/code-review
 
 # Add with description and skip verification (requires explicit --ref SHA)
-apm marketplace plugin add acme/code-review --ref abc123...40chars \
+apm marketplace package add acme/code-review --ref abc123...40chars \
   --description "Code review skill" --no-verify
 ```
 
-#### `apm marketplace plugin set` - Update a plugin entry
+#### `apm marketplace package set` - Update a package entry
 
-Update fields on an existing plugin entry in `marketplace.yml`.
+Update fields on an existing package entry in `marketplace.yml`.
 
 ```bash
-apm marketplace plugin set NAME [OPTIONS]
+apm marketplace package set NAME [OPTIONS]
 ```
 
 **Arguments:**
-- `NAME` - Name of the existing plugin entry
+- `NAME` - Name of the existing package entry
 
 **Options:**
 - `--version TEXT` - New semver range constraint
@@ -1476,28 +1477,28 @@ apm marketplace plugin set NAME [OPTIONS]
 **Examples:**
 ```bash
 # Widen the version range
-apm marketplace plugin set code-review --version ">=2.0.0"
+apm marketplace package set code-review --version ">=2.0.0"
 
 # Switch from version to pinned ref
-apm marketplace plugin set code-review --ref abc1234
+apm marketplace package set code-review --ref abc1234
 
 # Re-pin to current HEAD SHA
-apm marketplace plugin set code-review --ref HEAD
+apm marketplace package set code-review --ref HEAD
 
 # Update the description
-apm marketplace plugin set code-review --description "Updated review skill"
+apm marketplace package set code-review --description "Updated review skill"
 ```
 
-#### `apm marketplace plugin remove` - Remove a plugin entry
+#### `apm marketplace package remove` - Remove a package entry
 
-Remove a plugin entry from `marketplace.yml`.
+Remove a package entry from `marketplace.yml`.
 
 ```bash
-apm marketplace plugin remove NAME [OPTIONS]
+apm marketplace package remove NAME [OPTIONS]
 ```
 
 **Arguments:**
-- `NAME` - Name of the plugin entry to remove
+- `NAME` - Name of the package entry to remove
 
 **Options:**
 - `--yes` - Skip confirmation prompt
@@ -1508,10 +1509,10 @@ Prompts for confirmation unless `--yes` is passed. In non-interactive environmen
 **Examples:**
 ```bash
 # Remove with confirmation prompt
-apm marketplace plugin remove code-review
+apm marketplace package remove code-review
 
 # Skip confirmation (CI-friendly)
-apm marketplace plugin remove code-review --yes
+apm marketplace package remove code-review --yes
 ```
 
 ### `apm search` - Search plugins in a marketplace

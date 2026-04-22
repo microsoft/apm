@@ -164,33 +164,33 @@ packages:
 
 Three subcommands let you manage `marketplace.yml` entries without hand-editing YAML.
 
-### Adding a plugin
+### Adding a package
 
 ```bash
-apm marketplace plugin add microsoft/apm-sample-package \
+apm marketplace package add microsoft/apm-sample-package \
   --version ">=1.0.0" \
   --description "Sample package"
 ```
 
-`plugin add` takes a `<owner>/<repo>` source, derives the plugin name from the repo, and appends an entry to `packages:`. Pass `--name` to override the derived name, `--subdir` for monorepo paths, `--tag-pattern` for non-default tag layouts, or `--tags` to attach metadata tags. By default the command verifies the source is reachable via `git ls-remote`; pass `--no-verify` to skip that check.
+`package add` takes a `<owner>/<repo>` source, derives the package name from the repo, and appends an entry to `packages:`. Pass `--name` to override the derived name, `--subdir` for monorepo paths, `--tag-pattern` for non-default tag layouts, or `--tags` to attach metadata tags. By default the command verifies the source is reachable via `git ls-remote`; pass `--no-verify` to skip that check.
 
 `--version` and `--ref` are mutually exclusive -- use `--ref` to pin an exact SHA, tag, or branch instead of a semver range.
 
-### Updating a plugin
+### Updating a package
 
 ```bash
-apm marketplace plugin set apm-sample-package --version ">=2.0.0"
+apm marketplace package set apm-sample-package --version ">=2.0.0"
 ```
 
-`plugin set` takes the plugin name (not the source) and updates the specified fields in place. Any option accepted by `plugin add` (except `--name`) can be passed to `plugin set`.
+`package set` takes the package name (not the source) and updates the specified fields in place. Any option accepted by `package add` (except `--name`) can be passed to `package set`.
 
-### Removing a plugin
+### Removing a package
 
 ```bash
-apm marketplace plugin remove apm-sample-package --yes
+apm marketplace package remove apm-sample-package --yes
 ```
 
-`plugin remove` drops the named entry from `packages:`. Without `--yes` the command prompts for confirmation.
+`package remove` drops the named entry from `packages:`. Without `--yes` the command prompts for confirmation.
 
 ## The build flow
 

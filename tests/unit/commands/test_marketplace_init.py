@@ -195,3 +195,56 @@ class TestInitContentSafety:
         runner.invoke(marketplace, ["init"])
         content = (tmp_path / "marketplace.yml").read_text(encoding="utf-8")
         content.encode("ascii")  # raises UnicodeEncodeError if non-ASCII
+
+
+# ---------------------------------------------------------------------------
+# --name / --owner flags
+# ---------------------------------------------------------------------------
+
+
+class TestInitNameOwnerFlags:
+    def test_custom_name(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(marketplace, ["init", "--name", "cool-tools"])
+        assert result.exit_code == 0
+        yml = load_marketplace_yml(tmp_path / "marketplace.yml")
+        assert yml.name == "cool-tools"
+
+    def test_custom_owner(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(marketplace, ["init", "--owner", "my-org"])
+        assert result.exit_code == 0
+        yml = load_marketplace_yml(tmp_path / "marketplace.yml")
+        assert yml.owner.name == "my-org"
+
+    def test_custom_name_and_owner(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(
+            marketplace, ["init", "--name", "my-mkt", "--owner", "my-team"],
+        )
+        assert result.exit_code == 0
+        yml = load_marketplace_yml(tmp_path / "marketplace.yml")
+        assert yml.name == "my-mkt"
+        assert yml.owner.name == "my-team"
+        content = (tmp_path / "marketplace.yml").read_text(encoding="utf-8")
+        assert "my-team" in content
+        # The default acme-org should not appear when owner is overridden.
+        assert "acme-org" not in content
+
+    def test_defaults_without_flags(self, runner, tmp_path, monkeypatch):
+        """Without --name/--owner the defaults are used."""
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(marketplace, ["init"])
+        assert result.exit_code == 0
+        yml = load_marketplace_yml(tmp_path / "marketplace.yml")
+        assert yml.name == "my-marketplace"
+        assert yml.owner.name == "acme-org"
+
+    def test_custom_values_are_pure_ascii(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(
+            marketplace, ["init", "--name", "ascii-only", "--owner", "plain-org"],
+        )
+        assert result.exit_code == 0
+        content = (tmp_path / "marketplace.yml").read_text(encoding="utf-8")
+        content.encode("ascii")  # raises UnicodeEncodeError if non-ASCII

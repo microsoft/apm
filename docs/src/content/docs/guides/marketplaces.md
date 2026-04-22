@@ -264,8 +264,8 @@ Shadow detection runs automatically during install -- no configuration required.
 When building a marketplace that tracks packages from a monorepo (multiple packages inside one Git repository), use `--subdir` to point each entry at its subdirectory:
 
 ```bash
-apm marketplace plugin add acme/monorepo --subdir plugins/eslint-rules --name eslint-rules
-apm marketplace plugin add acme/monorepo --subdir plugins/formatter --name formatter
+apm marketplace package add acme/monorepo --subdir plugins/eslint-rules --name eslint-rules
+apm marketplace package add acme/monorepo --subdir plugins/formatter --name formatter
 ```
 
 ### Ref auto-resolution
@@ -276,13 +276,13 @@ Mutable git refs (`HEAD`, branch names) are automatically resolved to concrete 4
 
 ```bash
 # Resolves HEAD to its current SHA and stores it
-apm marketplace plugin add acme/code-review
+apm marketplace package add acme/code-review
 ```
 
 **Explicit `HEAD`:** Passing `--ref HEAD` warns that HEAD is mutable, then resolves:
 
 ```bash
-apm marketplace plugin add acme/code-review --ref HEAD
+apm marketplace package add acme/code-review --ref HEAD
 # [!] 'HEAD' is a mutable ref. Resolving to current SHA for safety.
 # [i] Resolved HEAD to abc123def456
 ```
@@ -290,15 +290,15 @@ apm marketplace plugin add acme/code-review --ref HEAD
 **Branch names:** Branch names that match `refs/heads/*` on the remote are also resolved:
 
 ```bash
-apm marketplace plugin add acme/code-review --ref main
+apm marketplace package add acme/code-review --ref main
 # [!] 'main' is a branch (mutable ref). Resolving to current SHA for safety.
 # [i] Resolved main to abc123def456
 ```
 
-**Updating pinned SHAs:** Use `plugin set` with `--ref HEAD` to re-pin to the latest commit:
+**Updating pinned SHAs:** Use `package set` with `--ref HEAD` to re-pin to the latest commit:
 
 ```bash
-apm marketplace plugin set code-review --ref HEAD
+apm marketplace package set code-review --ref HEAD
 ```
 
 Tags and concrete SHAs are stored as-is without resolution.
