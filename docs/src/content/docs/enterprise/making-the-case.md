@@ -38,8 +38,7 @@ dependencies:
     - microsoft/apm-sample-package#v1.0.0
     - github/awesome-copilot/plugins/context-engineering
   mcp:
-    - name: io.github.github/github-mcp-server
-      transport: http
+    - io.github.github/github-mcp-server
 ```
 
 This file is version-controlled, reviewed in pull requests, and readable by anyone on the team.
