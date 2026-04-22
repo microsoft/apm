@@ -1713,3 +1713,7 @@ apm runtime status
 - Runtime preference order (copilot → codex → llm)
 - Currently active runtime
 - Next steps if no runtime is available
+
+## Experimental Features
+
+`apm experimental` manages opt-in flags that gate new or changing behaviour. Subcommands: `list`, `enable`, `disable`, `reset`. See the full reference in [Experimental Flags](../experimental/).
