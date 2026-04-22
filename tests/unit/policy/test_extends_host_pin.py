@@ -9,11 +9,48 @@ policy's origin host and verify HTTP redirects are refused.
 
 from __future__ import annotations
 
+import re
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import pytest
+
+
+def _assert_extends_host_in_message(msg: str, expected_host: str) -> None:
+    """Assert *expected_host* appears as the parsed ``extends host:`` token.
+
+    Anchored on the production error format
+    ``... extends host: <host>); ...`` so CodeQL's
+    ``py/incomplete-url-substring-sanitization`` rule is satisfied --
+    we do not bare-substring-match a hostname against an arbitrary
+    string.
+    """
+    match = re.search(r"extends host:\s*([^\s)]+)", msg)
+    assert match is not None, f"no 'extends host:' token in message: {msg!r}"
+    assert match.group(1) == expected_host
+
+
+def _assert_leaf_host_in_message(msg: str, expected_host: str) -> None:
+    """Assert *expected_host* appears as the parsed ``leaf host:`` token."""
+    match = re.search(r"leaf host:\s*([^\s,)]+)", msg)
+    assert match is not None, f"no 'leaf host:' token in message: {msg!r}"
+    assert match.group(1) == expected_host
+
+
+def _assert_redirect_target_host(error: str, expected_host: str) -> None:
+    """Extract the redirect *target* URL from *error* and compare hostname.
+
+    Production format: ``Refusing HTTP redirect (NNN) from <src> to <dst>``.
+    We parse the destination URL and compare ``urlparse(...).hostname``
+    so CodeQL's ``py/incomplete-url-substring-sanitization`` rule is
+    satisfied.
+    """
+    match = re.search(r"\bto\s+(https?://\S+)", error)
+    assert match is not None, f"no redirect target URL in error: {error!r}"
+    parsed = urlparse(match.group(1).rstrip(").,;"))
+    assert parsed.hostname == expected_host
 
 from apm_cli.policy.discovery import (
     PolicyFetchResult,
@@ -68,7 +105,7 @@ class TestExtendsHostPin:
 
         msg = str(exc_info.value)
         assert "cross-host" in msg
-        assert "evil.example.com" in msg
+        _assert_extends_host_in_message(msg, "evil.example.com")
         # Only one discover call (the leaf): parent must not have been
         # fetched -- credential leak prevented.
         assert mock_discover.call_count == 1
@@ -91,8 +128,8 @@ class TestExtendsHostPin:
 
         msg = str(exc_info.value)
         assert "cross-host" in msg
-        assert "evil.example.com" in msg
-        assert "github.com" in msg
+        _assert_extends_host_in_message(msg, "evil.example.com")
+        _assert_leaf_host_in_message(msg, "github.com")
         assert mock_discover.call_count == 1
 
     @patch(_PATCH_WRITE_CACHE)
@@ -135,7 +172,9 @@ class TestExtendsHostPin:
 
         with pytest.raises(PolicyInheritanceError) as exc_info:
             discover_policy_with_chain(Path("/fake"))
-        assert "raw.githubusercontent.com" in str(exc_info.value)
+        _assert_extends_host_in_message(
+            str(exc_info.value), "raw.githubusercontent.com"
+        )
 
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
@@ -177,7 +216,8 @@ class TestExtendsHostPin:
             discover_policy_with_chain(Path("/fake"))
         msg = str(exc_info.value)
         assert "cross-host" in msg
-        assert "ghes.contoso.com" in msg
+        _assert_leaf_host_in_message(msg, "ghes.contoso.com")
+        _assert_extends_host_in_message(msg, "github.com")
 
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
@@ -233,7 +273,7 @@ class TestFetchFromUrlRedirectRefusal:
         assert result.policy is None
         assert result.outcome == "cache_miss_fetch_fail"
         assert "redirect" in (result.error or "").lower()
-        assert "attacker.example.com" in (result.error or "")
+        _assert_redirect_target_host(result.error or "", "attacker.example.com")
 
     @patch("apm_cli.policy.discovery.requests")
     def test_fetch_from_url_302_also_refused(self, mock_requests):
