@@ -2,16 +2,36 @@
 name: PR Review Panel
 description: Multi-persona expert panel review of labelled PRs, posting a single synthesized verdict comment.
 
-# Trigger: pull_request (NOT pull_request_target -- gh-aw blocks the latter on
-# public repos). Cost-gate: only runs when a maintainer applies `panel-review`.
-# `synchronize` re-runs on new pushes once the PR carries the label.
-# `forks: ["*"]` allows fork PRs to be reviewed; the trust gate is the label
-# itself, which only write-access maintainers can apply.
+# Triggers (cost-gated, fork-safe, GHES-compatible):
+#
+# 1. pull_request: only when a maintainer applies the `panel-review` label.
+#    We deliberately do NOT subscribe to `synchronize` -- previous behaviour
+#    re-ran the panel on every push to a labelled PR, which is wasteful and
+#    indistinguishable from a DoS on agent quota. Re-apply the label
+#    (remove + add) to re-run after addressing findings.
+#
+# 2. workflow_dispatch: manual trigger taking a PR number. This is the
+#    only path that works for fork PRs on GitHub.com and GHES, because
+#    `pull_request` from forks does NOT pass repository secrets
+#    (COPILOT_GITHUB_TOKEN etc.), and gh-aw blocks `pull_request_target`
+#    on public repos. workflow_dispatch always runs in the base/trusted
+#    context with full secrets, regardless of where the PR head lives.
+#
+# `forks: ["*"]` is retained so the label path also works against fork
+# PRs in private/enterprise repos where secrets DO pass to fork PRs
+# (per-org setting). On microsoft/apm public, the dispatch path is the
+# reliable fork route.
 on:
   pull_request:
-    types: [labeled, synchronize]
+    types: [labeled]
     names: [panel-review]
     forks: ["*"]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Pull request number to review (works for fork PRs)"
+        required: true
+        type: string
 
 # Agent job runs READ-ONLY. Safe-output jobs are auto-granted scoped write.
 permissions:
@@ -53,7 +73,7 @@ timeout-minutes: 30
 # PR Review Panel
 
 You are orchestrating the **apm-review-panel** skill against pull request
-**#${{ github.event.pull_request.number }}** in `${{ github.repository }}`.
+**#${{ github.event.pull_request.number || inputs.pr_number }}** in `${{ github.repository }}`.
 
 ## Step 1: Load the panel skill
 
@@ -79,7 +99,7 @@ repo context with read-only permissions; the PR diff is the only untrusted
 input we touch, and `gh` returns it as inert data.
 
 ```bash
-PR=${{ github.event.pull_request.number }}
+PR=${{ github.event.pull_request.number || inputs.pr_number }}
 gh pr view "$PR" --json title,body,author,additions,deletions,changedFiles,files,labels
 gh pr diff "$PR"
 ```
