@@ -16,6 +16,12 @@ from pathlib import Path
 from typing import List, Dict, Optional, Set
 from urllib.parse import urlparse
 
+from ..utils.path_security import (
+    ensure_path_within,
+    validate_path_segments,
+    PathTraversalError,
+)
+
 # CRITICAL: Shadow Click commands to prevent namespace collision
 set = builtins.set
 list = builtins.list
@@ -431,21 +437,32 @@ def validate_link_targets(content: str, base_path: Path) -> List[str]:
 
 
 def _resolve_path(path: str, base_path: Path) -> Optional[Path]:
-    """Resolve a relative path against a base path.
-    
+    """Resolve a relative path against a base path with containment checks.
+
+    Security behaviour:
+    - Absolute paths are rejected outright (return ``None``).
+    - Traversal segments (``..``) are rejected at parse time.
+    - After joining, the resolved path must remain within *base_path*
+      (catches symlink escapes).
+
     Args:
         path (str): Relative path to resolve.
         base_path (Path): Base directory for resolution.
-    
+
     Returns:
-        Optional[Path]: Resolved path or None if invalid.
+        Optional[Path]: Resolved path or ``None`` if the path is
+            invalid, absolute, or escapes the base directory.
     """
     try:
         if Path(path).is_absolute():
-            return Path(path)
-        else:
-            return base_path / path
-    except (OSError, ValueError):
+            return None
+
+        validate_path_segments(
+            path, context="link target", allow_current_dir=True,
+        )
+
+        return ensure_path_within(base_path / path, base_path)
+    except (PathTraversalError, OSError, ValueError):
         return None
 
 

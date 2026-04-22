@@ -11,7 +11,9 @@ from urllib.parse import urlparse
 
 from apm_cli.compilation.link_resolver import (
     UnifiedLinkResolver,
-    LinkResolutionContext
+    LinkResolutionContext,
+    _resolve_path,
+    validate_link_targets,
 )
 from apm_cli.primitives.models import (
     PrimitiveCollection,
@@ -457,3 +459,66 @@ class TestEdgeCases:
         
         # Should be rewritten to actual source location
         assert ".apm/context/project.memory.md" in result
+
+
+class TestResolvePathSecurity:
+    """Tests for _resolve_path containment and traversal rejection."""
+
+    def test_absolute_path_rejected(self, tmp_path):
+        """Absolute paths must be rejected outright."""
+        assert _resolve_path("/etc/passwd", tmp_path) is None
+
+    def test_traversal_segment_rejected(self, tmp_path):
+        """Paths containing '..' segments must be rejected."""
+        assert _resolve_path("../../etc/passwd", tmp_path) is None
+
+    def test_deep_traversal_segment_rejected(self, tmp_path):
+        """Paths with '..' buried after valid segments must be rejected."""
+        assert _resolve_path("foo/../../../etc/passwd", tmp_path) is None
+
+    def test_current_directory_segment_allowed(self, tmp_path):
+        """Paths with './' prefixes are legitimate in markdown links."""
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        target = sub / "file.md"
+        target.write_text("content", encoding="utf-8")
+
+        result = _resolve_path("./sub/file.md", tmp_path)
+        assert result is not None
+        assert result == target.resolve()
+
+    def test_symlink_escape_rejected(self, tmp_path):
+        """A symlink that resolves outside base_path must be rejected."""
+        import os
+        import tempfile
+
+        # Create a file outside the sandbox
+        outside_dir = Path(tempfile.mkdtemp())
+        outside_file = outside_dir / "secret.txt"
+        outside_file.write_text("secret", encoding="utf-8")
+
+        # Create a symlink inside tmp_path pointing outside
+        link = tmp_path / "escape_link"
+        try:
+            os.symlink(outside_file, link)
+        except OSError:
+            pytest.skip("symlinks not supported on this platform")
+
+        assert _resolve_path("escape_link", tmp_path) is None
+
+    def test_legitimate_relative_path_resolves(self, tmp_path):
+        """A normal relative path within base_path must resolve."""
+        sub = tmp_path / "docs"
+        sub.mkdir()
+        target = sub / "guide.md"
+        target.write_text("guide", encoding="utf-8")
+
+        result = _resolve_path("docs/guide.md", tmp_path)
+        assert result is not None
+        assert result == target.resolve()
+
+    def test_validate_link_targets_blocks_absolute_path(self, tmp_path):
+        """Integration: absolute path in markdown link is reported as not found."""
+        content = "See [evil](/etc/passwd) for details."
+        errors = validate_link_targets(content, tmp_path)
+        assert any("Referenced file not found" in e and "/etc/passwd" in e for e in errors)
