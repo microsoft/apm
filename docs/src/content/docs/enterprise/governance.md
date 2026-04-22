@@ -11,14 +11,14 @@ Sections on this page covering organization policy enforcement (`apm audit --ci 
 
 ## The governance challenge
 
-As AI agents become integral to software development, organizations face questions that traditional tooling was never designed to answer:
+**Twelve teams. Four agent stacks. One security review.** As AI agents become integral to software development, organizations face questions that traditional tooling was never designed to answer:
 
 - **Incident response.** What agent instructions were active during a production incident?
 - **Change management.** Who approved this agent configuration change, and when?
 - **Policy enforcement.** Are all teams using approved plugins and instruction sources?
 - **Audit readiness.** Can we produce evidence of agent configuration state at any point in time?
 
-APM addresses these by treating agent configuration as auditable infrastructure, managed through the same version control and CI/CD practices that govern application code.
+APM answers all four with two files: `apm.lock.yaml` records what was deployed; [`apm-policy.yml`](../apm-policy/) defines what is allowed. Both are git-tracked, both are reviewable, both reconstruct any historical state with one git command.
 
 ---
 
@@ -131,7 +131,7 @@ For step-by-step setup including SARIF integration and GitHub Code Scanning, see
 
 ## Organization policy governance
 
-`apm audit --ci --policy org` enforces organization-wide rules defined in `apm-policy.yml`. This adds 16 policy checks on top of the 6 baseline checks.
+`apm audit --ci --policy org` enforces organization-wide rules defined in [`apm-policy.yml`](../apm-policy/). This adds 16 policy checks on top of the 6 baseline checks.
 
 Policy enforcement applies at both `apm install` (blocks before files are written) and `apm audit --ci` (CI gate). See [Install-time enforcement](../policy-reference/#install-time-enforcement).
 
@@ -141,7 +141,30 @@ Policy enforcement applies at both `apm install` (blocks before files are writte
 2. **Auto-discover** — `--policy org` fetches the policy via GitHub API from `<org>/.github/apm-policy.yml`.
 3. **Enforce** — `apm audit --ci --policy org` runs all 22 checks (6 baseline + 16 policy).
 
-Policies support a three-level inheritance chain (`Enterprise hub -> Org policy -> Repo override`) where child policies can only tighten constraints. For the complete schema, all check names, pattern matching rules, and inheritance semantics, see the [Policy Reference](../policy-reference/). For step-by-step CI setup, see the [CI Policy Enforcement guide](../../guides/ci-policy-setup/).
+Policies support a three-level inheritance chain (`Enterprise hub -> Org policy -> Repo override`) where child policies can only tighten constraints. For the mental model and the merge-rule table, see [`apm-policy.yml`](../apm-policy/). For the complete schema and check names, see the [Policy Reference](../policy-reference/). For step-by-step CI setup, see the [CI Policy Enforcement guide](../../guides/ci-policy-setup/).
+
+### What a policy violation looks like
+
+A developer adds a denied package to `apm.yml`:
+
+```yaml
+dependencies:
+  apm:
+    - untrusted-org/random-skills
+```
+
+`apm install` halts before any file is written:
+
+```
+[x] Policy violation: dependency 'untrusted-org/random-skills' is denied by org policy
+    Policy: contoso/.github/apm-policy.yml
+    Rule:   dependencies.deny matches 'untrusted-org/**'
+    Action: install aborted, no files deployed
+
+Run `apm audit --ci --policy org` for full report. Override with `--no-policy` (not recommended).
+```
+
+In CI, the same finding renders as a SARIF result inline on the PR diff via GitHub Code Scanning. The PR cannot be merged until the violation is resolved or the policy is amended through the org's own change-management process.
 
 ---
 
