@@ -508,7 +508,11 @@ dependencies:
 ## Install-time enforcement
 
 :::note[Planned]
-Install-time policy enforcement (issue #827) is in active development. The behaviour described below reflects the design that will ship; sections marked `TODO` will be filled with verbatim CLI output once the implementation lands.
+Install-time policy enforcement (issue #827) is in active development. The behaviour described below reflects the design that will ship.
+:::
+
+:::note[Non-goal: structured output]
+Install-time enforcement does **NOT** emit JSON or SARIF. The output is human-readable terminal text only. For machine-readable policy reports (CI gating, dashboards, code-scanning uploads) use `apm audit --ci --format json` or `apm audit --ci --format sarif` — see [`apm audit`](../../reference/cli-commands/#apm-audit---scan-for-hidden-unicode-characters) in the CLI reference.
 :::
 
 ### 1. What APM policy is
@@ -558,20 +562,120 @@ Install-time enforcement runs the same rule families documented in [Check refere
 - It does **NOT** downgrade missing required packages — those still block under `enforcement: block`.
 - It does **NOT** override an inherited org `deny` — a parent's deny always wins over a child's allow or local declaration.
 
-### 7. How install-time enforcement prevents disallowed sources
+### 7. CLI examples
 
-```
-TODO: snippet from W4 live matrix — L2 (deny-list block, enforcement=block).
-Show the verbatim install output: gate fails before integration; clear
-"blocked by policy" diagnostic; non-zero exit.
+All examples below use the literal output APM emits today. Symbol legend: `[+]` success, `[!]` warning, `[x]` error, `[i]` info, `[*]` summary.
+
+#### Successful install with policy resolved
+
+`apm install` (verbose) against an org publishing `enforcement: block`, all dependencies allowed:
+
+```shell
+$ apm install --verbose
+[i] Resolving dependencies...
+[i] Policy: org:contoso/.github (cached, fetched 12m ago) -- enforcement=block
+[+] Installed 4 APM dependencies, 2 MCP servers
 ```
 
-```
-TODO: snippet from W4 live matrix — L4 (required missing, enforcement=block).
+Without `--verbose`, the `Policy:` line is suppressed for `enforcement=warn` and `enforcement=off`. Under `enforcement=block` it is **always** shown (rendered as a `[!]` warning) so users know blocking is active.
+
+#### Block: denied dependency aborts the install
+
+```shell
+$ apm install
+[i] Resolving dependencies...
+[!] Policy: org:contoso/.github -- enforcement=block
+[x] Policy violation: acme/evil-pkg -- Blocked by org policy at org:contoso/.github -- remove `acme/evil-pkg` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+[x] Install aborted: 1 policy check failed
+$ echo $?
+1
 ```
 
+The gate runs after dependency resolution and **before** any integrator writes files — `apm_modules/` and target configs are untouched.
+
+#### Warn: denied dependency renders, install succeeds
+
+Same denied dep, but the org policy ships `enforcement: warn`:
+
+```shell
+$ apm install
+[i] Resolving dependencies...
+[+] Installed 4 APM dependencies, 2 MCP servers
+
+[!] Policy
+    acme/evil-pkg -- Blocked by org policy at org:contoso/.github -- remove `acme/evil-pkg` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
 ```
-TODO: snippet from W4 live matrix — L13 (transitive dep blocked).
+
+Violations flow through `DiagnosticCollector` and surface in the end-of-install summary under the `Policy` category. Exit code is `0`.
+
+#### `--no-policy` flag: loud warning, install proceeds
+
+```shell
+$ apm install --no-policy
+[!] Policy enforcement disabled by --no-policy for this invocation. This does NOT bypass apm audit --ci. CI will still fail the PR for the same policy violation.
+[i] Resolving dependencies...
+[+] Installed 4 APM dependencies, 2 MCP servers
+```
+
+#### `APM_POLICY_DISABLE=1` env var: identical wording
+
+```shell
+$ APM_POLICY_DISABLE=1 apm install
+[!] Policy enforcement disabled by APM_POLICY_DISABLE=1 for this invocation. This does NOT bypass apm audit --ci. CI will still fail the PR for the same policy violation.
+[i] Resolving dependencies...
+[+] Installed 4 APM dependencies, 2 MCP servers
+```
+
+The warning is emitted on every invocation and cannot be silenced.
+
+#### `--dry-run` with mixed allowed + denied + warn dependencies
+
+Preview output is capped at five lines per severity bucket; overflow collapses into a single tail line:
+
+```shell
+$ apm install --dry-run
+[i] Resolving dependencies...
+[i] Policy: org:contoso/.github -- enforcement=block
+[!] Would be blocked by policy: acme/evil-pkg -- denylist match: acme/evil-pkg
+[!] Would be blocked by policy: acme/banned -- denylist match: acme/banned
+[!] Would be blocked by policy: vendor/old -- denylist match: vendor/old
+[!] Would be blocked by policy: vendor/legacy -- denylist match: vendor/legacy
+[!] Would be blocked by policy: third/party -- denylist match: third/party
+[!] ... and 2 more would be blocked by policy. Run `apm audit` for full report.
+[!] Policy warning: contrib/optional -- required-package missing version pin
+[i] Dry-run: no files written
+```
+
+#### `apm install <pkg>` blocked → manifest unchanged
+
+`apm install <pkg>` mutates `apm.yml` before the pipeline runs. On a policy block, APM restores the manifest from a snapshot:
+
+```shell
+$ apm install acme/evil-pkg
+[i] Resolving dependencies...
+[!] Policy: org:contoso/.github -- enforcement=block
+[x] Policy violation: acme/evil-pkg -- Blocked by org policy at org:contoso/.github -- remove `acme/evil-pkg` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+[i] apm.yml restored to its previous state.
+[x] Install aborted: 1 policy check failed
+$ echo $?
+1
+```
+
+#### Transitive MCP server blocked
+
+When a dep brings in an MCP server denied by `mcp.deny` or rejected by `mcp.transport.allow`, APM packages still install but MCP configs are not written:
+
+```shell
+$ apm install
+[i] Resolving dependencies...
+[!] Policy: org:contoso/.github -- enforcement=block
+[+] Installed 4 APM dependencies
+[x] Transitive MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.
+
+[!] Policy
+    contrib/sketchy-mcp -- transport `http` not in mcp.transport.allow=[stdio]
+$ echo $?
+1
 ```
 
 ### 8. Escape hatches
@@ -599,20 +703,38 @@ When discovery cannot reach the policy source, APM behaves as follows:
 
 Organizations that need fail-closed semantics on fetch failure can track the planned `policy.fetch_failure: warn|block` schema knob in the follow-up issue (link TBD post-merge).
 
-### 10. Troubleshooting
+### 10. Error and exit-code reference
 
-```
-TODO (W3-docs-final): every install-time policy error message paired with
-its actionable next step. Sourced from CommandLogger string table once W2
-lands. Cover at minimum:
-  - auth failure       -> "check `gh auth status` and GITHUB_APM_PAT"
-  - unreachable        -> "retry, check VPN/firewall, or use --no-policy"
-  - malformed policy   -> "contact your org admin to fix <source>"
-  - blocked dependency -> "remove <dep> from apm.yml, contact admin to
-                          update <source>, or use --no-policy"
-  - missing required   -> "add <dep> to apm.yml or contact admin"
-  - target mismatch    -> "adjust compilation.target or --target flag"
-```
+#### Discovery outcomes
+
+Each row maps a `PolicyFetchResult.outcome` to its exit impact, severity, the message APM emits, and the recommended fix.
+
+| Outcome | Exit | Severity | Primary message | Remediation |
+|---------|------|----------|-----------------|-------------|
+| `found` | `0` (or `1` if checks fail under `block`) | info / block | `Policy: <source> (cached, fetched Nm ago) -- enforcement=<level>` | None; enforcement applied. Under `block`, fix violations or use `--no-policy` for one-off bypass. |
+| `absent` | `0` | info | `No org policy found for <host_org>` | None required. To publish one, see section 11. |
+| `cached_stale` | `0` (enforcement still applies) | warn | `Policy: <source> (cached, fetched Nm ago) -- enforcement=<level>` plus refresh-error warning | Restore network reachability or run with `--no-cache` once connectivity returns. |
+| `cache_miss_fetch_fail` | `0` | warn | `Could not fetch org policy (<error>) -- policy enforcement skipped for this invocation` | Retry, check VPN/firewall/`gh auth status`/`GITHUB_APM_PAT`. Fail-open by design (CEO-ratified); CI will still fail for the same violation. |
+| `garbage_response` | `0` | warn | `Could not fetch org policy (invalid YAML body from <source>) -- policy enforcement skipped for this invocation` | Likely a captive portal or auth wall returning HTML. Restore direct connectivity, then re-run. |
+| `malformed` | `0` (no enforcement) | warn | `Policy at <source> is malformed -- contact your org admin to fix the policy file` | Contact org admin to fix the YAML. Validate locally with `apm audit --ci --policy <local-path>`. |
+| `disabled` | `0` | warn | `Policy enforcement disabled by --no-policy for this invocation. This does NOT bypass apm audit --ci. CI will still fail the PR for the same policy violation.` | Single-invocation only. Drop the flag / env var to re-enable. |
+| `no_git_remote` | `0` | warn | `Could not determine org from git remote; policy auto-discovery skipped` | Run inside a checkout with a GitHub remote, or set the remote with `git remote add origin <url>`. |
+| `empty` | `0` | warn | `Org policy is present but empty; no enforcement applied` | Org admin should populate the policy file (see section 11) or remove it. |
+
+#### Violation classes
+
+When `enforcement=block`, any of the following exit `1` and abort before integration. When `enforcement=warn`, they render in the post-install summary under the `Policy` category and exit `0`.
+
+| Class | Origin | Primary message | Remediation |
+|-------|--------|-----------------|-------------|
+| `denylist` | `dependencies.deny` match | `Policy violation: <dep> -- Blocked by org policy at <source> -- remove <dep> from apm.yml, contact admin to update policy, or use --no-policy for one-off bypass` | Remove the dep from `apm.yml`, request an org-policy update, or `--no-policy` for one-off local debugging. |
+| `allowlist` | Dep not in non-empty `dependencies.allow` | `Policy violation: <dep> -- not in dependencies.allow` | Add the dep to the org allowlist or switch to an approved package. |
+| `required` | Missing `dependencies.require` entry, or pin mismatch | `Policy violation: <required-dep> -- required by org policy but not declared in apm.yml` (or `... required >=X but apm.yml pins <Y>`) | Add the required dep to `apm.yml` (and pin the required version). Pin mismatches downgrade to warn under `require_resolution: project-wins`; missing required deps still block. |
+| `transport` | MCP transport not in `mcp.transport.allow` | `Policy violation: <mcp-server> -- transport <t> not in mcp.transport.allow=[<list>]` | Switch the server to an allowed transport, or request `mcp.transport.allow` updates. |
+| `target` | Resolved target not in `compilation.target.allow` (or violates `target.enforce`) | `Policy violation: target <t> -- not in compilation.target.allow=[<list>]` | Re-run with `--target <allowed>`, or update `compilation.target` in `apm.yml`. Evaluated post-`targets` phase, so CLI overrides are honoured. |
+| `transitive_mcp` | MCP server pulled in by a transitive dep, blocked by `mcp.deny`/`transport`/`self_defined` | `Transitive MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.` plus per-server `Policy violation: ...` | Remove the offending dep, request an org policy update, or set `mcp.trust_transitive: true` if the org chooses to allow transitive MCP entries. |
+
+All violation messages above flow through `InstallLogger.policy_violation`; under `block` they print inline as `[x]` errors and exit `1`. Use `apm audit --ci --format json` for the same set of findings in machine-readable form.
 
 ### 11. For org admins
 
