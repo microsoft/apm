@@ -68,7 +68,7 @@ FLAGS: dict[str, ExperimentalFlag] = {
 # Name normalisation
 # ---------------------------------------------------------------------------
 
-def _normalise_flag_name(name: str) -> str:
+def normalise_flag_name(name: str) -> str:
     """Normalise a CLI flag name to its internal snake_case form.
 
     Accepts both ``verbose-version`` and ``verbose_version``.
@@ -76,7 +76,7 @@ def _normalise_flag_name(name: str) -> str:
     return name.replace("-", "_").lower()
 
 
-def _display_name(name: str) -> str:
+def display_name(name: str) -> str:
     """Convert an internal snake_case flag name to kebab-case for display."""
     return name.replace("_", "-")
 
@@ -138,7 +138,7 @@ def is_enabled(name: str) -> bool:
 # Mutators (thin wrappers around apm_cli.config.update_config)
 # ---------------------------------------------------------------------------
 
-def _validate_flag_name(name: str) -> str:
+def validate_flag_name(name: str) -> str:
     """Validate and normalise a flag name from CLI input.
 
     Returns the normalised snake_case name on success.
@@ -147,16 +147,16 @@ def _validate_flag_name(name: str) -> str:
         ValueError: If the flag is not registered.  The exception message
             includes ``difflib``-based suggestions when available.
     """
-    normalised = _normalise_flag_name(name)
+    normalised = normalise_flag_name(name)
     if normalised in FLAGS:
         return normalised
 
-    display = _display_name(normalised)
+    display = display_name(normalised)
     suggestions = difflib.get_close_matches(
         normalised, FLAGS.keys(), n=3, cutoff=0.6,
     )
     msg = f"Unknown experimental feature: {display}"
-    raise ValueError(msg, [_display_name(s) for s in suggestions])
+    raise ValueError(msg, [display_name(s) for s in suggestions])
 
 
 def _set_flag(name: str, value: bool) -> ExperimentalFlag:
@@ -202,7 +202,7 @@ def disable(name: str) -> ExperimentalFlag:
     return _set_flag(name, False)
 
 
-def reset(name: str | None = None) -> list[str]:
+def reset(name: str | None = None) -> int:
     """Reset one or all experimental flags to their registry defaults.
 
     When *name* is ``None``, clears all keys from ``experimental``
@@ -213,7 +213,7 @@ def reset(name: str | None = None) -> list[str]:
         name: Snake_case flag identifier, or ``None`` for bulk reset.
 
     Returns:
-        List of flag names (snake_case) that were actually reset.
+        Number of keys that were actually removed.
     """
     from apm_cli.config import update_config
 
@@ -223,14 +223,14 @@ def reset(name: str | None = None) -> list[str]:
         if name in experimental:
             del experimental[name]
             update_config({"experimental": experimental})
-            return [name]
-        return []
+            return 1
+        return 0
 
     # Bulk reset -- remove all keys
-    reset_names = list(experimental.keys())
-    if reset_names:
+    count = len(experimental)
+    if count:
         update_config({"experimental": {}})
-    return reset_names
+    return count
 
 
 def get_overridden_flags() -> dict[str, bool]:
@@ -254,3 +254,13 @@ def get_stale_config_keys() -> list[str]:
     """
     experimental = _get_experimental_section()
     return [k for k in experimental if k not in FLAGS]
+
+
+def get_malformed_flag_keys() -> list[str]:
+    """Return registered flag names whose config values are not booleans.
+
+    These are known flags with corrupt values (e.g. ``"true"`` instead of
+    ``True``).  They are safe to remove via ``apm experimental reset``.
+    """
+    experimental = _get_experimental_section()
+    return [k for k in experimental if k in FLAGS and not isinstance(experimental[k], bool)]

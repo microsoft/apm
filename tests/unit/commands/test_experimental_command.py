@@ -382,13 +382,221 @@ class TestVerboseFlag:
 class TestIntroLine:
     """Tests for the intro-line displayed by `list`."""
 
-    def test_list_emits_intro_line(self, runner: CliRunner) -> None:
-        """Every `list` invocation prints the intro description."""
+    def test_list_does_not_emit_intro_at_normal_verbosity(self, runner: CliRunner) -> None:
+        """Normal `list` output does NOT contain the intro preamble."""
         from apm_cli.commands.experimental import experimental
 
         result = runner.invoke(experimental, ["list"])
         assert result.exit_code == 0
         assert (
+            "Experimental features let you try new behaviour"
+            not in result.output
+        )
+
+    def test_list_verbose_emits_intro_line(self, runner: CliRunner) -> None:
+        """With --verbose, `list` prints the intro description."""
+        from apm_cli.commands.experimental import experimental
+
+        result = runner.invoke(experimental, ["list", "--verbose"])
+        assert result.exit_code == 0
+        assert (
             "Experimental features let you try new behaviour before it becomes default."
             in result.output
         )
+
+
+# ---------------------------------------------------------------------------
+# --verbose after subcommand (P-UX-1)
+# ---------------------------------------------------------------------------
+
+
+class TestVerboseAfterSubcommand:
+    """Tests that --verbose/-v works when placed AFTER the subcommand name."""
+
+    def test_enable_verbose_after_subcommand(self, runner: CliRunner) -> None:
+        """apm experimental enable <name> --verbose shows Config file."""
+        from apm_cli.commands.experimental import experimental
+
+        result = runner.invoke(experimental, ["enable", "verbose-version", "--verbose"])
+        assert result.exit_code == 0
+        assert "Config file:" in result.output
+
+    def test_disable_verbose_after_subcommand(self, runner: CliRunner) -> None:
+        """apm experimental disable <name> --verbose shows Config file."""
+        from apm_cli.commands.experimental import experimental
+
+        runner.invoke(experimental, ["enable", "verbose-version"])
+        result = runner.invoke(experimental, ["disable", "verbose-version", "-v"])
+        assert result.exit_code == 0
+        assert "Config file:" in result.output
+
+    def test_reset_verbose_after_subcommand(self, runner: CliRunner) -> None:
+        """apm experimental reset --verbose shows Config file."""
+        from apm_cli.commands.experimental import experimental
+
+        result = runner.invoke(experimental, ["reset", "--verbose"])
+        assert result.exit_code == 0
+        assert "Config file:" in result.output
+
+
+# ---------------------------------------------------------------------------
+# --json output (P-UX-2)
+# ---------------------------------------------------------------------------
+
+
+class TestJsonOutput:
+    """Tests for `apm experimental list --json`."""
+
+    def test_json_output_parses_and_has_correct_schema(self, runner: CliRunner) -> None:
+        """--json outputs valid JSON with the expected keys for each flag."""
+        import json
+
+        from apm_cli.commands.experimental import experimental
+
+        result = runner.invoke(experimental, ["list", "--json"])
+        assert result.exit_code == 0
+
+        rows = json.loads(result.output)
+        assert isinstance(rows, list)
+        assert len(rows) >= 1
+
+        for row in rows:
+            assert set(row.keys()) == {"name", "enabled", "default", "description", "source"}
+            assert isinstance(row["name"], str)
+            assert isinstance(row["enabled"], bool)
+            assert isinstance(row["default"], bool)
+            assert isinstance(row["description"], str)
+            assert row["source"] in ("default", "config")
+
+    def test_json_output_shows_default_source_when_no_override(self, runner: CliRunner) -> None:
+        """Without overrides, source is 'default'."""
+        import json
+
+        from apm_cli.commands.experimental import experimental
+
+        result = runner.invoke(experimental, ["list", "--json"])
+        rows = json.loads(result.output)
+
+        vv = [r for r in rows if r["name"] == "verbose_version"][0]
+        assert vv["enabled"] is False
+        assert vv["source"] == "default"
+
+    def test_json_output_shows_config_source_after_enable(self, runner: CliRunner) -> None:
+        """After enabling, source becomes 'config'."""
+        import json
+
+        from apm_cli.commands.experimental import experimental
+
+        runner.invoke(experimental, ["enable", "verbose-version"])
+        result = runner.invoke(experimental, ["list", "--json"])
+        rows = json.loads(result.output)
+
+        vv = [r for r in rows if r["name"] == "verbose_version"][0]
+        assert vv["enabled"] is True
+        assert vv["source"] == "config"
+
+    def test_json_output_has_no_non_json_text(self, runner: CliRunner) -> None:
+        """--json must NOT emit preamble, symbols, or colours to stdout."""
+        import json
+
+        from apm_cli.commands.experimental import experimental
+
+        result = runner.invoke(experimental, ["list", "--json"])
+        # The entire output must be valid JSON (no preamble, no symbols)
+        parsed = json.loads(result.output)
+        assert isinstance(parsed, list)
+        # No Rich markup or status symbols
+        assert "[" not in result.output.split("\n")[0] or result.output.strip().startswith("[")
+
+
+# ---------------------------------------------------------------------------
+# Malformed value reset (C1)
+# ---------------------------------------------------------------------------
+
+
+class TestMalformedValueReset:
+    """Tests for bulk reset of malformed (non-bool) config overrides."""
+
+    def test_reset_cleans_malformed_string_override(self, runner: CliRunner, tmp_path) -> None:
+        """reset --yes removes a registered flag with a string value (e.g. 'true')."""
+        import json as _json
+
+        import apm_cli.config as _conf
+
+        from apm_cli.commands.experimental import experimental
+
+        # Write a malformed config directly
+        config_dir = tmp_path / ".apm-malformed"
+        config_dir.mkdir()
+        config_file = config_dir / "config.json"
+        config_file.write_text(
+            _json.dumps({"experimental": {"verbose_version": "true"}}),
+            encoding="utf-8",
+        )
+
+        # Redirect config to the crafted file
+        import apm_cli.config as _mod
+
+        orig_dir = _mod.CONFIG_DIR
+        orig_file = _mod.CONFIG_FILE
+        _mod.CONFIG_DIR = str(config_dir)
+        _mod.CONFIG_FILE = str(config_file)
+        _mod._config_cache = None
+
+        try:
+            result = runner.invoke(experimental, ["reset", "--yes"])
+            assert result.exit_code == 0
+            assert "Nothing to reset" not in result.output
+
+            data = _json.loads(config_file.read_text(encoding="utf-8"))
+            assert "verbose_version" not in data.get("experimental", {})
+        finally:
+            _mod.CONFIG_DIR = orig_dir
+            _mod.CONFIG_FILE = orig_file
+            _mod._config_cache = None
+
+    def test_reset_cleans_mixed_overrides_stale_and_malformed(
+        self, runner: CliRunner, tmp_path
+    ) -> None:
+        """reset --yes handles bool override + malformed value + stale key together."""
+        import json as _json
+
+        import apm_cli.config as _conf
+
+        from apm_cli.commands.experimental import experimental
+
+        config_dir = tmp_path / ".apm-mixed"
+        config_dir.mkdir()
+        config_file = config_dir / "config.json"
+        # One valid bool override, one malformed string, one stale unknown key
+        config_file.write_text(
+            _json.dumps({
+                "experimental": {
+                    "verbose_version": "true",     # malformed (string, not bool)
+                    "old_removed_flag": True,       # stale (not in FLAGS)
+                }
+            }),
+            encoding="utf-8",
+        )
+
+        import apm_cli.config as _mod
+
+        orig_dir = _mod.CONFIG_DIR
+        orig_file = _mod.CONFIG_FILE
+        _mod.CONFIG_DIR = str(config_dir)
+        _mod.CONFIG_FILE = str(config_file)
+        _mod._config_cache = None
+
+        try:
+            result = runner.invoke(experimental, ["reset", "--yes"])
+            assert result.exit_code == 0
+            assert "Nothing to reset" not in result.output
+            assert "Reset all experimental features to defaults" in result.output
+
+            data = _json.loads(config_file.read_text(encoding="utf-8"))
+            exp_section = data.get("experimental", {})
+            assert exp_section == {}
+        finally:
+            _mod.CONFIG_DIR = orig_dir
+            _mod.CONFIG_FILE = orig_file
+            _mod._config_cache = None

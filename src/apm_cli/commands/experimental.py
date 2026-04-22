@@ -4,6 +4,7 @@ Provides ``apm experimental list|enable|disable|reset`` to manage
 opt-in feature flags stored in ``~/.apm/config.json``.
 """
 
+import json
 import sys
 
 import click
@@ -12,11 +13,12 @@ from ._helpers import _get_console
 from ..core.command_logger import CommandLogger
 from ..core.experimental import (
     FLAGS,
-    _display_name,
-    _normalise_flag_name,
-    _validate_flag_name,
+    display_name,
+    normalise_flag_name,
+    validate_flag_name,
     enable as _enable_flag,
     disable as _disable_flag,
+    get_malformed_flag_keys,
     get_overridden_flags,
     get_stale_config_keys,
     reset as _reset_flags,
@@ -26,6 +28,17 @@ from ..core.experimental import (
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
+
+def _resolve_verbose(ctx: click.Context, local_verbose: bool) -> bool:
+    """Merge subcommand-local ``--verbose`` with the group-level value.
+
+    Prefers the subcommand-local flag when explicitly passed; otherwise
+    inherits from the group's ``ctx.obj["verbose"]``.
+    """
+    if local_verbose:
+        return True
+    return (ctx.obj.get("verbose", False) if ctx.obj else False)
 
 
 def _print_list_footer(flags_shown: list, logger: "CommandLogger") -> None:
@@ -77,7 +90,7 @@ def _build_table(flags_to_show, logger):
             status_word = "enabled" if enabled else "disabled"
             status_cell = f"[{'green bold' if enabled else 'dim'}]{status_word}[/]"
             table.add_row(
-                _display_name(flag.name),
+                display_name(flag.name),
                 status_cell,
                 flag.description,
             )
@@ -92,19 +105,22 @@ def _build_table(flags_to_show, logger):
         for flag in flags_to_show:
             enabled = is_enabled(flag.name)
             status = "enabled" if enabled else "disabled"
-            _rich_echo(f"  {_display_name(flag.name)} [{status}]", color="white", bold=True)
+            _rich_echo(f"  {display_name(flag.name)} [{status}]", color="white", bold=True)
             _rich_echo(f"    {flag.description}", color="dim")
 
         _print_list_footer(flags_to_show, logger)
 
 
 def _handle_unknown_flag(name: str, logger: CommandLogger) -> None:
-    """Handle an unknown flag name: print error, suggestions, and exit."""
+    """Handle an unknown flag name: print error, suggestions, and exit.
+
+    Callers are responsible for passing a normalised (snake_case) name.
+    """
     try:
-        _validate_flag_name(name)
+        validate_flag_name(name)
     except ValueError as exc:
         args = exc.args
-        display = _display_name(_normalise_flag_name(name))
+        display = display_name(name)
         logger.error(f"Unknown experimental feature: {display}")
 
         suggestions = args[1] if len(args) > 1 else []
@@ -140,13 +156,15 @@ def experimental(ctx, verbose: bool):
 @experimental.command("list", help="List all experimental features")
 @click.option("--enabled", "filter_enabled", is_flag=True, default=False, help="Show only enabled features")
 @click.option("--disabled", "filter_disabled", is_flag=True, default=False, help="Show only disabled features")
+@click.option("--verbose", "-v", is_flag=True, default=False, help="Show detailed output")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output as JSON array")
 @click.pass_context
-def list_flags(ctx, filter_enabled: bool, filter_disabled: bool):
+def list_flags(ctx, filter_enabled: bool, filter_disabled: bool, verbose: bool, as_json: bool):
     """List all registered experimental flags."""
     if filter_enabled and filter_disabled:
         raise click.UsageError("--enabled and --disabled are mutually exclusive.")
 
-    verbose = ctx.obj.get("verbose", False) if ctx.obj else False
+    verbose = _resolve_verbose(ctx, verbose)
     logger = CommandLogger("experimental list", verbose=verbose)
 
     from ..config import CONFIG_FILE
@@ -159,86 +177,105 @@ def list_flags(ctx, filter_enabled: bool, filter_disabled: bool):
         from ..core.experimental import is_enabled
 
         flags_to_show = [f for f in all_flags if is_enabled(f.name)]
-        if not flags_to_show:
+        if not flags_to_show and not as_json:
             logger.progress("No experimental flags are enabled.")
             return
     elif filter_disabled:
         from ..core.experimental import is_enabled
 
         flags_to_show = [f for f in all_flags if not is_enabled(f.name)]
-        if not flags_to_show:
+        if not flags_to_show and not as_json:
             logger.progress("All experimental flags are currently enabled.")
             return
     else:
         flags_to_show = all_flags
 
-    logger.progress("Experimental features let you try new behaviour before it becomes default.")
+    if as_json:
+        from ..core.experimental import is_enabled
+
+        overridden = get_overridden_flags()
+        rows = []
+        for flag in flags_to_show:
+            rows.append({
+                "name": flag.name,
+                "enabled": is_enabled(flag.name),
+                "default": flag.default,
+                "description": flag.description,
+                "source": "config" if flag.name in overridden else "default",
+            })
+        click.echo(json.dumps(rows, indent=2))
+        return
+
+    logger.verbose_detail("Experimental features let you try new behaviour before it becomes default.")
     _build_table(flags_to_show, logger)
 
 
 @experimental.command("enable", help="Enable an experimental feature")
 @click.argument("name")
+@click.option("--verbose", "-v", is_flag=True, default=False, help="Show detailed output")
 @click.pass_context
-def enable_flag(ctx, name: str):
+def enable_flag(ctx, name: str, verbose: bool):
     """Enable an experimental feature flag."""
-    verbose = ctx.obj.get("verbose", False) if ctx.obj else False
+    verbose = _resolve_verbose(ctx, verbose)
     logger = CommandLogger("experimental enable", verbose=verbose)
 
     from ..config import CONFIG_FILE
 
     logger.verbose_detail(f"Config file: {CONFIG_FILE}")
 
-    normalised = _normalise_flag_name(name)
+    normalised = normalise_flag_name(name)
     if normalised not in FLAGS:
-        _handle_unknown_flag(name, logger)
+        _handle_unknown_flag(normalised, logger)
         return  # unreachable after sys.exit, but satisfies linters
 
     from ..core.experimental import is_enabled
 
     if is_enabled(normalised):
-        logger.warning(f"{_display_name(normalised)} is already enabled.")
+        logger.warning(f"{display_name(normalised)} is already enabled.")
         return
 
     flag = _enable_flag(normalised)
-    logger.success(f"Enabled experimental feature: {_display_name(normalised)}", symbol="check")
+    logger.success(f"Enabled experimental feature: {display_name(normalised)}", symbol="check")
     if flag.hint:
         logger.progress(flag.hint)
 
 
 @experimental.command("disable", help="Disable an experimental feature")
 @click.argument("name")
+@click.option("--verbose", "-v", is_flag=True, default=False, help="Show detailed output")
 @click.pass_context
-def disable_flag(ctx, name: str):
+def disable_flag(ctx, name: str, verbose: bool):
     """Disable an experimental feature flag."""
-    verbose = ctx.obj.get("verbose", False) if ctx.obj else False
+    verbose = _resolve_verbose(ctx, verbose)
     logger = CommandLogger("experimental disable", verbose=verbose)
 
     from ..config import CONFIG_FILE
 
     logger.verbose_detail(f"Config file: {CONFIG_FILE}")
 
-    normalised = _normalise_flag_name(name)
+    normalised = normalise_flag_name(name)
     if normalised not in FLAGS:
-        _handle_unknown_flag(name, logger)
+        _handle_unknown_flag(normalised, logger)
         return
 
     from ..core.experimental import is_enabled
 
     if not is_enabled(normalised):
-        logger.warning(f"{_display_name(normalised)} is already disabled.")
+        logger.warning(f"{display_name(normalised)} is already disabled.")
         return
 
     _disable_flag(normalised)
-    logger.success(f"Disabled experimental feature: {_display_name(normalised)}", symbol="check")
+    logger.success(f"Disabled experimental feature: {display_name(normalised)}", symbol="check")
 
 
 @experimental.command("reset", help="Reset experimental features to defaults")
 @click.argument("name", required=False, default=None)
 @click.option("--yes", "-y", is_flag=True, default=False, help="Skip confirmation prompt")
+@click.option("--verbose", "-v", is_flag=True, default=False, help="Show detailed output")
 @click.pass_context
-def reset_flags(ctx, name: str | None, yes: bool):
+def reset_flags(ctx, name: str | None, yes: bool, verbose: bool):
     """Reset one or all experimental features to their defaults."""
-    verbose = ctx.obj.get("verbose", False) if ctx.obj else False
+    verbose = _resolve_verbose(ctx, verbose)
     logger = CommandLogger("experimental reset", verbose=verbose)
 
     from ..config import CONFIG_FILE
@@ -247,29 +284,30 @@ def reset_flags(ctx, name: str | None, yes: bool):
 
     if name is not None:
         # Single-flag reset
-        normalised = _normalise_flag_name(name)
+        normalised = normalise_flag_name(name)
         if normalised not in FLAGS:
-            _handle_unknown_flag(name, logger)
+            _handle_unknown_flag(normalised, logger)
             return
 
         reset_result = _reset_flags(normalised)
         default_label = "enabled" if FLAGS[normalised].default else "disabled"
-        if reset_result:
+        if reset_result > 0:
             logger.success(
-                f"Reset {_display_name(normalised)} to default ({default_label})",
+                f"Reset {display_name(normalised)} to default ({default_label})",
                 symbol="check",
             )
         else:
             logger.progress(
-                f"{_display_name(normalised)} is already at its default ({default_label}). Nothing to do."
+                f"{display_name(normalised)} is already at its default ({default_label}). Nothing to do."
             )
         return
 
-    # Bulk reset -- collect overrides (both known and stale)
+    # Bulk reset -- collect overrides (known bool, stale, and malformed)
     overridden = get_overridden_flags()
     stale = get_stale_config_keys()
+    malformed = get_malformed_flag_keys()
 
-    if not overridden and not stale:
+    if not overridden and not stale and not malformed:
         logger.progress("All features already at default settings. Nothing to reset.")
         return
 
@@ -280,13 +318,15 @@ def reset_flags(ctx, name: str | None, yes: bool):
             current = "enabled" if value else "disabled"
             default = "enabled" if FLAGS[flag_name].default else "disabled"
             if current == default:
-                lines.append(f"  {_display_name(flag_name)} (redundant override - removing)")
+                lines.append(f"  {display_name(flag_name)} (redundant override - removing)")
             else:
-                lines.append(f"  {_display_name(flag_name)} (currently {current} -> {default})")
+                lines.append(f"  {display_name(flag_name)} (currently {current} -> {default})")
         for key in stale:
-            lines.append(f"  {_display_name(key)} (unknown, will be removed)")
+            lines.append(f"  {display_name(key)} (unknown, will be removed)")
+        for key in malformed:
+            lines.append(f"  {display_name(key)} (malformed value, will be removed)")
 
-        total = len(overridden) + len(stale)
+        total = len(overridden) + len(stale) + len(malformed)
         noun = "feature" if total == 1 else "features"
         pronoun = "its" if total == 1 else "their"
         default_word = "default" if total == 1 else "defaults"

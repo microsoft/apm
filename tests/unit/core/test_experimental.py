@@ -3,10 +3,10 @@
 Coverage:
   - is_enabled: default, config override, unknown flag
   - enable / disable / reset: round-trips on an isolated disk config
-  - _normalise_flag_name: hyphen and underscore inputs
-  - _validate_flag_name: ValueError raised before any write, difflib suggestions
+  - normalise_flag_name: hyphen and underscore inputs
+  - validate_flag_name: ValueError raised before any write, difflib suggestions
   - Loader rejection of non-bool values in config
-  - get_overridden_flags / get_stale_config_keys
+  - get_overridden_flags / get_stale_config_keys / get_malformed_flag_keys
   - Registry invariants (key == name, all defaults False, printable ASCII)
 """
 
@@ -160,15 +160,15 @@ class TestNormaliseFlagName:
 
     def test_hyphens_converted_to_underscores(self) -> None:
         """verbose-version (kebab) normalises to verbose_version (snake)."""
-        from apm_cli.core.experimental import _normalise_flag_name
+        from apm_cli.core.experimental import normalise_flag_name
 
-        assert _normalise_flag_name("verbose-version") == "verbose_version"
+        assert normalise_flag_name("verbose-version") == "verbose_version"
 
     def test_underscores_are_idempotent(self) -> None:
         """verbose_version (already snake) normalises to the same string."""
-        from apm_cli.core.experimental import _normalise_flag_name
+        from apm_cli.core.experimental import normalise_flag_name
 
-        assert _normalise_flag_name("verbose_version") == "verbose_version"
+        assert normalise_flag_name("verbose_version") == "verbose_version"
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +177,7 @@ class TestNormaliseFlagName:
 
 
 class TestValidateFlagName:
-    """Tests for _validate_flag_name -- the public validation entry point."""
+    """Tests for validate_flag_name -- the public validation entry point."""
 
     def test_unknown_flag_raises_value_error_before_config_write(
         self, inject_config: Any, monkeypatch: Any
@@ -193,11 +193,11 @@ class TestValidateFlagName:
         mock_update = MagicMock()
         monkeypatch.setattr("apm_cli.config.update_config", mock_update)
 
-        from apm_cli.core.experimental import _validate_flag_name, enable
+        from apm_cli.core.experimental import validate_flag_name, enable
 
-        # _validate_flag_name itself should raise
+        # validate_flag_name itself should raise
         with pytest.raises(ValueError, match="Unknown experimental feature"):
-            _validate_flag_name("nonexistent-flag-abc123")
+            validate_flag_name("nonexistent-flag-abc123")
 
         # enable() also raises for unregistered names (KeyError from FLAGS)
         with pytest.raises(KeyError):
@@ -207,10 +207,10 @@ class TestValidateFlagName:
 
     def test_value_error_args_contain_difflib_suggestion(self) -> None:
         """For a near-typo, exc.args[1] contains difflib suggestion list."""
-        from apm_cli.core.experimental import _validate_flag_name
+        from apm_cli.core.experimental import validate_flag_name
 
         with pytest.raises(ValueError) as exc_info:
-            _validate_flag_name("verbse-version")  # one char typo
+            validate_flag_name("verbse-version")  # one char typo
 
         exc = exc_info.value
         assert "Unknown experimental feature" in exc.args[0]
@@ -220,20 +220,20 @@ class TestValidateFlagName:
 
     def test_value_error_no_suggestion_for_distant_name(self) -> None:
         """When the flag name is far from all known flags, suggestions list is empty."""
-        from apm_cli.core.experimental import _validate_flag_name
+        from apm_cli.core.experimental import validate_flag_name
 
         with pytest.raises(ValueError) as exc_info:
-            _validate_flag_name("zzzz-completely-unrelated-xyzqwerty")
+            validate_flag_name("zzzz-completely-unrelated-xyzqwerty")
 
         suggestions = exc_info.value.args[1]
         assert suggestions == []
 
     def test_valid_flag_returns_normalised_name(self) -> None:
         """Known flag names (hyphen or underscore) return the snake_case form."""
-        from apm_cli.core.experimental import _validate_flag_name
+        from apm_cli.core.experimental import validate_flag_name
 
-        assert _validate_flag_name("verbose-version") == "verbose_version"
-        assert _validate_flag_name("verbose_version") == "verbose_version"
+        assert validate_flag_name("verbose-version") == "verbose_version"
+        assert validate_flag_name("verbose_version") == "verbose_version"
 
 
 # ---------------------------------------------------------------------------
@@ -431,3 +431,76 @@ class TestRegistryInvariants:
                     f"Flag {flag.name!r} hint contains non-printable-ASCII: "
                     f"{flag.hint!r}"
                 )
+
+
+# ---------------------------------------------------------------------------
+# get_malformed_flag_keys
+# ---------------------------------------------------------------------------
+
+
+class TestGetMalformedFlagKeys:
+    """Tests for the malformed-value detection helper."""
+
+    def test_returns_known_flag_with_non_bool_value(self, inject_config: Any) -> None:
+        """A registered flag with a string value is reported as malformed."""
+        inject_config({"experimental": {"verbose_version": "true"}})
+        from apm_cli.core.experimental import get_malformed_flag_keys
+
+        result = get_malformed_flag_keys()
+        assert "verbose_version" in result
+
+    def test_excludes_bool_overrides(self, inject_config: Any) -> None:
+        """A registered flag with a proper bool value is NOT malformed."""
+        inject_config({"experimental": {"verbose_version": True}})
+        from apm_cli.core.experimental import get_malformed_flag_keys
+
+        assert get_malformed_flag_keys() == []
+
+    def test_excludes_unknown_keys(self, inject_config: Any) -> None:
+        """Unknown keys (stale) are NOT reported as malformed."""
+        inject_config({"experimental": {"unknown_flag_xyz": "garbage"}})
+        from apm_cli.core.experimental import get_malformed_flag_keys
+
+        assert get_malformed_flag_keys() == []
+
+    def test_empty_when_no_experimental_section(self, inject_config: Any) -> None:
+        """Empty list when config has no experimental section at all."""
+        inject_config({})
+        from apm_cli.core.experimental import get_malformed_flag_keys
+
+        assert get_malformed_flag_keys() == []
+
+
+# ---------------------------------------------------------------------------
+# reset return type
+# ---------------------------------------------------------------------------
+
+
+class TestResetReturnType:
+    """Tests that reset() returns an int count, not a list."""
+
+    def test_reset_single_returns_int(self, isolated_config: Any) -> None:
+        """reset(name) returns 1 when the key existed, 0 otherwise."""
+        from apm_cli.core.experimental import enable, reset
+
+        enable("verbose_version")
+        result = reset("verbose_version")
+        assert result == 1
+        assert isinstance(result, int)
+
+    def test_reset_single_noop_returns_zero(self, isolated_config: Any) -> None:
+        """reset(name) returns 0 when nothing was in config."""
+        from apm_cli.core.experimental import reset
+
+        result = reset("verbose_version")
+        assert result == 0
+        assert isinstance(result, int)
+
+    def test_reset_bulk_returns_count(self, isolated_config: Any) -> None:
+        """reset(None) returns the number of keys that were removed."""
+        from apm_cli.core.experimental import enable, reset
+
+        enable("verbose_version")
+        result = reset(None)
+        assert result == 1
+        assert isinstance(result, int)
