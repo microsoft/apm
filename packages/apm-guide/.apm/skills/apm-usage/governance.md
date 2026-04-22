@@ -61,7 +61,7 @@ unmanaged_files:
 |-------|----------|
 | `off` | Checks skipped entirely |
 | `warn` | Violations reported but do not fail |
-| `block` | Violations cause `apm audit --ci` to exit 1 |
+| `block` | Violations abort `apm install` (exit 1) AND fail `apm audit --ci` |
 
 ## Inheritance rules (tighten-only)
 

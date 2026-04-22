@@ -102,7 +102,11 @@ def run_policy_preflight(
 
     # Outcome routing (plan section B)
     if not fetch_result.found:
-        _log_discovery_miss(fetch_result, logger)
+        logger.policy_discovery_miss(
+            outcome=fetch_result.outcome,
+            source=fetch_result.source,
+            error=fetch_result.error or fetch_result.fetch_error,
+        )
         return fetch_result, False
 
     policy: ApmPolicy = fetch_result.policy  # type: ignore[assignment]
@@ -173,6 +177,7 @@ def run_policy_preflight(
                         dep_ref=dep_ref,
                         reason=detail,
                         severity="block" if enforcement == "block" else "warn",
+                        source=fetch_result.source,
                     )
 
         if enforcement == "block" and not dry_run:
@@ -185,49 +190,3 @@ def run_policy_preflight(
 
     return fetch_result, True
 
-
-def _log_discovery_miss(fetch_result: PolicyFetchResult, logger) -> None:
-    """Emit the appropriate diagnostic for a non-found policy outcome."""
-    from ..utils.console import _rich_info, _rich_warning
-
-    outcome = fetch_result.outcome
-
-    if outcome == "no_git_remote":
-        _rich_warning(
-            "Could not determine org from git remote; "
-            "policy auto-discovery skipped",
-            symbol="warning",
-        )
-    elif outcome == "disabled":
-        # Already handled by the caller's no_policy check
-        pass
-    elif outcome == "malformed":
-        _rich_warning(
-            f"Policy at {fetch_result.source} is malformed "
-            "-- contact your org admin to fix the policy file",
-            symbol="warning",
-        )
-    elif outcome in ("cache_miss_fetch_fail", "garbage_response"):
-        # Fail-open: warn loudly, never block (CEO ruling)
-        _rich_warning(
-            f"Could not fetch org policy ({fetch_result.error or 'unknown error'}) "
-            "-- policy enforcement skipped for this invocation",
-            symbol="warning",
-        )
-    elif outcome == "empty":
-        _rich_warning(
-            "Org policy is present but empty; no enforcement applied",
-            symbol="warning",
-        )
-    elif outcome == "absent":
-        _rich_info(
-            f"No org policy found for {fetch_result.source or 'this project'}",
-            symbol="info",
-        )
-    else:
-        # Unknown outcome -- log conservatively
-        if fetch_result.error:
-            _rich_warning(
-                f"Policy discovery issue: {fetch_result.error}",
-                symbol="warning",
-            )

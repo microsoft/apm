@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - `apm install` now enforces org `apm-policy.yml` at install time, not only in `apm audit --ci` — covering dependency deny/allow/required lists, MCP server deny/transport/trust-transitive rules, and `compilation.target.allow` constraints; transitive MCP servers from APM packages are checked before runtime config is written (#827)
+  - **Migration**: If your org publishes `enforcement: block`, your next `apm install` may fail where it previously succeeded. Preview verdicts with `apm install --dry-run` before upgrading.
 
 ### Fixed
 

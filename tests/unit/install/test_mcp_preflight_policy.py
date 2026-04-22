@@ -565,7 +565,11 @@ class TestDiscoveryOutcomes:
         assert active is False
 
     def test_no_git_remote_outcome(self):
-        """no_git_remote outcome -> enforcement_active=False, warns."""
+        """no_git_remote outcome -> enforcement_active=False, info line.
+
+        UX F2: this is a normal state for fresh `git init`, unpacked
+        bundles, or temp dirs -- info, not a warning.
+        """
         fetch = PolicyFetchResult(
             policy=None,
             source="",
@@ -574,7 +578,7 @@ class TestDiscoveryOutcomes:
 
         logger = _make_logger()
         with _patch_discover(fetch), \
-             patch("apm_cli.utils.console._rich_warning") as mock_warn:
+             patch("apm_cli.core.command_logger._rich_info") as mock_info:
             result, active = run_policy_preflight(
                 project_root=Path("/tmp/fake"),
                 mcp_deps=[_make_mcp_dep("anything/server")],
@@ -582,10 +586,10 @@ class TestDiscoveryOutcomes:
             )
 
         assert active is False
-        assert mock_warn.call_count >= 1
+        assert mock_info.call_count >= 1
         # Check that at least one call mentions git remote
-        warn_messages = [str(c) for c in mock_warn.call_args_list]
-        assert any("git remote" in msg for msg in warn_messages)
+        info_messages = [str(c) for c in mock_info.call_args_list]
+        assert any("git remote" in msg for msg in info_messages)
 
 
 # -- Test: helper return shape ----------------------------------------

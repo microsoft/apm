@@ -57,60 +57,22 @@ def run(ctx: "InstallContext") -> None:
     if outcome == "disabled":
         return
 
-    # absent -- no policy published
-    if outcome == "absent":
+    # 5 of 9 non-found / non-disabled outcomes go through the canonical
+    # logger helper for consistent wording (Logging C1/C2, UX F1/F2/F4).
+    if outcome in (
+        "absent",
+        "no_git_remote",
+        "empty",
+        "malformed",
+        "cache_miss_fetch_fail",
+        "garbage_response",
+    ):
         if logger:
-            from apm_cli.utils.console import _rich_info
-            host_org = source.removeprefix("org:").removeprefix("url:")
-            _rich_info(
-                f"No org policy found for {host_org}",
-                symbol="info",
+            logger.policy_discovery_miss(
+                outcome=outcome,
+                source=source,
+                error=fetch_result.error or fetch_result.fetch_error,
             )
-        ctx.policy_enforcement_active = False
-        return
-
-    # no_git_remote -- cannot determine org
-    if outcome == "no_git_remote":
-        if logger:
-            from apm_cli.utils.console import _rich_warning
-            _rich_warning(
-                "Could not determine org from git remote; "
-                "policy auto-discovery skipped",
-                symbol="warning",
-            )
-        ctx.policy_enforcement_active = False
-        return
-
-    # empty -- policy present but no actionable rules
-    if outcome == "empty":
-        if logger:
-            from apm_cli.utils.console import _rich_warning
-            _rich_warning(
-                "Org policy is present but empty; no enforcement applied",
-                symbol="warning",
-            )
-        ctx.policy_enforcement_active = False
-        return
-
-    # malformed -- fail-open with loud warning (CEO mandate: matches
-    # cache_miss_fetch_fail/garbage_response posture; fail-closed is a
-    # follow-up via #829 with an explicit schema knob).
-    if outcome == "malformed":
-        if logger:
-            from apm_cli.core.command_logger import InstallLogger
-            reason = InstallLogger._policy_reason_malformed(source)
-            from apm_cli.utils.console import _rich_warning
-            _rich_warning(reason, symbol="warning")
-        ctx.policy_enforcement_active = False
-        return
-
-    # cache_miss_fetch_fail / garbage_response -- loud warn, no enforce
-    if outcome in ("cache_miss_fetch_fail", "garbage_response"):
-        if logger:
-            from apm_cli.core.command_logger import InstallLogger
-            reason = InstallLogger._policy_reason_unreachable(source)
-            from apm_cli.utils.console import _rich_warning
-            _rich_warning(reason, symbol="warning")
         ctx.policy_enforcement_active = False
         return
 
@@ -124,11 +86,10 @@ def run(ctx: "InstallContext") -> None:
                 enforcement=fetch_result.policy.enforcement,
                 age_seconds=age,
             )
-            from apm_cli.utils.console import _rich_warning
-            _rich_warning(
-                f"Using stale cached policy (fetch failed: "
-                f"{fetch_result.fetch_error or 'unknown'})",
-                symbol="warning",
+            logger.policy_discovery_miss(
+                outcome="cached_stale",
+                source=source,
+                error=fetch_result.fetch_error,
             )
 
     # found -- normal path
@@ -196,6 +157,7 @@ def run(ctx: "InstallContext") -> None:
                     dep_ref=check.name,
                     reason=reason,
                     severity=severity,
+                    source=source,
                 )
             if severity == "block":
                 has_blocking = True
@@ -211,6 +173,7 @@ def run(ctx: "InstallContext") -> None:
                     dep_ref=check.name,
                     reason=reason,
                     severity="warn",
+                    source=source,
                 )
 
     if has_blocking:

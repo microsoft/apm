@@ -101,6 +101,7 @@ def run(ctx: "InstallContext") -> None:
                 dep_ref=check.name,
                 reason=reason,
                 severity=severity,
+                source=getattr(getattr(ctx, "policy_fetch", None), "source", None),
             )
 
         if severity == "block":

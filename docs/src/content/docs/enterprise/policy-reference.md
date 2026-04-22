@@ -73,7 +73,7 @@ Controls how violations are reported:
 |-------|----------|
 | `off` | Policy checks are skipped |
 | `warn` | Violations are reported but do not fail the audit |
-| `block` | Violations cause `apm audit --ci` to exit with code 1 |
+| `block` | Violations abort `apm install` (exit 1) AND fail `apm audit --ci` |
 
 ### `extends`
 
@@ -383,10 +383,14 @@ Deny patterns are evaluated first. If a reference matches any deny pattern, it f
 
 ## Inheritance
 
+:::note[Discovery vs. `extends:` -- two different concepts]
+APM auto-discovers exactly **one** policy file: `<org>/.github/apm-policy.yml`, derived from the project's git remote. There is no automatic per-repo or per-enterprise discovery. `extends:` is what composes policies **inside** that one discovered file -- it lets the discovered policy pull in a parent (and that parent's parent, up to `MAX_CHAIN_DEPTH=5`) so you can model an enterprise -> org -> team chain through composition. Most teams who say "3 levels (repo, org, enterprise)" actually want `extends:`, not more discovery sites.
+:::
+
 Policies can inherit from a parent using `extends`. This enables a three-level chain:
 
 ```
-Enterprise hub → Org policy → Repo override
+Enterprise hub -> Org policy -> Repo override
 ```
 
 ### Tighten-only merge rules
@@ -506,10 +510,6 @@ dependencies:
 ---
 
 ## Install-time enforcement
-
-:::note[Planned]
-Install-time policy enforcement (issue #827) is in active development. The behaviour described below reflects the design that will ship.
-:::
 
 :::note[Non-goal: structured output]
 Install-time enforcement does **NOT** emit JSON or SARIF. The output is human-readable terminal text only. For machine-readable policy reports (CI gating, dashboards, code-scanning uploads) use `apm audit --ci --format json` or `apm audit --ci --format sarif` — see [`apm audit`](../../reference/cli-commands/#apm-audit---scan-for-hidden-unicode-characters) in the CLI reference.

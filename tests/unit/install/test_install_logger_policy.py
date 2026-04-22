@@ -80,6 +80,240 @@ class TestDiagnosticCollectorPolicy:
         assert len(groups["warning"]) == 1
 
 
+# ── policy_discovery_miss (canonical helper for non-found outcomes) ──
+
+
+class TestPolicyDiscoveryMiss:
+    """Canonical helper for the 7 non-found / non-disabled outcomes.
+
+    Wording table is the single source of truth -- both call sites
+    (policy_gate, install_preflight) route through this method.
+    Covers Logging C1/C2 and UX F1/F2/F4/F5.
+    """
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    @patch("apm_cli.core.command_logger._rich_warning")
+    def test_absent_silent_in_non_verbose(self, mock_warning, mock_info):
+        """UX F1: 'No org policy found' is verbose-only."""
+        logger = InstallLogger(verbose=False)
+        logger.policy_discovery_miss(outcome="absent", source="org:acme/.github")
+        mock_info.assert_not_called()
+        mock_warning.assert_not_called()
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_absent_visible_in_verbose(self, mock_info):
+        logger = InstallLogger(verbose=True)
+        logger.policy_discovery_miss(outcome="absent", source="org:acme/.github")
+        mock_info.assert_called_once()
+        msg = mock_info.call_args[0][0]
+        assert "No org policy found for acme/.github" in msg
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_absent_explicit_host_org(self, mock_info):
+        logger = InstallLogger(verbose=True)
+        logger.policy_discovery_miss(
+            outcome="absent", source="ignored", host_org="explicit/org"
+        )
+        msg = mock_info.call_args[0][0]
+        assert "explicit/org" in msg
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    @patch("apm_cli.core.command_logger._rich_warning")
+    def test_no_git_remote_uses_info_not_warning(self, mock_warning, mock_info):
+        """UX F2: no_git_remote is a normal state, render as info."""
+        logger = InstallLogger(verbose=False)
+        logger.policy_discovery_miss(outcome="no_git_remote")
+        mock_info.assert_called_once()
+        mock_warning.assert_not_called()
+        msg = mock_info.call_args[0][0]
+        assert "git remote" in msg
+        assert "auto-discovery skipped" in msg
+
+    @patch("apm_cli.core.command_logger._rich_warning")
+    def test_empty_warns(self, mock_warning):
+        logger = InstallLogger()
+        logger.policy_discovery_miss(
+            outcome="empty", source="org:acme/.github"
+        )
+        mock_warning.assert_called_once()
+        msg = mock_warning.call_args[0][0]
+        assert "org:acme/.github" in msg
+        assert "empty" in msg
+        assert "no enforcement applied" in msg
+
+    @patch("apm_cli.core.command_logger._rich_warning")
+    def test_malformed_warns_with_error(self, mock_warning):
+        logger = InstallLogger()
+        logger.policy_discovery_miss(
+            outcome="malformed",
+            source="org:acme/.github",
+            error="invalid YAML at line 3",
+        )
+        msg = mock_warning.call_args[0][0]
+        assert "malformed" in msg
+        assert "invalid YAML at line 3" in msg
+        assert "org admin" in msg
+
+    @patch("apm_cli.core.command_logger._rich_warning")
+    def test_cache_miss_fetch_fail_explicit_posture(self, mock_warning):
+        """UX F5: message must state 'proceeding without policy enforcement'."""
+        logger = InstallLogger()
+        logger.policy_discovery_miss(
+            outcome="cache_miss_fetch_fail",
+            source="org:acme/.github",
+            error="Connection timeout",
+        )
+        msg = mock_warning.call_args[0][0]
+        assert "Could not fetch org policy" in msg
+        assert "Connection timeout" in msg
+        assert "proceeding without policy enforcement" in msg
+        assert "--no-policy" in msg
+
+    @patch("apm_cli.core.command_logger._rich_warning")
+    def test_garbage_response_does_not_say_check_vpn(self, mock_warning):
+        """UX F4: server IS reachable; 'check VPN/firewall' is wrong advice."""
+        logger = InstallLogger()
+        logger.policy_discovery_miss(
+            outcome="garbage_response",
+            source="org:acme/.github",
+            error="HTML in response",
+        )
+        msg = mock_warning.call_args[0][0]
+        assert "not valid YAML" in msg
+        assert "HTML in response" in msg
+        assert "VPN" not in msg
+        assert "firewall" not in msg
+        assert "org admin" in msg or "--no-policy" in msg
+
+    @patch("apm_cli.core.command_logger._rich_warning")
+    def test_cached_stale_explicit_posture(self, mock_warning):
+        """UX F5: message must state 'enforcement still applies'."""
+        logger = InstallLogger()
+        logger.policy_discovery_miss(
+            outcome="cached_stale",
+            source="org:acme/.github",
+            error="Connection refused",
+        )
+        msg = mock_warning.call_args[0][0]
+        assert "stale cached policy" in msg
+        assert "Connection refused" in msg
+        assert "enforcement still applies" in msg
+
+    @patch("apm_cli.core.command_logger._rich_warning")
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_all_outcomes_ascii(self, _info, _warning):
+        """All wording in the canonical table is ASCII-only."""
+        logger = InstallLogger(verbose=True)
+        for outcome in (
+            "absent", "no_git_remote", "empty", "malformed",
+            "cache_miss_fetch_fail", "garbage_response", "cached_stale",
+        ):
+            logger.policy_discovery_miss(
+                outcome=outcome, source="org:acme/.github", error="boom"
+            )
+        for mock in (_info, _warning):
+            for c in mock.call_args_list:
+                msg = c[0][0]
+                assert msg.isascii(), f"Non-ASCII for {outcome!r}: {msg!r}"
+
+
+# ── policy_violation block-mode next-step (CLI logging C3) ──────────
+
+
+class TestPolicyViolationBlockNextStep:
+    """Block-severity violations emit a dim secondary line with remediation."""
+
+    @patch("apm_cli.core.command_logger._rich_echo")
+    @patch("apm_cli.core.command_logger._rich_error")
+    def test_block_with_source_emits_secondary_line(self, mock_error, mock_echo):
+        logger = InstallLogger()
+        logger.policy_violation(
+            dep_ref="acme/evil",
+            reason="denied by pattern: acme/*",
+            severity="block",
+            source="org:acme/.github",
+        )
+        mock_error.assert_called_once()
+        # Secondary dim line should mention apm.yml and --no-policy
+        dim_calls = [
+            c for c in mock_echo.call_args_list
+            if c[1].get("color") == "dim"
+        ]
+        assert len(dim_calls) == 1
+        dim_text = dim_calls[0][0][0]
+        assert "apm.yml" in dim_text
+        assert "--no-policy" in dim_text
+        assert "acme/evil" in dim_text
+
+    @patch("apm_cli.core.command_logger._rich_echo")
+    @patch("apm_cli.core.command_logger._rich_error")
+    def test_block_without_source_no_secondary_line(self, mock_error, mock_echo):
+        logger = InstallLogger()
+        logger.policy_violation(
+            dep_ref="acme/evil",
+            reason="denied by pattern: acme/*",
+            severity="block",
+        )
+        mock_error.assert_called_once()
+        dim_calls = [
+            c for c in mock_echo.call_args_list
+            if c[1].get("color") == "dim"
+        ]
+        assert dim_calls == []
+
+    @patch("apm_cli.core.command_logger._rich_echo")
+    @patch("apm_cli.core.command_logger._rich_error")
+    def test_warn_severity_does_not_emit_inline(self, mock_error, mock_echo):
+        logger = InstallLogger()
+        logger.policy_violation(
+            dep_ref="acme/evil",
+            reason="denied",
+            severity="warn",
+            source="org:acme/.github",
+        )
+        mock_error.assert_not_called()
+        mock_echo.assert_not_called()
+
+
+# ── F9 dedupe of "{dep_ref}: " prefix ──────────────────────────────
+
+
+class TestPolicyViolationDedupePrefix:
+    """UX F9: strip redundant '{dep_ref}: ' prefix from reason."""
+
+    @patch("apm_cli.core.command_logger._rich_echo")
+    @patch("apm_cli.core.command_logger._rich_error")
+    def test_dedupes_prefix_in_block_inline(self, mock_error, _echo):
+        logger = InstallLogger()
+        logger.policy_violation(
+            dep_ref="acme/evil",
+            reason="acme/evil: denied by pattern: acme/*",
+            severity="block",
+        )
+        msg = mock_error.call_args[0][0]
+        # Inline error should say the dep name once (after "violation:"),
+        # NOT three times.
+        assert msg.count("acme/evil") == 1
+        assert "denied by pattern: acme/*" in msg
+
+    def test_dedupes_prefix_in_diagnostic(self):
+        """The DiagnosticCollector entry should also have the deduped reason."""
+        from apm_cli.utils.diagnostics import CATEGORY_POLICY
+
+        logger = InstallLogger(verbose=True)
+        logger.policy_violation(
+            dep_ref="acme/evil",
+            reason="acme/evil: denied by pattern: acme/*",
+            severity="warn",
+        )
+        diags = [
+            d for d in logger.diagnostics._diagnostics
+            if d.category == CATEGORY_POLICY
+        ]
+        assert len(diags) == 1
+        assert diags[0].message == "denied by pattern: acme/*"
+
+
 # ── policy_resolved ─────────────────────────────────────────────────
 
 

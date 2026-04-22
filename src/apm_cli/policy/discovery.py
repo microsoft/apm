@@ -133,6 +133,112 @@ def _strip_source_prefix(src: str) -> str:
     )
 
 
+def _derive_leaf_host(source: str, project_root: Path) -> Optional[str]:
+    """Derive the origin host of the leaf policy.
+
+    The leaf host pins which host an ``extends:`` reference may resolve
+    against (Security Finding F1 -- prevents credential leakage to
+    attacker-controlled hosts via cross-host extends chains).
+
+    Returns the host in lowercase, or None if it cannot be determined.
+
+    Source forms:
+    * ``url:https://<host>/...`` -> ``<host>``
+    * ``org:<host>/<owner>/<repo>`` (3+ slash-segments) -> ``<host>``
+    * ``org:<owner>/<repo>`` (2 slash-segments) -> ``github.com`` (default)
+    * ``file:<path>`` -> fall back to git remote of *project_root*
+    """
+    if not source:
+        bare = ""
+    else:
+        bare = _strip_source_prefix(source)
+
+    if source.startswith("url:") or bare.startswith("https://") or bare.startswith("http://"):
+        try:
+            parsed = urlparse(bare)
+            if parsed.hostname:
+                return parsed.hostname.lower()
+        except Exception:
+            return None
+        return None
+
+    if source.startswith("org:") or (bare and "://" not in bare and bare.count("/") >= 1):
+        parts = bare.split("/")
+        if len(parts) >= 3:
+            return parts[0].lower()
+        if len(parts) == 2:
+            # owner/repo shorthand defaults to github.com (matches
+            # _fetch_github_contents convention).
+            return "github.com"
+
+    # File source (or unrecognized): fall back to project's git remote.
+    org_and_host = _extract_org_from_git_remote(project_root)
+    if org_and_host is not None:
+        _, host = org_and_host
+        if host:
+            return host.lower()
+    return None
+
+
+def _extract_extends_host(ref: str) -> Optional[str]:
+    """Return the host an ``extends:`` ref resolves against, if explicit.
+
+    * Full URL -> URL host (lowercase)
+    * ``<host>/<owner>/<repo>`` (3+ slash-segments) -> ``<host>`` (lowercase)
+    * ``<owner>/<repo>`` shorthand -> None (intrinsically same-host)
+    * ``<org>`` shorthand (no slash) -> None (intrinsically same-host)
+    """
+    if not ref:
+        return None
+    if ref.startswith("http://") or ref.startswith("https://"):
+        try:
+            parsed = urlparse(ref)
+            if parsed.hostname:
+                return parsed.hostname.lower()
+        except Exception:
+            return None
+        return None
+    if "/" not in ref:
+        return None
+    parts = ref.split("/")
+    if len(parts) >= 3:
+        return parts[0].lower()
+    return None
+
+
+def _validate_extends_host(leaf_host: Optional[str], extends_ref: str) -> None:
+    """Reject ``extends:`` refs that point at a different host than the leaf.
+
+    Raises :class:`PolicyInheritanceError` (imported lazily to avoid a
+    module-level cycle) when the ``extends:`` ref names a host that does
+    not match *leaf_host*. Pure shorthand refs (``owner/repo``, ``org``)
+    are intrinsically same-host and always pass.
+
+    See Security Finding F1: a malicious org policy author setting
+    ``extends: "evil.example.com/org/.github"`` could otherwise route
+    ``git credential fill`` against an attacker-controlled host.
+    """
+    from . import inheritance as _inheritance_mod
+
+    extends_host = _extract_extends_host(extends_ref)
+    if extends_host is None:
+        return  # shorthand: intrinsically same-host, allowed.
+
+    if leaf_host is None:
+        raise _inheritance_mod.PolicyInheritanceError(
+            f"Policy extends: cross-host reference rejected "
+            f"(leaf host: <unknown>, extends host: {extends_host}); "
+            f"cross-host policy chains are not allowed"
+        )
+
+    if extends_host != leaf_host.lower():
+        raise _inheritance_mod.PolicyInheritanceError(
+            f"Policy extends: cross-host reference rejected "
+            f"(leaf host: {leaf_host}, extends host: {extends_host}); "
+            f"cross-host policy chains are not allowed"
+        )
+
+
 def _resolve_and_persist_chain(
     fetch_result: PolicyFetchResult,
     project_root: Path,
@@ -159,6 +265,11 @@ def _resolve_and_persist_chain(
     leaf_policy = fetch_result.policy
     leaf_source = fetch_result.source
 
+    # Host pin: extends: refs may only resolve against the leaf's origin
+    # host. Prevents credential leakage to attacker-controlled hosts via
+    # cross-host extends chains (Security Finding F1).
+    leaf_host = _derive_leaf_host(leaf_source, project_root)
+
     # Ordered ancestors collected as we walk parents.  Built leaf-first
     # for traversal convenience; reversed before merging.
     chain_policies: List[ApmPolicy] = [leaf_policy]
@@ -174,6 +285,10 @@ def _resolve_and_persist_chain(
 
     while current.extends:
         next_ref = current.extends
+
+        # Host pin enforcement: must validate BEFORE any fetch so we never
+        # call git credential fill against an attacker-controlled host.
+        _validate_extends_host(leaf_host, next_ref)
 
         if _inheritance_mod.detect_cycle(visited, next_ref):
             raise _inheritance_mod.PolicyInheritanceError(
@@ -418,14 +533,23 @@ def _fetch_from_url(
     content: Optional[str] = None
 
     try:
-        resp = requests.get(url, timeout=10)
+        resp = requests.get(url, timeout=10, allow_redirects=False)
         if resp.status_code == 404:
             return PolicyFetchResult(
                 source=source_label,
                 error="404: Policy file not found",
                 outcome="absent",
             )
-        if resp.status_code != 200:
+        if 300 <= resp.status_code < 400:
+            # Redirects are refused: a malicious or compromised origin
+            # could otherwise bounce us to an attacker-controlled host
+            # (SSRF / Referer leakage). Treat as fetch failure.
+            location = resp.headers.get("Location", "<no Location header>")
+            fetch_error = (
+                f"Refusing HTTP redirect ({resp.status_code}) "
+                f"from {url} to {location}"
+            )
+        elif resp.status_code != 200:
             fetch_error = f"HTTP {resp.status_code} fetching {url}"
         else:
             content = resp.text
@@ -555,11 +679,17 @@ def _fetch_github_contents(
         headers["Authorization"] = f"token {token}"
 
     try:
-        resp = requests.get(api_url, headers=headers, timeout=10)
+        resp = requests.get(api_url, headers=headers, timeout=10, allow_redirects=False)
         if resp.status_code == 404:
             return None, "404: Policy file not found"
         if resp.status_code == 403:
             return None, f"403: Access denied to {repo_ref}"
+        if 300 <= resp.status_code < 400:
+            location = resp.headers.get("Location", "<no Location header>")
+            return None, (
+                f"Refusing HTTP redirect ({resp.status_code}) from "
+                f"{api_url} to {location}"
+            )
         if resp.status_code != 200:
             return None, f"HTTP {resp.status_code} fetching policy from {repo_ref}"
 

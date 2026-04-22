@@ -17,6 +17,13 @@ from apm_cli.utils.console import (
 )
 
 
+def _strip_source_prefix(source: str) -> str:
+    """Strip the ``org:`` / ``url:`` prefix from a policy source string."""
+    if not source:
+        return ""
+    return source.removeprefix("org:").removeprefix("url:")
+
+
 @dataclass
 class _ValidationOutcome:
     """Result of package validation before install."""
@@ -398,20 +405,136 @@ class InstallLogger(CommandLogger):
             _rich_info(message, symbol="info")
         # Non-verbose + non-block: silent (no noise for warn/off)
 
-    def policy_violation(self, dep_ref: str, reason: str, severity: str):
+    def policy_discovery_miss(
+        self,
+        outcome: str,
+        source: str = "",
+        error: Optional[str] = None,
+        host_org: Optional[str] = None,
+    ):
+        """Log a policy-discovery non-success outcome.
+
+        Single canonical helper that routes all 7 non-found / non-disabled
+        outcomes through one wording table.  Replaces the per-call-site
+        ``_rich_info`` / ``_rich_warning`` invocations in ``policy_gate``
+        and ``install_preflight`` (Logging C1 / C2, UX F1 / F2 / F4 / F5).
+
+        Args:
+            outcome: One of ``"absent"``, ``"no_git_remote"``, ``"empty"``,
+                ``"malformed"``, ``"cache_miss_fetch_fail"``,
+                ``"garbage_response"``, ``"cached_stale"``.
+            source: Policy source string (e.g. ``"org:acme/.github"``).
+            error: Optional error string (used for malformed,
+                cache_miss_fetch_fail, garbage_response, cached_stale).
+            host_org: Optional org slug for ``absent`` outcome (verbose
+                hint).  Auto-derived from ``source`` when not provided.
+        """
+        err_text = error or "unknown"
+
+        if outcome == "absent":
+            # Verbose-only: the vast majority of users have no org policy
+            # and don't need to see a line for it on every install (UX F1).
+            if not self.verbose:
+                return
+            org = host_org or _strip_source_prefix(source) or "this project"
+            _rich_info(f"No org policy found for {org}", symbol="info")
+            return
+
+        if outcome == "no_git_remote":
+            # UX F2: this is a normal state for fresh `git init`, unpacked
+            # bundles, or temp dirs -- info, not a warning.
+            _rich_info(
+                "Could not determine org from git remote; "
+                "policy auto-discovery skipped",
+                symbol="info",
+            )
+            return
+
+        if outcome == "empty":
+            src = source or "this project"
+            _rich_warning(
+                f"Org policy at {src} is present but empty; "
+                "no enforcement applied",
+                symbol="warning",
+            )
+            return
+
+        if outcome == "malformed":
+            _rich_warning(
+                f"Policy at {source} is malformed: {err_text}. "
+                "Contact your org admin to fix the policy file.",
+                symbol="warning",
+            )
+            return
+
+        if outcome == "cache_miss_fetch_fail":
+            # UX F5: explicit posture -- enforcement skipped.
+            _rich_warning(
+                f"Could not fetch org policy from {source} ({err_text}); "
+                "proceeding without policy enforcement. "
+                "Retry, check connectivity, or use --no-policy to bypass.",
+                symbol="warning",
+            )
+            return
+
+        if outcome == "garbage_response":
+            # UX F4: server IS reachable; "check VPN/firewall" is wrong
+            # advice.  Point at the org admin instead.
+            _rich_warning(
+                f"Policy response from {source} is not valid YAML "
+                f"({err_text}); proceeding without policy enforcement. "
+                "Contact your org admin or use --no-policy.",
+                symbol="warning",
+            )
+            return
+
+        if outcome == "cached_stale":
+            # UX F5: explicit posture -- enforcement still applies.
+            _rich_warning(
+                f"Using stale cached policy (refresh failed: {err_text}); "
+                "enforcement still applies from cached policy.",
+                symbol="warning",
+            )
+            return
+
+        # Defensive: unknown outcome -- emit a conservative warning
+        if error:
+            _rich_warning(
+                f"Policy discovery issue: {err_text}",
+                symbol="warning",
+            )
+
+    def policy_violation(
+        self,
+        dep_ref: str,
+        reason: str,
+        severity: str,
+        source: Optional[str] = None,
+    ):
         """Record a policy violation for a dependency.
 
         Pushes to ``DiagnosticCollector`` under ``CATEGORY_POLICY`` for
         the end-of-install summary.  When ``severity == "block"``, also
         prints an inline error so the user sees the failure immediately
-        (before the summary).
+        (before the summary), followed by a dim secondary line with the
+        actionable next-step (CLI logging C3).
 
         Args:
             dep_ref: Dependency reference (e.g. ``"acme/evil-pkg"``).
             reason: Actionable reason text per rubber-duck I9.
             severity: ``"block"`` or ``"warn"``.
+            source: Optional policy source (used for block-mode next-step
+                hint).  When provided, a dim secondary line with
+                remediation guidance is rendered under the inline error.
         """
         from apm_cli.utils.diagnostics import CATEGORY_POLICY
+
+        # F9 dedupe: some callers pass reason with a "{dep_ref}: " prefix
+        # (the detail strings produced by policy_checks.py do this).
+        # Strip it defensively so the inline error reads cleanly.
+        prefix = f"{dep_ref}: "
+        if reason.startswith(prefix):
+            reason = reason[len(prefix):]
 
         self.diagnostics.policy(
             message=reason,
@@ -421,6 +544,11 @@ class InstallLogger(CommandLogger):
 
         if severity == "block":
             _rich_error(f"Policy violation: {dep_ref} -- {reason}", symbol="error")
+            if source:
+                _rich_echo(
+                    f"  {self._policy_reason_blocked(dep_ref, source)}",
+                    color="dim",
+                )
 
     def policy_disabled(self, reason: str):
         """Log a loud warning that policy enforcement is disabled.
