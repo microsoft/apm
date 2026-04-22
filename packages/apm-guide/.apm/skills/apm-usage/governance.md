@@ -17,6 +17,7 @@ name: "Contoso Engineering Policy"
 version: "1.0.0"
 extends: org                             # inherit from parent policy
 enforcement: block                       # off | warn | block
+fetch_failure: warn                      # warn | block; org-side knob (see 9.5)
 
 cache:
   ttl: 3600                             # policy cache in seconds

@@ -17,6 +17,7 @@ name: "Contoso Engineering Policy"
 version: "1.0.0"
 extends: org                    # Optional: inherit from parent policy
 enforcement: block              # warn | block | off
+fetch_failure: warn             # warn | block, default warn (org-side knob; see Section 9.5)
 
 cache:
   ttl: 3600                     # Policy cache TTL in seconds
@@ -84,6 +85,17 @@ Inherit from a parent policy. See [Inheritance](#inheritance).
 | `org` | Parent org's `.github/apm-policy.yml` |
 | `owner/repo` | Cross-org policy from a specific repository |
 | `https://...` | Direct URL to a policy file |
+
+### `fetch_failure`
+
+Org-side posture when consumers cannot fetch this policy AND have a stale cached copy. Optional. Default: `warn`.
+
+| Value | Behavior |
+|-------|----------|
+| `warn` | Loud warning emitted; install proceeds with the cached policy (or with no policy if cache is empty). Default. |
+| `block` | Fail-closed when a cached policy is available but a refresh fails. |
+
+Consumers can opt into fail-closed semantics for the no-cache case from their `apm.yml` via `policy.fetch_failure_default: block` -- see [Network failure semantics](#95-network-failure-semantics) for the full matrix and [`apm.yml` policy block](../../reference/manifest-schema/#39-policy) for the consumer-side fields.
 
 ---
 
@@ -680,56 +692,6 @@ $ echo $?
 1
 ```
 
-#### `apm policy status`: diagnostic snapshot
-
-Inspect the current policy posture without running an install or audit. Always exits 0, so it is safe for CI / SIEM ingestion:
-
-```shell
-$ apm policy status
-                APM Policy Status
-+--------------------+-----------------------------------+
-| Field              | Value                             |
-+--------------------+-----------------------------------+
-| Outcome            | found                             |
-| Source             | org:contoso/.github               |
-| Enforcement        | block                             |
-| Cache age          | 12m ago                           |
-| Extends chain      | none                              |
-| Effective rules    | 3 dependency denies; 2 mcp denies |
-+--------------------+-----------------------------------+
-```
-
-JSON output for CI / scripting:
-
-```shell
-$ apm policy status --json
-{
-  "outcome": "found",
-  "source": "org:contoso/.github",
-  "enforcement": "block",
-  "cache_age_seconds": 720,
-  "extends_chain": [],
-  "rule_counts": { ... },
-  "rule_summary": ["3 dependency denies", "2 mcp denies"]
-}
-```
-
-Flags:
-
-- `--policy-source <ref>` overrides discovery (path, `owner/repo`, `https://...`, or `org`).
-- `--no-cache` forces a fresh fetch.
-- `--json` / `-o json` switches to JSON output.
-
-#### `apm audit --ci`: auto-discovery
-
-When `--policy` (alias `--policy-source`) is omitted, `apm audit --ci` mirrors the install-time discovery path: it auto-discovers the org policy from the git remote, applying the same checks CI runs in production. Add `--no-policy` to skip discovery for a single invocation:
-
-```shell
-$ apm audit --ci                     # auto-discovers org policy
-$ apm audit --ci --policy <local>    # explicit override
-$ apm audit --ci --no-policy         # baseline checks only
-```
-
 ### 8. Escape hatches
 
 **Non-bypass contract:** every escape hatch below is single-invocation, is not persisted to disk, and does **NOT** change CI behaviour. `apm audit --ci` will still fail the PR for the same policy violation. These hatches exist to unblock local debugging, not to circumvent governance.
@@ -785,6 +747,56 @@ When set, every install / `apm policy status` / `apm audit --ci` verifies the ha
 A malformed pin (unsupported algorithm, wrong length, non-hex) is rejected at parse time -- silently ignoring it would defeat the security guarantee. MD5 and SHA-1 are not accepted.
 
 Compute the pin on Linux with `sha256sum .github/apm-policy.yml | awk '{print "sha256:" $1}'`.
+
+### 9.7. `apm policy status`: diagnostic snapshot
+
+Inspect the current policy posture without running an install or audit. Always exits 0, so it is safe for CI / SIEM ingestion:
+
+```shell
+$ apm policy status
+                APM Policy Status
++--------------------+-----------------------------------+
+| Field              | Value                             |
++--------------------+-----------------------------------+
+| Outcome            | found                             |
+| Source             | org:contoso/.github               |
+| Enforcement        | block                             |
+| Cache age          | 12m ago                           |
+| Extends chain      | none                              |
+| Effective rules    | 3 dependency denies; 2 mcp denies |
++--------------------+-----------------------------------+
+```
+
+JSON output for CI / scripting:
+
+```shell
+$ apm policy status --json
+{
+  "outcome": "found",
+  "source": "org:contoso/.github",
+  "enforcement": "block",
+  "cache_age_seconds": 720,
+  "extends_chain": [],
+  "rule_counts": { ... },
+  "rule_summary": ["3 dependency denies", "2 mcp denies"]
+}
+```
+
+Flags:
+
+- `--policy-source <ref>` overrides discovery (path, `owner/repo`, `https://...`, or `org`).
+- `--no-cache` forces a fresh fetch.
+- `--json` / `-o json` switches to JSON output.
+
+### 9.8. `apm audit --ci` auto-discovery
+
+When `--policy` (alias `--policy-source`) is omitted, `apm audit --ci` mirrors the install-time discovery path: it auto-discovers the org policy from the git remote, applying the same checks CI runs in production. Add `--no-policy` to skip discovery for a single invocation:
+
+```shell
+$ apm audit --ci                     # auto-discovers org policy
+$ apm audit --ci --policy <local>    # explicit override
+$ apm audit --ci --no-policy         # baseline checks only
+```
 
 ### 10. Error and exit-code reference
 
