@@ -522,7 +522,27 @@ class GitHubPackageDownloader:
         if is_generic:
             return None
 
-        return self.auth_resolver.resolve_for_dep(dep_ref)
+        ctx = self.auth_resolver.resolve_for_dep(dep_ref)
+        # Verbose source surfacing (#852): when APM_VERBOSE=1 is set by the
+        # caller (install --verbose), emit a one-time per-host log line so
+        # users can see which credential source was actually used.
+        if os.environ.get("APM_VERBOSE") == "1":
+            host_key = (dep_host or "").lower()
+            if not hasattr(self, "_verbose_auth_logged_hosts"):
+                self._verbose_auth_logged_hosts = set()
+            if host_key and host_key not in self._verbose_auth_logged_hosts:
+                self._verbose_auth_logged_hosts.add(host_key)
+                if ctx and ctx.source != "none":
+                    if ctx.auth_scheme == "bearer":
+                        sys.stderr.write(
+                            f"  [i] {host_key} -- using bearer from az cli "
+                            f"(source: {ctx.source})\n"
+                        )
+                    else:
+                        sys.stderr.write(
+                            f"  [i] {host_key} -- token from {ctx.source}\n"
+                        )
+        return ctx
 
     def _build_noninteractive_git_env(
         self,
@@ -937,6 +957,50 @@ class GitHubPackageDownloader:
                     verbose_callback(f"Cloned from: {display}")
                 return repo
             except GitCommandError as e:
+                # ADO bearer fallback for clone (mirrors validation/list_remote_refs):
+                # PAT was rejected -> silently retry this attempt with az-cli bearer.
+                err_msg = str(e)
+                if (
+                    is_ado
+                    and attempt.use_token
+                    and dep_auth_scheme == "basic"
+                    and has_token
+                    and (
+                        "401" in err_msg
+                        or "Authentication failed" in err_msg
+                        or "Unauthorized" in err_msg
+                    )
+                ):
+                    try:
+                        from apm_cli.core.azure_cli import (
+                            AzureCliBearerProvider, AzureCliBearerError,
+                        )
+                        from apm_cli.utils.github_host import build_ado_bearer_git_env
+                        provider = AzureCliBearerProvider()
+                        if provider.is_available():
+                            try:
+                                bearer = provider.get_bearer_token()
+                                bearer_url = self._build_repo_url(
+                                    repo_url_base, use_ssh=False, dep_ref=dep_ref,
+                                    token=None, auth_scheme="bearer",
+                                )
+                                bearer_env = {**self.git_env, **build_ado_bearer_git_env(bearer)}
+                                repo = Repo.clone_from(
+                                    bearer_url, target_path, env=bearer_env,
+                                    progress=progress_reporter, **clone_kwargs,
+                                )
+                                self.auth_resolver._emit_stale_pat_diagnostic(
+                                    dep_host or "dev.azure.com"
+                                )
+                                if verbose_callback:
+                                    verbose_callback(
+                                        "Cloned from: (sanitized) via AAD bearer fallback"
+                                    )
+                                return repo
+                            except (AzureCliBearerError, GitCommandError):
+                                pass
+                    except ImportError:
+                        pass
                 last_error = e
                 prev_label = attempt.label
                 prev_scheme = attempt.scheme
@@ -1132,6 +1196,42 @@ class GitHubPackageDownloader:
             refs = self._parse_ls_remote_output(output)
             return self._sort_remote_refs(refs)
         except GitCommandError as e:
+            # ADO bearer fallback: if PAT was rejected (401/Authentication failed)
+            # AND the host is ADO AND we resolved as PAT AND az is available,
+            # silently retry with bearer and emit a deferred [!] warning.
+            err_str = str(e)
+            ado_pat_401 = (
+                is_ado
+                and dep_auth_scheme == "basic"
+                and dep_token is not None
+                and ("401" in err_str or "Authentication failed" in err_str or "Unauthorized" in err_str)
+            )
+            if ado_pat_401:
+                try:
+                    from apm_cli.core.azure_cli import AzureCliBearerProvider, AzureCliBearerError
+                    from apm_cli.utils.github_host import build_ado_bearer_git_env
+                    provider = AzureCliBearerProvider()
+                    if provider.is_available():
+                        try:
+                            bearer = provider.get_bearer_token()
+                            bearer_env = {**self.git_env, **build_ado_bearer_git_env(bearer)}
+                            # Re-build URL WITHOUT token (bearer flows via header)
+                            bearer_url = self._build_repo_url(
+                                repo_url_base, use_ssh=False, dep_ref=dep_ref,
+                                token=None, auth_scheme="bearer",
+                            )
+                            output = g.ls_remote("--tags", "--heads", bearer_url, env=bearer_env)
+                            refs = self._parse_ls_remote_output(output)
+                            # Emit stale-PAT diagnostic via the resolver
+                            self.auth_resolver._emit_stale_pat_diagnostic(
+                                dep_ref.host or default_host()
+                            )
+                            return self._sort_remote_refs(refs)
+                        except (AzureCliBearerError, GitCommandError):
+                            pass  # Fall through to original error handling
+                except ImportError:
+                    pass
+
             dep_host = dep_ref.host
             if dep_host:
                 is_github = is_github_hostname(dep_host)

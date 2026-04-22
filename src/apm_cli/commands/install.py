@@ -1,6 +1,7 @@
 """APM install command and dependency installation engine."""
 
 import builtins
+import os
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -1093,6 +1094,8 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         # scope initialisation below throws).
         is_partial = bool(packages)
         logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=is_partial)
+        if verbose:
+            os.environ["APM_VERBOSE"] = "1"  # surfaces auth source in deeper layers
 
         # W2-pkg-rollback (#827): snapshot bytes captured BEFORE
         # _validate_and_add_packages_to_apm_yml mutates apm.yml.

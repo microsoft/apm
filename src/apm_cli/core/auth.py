@@ -335,7 +335,11 @@ class AuthResolver:
             if not ado_bearer_fallback_available:
                 raise exc
             exc_msg = str(exc)
-            if "401" not in exc_msg and "Unauthorized" not in exc_msg:
+            if (
+                "401" not in exc_msg
+                and "Unauthorized" not in exc_msg
+                and "Authentication failed" not in exc_msg
+            ):
                 raise exc
             from apm_cli.core.azure_cli import AzureCliBearerProvider, AzureCliBearerError
             provider = AzureCliBearerProvider()
