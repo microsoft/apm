@@ -784,7 +784,7 @@ When set, every install / `apm policy status` / `apm audit --ci` verifies the ha
 
 A malformed pin (unsupported algorithm, wrong length, non-hex) is rejected at parse time -- silently ignoring it would defeat the security guarantee. MD5 and SHA-1 are not accepted.
 
-Organizations that need fail-closed semantics on fetch failure can track the planned `policy.fetch_failure: warn|block` schema knob in the follow-up issue (link TBD post-merge).
+Compute the pin on Linux with `sha256sum .github/apm-policy.yml | awk '{print "sha256:" $1}'`.
 
 ### 10. Error and exit-code reference
 

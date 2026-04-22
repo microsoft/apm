@@ -423,9 +423,10 @@ apm audit [PACKAGE] [OPTIONS]
 - `-v, --verbose` - Show info-level findings and file details
 - `-f, --format [text|json|sarif|markdown]` - Output format: `text` (default), `json` (machine-readable), `sarif` (GitHub Code Scanning), `markdown` (step summaries). Cannot be combined with `--strip` or `--dry-run`.
 - `-o, --output PATH` - Write report to file. Auto-detects format from extension (`.sarif`, `.sarif.json` → SARIF; `.json` → JSON; `.md` → Markdown) when `--format` is not specified.
-- `--ci` - Run lockfile consistency checks for CI/CD gates. Exit 0 if clean, 1 if violations found.
-- `--policy SOURCE` - *(Experimental)* Policy source: `org` (auto-discover from org), file path, or URL. Used with `--ci` to run policy checks on top of baseline.
-- `--no-cache` - Force fresh policy fetch (skip cache). Only relevant with `--policy`.
+- `--ci` - Run lockfile consistency checks for CI/CD gates. Exit 0 if clean, 1 if violations found. Auto-discovers org policy from the org `.github` repo unless `--no-policy` is set.
+- `--policy SOURCE` - *(Experimental)* Override discovery: `org` (auto-discover from org), file path, or URL. Without this flag, `--ci` auto-discovers.
+- `--no-policy` - Skip policy discovery and enforcement entirely. Equivalent to `APM_POLICY_DISABLE=1`.
+- `--no-cache` - Force fresh policy fetch (skip cache). Only relevant with policy discovery active.
 - `--no-fail-fast` - Run all checks even after a failure. By default, CI mode stops at the first failing check to save time.
 
 **Examples:**
@@ -460,17 +461,20 @@ apm audit -o report.sarif
 # JSON report to file
 apm audit -f json -o results.json
 
-# CI lockfile consistency gate
+# CI lockfile consistency gate (auto-discovers org policy)
 apm audit --ci
 
-# CI gate with org policy checks
+# CI gate skipping policy discovery (baseline checks only)
+apm audit --ci --no-policy
+
+# CI gate with explicit policy source (overrides auto-discovery)
 apm audit --ci --policy org
 
 # CI gate with local policy file
 apm audit --ci --policy ./apm-policy.yml
 
 # Force fresh policy fetch
-apm audit --ci --policy org --no-cache
+apm audit --ci --no-cache
 
 # Run all checks (no fail-fast) for full diagnostic report
 apm audit --ci --policy org --no-fail-fast
@@ -493,6 +497,40 @@ apm audit --ci --policy org --no-fail-fast
 - **Critical**: Tag characters (U+E0001–E007F), bidi overrides (U+202A–E, U+2066–9), variation selectors 17–256 (U+E0100–E01EF, Glassworm attack vector)
 - **Warning**: Zero-width spaces/joiners (U+200B–D), variation selectors 1–15 (U+FE00–FE0E), bidi marks (U+200E–F, U+061C), invisible operators (U+2061–4), annotation markers (U+FFF9–B), deprecated formatting (U+206A–F), soft hyphen (U+00AD), mid-file BOM
 - **Info**: Non-breaking spaces, unusual whitespace, emoji presentation selector (U+FE0F). ZWJ between emoji characters is context-downgraded to info.
+
+### `apm policy` - Inspect organization policy
+
+Diagnostic commands for the organization-level `apm-policy.yml` resolved by APM at install / audit time. See [Policy Reference](../../enterprise/policy-reference/) for the full schema and enforcement model.
+
+#### `apm policy status` - Show resolved policy state
+
+Show what policy APM resolved for the current project: discovery outcome, source, enforcement level, cache age, `extends:` chain, and effective rule counts. Trust-but-verify diagnostic for admins and CI gates.
+
+```bash
+apm policy status [OPTIONS]
+```
+
+**Options:**
+- `--policy-source SOURCE` - Override discovery: `org`, file path, or URL. Same shape as `apm install --policy`.
+- `--no-cache` - Force fresh fetch (skip cache).
+- `--json` / `-o json` - Machine-readable output for SIEM ingestion or CI inspection.
+
+**Exit code:** Always 0 - this is a diagnostic, not a gate. Use `apm audit --ci` to gate on policy compliance.
+
+**Examples:**
+```bash
+# Show resolved org policy state
+apm policy status
+
+# Force fresh fetch (bypass cache)
+apm policy status --no-cache
+
+# Machine-readable JSON for SIEM
+apm policy status --json
+
+# Inspect a specific policy without committing it
+apm policy status --policy-source ./draft-policy.yml
+```
 
 ### `apm pack` - Create a portable bundle
 
