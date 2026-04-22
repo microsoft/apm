@@ -1,0 +1,9 @@
+[submodule "devcontainer-feature/test/bats"]
+	path = devcontainer-feature/test/bats
+	url = https://github.com/bats-core/bats-core
+[submodule "devcontainer-feature/test/test_helper/bats-support"]
+	path = devcontainer-feature/test/test_helper/bats-support
+	url = https://github.com/bats-core/bats-support
+[submodule "devcontainer-feature/test/test_helper/bats-assert"]
+	path = devcontainer-feature/test/test_helper/bats-assert
+	url = https://github.com/bats-core/bats-assert

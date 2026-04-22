@@ -1,0 +1,48 @@
+{
+  "scenarios": [
+    {
+      "id": "default-ubuntu-24",
+      "description": "Default install on Ubuntu 24.04 (PEP 668 distro)",
+      "image": "ubuntu:24.04"
+    },
+    {
+      "id": "default-ubuntu-22",
+      "description": "Default install on Ubuntu 22.04",
+      "image": "ubuntu:22.04"
+    },
+    {
+      "id": "default-debian-12",
+      "description": "Default install on Debian 12 (Bookworm)",
+      "image": "debian:12"
+    },
+    {
+      "id": "pinned-version",
+      "description": "Pinned version install on Ubuntu 24.04",
+      "image": "ubuntu:24.04",
+      "features": {
+        "apm": {
+          "version": "0.8.11"
+        }
+      }
+    },
+    {
+      "id": "with-python-feature",
+      "description": "Install after the Python devcontainer feature",
+      "image": "ubuntu:24.04",
+      "features": {
+        "ghcr.io/devcontainers/features/python:1": {},
+        "apm": {}
+      }
+    },
+    {
+      "id": "default-alpine-3",
+      "description": "Default install on Alpine 3 (apk path)",
+      "image": "alpine:3.20"
+    },
+    {
+      "id": "default-fedora",
+      "description": "Default install on Fedora (dnf path)",
+      "image": "fedora:41"
+    }
+  ]
+}
