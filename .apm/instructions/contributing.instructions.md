@@ -1,0 +1,30 @@
+---
+description: "Repository-wide contributor guidelines for APM"
+---
+- This project uses uv to manage Python environments and dependencies.
+    - Use `uv sync` to create the virtual environment and install all dependencies automatically.
+    - Use `uv run <command>` to run commands in the uv-managed environment.
+    - For development dependencies, use `uv sync --extra dev`.
+- **Running tests**: Use pytest via `uv run`. Prefer targeted test runs during development:
+    - **Targeted (fastest, use during iteration):** `uv run pytest tests/unit/path/to/relevant_test.py -x`
+    - **Unit suite (default validation):** `uv run pytest tests/unit tests/test_console.py -x` (~2,400 tests, matches CI)
+    - **Full suite (only before final commit):** `uv run pytest`
+    - When modifying a specific module, run only its corresponding test file(s) first. Run the full unit suite once as final validation before considering your work done.
+- **Test coverage principle**: When modifying existing code, add tests for the code paths you touch, on top of tests for the new functionality.
+- **Development Workflow**: To run APM from source while working in other directories:
+    - Install in development mode: `cd /path/to/awd-cli && uv run pip install -e .`
+    - Use absolute path: `/Users/danielmeppiel/Repos/awd-cli/.venv/bin/apm compile --verbose --dry-run`
+    - Or create alias: `alias apm-dev='/Users/danielmeppiel/Repos/awd-cli/.venv/bin/apm'`
+    - Changes to source code are immediately reflected (no reinstall needed)
+- The solution must meet the functionality as explained in the [README.md](README.md) file.
+- The general high-level basis to the solution is depicted in [APPROACH.md](../../APPROACH.md). 
+- When developing functionality, we need to respect our own [CONTRIBUTING.md](../../CONTRIBUTING.md) file.
+The architectural decisions and basis for the project in that document are only the inspiring foundation. It can and should always be challenged when needed and is not meant as the only truth, but a very useful context and grounding research.
+- The project is meant for the Open Source community and should be open to contributions and follow the standards of the community.
+- The project is meant to be used by developers and should be easy to use, with a focus on developer experience.
+- The philosophy when architecting and implementing the project is to prime speed and simplicity over complexity. Do NOT over-engineer, but rather build a solid foundation that can be iterated on.
+- APM is an active OSS project under the `microsoft` org with a growing community (250+ stars, external contributors). Breaking changes should be communicated clearly (CHANGELOG.md), but we still favor shipping fast over lengthy deprecation cycles.
+- The goal is to deliver a solid and scalable architecture but simple starting implementation. Not building something complex from the start and then having to simplify it later. Remember we are delivering a new tool to the developer community and we will need to rapidly adapt to what's really useful, evolving standards, etc.
+- **Cross-platform encoding rule**: All source code and CLI output must stay within printable ASCII (U+0020–U+007E). Do NOT use emojis, Unicode symbols, box-drawing characters, em dashes, or any character outside the ASCII range in source files or CLI output strings. Use bracket notation for status symbols: `[+]` success, `[!]` warning, `[x]` error, `[i]` info, `[*]` action, `[>]` running. This is required to prevent `charmap` codec errors on Windows cp1252 terminals.
+- **Path safety rule**: Any code that builds filesystem paths from user input or external data (marketplace names, plugin paths, lockfile entries, bundle contents) **must** use the centralized guards in `src/apm_cli/utils/path_security.py`. Use `validate_path_segments(value, context=)` at parse time to reject traversal sequences (`.`, `..`) with cross-platform backslash normalization, and `ensure_path_within(path, base_dir)` after resolution to assert containment (resolves symlinks). Never write ad-hoc `".." in x` checks.
+- **Expert review panel**: For any non-trivial change (cross-cutting refactor, new CLI surface, dependency/auth/lockfile work, release or positioning decision), invoke the [APM Review Panel skill](skills/apm-review-panel/SKILL.md). It orchestrates seven personas (Python Architect, CLI Logging Expert, DevX UX Expert, Supply Chain Security Expert, APM CEO, OSS Growth Hacker) with explicit routing: specialists raise findings, the CEO arbitrates disagreements and strategic calls, the Growth Hacker side-channels conversion / `WIP/growth-strategy.md` insights to the CEO. Individual per-persona skills (`devx-ux`, `supply-chain-security`, `apm-strategy`, `oss-growth`) auto-activate on relevant edits even outside the panel.

@@ -1,12 +1,6 @@
-name: apm
+name: apm-cli
 version: 0.9.0
-description: APM (Agent Package Manager) -- ship and govern AI agent context
+description: "APM - Agent Package Manager. The developer toolchain for agent primitives."
 author: Microsoft
 license: MIT
-
-# No external deps -- microsoft/apm is the package source itself.
-dependencies:
-  apm: []
-  mcp: []
-
-scripts: {}
+target: all
