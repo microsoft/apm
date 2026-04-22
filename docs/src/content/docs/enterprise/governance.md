@@ -2,8 +2,10 @@
 title: "Governance & Compliance"
 description: "Enforce AI agent configuration policies with lock files, audit trails, and CI gates."
 sidebar:
-  order: 2
+  order: 3
 ---
+
+For org-policy enforcement (apm-policy.yml, apm audit --ci, install gate), see the [Governance Guide](../governance-guide/). This page focuses on the lockfile audit trail and forensic recipes.
 
 :::caution[Experimental — Policy Engine]
 Sections on this page covering organization policy enforcement (`apm audit --ci --policy`, `apm-policy.yml`, inheritance chains) describe an early preview feature for testing and feedback. Lock-file based governance (`apm audit --ci` baseline checks) is stable. The policy engine layer on top may change based on community input.
@@ -131,40 +133,7 @@ For step-by-step setup including SARIF integration and GitHub Code Scanning, see
 
 ## Organization policy governance
 
-`apm audit --ci --policy org` enforces organization-wide rules defined in [`apm-policy.yml`](../apm-policy/). This adds 16 policy checks on top of the 6 baseline checks.
-
-Policy enforcement applies at both `apm install` (blocks before files are written) and `apm audit --ci` (CI gate). See [Install-time enforcement](../policy-reference/#install-time-enforcement).
-
-### How it works
-
-1. **Define policy** — create `apm-policy.yml` in your org's `.github` repository.
-2. **Auto-discover** — `--policy org` fetches the policy via GitHub API from `<org>/.github/apm-policy.yml`.
-3. **Enforce** — `apm audit --ci --policy org` runs all 22 checks (6 baseline + 16 policy).
-
-Policies support a three-level inheritance chain (`Enterprise hub -> Org policy -> Repo override`) where child policies can only tighten constraints. For the mental model and the merge-rule table, see [`apm-policy.yml`](../apm-policy/). For the complete schema and check names, see the [Policy Reference](../policy-reference/). For step-by-step CI setup, see the [CI Policy Enforcement guide](../../guides/ci-policy-setup/).
-
-### What a policy violation looks like
-
-A developer adds a denied package to `apm.yml`:
-
-```yaml
-dependencies:
-  apm:
-    - untrusted-org/random-skills
-```
-
-`apm install` halts before any file is written:
-
-```
-[x] Policy violation: dependency 'untrusted-org/random-skills' is denied by org policy
-    Policy: contoso/.github/apm-policy.yml
-    Rule:   dependencies.deny matches 'untrusted-org/**'
-    Action: install aborted, no files deployed
-
-Run `apm audit --ci --policy org` for full report. Override with `--no-policy` (not recommended).
-```
-
-In CI, the same finding renders as a SARIF result inline on the PR diff via GitHub Code Scanning. The PR cannot be merged until the violation is resolved or the policy is amended through the org's own change-management process.
+For organization-wide policy enforcement (`apm-policy.yml`, install gate, `apm audit --ci --policy org`, inheritance chains, the bypass contract, and the rollout playbook), see the [Governance Guide](../governance-guide/). The mental model for the policy file itself lives in [`apm-policy.yml`](../apm-policy/); the schema is in the [Policy Reference](../policy-reference/).
 
 ---
 
@@ -176,46 +145,7 @@ In CI, the same finding renders as a SARIF result inline on the PR diff via GitH
 
 ---
 
-## Policy enforcement patterns
-
-Beyond CI gates, APM provides mechanisms to enforce organizational policies on agent configuration.
-
-### Approved sources
-
-Use the `dependencies.allow` and `dependencies.deny` fields in `apm-policy.yml` to restrict which packages repositories can depend on. See the [Policy Reference](../policy-reference/#dependencies) for pattern syntax.
-
-### Version pinning policy
-
-Require exact version references rather than floating branch refs. Pinned versions ensure reproducibility and prevent unreviewed upstream changes from propagating:
-
-```yaml
-# Preferred: pinned to exact tag
-ref: v2.1.0
-
-# Acceptable: pinned to exact commit
-ref: a1b2c3d4e5f6
-
-# Discouraged: floating branch ref
-ref: main
-```
-
-Enforce this policy through PR review or by scripting a check against `apm.yml` in CI.
-
-### Transitive MCP server trust
-
-When a dependency declares MCP server configurations, APM requires explicit opt-in before installing them transitively. The `--trust-transitive-mcp` flag on `apm install` controls this behavior:
-
-```bash
-# Default: transitive MCP servers are NOT installed
-apm install
-
-# Explicit opt-in: trust transitive MCP servers
-apm install --trust-transitive-mcp
-```
-
-Without this flag, transitive MCP server declarations are skipped. This prevents a dependency from silently introducing tool access that the consuming repository did not explicitly approve.
-
-### Constitution injection
+## Constitution injection
 
 A constitution is an organization-wide rules block applied to all compiled agent instructions. Define it in `memory/constitution.md` and APM injects it into every compilation output with hash verification:
 

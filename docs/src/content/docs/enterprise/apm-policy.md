@@ -2,8 +2,10 @@
 title: "apm-policy.yml"
 description: "One org-wide policy file with tighten-only inheritance for AI agent dependencies, MCP servers, and compilation targets."
 sidebar:
-  order: 3
+  order: 4
 ---
+
+For the full enterprise rollout playbook and bypass contract, see the [Governance Guide](../governance-guide/).
 
 :::caution[Experimental Feature]
 The `apm-policy.yml` schema, inheritance, and discovery ship today and are usable for testing and feedback. Policy enforcement at install time and via `apm audit --ci --policy` is an early preview. Fields, defaults, and check behaviour may change based on community input. Pin your policy to a specific APM version and watch the [CHANGELOG](https://github.com/microsoft/apm/blob/main/CHANGELOG.md) for breaking changes.
@@ -145,14 +147,7 @@ In CI, `apm audit --ci --policy org` produces the same finding as a SARIF result
 
 ## Forensics
 
-When an incident review asks "what was running last Tuesday?", the answer is in the lockfile, not in the policy:
-
-```bash
-git show <commit>:apm.lock.yaml | grep resolved_commit
-git log --oneline apm.lock.yaml
-```
-
-The policy says what is allowed; the lockfile records what was actually deployed. Both are git-tracked, both are reviewable, both reconstruct any historical state with one git command. See [Lock file as audit trail](../governance/#lock-file-as-audit-trail) in the Governance guide.
+For lockfile-based forensic recipes, see [Lock file as audit trail](../governance/#lock-file-as-audit-trail) and the [Governance Guide §13: enforcement audit log](../governance-guide/#13-the-enforcement-audit-log).
 
 ---
 

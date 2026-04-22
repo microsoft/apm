@@ -1,7 +1,7 @@
 ---
 title: Policy Reference
 sidebar:
-  order: 4
+  order: 5
 ---
 
 :::caution[Experimental Feature]

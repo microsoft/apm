@@ -2,7 +2,7 @@
 title: "Security Model"
 description: "How APM handles supply chain security for AI agents — attack surface boundaries, content scanning, dependency provenance, path safety, and MCP trust."
 sidebar:
-  order: 3
+  order: 6
 ---
 
 This page documents APM's security posture for enterprise security reviews, compliance audits, and supply chain assessments.

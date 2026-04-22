@@ -79,6 +79,7 @@ export default defineConfig({
 					label: 'Enterprise',
 					items: [
 						{ label: 'APM for Teams', slug: 'enterprise/teams' },
+						{ label: 'Governance Guide', slug: 'enterprise/governance-guide' },
 						{ label: 'Governance & Compliance', slug: 'enterprise/governance' },
 						{ label: 'apm-policy.yml', slug: 'enterprise/apm-policy' },
 						{ label: 'Policy Reference', slug: 'enterprise/policy-reference' },

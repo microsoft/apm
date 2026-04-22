@@ -64,15 +64,7 @@ Once configured, any PR that introduces content issues detected by `apm audit` w
 - **Critical: Hidden Unicode characters** -- tag characters (U+E0001-E007F), bidi overrides (U+202A-202E, U+2066-2069), and SMP variation selectors. Exit code **1**.
 - **Warning: Zero-width and invisible characters** -- zero-width spaces/joiners, mid-file BOM, soft hyphens. Exit code **2**. These are suspicious but not attack vectors.
 
-**CI baseline checks** (`apm audit --ci`) -- adds lockfile verification on top of content scanning:
-- **Lockfile exists** -- validates `apm.lock.yaml` is present when dependencies are declared
-- **Ref consistency** -- every dependency's manifest ref matches the lockfile
-- **Deployed files present** -- all files listed in lockfile exist on disk
-- **No orphaned packages** -- no packages in lockfile are absent from manifest
-- **Config consistency** -- MCP server configs match lockfile baseline
-- **Content integrity** -- fails on **critical** Unicode only (warnings are not CI-blocking)
-
-In `--ci` mode, exit codes are binary: **0** = pass, **1** = fail. Warning-level characters do not fail CI.
+**CI baseline checks** (`apm audit --ci`) -- adds lockfile verification on top of content scanning. See [policy-reference: Check reference](../../enterprise/policy-reference/#check-reference) for the canonical list of baseline and policy checks. In `--ci` mode, exit codes are binary: **0** = pass, **1** = fail. Warning-level characters do not fail CI.
 
 **Policy enforcement** (`apm audit --ci --policy org`) -- adds organizational rules:
 - **Approved/denied sources** -- restrict which repositories packages can come from

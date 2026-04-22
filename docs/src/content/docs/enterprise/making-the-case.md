@@ -2,7 +2,7 @@
 title: "Making the Case"
 description: "Talking points, objection handling, and resources for advocating APM adoption within your organization."
 sidebar:
-  order: 5
+  order: 8
 ---
 
 An internal advocacy toolkit for APM. Each section is self-contained and designed to be copied into RFCs, Slack messages, and proposals.
