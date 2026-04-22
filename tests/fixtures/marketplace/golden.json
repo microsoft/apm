@@ -14,7 +14,6 @@
   "plugins": [
     {
       "name": "code-reviewer",
-      "description": "Automated code review assistant",
       "tags": [
         "review",
         "quality"

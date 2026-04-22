@@ -147,7 +147,6 @@ class TestLoadHappyPath:
         assert linter.ref == "v1.2.3"
         assert linter.tag_pattern == "linter-v{version}"
         assert linter.include_prerelease is True
-        assert linter.description == "A linting tool"
         assert linter.tags == ("lint", "quality")
 
         formatter = result.packages[1]

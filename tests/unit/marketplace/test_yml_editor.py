@@ -80,7 +80,6 @@ class TestAddPluginHappy:
             yml,
             source="acme/full-tool",
             version=">=3.0.0",
-            description="A fully configured tool",
             subdir="src/plugin",
             tag_pattern="v{version}",
             tags=["utilities", "testing"],
@@ -91,7 +90,6 @@ class TestAddPluginHappy:
         added = next(
             p for p in data["packages"] if p["name"] == "full-tool"
         )
-        assert added["description"] == "A fully configured tool"
         assert added["subdir"] == "src/plugin"
         assert added["tag_pattern"] == "v{version}"
         assert added["tags"] == ["utilities", "testing"]
@@ -225,14 +223,14 @@ class TestUpdatePluginHappy:
         entry = data["packages"][0]
         assert entry["version"] == ">=2.0.0"
 
-    def test_update_description(self, tmp_path):
+    def test_update_subdir(self, tmp_path):
         yml = _write_yml(tmp_path, _BASIC_YML)
         update_plugin_entry(
-            yml, "existing-package", description="Updated description"
+            yml, "existing-package", subdir="src/plugin"
         )
         data = yaml.safe_load(yml.read_text(encoding="utf-8"))
         entry = data["packages"][0]
-        assert entry["description"] == "Updated description"
+        assert entry["subdir"] == "src/plugin"
 
     def test_setting_ref_clears_version(self, tmp_path):
         yml = _write_yml(tmp_path, _BASIC_YML)
@@ -265,7 +263,7 @@ class TestUpdatePluginHappy:
     def test_unmodified_fields_preserved(self, tmp_path):
         yml = _write_yml(tmp_path, _BASIC_YML)
         update_plugin_entry(
-            yml, "existing-package", description="New desc"
+            yml, "existing-package", subdir="sub/dir"
         )
         data = yaml.safe_load(yml.read_text(encoding="utf-8"))
         entry = data["packages"][0]
@@ -277,11 +275,11 @@ class TestUpdatePluginHappy:
     def test_case_insensitive_match(self, tmp_path):
         yml = _write_yml(tmp_path, _BASIC_YML)
         update_plugin_entry(
-            yml, "Existing-Package", description="Mixed case"
+            yml, "Existing-Package", subdir="sub/dir"
         )
         data = yaml.safe_load(yml.read_text(encoding="utf-8"))
         entry = data["packages"][0]
-        assert entry["description"] == "Mixed case"
+        assert entry["subdir"] == "sub/dir"
 
 
 # ---------------------------------------------------------------------------

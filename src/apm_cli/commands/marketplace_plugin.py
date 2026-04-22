@@ -187,7 +187,6 @@ def package():
     default=None,
     help="Pin to a git ref (SHA, tag, or HEAD). Mutable refs are auto-resolved to SHA.",
 )
-@click.option("-d", "--description", default=None, help="Human-readable description")
 @click.option("-s", "--subdir", default=None, help="Subdirectory inside source repo")
 @click.option("--tag-pattern", default=None, help="Tag pattern (e.g. 'v{version}')")
 @click.option("--tags", default=None, help="Comma-separated tags")
@@ -201,7 +200,6 @@ def add(
     name,
     version,
     ref,
-    description,
     subdir,
     tag_pattern,
     tags,
@@ -238,7 +236,6 @@ def add(
             name=name,
             version=version,
             ref=ref,
-            description=description,
             subdir=subdir,
             tag_pattern=tag_pattern,
             tags=parsed_tags,
@@ -267,7 +264,6 @@ def add(
     default=None,
     help="Pin to a git ref (SHA, tag, or HEAD). Mutable refs are auto-resolved to SHA.",
 )
-@click.option("--description", default=None, help="Human-readable description")
 @click.option("--subdir", default=None, help="Subdirectory inside source repo")
 @click.option("--tag-pattern", default=None, help="Tag pattern (e.g. 'v{version}')")
 @click.option("--tags", default=None, help="Comma-separated tags")
@@ -282,7 +278,6 @@ def set_cmd(
     name,
     version,
     ref,
-    description,
     subdir,
     tag_pattern,
     tags,
@@ -324,8 +319,6 @@ def set_cmd(
         fields["version"] = version
     if ref is not None:
         fields["ref"] = ref
-    if description is not None:
-        fields["description"] = description
     if subdir is not None:
         fields["subdir"] = subdir
     if tag_pattern is not None:
@@ -338,7 +331,7 @@ def set_cmd(
     if not fields:
         logger.error(
             "No fields specified. Pass at least one option "
-            "(e.g. --version, --ref, --description).",
+            "(e.g. --version, --ref, --subdir).",
             symbol="error",
         )
         sys.exit(1)

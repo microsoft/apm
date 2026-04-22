@@ -123,7 +123,6 @@ def add_plugin_entry(
     name: Optional[str] = None,
     version: Optional[str] = None,
     ref: Optional[str] = None,
-    description: Optional[str] = None,
     subdir: Optional[str] = None,
     tag_pattern: Optional[str] = None,
     tags: Optional[List[str]] = None,
@@ -181,8 +180,6 @@ def add_plugin_entry(
         new_entry["version"] = version
     if ref is not None:
         new_entry["ref"] = ref
-    if description is not None:
-        new_entry["description"] = description
     if subdir is not None:
         new_entry["subdir"] = subdir
     if tag_pattern is not None:
@@ -236,7 +233,7 @@ def update_plugin_entry(yml_path: Path, name: str, **fields) -> None:
             del entry["version"]
 
     # Simple scalar fields.
-    _SIMPLE_FIELDS = ("description", "subdir", "tag_pattern")
+    _SIMPLE_FIELDS = ("subdir", "tag_pattern")
     for key in _SIMPLE_FIELDS:
         if key in fields and fields[key] is not None:
             if key == "subdir":

@@ -68,7 +68,6 @@ class ResolvedPackage:
     ref: str                  # resolved tag name, e.g. "v1.2.0"
     sha: str                  # 40-char git SHA
     requested_version: Optional[str]  # original APM-only range (for diagnostics)
-    description: Optional[str]
     tags: Tuple[str, ...]
     is_prerelease: bool       # True if the resolved ref was a prerelease semver
 
@@ -119,17 +118,25 @@ class MarketplaceBuilder:
         Path to the ``marketplace.yml`` file.
     options:
         Build options.  Defaults to ``BuildOptions()`` if not provided.
+    auth_resolver:
+        Optional ``AuthResolver`` for authenticating requests to private
+        GitHub repositories.  When ``None`` (default) a fresh resolver is
+        created lazily the first time a token is needed.
     """
 
     def __init__(
         self,
         marketplace_yml_path: Path,
         options: Optional[BuildOptions] = None,
+        auth_resolver: Optional[object] = None,
     ) -> None:
         self._yml_path = marketplace_yml_path
         self._options = options or BuildOptions()
         self._yml: Optional[MarketplaceYml] = None
         self._resolver: Optional[RefResolver] = None
+        self._auth_resolver = auth_resolver
+        # Resolved once per build, used by worker threads (read-only).
+        self._github_token: Optional[str] = None
 
     # -- lazy loaders -------------------------------------------------------
 
@@ -191,7 +198,6 @@ class MarketplaceBuilder:
                 ref=ref_text,
                 sha=ref_text,
                 requested_version=entry.version,
-                description=entry.description,
                 tags=entry.tags,
                 is_prerelease=sv.is_prerelease if sv else False,
             )
@@ -212,7 +218,6 @@ class MarketplaceBuilder:
                     ref=tag_name,
                     sha=remote_ref.sha,
                     requested_version=entry.version,
-                    description=entry.description,
                     tags=entry.tags,
                     is_prerelease=sv.is_prerelease if sv else False,
                 )
@@ -232,7 +237,6 @@ class MarketplaceBuilder:
                     ref=short,
                     sha=remote_ref.sha,
                     requested_version=entry.version,
-                    description=entry.description,
                     tags=entry.tags,
                     is_prerelease=sv.is_prerelease if sv else False,
                 )
@@ -249,7 +253,6 @@ class MarketplaceBuilder:
                     ref=ref_text,
                     sha=remote_ref.sha,
                     requested_version=entry.version,
-                    description=entry.description,
                     tags=entry.tags,
                     is_prerelease=False,
                 )
@@ -321,7 +324,6 @@ class MarketplaceBuilder:
             ref=best_tag,
             sha=best_sha,
             requested_version=version_range,
-            description=entry.description,
             tags=entry.tags,
             is_prerelease=best_sv.is_prerelease,
         )
@@ -388,13 +390,17 @@ class MarketplaceBuilder:
 
     # -- remote description fetcher -----------------------------------------
 
-    @staticmethod
-    def _fetch_remote_description(pkg: ResolvedPackage) -> Optional[str]:
-        """Best-effort: fetch ``description`` from the package's remote apm.yml.
+    def _fetch_remote_metadata(self, pkg: ResolvedPackage) -> Optional[Dict[str, str]]:
+        """Best-effort: fetch ``description`` and ``version`` from the
+        package's remote ``apm.yml``.
 
-        Returns the description string or ``None`` on any error.  This is
-        purely cosmetic enrichment -- failures are silently logged at debug
-        level and never propagate.
+        Returns a dict with ``description`` and/or ``version`` keys, or
+        ``None`` on any error.  This is purely cosmetic enrichment --
+        failures are silently logged at debug level and never propagate.
+
+        When a GitHub token is available (via ``self._github_token``), it
+        is included as an ``Authorization`` header so private repos can be
+        accessed.
         """
         try:
             path_prefix = f"{pkg.subdir}/" if pkg.subdir else ""
@@ -403,53 +409,92 @@ class MarketplaceBuilder:
                 f"{pkg.source_repo}/{pkg.sha}/{path_prefix}apm.yml"
             )
             req = urllib.request.Request(url)
+            if self._github_token:
+                req.add_header("Authorization", f"token {self._github_token}")
             with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
                 raw = resp.read().decode("utf-8")
             data = yaml.safe_load(raw)
-            if isinstance(data, dict):
-                desc = data.get("description")
-                if isinstance(desc, str) and desc:
-                    logger.debug(
-                        "Fetched description for %s from remote apm.yml",
-                        pkg.name,
-                    )
-                    return desc
+            if not isinstance(data, dict):
+                return None
+            result: Dict[str, str] = {}
+            desc = data.get("description")
+            if isinstance(desc, str) and desc:
+                result["description"] = desc
+            ver = data.get("version")
+            if ver is not None:
+                ver_str = str(ver).strip()
+                if ver_str:
+                    result["version"] = ver_str
+            if result:
+                logger.debug(
+                    "Fetched metadata for %s from remote apm.yml: %s",
+                    pkg.name,
+                    ", ".join(result.keys()),
+                )
+                return result
         except Exception:  # noqa: BLE001 -- best-effort enrichment
             logger.debug(
-                "Could not fetch remote description for %s",
+                "Could not fetch remote metadata for %s",
                 pkg.name,
                 exc_info=True,
             )
         return None
 
-    def _prefetch_descriptions(
-        self, resolved: List[ResolvedPackage]
-    ) -> Dict[str, str]:
-        """Concurrently fetch remote descriptions for packages that lack one.
+    def _resolve_github_token(self) -> Optional[str]:
+        """Resolve a GitHub token using ``AuthResolver``.
 
-        Returns a mapping of ``{package_name: description}`` for successful
-        fetches.  Skipped entirely when ``--offline`` is set.
+        Called once before concurrent fetches.  Returns the token string
+        or ``None`` if no credentials are available.  Never raises --
+        auth failures are logged at debug and silently ignored.
+        """
+        try:
+            resolver = self._auth_resolver
+            if resolver is None:
+                from ..core.auth import AuthResolver  # lazy import
+
+                resolver = AuthResolver()
+                self._auth_resolver = resolver
+            ctx = resolver.resolve("github.com")  # type: ignore[union-attr]
+            if ctx.token:
+                logger.debug("Resolved GitHub token for metadata fetch (source=%s)", ctx.source)
+                return ctx.token
+        except Exception:  # noqa: BLE001 -- best-effort
+            logger.debug("Could not resolve GitHub token for metadata fetch", exc_info=True)
+        return None
+
+    def _prefetch_metadata(
+        self, resolved: List[ResolvedPackage]
+    ) -> Dict[str, Dict[str, str]]:
+        """Concurrently fetch remote metadata for all packages.
+
+        Returns a mapping of ``{package_name: {"description": ..., "version": ...}}``
+        for successful fetches.  Skipped entirely when ``--offline`` is set.
+
+        A GitHub token is resolved once before spawning worker threads and
+        stored on ``self._github_token`` for the workers to read.
         """
         if self._options.offline:
             return {}
 
-        need_fetch = [pkg for pkg in resolved if not pkg.description]
-        if not need_fetch:
+        if not resolved:
             return {}
 
-        results: Dict[str, str] = {}
-        workers = min(self._options.concurrency, len(need_fetch))
+        # Resolve token once -- threads read self._github_token (immutable).
+        self._github_token = self._resolve_github_token()
+
+        results: Dict[str, Dict[str, str]] = {}
+        workers = min(self._options.concurrency, len(resolved))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             future_to_name = {
-                pool.submit(self._fetch_remote_description, pkg): pkg.name
-                for pkg in need_fetch
+                pool.submit(self._fetch_remote_metadata, pkg): pkg.name
+                for pkg in resolved
             }
             for future in as_completed(future_to_name):
                 name = future_to_name[future]
                 try:
-                    desc = future.result()
-                    if desc:
-                        results[name] = desc
+                    meta = future.result()
+                    if meta:
+                        results[name] = meta
                 except Exception:  # noqa: BLE001 -- best-effort
                     pass
         return results
@@ -476,8 +521,8 @@ class MarketplaceBuilder:
         """
         yml = self._load_yml()
 
-        # Pre-fetch descriptions for packages that don't have one
-        remote_descriptions = self._prefetch_descriptions(resolved)
+        # Pre-fetch metadata (description + version) from remote apm.yml
+        remote_metadata = self._prefetch_metadata(resolved)
 
         doc: Dict[str, Any] = OrderedDict()
         doc["name"] = yml.name
@@ -502,10 +547,11 @@ class MarketplaceBuilder:
         for pkg in resolved:
             plugin: Dict[str, Any] = OrderedDict()
             plugin["name"] = pkg.name
-            if pkg.description:
-                plugin["description"] = pkg.description
-            elif pkg.name in remote_descriptions:
-                plugin["description"] = remote_descriptions[pkg.name]
+            meta = remote_metadata.get(pkg.name, {})
+            if meta.get("description"):
+                plugin["description"] = meta["description"]
+            if meta.get("version"):
+                plugin["version"] = meta["version"]
             plugin["tags"] = list(pkg.tags)
 
             source: Dict[str, Any] = OrderedDict()

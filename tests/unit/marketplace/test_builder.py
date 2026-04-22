@@ -124,9 +124,12 @@ def _build_with_mock(
     refs_by_remote: Dict[str, List[RemoteRef]],
     options: Optional[BuildOptions] = None,
 ) -> BuildReport:
-    """Build using a mock ref resolver."""
+    """Build using a mock ref resolver.
+
+    Uses offline=True by default to prevent network calls during tests.
+    """
     yml_path = _write_yml(tmp_path, yml_content)
-    opts = options or BuildOptions()
+    opts = options or BuildOptions(offline=True)
     builder = MarketplaceBuilder(yml_path, opts)
     builder._resolver = _MockRefResolver(refs_by_remote)  # type: ignore[assignment]
     return builder.build()
@@ -987,7 +990,6 @@ class TestGoldenFile:
         data = json.loads(_GOLDEN_PATH.read_text("utf-8"))
         assert "build" not in data
         for plugin in data["plugins"]:
-            assert "version" not in plugin
             assert "subdir" not in plugin
             assert "tag_pattern" not in plugin
             assert "include_prerelease" not in plugin
@@ -1008,7 +1010,7 @@ class TestComposeMarketplaceJson:
 
     def test_compose_returns_ordered_dict(self, tmp_path: Path) -> None:
         yml_path = _write_yml(tmp_path, _BASIC_YML)
-        builder = MarketplaceBuilder(yml_path)
+        builder = MarketplaceBuilder(yml_path, BuildOptions(offline=True))
         resolved = [
             ResolvedPackage(
                 name="test-pkg",
@@ -1017,7 +1019,6 @@ class TestComposeMarketplaceJson:
                 ref="v1.0.0",
                 sha=_SHA_A,
                 requested_version="^1.0.0",
-                description="A test package",
                 tags=("testing",),
                 is_prerelease=False,
             ),
@@ -1036,7 +1037,7 @@ class TestComposeMarketplaceJson:
           name: Test
         """
         yml_path = _write_yml(tmp_path, yml)
-        builder = MarketplaceBuilder(yml_path)
+        builder = MarketplaceBuilder(yml_path, BuildOptions(offline=True))
         result = builder.compose_marketplace_json([])
         assert result["plugins"] == []
 
@@ -1181,7 +1182,7 @@ class TestDuplicateNameWarnings:
             version: "^1.0.0"
         """)
         refs = {"acme/alpha": _make_refs("v1.0.0")}
-        builder = MarketplaceBuilder(yml_path)
+        builder = MarketplaceBuilder(yml_path, BuildOptions(offline=True))
         builder._resolver = _MockRefResolver(refs)  # type: ignore[assignment]
 
         # Craft two resolved packages with the same name but different paths.
@@ -1193,7 +1194,6 @@ class TestDuplicateNameWarnings:
                 ref="v1.0.0",
                 sha=_SHA_A,
                 requested_version="^1.0.0",
-                description=None,
                 tags=(),
                 is_prerelease=False,
             ),
@@ -1204,7 +1204,6 @@ class TestDuplicateNameWarnings:
                 ref="v1.0.0",
                 sha=_SHA_B,
                 requested_version="^1.0.0",
-                description=None,
                 tags=(),
                 is_prerelease=False,
             ),
@@ -1231,7 +1230,7 @@ class TestDuplicateNameWarnings:
             source: acme/alpha
             version: "^1.0.0"
         """)
-        builder = MarketplaceBuilder(yml_path)
+        builder = MarketplaceBuilder(yml_path, BuildOptions(offline=True))
         builder._resolver = _MockRefResolver({  # type: ignore[assignment]
             "acme/alpha": _make_refs("v1.0.0"),
         })
@@ -1244,7 +1243,6 @@ class TestDuplicateNameWarnings:
                 ref="v1.0.0",
                 sha=_SHA_A,
                 requested_version="^1.0.0",
-                description=None,
                 tags=(),
                 is_prerelease=False,
             ),
@@ -1255,7 +1253,6 @@ class TestDuplicateNameWarnings:
                 ref="v1.0.0",
                 sha=_SHA_B,
                 requested_version="^1.0.0",
-                description=None,
                 tags=(),
                 is_prerelease=False,
             ),
@@ -1286,12 +1283,12 @@ class TestDuplicateNameWarnings:
 
 
 # ---------------------------------------------------------------------------
-# _fetch_remote_description tests
+# _fetch_remote_metadata tests
 # ---------------------------------------------------------------------------
 
 
-class TestFetchRemoteDescription:
-    """Tests for best-effort remote apm.yml description fetching."""
+class TestFetchRemoteMetadata:
+    """Tests for best-effort remote apm.yml metadata fetching."""
 
     def _make_pkg(
         self,
@@ -1300,7 +1297,6 @@ class TestFetchRemoteDescription:
         source_repo: str = "acme/my-tool",
         subdir: Optional[str] = None,
         sha: str = _SHA_A,
-        description: Optional[str] = None,
     ) -> ResolvedPackage:
         return ResolvedPackage(
             name=name,
@@ -1309,97 +1305,184 @@ class TestFetchRemoteDescription:
             ref="v1.0.0",
             sha=sha,
             requested_version="^1.0.0",
-            description=description,
             tags=("testing",),
             is_prerelease=False,
         )
 
-    def test_happy_path_returns_description(self) -> None:
-        """urlopen returns valid YAML with description -> returns it."""
+    def _make_builder(self, tmp_path: Path) -> MarketplaceBuilder:
+        yml_path = _write_yml(tmp_path, _BASIC_YML)
+        return MarketplaceBuilder(yml_path)
+
+    def test_happy_path_returns_description_and_version(self, tmp_path: Path) -> None:
+        """urlopen returns valid YAML with description and version."""
         pkg = self._make_pkg()
-        yaml_body = b"name: my-tool\ndescription: Remote tool description\n"
+        builder = self._make_builder(tmp_path)
+        yaml_body = b"name: my-tool\ndescription: Remote tool description\nversion: 2.3.1\n"
         mock_resp = _FakeHTTPResponse(yaml_body)
         with patch("apm_cli.marketplace.builder.urllib.request.urlopen", return_value=mock_resp):
-            result = MarketplaceBuilder._fetch_remote_description(pkg)
-        assert result == "Remote tool description"
+            result = builder._fetch_remote_metadata(pkg)
+        assert result is not None
+        assert result["description"] == "Remote tool description"
+        assert result["version"] == "2.3.1"
 
-    def test_happy_path_with_subdir(self) -> None:
+    def test_happy_path_with_subdir(self, tmp_path: Path) -> None:
         """URL includes subdir when present on the package."""
         pkg = self._make_pkg(subdir="src/plugin")
-        yaml_body = b"description: Nested plugin desc\n"
+        builder = self._make_builder(tmp_path)
+        yaml_body = b"description: Nested plugin desc\nversion: 1.0.0\n"
         mock_resp = _FakeHTTPResponse(yaml_body)
         with patch(
             "apm_cli.marketplace.builder.urllib.request.urlopen",
             return_value=mock_resp,
         ) as mock_open:
-            result = MarketplaceBuilder._fetch_remote_description(pkg)
-        assert result == "Nested plugin desc"
+            result = builder._fetch_remote_metadata(pkg)
+        assert result is not None
+        assert result["description"] == "Nested plugin desc"
         # Verify the URL contains the subdir
         call_args = mock_open.call_args
         req = call_args[0][0]
         assert "src/plugin/apm.yml" in req.full_url
 
-    def test_network_failure_returns_none(self) -> None:
+    def test_description_only(self, tmp_path: Path) -> None:
+        """YAML with description but no version."""
+        pkg = self._make_pkg()
+        builder = self._make_builder(tmp_path)
+        yaml_body = b"name: my-tool\ndescription: Only desc\n"
+        mock_resp = _FakeHTTPResponse(yaml_body)
+        with patch("apm_cli.marketplace.builder.urllib.request.urlopen", return_value=mock_resp):
+            result = builder._fetch_remote_metadata(pkg)
+        assert result is not None
+        assert result["description"] == "Only desc"
+        assert "version" not in result
+
+    def test_version_only(self, tmp_path: Path) -> None:
+        """YAML with version but no description."""
+        pkg = self._make_pkg()
+        builder = self._make_builder(tmp_path)
+        yaml_body = b"name: my-tool\nversion: 3.0.0\n"
+        mock_resp = _FakeHTTPResponse(yaml_body)
+        with patch("apm_cli.marketplace.builder.urllib.request.urlopen", return_value=mock_resp):
+            result = builder._fetch_remote_metadata(pkg)
+        assert result is not None
+        assert result["version"] == "3.0.0"
+        assert "description" not in result
+
+    def test_network_failure_returns_none(self, tmp_path: Path) -> None:
         """URLError from urlopen -> returns None, no crash."""
         import urllib.error
 
         pkg = self._make_pkg()
+        builder = self._make_builder(tmp_path)
         with patch(
             "apm_cli.marketplace.builder.urllib.request.urlopen",
             side_effect=urllib.error.URLError("connection refused"),
         ):
-            result = MarketplaceBuilder._fetch_remote_description(pkg)
+            result = builder._fetch_remote_metadata(pkg)
         assert result is None
 
-    def test_http_404_returns_none(self) -> None:
+    def test_http_404_returns_none(self, tmp_path: Path) -> None:
         """HTTP 404 -> returns None."""
         import urllib.error
 
         pkg = self._make_pkg()
+        builder = self._make_builder(tmp_path)
         with patch(
             "apm_cli.marketplace.builder.urllib.request.urlopen",
             side_effect=urllib.error.HTTPError(
                 url="", code=404, msg="Not Found", hdrs=None, fp=None  # type: ignore[arg-type]
             ),
         ):
-            result = MarketplaceBuilder._fetch_remote_description(pkg)
+            result = builder._fetch_remote_metadata(pkg)
         assert result is None
 
-    def test_missing_description_in_yaml_returns_none(self) -> None:
-        """YAML without a description key -> returns None."""
+    def test_no_description_no_version_returns_none(self, tmp_path: Path) -> None:
+        """YAML without description or version -> returns None."""
         pkg = self._make_pkg()
-        yaml_body = b"name: my-tool\nversion: 1.0.0\n"
+        builder = self._make_builder(tmp_path)
+        yaml_body = b"name: my-tool\ntags:\n  - util\n"
         mock_resp = _FakeHTTPResponse(yaml_body)
         with patch("apm_cli.marketplace.builder.urllib.request.urlopen", return_value=mock_resp):
-            result = MarketplaceBuilder._fetch_remote_description(pkg)
+            result = builder._fetch_remote_metadata(pkg)
         assert result is None
 
-    def test_empty_description_returns_none(self) -> None:
-        """YAML with empty description string -> returns None."""
+    def test_empty_description_excluded(self, tmp_path: Path) -> None:
+        """YAML with empty description string -> excluded from result."""
         pkg = self._make_pkg()
-        yaml_body = b'name: my-tool\ndescription: ""\n'
+        builder = self._make_builder(tmp_path)
+        yaml_body = b'name: my-tool\ndescription: ""\nversion: 1.0.0\n'
         mock_resp = _FakeHTTPResponse(yaml_body)
         with patch("apm_cli.marketplace.builder.urllib.request.urlopen", return_value=mock_resp):
-            result = MarketplaceBuilder._fetch_remote_description(pkg)
-        assert result is None
+            result = builder._fetch_remote_metadata(pkg)
+        assert result is not None
+        assert "description" not in result
+        assert result["version"] == "1.0.0"
 
-    def test_non_dict_yaml_returns_none(self) -> None:
+    def test_non_dict_yaml_returns_none(self, tmp_path: Path) -> None:
         """YAML that parses to a non-dict (e.g. a list) -> returns None."""
         pkg = self._make_pkg()
+        builder = self._make_builder(tmp_path)
         yaml_body = b"- item1\n- item2\n"
         mock_resp = _FakeHTTPResponse(yaml_body)
         with patch("apm_cli.marketplace.builder.urllib.request.urlopen", return_value=mock_resp):
-            result = MarketplaceBuilder._fetch_remote_description(pkg)
+            result = builder._fetch_remote_metadata(pkg)
         assert result is None
 
-    def test_invalid_yaml_returns_none(self) -> None:
+    def test_invalid_yaml_returns_none(self, tmp_path: Path) -> None:
         """Unparseable YAML -> returns None."""
         pkg = self._make_pkg()
+        builder = self._make_builder(tmp_path)
         yaml_body = b"{{{{not: yaml at all"
         mock_resp = _FakeHTTPResponse(yaml_body)
         with patch("apm_cli.marketplace.builder.urllib.request.urlopen", return_value=mock_resp):
-            result = MarketplaceBuilder._fetch_remote_description(pkg)
+            result = builder._fetch_remote_metadata(pkg)
         assert result is None
+
+    def test_numeric_version_coerced_to_string(self, tmp_path: Path) -> None:
+        """YAML version as float (e.g. 1.0) is coerced to string."""
+        pkg = self._make_pkg()
+        builder = self._make_builder(tmp_path)
+        yaml_body = b"name: my-tool\nversion: 1.0\n"
+        mock_resp = _FakeHTTPResponse(yaml_body)
+        with patch("apm_cli.marketplace.builder.urllib.request.urlopen", return_value=mock_resp):
+            result = builder._fetch_remote_metadata(pkg)
+        assert result is not None
+        assert result["version"] == "1.0"
+
+    def test_auth_header_added_when_token_present(self, tmp_path: Path) -> None:
+        """When _github_token is set, Authorization header is included."""
+        pkg = self._make_pkg()
+        builder = self._make_builder(tmp_path)
+        builder._github_token = "ghp_faketoken123"
+        yaml_body = b"description: Private plugin\nversion: 1.0.0\n"
+        mock_resp = _FakeHTTPResponse(yaml_body)
+        with patch(
+            "apm_cli.marketplace.builder.urllib.request.urlopen",
+            return_value=mock_resp,
+        ) as mock_open:
+            result = builder._fetch_remote_metadata(pkg)
+        assert result is not None
+        assert result["description"] == "Private plugin"
+        # Verify Authorization header was set on the Request
+        call_args = mock_open.call_args
+        req = call_args[0][0]
+        assert req.get_header("Authorization") == "token ghp_faketoken123"
+
+    def test_no_auth_header_when_no_token(self, tmp_path: Path) -> None:
+        """When _github_token is None, no Authorization header is set."""
+        pkg = self._make_pkg()
+        builder = self._make_builder(tmp_path)
+        builder._github_token = None
+        yaml_body = b"description: Public plugin\nversion: 2.0.0\n"
+        mock_resp = _FakeHTTPResponse(yaml_body)
+        with patch(
+            "apm_cli.marketplace.builder.urllib.request.urlopen",
+            return_value=mock_resp,
+        ) as mock_open:
+            result = builder._fetch_remote_metadata(pkg)
+        assert result is not None
+        call_args = mock_open.call_args
+        req = call_args[0][0]
+        assert req.get_header("Authorization") is None
 
 
 class _FakeHTTPResponse:
@@ -1419,66 +1502,42 @@ class _FakeHTTPResponse:
 
 
 # ---------------------------------------------------------------------------
-# compose_marketplace_json description enrichment tests
+# compose_marketplace_json metadata enrichment tests
 # ---------------------------------------------------------------------------
 
 
-class TestDescriptionEnrichment:
-    """Tests for compose_marketplace_json remote description enrichment."""
+class TestMetadataEnrichment:
+    """Tests for compose_marketplace_json remote metadata enrichment."""
 
-    def test_enrichment_populates_missing_description(self, tmp_path: Path) -> None:
-        """Package without description gets it from remote fetch."""
+    def test_enrichment_populates_description_and_version(self, tmp_path: Path) -> None:
+        """Package gets description and version from remote fetch."""
         yml_path = _write_yml(tmp_path, _BASIC_YML)
         builder = MarketplaceBuilder(yml_path)
         resolved = [
             ResolvedPackage(
-                name="no-desc-pkg",
-                source_repo="acme/no-desc-pkg",
+                name="enriched-pkg",
+                source_repo="acme/enriched-pkg",
                 subdir=None,
                 ref="v1.0.0",
                 sha=_SHA_A,
                 requested_version="^1.0.0",
-                description=None,
                 tags=("test",),
                 is_prerelease=False,
             ),
         ]
         with patch.object(
             MarketplaceBuilder,
-            "_fetch_remote_description",
-            return_value="Fetched desc",
+            "_fetch_remote_metadata",
+            return_value={"description": "Fetched desc", "version": "1.2.3"},
         ):
             result = builder.compose_marketplace_json(resolved)
         assert result["plugins"][0]["description"] == "Fetched desc"
+        assert result["plugins"][0]["version"] == "1.2.3"
 
-    def test_explicit_description_wins_over_remote(self, tmp_path: Path) -> None:
-        """Package with an explicit description never triggers remote fetch."""
-        yml_path = _write_yml(tmp_path, _BASIC_YML)
-        builder = MarketplaceBuilder(yml_path)
-        resolved = [
-            ResolvedPackage(
-                name="has-desc",
-                source_repo="acme/has-desc",
-                subdir=None,
-                ref="v1.0.0",
-                sha=_SHA_A,
-                requested_version="^1.0.0",
-                description="Explicit",
-                tags=("test",),
-                is_prerelease=False,
-            ),
-        ]
-        with patch.object(
-            MarketplaceBuilder,
-            "_fetch_remote_description",
-        ) as mock_fetch:
-            result = builder.compose_marketplace_json(resolved)
-        # _fetch_remote_description should not be called for packages with descriptions
-        mock_fetch.assert_not_called()
-        assert result["plugins"][0]["description"] == "Explicit"
-
-    def test_remote_fetch_failure_leaves_no_description(self, tmp_path: Path) -> None:
-        """When remote fetch returns None, plugin has no description key."""
+    def test_remote_fetch_failure_leaves_no_description_or_version(
+        self, tmp_path: Path,
+    ) -> None:
+        """When remote fetch returns None, plugin has no description or version."""
         yml_path = _write_yml(tmp_path, _BASIC_YML)
         builder = MarketplaceBuilder(yml_path)
         resolved = [
@@ -1489,18 +1548,18 @@ class TestDescriptionEnrichment:
                 ref="v1.0.0",
                 sha=_SHA_A,
                 requested_version="^1.0.0",
-                description=None,
                 tags=("test",),
                 is_prerelease=False,
             ),
         ]
         with patch.object(
             MarketplaceBuilder,
-            "_fetch_remote_description",
+            "_fetch_remote_metadata",
             return_value=None,
         ):
             result = builder.compose_marketplace_json(resolved)
         assert "description" not in result["plugins"][0]
+        assert "version" not in result["plugins"][0]
 
     def test_offline_mode_skips_fetch(self, tmp_path: Path) -> None:
         """When offline=True, no remote fetch is attempted."""
@@ -1514,52 +1573,215 @@ class TestDescriptionEnrichment:
                 ref="v1.0.0",
                 sha=_SHA_A,
                 requested_version="^1.0.0",
-                description=None,
                 tags=("test",),
                 is_prerelease=False,
             ),
         ]
         with patch.object(
             MarketplaceBuilder,
-            "_fetch_remote_description",
+            "_fetch_remote_metadata",
         ) as mock_fetch:
             result = builder.compose_marketplace_json(resolved)
         mock_fetch.assert_not_called()
         assert "description" not in result["plugins"][0]
+        assert "version" not in result["plugins"][0]
 
-    def test_mixed_explicit_and_fetched(self, tmp_path: Path) -> None:
-        """Mix of packages with and without descriptions."""
+    def test_partial_metadata_only_description(self, tmp_path: Path) -> None:
+        """Remote returns only description, no version."""
         yml_path = _write_yml(tmp_path, _BASIC_YML)
         builder = MarketplaceBuilder(yml_path)
         resolved = [
             ResolvedPackage(
-                name="has-desc",
-                source_repo="acme/has-desc",
+                name="desc-only-pkg",
+                source_repo="acme/desc-only-pkg",
                 subdir=None,
                 ref="v1.0.0",
                 sha=_SHA_A,
                 requested_version="^1.0.0",
-                description="Explicit desc",
-                tags=(),
-                is_prerelease=False,
-            ),
-            ResolvedPackage(
-                name="no-desc",
-                source_repo="acme/no-desc",
-                subdir=None,
-                ref="v1.0.0",
-                sha=_SHA_B,
-                requested_version="^1.0.0",
-                description=None,
                 tags=(),
                 is_prerelease=False,
             ),
         ]
         with patch.object(
             MarketplaceBuilder,
-            "_fetch_remote_description",
-            return_value="Remote desc",
+            "_fetch_remote_metadata",
+            return_value={"description": "Only desc"},
         ):
             result = builder.compose_marketplace_json(resolved)
-        assert result["plugins"][0]["description"] == "Explicit desc"
-        assert result["plugins"][1]["description"] == "Remote desc"
+        assert result["plugins"][0]["description"] == "Only desc"
+        assert "version" not in result["plugins"][0]
+
+    def test_partial_metadata_only_version(self, tmp_path: Path) -> None:
+        """Remote returns only version, no description."""
+        yml_path = _write_yml(tmp_path, _BASIC_YML)
+        builder = MarketplaceBuilder(yml_path)
+        resolved = [
+            ResolvedPackage(
+                name="ver-only-pkg",
+                source_repo="acme/ver-only-pkg",
+                subdir=None,
+                ref="v1.0.0",
+                sha=_SHA_A,
+                requested_version="^1.0.0",
+                tags=(),
+                is_prerelease=False,
+            ),
+        ]
+        with patch.object(
+            MarketplaceBuilder,
+            "_fetch_remote_metadata",
+            return_value={"version": "4.5.6"},
+        ):
+            result = builder.compose_marketplace_json(resolved)
+        assert "description" not in result["plugins"][0]
+        assert result["plugins"][0]["version"] == "4.5.6"
+
+
+# ---------------------------------------------------------------------------
+# Auth token resolution tests
+# ---------------------------------------------------------------------------
+
+
+class TestResolveGitHubToken:
+    """Tests for _resolve_github_token and auth integration in _prefetch_metadata."""
+
+    def test_resolve_token_returns_token_from_auth_resolver(self, tmp_path: Path) -> None:
+        """When AuthResolver returns a token, _resolve_github_token returns it."""
+        from unittest.mock import MagicMock
+
+        mock_resolver = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.token = "ghp_resolved_token"
+        mock_ctx.source = "GITHUB_TOKEN"
+        mock_resolver.resolve.return_value = mock_ctx
+
+        yml_path = _write_yml(tmp_path, _BASIC_YML)
+        builder = MarketplaceBuilder(yml_path, auth_resolver=mock_resolver)
+        token = builder._resolve_github_token()
+        assert token == "ghp_resolved_token"
+        mock_resolver.resolve.assert_called_once_with("github.com")
+
+    def test_resolve_token_returns_none_when_no_token(self, tmp_path: Path) -> None:
+        """When AuthResolver returns no token, _resolve_github_token returns None."""
+        from unittest.mock import MagicMock
+
+        mock_resolver = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.token = None
+        mock_resolver.resolve.return_value = mock_ctx
+
+        yml_path = _write_yml(tmp_path, _BASIC_YML)
+        builder = MarketplaceBuilder(yml_path, auth_resolver=mock_resolver)
+        token = builder._resolve_github_token()
+        assert token is None
+
+    def test_resolve_token_returns_none_on_exception(self, tmp_path: Path) -> None:
+        """When AuthResolver raises, _resolve_github_token returns None (best-effort)."""
+        from unittest.mock import MagicMock
+
+        mock_resolver = MagicMock()
+        mock_resolver.resolve.side_effect = RuntimeError("auth explosion")
+
+        yml_path = _write_yml(tmp_path, _BASIC_YML)
+        builder = MarketplaceBuilder(yml_path, auth_resolver=mock_resolver)
+        token = builder._resolve_github_token()
+        assert token is None
+
+    def test_resolve_token_lazy_creates_resolver(self, tmp_path: Path) -> None:
+        """When no auth_resolver is provided, one is created lazily."""
+        from unittest.mock import MagicMock
+
+        yml_path = _write_yml(tmp_path, _BASIC_YML)
+        builder = MarketplaceBuilder(yml_path)  # no auth_resolver
+        assert builder._auth_resolver is None
+
+        mock_ctx = MagicMock()
+        mock_ctx.token = "ghp_lazy_token"
+        mock_ctx.source = "GH_TOKEN"
+        with patch("apm_cli.core.auth.AuthResolver") as MockAuthCls:
+            MockAuthCls.return_value.resolve.return_value = mock_ctx
+            token = builder._resolve_github_token()
+        assert token == "ghp_lazy_token"
+        assert builder._auth_resolver is not None
+
+    def test_prefetch_metadata_resolves_token_before_fetching(
+        self, tmp_path: Path,
+    ) -> None:
+        """_prefetch_metadata resolves the token once, then workers use it."""
+        from unittest.mock import MagicMock
+
+        mock_resolver = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.token = "ghp_prefetch_token"
+        mock_ctx.source = "GITHUB_APM_PAT"
+        mock_resolver.resolve.return_value = mock_ctx
+
+        yml_path = _write_yml(tmp_path, _BASIC_YML)
+        builder = MarketplaceBuilder(yml_path, auth_resolver=mock_resolver)
+        resolved = [
+            ResolvedPackage(
+                name="auth-pkg",
+                source_repo="acme/auth-pkg",
+                subdir=None,
+                ref="v1.0.0",
+                sha=_SHA_A,
+                requested_version="^1.0.0",
+                tags=(),
+                is_prerelease=False,
+            ),
+        ]
+        yaml_body = b"description: Auth test\nversion: 1.0.0\n"
+        mock_resp = _FakeHTTPResponse(yaml_body)
+        with patch(
+            "apm_cli.marketplace.builder.urllib.request.urlopen",
+            return_value=mock_resp,
+        ) as mock_open:
+            results = builder._prefetch_metadata(resolved)
+        # Token was resolved
+        assert builder._github_token == "ghp_prefetch_token"
+        # Request included auth header
+        call_args = mock_open.call_args
+        req = call_args[0][0]
+        assert req.get_header("Authorization") == "token ghp_prefetch_token"
+        # Result was populated
+        assert "auth-pkg" in results
+        assert results["auth-pkg"]["description"] == "Auth test"
+
+    def test_prefetch_metadata_works_without_token(self, tmp_path: Path) -> None:
+        """_prefetch_metadata works even when no token is available."""
+        from unittest.mock import MagicMock
+
+        mock_resolver = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.token = None
+        mock_resolver.resolve.return_value = mock_ctx
+
+        yml_path = _write_yml(tmp_path, _BASIC_YML)
+        builder = MarketplaceBuilder(yml_path, auth_resolver=mock_resolver)
+        resolved = [
+            ResolvedPackage(
+                name="public-pkg",
+                source_repo="acme/public-pkg",
+                subdir=None,
+                ref="v1.0.0",
+                sha=_SHA_A,
+                requested_version="^1.0.0",
+                tags=(),
+                is_prerelease=False,
+            ),
+        ]
+        yaml_body = b"description: Public test\nversion: 2.0.0\n"
+        mock_resp = _FakeHTTPResponse(yaml_body)
+        with patch(
+            "apm_cli.marketplace.builder.urllib.request.urlopen",
+            return_value=mock_resp,
+        ) as mock_open:
+            results = builder._prefetch_metadata(resolved)
+        # No token was set
+        assert builder._github_token is None
+        # Request had no auth header
+        call_args = mock_open.call_args
+        req = call_args[0][0]
+        assert req.get_header("Authorization") is None
+        # Result was still populated (public repo)
+        assert "public-pkg" in results

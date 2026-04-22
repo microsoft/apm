@@ -90,8 +90,6 @@ _PACKAGE_ENTRY_KEYS = frozenset({
     "description",
     "tags",
 })
-
-
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
@@ -132,7 +130,6 @@ class PackageEntry:
     tag_pattern: Optional[str] = None
     include_prerelease: bool = False
     # Anthropic pass-through fields
-    description: Optional[str] = None
     tags: Tuple[str, ...] = ()
 
 
@@ -334,11 +331,6 @@ def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
             f"'packages[{index}].include_prerelease' must be a boolean"
         )
 
-    # Anthropic pass-through: description
-    description: Optional[str] = raw.get("description")
-    if description is not None:
-        description = str(description).strip() or None
-
     # Anthropic pass-through: tags
     raw_tags = raw.get("tags")
     tags: Tuple[str, ...] = ()
@@ -357,7 +349,6 @@ def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
         ref=ref,
         tag_pattern=tag_pattern,
         include_prerelease=include_prerelease,
-        description=description,
         tags=tags,
     )
 
