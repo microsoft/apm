@@ -110,13 +110,11 @@ class TestHelpTextShowsNoPolicy:
         normalized = " ".join(result.output.split())
         assert "Does NOT bypass apm audit --ci" in normalized
 
-    def test_update_help_shows_no_policy(self):
+    def test_update_help_does_not_show_no_policy(self):
+        """`--no-policy` is intentionally NOT exposed on `apm update` (CLI self-update)."""
         result = self.runner.invoke(cli, ["update", "--help"])
         assert result.exit_code == 0
-        assert "--no-policy" in result.output
-        assert "Skip org policy enforcement" in result.output
-        normalized = " ".join(result.output.split())
-        assert "Does NOT bypass apm audit --ci" in normalized
+        assert "--no-policy" not in result.output
 
     def test_help_text_is_plain_ascii(self):
         """Help text must be plain ASCII per cli.instructions.md."""
@@ -324,22 +322,24 @@ class TestInstallMcpNoPolicy:
 
 
 # ---------------------------------------------------------------------------
-# apm update --no-policy -> flag accepted
+# apm update --no-policy -> rejected (apm update is CLI self-update, not deps)
 # ---------------------------------------------------------------------------
 
 class TestUpdateNoPolicy:
-    """apm update --no-policy is accepted without error."""
+    """apm update intentionally does NOT accept --no-policy."""
 
     def setup_method(self):
         self.runner = CliRunner()
 
-    @patch("apm_cli.commands.update.is_self_update_enabled", return_value=False)
-    def test_update_no_policy_flag_accepted(self, mock_enabled):
-        """update --no-policy is a valid invocation (flag does not cause error)."""
+    def test_update_no_policy_flag_rejected(self):
+        """`apm update --no-policy` exits non-zero with usage error.
+
+        ``apm update`` is the CLI self-updater (refreshes the apm binary), not a
+        dependency refresh. A `--no-policy` flag would be misleading and dead.
+        """
         result = self.runner.invoke(cli, ["update", "--no-policy"])
-        # Self-update is disabled in test, so it returns early -- but no error from bad flag
-        assert result.exit_code == 0, (
-            f"Expected exit 0, got {result.exit_code}\nOutput: {result.output}"
+        assert result.exit_code != 0, (
+            f"Expected non-zero exit, got 0\nOutput: {result.output}"
         )
 
 

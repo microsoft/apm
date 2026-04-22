@@ -227,88 +227,12 @@ def _is_policy_disabled(ctx: "InstallContext") -> bool:
 
 
 def _discover_with_chain(ctx: "InstallContext"):
-    """Run discovery and wire resolve_policy_chain + cache with real chain_refs.
+    """Run chain-aware discovery via the shared seam in ``discovery.py``.
 
-    C1 amendment: today W1 callers pass ``[repo_ref]`` only to
-    ``_write_cache``.  When the fetched policy has ``extends:``, we must
-    resolve the full inheritance chain and re-write the cache with the
-    merged effective policy AND the real chain refs so the fingerprint
-    covers parent + leaf.
+    Delegates to :func:`~apm_cli.policy.discovery.discover_policy_with_chain`
+    which walks the inheritance chain, merges effective policy, and persists
+    the cache with real ``chain_refs``.
     """
-    from apm_cli.policy import discovery as _discovery_mod
-    from apm_cli.policy import inheritance as _inheritance_mod
+    from apm_cli.policy.discovery import discover_policy_with_chain
 
-    fetch_result = _discovery_mod.discover_policy(
-        ctx.project_root,
-        policy_override=None,
-        no_cache=False,
-    )
-
-    # If discovery found a valid policy with extends, resolve the chain
-    # and re-persist with real chain_refs so the fingerprint covers parent+leaf.
-    if (
-        fetch_result.policy is not None
-        and fetch_result.outcome in ("found", "cached_stale")
-        and fetch_result.policy.extends is not None
-        and not fetch_result.cached  # Don't re-resolve if served from cache
-    ):
-        # Build the chain: the policy we got is the leaf.  Fetch the parent
-        # via its extends reference, then merge.
-        _resolve_and_cache_chain(ctx, fetch_result)
-
-    return fetch_result
-
-
-def _resolve_and_cache_chain(ctx: "InstallContext", fetch_result) -> None:
-    """Resolve inheritance chain and update cache with merged policy + chain_refs.
-
-    Mutates ``fetch_result.policy`` in-place with the merged effective policy.
-    """
-    from apm_cli.policy import discovery as _discovery_mod
-    from apm_cli.policy import inheritance as _inheritance_mod
-
-    leaf_policy = fetch_result.policy
-    extends_ref = leaf_policy.extends
-
-    # Fetch the parent policy (could itself have extends)
-    parent_result = _discovery_mod.discover_policy(
-        ctx.project_root,
-        policy_override=extends_ref,
-        no_cache=False,
-    )
-
-    if parent_result.policy is None:
-        # Parent fetch failed -- use leaf as-is (already cached by discovery)
-        return
-
-    # Build chain [parent, leaf] and merge
-    chain = [parent_result.policy, leaf_policy]
-    try:
-        merged = _inheritance_mod.resolve_policy_chain(chain)
-    except Exception:
-        # Chain resolution failed -- use leaf as-is
-        return
-
-    # Build chain_refs from sources
-    chain_refs = []
-    parent_source = parent_result.source
-    if parent_source:
-        chain_refs.append(
-            parent_source.removeprefix("org:").removeprefix("url:").removeprefix("file:")
-        )
-    leaf_source = fetch_result.source
-    if leaf_source:
-        chain_refs.append(
-            leaf_source.removeprefix("org:").removeprefix("url:").removeprefix("file:")
-        )
-
-    # Re-write cache with merged effective policy + real chain_refs
-    # Use the leaf's source key as the cache key
-    cache_key = leaf_source.removeprefix("org:").removeprefix("url:").removeprefix("file:")
-    if cache_key:
-        _discovery_mod._write_cache(
-            cache_key, merged, ctx.project_root, chain_refs=chain_refs
-        )
-
-    # Update the fetch result with the merged policy
-    fetch_result.policy = merged
+    return discover_policy_with_chain(ctx.project_root)

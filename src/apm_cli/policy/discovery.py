@@ -79,6 +79,102 @@ class PolicyFetchResult:
         return self.policy is not None
 
 
+def discover_policy_with_chain(
+    project_root: Path,
+    *,
+    no_policy: bool = False,
+) -> PolicyFetchResult:
+    """Discover policy with full inheritance chain resolution.
+
+    This is the **shared entry point** for all command sites that need
+    chain-aware policy discovery (gate phase, ``--mcp`` preflight,
+    ``--dry-run`` preflight).  It ensures every path resolves the same
+    merged effective policy with real ``chain_refs``.
+
+    Parameters
+    ----------
+    project_root:
+        Project root directory (used for git-remote org extraction and cache).
+    no_policy:
+        When ``True`` **or** ``APM_POLICY_DISABLE=1`` is set, short-circuit
+        to ``outcome="disabled"`` without any network I/O.
+
+    Returns
+    -------
+    PolicyFetchResult
+        With merged effective policy and real chain_refs when inheritance
+        is present.  Outcome follows the 9-outcome matrix (section B).
+    """
+    # -- Escape hatches ------------------------------------------------
+    if no_policy or os.environ.get("APM_POLICY_DISABLE") == "1":
+        return PolicyFetchResult(outcome="disabled")
+
+    # -- Base discovery ------------------------------------------------
+    fetch_result = discover_policy(project_root)
+
+    # -- Chain resolution if leaf has extends: -------------------------
+    if (
+        fetch_result.policy is not None
+        and fetch_result.outcome in ("found", "cached_stale")
+        and fetch_result.policy.extends is not None
+        and not fetch_result.cached  # Don't re-resolve if served from cache
+    ):
+        _resolve_and_persist_chain(fetch_result, project_root)
+
+    return fetch_result
+
+
+def _resolve_and_persist_chain(
+    fetch_result: PolicyFetchResult,
+    project_root: Path,
+) -> None:
+    """Resolve inheritance chain and update cache with merged policy + chain_refs.
+
+    Mutates *fetch_result*.policy in-place with the merged effective policy.
+    Called by :func:`discover_policy_with_chain` -- not intended for direct use.
+    """
+    from . import inheritance as _inheritance_mod
+
+    leaf_policy = fetch_result.policy
+    extends_ref = leaf_policy.extends
+
+    # Fetch the parent policy (could itself have extends:)
+    parent_result = discover_policy(
+        project_root,
+        policy_override=extends_ref,
+        no_cache=False,
+    )
+
+    if parent_result.policy is None:
+        # Parent fetch failed -- use leaf as-is (already cached by discovery)
+        return
+
+    # Build chain [parent, leaf] and merge
+    chain = [parent_result.policy, leaf_policy]
+    try:
+        merged = _inheritance_mod.resolve_policy_chain(chain)
+    except Exception:
+        # Chain resolution failed -- use leaf as-is
+        return
+
+    # Build chain_refs from sources
+    chain_refs: List[str] = []
+    for src in (parent_result.source, fetch_result.source):
+        if src:
+            chain_refs.append(
+                src.removeprefix("org:").removeprefix("url:").removeprefix("file:")
+            )
+
+    # Re-write cache with merged effective policy + real chain_refs
+    leaf_source = fetch_result.source
+    cache_key = leaf_source.removeprefix("org:").removeprefix("url:").removeprefix("file:")
+    if cache_key:
+        _write_cache(cache_key, merged, project_root, chain_refs=chain_refs)
+
+    # Update the fetch result with the merged policy
+    fetch_result.policy = merged
+
+
 def discover_policy(
     project_root: Path,
     *,

@@ -87,7 +87,7 @@ def _make_logger(**kwargs) -> InstallLogger:
 def _patch_discover(fetch_result: PolicyFetchResult):
     """Return a patch context manager for discover_policy."""
     return patch(
-        "apm_cli.policy.install_preflight.discover_policy",
+        "apm_cli.policy.install_preflight.discover_policy_with_chain",
         return_value=fetch_result,
     )
 

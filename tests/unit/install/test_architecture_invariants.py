@@ -104,12 +104,19 @@ def test_install_py_under_legacy_budget():
     The call lives in install.py because it coordinates between
     policy discovery and the existing render_and_exit presenter.
     The pending --mcp extraction will recover all #827 headroom.
+
+    Issue #827 (C2-S1) raised 1650 -> 1675 to add a second
+    run_policy_preflight call guarding transitive MCP servers
+    collected from installed APM packages (+23 lines). This is a
+    security-critical gate: without it, transitive MCP servers
+    bypass policy enforcement entirely (panel blocker S1).
+    The pending --mcp extraction will recover this budget.
     """
     install_py = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "commands" / "install.py"
     assert install_py.is_file()
     n = _line_count(install_py)
-    assert n <= 1650, (
-        f"commands/install.py grew to {n} LOC (budget 1650). "
+    assert n <= 1675, (
+        f"commands/install.py grew to {n} LOC (budget 1675). "
         "Do NOT trim cosmetically -- engage the python-architecture skill "
         "(.github/skills/python-architecture/SKILL.md) and propose an "
         "extraction into apm_cli/install/."

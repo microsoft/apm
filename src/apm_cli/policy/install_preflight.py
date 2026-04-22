@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 from typing import Optional, Tuple
 
-from .discovery import PolicyFetchResult, discover_policy
+from .discovery import PolicyFetchResult, discover_policy_with_chain
 from .models import CIAuditResult
 from .policy_checks import run_dependency_policy_checks
 from .schema import ApmPolicy
@@ -37,6 +37,11 @@ class PolicyBlockError(Exception):
         super().__init__(message)
         self.audit_result = audit_result
         self.policy_source = policy_source
+
+
+# Maximum lines to emit per severity bucket in dry-run preview.
+# Overflow is collapsed into a single tail line pointing to ``apm audit``.
+_DRY_RUN_PREVIEW_LIMIT = 5
 
 
 def run_policy_preflight(
@@ -92,8 +97,8 @@ def run_policy_preflight(
         logger.policy_disabled(reason)
         return None, False
 
-    # -- Discovery -----------------------------------------------------
-    fetch_result = discover_policy(project_root)
+    # -- Discovery (chain-aware: resolves extends: + merges) -----------
+    fetch_result = discover_policy_with_chain(project_root)
 
     # Outcome routing (plan section B)
     if not fetch_result.found:
@@ -124,23 +129,46 @@ def run_policy_preflight(
     )
 
     if not audit_result.passed:
-        # Emit diagnostics via logger
-        for check in audit_result.failed_checks:
-            for detail in check.details:
-                dep_ref = detail.split(":")[0].strip() if ":" in detail else detail
-                if dry_run:
-                    # W2-dry-run: preview verdicts -- never raise, never
-                    # push to DiagnosticCollector.  Uses logger.warning()
-                    # so output renders with [!] symbol consistently.
+        if dry_run:
+            # -- D2: capped preview per severity bucket ----------------
+            block_lines: list[tuple[str, str]] = []
+            warn_lines: list[tuple[str, str]] = []
+            for check in audit_result.failed_checks:
+                for detail in check.details:
+                    dep_ref = detail.split(":")[0].strip() if ":" in detail else detail
                     if enforcement == "block":
-                        logger.warning(
-                            f"Would be blocked by policy: {dep_ref} -- {detail}"
-                        )
+                        block_lines.append((dep_ref, detail))
                     else:
-                        logger.warning(
-                            f"Policy warning: {dep_ref} -- {detail}"
-                        )
-                else:
+                        warn_lines.append((dep_ref, detail))
+
+            # Emit block bucket (capped)
+            for dep_ref, detail in block_lines[:_DRY_RUN_PREVIEW_LIMIT]:
+                logger.warning(
+                    f"Would be blocked by policy: {dep_ref} -- {detail}"
+                )
+            overflow = len(block_lines) - _DRY_RUN_PREVIEW_LIMIT
+            if overflow > 0:
+                logger.warning(
+                    f"... and {overflow} more would be blocked by policy. "
+                    "Run `apm audit` for full report."
+                )
+
+            # Emit warn bucket (capped)
+            for dep_ref, detail in warn_lines[:_DRY_RUN_PREVIEW_LIMIT]:
+                logger.warning(
+                    f"Policy warning: {dep_ref} -- {detail}"
+                )
+            overflow = len(warn_lines) - _DRY_RUN_PREVIEW_LIMIT
+            if overflow > 0:
+                logger.warning(
+                    f"... and {overflow} more policy warnings. "
+                    "Run `apm audit` for full report."
+                )
+        else:
+            # -- Real install: push each violation to DiagnosticCollector
+            for check in audit_result.failed_checks:
+                for detail in check.details:
+                    dep_ref = detail.split(":")[0].strip() if ":" in detail else detail
                     logger.policy_violation(
                         dep_ref=dep_ref,
                         reason=detail,
