@@ -1040,7 +1040,7 @@ class GitHubPackageDownloader:
             if is_generic:
                 if dep_host:
                     host_info = self.auth_resolver.classify_host(
-                        dep_host, port=dep_ref.port if dep_ref else None,
+                        dep_host, port=dep_ref.port,
                     )
                     host_name = host_info.display_name
                 else:

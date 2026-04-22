@@ -60,7 +60,7 @@ class TestGenericHostCloneErrorPort:
         dl = _make_downloader()
 
         def _fake_clone(*_args, **_kwargs):
-            raise GitCommandError("clone", "failed")
+            raise GitCommandError("clone", 128)
 
         with patch.dict(os.environ, {}, clear=True), patch(
             "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
