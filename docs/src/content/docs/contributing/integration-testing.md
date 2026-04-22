@@ -10,6 +10,12 @@ This document describes APM's integration testing strategy to ensure runtime set
 
 APM uses a tiered approach to integration testing:
 
+Some command families also keep their own suite-specific maintainer
+notes next to the tests. For example, the marketplace CLI integration
+suite is documented in `tests/integration/marketplace/README.md`, which
+also points back to the package-based command layout in
+`src/apm_cli/commands/marketplace/`.
+
 ### 1. **Smoke Tests** (Every CI run)
 - **Location**: `tests/integration/test_runtime_smoke.py`
 - **Purpose**: Fast verification that runtime setup scripts work

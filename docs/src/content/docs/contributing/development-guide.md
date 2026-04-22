@@ -105,6 +105,8 @@ pytest -q
 This project follows:
 - [PEP 8](https://pep8.org/) for Python style guidelines
 - We use Black for code formatting and isort for import sorting
+- Prefer small command modules over oversized single-file command groups
+  when a CLI surface grows into multiple subcommands.
 
 You can run these tools with:
 
@@ -112,6 +114,28 @@ You can run these tools with:
 uv run black .
 uv run isort .
 ```
+
+## CLI Command Layout
+
+CLI command groups should stay easy to review and test. When a command
+surface grows to multiple substantial subcommands, prefer a package
+layout like `src/apm_cli/commands/marketplace/` instead of one large
+module.
+
+The marketplace commands are the reference example:
+
+- `src/apm_cli/commands/marketplace/__init__.py` keeps click group wiring,
+  shared helpers, and the lighter marketplace registry commands such as
+  `add`, `list`, `browse`, `update`, `remove`, and `search`.
+- One file owns each substantial subcommand such as `build.py`,
+  `check.py`, `doctor.py`, `init.py`, `outdated.py`, `publish.py`, and
+  `validate.py`.
+- Nested groups can live in a subpackage such as
+  `src/apm_cli/commands/marketplace/plugin/`, with one file per
+  subgroup command such as `add.py`, `set.py`, and `remove.py`.
+- If tests or external imports still rely on an older path, keep a thin
+  compatibility re-export like `src/apm_cli/commands/marketplace_plugin.py`
+  until those imports can be retired.
 
 ## Documentation
 

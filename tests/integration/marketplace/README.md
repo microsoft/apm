@@ -139,14 +139,36 @@ APM-only keys (`subdir`, `version`, `ref` in yml, `tag_pattern`,
 
 ---
 
-## 5. Failure Triage Guide
+## 5. Command Code Map
+
+The marketplace CLI is now implemented as a package rather than a
+single monolithic command module.
+
+- `src/apm_cli/commands/marketplace/__init__.py` holds the click group,
+  shared render/load helpers, and the lighter registry commands
+  (`add`, `list`, `browse`, `update`, `remove`, `search`).
+- `src/apm_cli/commands/marketplace/build.py`,
+  `check.py`, `doctor.py`, `init.py`, `outdated.py`, `publish.py`, and
+  `validate.py` each own one substantial subcommand.
+- `src/apm_cli/commands/marketplace/plugin/` contains the plugin
+  subgroup split into `add.py`, `set.py`, and `remove.py`.
+- `src/apm_cli/commands/marketplace_plugin.py` is a compatibility
+  re-export for older imports used by tests or external callers.
+
+When triaging a marketplace CLI failure, start with the specific
+subcommand module and then check `__init__.py` only if the issue looks
+shared across multiple commands.
+
+---
+
+## 6. Failure Triage Guide
 
 | Symptom | First suspect | Action |
 |---------|--------------|--------|
 | Unit tests fail | Library logic | Check the specific unit test file in tests/unit/marketplace/. |
 | Integration tests fail on yml parse | yml_schema.py | Confirm the test fixture YAML is valid. |
 | Integration tests fail on JSON content | builder.compose_marketplace_json | Check key order and golden fixture. |
-| Integration tests fail on exit code | CLI command handler | Inspect the sys.exit() paths in commands/marketplace.py. |
+| Integration tests fail on exit code | CLI command handler | Inspect the `sys.exit()` paths in `src/apm_cli/commands/marketplace/__init__.py` and the relevant subcommand module under `src/apm_cli/commands/marketplace/`. |
 | Integration tests fail on mock | conftest.py fixture | Confirm mock_ref_resolver patches the right import path. |
 | Live tests fail on resolution | Real remote | Check that APM_E2E_MARKETPLACE points to a valid repo with tags. |
 | Live tests fail on timeout | Network or rate limit | Increase timeout or set GITHUB_TOKEN to raise rate limit. |
@@ -154,7 +176,7 @@ APM-only keys (`subdir`, `version`, `ref` in yml, `tag_pattern`,
 
 ---
 
-## 6. Adding a New Test
+## 7. Adding a New Test
 
 1. Identify the tier: does it need real disk I/O? -> integration.  Does it
    need a real remote? -> live.  Otherwise -> unit.
@@ -168,7 +190,7 @@ APM-only keys (`subdir`, `version`, `ref` in yml, `tag_pattern`,
 
 ---
 
-## 7. Environment Variables
+## 8. Environment Variables
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
