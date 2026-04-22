@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `pr-review-panel` workflow now runs on PRs from forks: switched to `pull_request_target` with label-only triggering and a workflow-dispatch path (#826, #836, #837)
 
+### Fixed
+
+- Lowercase the host axis of the `_fallback_port_warned` dedup key so deps that differ only in hostname casing collapse to one cross-protocol fallback warning, matching the `AuthResolver._cache` convention (RFC 4343). Closes #800 (#815)
+
 ## [0.9.0] - 2026-04-21
 
 ### Changed (BREAKING)
