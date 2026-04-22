@@ -9,6 +9,16 @@ import pytest
 
 from apm_cli.core.auth import AuthResolver, HostInfo, AuthContext
 from apm_cli.core.token_manager import GitHubTokenManager
+from apm_cli.core import azure_cli as _azure_cli_mod
+
+
+@pytest.fixture(autouse=True)
+def _reset_bearer_singleton():
+    """Reset AzureCliBearerProvider singleton between tests so per-test
+    mocks of the class take effect (B3 #852)."""
+    _azure_cli_mod._provider_singleton = None
+    yield
+    _azure_cli_mod._provider_singleton = None
 
 
 # ---------------------------------------------------------------------------

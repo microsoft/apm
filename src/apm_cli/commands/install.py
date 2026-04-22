@@ -1094,8 +1094,12 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         # scope initialisation below throws).
         is_partial = bool(packages)
         logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=is_partial)
+        # HACK(#852): surface --verbose to deeper auth layers via env var until
+        # AuthResolver gains a first-class verbose channel. Restored in finally
+        # below to keep the mutation scoped to this command invocation.
+        _apm_verbose_prev = os.environ.get("APM_VERBOSE")
         if verbose:
-            os.environ["APM_VERBOSE"] = "1"  # surfaces auth source in deeper layers
+            os.environ["APM_VERBOSE"] = "1"
 
         # W2-pkg-rollback (#827): snapshot bytes captured BEFORE
         # _validate_and_add_packages_to_apm_yml mutates apm.yml.
@@ -1597,6 +1601,12 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         if not verbose:
             logger.progress("Run with --verbose for detailed diagnostics")
         sys.exit(1)
+    finally:
+        # HACK(#852) cleanup: restore APM_VERBOSE so it stays scoped to this call.
+        if _apm_verbose_prev is None:
+            os.environ.pop("APM_VERBOSE", None)
+        else:
+            os.environ["APM_VERBOSE"] = _apm_verbose_prev
 
 
 # ---------------------------------------------------------------------------

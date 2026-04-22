@@ -11,11 +11,21 @@ Skip conditions:
     - APM_TEST_ADO_BEARER is not set to "1" (opt-in, since these tests need
       tenant context the test runner cannot itself control)
 
+Maintainer note (#852):
+    These tests run in CI only behind a Workload Identity Federation (WIF)
+    service connection that maintainers must provision (see the
+    `ado-bearer-tests` job in `.github/workflows/auth-acceptance.yml` for
+    setup steps). External contributors will see the job skipped, which is
+    expected -- the bearer-token logic is exhaustively unit-tested in
+    `tests/unit/test_azure_cli.py` and `tests/unit/test_auth.py`. Live
+    network coverage is the maintainer's responsibility.
+
 Refs: microsoft/apm#852
 """
 
 import os
 import shutil
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -72,8 +82,9 @@ def run_apm(cmd: str, cwd: Path, env_overrides: dict, timeout: int = 90) -> subp
             env[k] = v
 
     return subprocess.run(
-        f"{apm_path} {cmd}",
-        shell=True,
+        # B4 #852: list-form (shell=False) avoids command injection via
+        # CI-supplied repo names that may contain shell metacharacters.
+        [apm_path, *shlex.split(cmd)],
         cwd=cwd,
         capture_output=True,
         text=True,

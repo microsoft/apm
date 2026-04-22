@@ -80,6 +80,7 @@ This catches cases where a developer updates `apm.yml` but forgets to re-run `ap
 steps:
   - script: |
       curl -sSL https://aka.ms/apm-unix | sh
+      export PATH="$HOME/.apm/bin:$PATH"
       apm install
       # Optional: only if targeting Codex, Gemini, or similar tools
       # apm compile
@@ -102,6 +103,7 @@ steps:
       scriptLocation: inlineScript
       inlineScript: |
         curl -sSL https://aka.ms/apm-unix | sh
+        export PATH="$HOME/.apm/bin:$PATH"
         apm install
 ```
 

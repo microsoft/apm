@@ -137,7 +137,8 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             if not result and verbose_log:
                 try:
                     err_ctx = auth_resolver.build_error_context(
-                        host, f"accessing {package}", org=org, port=dep_ref.port
+                        host, f"accessing {package}", org=org, port=dep_ref.port,
+                        dep_url=dep_ref.repo_url,
                     )
                     for line in err_ctx.splitlines():
                         verbose_log(line)
@@ -236,9 +237,9 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                 )
             ):
                 try:
-                    from apm_cli.core.azure_cli import AzureCliBearerProvider, AzureCliBearerError
+                    from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
                     from apm_cli.utils.github_host import build_ado_bearer_git_env
-                    provider = AzureCliBearerProvider()
+                    provider = get_bearer_provider()
                     if provider.is_available():
                         try:
                             bearer = provider.get_bearer_token()
@@ -347,7 +348,8 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             if verbose_log:
                 try:
                     ctx = auth_resolver.build_error_context(
-                        host, f"accessing {package}", org=org, port=port
+                        host, f"accessing {package}", org=org, port=port,
+                        dep_url=getattr(dep_ref, "repo_url", None),
                     )
                     for line in ctx.splitlines():
                         verbose_log(line)
@@ -397,7 +399,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
         except Exception:
             if verbose_log:
                 try:
-                    ctx = auth_resolver.build_error_context(host, f"accessing {package}", org=org)
+                    ctx = auth_resolver.build_error_context(host, f"accessing {package}", org=org, dep_url=package)
                     for line in ctx.splitlines():
                         verbose_log(line)
                 except Exception:

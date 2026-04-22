@@ -212,6 +212,29 @@ class AzureCliBearerProvider:
 # Helpers
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Module-level singleton (B3 #852)
+# ---------------------------------------------------------------------------
+#
+# AzureCliBearerProvider advertises an in-memory token cache, but every fresh
+# instantiation gets an empty cache, so per-callsite construction defeats the
+# design. Use get_bearer_provider() everywhere to share one cache across the
+# process. Tests can call .clear_cache() on the returned singleton.
+
+_provider_singleton: Optional["AzureCliBearerProvider"] = None
+_provider_singleton_lock = threading.Lock()
+
+
+def get_bearer_provider() -> "AzureCliBearerProvider":
+    """Return the process-wide AzureCliBearerProvider singleton."""
+    global _provider_singleton
+    if _provider_singleton is None:
+        with _provider_singleton_lock:
+            if _provider_singleton is None:
+                _provider_singleton = AzureCliBearerProvider()
+    return _provider_singleton
+
+
 def _looks_like_jwt(value: str) -> bool:
     """Return True if *value* loosely resembles a JWT.
 

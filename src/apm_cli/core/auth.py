@@ -85,7 +85,7 @@ class AuthContext:
     Not frozen because ``git_env`` is a dict (unhashable).
     """
 
-    token: Optional[str]
+    token: Optional[str] = field(repr=False)  # B1 #852: never expose JWT/PAT via repr()
     source: str  # e.g. "GITHUB_APM_PAT_ORGNAME", "GITHUB_TOKEN", "none"
     token_type: str  # "fine-grained", "classic", "oauth", "github-app", "unknown"
     host_info: HostInfo
@@ -341,8 +341,8 @@ class AuthResolver:
                 and "Authentication failed" not in exc_msg
             ):
                 raise exc
-            from apm_cli.core.azure_cli import AzureCliBearerProvider, AzureCliBearerError
-            provider = AzureCliBearerProvider()
+            from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
+            provider = get_bearer_provider()
             if not provider.is_available():
                 raise exc
             try:
@@ -427,17 +427,18 @@ class AuthResolver:
 
         # --- ADO-specific error cases ---
         if host_info.kind == "ado":
-            from apm_cli.core.azure_cli import AzureCliBearerProvider
-            provider = AzureCliBearerProvider()
+            from apm_cli.core.azure_cli import get_bearer_provider
+            provider = get_bearer_provider()
             az_available = provider.is_available()
             pat_set = bool(os.environ.get("ADO_APM_PAT"))
 
-            org_part = ""
-            source_url = dep_url or ""
-            if source_url:
-                parts = source_url.replace("https://", "").split("/")
-                if len(parts) >= 2 and (parts[0] in ("dev.azure.com",) or parts[0].endswith(".visualstudio.com")):
-                    org_part = parts[1] if len(parts) > 1 else ""
+            org_part = org or ""
+            if not org_part:
+                source_url = dep_url or ""
+                if source_url:
+                    parts = source_url.replace("https://", "").split("/")
+                    if len(parts) >= 2 and (parts[0] in ("dev.azure.com",) or parts[0].endswith(".visualstudio.com")):
+                        org_part = parts[1] if len(parts) > 1 else ""
 
             token_url = f"https://dev.azure.com/{org_part}/_usersSettings/tokens" if org_part else "https://dev.azure.com/<org>/_usersSettings/tokens"
 
@@ -466,10 +467,14 @@ class AuthResolver:
             if not az_available:
                 # Case 1: no az, no PAT
                 return (
-                    f"\n    Azure DevOps requires authentication. Set a Personal Access Token:\n\n"
-                    f"      export ADO_APM_PAT=your_token\n\n"
-                    f"    Create one at {token_url}\n"
-                    f"    with Code (Read) scope.\n\n"
+                    f"\n    Azure DevOps requires authentication. You have two options:\n\n"
+                    f"    1. Install Azure CLI and sign in (recommended for Entra ID users):\n"
+                    f"         https://aka.ms/installazurecliwindows  (or 'brew install azure-cli')\n"
+                    f"         az login\n"
+                    f"         apm install                   # retry -- no env var needed\n\n"
+                    f"    2. Use a Personal Access Token:\n"
+                    f"         export ADO_APM_PAT=your_token\n"
+                    f"         (Create one at {token_url} with Code (Read) scope.)\n\n"
                     f"    Docs: https://aka.ms/apm-ado-auth"
                 )
 
@@ -572,8 +577,8 @@ class AuthResolver:
             if pat:
                 return pat, "ADO_APM_PAT", "basic"
             # Try AAD bearer via az cli (lazy import to avoid module-load cost on non-ADO paths)
-            from apm_cli.core.azure_cli import AzureCliBearerProvider, AzureCliBearerError
-            provider = AzureCliBearerProvider()
+            from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
+            provider = get_bearer_provider()
             if provider.is_available():
                 try:
                     bearer = provider.get_bearer_token()
@@ -641,11 +646,14 @@ class AuthResolver:
         env["GIT_TERMINAL_PROMPT"] = "0"
         # On Windows, GIT_ASKPASS='' can cause issues; use 'echo' instead
         env["GIT_ASKPASS"] = "" if sys.platform != "win32" else "echo"
-        if token:
-            env["GIT_TOKEN"] = token
         if scheme == "bearer" and token and host_kind == "ado":
+            # B2 #852: skip GIT_TOKEN for bearer scheme -- the JWT is injected via
+            # GIT_CONFIG_VALUE_0 only; GIT_TOKEN here would leak it into every
+            # child-process env (visible in /proc/<pid>/environ, ps eww).
             from apm_cli.utils.github_host import build_ado_bearer_git_env
             env.update(build_ado_bearer_git_env(token))
+        elif token:
+            env["GIT_TOKEN"] = token
         return env
 
     def _emit_stale_pat_diagnostic(self, host_display: str) -> None:

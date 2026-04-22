@@ -973,10 +973,10 @@ class GitHubPackageDownloader:
                 ):
                     try:
                         from apm_cli.core.azure_cli import (
-                            AzureCliBearerProvider, AzureCliBearerError,
+                            AzureCliBearerError, get_bearer_provider,
                         )
                         from apm_cli.utils.github_host import build_ado_bearer_git_env
-                        provider = AzureCliBearerProvider()
+                        provider = get_bearer_provider()
                         if provider.is_available():
                             try:
                                 bearer = provider.get_bearer_token()
@@ -1024,6 +1024,7 @@ class GitHubPackageDownloader:
                 host, "clone",
                 org=dep_ref.ado_organization if dep_ref else None,
                 port=dep_ref.port if dep_ref else None,
+                dep_url=dep_ref.repo_url if dep_ref else None,
             )
         elif is_generic:
             host_name = dep_host or "the target host"
@@ -1048,6 +1049,7 @@ class GitHubPackageDownloader:
             org = dep_ref.repo_url.split('/')[0] if dep_ref and dep_ref.repo_url else None
             error_msg += self.auth_resolver.build_error_context(
                 host, "clone", org=org, port=dep_ref.port if dep_ref else None,
+                dep_url=dep_ref.repo_url if dep_ref else None,
             )
         else:
             error_msg += "Please check repository access permissions and authentication setup."
@@ -1208,9 +1210,9 @@ class GitHubPackageDownloader:
             )
             if ado_pat_401:
                 try:
-                    from apm_cli.core.azure_cli import AzureCliBearerProvider, AzureCliBearerError
+                    from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
                     from apm_cli.utils.github_host import build_ado_bearer_git_env
-                    provider = AzureCliBearerProvider()
+                    provider = get_bearer_provider()
                     if provider.is_available():
                         try:
                             bearer = provider.get_bearer_token()
@@ -1253,6 +1255,7 @@ class GitHubPackageDownloader:
                 error_msg += self.auth_resolver.build_error_context(
                     host, "list refs", org=org,
                     port=dep_ref.port if dep_ref else None,
+                    dep_url=dep_ref.repo_url if dep_ref else None,
                 )
 
             sanitized = self._sanitize_git_error(str(e))
@@ -1377,6 +1380,7 @@ class GitHubPackageDownloader:
                             org = dep_ref.repo_url.split('/')[0] if dep_ref.repo_url else None
                             error_msg += self.auth_resolver.build_error_context(
                                 host, "resolve reference", org=org, port=dep_ref.port,
+                                dep_url=dep_ref.repo_url,
                             )
                             raise RuntimeError(error_msg)
                         else:
@@ -1510,6 +1514,7 @@ class GitHubPackageDownloader:
                         host, "download",
                         org=dep_ref.ado_organization if dep_ref else None,
                         port=dep_ref.port if dep_ref else None,
+                        dep_url=dep_ref.repo_url if dep_ref else None,
                     )
                 else:
                     error_msg += "Please check your Azure DevOps PAT permissions."
@@ -1662,6 +1667,7 @@ class GitHubPackageDownloader:
                             + self.auth_resolver.build_error_context(
                                 host, "API request (rate limited)", org=owner,
                                 port=dep_ref.port if dep_ref else None,
+                                dep_url=dep_ref.repo_url if dep_ref else None,
                             )
                         )
                     else:
@@ -1689,6 +1695,7 @@ class GitHubPackageDownloader:
                 if not token:
                     error_msg += self.auth_resolver.build_error_context(
                         host, "download", org=owner, port=dep_ref.port if dep_ref else None,
+                        dep_url=dep_ref.repo_url if dep_ref else None,
                     )
                 elif token and not host.lower().endswith(".ghe.com"):
                     error_msg += (
@@ -2589,6 +2596,7 @@ class GitHubPackageDownloader:
                 org = dep_ref.repo_url.split('/')[0] if dep_ref.repo_url else None
                 error_msg += self.auth_resolver.build_error_context(
                     host, "clone", org=org, port=dep_ref.port,
+                    dep_url=dep_ref.repo_url,
                 )
                 raise RuntimeError(error_msg)
             else:

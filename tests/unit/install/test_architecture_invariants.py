@@ -118,12 +118,20 @@ def test_install_py_under_legacy_budget():
     under "Failed to install ... Failed to resolve ..." (+5 lines:
     one import + four error-handler lines). Recovered by the same
     pending --mcp extraction.
+    PR #852 (panel fix B7) raised 1680 -> 1690 to add the
+    HACK(#852) try/finally cleanup around APM_VERBOSE so that the
+    env-var mutation that surfaces --verbose to the auth layer does
+    not leak past this command invocation (+10 lines: 4-line save
+    block at function entry + 6-line finally block at function exit).
+    The follow-up issue tracks threading verbose state through
+    AuthResolver as a constructor arg, after which both blocks can
+    be deleted.
     """
     install_py = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "commands" / "install.py"
     assert install_py.is_file()
     n = _line_count(install_py)
-    assert n <= 1680, (
-        f"commands/install.py grew to {n} LOC (budget 1680). "
+    assert n <= 1690, (
+        f"commands/install.py grew to {n} LOC (budget 1690). "
         "Do NOT trim cosmetically -- engage the python-architecture skill "
         "(.github/skills/python-architecture/SKILL.md) and propose an "
         "extraction into apm_cli/install/."
