@@ -287,3 +287,163 @@ class TestPreflightUsesSharedSeam:
         )
 
         mock_chain_discover.assert_called_once_with(Path("/fake"))
+
+
+# ======================================================================
+# Multi-level extends chain (#831)
+# ======================================================================
+
+
+class TestMultiLevelExtendsChain:
+    """Recursive walk of `extends:` follows N levels (up to MAX_CHAIN_DEPTH)."""
+
+    @patch(_PATCH_WRITE_CACHE)
+    @patch(_PATCH_DISCOVER)
+    def test_three_level_chain_resolves_all(
+        self, mock_discover, mock_write_cache
+    ):
+        """leaf -> mid -> root: all three policies merged, chain_refs has 3 entries."""
+        leaf = _make_policy(enforcement="warn", extends="org-mid/.github")
+        mid = _make_policy(enforcement="warn", extends="enterprise-root/.github")
+        root = _make_policy(enforcement="block", deny=("evil/*",))
+
+        leaf_fetch = _make_fetch(policy=leaf, source="org:contoso/.github")
+        mid_fetch = _make_fetch(policy=mid, source="org:org-mid/.github")
+        root_fetch = _make_fetch(policy=root, source="org:enterprise-root/.github")
+
+        mock_discover.side_effect = [leaf_fetch, mid_fetch, root_fetch]
+
+        result = discover_policy_with_chain(Path("/fake"))
+
+        # Merged policy must reflect root's tightening.
+        assert result.policy.enforcement == "block"
+        assert "evil/*" in result.policy.dependencies.deny
+
+        # Cache write must include all three sources, root-first (existing
+        # convention also used by the 2-level case).
+        kw = mock_write_cache.call_args
+        chain_refs = kw.kwargs.get("chain_refs") or kw[1].get("chain_refs")
+        assert chain_refs is not None
+        assert len(chain_refs) == 3
+        assert "enterprise-root/.github" in chain_refs[0]
+        assert "org-mid/.github" in chain_refs[1]
+        assert "contoso/.github" in chain_refs[2]
+
+    @patch(_PATCH_WRITE_CACHE)
+    @patch(_PATCH_DISCOVER)
+    def test_cycle_in_chain_raises(self, mock_discover, mock_write_cache):
+        """A extends B, B extends A -> PolicyInheritanceError."""
+        from apm_cli.policy.inheritance import PolicyInheritanceError
+
+        leaf = _make_policy(enforcement="warn", extends="org-b/.github")
+        b = _make_policy(enforcement="warn", extends="org-a/.github")
+        a = _make_policy(enforcement="warn", extends="org-b/.github")
+
+        leaf_fetch = _make_fetch(policy=leaf, source="org:org-a/.github")
+        b_fetch = _make_fetch(policy=b, source="org:org-b/.github")
+        a_fetch = _make_fetch(policy=a, source="org:org-a/.github")
+
+        mock_discover.side_effect = [leaf_fetch, b_fetch, a_fetch]
+
+        with pytest.raises(PolicyInheritanceError, match="Cycle"):
+            discover_policy_with_chain(Path("/fake"))
+
+    @patch(_PATCH_WRITE_CACHE)
+    @patch(_PATCH_DISCOVER)
+    def test_depth_limit_raises(self, mock_discover, mock_write_cache):
+        """A 6-level chain exceeds MAX_CHAIN_DEPTH=5."""
+        from apm_cli.policy.inheritance import (
+            MAX_CHAIN_DEPTH,
+            PolicyInheritanceError,
+        )
+
+        # Build leaf + 5 ancestors all chained, then a 6th that would tip it.
+        # Each policy points to the next via extends:.
+        levels = [f"level-{i}/.github" for i in range(6)]
+        # Leaf has extends -> level-0; level-i has extends -> level-{i+1};
+        # level-5 has no extends.  That gives 7 policies total > MAX=5.
+        leaf = _make_policy(enforcement="warn", extends=levels[0])
+        ancestors = []
+        for i in range(5):
+            ancestors.append(
+                _make_policy(enforcement="warn", extends=levels[i + 1])
+            )
+        # Enough policies to overflow.
+
+        leaf_fetch = _make_fetch(policy=leaf, source="org:leaf/.github")
+        anc_fetches = [
+            _make_fetch(policy=a, source=f"org:{levels[i]}")
+            for i, a in enumerate(ancestors)
+        ]
+        mock_discover.side_effect = [leaf_fetch] + anc_fetches
+
+        with pytest.raises(PolicyInheritanceError) as exc_info:
+            discover_policy_with_chain(Path("/fake"))
+        assert str(MAX_CHAIN_DEPTH) in str(exc_info.value)
+
+    @patch("apm_cli.policy.discovery._rich_warning", create=True)
+    @patch(_PATCH_WRITE_CACHE)
+    @patch(_PATCH_DISCOVER)
+    def test_partial_chain_emits_warning_and_uses_resolved_policies(
+        self, mock_discover, mock_write_cache, _mock_warn_unused
+    ):
+        """leaf -> mid -> root(404): partial chain (leaf+mid) is used and warning emitted.
+
+        Design choice: when a parent fetch fails midway, we merge the chain
+        we managed to resolve and emit `_rich_warning` so the operator
+        learns that an upstream policy was unreachable.
+        """
+        from apm_cli.utils import console as _console
+
+        leaf = _make_policy(enforcement="warn", extends="org-mid/.github")
+        mid = _make_policy(enforcement="warn", extends="enterprise-root/.github")
+
+        leaf_fetch = _make_fetch(policy=leaf, source="org:contoso/.github")
+        mid_fetch = _make_fetch(policy=mid, source="org:org-mid/.github")
+        # root fetch fails: policy=None, no source
+        root_fetch = _make_fetch(
+            policy=None,
+            source="",
+            outcome="cache_miss_fetch_fail",
+            error="404",
+        )
+
+        mock_discover.side_effect = [leaf_fetch, mid_fetch, root_fetch]
+
+        with patch.object(_console, "_rich_warning") as mock_warn:
+            result = discover_policy_with_chain(Path("/fake"))
+
+        # We still got a merged policy (leaf + mid).
+        assert result.policy is not None
+
+        # Cache write happened with the partial 2-level chain_refs.
+        kw = mock_write_cache.call_args
+        chain_refs = kw.kwargs.get("chain_refs") or kw[1].get("chain_refs")
+        assert len(chain_refs) == 2
+
+        # Warning was emitted with the unreachable ref + count.
+        assert mock_warn.called
+        warn_msg = mock_warn.call_args[0][0]
+        assert "incomplete" in warn_msg.lower()
+        assert "enterprise-root/.github" in warn_msg
+        assert "2 of 3" in warn_msg
+
+    @patch(_PATCH_WRITE_CACHE)
+    @patch(_PATCH_DISCOVER)
+    def test_single_level_chain_still_works(
+        self, mock_discover, mock_write_cache
+    ):
+        """Existing single-level extends behavior is preserved."""
+        leaf = _make_policy(enforcement="warn", extends="hub/.github")
+        parent = _make_policy(enforcement="block")
+
+        leaf_fetch = _make_fetch(policy=leaf, source="org:team/.github")
+        parent_fetch = _make_fetch(policy=parent, source="org:hub/.github")
+        mock_discover.side_effect = [leaf_fetch, parent_fetch]
+
+        result = discover_policy_with_chain(Path("/fake"))
+
+        assert result.policy.enforcement == "block"
+        kw = mock_write_cache.call_args
+        chain_refs = kw.kwargs.get("chain_refs") or kw[1].get("chain_refs")
+        assert len(chain_refs) == 2

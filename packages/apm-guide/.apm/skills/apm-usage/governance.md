@@ -148,10 +148,10 @@ The `--policy <override>` flag is **audit-only today** — it works on
 Policy resolves through the chain: enterprise hub -> org -> repo override.
 The merge is **tighten-only** (see "Inheritance rules" above).
 
-**Install-time chain depth:** install-time enforcement currently resolves a
-**single parent** via `extends:`. `apm audit --ci` resolves the full
-multi-level chain. Multi-level resolution at install time is tracked in
-[#831](https://github.com/microsoft/apm/issues/831).
+**Multi-level extends:** install-time enforcement and `apm audit --ci` both
+resolve the full `extends:` chain up to `MAX_CHAIN_DEPTH = 5`. Cycles are
+detected and abort with an error. If a parent fetch fails midway, APM
+merges what it resolved and emits a `Policy chain incomplete` warning.
 
 ### 4. What gets enforced
 

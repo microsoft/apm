@@ -1079,3 +1079,87 @@ class TestI20WarnModeAllViolations:
             assert dep_name in out, (
                 f"Expected {dep_name} to appear in output (not short-circuited):\n{out}"
             )
+
+        # microsoft/apm#834 -- warn-mode violations must be visible in the
+        # final install summary, not just buried in an internal collector.
+        # The rendered summary uses "policy warning(s)" plural-aware noun.
+        assert "policy warning" in out.lower(), (
+            f"Expected warn-mode violations to surface in install summary:\n{out}"
+        )
+
+
+# =====================================================================
+# I21: 3-level extends chain (#831) end-to-end through install pipeline
+# =====================================================================
+
+class TestI21ThreeLevelExtendsChain:
+    """leaf -> mid -> root resolves all three policies at install time.
+
+    Bug #831: the install-time chain walk only resolved one level of
+    `extends:`, silently dropping any grandparent policies.  This test
+    exercises the full pipeline end-to-end by mocking the per-level
+    fetcher (`discover_policy`) and letting the real
+    `discover_policy_with_chain` walk three levels.
+
+    A deny rule that lives only on the **root** policy must still block
+    an install -- if the chain collapses, this assertion fails.
+    """
+
+    @patch(_PATCH_UPDATES, return_value=None)
+    @patch(_PATCH_DOWNLOADER)
+    @patch("apm_cli.policy.discovery.discover_policy")
+    def test_three_level_chain_blocks_via_root_deny(
+        self, mock_discover, mock_dl, mock_updates, project
+    ):
+        project_dir, runner = project
+
+        # Leaf project depends on a package that only the ROOT policy denies.
+        _write_apm_yml(
+            project_dir / "apm.yml",
+            deps=["enterprise-blocked/forbidden"],
+        )
+
+        leaf_policy = ApmPolicy(
+            enforcement="warn",
+            extends="org-mid/.github",
+            dependencies=DependencyPolicy(),
+        )
+        mid_policy = ApmPolicy(
+            enforcement="warn",
+            extends="enterprise-root/.github",
+            dependencies=DependencyPolicy(),
+        )
+        root_policy = ApmPolicy(
+            enforcement="block",
+            dependencies=DependencyPolicy(deny=("enterprise-blocked/*",)),
+        )
+
+        leaf_fetch = _make_fetch_result(
+            "found", policy=leaf_policy, source="org:contoso/.github"
+        )
+        mid_fetch = _make_fetch_result(
+            "found", policy=mid_policy, source="org:org-mid/.github"
+        )
+        root_fetch = _make_fetch_result(
+            "found", policy=root_policy, source="org:enterprise-root/.github"
+        )
+
+        # discover_policy is called once for the leaf (auto-discover) plus
+        # one call per ancestor in the chain.  Both the gate phase and the
+        # preflight may invoke discover_policy_with_chain, so be generous
+        # by repeating the side_effect cycle.
+        cycle = [leaf_fetch, mid_fetch, root_fetch]
+        mock_discover.side_effect = cycle * 4  # tolerate up to 4 invocations
+
+        result = _invoke_install(runner)
+
+        out = result.output
+
+        # The chain must have collapsed root's deny rule into the merged
+        # effective policy and blocked the install.
+        assert result.exit_code != 0, (
+            f"Expected exit non-zero when 3-level chain blocks dep:\n{out}"
+        )
+        assert "enterprise-blocked/forbidden" in out, (
+            f"Expected denied dep to be cited in output:\n{out}"
+        )

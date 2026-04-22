@@ -215,7 +215,17 @@ def run_install_pipeline(
         # --------------------------------------------------------------
         transitive_failures = ctx.transitive_failures
 
-        diagnostics = DiagnosticCollector(verbose=verbose)
+        # Reuse the logger's DiagnosticCollector when available so that
+        # diagnostics recorded earlier in the pipeline (e.g. warn-mode
+        # policy violations pushed by ``logger.policy_violation()`` from
+        # the policy_gate phase, which runs BEFORE this point) surface
+        # in the final install summary.  Block-mode violations also flow
+        # through here, but the pipeline aborts via PolicyViolationError
+        # before render_summary() runs, so the inline ``[x]`` print is
+        # what users see -- no duplication.
+        diagnostics = (
+            logger.diagnostics if logger is not None else DiagnosticCollector(verbose=verbose)
+        )
 
         # Drain transitive failures collected during resolution into diagnostics
         for dep_display, fail_msg in transitive_failures:

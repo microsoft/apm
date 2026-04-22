@@ -124,55 +124,130 @@ def discover_policy_with_chain(
     return fetch_result
 
 
+def _strip_source_prefix(src: str) -> str:
+    """Strip 'org:' / 'url:' / 'file:' prefix from a PolicyFetchResult.source."""
+    return (
+        src.removeprefix("org:")
+        .removeprefix("url:")
+        .removeprefix("file:")
+    )
+
+
 def _resolve_and_persist_chain(
     fetch_result: PolicyFetchResult,
     project_root: Path,
 ) -> None:
     """Resolve inheritance chain and update cache with merged policy + chain_refs.
 
+    Walks the ``extends:`` chain depth-first, fetching each parent via the
+    single-policy ``discover_policy`` (so each fetch still hits the
+    well-tested fetch path).  Cycle detection on normalized ``extends:``
+    refs and ``MAX_CHAIN_DEPTH`` enforcement protect against runaway or
+    self-referential chains.
+
+    Partial-chain policy: if any parent fetch fails, emit a warning via
+    ``_rich_warning`` and merge whatever was resolved so far -- never
+    silently drop ancestors.
+
     Mutates *fetch_result*.policy in-place with the merged effective policy.
-    Called by :func:`discover_policy_with_chain` -- not intended for direct use.
+    Called by :func:`discover_policy_with_chain` -- not intended for direct
+    use.
     """
     from . import inheritance as _inheritance_mod
+    from ..utils.console import _rich_warning
 
     leaf_policy = fetch_result.policy
-    extends_ref = leaf_policy.extends
+    leaf_source = fetch_result.source
 
-    # Fetch the parent policy (could itself have extends:)
-    parent_result = discover_policy(
-        project_root,
-        policy_override=extends_ref,
-        no_cache=False,
-    )
+    # Ordered ancestors collected as we walk parents.  Built leaf-first
+    # for traversal convenience; reversed before merging.
+    chain_policies: List[ApmPolicy] = [leaf_policy]
+    chain_sources: List[str] = [leaf_source]
 
-    if parent_result.policy is None:
-        # Parent fetch failed -- use leaf as-is (already cached by discovery)
-        return
+    # Track normalized refs we've already followed to break cycles.
+    # We seed with the leaf's source so an extends pointing back at the
+    # leaf is also detected.
+    visited: List[str] = [_strip_source_prefix(leaf_source)] if leaf_source else []
 
-    # Build chain [parent, leaf] and merge
-    chain = [parent_result.policy, leaf_policy]
-    try:
-        merged = _inheritance_mod.resolve_policy_chain(chain)
-    except Exception:
-        # Chain resolution failed -- use leaf as-is
-        return
+    current = leaf_policy
+    partial_warning: Optional[Tuple[str, int, int]] = None
 
-    # Build chain_refs from sources
-    chain_refs: List[str] = []
-    for src in (parent_result.source, fetch_result.source):
-        if src:
-            chain_refs.append(
-                src.removeprefix("org:").removeprefix("url:").removeprefix("file:")
+    while current.extends:
+        next_ref = current.extends
+
+        if _inheritance_mod.detect_cycle(visited, next_ref):
+            raise _inheritance_mod.PolicyInheritanceError(
+                f"Cycle detected in policy extends chain: "
+                f"{' -> '.join(visited)} -> {next_ref}"
             )
 
-    # Re-write cache with merged effective policy + real chain_refs
-    leaf_source = fetch_result.source
-    cache_key = leaf_source.removeprefix("org:").removeprefix("url:").removeprefix("file:")
+        # Depth check: chain_policies already has len() entries; next fetch
+        # would push us to len()+1.  resolve_policy_chain enforces this
+        # afterwards, but failing here gives a clearer error.
+        if len(chain_policies) + 1 > _inheritance_mod.MAX_CHAIN_DEPTH:
+            raise _inheritance_mod.PolicyInheritanceError(
+                f"Policy chain depth exceeds maximum of "
+                f"{_inheritance_mod.MAX_CHAIN_DEPTH} "
+                f"(chain: {' -> '.join(visited)} -> {next_ref})"
+            )
+
+        parent_result = discover_policy(
+            project_root,
+            policy_override=next_ref,
+            no_cache=False,
+        )
+
+        if parent_result.policy is None:
+            # Parent fetch failed -- merge what we have so far and warn.
+            attempted = len(chain_policies) + 1
+            resolved = len(chain_policies)
+            partial_warning = (next_ref, resolved, attempted)
+            break
+
+        chain_policies.append(parent_result.policy)
+        chain_sources.append(parent_result.source)
+        visited.append(next_ref)
+        current = parent_result.policy
+
+    # No actual ancestors fetched -- nothing to merge or re-cache.
+    if len(chain_policies) == 1:
+        if partial_warning is not None:
+            ref, resolved, attempted = partial_warning
+            _rich_warning(
+                f"Policy chain incomplete: {ref} unreachable, "
+                f"using {resolved} of {attempted} policies",
+                symbol="warning",
+            )
+        return
+
+    # Merge in [root, ..., leaf] order.  We collected leaf-first, so reverse.
+    ordered = list(reversed(chain_policies))
+    ordered_sources = list(reversed(chain_sources))
+
+    try:
+        merged = _inheritance_mod.resolve_policy_chain(ordered)
+    except _inheritance_mod.PolicyInheritanceError:
+        # Re-raise depth errors from the canonical validator so callers
+        # see a single consistent error type.
+        raise
+
+    chain_refs: List[str] = [
+        _strip_source_prefix(src) for src in ordered_sources if src
+    ]
+
+    cache_key = _strip_source_prefix(leaf_source) if leaf_source else ""
     if cache_key:
         _write_cache(cache_key, merged, project_root, chain_refs=chain_refs)
 
-    # Update the fetch result with the merged policy
     fetch_result.policy = merged
+
+    if partial_warning is not None:
+        ref, resolved, attempted = partial_warning
+        _rich_warning(
+            f"Policy chain incomplete: {ref} unreachable, "
+            f"using {resolved} of {attempted} policies",
+            symbol="warning",
+        )
 
 
 def discover_policy(

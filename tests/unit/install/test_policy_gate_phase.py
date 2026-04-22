@@ -371,6 +371,44 @@ class TestEnforcementWarn:
         args, kwargs = ctx.logger.policy_violation.call_args
         assert kwargs.get("severity") == "warn"
 
+    @patch(_PATCH_CHECKS)
+    @patch(_PATCH_DISCOVER)
+    def test_warn_violation_recorded_on_logger_diagnostics(
+        self, mock_discover, mock_checks
+    ):
+        """microsoft/apm#834 -- warn-mode violations must reach the
+        DiagnosticCollector that the install summary will render.
+
+        The pipeline reuses ``logger.diagnostics`` for the install
+        summary (pipeline.py), so any policy violation pushed via
+        ``logger.policy_violation()`` lands in the same collector and
+        surfaces in the final ``-- Diagnostics --`` block.
+        """
+        from apm_cli.core.command_logger import InstallLogger
+        from apm_cli.utils.diagnostics import CATEGORY_POLICY
+
+        mock_discover.return_value = _make_fetch_result("found", enforcement="warn")
+        mock_checks.return_value = _failing_audit()
+
+        # Use a real InstallLogger so policy_violation() exercises the
+        # real DiagnosticCollector wiring (the production code path).
+        logger = InstallLogger(verbose=True)
+        ctx = _make_ctx(logger=logger)
+
+        run(ctx)
+
+        # The violation lands in the collector that the install pipeline
+        # also reuses for its end-of-install summary.
+        assert logger.diagnostics.policy_count >= 1
+        policy_diags = [
+            d for d in logger.diagnostics._diagnostics
+            if d.category == CATEGORY_POLICY
+        ]
+        assert any(d.severity == "warn" for d in policy_diags), (
+            f"Expected at least one warn-severity policy diagnostic, got: "
+            f"{[(d.severity, d.message) for d in policy_diags]}"
+        )
+
 
 class TestEnforcementOff:
     """enforcement=off + denied dep -> passes silently (verbose-only)."""
