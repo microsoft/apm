@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Legacy `.github/prompts/` and `.github/chatmodes/` that pre-dated the skill/agent primitive model (#823)
 
+### Fixed
+
+- Lowercase the host axis of the `_fallback_port_warned` dedup key so deps that differ only in hostname casing collapse to one cross-protocol fallback warning, matching the `AuthResolver._cache` convention (RFC 4343). Closes #800 (#815)
+
 ## [0.9.0] - 2026-04-21
 
 ### Changed (BREAKING)
