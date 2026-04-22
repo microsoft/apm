@@ -111,6 +111,13 @@ class InstallContext:
     total_links_resolved: int = 0  # integrate
 
     # ------------------------------------------------------------------
+    # policy_gate
+    # ------------------------------------------------------------------
+    policy_fetch: Any = None  # Optional[PolicyFetchResult] from discovery
+    policy_enforcement_active: bool = False
+    no_policy: bool = False  # W2-escape-hatch will wire --no-policy here
+
+    # ------------------------------------------------------------------
     # Post-deps local content tracking (F3)
     # ------------------------------------------------------------------
     old_local_deployed: List[str] = field(default_factory=list)  # pipeline setup

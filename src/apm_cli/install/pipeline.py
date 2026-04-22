@@ -165,6 +165,20 @@ def run_install_pipeline(
 
     try:
         # --------------------------------------------------------------
+        # Phase 1.5: Policy enforcement gate (#827)
+        # Runs after resolve (deps_to_install populated) and before
+        # targets (denied deps never reach integration).
+        # PolicyViolationError halts the pipeline cleanly.
+        # --------------------------------------------------------------
+        from .phases import policy_gate as _policy_gate_phase
+        from .phases.policy_gate import PolicyViolationError
+
+        try:
+            _policy_gate_phase.run(ctx)
+        except PolicyViolationError:
+            raise  # re-raise through the outer except -> RuntimeError wrapper
+
+        # --------------------------------------------------------------
         # Phase 2: Target detection + integrator initialization
         # --------------------------------------------------------------
         from .phases import targets as _targets_phase
