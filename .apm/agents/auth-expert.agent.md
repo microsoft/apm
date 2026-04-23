@@ -54,3 +54,4 @@ When reviewing or writing auth code:
 - Windows: `GIT_ASKPASS` must be `'echo'` not empty string
 - Classic PATs (`ghp_`) work cross-org but are being deprecated — prefer fine-grained
 - ADO uses Basic auth with base64-encoded `:PAT` — different from GitHub bearer token flow
+- ADO also supports AAD bearer tokens via `az account get-access-token` (resource `499b84ac-1321-427f-aa17-267ca6975798`); precedence is `ADO_APM_PAT` -> az bearer -> fail. Stale PATs (401) silently fall back to the bearer with a `[!]` warning. See the auth skill for the four diagnostic cases.

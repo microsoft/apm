@@ -255,8 +255,20 @@ APM authenticates to git hosts using personal access tokens (PATs) read from env
 - **Never stored in files.** Tokens are read from the environment at runtime. They are never written to `apm.yml`, `apm.lock.yaml`, or any generated file.
 - **Never logged.** Token values are not included in console output, error messages, or debug logs.
 - **Scoped to their git host.** A GitHub token is only sent to GitHub. An Azure DevOps token is only sent to Azure DevOps. Tokens are never transmitted to any other endpoint.
+- **Injected via transient git config.** APM passes credentials with `http.extraheader` for the duration of a single git invocation; tokens are never embedded in URLs and are not visible in `ps` or process listings.
 
 For GitHub, a fine-grained PAT with read-only `Contents` permission on the repositories you depend on is sufficient.
+
+### Azure DevOps AAD bearer tokens
+
+When `ADO_APM_PAT` is unset, APM can authenticate to Azure DevOps with a Microsoft Entra ID bearer token issued on demand by the Azure CLI (`az account get-access-token`). The posture:
+
+- **Short-lived.** Tokens expire in roughly 60 minutes, are acquired per resolution, and are never persisted by APM.
+- **No new secrets in manifests.** Nothing is written to `apm.yml` or `apm.lock.yaml`. The token never crosses the `apm.yml`/lockfile boundary.
+- **Compatible with managed-identity / service-account-only orgs.** Works in environments where PAT creation is disabled, including WIF-backed pipelines.
+- **Same transport rules as PATs.** Bearer values are injected via `http.extraheader`, scoped to ADO hosts only, and never logged.
+
+See [Authentication: AAD bearer tokens](../../getting-started/authentication/#authenticating-with-microsoft-entra-id-aad-bearer-tokens) for the resolution precedence and CI patterns.
 
 ## Attack surface comparison
 
