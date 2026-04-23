@@ -18,7 +18,7 @@ The APM Dev Container Feature packages the `apm-cli` tool as a reusable, declara
 **What motivated it**
 
 - APM was previously only installable via ad-hoc `postCreateCommand` lines -- not reusable, not discoverable, hard to standardise.
-- See [docs/01-feature-717.md](docs/01-feature-717.md) for the original feature request.
+- See GitHub issue [#717](https://github.com/microsoft/apm/issues/717) for the original feature request.
 
 **Options**
 
