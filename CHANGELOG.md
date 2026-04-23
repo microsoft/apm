@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `find_primitive_files()` now uses `os.walk` with early directory pruning so `compilation.exclude` patterns prevent traversal into excluded subtrees on large repos. (#870)
+
 ### Added
 
 - New `enterprise/governance-guide.md` documentation page: flagship governance reference for CISO / VPE / Platform Tech Lead audiences, covering enforcement points, bypass contract, failure semantics, air-gapped operation, rollout playbook, and known gaps. Trims duplicated content in `governance.md`, `apm-policy.md`, and `integrations/github-rulesets.md`. Adds `templates/apm-policy-starter.yml`. (#851)
