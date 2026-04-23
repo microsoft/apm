@@ -41,33 +41,42 @@ APM separates two concerns that those folders conflate:
 ### A concrete example: this repo
 
 The `microsoft/apm` repository (the one shipping the CLI you are reading docs
-for) dogfoods this layout. It contains both source and compiled output side by
-side:
+for) dogfoods this layout. It contains both source and compiled output side
+by side:
 
 ```
 microsoft/apm/
 +-- apm.yml
 +-- .apm/
 |   +-- skills/
-|   |   +-- writing-skills/
+|   |   +-- python-architecture/
 |   |       +-- SKILL.md
-|   +-- instructions/
 |   +-- agents/
+|   |   +-- doc-writer.agent.md
+|   +-- instructions/
 +-- .github/
 |   +-- skills/
-|   |   +-- writing-skills/
-|   |       +-- SKILL.md         (compiled from .apm/, byte-identical)
-|   +-- instructions/
+|   |   +-- python-architecture/
+|   |       +-- SKILL.md         (deployed from .apm/ by apm install)
 |   +-- agents/
+|   |   +-- doc-writer.agent.md
+|   +-- instructions/
 +-- src/
 +-- tests/
 ```
 
-The file under `.apm/skills/writing-skills/SKILL.md` is the source. The file
-under `.github/skills/writing-skills/SKILL.md` is the compiled artifact that
-the in-repo Copilot agent actually loads while we work on the CLI. Same
-content today, but only one of them is authoritative -- and only one of them
-gets shipped when this repo is consumed as an APM package.
+The source files under `.apm/` are authoritative. You can inspect them on
+GitHub:
+[`.apm/skills/python-architecture/SKILL.md`](https://github.com/microsoft/apm/blob/main/.apm/skills/python-architecture/SKILL.md)
+and
+[`.apm/agents/doc-writer.agent.md`](https://github.com/microsoft/apm/blob/main/.apm/agents/doc-writer.agent.md).
+Their counterparts under `.github/` are the deployed copies the in-repo
+Copilot agent actually loads while we work on the CLI.
+
+For simple primitives the deployed file is byte-identical to the source.
+The deploy step can also augment files for runtime-specific concerns (e.g.
+adding diagnostic guidance for a particular target), so treat `.github/`
+as build output: never edit it by hand, always re-deploy from `.apm/`.
 
 ## Why not just put primitives in `.github/` directly?
 
