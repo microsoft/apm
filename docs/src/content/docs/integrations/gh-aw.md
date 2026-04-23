@@ -63,6 +63,10 @@ The APM compilation target is automatically inferred from the configured `engine
 
 Packages are fetched using gh-aw's cascading token fallback: `GH_AW_PLUGINS_TOKEN` -> `GH_AW_GITHUB_TOKEN` -> `GITHUB_TOKEN`.
 
+:::note[Isolated install by default]
+`shared/apm.md` invokes `microsoft/apm-action` with `isolated: true`. Only the packages listed under `packages:` are installed -- any host-repo primitives under `.apm/` or `.github/` (instructions, prompts, skills, agents) are ignored and pre-existing primitive directories are cleared. To merge host-repo primitives with imported ones, use the [apm-action Pre-Step](#apm-action-pre-step) approach below, which leaves `isolated` at its default of `false`.
+:::
+
 :::caution[Deprecated: `dependencies:` frontmatter]
 Earlier gh-aw versions accepted a top-level `dependencies:` field on the workflow. That form is deprecated and no longer supported -- migrate to the `imports: - uses: shared/apm.md` pattern shown above.
 :::
