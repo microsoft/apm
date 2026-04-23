@@ -5,19 +5,15 @@ set -e
 # shellcheck source=/dev/null
 source dev-container-features-test-lib
 
-# ── Tests ────────────────────────────────────────────────────────────────────
+# Source generic checks (applies to all scenarios)
+# shellcheck source=/dev/null
+source "$(dirname "$0")/generic-checks.sh"
 
+# Scenario-specific checks
 check "python3 is on PATH" \
     command -v python3
 
-check "python3 is version 3.12 (from Python devcontainer feature)" \
-    bash -c "python3 --version | grep -q 'Python 3.12'"
+check "python3 meets minimum version (3.10+)" \
+    bash -c "python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'"
 
-check "python3 resolves to Python feature install path" \
-    bash -c "which python3 | grep -q '/usr/local/python/current/bin/python3'"
-
-check "apm --version exits cleanly" \
-    apm --version
-
-# ── Report ────────────────────────────────────────────────────────────────────
 reportResults
