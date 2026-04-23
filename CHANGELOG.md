@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- CI docs: clarify that branch-protection ruleset must store the check-run name (`gate`), not the workflow display string (`Merge Gate / gate`); document the merge-gate aggregator in `cicd.instructions.md` and mark the legacy stub workflow as deprecated.
+
 ## [0.9.2] - 2026-04-23
 
 ### Added
