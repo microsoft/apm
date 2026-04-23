@@ -138,6 +138,4 @@ validation block.
 - [ ] **Every mermaid block validated by `mmdc`.**
 - [ ] TL;DR sentence count is 4 or fewer.
 - [ ] Long evidence is inside `<details>`, not flat in the body.
-- [ ] Trailer line `Co-authored-by: Copilot
-      <223556219+Copilot@users.noreply.github.com>` is the last
-      non-empty line.
+- [ ] Trailer line `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>` is the last non-empty line.

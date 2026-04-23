@@ -33,21 +33,31 @@ Up to 3 verbatim quoted anchors total across this section.>
 - [x] <Concrete failure mode 2.>
 - [!] <Soft risk or drift vector observed today.>
 
-Why these matter: <Failure 1> violates
-["<verbatim quote from PROSE or Agent Skills>"](<source url>);
-<Failure 2> violates
-["<verbatim quote>"](<source url>).
+Why these matter: <one or two sentences naming the principle, rule,
+or contract each failure breaks. Anchor each claim to the most
+credible source available for THIS PR -- could be a doc URL, a file
+path with line range, a prior PR or issue, a verbatim CLI/log
+excerpt, or a named convention. Omit the anchor entirely when no
+credible source exists; never invent one. Bullet style, link style,
+or inline-quote style are all acceptable -- match what the source
+naturally affords.>
 
 ## Approach (WHAT)
 
 <Table OR 3-7 bullets. If purely additive, replace this section's
 body with: "Additive change -- see Implementation.">
 
-| # | Fix | Principle | Source |
-|---|-----|-----------|--------|
-| 1 | <Surgical fix.> | ["<verbatim quote>"](<url>) | <PROSE / Agent Skills section> |
-| 2 | <Surgical fix.> | ["<verbatim quote>"](<url>) | <Source> |
-| 3 | <Surgical fix.> | ["<verbatim quote>"](<url>) | <Source> |
+<Use a 2-column table when each fix has one obvious anchor; use 3
+columns only when the "why" cannot be merged into the fix line
+without loss. Anchor type is open: a URL, a principle name, a file
+ref, a prior PR/issue, or no anchor at all. Drop the anchor column
+entirely if most rows would have none.>
+
+| # | Fix (and why, if non-obvious) |
+|---|-------------------------------|
+| 1 | <One-line surgical fix; trailing parenthetical or footnote anchor only when it adds reviewer signal.> |
+| 2 | <Surgical fix.> |
+| 3 | <Surgical fix.> |
 
 ## Implementation (HOW)
 
@@ -65,19 +75,29 @@ https://github.com/microsoft/apm/blob/<sha>/path#L12-L34>
 <1-3 mermaid blocks. Each preceded by a one-sentence legend. Every
 block MUST have been validated by mmdc before saving.>
 
-Legend: <one sentence on what this diagram shows and what to look
-at first>.
+<DO NOT paste an example diagram here. Derive each diagram from THIS
+PR's actual artifacts -- nodes are real file names, function names,
+job IDs, or component names from the diff; edges are real
+control-flow or data-flow steps; branch labels are the real
+predicates being decided; side effects (writes, network calls,
+process exits) are visibly marked. A flowchart with placeholder
+labels like "Start", "Decision", "Action when yes" is a failed
+diagram and must be rewritten or removed.
 
-```mermaid
-flowchart TD
-    A[Start] --> B{Decision}
-    B -- yes --> C[Action when yes]
-    B -- no --> D[Action when no]
-    C --> E[End]
-    D --> E
-```
+Pick the diagram type that matches the change: flowchart for
+execution flow, sequenceDiagram for cross-component interaction,
+stateDiagram-v2 for lifecycle, classDiagram for type relationships,
+erDiagram for data shape. ASCII labels only inside the block.>
 
-<Add a second diagram only if the relationships are non-trivial.>
+Legend: <one sentence on what this diagram shows and what a
+reviewer should look at first.>
+
+<mermaid block goes here -- omit the entire Diagrams section if no
+relationship in this PR is genuinely non-trivial. A trivial diagram
+is worse than no diagram.>
+
+<Add a second diagram only if the relationships are non-trivial,
+and only after the first diagram passes mmdc validation.>
 
 ## Trade-offs
 

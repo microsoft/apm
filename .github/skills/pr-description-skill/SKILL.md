@@ -10,7 +10,6 @@ description: >-
   PROSE or Agent Skills. Activate when the user asks to "write a PR
   description", "draft a PR body", "open a PR", "fill in the PR
   template", or any equivalent.
-model: claude-opus-4.7
 ---
 
 # PR Description Skill -- Anchored, Concise, Validated PR Bodies
