@@ -17,13 +17,13 @@
       apm\.yml|
       apm\.lock\.yaml|
       apm-policy\.yml|
-      .claude/.*|
-      .cursor/.*|
-      .github/agents/.*|
-      .github/instructions/.*|
-      .github/hooks/.*|
-      .opencode/.*|
-      .agents/.*
+      \.claude/.*|
+      \.cursor/.*|
+      \.github/agents/.*|
+      \.github/instructions/.*|
+      \.github/hooks/.*|
+      \.opencode/.*|
+      \.agents/.*
     )$
   language: system
   pass_filenames: false
