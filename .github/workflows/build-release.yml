@@ -69,11 +69,27 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev --extra build
 
-      - name: Run tests
+      # Unit tests run on every push for fast platform-regression signal.
+      # Smoke is intentionally NOT included here: it duplicates ci-integration.yml's
+      # merge-time smoke gate and burns a real codex binary download per platform
+      # per push (~15 redundant runs/day). Smoke is gated to promotion boundaries
+      # below (tag/schedule/dispatch) where it actually serves as a pre-ship gate.
+      - name: Run unit tests
         env:
           GITHUB_TOKEN: ${{ secrets.GH_MODELS_PAT }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
-        run: uv run pytest tests/unit tests/test_console.py tests/integration/test_runtime_smoke.py -n auto --dist worksteal
+        run: uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal
+
+      # Smoke runs only at promotion boundaries:
+      #   - tags (pre-ship release gate; only place tag-cut releases get smoke validation)
+      #   - schedule (nightly regression catch for upstream codex URL drift)
+      #   - workflow_dispatch (manual safety net)
+      - name: Run smoke tests
+        if: github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_MODELS_PAT }}
+          GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
+        run: uv run pytest tests/integration/test_runtime_smoke.py -v
 
       - name: Install UPX (Linux)
         if: matrix.platform == 'linux'

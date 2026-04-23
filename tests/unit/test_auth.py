@@ -9,6 +9,16 @@ import pytest
 
 from apm_cli.core.auth import AuthResolver, HostInfo, AuthContext
 from apm_cli.core.token_manager import GitHubTokenManager
+from apm_cli.core import azure_cli as _azure_cli_mod
+
+
+@pytest.fixture(autouse=True)
+def _reset_bearer_singleton():
+    """Reset AzureCliBearerProvider singleton between tests so per-test
+    mocks of the class take effect (B3 #852)."""
+    _azure_cli_mod._provider_singleton = None
+    yield
+    _azure_cli_mod._provider_singleton = None
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +152,7 @@ class TestResolve:
 
         def _slow_resolve_token(host_info, org):
             time.sleep(0.05)
-            return ("cred-token", "git-credential-fill")
+            return ("cred-token", "git-credential-fill", "basic")
 
         with patch.object(AuthResolver, "_resolve_token", side_effect=_slow_resolve_token) as mock_resolve:
             with ThreadPoolExecutor(max_workers=8) as pool:
@@ -472,19 +482,23 @@ class TestBuildErrorContextADO:
 
     Issue #625: missing ADO_APM_PAT is described with a generic GitHub error
     message instead of pointing the user at ADO_APM_PAT and Code (Read) scope.
+
+    Now includes adaptive error cases based on az CLI availability (issue #852).
     """
 
-    def test_ado_no_token_mentions_ado_pat(self):
-        """No ADO_APM_PAT -> error message must mention ADO_APM_PAT."""
+    def test_ado_no_token_no_az_mentions_ado_pat(self):
+        """No ADO_APM_PAT, no az CLI -> Case 1: error message must mention ADO_APM_PAT."""
         with patch.dict(os.environ, {}, clear=True):
             with patch.object(
                 GitHubTokenManager, "resolve_credential_from_git", return_value=None
             ):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
-                assert "ADO_APM_PAT" in msg, (
-                    f"Expected 'ADO_APM_PAT' in error message, got:\n{msg}"
-                )
+                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                    mock_provider_cls.return_value.is_available.return_value = False
+                    resolver = AuthResolver()
+                    msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
+                    assert "ADO_APM_PAT" in msg, (
+                        f"Expected 'ADO_APM_PAT' in error message, got:\n{msg}"
+                    )
 
     def test_ado_no_token_does_not_suggest_github_remediation(self):
         """ADO error must not suggest GitHub-specific remediation steps."""
@@ -492,18 +506,20 @@ class TestBuildErrorContextADO:
             with patch.object(
                 GitHubTokenManager, "resolve_credential_from_git", return_value=None
             ):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
-                assert "gh auth login" not in msg, (
-                    f"ADO error message should not mention 'gh auth login', got:\n{msg}"
-                )
-                assert "GITHUB_TOKEN" not in msg, (
-                    f"ADO error message should not mention 'GITHUB_TOKEN', got:\n{msg}"
-                )
-                assert "GITHUB_APM_PAT_MYORG" not in msg, (
-                    "ADO error message should not mention per-org GitHub PAT hint "
-                    f"'GITHUB_APM_PAT_MYORG', got:\n{msg}"
-                )
+                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                    mock_provider_cls.return_value.is_available.return_value = False
+                    resolver = AuthResolver()
+                    msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
+                    assert "gh auth login" not in msg, (
+                        f"ADO error message should not mention 'gh auth login', got:\n{msg}"
+                    )
+                    assert "GITHUB_TOKEN" not in msg, (
+                        f"ADO error message should not mention 'GITHUB_TOKEN', got:\n{msg}"
+                    )
+                    assert "GITHUB_APM_PAT_MYORG" not in msg, (
+                        "ADO error message should not mention per-org GitHub PAT hint "
+                        f"'GITHUB_APM_PAT_MYORG', got:\n{msg}"
+                    )
 
     def test_ado_no_token_mentions_code_read_scope(self):
         """ADO error must mention Code (Read) scope so user knows what PAT scope to set."""
@@ -511,11 +527,13 @@ class TestBuildErrorContextADO:
             with patch.object(
                 GitHubTokenManager, "resolve_credential_from_git", return_value=None
             ):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
-                assert "Code" in msg or "read" in msg.lower(), (
-                    f"Expected Code (Read) scope guidance in error message, got:\n{msg}"
-                )
+                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                    mock_provider_cls.return_value.is_available.return_value = False
+                    resolver = AuthResolver()
+                    msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
+                    assert "Code" in msg or "read" in msg.lower(), (
+                        f"Expected Code (Read) scope guidance in error message, got:\n{msg}"
+                    )
 
     def test_ado_no_org_no_token_mentions_ado_pat(self):
         """No org argument, no ADO_APM_PAT -> error message must still mention ADO_APM_PAT."""
@@ -523,11 +541,13 @@ class TestBuildErrorContextADO:
             with patch.object(
                 GitHubTokenManager, "resolve_credential_from_git", return_value=None
             ):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("dev.azure.com", "clone")
-                assert "ADO_APM_PAT" in msg, (
-                    f"Expected 'ADO_APM_PAT' in error message, got:\n{msg}"
-                )
+                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                    mock_provider_cls.return_value.is_available.return_value = False
+                    resolver = AuthResolver()
+                    msg = resolver.build_error_context("dev.azure.com", "clone")
+                    assert "ADO_APM_PAT" in msg, (
+                        f"Expected 'ADO_APM_PAT' in error message, got:\n{msg}"
+                    )
 
     def test_ado_with_token_still_shows_source(self):
         """When an ADO token IS present but clone fails, source info is shown."""
@@ -535,11 +555,13 @@ class TestBuildErrorContextADO:
             with patch.object(
                 GitHubTokenManager, "resolve_credential_from_git", return_value=None
             ):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
-                assert "ADO_APM_PAT" in msg, (
-                    f"Expected token source 'ADO_APM_PAT' in error message, got:\n{msg}"
-                )
+                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                    mock_provider_cls.return_value.is_available.return_value = False
+                    resolver = AuthResolver()
+                    msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
+                    assert "ADO_APM_PAT" in msg, (
+                        f"Expected token source 'ADO_APM_PAT' in error message, got:\n{msg}"
+                    )
 
     def test_ado_with_token_mentions_scope_guidance(self):
         """When an ADO token is present but auth fails, PAT validity/scope hint is shown."""
@@ -547,11 +569,13 @@ class TestBuildErrorContextADO:
             with patch.object(
                 GitHubTokenManager, "resolve_credential_from_git", return_value=None
             ):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
-                assert "Code (Read)" in msg, (
-                    f"Expected Code (Read) scope guidance in error message, got:\n{msg}"
-                )
+                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                    mock_provider_cls.return_value.is_available.return_value = False
+                    resolver = AuthResolver()
+                    msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
+                    assert "Code (Read)" in msg, (
+                        f"Expected Code (Read) scope guidance in error message, got:\n{msg}"
+                    )
 
     def test_ado_with_token_does_not_suggest_github_remediation(self):
         """When an ADO token is present but auth fails, GitHub SAML guidance must not appear."""
@@ -559,14 +583,16 @@ class TestBuildErrorContextADO:
             with patch.object(
                 GitHubTokenManager, "resolve_credential_from_git", return_value=None
             ):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
-                assert "SAML" not in msg, (
-                    f"ADO error should not mention SAML, got:\n{msg}"
-                )
-                assert "github.com/settings/tokens" not in msg, (
-                    f"ADO error should not mention github.com/settings/tokens, got:\n{msg}"
-                )
+                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                    mock_provider_cls.return_value.is_available.return_value = False
+                    resolver = AuthResolver()
+                    msg = resolver.build_error_context("dev.azure.com", "clone", org="myorg")
+                    assert "SAML" not in msg, (
+                        f"ADO error should not mention SAML, got:\n{msg}"
+                    )
+                    assert "github.com/settings/tokens" not in msg, (
+                        f"ADO error should not mention github.com/settings/tokens, got:\n{msg}"
+                    )
 
     def test_visualstudio_com_gets_ado_remediation(self):
         """Legacy *.visualstudio.com hosts are also ADO and must get ADO-specific guidance."""
@@ -574,17 +600,70 @@ class TestBuildErrorContextADO:
             with patch.object(
                 GitHubTokenManager, "resolve_credential_from_git", return_value=None
             ):
-                resolver = AuthResolver()
-                msg = resolver.build_error_context("myorg.visualstudio.com", "clone")
-                assert "ADO_APM_PAT" in msg, (
-                    f"Expected 'ADO_APM_PAT' in error message, got:\n{msg}"
-                )
-                assert "gh auth login" not in msg, (
-                    f"ADO error should not mention 'gh auth login', got:\n{msg}"
-                )
-                assert "SAML" not in msg, (
-                    f"ADO error should not mention SAML, got:\n{msg}"
-                )
+                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                    mock_provider_cls.return_value.is_available.return_value = False
+                    resolver = AuthResolver()
+                    msg = resolver.build_error_context("myorg.visualstudio.com", "clone")
+                    assert "ADO_APM_PAT" in msg, (
+                        f"Expected 'ADO_APM_PAT' in error message, got:\n{msg}"
+                    )
+                    assert "gh auth login" not in msg, (
+                        f"ADO error should not mention 'gh auth login', got:\n{msg}"
+                    )
+                    assert "SAML" not in msg, (
+                        f"ADO error should not mention SAML, got:\n{msg}"
+                    )
+
+    def test_ado_no_pat_az_available_not_logged_in(self):
+        """Case 3: no PAT, az on PATH but not logged in -> suggest az login."""
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value=None
+            ):
+                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                    mock_provider = mock_provider_cls.return_value
+                    mock_provider.is_available.return_value = True
+                    mock_provider.get_current_tenant_id.return_value = None
+                    from apm_cli.core.azure_cli import AzureCliBearerError
+                    mock_provider.get_bearer_token.side_effect = AzureCliBearerError(
+                        "not logged in", kind="not_logged_in"
+                    )
+                    resolver = AuthResolver()
+                    msg = resolver.build_error_context("dev.azure.com", "clone")
+                    assert "az login" in msg
+                    assert "ADO_APM_PAT" in msg
+
+    def test_ado_no_pat_az_available_logged_in_but_rejected(self):
+        """Case 2: no PAT, az logged in, bearer acquired but ADO rejected it."""
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value=None
+            ):
+                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                    mock_provider = mock_provider_cls.return_value
+                    mock_provider.is_available.return_value = True
+                    mock_provider.get_bearer_token.return_value = "eyJfake"
+                    mock_provider.get_current_tenant_id.return_value = "abc-123"
+                    resolver = AuthResolver()
+                    # Force cache clear so resolve uses the mocked bearer
+                    resolver._cache.clear()
+                    msg = resolver.build_error_context("dev.azure.com", "clone")
+                    assert "tenant" in msg.lower()
+                    assert "az account show" in msg
+
+    def test_ado_pat_set_az_available_case4(self):
+        """Case 4: PAT set + az available -> both rejected."""
+        with patch.dict(os.environ, {"ADO_APM_PAT": "expired-pat"}, clear=True):
+            with patch.object(
+                GitHubTokenManager, "resolve_credential_from_git", return_value=None
+            ):
+                with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                    mock_provider = mock_provider_cls.return_value
+                    mock_provider.is_available.return_value = True
+                    resolver = AuthResolver()
+                    msg = resolver.build_error_context("dev.azure.com", "clone")
+                    assert "unset ADO_APM_PAT" in msg
+                    assert "az login" in msg
 
 
 # ---------------------------------------------------------------------------

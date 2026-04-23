@@ -1,0 +1,104 @@
+# Merge Gate -- single-authority orchestrator that aggregates ALL required
+# PR-time checks into one verdict. Branch protection requires only this
+# check; this workflow polls the Checks API for all underlying checks.
+#
+# Why this file exists:
+#   GitHub's required-status-checks model is name-based, not workflow-based.
+#   Without this gate, branch protection had to require each PR-time check
+#   individually -- adding or renaming a check meant a ruleset edit. With
+#   this gate, branch protection requires only 'gate' (the check-run name
+#   of the job below) and the gate aggregates whatever underlying checks
+#   we declare in EXPECTED_CHECKS. Tide / bors single-authority pattern.
+#
+# Why a single trigger (not dual pull_request + pull_request_target):
+#   We tried dual-trigger redundancy in PR #865 to harden against rare
+#   dropped 'pull_request' webhook deliveries (observed once on PR #856).
+#   It backfired: 'concurrency: cancel-in-progress' produced TWO check-runs
+#   per SHA -- one SUCCESS and one CANCELLED -- which poisons branch
+#   protection's status-check rollup ('CANCELLED' counts as failure ->
+#   PR BLOCKED). No GitHub Actions primitive cleanly de-duplicates checks
+#   across event channels. World-class OSS projects (k8s, rust, deno,
+#   next.js) accept this and use a single trigger plus manual recovery.
+#
+# Recovery if a 'pull_request' webhook is dropped:
+#   - Push an empty commit:  git commit --allow-empty -m 'retrigger' && git push
+#   - Or trigger manually:   gh workflow run merge-gate.yml -f pr_number=NNN
+#   - Or close + reopen the PR.
+
+name: Merge Gate
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths-ignore:
+      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE'
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to re-run the gate against'
+        required: true
+        type: string
+
+# Dedup pushes to the same PR: cancel any older in-flight gate run on
+# the same PR head. Now safe -- only one trigger channel, so cancellations
+# only happen on rapid push-after-push, not on cross-event collisions.
+concurrency:
+  group: merge-gate-${{ github.event.pull_request.number || inputs.pr_number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: read
+  pull-requests: read
+
+jobs:
+  gate:
+    name: gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Resolve PR head SHA
+        id: sha
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            sha=$(gh api "repos/${{ github.repository }}/pulls/${{ inputs.pr_number }}" --jq '.head.sha')
+          else
+            sha="${{ github.event.pull_request.head.sha }}"
+          fi
+          if [ -z "$sha" ]; then
+            echo "::error::Could not resolve PR head SHA"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "[merge-gate] resolved head SHA: $sha"
+
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.sha.outputs.sha }}
+          sparse-checkout: |
+            .github/scripts/ci
+
+      - name: Wait for all required checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ steps.sha.outputs.sha }}
+          # All PR-time checks the gate aggregates. Keep this in sync with
+          # the underlying workflows. Currently only ci.yml emits PR-time
+          # checks ('Build & Test (Linux)'); ci-integration.yml is
+          # merge_group-only and is NOT polled here.
+          # NOTE: 'gate' (this job) MUST NOT appear here -- it would
+          # deadlock waiting for itself.
+          EXPECTED_CHECKS: 'Build & Test (Linux)'
+          TIMEOUT_MIN: '30'
+          POLL_SEC: '30'
+        run: |
+          chmod +x .github/scripts/ci/merge_gate_wait.sh
+          .github/scripts/ci/merge_gate_wait.sh
+
+
