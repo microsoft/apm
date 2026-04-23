@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # Unit tests for devcontainer/src/apm/install.sh
-# PATH is fully isolated to STUB_BIN — no network, no real packages, no Docker.
+# PATH is fully isolated to STUB_BIN -- no network, no real packages, no Docker.
 
 load "../../test_helper/bats-support/load"
 load "../../test_helper/bats-assert/load"
@@ -36,7 +36,7 @@ case "$*" in
 esac
 EOF
     /bin/chmod +x "$STUB_BIN/_python3_stub"
-    # NOTE: PATH is NOT locked here — test code needs rm, cat, etc.
+    # NOTE: PATH is NOT locked here -- test code needs rm, cat, etc.
     # We'll lock it per-test using run_with_stubs()
 }
 
@@ -62,7 +62,7 @@ make_python3_stub() {
     /bin/cp "$STUB_BIN/_python3_stub" "$STUB_BIN/python3"
 }
 
-# make_old_python3_stub <major> <minor>  — simulates an older Python.
+# make_old_python3_stub <major> <minor>  -- simulates an older Python.
 make_old_python3_stub() {
     local major="${1:-3}" minor="${2:-8}"
     /bin/cat > "$STUB_BIN/python3" <<EOF
@@ -77,7 +77,7 @@ EOF
     /bin/chmod +x "$STUB_BIN/python3"
 }
 
-# make_pkg_mgr_stub <cmd>  — creates a package-manager stub that side-effects
+# make_pkg_mgr_stub <cmd>  -- creates a package-manager stub that side-effects
 # a python3 stub (simulating a successful install of python3) and records args.
 make_pkg_mgr_stub() {
     local cmd="$1"
@@ -103,7 +103,7 @@ setup_happy_path() {
 # -- Root check ----------------------------------------------------------------
 
 @test "exits 1 with clear message when not run as root" {
-    make_stub id 0 "1"   # id -u → 1 (non-root)
+    make_stub id 0 "1"   # id -u -> 1 (non-root)
 
     run_with_stubs
 
@@ -149,7 +149,7 @@ EOF
 @test "installs python3 via apk when apt-get is absent" {
     setup_happy_path
     rm -f "$STUB_BIN/python3"
-    # No apt-get stub — falls through to apk
+    # No apt-get stub -- falls through to apk
     make_pkg_mgr_stub apk
 
     run_with_stubs
@@ -163,7 +163,7 @@ EOF
 @test "installs python3 via dnf when apt-get and apk are absent" {
     setup_happy_path
     rm -f "$STUB_BIN/python3"
-    # No apt-get or apk stubs — falls through to dnf
+    # No apt-get or apk stubs -- falls through to dnf
     make_pkg_mgr_stub dnf
 
     run_with_stubs
@@ -507,6 +507,14 @@ EOF
 @test "cleans up uv installer temp file on success" {
     setup_happy_path
     rm -f "$STUB_BIN/uv"
+    # Pin mktemp to a deterministic path so we can assert on that exact file.
+    UV_TMP="$BATS_TEST_TMPDIR/uv_install.fixed"
+    /bin/cat > "$STUB_BIN/mktemp" <<EOF
+#!/bin/sh
+: > "$UV_TMP"
+echo "$UV_TMP"
+EOF
+    /bin/chmod +x "$STUB_BIN/mktemp"
     /bin/cat > "$STUB_BIN/curl" <<EOF
 #!/bin/sh
 cat <<SCRIPT
@@ -520,13 +528,19 @@ EOF
     run_with_stubs
 
     assert_success
-    # Verify no uv_install temp files left behind
-    [ -z "$(find /tmp -maxdepth 1 -name 'uv_install.*' -type f 2>/dev/null)" ]
+    [ ! -e "$UV_TMP" ]
 }
 
 @test "cleans up uv installer temp file on script failure" {
     setup_happy_path
     rm -f "$STUB_BIN/uv"
+    UV_TMP="$BATS_TEST_TMPDIR/uv_install.fixed"
+    /bin/cat > "$STUB_BIN/mktemp" <<EOF
+#!/bin/sh
+: > "$UV_TMP"
+echo "$UV_TMP"
+EOF
+    /bin/chmod +x "$STUB_BIN/mktemp"
     /bin/cat > "$STUB_BIN/curl" <<'EOF'
 #!/bin/sh
 cat <<'SCRIPT'
@@ -538,8 +552,7 @@ EOF
     run_with_stubs
 
     assert_failure
-    # Verify no uv_install temp files left behind
-    [ -z "$(find /tmp -maxdepth 1 -name 'uv_install.*' -type f 2>/dev/null)" ]
+    [ ! -e "$UV_TMP" ]
 }
 
 @test "skips uv install when already on PATH; does not call curl" {

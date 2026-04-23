@@ -19,13 +19,13 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-# -- Install uv (idempotent — skip if already on PATH) ------------------------
+# -- Install uv (idempotent -- skip if already on PATH) -----------------------
 if command -v uv >/dev/null 2>&1; then
-    echo "uv already installed at $(command -v uv) — skipping"
+    echo "uv already installed at $(command -v uv) -- skipping"
 else
     # curl is only needed to fetch the uv installer
     if ! command -v curl >/dev/null 2>&1; then
-        echo "curl not found — installing..."
+        echo "curl not found -- installing..."
         if command -v apt-get >/dev/null 2>&1; then
             apt-get update -y -qq
             DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl
@@ -49,7 +49,7 @@ echo "Installing APM CLI (version: ${VERSION})..."
 
 # -- Ensure Python 3.10+ is available -----------------------------------------
 if ! command -v python3 >/dev/null 2>&1; then
-    echo "Python 3 not found — installing via system package manager..."
+    echo "Python 3 not found -- installing via system package manager..."
     if command -v apt-get >/dev/null 2>&1; then
         apt-get update -y -qq
         DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-pip git
