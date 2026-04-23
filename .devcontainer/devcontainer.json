@@ -2,16 +2,6 @@
   "name": "APM Development",
   "image": "mcr.microsoft.com/devcontainers/python:3.12",
   "features": {
-    "../devcontainer-feature/src/apm": {}
-  },
-  "postCreateCommand": "uv sync --extra dev",
-  "customizations": {
-    "vscode": {
-      "extensions": [
-        "ms-python.python",
-        "ms-python.vscode-pylance",
-        "charliermarsh.ruff"
-      ]
-    }
+    "./apm-feature": {}
   }
 }

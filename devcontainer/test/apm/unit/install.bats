@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Unit tests for devcontainer-feature/src/apm/install.sh
+# Unit tests for devcontainer/src/apm/install.sh
 # PATH is fully isolated to STUB_BIN — no network, no real packages, no Docker.
 
 load "../../test_helper/bats-support/load"
