@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI: smoke tests in `build-release.yml`'s `build-and-test` job (Linux x86_64, Linux arm64, Windows) are now gated to promotion boundaries (tag/schedule/dispatch) instead of running on every push to main. Push-time smoke duplicated the merge-time smoke gate in `ci-integration.yml` and burned ~15 redundant codex-binary downloads/day. Tag-cut releases still run smoke as a pre-ship gate; nightly catches upstream codex URL drift; merge-time still gates merges into main. (#878)
 - CI docs: clarify that branch-protection ruleset must store the check-run name (`gate`), not the workflow display string (`Merge Gate / gate`); document the merge-gate aggregator in `cicd.instructions.md` and mark the legacy stub workflow as deprecated.
 
+### Fixed
+
+- `apm install` (user scope): `init_link_resolver` now scopes `discover_primitives` to `~/.apm/` instead of `~/`, preventing recursive-glob across the entire home directory. Fixes #830 (#850)
+
 ### Removed
 
 - CI: deleted `ci-integration-pr-stub.yml`. The four stubs were a holdover from the pre-merge-gate model where branch protection required each Tier 2 check name directly. After #867, branch protection requires only `gate`, so the stubs are dead weight. Reduced `EXPECTED_CHECKS` in `merge-gate.yml` to just `Build & Test (Linux)`.
