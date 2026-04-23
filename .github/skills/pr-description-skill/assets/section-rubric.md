@@ -1,236 +1,156 @@
 <!--
   section-rubric.md
 
-  Loaded by pr-description-skill ONLY at the self-check step (step 7
-  of the execution checklist). For each section the orchestrator
-  drafted, run the matching block below as a "fresh eyes" pass: read
-  the section, run the acceptance test, fix or rewrite if it fails,
-  re-run until it passes. Then proceed to the next section.
+  Loaded by pr-description-skill at the self-check step. For each
+  section, run the acceptance test, fix or rewrite if it fails,
+  re-run until it passes.
 
-  ASCII-only.
+  CHARSET: this file is ASCII (lives in the repo, subject to
+  .github/instructions/encoding.instructions.md). The PR body it
+  governs is UTF-8 GitHub-Flavored Markdown.
 -->
 
 # Section Rubric -- Per-section Quality Bar and Self-check
 
+## Body-level ceilings
+
+- Total body length: target 150-220 lines. 250+ triggers a
+  tightening pass; 300+ is refused.
+- Long evidence (full audit logs, full pytest transcripts, large
+  file listings) MUST be wrapped in `<details>` so the visible body
+  stays scannable.
+
 ## 1. Title line
 
-- **Purpose**: One imperative summary the reviewer reads in the PR
-  list view.
-- **Minimum content**: `<verb>(<scope>): <summary>`. Verb is one of
-  add, fix, refactor, harden, document, ship, remove, deprecate.
-  Scope matches the area touched (cli, install, integration, docs,
-  ci, skills, etc.).
-- **Failure modes to refuse**:
-  - Past tense ("added", "fixed").
-  - Title longer than 100 chars.
-  - Scope that names a single file ("update SKILL.md") instead of
-    an area.
-- **Acceptance test**: First line starts with one of the listed
-  verbs, contains a parenthesized scope, and is at most 100 chars.
+- Acceptance: First line is `<verb>(<scope>): <summary>`. Verb is
+  one of {add, fix, refactor, harden, document, ship, remove,
+  deprecate}. Max 100 chars.
+- Refuse: past tense ("added"), single-file scope ("update SKILL.md"
+  instead of an area).
 
 ## 2. TL;DR
 
-- **Purpose**: Executive summary that lets a busy reviewer triage
-  the PR in under 30 seconds.
-- **Minimum content**: What changed, why now, the risk eliminated.
-  Four sentences maximum.
-- **Failure modes to refuse**:
-  - More than four sentences.
-  - Marketing tone ("this is a great improvement").
-  - Restating the title in different words without adding the
-    "why now" or the "eliminated risk".
-- **Acceptance test**: Count sentences. If `count > 4`, rewrite. If
-  any sentence contains an adjective in {"great", "amazing",
-  "significantly", "best-in-class", "powerful"}, strip it.
+- Acceptance: 2-4 sentences. States what changed, why now, risk
+  eliminated.
+- Refuse: more than 4 sentences; marketing adjectives in {great,
+  amazing, significantly, best-in-class, powerful}; restating the
+  title without adding the "why now".
 
 ## 3. Problem (WHY)
 
-- **Purpose**: Convince the reviewer that the change is necessary
-  by showing observed failure modes today, not hypothetical future
-  ones.
-- **Minimum content**:
-  - At least two bullet items tagged with `[x]` (hard violation) or
-    `[!]` (soft risk).
-  - At least two verbatim quoted anchors from PROSE or Agent Skills,
-    each wrapped in a hyperlink to the source URL.
-  - Each anchor cites the failure mode it explains, not a generic
-    principle.
-- **Failure modes to refuse**:
-  - Hypothetical-only language ("could lead to", "might cause")
-    with no observed evidence.
-  - Quotes paraphrased inside the link text instead of reproduced
-    verbatim.
-  - Anchors to anything other than PROSE or Agent Skills (or
-    another canonical reference the orchestrator has been asked to
-    use).
-- **Acceptance test**: Count anchored quotes. If `count < 2`, find
-  more anchors or drop unsupported claims.
+- Acceptance: max 6 bullets. Each tagged `[x]` or `[!]`. Max 3
+  verbatim quoted anchors total in this section. Each quote
+  reproduced character-for-character at its linked URL.
+- Refuse: hypothetical-only language ("could lead to") with no
+  observed evidence; paraphrased quotes inside link text; anchors
+  to anything other than PROSE / Agent Skills (or a canonical ref
+  the orchestrator was asked to use); more than 3 quotes (they stop
+  adding signal beyond that).
 
 ## 4. Approach (WHAT)
 
-- **Purpose**: Show the reviewer the shape of the fix in one
-  scannable table before they read the prose.
-- **Minimum content**: A table with columns `#`, `Fix`,
-  `Principle operationalized`, `Source`. Every row has all four
-  columns filled. Every Principle cell is a verbatim quote with a
-  hyperlink. Every Source cell names PROSE constraint or Agent
-  Skills section.
-- **Failure modes to refuse**:
-  - Rows with empty Principle or Source.
-  - Paraphrased principles ("basically Progressive Disclosure")
-    instead of verbatim quotes.
-  - One mega-row covering "everything in this PR"; rows must
-    decompose to surgical fixes.
-- **Acceptance test**: For each row, the Principle cell contains a
-  pair of double quotes around a string that appears verbatim at
-  the linked URL.
+- Acceptance: a table with columns `#`, `Fix`, `Principle`,
+  `Source`, OR a 3-7 bullet list. Every Principle cell is a
+  verbatim quote with a hyperlink. May be replaced by the single
+  line "Additive change -- see Implementation" when the PR adds new
+  surface without changing existing behavior.
+- Refuse: empty Principle/Source cells; paraphrased principles
+  ("basically Progressive Disclosure"); one mega-row covering
+  everything in the PR.
 
 ## 5. Implementation (HOW)
 
-- **Purpose**: Tell the reviewer per file: what changed in intent,
-  what risk it carries, what was deliberately NOT touched.
-- **Minimum content**:
-  - One H3 subsection per file changed (or per logical group of
-    files when the change is uniform).
-  - Bullets describing intent, risk, and surgical-scope notes.
-  - At least one quoted anchor per subsection, OR an explicit note
-    "no anchor needed -- mechanical change".
-- **Failure modes to refuse**:
-  - Line-by-line restatement of the diff.
-  - "Refactored for clarity" with no specific intent.
-  - Files mentioned only in the title or TL;DR with no H3
-    subsection.
-- **Acceptance test**: For each file in the activation contract's
-  changed-files list, an H3 subsection with the file path in
-  backticks exists. If not, add it or explain its absence.
+- Acceptance: one short paragraph per file (or a table). Each entry
+  names intent and surgical-scope notes. May reference the diff via
+  a permalink (`https://github.com/microsoft/apm/blob/<sha>/...#Ln-Lm`)
+  rather than restating it.
+- Refuse: line-by-line restatement of the diff; "refactored for
+  clarity" with no specific intent; files in the activation
+  contract that have no entry here at all.
 
 ## 6. Diagrams
 
-- **Purpose**: Make non-trivial structural change pattern-matchable
-  at a glance.
-- **Minimum content**:
-  - At least one mermaid block for any PR that touches more than
-    one file or alters control flow.
-  - One ASCII legend per diagram, even if obvious.
-  - Diagram type matched to content: `flowchart` for control flow,
-    `stateDiagram-v2` for lifecycle, `classDiagram` for artifact
-    relationships.
-- **Failure modes to refuse**:
-  - Any non-ASCII character in a node label, edge label, or note.
-  - Diagrams with no legend.
-  - Decorative diagrams that do not reflect the change (e.g. a
-    flowchart of unchanged code).
-- **Acceptance test**: Run an ASCII check on the contents of every
-  fenced mermaid block. Verify the diagram references at least one
-  file or function actually touched by the diff.
+- Acceptance: 1-3 mermaid blocks for any non-doc-only PR. Each
+  block preceded by a one-sentence legend. **Every block validated
+  by `mmdc` before save** (see SKILL.md "Mandatory mermaid
+  validation step").
+- Refuse: any block that fails `mmdc`; a third diagram that does
+  not earn its place; diagrams with no legend; decorative diagrams
+  that do not reflect the change. Unicode IS allowed in node
+  labels -- the constraint is mmdc validity, not ASCII purity.
 
 ## 7. PROSE alignment matrix
 
-- **Purpose**: Force an honest before/after assessment for every
-  PROSE dimension the change touches.
-- **Minimum content**:
-  - One row per PROSE dimension touched (Progressive Disclosure,
-    Reduced Scope, Orchestrated Composition, Safety Boundaries,
-    Explicit Hierarchy).
-  - Columns: dimension name, Before state, After state, 1-5 score.
-  - Any score below 5 is followed by a one-sentence "why not 5"
-    sentence after the table.
-  - Any score of 5 is justified by naming the source-of-truth file,
-    every dependent reference, and the gotcha resolved.
-- **Failure modes to refuse**:
-  - All-5s without justification. The maintainer rule of thumb:
-    "all fives means the author did not look hard enough".
-  - Empty Before or After cells.
-  - Dimensions claimed without any evidence in the diff.
-- **Acceptance test**: For each row, ask: "Could a reviewer reading
-  the diff agree with this Before/After characterization?" If not,
-  rewrite the cells before adjusting the score.
+- Acceptance: at most 5 rows -- one per PROSE dimension touched.
+  Columns: dimension, Before, After, score 1-5. Any score < 5 has a
+  one-sentence "why not 5" after the table. Any score of 5 names
+  the source-of-truth file, dependent references, and the gotcha
+  resolved. The whole matrix fits in a screen-height.
+- Refuse: all-5s without justification; empty Before/After cells;
+  dimensions claimed without evidence in the diff. May be omitted
+  entirely when the PR does not advance any dimension -- record the
+  omission in Trade-offs.
 
-## 8. Trade-offs and self-critique
+## 8. Trade-offs
 
-- **Purpose**: Show the reviewer that obvious alternatives were
-  considered and rejected with reasons, not missed.
-- **Minimum content**:
-  - At least one bullet per non-trivial decision.
-  - Each bullet has the shape: option chosen, option rejected,
-    rationale, anchor (when possible).
-  - Surgical-scope decisions ("we did not also fix X because ...")
-    are listed here, not hidden in Implementation.
-- **Failure modes to refuse**:
-  - Trade-offs that read like benefits in disguise ("we chose to
-    do this because it is better").
-  - "No trade-offs" claim. Every non-trivial PR has at least one
-    rejected option; if none surface, push back.
-  - Rationale that boils down to "personal preference" with no
-    grounding.
-- **Acceptance test**: For each bullet, the words "rejected:" or
-  "option rejected" appear, followed by a concrete alternative.
+- Acceptance: 3-5 bullets for cross-cutting changes; 1-2 acceptable
+  for mechanical PRs. Each bullet names option chosen, option
+  rejected, rationale.
+- Refuse: trade-offs that read like benefits in disguise; "no
+  trade-offs" claim on a non-mechanical PR; rationale that boils
+  down to "personal preference" with no grounding.
 
-## 9. Benefits (recap)
+## 9. Benefits
 
-- **Purpose**: Let the reviewer confirm that the WHY in section 3
-  is actually addressed by the WHAT in section 4.
-- **Minimum content**: Numbered list of concrete, observable
-  benefits. Each benefit names something a reviewer can verify
-  (count of comments emitted, presence of a section, behavior
-  under a specific input).
-- **Failure modes to refuse**:
-  - Adjectives in {"great", "amazing", "significantly",
-    "best-in-class", "powerful", "robust"}.
-  - Benefits that restate the fix without naming the observable
-    outcome.
-- **Acceptance test**: For each benefit, ask: "What command or
-  observation lets the reviewer verify this?" If you cannot
-  answer, rewrite or drop the bullet.
+- Acceptance: 3-5 numbered items. Each names something a reviewer
+  can verify (count, presence, behavior under specific input).
+- Refuse: marketing adjectives; benefits that restate the fix
+  without naming the observable outcome.
 
 ## 10. Validation
 
-- **Purpose**: Show the reviewer that the change has been
-  exercised, not just written.
-- **Minimum content**:
-  - At least one fenced code block of real CLI output (`apm audit
-    --ci`, `uv run pytest`, `apm install --target copilot`, or
-    equivalent).
-  - An ASCII-purity statement listing each authored / rewritten
-    file with `OK` or a documented exception.
-  - When applicable, a mirror-parity check (`apm install --target
-    copilot` confirms `.apm/` and `.github/` are in sync).
-- **Failure modes to refuse**:
-  - Invented or stylized output ("[+] all tests pass" with no
-    real command shown).
-  - Skipping ASCII purity for any authored file.
-  - Output excerpts that hide failures with `...`.
-- **Acceptance test**: For each fenced output block, the command
-  that produced it is named on the immediately preceding line, and
-  the output is verbatim (warts included).
+- Acceptance: real CLI output, verbatim. Commands named on the
+  line immediately preceding their fenced block. Long transcripts
+  wrapped in `<details>`.
+- Refuse: invented or stylized output; output excerpts that hide
+  failures with `...`; narration of what the command "would print"
+  in place of the actual output.
 
 ## 11. How to test
 
-- **Purpose**: Give the reviewer a reproducible script they can
-  follow without reading the source.
-- **Minimum content**: Numbered steps. Each step has an action and
-  an expected observation. Steps cover both the happy path and at
-  least one edge case the change addresses.
-- **Failure modes to refuse**:
-  - "See the diff" or "obvious from the code" as a step.
-  - Steps that depend on un-mentioned setup.
-  - Steps that rely on a private fixture or unshipped data.
-- **Acceptance test**: Pick a hypothetical reviewer who has never
-  seen this branch. Can they follow the steps end-to-end with only
-  what is in the PR body and the repo? If not, rewrite.
+- Acceptance: max 5 numbered or task-list steps. Each step has an
+  action and an expected observation. Use GFM task list form
+  (`- [ ] ...`) so reviewers can tick boxes as they go.
+- Refuse: "see the diff" or "obvious from the code" as a step;
+  steps that depend on un-mentioned setup; steps that rely on a
+  private fixture.
+
+## GFM features the body SHOULD use
+
+- `> [!NOTE]`, `> [!TIP]`, `> [!IMPORTANT]`, `> [!WARNING]`,
+  `> [!CAUTION]` for callouts that need to interrupt scanning.
+- `<details><summary>...</summary>...</details>` for long evidence.
+- Task lists in How to test.
+- Tables with `:---:` / `---:` alignment for matrices.
+- Permalinks to the diff for line-level evidence.
+
+If the draft contains no alerts, no collapsibles, and no task
+lists, ask whether GFM features would help -- a flat 250-line body
+almost always benefits from at least one collapsible around its
+validation block.
 
 ## Final pass -- run before saving
 
-- [ ] All eleven sections present (10 if alignment matrix omitted
-      AND that omission is documented in Trade-offs).
-- [ ] No `<PLACEHOLDER>`, `TBD`, or `TODO` strings remain.
-- [ ] Every quote in the body appears verbatim at its linked URL
-      (spot-check at least 3 quotes by re-fetching the page).
-- [ ] ASCII purity confirmed for the body file (printable
-      U+0020-U+007E plus newline and tab).
+- [ ] All 11 sections present (10 if alignment matrix omitted AND
+      that omission is recorded in Trade-offs).
+- [ ] Total body length within 150-220 lines (250+ triggers
+      tightening).
+- [ ] No `<PLACEHOLDER>`, `TBD`, or `TODO` remains.
+- [ ] Every quote appears verbatim at its linked URL (spot-check
+      at least 3).
+- [ ] **Every mermaid block validated by `mmdc`.**
 - [ ] TL;DR sentence count is 4 or fewer.
-- [ ] At least one mermaid diagram is present for any non-doc-only
-      PR, and every diagram label is ASCII.
+- [ ] Long evidence is inside `<details>`, not flat in the body.
 - [ ] Trailer line `Co-authored-by: Copilot
       <223556219+Copilot@users.noreply.github.com>` is the last
-      non-empty line of the file.
+      non-empty line.

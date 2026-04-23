@@ -2,163 +2,144 @@
   pr-body-template.md
 
   Loaded by pr-description-skill ONLY at synthesis time, after every
-  row of the activation contract has been filled. Do not load this
-  file during persona dispatch or planning. Replace every <PLACEHOLDER>
-  with content drawn ONLY from the activation contract inputs.
+  row of the activation contract has been filled. Replace every
+  <PLACEHOLDER> with content drawn from the activation contract
+  inputs. Drop a section's body (keep its header) only when SKILL.md
+  explicitly allows it for this PR shape.
 
-  ASCII-only. No emojis, no em dashes, no curly quotes, no box-
-  drawing characters. Every mermaid node and edge label is ASCII.
+  CHARSET: this template is ASCII because it lives in the repo and is
+  subject to .github/instructions/encoding.instructions.md. The
+  rendered PR body the orchestrator produces from this template MUST
+  be UTF-8 GitHub-Flavored Markdown -- use em dashes, smart quotes,
+  alerts, collapsibles, and Unicode where they improve readability.
 -->
 
 # <verb>(<scope>): <one-line imperative summary>
-<!-- check: first line is at most 100 chars; verb is imperative (add, fix, refactor, harden, document, ship); scope matches the area touched (e.g. cli, install, integration, docs, ci, skills) -->
 
 ## TL;DR
-<!-- check: at most 4 sentences; states what changed, why, and the eliminated risk; no marketing language -->
 
-<PARAGRAPH: what changed, why now, the risk this eliminates. Keep it
-to four sentences max.>
+<2-4 sentences: what changed, why now, the risk this eliminates.>
+
+> [!NOTE]
+> <Optional one-line callout: linked issue, follow-up plan, or the
+> single fact a reviewer most needs to know up front.>
 
 ## Problem (WHY)
-<!-- check: at least 2 verbatim quoted anchors with hyperlinks; each observed failure tagged with [x] for hard violation or [!] for soft risk -->
 
-We observed:
+<Up to 6 bullets. Tag each with [x] hard violation or [!] soft risk.
+Up to 3 verbatim quoted anchors total across this section.>
 
-- `[x]` <Concrete failure mode 1, with file or command evidence.>
-- `[x]` <Concrete failure mode 2.>
-- `[!]` <Soft risk or drift vector observed in the codebase today.>
+- [x] <Concrete failure mode 1, with file or command evidence.>
+- [x] <Concrete failure mode 2.>
+- [!] <Soft risk or drift vector observed today.>
 
-Why each is a violation:
-
-- <Failure 1> violates
-  ["<verbatim quote from PROSE or Agent Skills>"](<source url>).
-- <Failure 2> violates
-  ["<verbatim quote>"](<source url>).
-- <Soft risk> would over time degrade
-  ["<verbatim quote>"](<source url>).
+Why these matter: <Failure 1> violates
+["<verbatim quote from PROSE or Agent Skills>"](<source url>);
+<Failure 2> violates
+["<verbatim quote>"](<source url>).
 
 ## Approach (WHAT)
-<!-- check: every row has a Principle column AND a Source column; principles are quoted verbatim, not paraphrased -->
 
-| # | Fix | Principle operationalized | Source |
-|---|-----|---------------------------|--------|
-| 1 | <Surgical fix description.> | ["<verbatim quote>"](<source url>) | <PROSE -- Constraint Name OR Agent Skills -- Section Name> |
-| 2 | <Surgical fix description.> | ["<verbatim quote>"](<source url>) | <Source> |
-| 3 | <Surgical fix description.> | ["<verbatim quote>"](<source url>) | <Source> |
+<Table OR 3-7 bullets. If purely additive, replace this section's
+body with: "Additive change -- see Implementation.">
+
+| # | Fix | Principle | Source |
+|---|-----|-----------|--------|
+| 1 | <Surgical fix.> | ["<verbatim quote>"](<url>) | <PROSE / Agent Skills section> |
+| 2 | <Surgical fix.> | ["<verbatim quote>"](<url>) | <Source> |
+| 3 | <Surgical fix.> | ["<verbatim quote>"](<url>) | <Source> |
 
 ## Implementation (HOW)
-<!-- check: every named file has its own H3 subsection; every subsection has at least one quoted anchor; no line-by-line restatement of the diff -->
 
-### `<path/to/file/1>`
+<One short paragraph per file changed, OR a table. No prose walls.
+Permalink to the diff for line-level evidence:
+https://github.com/microsoft/apm/blob/<sha>/path#L12-L34>
 
-- <Intent of the change in this file.>
-- <Risk this introduces or eliminates.>
-- <Anchor:> per
-  ["<verbatim quote>"](<source url>).
-
-### `<path/to/file/2>`
-
-- <Intent of the change.>
-- <Surgical scope note: what was deliberately NOT touched in this
-  file and why.>
+- **`<path/to/file/1>`** -- <intent in one or two sentences;
+  what was deliberately not touched and why.>
+- **`<path/to/file/2>`** -- <intent; anchor if non-mechanical:
+  per ["<quote>"](<url>).>
 
 ## Diagrams
-<!-- check: at least one diagram for any non-doc-only PR; every label is ASCII; at least one note or legend; verify the rendered output before saving -->
 
-### 1. <Short diagram title>
+<1-3 mermaid blocks. Each preceded by a one-sentence legend. Every
+block MUST have been validated by mmdc before saving.>
+
+Legend: <one sentence on what this diagram shows and what to look
+at first>.
 
 ```mermaid
 flowchart TD
-    A[Start point] --> B{Decision}
+    A[Start] --> B{Decision}
     B -- yes --> C[Action when yes]
     B -- no --> D[Action when no]
-    C --> E[End state]
+    C --> E[End]
     D --> E
 ```
 
-Legend: <one-line ASCII legend describing the boxes / arrows>.
+<Add a second diagram only if the relationships are non-trivial.>
 
-### 2. <Short diagram title>
+## PROSE alignment matrix
 
-```mermaid
-stateDiagram-v2
-    [*] --> Idle
-    Idle --> Working: trigger received
-    Working --> Idle: work complete
-    Working --> Failed: error raised
-    Failed --> Idle: operator reset
-    note right of Working
-        Long-running phase. No
-        side effects emitted from
-        this state until exit.
-    end note
-```
+<5 rows max. Any score < 5 followed by a one-sentence "why not 5".
+Skip this section entirely if the change does not advance any PROSE
+dimension; record that in Trade-offs.>
 
-## PROSE alignment matrix (honest)
-<!-- check: any score < 5 has a one-sentence "why not 5"; any 5 has explicit justification; an all-5 column without justification is refused as inflation -->
-
-| PROSE dimension | Before this PR | After this PR | Honest score 1-5 |
-|-----------------|----------------|---------------|------------------|
-| Progressive Disclosure | <Before state.> | <After state.> | <N> |
+| Dimension | Before | After | Score |
+|---|---|---|:---:|
+| Progressive Disclosure | <Before.> | <After.> | <N> |
 | Reduced Scope | <Before.> | <After.> | <N> |
 | Orchestrated Composition | <Before.> | <After.> | <N> |
 | Safety Boundaries | <Before.> | <After.> | <N> |
 | Explicit Hierarchy | <Before.> | <After.> | <N> |
 
-We knowingly leave <dimension X> at <score> because <one-sentence
-honest reason naming what is still missing>. A follow-up PR will
-<one-line plan or "this is acceptable residual scope">.
+Why not 5 on <dimension>: <one-sentence honest reason naming what
+is still missing>.
 
-## Trade-offs and self-critique
-<!-- check: at least one rejected option per non-trivial decision; rationale grounded in a quote when possible; surgical-scope decisions explicitly listed -->
+## Trade-offs
 
-- **<Decision 1 in one phrase>.** Option chosen: <option>. Option
-  rejected: <option>. Rationale: <why, ideally grounded in a quoted
-  principle>. Anchor:
-  ["<verbatim quote>"](<source url>).
+<3-5 bullets. 1-2 acceptable for mechanical PRs.>
 
-- **<Decision 2>.** Option chosen: <option>. Option rejected:
-  <option>. Rationale: <why>.
+- **<Decision in one phrase>.** Chose <option>; rejected <option>
+  because <rationale, ideally anchored:
+  ["<quote>"](<url>)>.
+- **Pre-existing issue X left in place.** Surgical scope; right
+  venue is a separate PR.
 
-- **Pre-existing issue X left in place.** Option chosen: leave it.
-  Option rejected: opportunistically fix. Rationale: surgical scope;
-  the right venue is a separate PR.
+## Benefits
 
-## Benefits (recap)
-<!-- check: numbered, concrete, no adjectives like "great", "amazing", "significantly"; each benefit names a measurable or observable change -->
+<3-5 numbered, measurable items.>
 
-1. <Concrete benefit, e.g. "One comment per PR review run instead of
-   N comments".>
-2. <Concrete benefit, named in terms a reviewer can verify.>
-3. <Concrete benefit.>
+1. <Benefit a reviewer can verify, e.g. "One PR comment per review
+   run instead of N".>
+2. <Measurable benefit.>
+3. <Measurable benefit.>
 
 ## Validation
-<!-- check: at least one fenced block of real CLI output; commands actually executed, not invented; ASCII purity confirmed -->
 
-`<command run, e.g. apm audit --ci>`:
+<Real CLI output, verbatim. Long transcripts go in <details>.>
 
-```
-<verbatim CLI output, ASCII only, no decoration>
-```
-
-ASCII purity (printable U+0020-U+007E, plus newline and tab) across
-the authored / rewritten files:
-
-- `<path/to/file/1>` -- OK
-- `<path/to/file/2>` -- OK
-
-`<other validation, e.g. uv run pytest tests/unit/...>`:
+`apm audit --ci`:
 
 ```
-<verbatim test output excerpt; the relevant pass/fail lines>
+<verbatim CLI output>
 ```
+
+<details><summary>Full pytest output (N tests)</summary>
+
+```
+<verbatim transcript>
+```
+
+</details>
 
 ## How to test
-<!-- check: every step is independently runnable; no "see the diff"; reviewer can follow these steps without reading the source -->
 
-1. <Concrete reproducible step the reviewer runs first.>
-2. <Next step, with the expected observable outcome.>
-3. <Next step.>
-4. <Final assertion the reviewer makes against observed output.>
+<Max 5 numbered or task-list steps. Each step has an action and an
+expected observation.>
+
+- [ ] <Step 1: action -> expected observation.>
+- [ ] <Step 2.>
+- [ ] <Step 3.>
 
 Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>

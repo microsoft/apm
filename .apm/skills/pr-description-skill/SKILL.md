@@ -3,17 +3,17 @@ name: pr-description-skill
 description: >-
   Use this skill to write the PR description (PR body) for any pull
   request opened against microsoft/apm. Produces one self-sufficient
-  markdown artifact containing TL;DR, Problem (WHY), Approach (WHAT),
-  Implementation (HOW), mermaid diagrams, an honest PROSE alignment
-  matrix, explicit trade-offs, validation evidence, and a How-to-test
-  section -- with every WHY-claim backed by a verbatim quote from
-  PROSE or Agent Skills. Activate when the user asks to "write a PR
-  description", "draft a PR body", "open a PR", "fill in the PR
-  template", or any equivalent.
+  GitHub-Flavored Markdown artifact: TL;DR, Problem (WHY), Approach
+  (WHAT), Implementation (HOW), 1-3 validated mermaid diagrams, an
+  honest PROSE alignment matrix, explicit trade-offs, validation
+  evidence, and a How-to-test section -- with every WHY-claim backed
+  by a verbatim quote from PROSE or Agent Skills. Activate when the
+  user asks to "write a PR description", "draft a PR body", "open a
+  PR", "fill in the PR template", or any equivalent.
 model: claude-opus-4.7
 ---
 
-# PR Description Skill -- Anchored, Self-sufficient PR Bodies
+# PR Description Skill -- Anchored, Concise, Validated PR Bodies
 
 ## When to use
 
@@ -26,10 +26,63 @@ Trigger this skill on any of the following intents:
 - "summarize this branch as a PR"
 - "create the PR write-up"
 
-The skill is reusable for **any** PR against `microsoft/apm`. It is
-not specialized to skill-bundle PRs, refactors, or any one subsystem.
-The output is a single markdown file the orchestrator either pastes
-into `gh pr create --body-file` or surfaces to the maintainer.
+Reusable for any PR against `microsoft/apm`. The output is one
+markdown file that the orchestrator pastes into
+`gh pr create --body-file` or surfaces to the maintainer.
+
+## Output charset rule (read this first)
+
+The repo-wide encoding rule at
+`.github/instructions/encoding.instructions.md` constrains
+**source files and CLI output** to printable ASCII because Windows
+cp1252 terminals raise `UnicodeEncodeError` on anything else. PR
+comments are NOT source code and NOT CLI output -- they are rendered
+by GitHub's Primer engine, which expects UTF-8 GitHub-Flavored
+Markdown.
+
+Two distinct rules therefore apply:
+
+1. **Source files in this bundle** (`SKILL.md`, `assets/*`) MUST
+   stay ASCII. They live in the repo and are subject to
+   `.github/instructions/encoding.instructions.md`.
+2. **The PR body output the skill produces** MUST be UTF-8
+   GitHub-Flavored Markdown. Use em dashes, smart punctuation,
+   alerts, collapsibles, task lists, and Unicode where it improves
+   readability. Mermaid diagram labels MAY use Unicode -- there is
+   no constraint here. The output is consumed by GitHub's renderer,
+   not by a Windows terminal.
+
+A previous version of this skill incorrectly required ASCII in the
+PR body. That made the output unreadable: no alerts, no collapsibles
+for long evidence, no em dashes, no smart quotes. Reviewers had to
+scroll through hundreds of flat lines instead of scanning a body
+shaped by GFM features.
+
+## Concision targets (hard ceilings)
+
+The skill aims for **150-220 lines** for a typical PR body. **300+
+lines is a smell, not a virtue**. If your draft exceeds 250 lines,
+run a tightening pass: every sentence that does not change the
+reviewer's understanding must be cut.
+
+Per-section ceilings (enforced by `assets/section-rubric.md`):
+
+| Section | Ceiling |
+|---|---|
+| TL;DR | 2-4 sentences |
+| Problem (WHY) | max 6 bullets, max 3 quoted anchors total |
+| Approach (WHAT) | a table OR 3-7 bullets; may be skipped if PR is purely additive (say "additive: see Implementation") |
+| Implementation (HOW) | one short paragraph per file, OR a table; no prose walls |
+| Diagrams | 1-3 mermaid blocks; every diagram preceded by a one-sentence legend |
+| PROSE alignment matrix | 5 rows max; one-sentence "why not 5" per row scored < 5 |
+| Trade-offs | 3-5 bullets; mechanical PRs may be 1-2 |
+| Benefits | 3-5 numbered items, each measurable |
+| Validation | copy-paste real command output; do not narrate |
+| How to test | max 5 numbered steps |
+
+Long verbatim quote blocks, full file listings, and full validation
+transcripts SHOULD live inside `<details>` so the body stays
+scannable.
 
 ## Core principles (with quoted anchors)
 
@@ -38,116 +91,124 @@ of the two reference docs. If a rule below cannot be backed by a
 quote, it is downgraded to a "should" with the reason given.
 
 1. **Self-sufficient body.** A reviewer must be able to read the PR
-   body and form an opinion without opening any other doc, issue, or
-   chat. Concretely: every WHY-claim cites the source doc inline,
-   every named file is qualified with what changed in it, and every
-   diagram has an ASCII-only legend.
+   body and form an opinion without opening any other doc, issue,
+   or chat. Every WHY-claim cites the source doc inline; every
+   named file is qualified with what changed in it; every diagram
+   has a one-sentence legend.
 
    Anchor: Agent Skills,
    ["agents pattern-match well against concrete structures"](https://agentskills.io/skill-creation/best-practices).
-   A self-sufficient body IS the concrete structure the reviewer
-   pattern-matches against.
 
-2. **Anchored: every WHY-claim cites its source.** Every claim of the
-   form "this violates X" or "this satisfies Y" must be followed by a
-   verbatim quoted phrase wrapped in a hyperlink to the source page.
-   Quotes are reproduced character-for-character; do not paraphrase
-   inside the link text.
+2. **Anchored: every WHY-claim cites its source.** Every claim of
+   the form "this violates X" or "this satisfies Y" is followed by
+   a verbatim quoted phrase wrapped in a hyperlink to the source
+   page. Reproduce quotes character-for-character; do not paraphrase
+   inside link text.
 
    Anchor: PROSE,
    ["Grounding outputs in deterministic tool execution transforms probabilistic generation into verifiable action."](https://danielmeppiel.github.io/awesome-ai-native/docs/prose/).
-   A reviewer following the link IS the verification step.
 
 3. **Cite-or-omit.** If a WHY-claim cannot be backed by a verbatim
-   quote, the claim is dropped or softened to a tradeoff statement.
-   Never invent justification. Never paraphrase a doc and present the
-   paraphrase as a quote.
+   quote, drop it or soften to a tradeoff statement. Never invent
+   justification.
 
    Anchor: Agent Skills,
    ["Add what the agent lacks, omit what it knows"](https://agentskills.io/skill-creation/best-practices).
-   The reviewer already knows generic best practices; only project-
-   specific or doc-specific anchors add value.
 
 4. **Visual aid where structure is non-trivial.** Any change that
-   touches more than one file, introduces a new control flow, or
-   alters a state machine MUST include at least one mermaid diagram
-   (`flowchart`, `stateDiagram-v2`, or `classDiagram`). All node
-   labels, edge labels, and notes are ASCII-only.
+   touches more than one file or alters control flow SHOULD include
+   at least one mermaid diagram. Add a second only when the
+   relationships are non-trivial. Never add a third unless it earns
+   its place. Each diagram MUST be preceded by a one-sentence legend.
 
    Anchor: Agent Skills,
    ["agents pattern-match well against concrete structures"](https://agentskills.io/skill-creation/best-practices).
-   A diagram is the most pattern-matchable structure for code-shape
-   change.
 
 5. **Honest alignment matrix.** When the PR claims to advance a
-   PROSE dimension (Progressive Disclosure, Reduced Scope,
-   Orchestrated Composition, Safety Boundaries, Explicit Hierarchy),
-   the matrix MUST show "Before" and "After" cells AND a 1-5 score.
-   Scores below 5 require a one-sentence reason naming what is still
-   missing. A row of all-5s without explicit "why not 4" justification
-   is refused as inflation.
+   PROSE dimension, the matrix shows "Before" and "After" cells AND
+   a 1-5 score. Scores below 5 require a one-sentence "why not 5".
+   A row of all-5s without explicit justification is refused as
+   inflation.
 
    Anchor: PROSE,
    ["Match task size to context capacity."](https://danielmeppiel.github.io/awesome-ai-native/docs/prose/).
-   An honest matrix keeps the PR scope visible; an inflated matrix
-   hides residual scope.
 
-6. **Trade-offs explicit.** Every non-obvious decision (option chosen
-   vs option rejected) appears in a Trade-offs / self-critique
-   section, including the rationale grounded in a quote when
-   possible. This includes scope decisions ("we did not also fix X
-   because ...").
+6. **Trade-offs explicit.** Address every non-obvious decision
+   (option chosen vs option rejected). For mechanical PRs this
+   section may be 1-2 bullets. For cross-cutting changes, surface
+   the rejected alternatives.
 
    Anchor: PROSE,
    ["Favor small, chainable primitives over monolithic frameworks."](https://danielmeppiel.github.io/awesome-ai-native/docs/prose/).
-   Surgical scope IS the small primitive; trade-offs document why
-   the PR did not balloon.
 
-7. **Single artifact, no fluff.** The output is one markdown file.
-   No marketing tone, no "this is a great improvement", no
-   self-congratulation. The TL;DR is at most four sentences.
+7. **Single artifact, no fluff.** One markdown file. No marketing
+   tone, no self-congratulation. TL;DR is at most four sentences.
 
    Anchor: Agent Skills,
    ["When you find yourself covering every edge case, consider whether most are better handled by the agent's own judgment."](https://agentskills.io/skill-creation/best-practices).
-   Brevity is itself a discipline against context bloat for the
-   reviewer.
+
+## GitHub-Flavored Markdown features the skill MUST use
+
+The PR body is rendered by GitHub's Primer engine. Use the features
+that engine provides; do not flatten the output to plain text.
+
+- **Alerts** for high-signal callouts:
+  `> [!NOTE]`, `> [!TIP]`, `> [!IMPORTANT]`, `> [!WARNING]`,
+  `> [!CAUTION]`. Reference:
+  https://github.com/orgs/community/discussions/16925.
+- **Collapsible sections** for long diffs, full validation output,
+  or appendix material:
+
+  ```
+  <details><summary>Full audit output</summary>
+
+  ...content...
+  </details>
+  ```
+
+  Use `<details open>` only when the content answers the most
+  likely first reviewer question.
+- **Task lists** for "How to test" sections:
+  `- [ ] Apply label, observe X`.
+- **Tables with alignment**: `| col | :---: | ---: |` for matrices.
+- **Permalink references** to specific lines in the diff:
+  `https://github.com/microsoft/apm/blob/<sha>/path#L12-L34`.
+
+Long verbatim quote blocks, full file listings, and full validation
+transcripts SHOULD live inside `<details>` so the body stays
+scannable.
 
 ## Required body structure
 
-The PR body MUST follow this section order. Each section has a one-
-line purpose and a one-line acceptance test. Full per-section rubric
-lives in `assets/section-rubric.md` and is loaded only at the self-
-check step.
-
-| # | Section | Purpose | Acceptance test |
-|---|---------|---------|-----------------|
-| 1 | Title line | One imperative summary of the change. | First line is `# <verb>(<scope>): <summary>` and is at most 100 chars. |
-| 2 | TL;DR | Four-sentence-max executive summary. | `len(sentences) <= 4`. |
-| 3 | Problem (WHY) | Bulleted observed failure modes; each tagged `[x]` or `[!]`. | At least 2 verbatim quotes from PROSE or Agent Skills. |
-| 4 | Approach (WHAT) | Numbered table of fixes mapped to a quoted principle and source doc. | Every row has a Principle column AND a Source column. |
-| 5 | Implementation (HOW) | Per-file subsections describing what changed and why. | Every named file appears as an `H3` subsection with at least one quoted anchor. |
-| 6 | Diagrams | At least one mermaid diagram for non-trivial PRs. | Every node and edge label is ASCII; at least one note or legend. |
-| 7 | PROSE alignment matrix | "Before / After / 1-5 score" per PROSE dimension touched. | Any score < 5 has a "why not 5" sentence; any all-5 column has explicit justification. |
-| 8 | Trade-offs and self-critique | Option chosen vs option rejected, with rationale. | At least one rejected option per non-trivial decision. |
-| 9 | Benefits (recap) | Numbered, concrete, no marketing tone. | No adjectives like "great", "amazing", "significantly". |
-| 10 | Validation | Concrete commands run + output excerpts. | At least one fenced block of real CLI output. |
-| 11 | How to test | Numbered reproducible steps a reviewer can follow. | Every step is independently runnable; no "see the diff". |
+| # | Section | Purpose |
+|---|---------|---------|
+| 1 | Title line | Imperative summary; first line `<verb>(<scope>): <summary>`, max 100 chars |
+| 2 | TL;DR | 2-4 sentence executive summary |
+| 3 | Problem (WHY) | Observed failure modes; max 6 bullets, max 3 quoted anchors |
+| 4 | Approach (WHAT) | Table or 3-7 bullets; may say "additive: see Implementation" |
+| 5 | Implementation (HOW) | One short paragraph per file or a table |
+| 6 | Diagrams | 1-3 validated mermaid blocks, each with a legend |
+| 7 | PROSE alignment matrix | 5 rows max; "why not 5" per sub-5 score |
+| 8 | Trade-offs | 3-5 bullets (1-2 if mechanical) |
+| 9 | Benefits | 3-5 numbered, measurable items |
+| 10 | Validation | Real command output, ideally inside `<details>` if long |
+| 11 | How to test | Max 5 numbered or task-list steps |
 
 The Trade-offs (8) and How to test (11) sections are non-skippable
 for any PR that changes more than docs.
 
 ## Activation contract -- inputs the orchestrator MUST gather first
 
-Before invoking this skill, the orchestrator MUST have collected all
-of the following. The skill MUST NOT invent facts not present in
-these inputs.
+Before invoking this skill, the orchestrator MUST have collected
+all of the following. The skill MUST NOT invent facts not present
+in these inputs.
 
 | Input | Source | Required |
 |-------|--------|----------|
 | Branch name (head) | `git rev-parse --abbrev-ref HEAD` | yes |
 | Base ref | usually `main`; ask if unclear | yes |
 | List of files changed | `git diff --name-status <base>...HEAD` | yes |
-| Actual diff | `git diff <base>...HEAD` (or path to a saved diff) | yes |
+| Actual diff | `git diff <base>...HEAD` | yes |
 | Commit messages on the branch | `git log --no-merges <base>..HEAD --oneline` | yes |
 | CHANGELOG entry, if any | inspect `CHANGELOG.md` Unreleased section | yes |
 | Linked issue / motivation | user-provided or referenced in commits | yes |
@@ -155,8 +216,7 @@ these inputs.
 | Mirror parity check, if applicable | `apm install --target copilot` output | conditional |
 
 If any required input is missing, the orchestrator MUST stop and
-collect it before loading the template. This is a Progressive
-Disclosure boundary:
+collect it. This is a Progressive Disclosure boundary:
 ["Context arrives just-in-time, not just-in-case."](https://danielmeppiel.github.io/awesome-ai-native/docs/prose/).
 Do not load `assets/pr-body-template.md` until the table above is
 complete.
@@ -166,114 +226,122 @@ complete.
 Run these steps in order. Tick each before moving on.
 
 1. [ ] Confirm every row of the activation contract is filled in.
-       If a row is missing, stop and ask the user or run the
-       collection command. Do NOT proceed on assumption.
-2. [ ] Read the diff in full. Identify: (a) per-file change summary,
-       (b) any new file, (c) any deleted file, (d) any change in
-       behavior at module boundaries.
-3. [ ] Decide which PROSE dimensions the change touches (zero or
-       more of: Progressive Disclosure, Reduced Scope, Orchestrated
-       Composition, Safety Boundaries, Explicit Hierarchy). If none,
-       the alignment matrix may be omitted -- record that decision
-       in Trade-offs.
-4. [ ] Load `assets/pr-body-template.md`. This is the only point in
-       the run at which the template is brought into context. This
-       is Progressive Disclosure in action:
+2. [ ] Read the diff in full. Identify per-file change summary,
+       new files, deleted files, behavior changes at module
+       boundaries.
+3. [ ] Decide which PROSE dimensions the change touches. If none,
+       omit the alignment matrix and record that in Trade-offs.
+4. [ ] Load `assets/pr-body-template.md`. This is the only point
+       at which the template enters context. Progressive Disclosure
+       in action:
        ["store them in `assets/` and reference them from `SKILL.md` so they only load when needed."](https://agentskills.io/skill-creation/best-practices).
-5. [ ] Fill in the template top-to-bottom using only facts from the
-       activation contract inputs. Every WHY-claim gets a verbatim
+5. [ ] Fill in the template top-to-bottom using only facts from
+       the activation contract. Every WHY-claim gets a verbatim
        quoted anchor. If you cannot anchor a claim, drop it.
-6. [ ] Generate at least one mermaid diagram for any non-doc-only
-       PR. Verify ASCII purity of node and edge labels before
-       moving on.
-7. [ ] Load `assets/section-rubric.md` and run the self-check pass.
-       For each section, run the 1-line acceptance test against
-       your own draft. This is the validation loop pattern from
-       Agent Skills:
+6. [ ] Generate 1-3 mermaid diagrams. Add a one-sentence legend
+       above each.
+7. [ ] **Validate every mermaid block deterministically (see
+       below). Do NOT save the draft until every block validates.**
+8. [ ] Load `assets/section-rubric.md` and run the self-check pass.
+       Validation loop pattern from Agent Skills:
        ["do the work, run a validator (a script, a reference checklist, or a self-check), fix any issues, and repeat until validation passes."](https://agentskills.io/skill-creation/best-practices).
-8. [ ] Run an ASCII-purity check on the final draft (printable
-       U+0020-U+007E plus `\n` and `\t` only). Refuse to save if any
-       character falls outside this range.
-9. [ ] Write the final body to a single file path provided by the
-       orchestrator (default: `.git/PR_BODY.md` or
-       session-state-relative path). Return the path; do not paste
-       the body inline unless explicitly asked.
+9. [ ] Run the line-count check. If the body exceeds 250 lines,
+       tighten until it fits 150-220.
+10. [ ] Write the final body to a single file path provided by the
+        orchestrator (default: `.git/PR_BODY.md` or
+        session-state-relative). Return the path; do not paste the
+        body inline unless explicitly asked.
+
+## Mandatory mermaid validation step
+
+Run every mermaid block in the draft through `mmdc` and refuse to
+save until all pass.
+
+```bash
+# Extract mermaid blocks and validate each one.
+# Requires: npx --yes -p @mermaid-js/mermaid-cli mmdc (one-shot, no global install needed)
+awk '/^```mermaid/{n++; f=outdir"/diag"n".mmd"; getline; while($0 != "```") {print > f; getline}}' outdir=/tmp/mermaid-check pr-body-draft.md
+for f in /tmp/mermaid-check/diag*.mmd; do
+  npx --yes -p @mermaid-js/mermaid-cli mmdc -i "$f" -o "${f%.mmd}.svg" --quiet || { echo "INVALID: $f"; exit 1; }
+done
+```
+
+If `mmdc` reports any error, fix the diagram and re-run. The skill
+MUST NOT save the draft until every mermaid block validates.
+
+### Common mermaid pitfalls
+
+- **Semicolons in `classDiagram` link labels break the parser.** A
+  label like `dispatches; verifies 3 artifacts` errors at the
+  semicolon. Use commas or rephrase: `dispatches, verifies 3 artifacts`.
+- **`note right of X` in `stateDiagram-v2`** must close with
+  `end note` on its own line. A note that bleeds into the next
+  state declaration is a parse error.
+- **Round brackets `()` in flowchart node labels** need quoting:
+  write `A["foo (bar)"]`, not `A[foo (bar)]`.
+- **Double quotes inside node labels** must be HTML-escaped as
+  `&quot;`. Mermaid does not support nested or escaped double
+  quotes inside `"..."` labels.
+- **Pipes `|` and angle brackets `<>` inside labels** also need
+  quoting or HTML escapes; they are operators in mermaid syntax.
+- **Edge labels with colons** can confuse `stateDiagram-v2`; prefer
+  arrow-then-label form: `A --> B : trigger received`, not
+  `A --> B[trigger: received]`.
 
 ## Output contract
 
-- Exactly ONE markdown file is produced. No multi-file output, no
-  inline echo unless the user explicitly asks.
-- The file is ASCII-only (printable U+0020 through U+007E plus
-  newline and tab). No emojis, no em dashes, no curly quotes, no
-  box-drawing characters.
-- Every mermaid label, note, and legend is ASCII.
-- The cite-or-omit rule applies absolutely: if no verbatim quote
-  backs a "this violates X" or "this satisfies Y" claim, the claim
-  is dropped or rewritten as an explicit trade-off.
+- Exactly ONE markdown file is produced.
+- The file is **UTF-8 GitHub-Flavored Markdown**. Em dashes, smart
+  quotes, Unicode in mermaid labels, alerts, and collapsibles are
+  all permitted and encouraged where they improve readability.
+- Every mermaid block has been validated by `mmdc` and renders
+  without error.
+- The cite-or-omit rule applies absolutely.
 - The TL;DR is at most four sentences.
-- The body ends with the standard trailer:
+- The body ends with the trailer:
   `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`
 
 ## Anti-patterns flagged -- refuse these
 
-The skill MUST refuse to produce a body that exhibits any of the
-following:
-
+- **Posting unvalidated mermaid.** A parser error renders as raw
+  code on GitHub and signals carelessness. Validate every block
+  before saving.
 - Pasting commit messages as the body. Commit messages are inputs,
   not output.
 - Marketing tone or self-congratulation ("this is a great
   improvement", "significantly enhances", "best-in-class"). Strip
   on sight.
 - Unsupported alignment scores. A column reading 5/5/5/5/5 with no
-  justification is refused; the maintainer's heuristic is "all
-  fives means the author did not look hard enough".
-- Diagrams without legends, OR diagrams whose labels contain any
-  non-ASCII character.
+  justification is refused; "all fives means the author did not
+  look hard enough".
+- Diagrams without a legend, OR diagrams that fail `mmdc`.
 - A TL;DR longer than four sentences.
 - Skipping any required section because "the PR is small". A small
-  PR can have a one-line Implementation subsection per file, but
-  the section header must still be present.
-- Restating the diff line-by-line in the Implementation section.
-  Implementation describes intent and risk per file, not text the
-  reviewer can read in the diff viewer.
-- Quoting a doc out of context (cherry-picking a phrase whose
-  surrounding sentences contradict the use here). The self-check
-  pass must verify that the quoted phrase actually supports the
-  claim.
+  PR can have a one-line Implementation per file, but the section
+  header must still be present.
+- Restating the diff line-by-line in Implementation. That is what
+  the Files Changed tab is for.
+- Quoting a doc out of context. The self-check pass must verify
+  that the quoted phrase actually supports the claim.
+- **Forcing ASCII-only on the PR body.** That rule applies to
+  source files and CLI output, not to Primer-rendered markdown.
+  See "Output charset rule" above.
 
 ## Gotchas
 
-These are environment-specific traps based on the worked example
-this skill was extracted from. Read them before starting any draft.
-
-- **Do not restate the diff.** The Implementation section is for
-  intent, risk, and which decisions were made -- not a textual
-  re-rendering of the patch. Reviewers can open the Files Changed
-  tab.
-- **Do not quote out of context.** Always re-read the surrounding
-  paragraph of the source doc before pasting a quote. A phrase that
-  reads as universal ("Match task size to context capacity") may
-  appear in a section that constrains its scope.
+- **Do not restate the diff.** Implementation is for intent, risk,
+  and decisions -- not a textual re-rendering of the patch.
+- **Do not quote out of context.** Re-read the surrounding paragraph
+  of the source doc before pasting a quote.
 - **Verify the source URL still serves the quoted text.** If the
-  doc has been edited, the link may now point to a page where the
-  quoted phrase no longer appears. The cite-or-omit rule applies:
-  if you cannot find the phrase verbatim at the linked URL, drop
-  the citation and rephrase the claim, or find a different anchor.
-- **ASCII purity bites silently.** A single em dash from an
-  autocorrect-style paste will pass visual review but fail the
-  cross-platform encoding rule. Run the purity check before saving.
-- **Mermaid label characters are a common ASCII trap.** Avoid `->`
-  inside node labels (mermaid will parse it); prefer `to` or `-->`
-  on the edge itself. Avoid parentheses-with-quotes patterns inside
-  labels; mermaid quoting rules differ across renderers.
-- **The alignment matrix tempts inflation.** If you score a
-  dimension at 5/5, double-check that the change actually moves
-  ALL of: the source-of-truth file, every dependent reference, and
-  the gotcha that drove the failure mode. Score 4 with a clear
-  "why not 5" sentence is more credible than an unjustified 5.
-- **A doc-only PR still needs a TL;DR, a Problem section, a
-  Validation section, and a How-to-test section.** "The PR is
-  trivial" is not an exemption; a one-line Problem and a one-step
-  How-to-test are sufficient.
+  doc has been edited and the phrase no longer appears verbatim,
+  drop the citation or find a new anchor.
+- **The alignment matrix tempts inflation.** A score of 4 with a
+  clear "why not 5" is more credible than an unjustified 5.
+- **A doc-only PR still needs TL;DR, Problem, Validation, and
+  How-to-test.** "The PR is trivial" is not an exemption.
+- **Long evidence belongs in `<details>`.** Reviewers should be
+  able to read the whole body in a single screen-and-a-half scroll
+  and expand evidence on demand.
 
 Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
