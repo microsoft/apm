@@ -138,6 +138,7 @@ Credentials resolve via `APM_REGISTRY_TOKEN_{NAME}` env var (or `apm config set 
 | `apm marketplace migrate` | Fold a legacy `marketplace.yml` into `apm.yml`'s `marketplace:` block; deletes `marketplace.yml` on success | `--force`/`--yes`/`-y`, `--dry-run`, `-v` |
 | `apm marketplace outdated` | Report upgradable plugins, range-aware | `--offline`, `--include-prerelease`, `-v` |
 | `apm marketplace check` | Validate the `marketplace:` block and verify refs resolve | `--offline`, `-v` |
+| `apm marketplace audit NAME` | Supply-chain audit: warn when plugin transitive deps bypass marketplace pinning | `--strict` (CI exit-1 on bypass), `-v` |
 | `apm marketplace doctor` | Diagnose git, network, auth, marketplace config readiness, and (when a `marketplace:` block is present) **format coverage** -- which output profiles are configured vs. supported, so producers can spot easy reach wins (e.g. add `codex: {}` to also publish for Codex consumers). All marketplace-specific rows are informational and never affect exit code. | `-v` |
 | `apm marketplace publish` | Open PRs on consumer repos from `consumer-targets.yml` | `--targets PATH`, `--dry-run`, `--no-pr`, `--draft`, `--allow-downgrade`, `--allow-ref-change`, `--parallel N`, `-y` |
 | `apm marketplace package add <source>` | Add a plugin entry to `marketplace.plugins` (source accepts `owner/repo` or `./path`) | `--name`, `--version`, `--ref` (mutable refs auto-resolved to SHA), `-d`/`--description`, `-s`/`--subdir`, `--tag-pattern`, `--tags`, `--include-prerelease`, `--no-verify` |
