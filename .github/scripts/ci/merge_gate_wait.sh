@@ -87,7 +87,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
           exit 0
           ;;
         *)
-          echo "::error title=Tier 1 failed::Build & Test (Linux) reported '${conclusion}'. See ${url}"
+          echo "::error title=Tier 1 failed::'${EXPECTED_CHECK}' reported '${conclusion}'. See ${url}"
           exit 1
           ;;
       esac

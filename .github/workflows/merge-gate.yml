@@ -90,6 +90,7 @@ jobs:
           # is the PR adding the script), degrade to a no-op that passes. Once
           # the script lands on main, this branch becomes a real gate.
           status=$(curl -fsSL -o .github/scripts/ci/merge_gate_wait.sh \
+            --retry 5 --retry-delay 3 --retry-connrefused --max-time 30 \
             -w '%{http_code}' \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github.raw" \

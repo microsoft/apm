@@ -43,8 +43,15 @@ now_ts=$(date -u +%s)
 # Use updated_at as the "last activity" proxy. headRefOid changes on every
 # push; updated_at changes on every push, comment, label etc. The combination
 # is fine for this safety-net heuristic.
-prs=$(gh pr list --repo "$REPO" --state open --limit 200 \
-  --json number,headRefOid,updatedAt,isDraft,title 2>/dev/null || echo '[]')
+prs_stderr=$(mktemp)
+if ! prs=$(gh pr list --repo "$REPO" --state open --limit 200 \
+  --json number,headRefOid,updatedAt,isDraft,title 2>"$prs_stderr"); then
+  echo "::error title=Watchdog scan failed::Could not list open PRs in ${REPO}. Stderr below." >&2
+  cat "$prs_stderr" >&2
+  rm -f "$prs_stderr"
+  exit 1
+fi
+rm -f "$prs_stderr"
 
 count_total=$(echo "$prs" | jq 'length')
 count_stuck=0
@@ -103,14 +110,15 @@ while read -r pr; do
   # 2. If all changed files match ci.yml's paths-ignore, the workflow was
   #    correctly suppressed and no run is expected.
   #    Keep this list in sync with .github/workflows/ci.yml `paths-ignore`.
-  non_ignored=$(gh api \
+  #    Use --paginate to handle PRs touching >100 files.
+  non_ignored=$(gh api --paginate \
     -H "Accept: application/vnd.github+json" \
-    "repos/${REPO}/pulls/${number}/files?per_page=300" \
-    --jq '[.[].filename] | map(select(
-        (startswith("docs/") | not)
-        and . != ".gitignore"
-        and . != "LICENSE"
-      )) | length' 2>/dev/null || echo "0")
+    "repos/${REPO}/pulls/${number}/files" \
+    --jq '.[].filename' 2>/dev/null \
+    | awk '!/^docs\// && $0 != ".gitignore" && $0 != "LICENSE"' \
+    | wc -l \
+    | tr -d ' ')
+  case "$non_ignored" in ''|*[!0-9]*) non_ignored=0 ;; esac
 
   if [ "$non_ignored" = "0" ]; then
     continue
