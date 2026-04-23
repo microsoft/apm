@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- CI: new `APM Self-Check` job in `ci.yml` dogfoods the two CI gates we ship to users via `microsoft/apm-action@v1` -- `apm audit --ci` (consumer-side install fidelity) plus a `git status --porcelain` regeneration-drift check (producer-side, catches hand-edits to `.github/` that bypass canonical `.apm/`). Wired into `merge-gate.yml`'s `EXPECTED_CHECKS`. Includes the precursor regen of `.github/agents/auth-expert.agent.md` and `.github/skills/auth/SKILL.md` so the gate is green on first run. Closes #883.
+
 ### Changed
 
 - CI: smoke tests in `build-release.yml`'s `build-and-test` job (Linux x86_64, Linux arm64, Windows) are now gated to promotion boundaries (tag/schedule/dispatch) instead of running on every push to main. Push-time smoke duplicated the merge-time smoke gate in `ci-integration.yml` and burned ~15 redundant codex-binary downloads/day. Tag-cut releases still run smoke as a pre-ship gate; nightly catches upstream codex URL drift; merge-time still gates merges into main. (#878)
