@@ -317,7 +317,7 @@ class TestProxyAwareFetch:
         assert manifest.plugins[0].name == "p1"
 
 
-@patch("apm_cli.marketplace.client._try_proxy_fetch", return_value=None)
+@patch("apm_cli.marketplace.client._try_proxy_fetch_raw", return_value=None)
 class TestPrivateRepoAuth:
     """Verify unauth_first=False so private repos get credentials before unauthenticated fallback.
 
