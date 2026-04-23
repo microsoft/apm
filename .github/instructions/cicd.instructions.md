@@ -6,7 +6,7 @@ description: "CI/CD Pipeline configuration for PyInstaller binary packaging and 
 # CI/CD Pipeline Instructions
 
 ## Workflow Architecture (Tiered + Merge Queue)
-Four workflows split by trigger and tier. PRs get fast feedback; the heavy
+Five workflows split by trigger and tier. PRs get fast feedback; the heavy
 integration suite runs only at merge time via GitHub Merge Queue
 (microsoft/apm#770).
 
@@ -38,19 +38,14 @@ integration suite runs only at merge time via GitHub Merge Queue
      never a ruleset edit. Tide / bors single-authority pattern.
    - Recovery if the `pull_request` webhook is dropped: empty commit,
      `gh workflow run merge-gate.yml -f pr_number=NNN`, or close+reopen.
-4. **`ci-integration-pr-stub.yml`** - legacy PR-time stubs (DEPRECATED)
-   - Holdover from the pre-merge-gate model where branch protection
-     required all four Tier 2 names directly. Now redundant - kept only
-     to avoid disturbing in-flight PRs. Slated for deletion.
    - `.github/CODEOWNERS` requires Lead Maintainer review for any change
-     to `.github/workflows/**` to prevent inadvertent additions of secrets,
-     checkout, or PR-data interpolation.
-5. **`build-release.yml`** - `push` to main, tags, schedule, `workflow_dispatch`
+     to `.github/workflows/**`.
+4. **`build-release.yml`** - `push` to main, tags, schedule, `workflow_dispatch`
    - **Linux + Windows** run combined `build-and-test` (unit tests + binary build in one job).
    - **macOS Intel** uses `build-and-validate-macos-intel` (root node, runs own unit tests - no dependency on `build-and-test`). Builds the binary on every push for early regression feedback; integration + release-validation phases conditional on tag/schedule/dispatch.
    - **macOS ARM** uses `build-and-validate-macos-arm` (root node, tag/schedule/dispatch only - ARM runners are extremely scarce with 2-4h+ queue waits). Only requested when the binary is actually needed for a release.
    - Secrets always available. Full 5-platform binary output (linux x86_64/arm64, darwin x86_64/arm64, windows x86_64).
-6. **`ci-runtime.yml`** - nightly schedule, manual dispatch, path-filtered push
+5. **`ci-runtime.yml`** - nightly schedule, manual dispatch, path-filtered push
    - **Linux x86_64 only**. Live inference smoke tests (`apm run`) isolated from release pipeline.
    - Uses `GH_MODELS_PAT` for GitHub Models API access.
    - Failures do not block releases - annotated as warnings.
