@@ -336,7 +336,7 @@ def tree(global_):
             if lockfile_path.exists():
                 lockfile = LockFile.read(lockfile_path)
                 if lockfile:
-                    lockfile_deps = lockfile.get_all_dependencies()
+                    lockfile_deps = lockfile.get_package_dependencies()
         except Exception:
             pass
         

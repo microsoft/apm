@@ -16,14 +16,21 @@ from pathlib import Path
 from typing import List
 
 from .models import CIAuditResult, CheckResult
+from ..deps.lockfile import _SELF_KEY
 
 
 # -- Individual checks ---------------------------------------------
 
 
 def _check_lockfile_exists(project_root: Path) -> CheckResult:
-    """Check that ``apm.lock.yaml`` is present when ``apm.yml`` has deps."""
-    from ..deps.lockfile import get_lockfile_path
+    """Check that ``apm.lock.yaml`` is present when relevant.
+
+    Relevance is determined by either:
+      * the manifest declaring APM/MCP dependencies, or
+      * a lockfile already on disk recording local-only content
+        (``local_deployed_files``) for this project.
+    """
+    from ..deps.lockfile import LockFile, get_lockfile_path
 
     apm_yml_path = project_root / "apm.yml"
     if not apm_yml_path.exists():
@@ -45,6 +52,20 @@ def _check_lockfile_exists(project_root: Path) -> CheckResult:
         )
 
     has_deps = manifest.has_apm_dependencies() or bool(manifest.get_mcp_dependencies())
+    lockfile_path = get_lockfile_path(project_root)
+
+    # Local-only repos may declare no remote/MCP deps but still have a
+    # lockfile recording the project's own local content (synthesized as
+    # the "." self-entry).  Treat that as having deps so downstream audit
+    # checks (deployed-files-present, content-integrity) still run.
+    if not has_deps and lockfile_path.exists():
+        try:
+            lock_for_gating = LockFile.read(lockfile_path)
+            if lock_for_gating is not None and lock_for_gating.local_deployed_files:
+                has_deps = True
+        except Exception:
+            pass  # fall through; if unreadable the missing-lockfile branch warns
+
     if not has_deps:
         return CheckResult(
             name="lockfile-exists",
@@ -52,7 +73,6 @@ def _check_lockfile_exists(project_root: Path) -> CheckResult:
             message="No dependencies declared -- lockfile not required",
         )
 
-    lockfile_path = get_lockfile_path(project_root)
     if lockfile_path.exists():
         return CheckResult(
             name="lockfile-exists",
@@ -146,7 +166,7 @@ def _check_no_orphans(
     orphaned = [
         dep_key
         for dep_key in lock.dependencies
-        if dep_key not in manifest_keys
+        if dep_key not in manifest_keys and dep_key != _SELF_KEY
     ]
     if not orphaned:
         return CheckResult(
@@ -223,8 +243,22 @@ def _check_content_integrity(
     project_root: Path,
     lock: "LockFile",
 ) -> CheckResult:
-    """Check deployed files for critical hidden Unicode characters."""
+    """Check deployed files for critical hidden Unicode and hash drift.
+
+    Two signals are evaluated:
+      * Critical hidden Unicode (steganographic markers) via the file
+        scanner.
+      * SHA-256 drift between the on-disk content and the hash recorded
+        in ``deployed_file_hashes`` at install time.
+
+    Missing files are deliberately skipped here -- ``_check_deployed_files_present``
+    already reports those, and double-reporting muddies the audit output.
+    Symlinks are skipped because they may legitimately point elsewhere,
+    and lockfile entries without a recorded hash (e.g. directories) are
+    skipped silently.
+    """
     from ..security.file_scanner import scan_lockfile_packages
+    from ..utils.content_hash import compute_file_hash
 
     findings_by_file, _files_scanned = scan_lockfile_packages(project_root)
 
@@ -234,20 +268,88 @@ def _check_content_integrity(
         if any(f.severity == "critical" for f in findings):
             critical_files.append(rel_path)
 
-    if not critical_files:
+    # Per-file hash verification across all dependencies (the synthesized
+    # self-entry is included in ``lock.dependencies`` so local content is
+    # covered through the same iteration).
+    hash_mismatches: List[tuple] = []  # (dep_key, rel_path, expected, actual)
+    for dep_key, dep in lock.dependencies.items():
+        if not dep.deployed_file_hashes:
+            continue
+        for rel_path, expected_hash in dep.deployed_file_hashes.items():
+            file_path = project_root / rel_path
+            if not file_path.exists():
+                continue  # _check_deployed_files_present owns this signal
+            if file_path.is_symlink():
+                continue
+            actual_hash = compute_file_hash(file_path)
+            if actual_hash != expected_hash:
+                hash_mismatches.append((dep_key, rel_path, expected_hash, actual_hash))
+
+    if not critical_files and not hash_mismatches:
         return CheckResult(
             name="content-integrity",
             passed=True,
-            message="No critical hidden Unicode characters detected",
+            message="No critical hidden Unicode or hash drift detected",
         )
+
+    details: List[str] = []
+    for rel_path in critical_files:
+        details.append(f"unicode: {rel_path}")
+    for dep_key, rel_path, expected, actual in hash_mismatches:
+        details.append(
+            f"hash-drift: {rel_path} (dep={dep_key}, expected={expected}, actual={actual})"
+        )
+
+    parts: List[str] = []
+    if critical_files:
+        parts.append(f"{len(critical_files)} file(s) with critical hidden Unicode")
+    if hash_mismatches:
+        parts.append(f"{len(hash_mismatches)} file(s) with hash drift")
+    summary = "; ".join(parts)
     return CheckResult(
         name="content-integrity",
         passed=False,
         message=(
-            f"{len(critical_files)} file(s) contain critical hidden Unicode -- "
-            "run 'apm audit --strip' to clean"
+            f"{summary} -- run 'apm audit --strip' to clean Unicode and "
+            "'apm install' to restore drifted files"
         ),
-        details=critical_files,
+        details=details,
+    )
+
+
+def _check_includes_consent(
+    manifest: "APMPackage",
+    lock: "LockFile",
+) -> CheckResult:
+    """Advisory check: nudge toward declaring 'includes:' when local content is deployed.
+
+    This check never hard-fails -- it always returns ``passed=True``.  When
+    the lockfile records local content but the manifest does not declare an
+    ``includes:`` field, the result message carries an ``[!]`` advisory so
+    audit output prompts the maintainer to add ``includes: auto`` (or an
+    explicit list) for governance clarity.
+    """
+    if not lock.local_deployed_files:
+        return CheckResult(
+            name="includes-consent",
+            passed=True,
+            message="No local content deployed -- consent check N/A",
+        )
+
+    if manifest.includes is None:
+        return CheckResult(
+            name="includes-consent",
+            passed=True,
+            message=(
+                "[!] Local content deployed but 'includes:' not declared in "
+                "apm.yml -- consider adding 'includes: auto' for explicit consent"
+            ),
+        )
+
+    return CheckResult(
+        name="includes-consent",
+        passed=True,
+        message="'includes:' declared -- local content deployment is explicitly consented",
     )
 
 
@@ -317,6 +419,10 @@ def run_baseline_checks(
         return result
 
     # Check 6: Content integrity
-    _run(_check_content_integrity(project_root, lock))
+    if _run(_check_content_integrity(project_root, lock)):
+        return result
+
+    # Check 7: Includes consent (advisory; never hard-fails)
+    _run(_check_includes_consent(manifest, lock))
 
     return result

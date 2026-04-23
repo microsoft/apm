@@ -101,7 +101,7 @@ class TestCiWithPolicyFlag:
         )
         assert result.exit_code == 0
         data = json.loads(result.output)
-        # Baseline: up to 6 checks, Policy: 16 checks -> total > 6
+        # Baseline: up to 7 checks, Policy: 16 checks -> total > 7
         assert data["summary"]["total"] > 6
 
     def test_ci_with_policy_deny_fails(self, runner, tmp_path, monkeypatch):
@@ -236,5 +236,5 @@ class TestCiWithoutPolicy:
         )
         assert result.exit_code == 0
         data = json.loads(result.output)
-        # Only baseline checks (max 6)
-        assert data["summary"]["total"] <= 6
+        # Only baseline checks (max 7 incl. includes-consent)
+        assert data["summary"]["total"] <= 7

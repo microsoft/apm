@@ -47,14 +47,16 @@ class _FakeContext:
     policy_fetch: Any = None
     policy_enforcement_active: bool = False
     no_policy: bool = False
+    apm_package: Any = None
 
 
-def _make_ctx(*, logger=None, no_policy=False, deps=None):
+def _make_ctx(*, logger=None, no_policy=False, deps=None, apm_package=None):
     """Build a _FakeContext with defaults."""
     return _FakeContext(
         logger=logger or MagicMock(),
         no_policy=no_policy,
         deps_to_install=deps or [],
+        apm_package=apm_package,
     )
 
 
@@ -790,3 +792,59 @@ class TestDirectMCPDepsWired:
 
         mock_checks.assert_called_once()
         assert mock_checks.call_args[1]["mcp_deps"] is None
+
+
+class TestExplicitIncludesWiring:
+    """policy_gate threads ctx.apm_package.includes into the dep seam."""
+
+    @patch(_PATCH_CHECKS)
+    @patch(_PATCH_DISCOVER)
+    def test_no_apm_package_omits_kwarg(self, mock_discover, mock_checks):
+        # When ctx.apm_package is None the seam kwarg must NOT be set,
+        # so legacy "skip" behaviour is preserved.
+        mock_discover.return_value = _make_fetch_result("found", enforcement="warn")
+        mock_checks.return_value = _passing_audit()
+        ctx = _make_ctx(apm_package=None)
+
+        run(ctx)
+
+        kwargs = mock_checks.call_args[1]
+        assert "manifest_includes" not in kwargs
+
+    @patch(_PATCH_CHECKS)
+    @patch(_PATCH_DISCOVER)
+    def test_apm_package_threads_includes(self, mock_discover, mock_checks):
+        mock_discover.return_value = _make_fetch_result("found", enforcement="block")
+        mock_checks.return_value = _passing_audit()
+        fake_pkg = MagicMock()
+        fake_pkg.includes = "auto"
+        ctx = _make_ctx(apm_package=fake_pkg)
+
+        run(ctx)
+
+        kwargs = mock_checks.call_args[1]
+        assert kwargs.get("manifest_includes") == "auto"
+
+    @patch(_PATCH_CHECKS)
+    @patch(_PATCH_DISCOVER)
+    def test_explicit_includes_violation_raises(self, mock_discover, mock_checks):
+        # Simulate the seam returning an explicit-includes violation;
+        # under enforcement=block, run() must raise PolicyViolationError.
+        mock_discover.return_value = _make_fetch_result("found", enforcement="block")
+        mock_checks.return_value = CIAuditResult(checks=[
+            CheckResult(
+                name="explicit-includes",
+                passed=False,
+                message=(
+                    "Policy requires explicit 'includes:' paths but manifest has "
+                    "'includes: auto' or no includes field."
+                ),
+                details=["includes: 'auto', require_explicit_includes: true"],
+            ),
+        ])
+        fake_pkg = MagicMock()
+        fake_pkg.includes = "auto"
+        ctx = _make_ctx(apm_package=fake_pkg)
+
+        with pytest.raises(PolicyViolationError):
+            run(ctx)
