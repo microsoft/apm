@@ -55,6 +55,7 @@ devDependencies:
   apm:         <list<ApmDependency>>
   mcp:         <list<McpDependency>>
 compilation:   <CompilationConfig>
+policy:        <PolicyConfig>
 ```
 
 ---
@@ -162,6 +163,27 @@ Declares how the package's content is processed during install and compile. Curr
 | **Key pattern** | Script name (free-form string) |
 | **Value** | Shell command string |
 | **Description** | Named commands executed via `apm run <name>`. MUST support `--param key=value` substitution. |
+
+### 3.9. `policy`
+
+| | |
+|---|---|
+| **Type** | `map<string, string>` |
+| **Required** | OPTIONAL |
+| **Description** | Consumer-side controls for org policy discovery and verification. All fields are optional; defaults preserve current fail-open install behaviour. |
+
+```yaml
+policy:
+  fetch_failure_default: warn      # warn | block, default warn (#829)
+  hash: "sha256:<hex>"             # optional consumer-side pin on the org policy bytes
+  hash_algorithm: sha256           # sha256 (default) | sha384 | sha512
+```
+
+| Sub-key | Type | Default | Allowed values | Semantic |
+|---|---|---|---|---|
+| `fetch_failure_default` | `string` | `warn` | `warn`, `block` | Posture when no policy is reachable AND none is cached. `warn` keeps installs unblocked when GitHub is unreachable; `block` opts into fail-closed semantics. See [Network failure semantics](../../enterprise/policy-reference/#95-network-failure-semantics). |
+| `hash` | `string` | unset | `<algo>:<hex-digest>` (e.g. `sha256:6a8c...e2f1`) | Pin on the raw bytes of the fetched leaf org policy. Verified before YAML parsing; mismatch is always fail-closed regardless of `fetch_failure_default`. See [Hash pin: `policy.hash`](../../enterprise/policy-reference/#96-hash-pin-policyhash-consumer-side-verification). |
+| `hash_algorithm` | `string` | `sha256` | `sha256`, `sha384`, `sha512` | Digest algorithm for `policy.hash`. Inferred from the `<algo>:` prefix when present; this field is the explicit override. MD5 and SHA-1 are rejected at parse time. |
 
 ---
 

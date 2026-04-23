@@ -825,11 +825,11 @@ class GitHubPackageDownloader:
             and any(a.scheme == "ssh" for a in plan.attempts)
             and any(a.scheme == "https" for a in plan.attempts)
         ):
-            # NOTE: dedup key is case-sensitive. GitHub/Bitbucket hostnames
-            # are case-insensitive per RFC, so "Example.com" and
-            # "example.com" dedup as distinct identities -- worst case is a
-            # duplicate warning. Follow-up issue tracks normalization.
-            warn_key = (dep_host, repo_url_base, dep_port)
+            warn_key = (
+                dep_host.lower() if dep_host else dep_host,
+                repo_url_base,
+                dep_port,
+            )
             if warn_key not in self._fallback_port_warned:
                 self._fallback_port_warned.add(warn_key)
                 initial_scheme = plan.attempts[0].scheme.upper()
@@ -918,7 +918,13 @@ class GitHubPackageDownloader:
                 port=dep_ref.port if dep_ref else None,
             )
         elif is_generic:
-            host_name = dep_host or "the target host"
+            if dep_host:
+                host_info = self.auth_resolver.classify_host(
+                    dep_host, port=dep_ref.port if dep_ref else None,
+                )
+                host_name = host_info.display_name
+            else:
+                host_name = "the target host"
             error_msg += (
                 f"For private repositories on {host_name}, configure SSH keys or a git credential helper. "
                 f"APM delegates authentication to git for non-GitHub/ADO hosts."
@@ -1090,7 +1096,13 @@ class GitHubPackageDownloader:
 
             error_msg = f"Failed to list remote refs for {repo_url_base}. "
             if is_generic:
-                host_name = dep_host or "the target host"
+                if dep_host:
+                    host_info = self.auth_resolver.classify_host(
+                        dep_host, port=dep_ref.port,
+                    )
+                    host_name = host_info.display_name
+                else:
+                    host_name = "the target host"
                 error_msg += (
                     f"For private repositories on {host_name}, configure SSH keys "
                     f"or a git credential helper. "

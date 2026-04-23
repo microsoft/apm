@@ -1,0 +1,5 @@
+# Fixture 7: Minimal block-mode policy
+# Tests: block enforcement halts install on any violation
+name: block-mode-policy
+version: "1.0.0"
+enforcement: block

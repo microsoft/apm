@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, List, Optional
 from ..models.results import InstallResult
 from ..utils.console import _rich_error
 from ..utils.diagnostics import DiagnosticCollector
+from .errors import PolicyViolationError
 
 if TYPE_CHECKING:
     from ..core.auth import AuthResolver
@@ -58,6 +59,7 @@ def run_install_pipeline(
     marketplace_provenance: dict = None,
     protocol_pref=None,
     allow_protocol_fallback: "Optional[bool]" = None,
+    no_policy: bool = False,
 ):
     """Install APM package dependencies.
 
@@ -149,6 +151,7 @@ def run_install_pipeline(
         all_apm_deps=all_apm_deps,
         root_has_local_primitives=_root_has_local_primitives,
         old_local_deployed=_old_local_deployed,
+        no_policy=no_policy,
     )
 
     # ------------------------------------------------------------------
@@ -165,11 +168,45 @@ def run_install_pipeline(
 
     try:
         # --------------------------------------------------------------
+        # Phase 1.5: Policy enforcement gate (#827)
+        # Runs after resolve (deps_to_install populated) and before
+        # targets (denied deps never reach integration).
+        # PolicyViolationError halts the pipeline cleanly.
+        # --------------------------------------------------------------
+
+        # Populate direct MCP deps from the manifest so the policy gate
+        # can enforce MCP allow/deny rules on them (S2 fix).
+        ctx.direct_mcp_deps = apm_package.get_mcp_dependencies()
+
+        from .phases import policy_gate as _policy_gate_phase
+        from .phases.policy_gate import PolicyViolationError
+
+        try:
+            _policy_gate_phase.run(ctx)
+        except PolicyViolationError:
+            raise  # re-raise through the outer except -> RuntimeError wrapper
+
+        # --------------------------------------------------------------
         # Phase 2: Target detection + integrator initialization
         # --------------------------------------------------------------
         from .phases import targets as _targets_phase
 
         _targets_phase.run(ctx)
+
+        # --------------------------------------------------------------
+        # Phase 2.5: Post-targets target-aware policy check (#827)
+        # Target/compilation policy rules need the effective target
+        # which is only known after targets.run().  Dependency checks
+        # already ran in policy_gate; this phase filters to
+        # compilation-target checks only.
+        # PolicyViolationError halts the pipeline cleanly.
+        # --------------------------------------------------------------
+        from .phases import policy_target_check as _policy_target_check_phase
+
+        try:
+            _policy_target_check_phase.run(ctx)
+        except PolicyViolationError:
+            raise  # re-raise through the outer except -> RuntimeError wrapper
 
         # --------------------------------------------------------------
         # Seam: read phase outputs into locals for remaining code.
@@ -179,7 +216,17 @@ def run_install_pipeline(
         # --------------------------------------------------------------
         transitive_failures = ctx.transitive_failures
 
-        diagnostics = DiagnosticCollector(verbose=verbose)
+        # Reuse the logger's DiagnosticCollector when available so that
+        # diagnostics recorded earlier in the pipeline (e.g. warn-mode
+        # policy violations pushed by ``logger.policy_violation()`` from
+        # the policy_gate phase, which runs BEFORE this point) surface
+        # in the final install summary.  Block-mode violations also flow
+        # through here, but the pipeline aborts via PolicyViolationError
+        # before render_summary() runs, so the inline ``[x]`` print is
+        # what users see -- no duplication.
+        diagnostics = (
+            logger.diagnostics if logger is not None else DiagnosticCollector(verbose=verbose)
+        )
 
         # Drain transitive failures collected during resolution into diagnostics
         for dep_display, fail_msg in transitive_failures:
@@ -307,5 +354,16 @@ def run_install_pipeline(
 
         return _finalize_phase.run(ctx)
 
+    except PolicyViolationError:
+        # #832: surface policy violations cleanly to the user.  The
+        # outer ``except Exception`` below would otherwise wrap the
+        # message into ``RuntimeError("Failed to resolve APM dependencies:
+        # Install blocked by org policy ...")`` and the caller in
+        # ``commands/install.py`` would wrap it AGAIN as
+        # ``"Failed to install APM dependencies: Failed to resolve APM
+        # dependencies: Install blocked by org policy ..."``.  Re-raising
+        # the typed exception lets the caller render the policy message
+        # as-is.
+        raise
     except Exception as e:
         raise RuntimeError(f"Failed to resolve APM dependencies: {e}")
