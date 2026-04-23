@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- CI: new `APM Self-Check` job in `ci.yml` dogfoods the two CI gates we ship to users via `microsoft/apm-action@v1` -- `apm audit --ci` (consumer-side install fidelity) plus a `git status --porcelain` regeneration-drift check (producer-side, catches hand-edits to `.github/` that bypass canonical `.apm/`). Wired into `merge-gate.yml`'s `EXPECTED_CHECKS`. Includes the precursor regen of `.github/agents/auth-expert.agent.md` and `.github/skills/auth/SKILL.md` so the gate is green on first run. Closes #883.
+- CI: add `APM Self-Check` to `ci.yml` for `apm audit --ci`, regeneration-drift validation, and `merge-gate.yml` `EXPECTED_CHECKS` coverage. (#885)
 
 ### Changed
 
