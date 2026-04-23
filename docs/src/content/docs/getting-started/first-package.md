@@ -26,7 +26,7 @@ my-coding-standards/
 └── apm.yml              # Package manifest
 ```
 
-> **Note:** By default, `apm init` creates only `apm.yml`. The directory structure below is what you build manually in the following steps.
+> **Note:** By default, `apm init` creates only `apm.yml`. The directory structure below is what you build manually in the following steps. See [Anatomy of an APM Package](../../introduction/anatomy-of-an-apm-package/) for what `.apm/` is and why files live there.
 
 ## 2. Add an Instruction
 

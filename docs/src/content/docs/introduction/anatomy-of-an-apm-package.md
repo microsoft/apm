@@ -112,6 +112,44 @@ Also tempting, also wrong, for symmetric reasons:
 `.apm/` is short, namespaced, conventional, and unambiguous. That is the
 whole argument.
 
+## Why not just ship a `plugin.json`?
+
+This is the sharpest version of the question, because plugin formats are
+real and the ecosystem is converging on them. APM does not compete with
+plugins -- it sits underneath them.
+
+- `plugin.json` is a **runtime distribution format**. It tells a single
+  host (Copilot CLI, Claude Code, Cursor) how to load a bundle of
+  primitives at runtime.
+- `.apm/` is a **source layout**. It tells APM what you authored, so it
+  can resolve dependencies, lock versions, scan for security issues, and
+  compile to *every* runtime -- including plugin format.
+
+The two are complementary, and APM treats them that way:
+
+1. **APM consumes plugins as first-class dependencies.** Any repo with a
+   `plugin.json` (root, `.github/plugin/`, `.claude-plugin/`, or
+   `.cursor-plugin/`) is auto-recognized by `apm install`. APM
+   synthesizes an `apm.yml` from the plugin metadata so it gets version
+   pinning, lockfile entries, and transitive resolution. Marketplaces
+   (`marketplace.json`) resolve through the same path. See
+   [Plugins](../../guides/plugins/) and [Marketplaces](../../guides/marketplaces/).
+2. **APM compiles `.apm/` to plugin format.** Run `apm pack --format
+   plugin` and you get a standalone plugin directory -- no `apm.yml`, no
+   `apm_modules/`, no `.apm/` -- consumable by any plugin host. See
+   [Pack & Distribute -- Plugin format](../../guides/pack-distribute/#plugin-format).
+3. **Hybrid mode is supported.** A repo can ship `apm.yml` + `plugin.json`
+   together: author with APM (dependency management, lockfile, security
+   scanning, dev/prod separation), distribute as a standard plugin.
+
+What `plugin.json` alone does not give you: transitive dependency
+resolution, a consumer-side lockfile, security scanning that blocks
+critical findings on install, `devDependencies` that stay out of the
+shipped artifact, or a single source that targets multiple runtimes.
+That is the gap `.apm/` fills. If you only ever target one host and
+never depend on shared primitives, plugin-only is fine -- and APM still
+consumes you.
+
 ## Two ways to be importable
 
 A repo can expose primitives to APM consumers in two forms. They are not
@@ -190,15 +228,9 @@ new source. No data loss, no breaking change for downstream consumers.
 
 ## Why does microsoft/apm itself have a `.apm/` folder?
 
-Because we use APM to manage the agent context that develops APM.
-
-The skills in `.apm/skills/` are the source primitives our team authors and
-versions. The files in `.github/skills/` are the compiled output that the
-Copilot agent attached to this repository reads while contributors work on
-the CLI. Same content right now, but distinct roles: one is what we ship,
-the other is what we run locally.
-
-If you are looking for a working reference layout, this repo is it.
+Because we use APM to manage the agent context that develops APM. The
+[concrete example above](#a-concrete-example-this-repo) is this repo. If
+you are looking for a working reference layout, it is right there.
 
 ## What APM looks for
 
@@ -246,6 +278,15 @@ touch `.apm/`.
 
 **What's the minimum for a valid APM package?** `apm.yml` at the root plus
 at least one primitive under `.apm/`.
+
+**Isn't the industry converging on the plugin format? Why do I need
+`.apm/` at all?** APM consumes plugins natively (`plugin.json` packages
+install as first-class dependencies) and exports to plugin format
+(`apm pack --format plugin`). `.apm/` is the source layout that gives
+you dependency management, lockfiles, and security scanning during
+authoring; `plugin.json` is the runtime distribution format. Use both --
+see [Why not just ship a `plugin.json`?](#why-not-just-ship-a-pluginjson)
+above and the [hybrid authoring workflow](../../guides/plugins/#hybrid-authoring-workflow).
 
 ## See also
 
