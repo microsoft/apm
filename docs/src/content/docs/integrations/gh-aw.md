@@ -49,7 +49,7 @@ Review the pull request using the installed coding standards and skills.
 |---|---|
 | `owner/repo` | Full APM package (skills/agents/instructions under `.apm/`) |
 | `owner/repo/path/to/primitive` | Individual primitive (skill, instruction, plugin, etc.) from any repository, regardless of layout |
-| `owner/repo#ref` | Pinned to a tag, branch, or commit SHA |
+| `owner/repo#ref` or `owner/repo/path/to/primitive#ref` | Pinned to a tag, branch, or commit SHA, for either a full package or a specific primitive |
 
 The per-primitive path form is what makes `github/awesome-copilot/skills/review-and-refactor` work -- the awesome-copilot repo lays skills out at `/skills/<name>/`, not under `.apm/`. Use this form to consume skills from existing repositories without restructuring them. See [Anatomy of an APM Package](../../introduction/anatomy-of-an-apm-package/) for the full source-vs-output model.
 
