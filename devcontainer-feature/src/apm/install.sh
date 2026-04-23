@@ -23,8 +23,23 @@ fi
 if command -v uv >/dev/null 2>&1; then
     echo "uv already installed at $(command -v uv) — skipping"
 else
+    # curl is only needed to fetch the uv installer
+    if ! command -v curl >/dev/null 2>&1; then
+        echo "curl not found — installing..."
+        if command -v apt-get >/dev/null 2>&1; then
+            apt-get update -y -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl
+        elif command -v apk >/dev/null 2>&1; then
+            apk add --no-cache curl
+        elif command -v dnf >/dev/null 2>&1; then
+            dnf install -y curl
+        else
+            echo "ERROR: curl is not installed and the package manager is not recognised."
+            exit 1
+        fi
+    fi
     echo "Installing uv..."
-    _uv_tmp="$(mktemp /tmp/uv_install.XXXXXX.sh)"
+    _uv_tmp="$(mktemp /tmp/uv_install.XXXXXX)"
     trap 'rm -f "$_uv_tmp"' EXIT INT TERM
     curl -LsSf https://astral.sh/uv/install.sh > "$_uv_tmp"
     UV_INSTALL_DIR=/usr/local/bin sh "$_uv_tmp"
@@ -104,10 +119,9 @@ fi
 # Ubuntu 24.04+ enforces PEP 668 ("externally managed environment") and rejects
 # plain `pip install`. Detect the specific error and retry with the flag.
 install_apm() {
-    local out
-    out=$($PIP_CMD install "$PKG_SPEC" 2>&1) && { echo "$out"; return 0; }
-    echo "$out"
-    if echo "$out" | grep -q "externally-managed-environment"; then
+    _install_out=$($PIP_CMD install "$PKG_SPEC" 2>&1) && { echo "$_install_out"; return 0; }
+    echo "$_install_out"
+    if echo "$_install_out" | grep -q "externally-managed-environment"; then
         echo "Retrying with --break-system-packages (PEP 668 distro)..."
         $PIP_CMD install --break-system-packages "$PKG_SPEC"
     else
@@ -116,6 +130,11 @@ install_apm() {
 }
 
 install_apm
+
+# ── Ensure bash is present (Alpine ships only ash; devcontainer test scripts require bash) ──
+if command -v apk >/dev/null 2>&1 && ! command -v bash >/dev/null 2>&1; then
+    apk add --no-cache bash
+fi
 
 # ── Verify ───────────────────────────────────────────────────────────────────
 if command -v apm >/dev/null 2>&1; then
