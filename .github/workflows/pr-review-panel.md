@@ -98,24 +98,7 @@ if [ "$EVENT" = "pull_request_target" ] && [ "$LABEL" != "panel-review" ]; then
 fi
 ```
 
-## Step 1: Load the panel skill
-
-The APM bundle has been unpacked into the runner workspace by the `apm` pre-job.
-Read the skill definition before doing anything else:
-
-```bash
-# The Copilot engine looks for skills under .github/skills/. Confirm and read:
-ls .github/skills/apm-review-panel/ 2>/dev/null || ls .apm/skills/apm-review-panel/
-cat .github/skills/apm-review-panel/SKILL.md 2>/dev/null \
-  || cat .apm/skills/apm-review-panel/SKILL.md
-```
-
-The skill describes the seven personas (Python Architect, CLI Logging Expert,
-DevX UX Expert, Supply Chain Security Expert, APM CEO, OSS Growth Hacker,
-Auth Expert) and the routing rules between them. Each persona is a separate
-agent definition under `.github/agents/` (or `.apm/agents/`).
-
-## Step 2: Gather PR context (read-only)
+## Step 1: Gather PR context (read-only)
 
 Use `gh` CLI -- never `git checkout` of PR head. We are running in the base
 repo context with read-only permissions; the PR diff is the only untrusted
@@ -127,51 +110,37 @@ gh pr view "$PR" --json title,body,author,additions,deletions,changedFiles,files
 gh pr diff "$PR"
 ```
 
-## Step 3: Run the panel
+## Step 2: Run the panel via the apm-review-panel skill
 
-Follow the apm-review-panel SKILL.md routing exactly:
-- Specialists raise findings against their domain.
-- The CEO arbitrates disagreements and makes the strategic call.
-- The OSS Growth Hacker side-channels conversion / `WIP/growth-strategy.md`
-  insights to the CEO.
+Load the **apm-review-panel** skill and follow its execution checklist
+and output contract exactly. The skill owns reviewer routing, persona
+dispatch, the Auth Expert conditional rule, the pre-arbitration
+completeness gate, template loading, and verdict shape.
 
-Do not skip personas. Do not invent personas not declared in the skill.
+Auth Expert is the only conditional panelist. The skill decides
+activation from the already-fetched PR title/body/files/diff using a
+fast-path file list plus a fallback self-check. Do not invent a
+separate scope-analysis sub-agent for this. If the skill marks Auth
+Expert inactive, do not dispatch it; keep the Auth Expert heading in
+the final verdict and fill it with `Not activated -- <reason>`.
 
-## Step 4: Synthesize a single verdict
+## Step 3: Workflow-only guardrails
 
-Compose ONE comment with this structure:
+These guardrails are enforced at the workflow boundary. The skill
+owns the review behavior; this step owns only the emission boundary.
 
-```
-## APM Review Panel Verdict
+- Emit exactly **one** safe-output comment for this entire panel run.
+- Do **not** call the GitHub API directly -- write only to the
+  `safe-outputs.add-comment` channel; the permission-isolated
+  downstream job publishes the comment to PR
+  #${{ github.event.pull_request.number || inputs.pr_number }}.
+- ASCII only -- no emojis, no Unicode box-drawing (project encoding rule).
 
-**Disposition**: APPROVE | REQUEST_CHANGES | NEEDS_DISCUSSION
-
-### Per-persona findings
-- **Python Architect**: ...
-- **CLI Logging Expert**: ...
-- **DevX UX Expert**: ...
-- **Supply Chain Security Expert**: ...
-- **Auth Expert**: ...
-- **OSS Growth Hacker**: ...
-
-### CEO arbitration
-<one-paragraph synthesis from apm-ceo>
-
-### Required actions before merge
-1. ...
-2. ...
-
-### Optional follow-ups
-- ...
-```
-
-Keep total length under ~600 lines. ASCII only -- no emojis, no Unicode
-box-drawing (project encoding rule).
-
-## Step 5: Emit the safe output
+## Step 4: Emit the safe output
 
 Post the verdict by writing the comment body to the agent output channel.
-The `safe-outputs.add-comment` job will pick it up and post it to PR #$PR.
+The `safe-outputs.add-comment` job (capped at 1) will pick it up and
+post it to PR #$PR.
 
 You do NOT call the GitHub API directly -- write the structured request to
 the safe-outputs channel and gh-aw's permission-isolated downstream job

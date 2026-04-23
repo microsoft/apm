@@ -8,8 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `apm-primitives-architect` agent: reusable persona for designing and critiquing `.apm/` skill bundles and agent files; anchors on PROSE constraints and Agent Skills best practices.
+
 ### Changed
 
+- Hardened `apm-review-panel` skill: roster reconciled to five mandatory specialists + one conditional Auth Expert + one arbiter; added Hybrid E activation (file fast-path + fallback self-check) for Auth Expert; added pre-arbitration completeness gate; codified Dispatch contract; verdict template extracted to `assets/verdict-template.md` with structurally invariant heading set; collapsed `pr-review-panel.md` Step 2 to defer to skill execution checklist (no contract duplication).
+- `python-architect` agent now has a mandatory PR-review output contract: every review must include a mermaid `classDiagram`, a mermaid `flowchart` of the runtime path, and an explicit "Design patterns" subsection naming patterns used and pragmatically applicable patterns that would improve modularity / readability / maintainability.
 - CI: smoke tests in `build-release.yml`'s `build-and-test` job (Linux x86_64, Linux arm64, Windows) are now gated to promotion boundaries (tag/schedule/dispatch) instead of running on every push to main. Push-time smoke duplicated the merge-time smoke gate in `ci-integration.yml` and burned ~15 redundant codex-binary downloads/day. Tag-cut releases still run smoke as a pre-ship gate; nightly catches upstream codex URL drift; merge-time still gates merges into main. (#878)
 - CI docs: clarify that branch-protection ruleset must store the check-run name (`gate`), not the workflow display string (`Merge Gate / gate`); document the merge-gate aggregator in `cicd.instructions.md` and mark the legacy stub workflow as deprecated.
 
