@@ -4,6 +4,15 @@ set -e
 # VERSION is sourced from devcontainer-feature.json options (uppercased option id)
 VERSION="${VERSION-"latest"}"
 
+# Track whether `apt-get update` has run so we only hit the network once.
+_APT_UPDATED=0
+apt_update_once() {
+    if [ "$_APT_UPDATED" -eq 0 ]; then
+        apt-get update -y -qq
+        _APT_UPDATED=1
+    fi
+}
+
 case "$VERSION" in
     latest) ;;
     *)
@@ -27,7 +36,7 @@ else
     if ! command -v curl >/dev/null 2>&1; then
         echo "curl not found -- installing..."
         if command -v apt-get >/dev/null 2>&1; then
-            apt-get update -y -qq
+            apt_update_once
             DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl
         elif command -v apk >/dev/null 2>&1; then
             apk add --no-cache curl
@@ -51,7 +60,7 @@ echo "Installing APM CLI (version: ${VERSION})..."
 if ! command -v python3 >/dev/null 2>&1; then
     echo "Python 3 not found -- installing via system package manager..."
     if command -v apt-get >/dev/null 2>&1; then
-        apt-get update -y -qq
+        apt_update_once
         DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-pip git
     elif command -v apk >/dev/null 2>&1; then
         apk add --no-cache python3 py3-pip git
@@ -67,7 +76,7 @@ fi
 # -- Ensure git is available (apm uses GitPython at startup) ------------------
 if ! command -v git >/dev/null 2>&1; then
     if command -v apt-get >/dev/null 2>&1; then
-        apt-get update -y -qq
+        apt_update_once
         DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git
     elif command -v apk >/dev/null 2>&1; then
         apk add --no-cache git
