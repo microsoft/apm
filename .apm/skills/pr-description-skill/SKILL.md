@@ -4,12 +4,12 @@ description: >-
   Use this skill to write the PR description (PR body) for any pull
   request opened against microsoft/apm. Produces one self-sufficient
   GitHub-Flavored Markdown artifact: TL;DR, Problem (WHY), Approach
-  (WHAT), Implementation (HOW), 1-3 validated mermaid diagrams, an
-  honest PROSE alignment matrix, explicit trade-offs, validation
-  evidence, and a How-to-test section -- with every WHY-claim backed
-  by a verbatim quote from PROSE or Agent Skills. Activate when the
-  user asks to "write a PR description", "draft a PR body", "open a
-  PR", "fill in the PR template", or any equivalent.
+  (WHAT), Implementation (HOW), 1-3 validated mermaid diagrams,
+  explicit trade-offs, validation evidence, and a How-to-test
+  section -- with every WHY-claim backed by a verbatim quote from
+  PROSE or Agent Skills. Activate when the user asks to "write a PR
+  description", "draft a PR body", "open a PR", "fill in the PR
+  template", or any equivalent.
 model: claude-opus-4.7
 ---
 
@@ -74,7 +74,6 @@ Per-section ceilings (enforced by `assets/section-rubric.md`):
 | Approach (WHAT) | a table OR 3-7 bullets; may be skipped if PR is purely additive (say "additive: see Implementation") |
 | Implementation (HOW) | one short paragraph per file, OR a table; no prose walls |
 | Diagrams | 1-3 mermaid blocks; every diagram preceded by a one-sentence legend |
-| PROSE alignment matrix | 5 rows max; one-sentence "why not 5" per row scored < 5 |
 | Trade-offs | 3-5 bullets; mechanical PRs may be 1-2 |
 | Benefits | 3-5 numbered items, each measurable |
 | Validation | copy-paste real command output; do not narrate |
@@ -124,16 +123,7 @@ quote, it is downgraded to a "should" with the reason given.
    Anchor: Agent Skills,
    ["agents pattern-match well against concrete structures"](https://agentskills.io/skill-creation/best-practices).
 
-5. **Honest alignment matrix.** When the PR claims to advance a
-   PROSE dimension, the matrix shows "Before" and "After" cells AND
-   a 1-5 score. Scores below 5 require a one-sentence "why not 5".
-   A row of all-5s without explicit justification is refused as
-   inflation.
-
-   Anchor: PROSE,
-   ["Match task size to context capacity."](https://danielmeppiel.github.io/awesome-ai-native/docs/prose/).
-
-6. **Trade-offs explicit.** Address every non-obvious decision
+5. **Trade-offs explicit.** Address every non-obvious decision
    (option chosen vs option rejected). For mechanical PRs this
    section may be 1-2 bullets. For cross-cutting changes, surface
    the rejected alternatives.
@@ -141,7 +131,7 @@ quote, it is downgraded to a "should" with the reason given.
    Anchor: PROSE,
    ["Favor small, chainable primitives over monolithic frameworks."](https://danielmeppiel.github.io/awesome-ai-native/docs/prose/).
 
-7. **Single artifact, no fluff.** One markdown file. No marketing
+6. **Single artifact, no fluff.** One markdown file. No marketing
    tone, no self-congratulation. TL;DR is at most four sentences.
 
    Anchor: Agent Skills,
@@ -188,13 +178,12 @@ scannable.
 | 4 | Approach (WHAT) | Table or 3-7 bullets; may say "additive: see Implementation" |
 | 5 | Implementation (HOW) | One short paragraph per file or a table |
 | 6 | Diagrams | 1-3 validated mermaid blocks, each with a legend |
-| 7 | PROSE alignment matrix | 5 rows max; "why not 5" per sub-5 score |
-| 8 | Trade-offs | 3-5 bullets (1-2 if mechanical) |
-| 9 | Benefits | 3-5 numbered, measurable items |
-| 10 | Validation | Real command output, ideally inside `<details>` if long |
-| 11 | How to test | Max 5 numbered or task-list steps |
+| 7 | Trade-offs | 3-5 bullets (1-2 if mechanical) |
+| 8 | Benefits | 3-5 numbered, measurable items |
+| 9 | Validation | Real command output, ideally inside `<details>` if long |
+| 10 | How to test | Max 5 numbered or task-list steps |
 
-The Trade-offs (8) and How to test (11) sections are non-skippable
+The Trade-offs (7) and How to test (10) sections are non-skippable
 for any PR that changes more than docs.
 
 ## Activation contract -- inputs the orchestrator MUST gather first
@@ -229,28 +218,26 @@ Run these steps in order. Tick each before moving on.
 2. [ ] Read the diff in full. Identify per-file change summary,
        new files, deleted files, behavior changes at module
        boundaries.
-3. [ ] Decide which PROSE dimensions the change touches. If none,
-       omit the alignment matrix and record that in Trade-offs.
-4. [ ] Load `assets/pr-body-template.md`. This is the only point
+3. [ ] Load `assets/pr-body-template.md`. This is the only point
        at which the template enters context. Progressive Disclosure
        in action:
        ["store them in `assets/` and reference them from `SKILL.md` so they only load when needed."](https://agentskills.io/skill-creation/best-practices).
-5. [ ] Fill in the template top-to-bottom using only facts from
+4. [ ] Fill in the template top-to-bottom using only facts from
        the activation contract. Every WHY-claim gets a verbatim
        quoted anchor. If you cannot anchor a claim, drop it.
-6. [ ] Generate 1-3 mermaid diagrams. Add a one-sentence legend
+5. [ ] Generate 1-3 mermaid diagrams. Add a one-sentence legend
        above each.
-7. [ ] **Validate every mermaid block deterministically (see
+6. [ ] **Validate every mermaid block deterministically (see
        below). Do NOT save the draft until every block validates.**
-8. [ ] Load `assets/section-rubric.md` and run the self-check pass.
+7. [ ] Load `assets/section-rubric.md` and run the self-check pass.
        Validation loop pattern from Agent Skills:
        ["do the work, run a validator (a script, a reference checklist, or a self-check), fix any issues, and repeat until validation passes."](https://agentskills.io/skill-creation/best-practices).
-9. [ ] Run the line-count check. If the body exceeds 250 lines,
+8. [ ] Run the line-count check. If the body exceeds 250 lines,
        tighten until it fits 150-220.
-10. [ ] Write the final body to a single file path provided by the
-        orchestrator (default: `.git/PR_BODY.md` or
-        session-state-relative). Return the path; do not paste the
-        body inline unless explicitly asked.
+9. [ ] Write the final body to a single file path provided by the
+       orchestrator (default: `.git/PR_BODY.md` or
+       session-state-relative). Return the path; do not paste the
+       body inline unless explicitly asked.
 
 ## Mandatory mermaid validation step
 
@@ -311,9 +298,6 @@ MUST NOT save the draft until every mermaid block validates.
 - Marketing tone or self-congratulation ("this is a great
   improvement", "significantly enhances", "best-in-class"). Strip
   on sight.
-- Unsupported alignment scores. A column reading 5/5/5/5/5 with no
-  justification is refused; "all fives means the author did not
-  look hard enough".
 - Diagrams without a legend, OR diagrams that fail `mmdc`.
 - A TL;DR longer than four sentences.
 - Skipping any required section because "the PR is small". A small
@@ -336,8 +320,6 @@ MUST NOT save the draft until every mermaid block validates.
 - **Verify the source URL still serves the quoted text.** If the
   doc has been edited and the phrase no longer appears verbatim,
   drop the citation or find a new anchor.
-- **The alignment matrix tempts inflation.** A score of 4 with a
-  clear "why not 5" is more credible than an unjustified 5.
 - **A doc-only PR still needs TL;DR, Problem, Validation, and
   How-to-test.** "The PR is trivial" is not an exemption.
 - **Long evidence belongs in `<details>`.** Reviewers should be

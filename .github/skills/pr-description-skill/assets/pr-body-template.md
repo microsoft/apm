@@ -79,23 +79,6 @@ flowchart TD
 
 <Add a second diagram only if the relationships are non-trivial.>
 
-## PROSE alignment matrix
-
-<5 rows max. Any score < 5 followed by a one-sentence "why not 5".
-Skip this section entirely if the change does not advance any PROSE
-dimension; record that in Trade-offs.>
-
-| Dimension | Before | After | Score |
-|---|---|---|:---:|
-| Progressive Disclosure | <Before.> | <After.> | <N> |
-| Reduced Scope | <Before.> | <After.> | <N> |
-| Orchestrated Composition | <Before.> | <After.> | <N> |
-| Safety Boundaries | <Before.> | <After.> | <N> |
-| Explicit Hierarchy | <Before.> | <After.> | <N> |
-
-Why not 5 on <dimension>: <one-sentence honest reason naming what
-is still missing>.
-
 ## Trade-offs
 
 <3-5 bullets. 1-2 acceptable for mechanical PRs.>

@@ -79,19 +79,7 @@
   that do not reflect the change. Unicode IS allowed in node
   labels -- the constraint is mmdc validity, not ASCII purity.
 
-## 7. PROSE alignment matrix
-
-- Acceptance: at most 5 rows -- one per PROSE dimension touched.
-  Columns: dimension, Before, After, score 1-5. Any score < 5 has a
-  one-sentence "why not 5" after the table. Any score of 5 names
-  the source-of-truth file, dependent references, and the gotcha
-  resolved. The whole matrix fits in a screen-height.
-- Refuse: all-5s without justification; empty Before/After cells;
-  dimensions claimed without evidence in the diff. May be omitted
-  entirely when the PR does not advance any dimension -- record the
-  omission in Trade-offs.
-
-## 8. Trade-offs
+## 7. Trade-offs
 
 - Acceptance: 3-5 bullets for cross-cutting changes; 1-2 acceptable
   for mechanical PRs. Each bullet names option chosen, option
@@ -100,14 +88,14 @@
   trade-offs" claim on a non-mechanical PR; rationale that boils
   down to "personal preference" with no grounding.
 
-## 9. Benefits
+## 8. Benefits
 
 - Acceptance: 3-5 numbered items. Each names something a reviewer
   can verify (count, presence, behavior under specific input).
 - Refuse: marketing adjectives; benefits that restate the fix
   without naming the observable outcome.
 
-## 10. Validation
+## 9. Validation
 
 - Acceptance: real CLI output, verbatim. Commands named on the
   line immediately preceding their fenced block. Long transcripts
@@ -116,7 +104,7 @@
   failures with `...`; narration of what the command "would print"
   in place of the actual output.
 
-## 11. How to test
+## 10. How to test
 
 - Acceptance: max 5 numbered or task-list steps. Each step has an
   action and an expected observation. Use GFM task list form
@@ -141,8 +129,7 @@ validation block.
 
 ## Final pass -- run before saving
 
-- [ ] All 11 sections present (10 if alignment matrix omitted AND
-      that omission is recorded in Trade-offs).
+- [ ] All 10 sections present.
 - [ ] Total body length within 150-220 lines (250+ triggers
       tightening).
 - [ ] No `<PLACEHOLDER>`, `TBD`, or `TODO` remains.
