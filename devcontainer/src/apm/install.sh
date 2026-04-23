@@ -17,14 +17,14 @@ case "$VERSION" in
     latest) ;;
     *)
         if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "ERROR: VERSION must be 'latest' or a semver string (e.g. 1.2.3), got: '${VERSION}'"
+            echo "[x] VERSION must be 'latest' or a semver string (e.g. 1.2.3), got: '${VERSION}'" >&2
             exit 1
         fi
         ;;
 esac
 
 if [ "$(id -u)" -ne 0 ]; then
-    echo 'ERROR: install.sh must run as root. Add "USER root" to your Dockerfile before this feature.'
+    echo '[x] install.sh must run as root. Add "USER root" to your Dockerfile before this feature.' >&2
     exit 1
 fi
 
@@ -43,7 +43,7 @@ else
         elif command -v dnf >/dev/null 2>&1; then
             dnf install -y curl
         else
-            echo "ERROR: curl is not installed and the package manager is not recognised."
+            echo "[x] curl is not installed and the package manager is not recognised." >&2
             exit 1
         fi
     fi
@@ -67,8 +67,8 @@ if ! command -v python3 >/dev/null 2>&1; then
     elif command -v dnf >/dev/null 2>&1; then
         dnf install -y python3 python3-pip git
     else
-        echo "ERROR: Python 3 is not installed and the package manager is not recognised."
-        echo "Please use a base image that includes Python 3.10+, or install it manually."
+        echo "[x] Python 3 is not installed and the package manager is not recognised." >&2
+        echo "Please use a base image that includes Python 3.10+, or install it manually." >&2
         exit 1
     fi
 fi
@@ -83,8 +83,8 @@ if ! command -v git >/dev/null 2>&1; then
     elif command -v dnf >/dev/null 2>&1; then
         dnf install -y git
     else
-        echo "ERROR: git is not installed and the package manager is not recognised."
-        echo "Please use a base image that includes git, or install it manually."
+        echo "[x] git is not installed and the package manager is not recognised." >&2
+        echo "Please use a base image that includes git, or install it manually." >&2
         exit 1
     fi
 fi
@@ -94,8 +94,8 @@ PYTHON_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
 PYTHON_MAJOR=$(python3 -c "import sys; print(sys.version_info.major)")
 if [ "$PYTHON_MAJOR" -lt 3 ] || { [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 10 ]; }; then
     PYTHON_VER=$(python3 -c "import sys; print('.'.join(map(str, sys.version_info[:3])))")
-    echo "ERROR: apm-cli requires Python 3.10+, found Python ${PYTHON_VER}."
-    echo "Use a base image with Python 3.10+ (e.g. ubuntu:22.04) or include the Python devcontainer feature."
+    echo "[x] apm-cli requires Python 3.10+, found Python ${PYTHON_VER}." >&2
+    echo "Use a base image with Python 3.10+ (e.g. ubuntu:22.04) or include the Python devcontainer feature." >&2
     exit 1
 fi
 
@@ -112,7 +112,7 @@ else
     elif command -v pip >/dev/null 2>&1; then
         PIP_CMD="pip"
     else
-        echo "ERROR: pip is not available and could not be bootstrapped."
+        echo "[x] pip is not available and could not be bootstrapped." >&2
         exit 1
     fi
 fi
@@ -149,6 +149,6 @@ fi
 if command -v apm >/dev/null 2>&1; then
     echo "[+] APM $(apm --version) installed at $(command -v apm)"
 else
-    echo "WARNING: apm was installed but is not in PATH."
-    echo "Ensure the pip bin directory is in PATH (usually /usr/local/bin or ~/.local/bin)."
+    echo "[!] apm was installed but is not in PATH." >&2
+    echo "Ensure the pip bin directory is in PATH (usually /usr/local/bin or ~/.local/bin)." >&2
 fi

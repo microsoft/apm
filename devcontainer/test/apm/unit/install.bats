@@ -362,7 +362,7 @@ EOF
     run_with_stubs
 
     assert_success
-    assert_output --partial "WARNING: apm was installed but is not in PATH"
+    assert_output --partial "[!] apm was installed but is not in PATH"
 }
 
 # -- curl install -------------------------------------------------------------
