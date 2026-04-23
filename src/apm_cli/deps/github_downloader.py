@@ -18,7 +18,7 @@ import git
 from git import Repo, RemoteProgress
 from git.exc import GitCommandError, InvalidGitRepositoryError
 
-from ..core.auth import AuthResolver
+from ..core.auth import AuthContext, AuthResolver
 from ..models.apm_package import (
     DependencyReference,
     PackageInfo,
@@ -502,6 +502,35 @@ class GitHubPackageDownloader:
         dep_ctx = self.auth_resolver.resolve_for_dep(dep_ref)
         return dep_ctx.token
 
+    def _resolve_dep_auth_ctx(self, dep_ref: Optional[DependencyReference] = None) -> Optional[AuthContext]:
+        """Resolve the full AuthContext for a dependency.
+
+        Returns the AuthContext from AuthResolver, or None for generic hosts
+        or when no dep_ref is provided.
+        """
+        if dep_ref is None:
+            return None
+
+        is_ado = dep_ref.is_azure_devops()
+        dep_host = dep_ref.host
+        if dep_host:
+            is_github = is_github_hostname(dep_host)
+        else:
+            is_github = True
+        is_generic = not is_ado and not is_github
+
+        if is_generic:
+            return None
+
+        ctx = self.auth_resolver.resolve_for_dep(dep_ref)
+        # Verbose source surfacing (#852): one-time per-host log line so users
+        # can see which credential source was actually used. Routed through
+        # AuthResolver.notify_auth_source() (#856 follow-up F2) so the line
+        # obeys the same verbose-channel logic as every other diagnostic.
+        if os.environ.get("APM_VERBOSE") == "1":
+            self.auth_resolver.notify_auth_source(dep_host or "", ctx)
+        return ctx
+
     def _build_noninteractive_git_env(
         self,
         *,
@@ -663,7 +692,7 @@ class GitHubPackageDownloader:
 
         return sanitized
 
-    def _build_repo_url(self, repo_ref: str, use_ssh: bool = False, dep_ref: DependencyReference = None, token: Optional[str] = None) -> str:
+    def _build_repo_url(self, repo_ref: str, use_ssh: bool = False, dep_ref: DependencyReference = None, token: Optional[str] = None, auth_scheme: str = "basic") -> str:
         """Build the appropriate repository URL for cloning.
 
         Supports both GitHub and Azure DevOps URL formats:
@@ -675,6 +704,8 @@ class GitHubPackageDownloader:
             use_ssh: Whether to use SSH URL for git operations
             dep_ref: Optional DependencyReference for ADO-specific URL building
             token: Optional per-dependency token override
+            auth_scheme: Auth scheme ("basic" or "bearer"). Bearer tokens are
+                injected via env vars, NOT embedded in the URL.
 
         Returns:
             str: Repository URL suitable for git clone operations
@@ -707,6 +738,16 @@ class GitHubPackageDownloader:
             # Use Azure DevOps URL builders with ADO-specific token
             if use_ssh:
                 return build_ado_ssh_url(dep_ref.ado_organization, dep_ref.ado_project, dep_ref.ado_repo)
+            elif auth_scheme == "bearer":
+                # Bearer tokens are injected via GIT_CONFIG env vars (Authorization header),
+                # NOT embedded in the clone URL. Build URL without credentials.
+                return build_ado_https_clone_url(
+                    dep_ref.ado_organization,
+                    dep_ref.ado_project,
+                    dep_ref.ado_repo,
+                    token=None,
+                    host=host
+                )
             elif ado_token:
                 return build_ado_https_clone_url(
                     dep_ref.ado_organization,
@@ -777,9 +818,14 @@ class GitHubPackageDownloader:
         dep_token = self._resolve_dep_token(dep_ref)
         has_token = dep_token is not None
 
+        # Resolve full auth context for bearer-aware URL building and env selection.
+        dep_auth_ctx = self._resolve_dep_auth_ctx(dep_ref)
+        dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
+
         _debug(
             f"_clone_with_fallback: repo={repo_url_base}, is_ado={is_ado}, "
             f"is_generic={is_generic}, has_token={has_token}, "
+            f"auth_scheme={dep_auth_scheme}, "
             f"protocol_pref={self._protocol_pref.value}, allow_fallback={self._allow_fallback}"
         )
 
@@ -791,6 +837,10 @@ class GitHubPackageDownloader:
         # prompts) keep working.
         def _env_for(attempt: TransportAttempt) -> Dict[str, str]:
             if attempt.use_token:
+                # For ADO bearer auth, use the AuthContext git_env which contains
+                # GIT_CONFIG_COUNT/KEY/VALUE for Authorization header injection.
+                if dep_auth_scheme == "bearer" and dep_auth_ctx is not None:
+                    return dep_auth_ctx.git_env
                 return self.git_env
             if attempt.scheme == "http":
                 return self._build_noninteractive_git_env(
@@ -863,6 +913,7 @@ class GitHubPackageDownloader:
                     use_ssh=use_ssh,
                     dep_ref=dep_ref,
                     token=dep_token if attempt.use_token else "",
+                    auth_scheme=dep_auth_scheme if attempt.use_token else "basic",
                 )
             except Exception as e:
                 last_error = e
@@ -893,6 +944,50 @@ class GitHubPackageDownloader:
                     verbose_callback(f"Cloned from: {display}")
                 return repo
             except GitCommandError as e:
+                # ADO bearer fallback for clone (mirrors validation/list_remote_refs):
+                # PAT was rejected -> silently retry this attempt with az-cli bearer.
+                err_msg = str(e)
+                if (
+                    is_ado
+                    and attempt.use_token
+                    and dep_auth_scheme == "basic"
+                    and has_token
+                    and (
+                        "401" in err_msg
+                        or "Authentication failed" in err_msg
+                        or "Unauthorized" in err_msg
+                    )
+                ):
+                    try:
+                        from apm_cli.core.azure_cli import (
+                            AzureCliBearerError, get_bearer_provider,
+                        )
+                        from apm_cli.utils.github_host import build_ado_bearer_git_env
+                        provider = get_bearer_provider()
+                        if provider.is_available():
+                            try:
+                                bearer = provider.get_bearer_token()
+                                bearer_url = self._build_repo_url(
+                                    repo_url_base, use_ssh=False, dep_ref=dep_ref,
+                                    token=None, auth_scheme="bearer",
+                                )
+                                bearer_env = {**self.git_env, **build_ado_bearer_git_env(bearer)}
+                                repo = Repo.clone_from(
+                                    bearer_url, target_path, env=bearer_env,
+                                    progress=progress_reporter, **clone_kwargs,
+                                )
+                                self.auth_resolver.emit_stale_pat_diagnostic(
+                                    dep_host or "dev.azure.com"
+                                )
+                                if verbose_callback:
+                                    verbose_callback(
+                                        "Cloned from: (sanitized) via AAD bearer fallback"
+                                    )
+                                return repo
+                            except (AzureCliBearerError, GitCommandError):
+                                pass
+                    except ImportError:
+                        pass
                 last_error = e
                 prev_label = attempt.label
                 prev_scheme = attempt.scheme
@@ -916,6 +1011,7 @@ class GitHubPackageDownloader:
                 host, "clone",
                 org=dep_ref.ado_organization if dep_ref else None,
                 port=dep_ref.port if dep_ref else None,
+                dep_url=dep_ref.repo_url if dep_ref else None,
             )
         elif is_generic:
             if dep_host:
@@ -946,6 +1042,7 @@ class GitHubPackageDownloader:
             org = dep_ref.repo_url.split('/')[0] if dep_ref and dep_ref.repo_url else None
             error_msg += self.auth_resolver.build_error_context(
                 host, "clone", org=org, port=dep_ref.port if dep_ref else None,
+                dep_url=dep_ref.repo_url if dep_ref else None,
             )
         else:
             error_msg += "Please check repository access permissions and authentication setup."
@@ -1061,13 +1158,19 @@ class GitHubPackageDownloader:
 
         is_ado = dep_ref.is_azure_devops()
         dep_token = self._resolve_dep_token(dep_ref)
+        dep_auth_ctx = self._resolve_dep_auth_ctx(dep_ref)
+        dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
 
         # All git hosts: git ls-remote
         repo_url_base = dep_ref.repo_url
 
         # Build the env -- mirror _clone_with_fallback logic
         if dep_token:
-            ls_env = self.git_env
+            # For ADO bearer, use AuthContext git_env with header injection
+            if dep_auth_scheme == "bearer" and dep_auth_ctx is not None:
+                ls_env = dep_auth_ctx.git_env
+            else:
+                ls_env = self.git_env
         else:
             ls_env = self._build_noninteractive_git_env(
                 preserve_config_isolation=bool(getattr(dep_ref, "is_insecure", False)),
@@ -1079,6 +1182,7 @@ class GitHubPackageDownloader:
         # Build authenticated URL
         remote_url = self._build_repo_url(
             repo_url_base, use_ssh=False, dep_ref=dep_ref, token=dep_token,
+            auth_scheme=dep_auth_scheme,
         )
 
         try:
@@ -1087,6 +1191,42 @@ class GitHubPackageDownloader:
             refs = self._parse_ls_remote_output(output)
             return self._sort_remote_refs(refs)
         except GitCommandError as e:
+            # ADO bearer fallback: if PAT was rejected (401/Authentication failed)
+            # AND the host is ADO AND we resolved as PAT AND az is available,
+            # silently retry with bearer and emit a deferred [!] warning.
+            err_str = str(e)
+            ado_pat_401 = (
+                is_ado
+                and dep_auth_scheme == "basic"
+                and dep_token is not None
+                and ("401" in err_str or "Authentication failed" in err_str or "Unauthorized" in err_str)
+            )
+            if ado_pat_401:
+                try:
+                    from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
+                    from apm_cli.utils.github_host import build_ado_bearer_git_env
+                    provider = get_bearer_provider()
+                    if provider.is_available():
+                        try:
+                            bearer = provider.get_bearer_token()
+                            bearer_env = {**self.git_env, **build_ado_bearer_git_env(bearer)}
+                            # Re-build URL WITHOUT token (bearer flows via header)
+                            bearer_url = self._build_repo_url(
+                                repo_url_base, use_ssh=False, dep_ref=dep_ref,
+                                token=None, auth_scheme="bearer",
+                            )
+                            output = g.ls_remote("--tags", "--heads", bearer_url, env=bearer_env)
+                            refs = self._parse_ls_remote_output(output)
+                            # Emit stale-PAT diagnostic via the resolver
+                            self.auth_resolver.emit_stale_pat_diagnostic(
+                                dep_ref.host or default_host()
+                            )
+                            return self._sort_remote_refs(refs)
+                        except (AzureCliBearerError, GitCommandError):
+                            pass  # Fall through to original error handling
+                except ImportError:
+                    pass
+
             dep_host = dep_ref.host
             if dep_host:
                 is_github = is_github_hostname(dep_host)
@@ -1114,6 +1254,7 @@ class GitHubPackageDownloader:
                 error_msg += self.auth_resolver.build_error_context(
                     host, "list refs", org=org,
                     port=dep_ref.port if dep_ref else None,
+                    dep_url=dep_ref.repo_url if dep_ref else None,
                 )
 
             sanitized = self._sanitize_git_error(str(e))
@@ -1238,6 +1379,7 @@ class GitHubPackageDownloader:
                             org = dep_ref.repo_url.split('/')[0] if dep_ref.repo_url else None
                             error_msg += self.auth_resolver.build_error_context(
                                 host, "resolve reference", org=org, port=dep_ref.port,
+                                dep_url=dep_ref.repo_url,
                             )
                             raise RuntimeError(error_msg)
                         else:
@@ -1371,6 +1513,7 @@ class GitHubPackageDownloader:
                         host, "download",
                         org=dep_ref.ado_organization if dep_ref else None,
                         port=dep_ref.port if dep_ref else None,
+                        dep_url=dep_ref.repo_url if dep_ref else None,
                     )
                 else:
                     error_msg += "Please check your Azure DevOps PAT permissions."
@@ -1523,6 +1666,7 @@ class GitHubPackageDownloader:
                             + self.auth_resolver.build_error_context(
                                 host, "API request (rate limited)", org=owner,
                                 port=dep_ref.port if dep_ref else None,
+                                dep_url=dep_ref.repo_url if dep_ref else None,
                             )
                         )
                     else:
@@ -1550,6 +1694,7 @@ class GitHubPackageDownloader:
                 if not token:
                     error_msg += self.auth_resolver.build_error_context(
                         host, "download", org=owner, port=dep_ref.port if dep_ref else None,
+                        dep_url=dep_ref.repo_url if dep_ref else None,
                     )
                 elif token and not host.lower().endswith(".ghe.com"):
                     error_msg += (
@@ -1936,9 +2081,15 @@ class GitHubPackageDownloader:
 
             # Resolve per-dependency token via AuthResolver.
             dep_token = self._resolve_dep_token(dep_ref)
+            dep_auth_ctx = self._resolve_dep_auth_ctx(dep_ref)
+            dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
 
-            env = {**os.environ, **(self.git_env or {})}
-            auth_url = self._build_repo_url(dep_ref.repo_url, use_ssh=False, dep_ref=dep_ref, token=dep_token)
+            # For ADO bearer, use the AuthContext git_env with header injection
+            if dep_auth_scheme == "bearer" and dep_auth_ctx is not None:
+                env = {**os.environ, **(dep_auth_ctx.git_env or {})}
+            else:
+                env = {**os.environ, **(self.git_env or {})}
+            auth_url = self._build_repo_url(dep_ref.repo_url, use_ssh=False, dep_ref=dep_ref, token=dep_token, auth_scheme=dep_auth_scheme)
 
             cmds = [
                 ['git', 'init'],
@@ -2444,6 +2595,7 @@ class GitHubPackageDownloader:
                 org = dep_ref.repo_url.split('/')[0] if dep_ref.repo_url else None
                 error_msg += self.auth_resolver.build_error_context(
                     host, "clone", org=org, port=dep_ref.port,
+                    dep_url=dep_ref.repo_url,
                 )
                 raise RuntimeError(error_msg)
             else:

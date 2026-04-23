@@ -80,6 +80,7 @@ This catches cases where a developer updates `apm.yml` but forgets to re-run `ap
 steps:
   - script: |
       curl -sSL https://aka.ms/apm-unix | sh
+      export PATH="$HOME/.apm/bin:$PATH"
       apm install
       # Optional: only if targeting Codex, Gemini, or similar tools
       # apm compile
@@ -87,6 +88,47 @@ steps:
     env:
       ADO_APM_PAT: $(ADO_PAT)
 ```
+
+### ADO with AAD bearer (no PAT)
+
+In orgs that disable PAT creation, use a Workload Identity Federation (WIF) service connection and let APM consume the `az` session inherited from `AzureCLI@2`. Do NOT set `ADO_APM_PAT` -- APM falls back to the bearer cleanly only when no PAT env var is present.
+
+```yaml
+steps:
+  - task: AzureCLI@2
+    displayName: 'APM Install (AAD bearer)'
+    inputs:
+      azureSubscription: 'my-wif-service-connection'
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        curl -sSL https://aka.ms/apm-unix | sh
+        export PATH="$HOME/.apm/bin:$PATH"
+        apm install
+```
+
+For GitHub Actions targeting ADO repos, use [`azure/login@v2`](https://github.com/marketplace/actions/azure-login) with OIDC federated credentials so `az` is signed in before `apm install` runs:
+
+```yaml
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - uses: microsoft/apm-action@v1
+        # Do not set ADO_APM_PAT -- APM picks up the az session.
+```
+
+See [Authentication: AAD bearer tokens](../../getting-started/authentication/#authenticating-with-microsoft-entra-id-aad-bearer-tokens) for resolution precedence and verbose output.
 
 ## General CI
 

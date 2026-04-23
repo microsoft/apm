@@ -137,7 +137,8 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             if not result and verbose_log:
                 try:
                     err_ctx = auth_resolver.build_error_context(
-                        host, f"accessing {package}", org=org, port=dep_ref.port
+                        host, f"accessing {package}", org=org, port=dep_ref.port,
+                        dep_url=dep_ref.repo_url,
                     )
                     for line in err_ctx.splitlines():
                         verbose_log(line)
@@ -221,6 +222,53 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                 if result.returncode == 0:
                     break
 
+            # ADO bearer fallback: if PAT was rejected (rc != 0 with auth-failure
+            # signal) AND the dep is on Azure DevOps AND we resolved a PAT,
+            # silently retry with az-cli bearer token.
+            if (
+                result is not None
+                and result.returncode != 0
+                and dep_ref.is_azure_devops()
+                and _url_token is not None  # we had a PAT
+                and (
+                    "401" in (result.stderr or "")
+                    or "Authentication failed" in (result.stderr or "")
+                    or "Unauthorized" in (result.stderr or "")
+                )
+            ):
+                try:
+                    from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
+                    from apm_cli.utils.github_host import build_ado_bearer_git_env
+                    provider = get_bearer_provider()
+                    if provider.is_available():
+                        try:
+                            bearer = provider.get_bearer_token()
+                            bearer_url = ado_downloader._build_repo_url(
+                                dep_ref.repo_url, use_ssh=False, dep_ref=dep_ref,
+                                token=None, auth_scheme="bearer",
+                            )
+                            bearer_env = {**validate_env, **build_ado_bearer_git_env(bearer)}
+                            cmd = ["git", "ls-remote", "--heads", "--exit-code", bearer_url]
+                            bearer_result = subprocess.run(
+                                cmd, capture_output=True, text=True,
+                                encoding="utf-8", timeout=30, env=bearer_env,
+                            )
+                            if bearer_result.returncode == 0:
+                                # Emit deferred stale-PAT warning via resolver
+                                auth_resolver.emit_stale_pat_diagnostic(
+                                    dep_ref.host or "dev.azure.com"
+                                )
+                                if verbose_log:
+                                    verbose_log(
+                                        f"git ls-remote rc=0 for {package} "
+                                        f"(via AAD bearer fallback)"
+                                    )
+                                return True
+                        except AzureCliBearerError:
+                            pass
+                except ImportError:
+                    pass
+
             if verbose_log:
                 if result.returncode == 0:
                     verbose_log(f"git ls-remote rc=0 for {package}")
@@ -300,7 +348,8 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             if verbose_log:
                 try:
                     ctx = auth_resolver.build_error_context(
-                        host, f"accessing {package}", org=org, port=port
+                        host, f"accessing {package}", org=org, port=port,
+                        dep_url=getattr(dep_ref, "repo_url", None),
                     )
                     for line in ctx.splitlines():
                         verbose_log(line)
@@ -350,7 +399,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
         except Exception:
             if verbose_log:
                 try:
-                    ctx = auth_resolver.build_error_context(host, f"accessing {package}", org=org)
+                    ctx = auth_resolver.build_error_context(host, f"accessing {package}", org=org, dep_url=package)
                     for line in ctx.splitlines():
                         verbose_log(line)
                 except Exception:
