@@ -8,6 +8,8 @@ APM supports plugins through the `plugin.json` format. Plugins are automatically
 
 ## Plugin authoring
 
+For where plugins fit relative to APM's source layout, see [Anatomy -- Why not just ship a `plugin.json`?](../../introduction/anatomy-of-an-apm-package/#why-not-just-ship-a-pluginjson).
+
 Plugin ecosystems handle distribution but lack dependency management, security scanning, version locking, and dev/prod separation. As plugins depend on shared primitives, these gaps compound.
 
 APM is the supply-chain layer. Author packages with full tooling — transitive dependencies, lockfile pinning, [security scanning](../../enterprise/security/), [`devDependencies`](../../reference/manifest-schema/#5-devdependencies) — then export as standard plugins. Consumers never need APM installed.

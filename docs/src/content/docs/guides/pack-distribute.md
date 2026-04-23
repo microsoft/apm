@@ -16,7 +16,7 @@ A bundle removes all of that. You resolve once, pack the output, and distribute 
 Common motivations:
 
 - **CI cost reduction** — resolve once, fan out to many jobs
-- **Air-gapped environments** — no network access at deploy time
+- **Air-gapped environments** — no network access at deploy time (for environments where CI *can* reach an internal proxy, see [Registry Proxy & Air-gapped](../../enterprise/registry-proxy/) -- bundles are the offline-delivery story; the proxy is the online-routing story)
 - **Reproducibility** — the bundle is a snapshot of exactly what was resolved
 - **Faster onboarding** — new contributors get pre-built context without running install
 - **Audit trail** — attach the bundle to a release for traceability
