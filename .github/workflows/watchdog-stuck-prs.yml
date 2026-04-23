@@ -1,0 +1,55 @@
+# Watchdog -- scheduled scan for "stuck pull_request webhook" PRs.
+#
+# Why this file exists:
+#   GitHub Actions occasionally drops a `pull_request` webhook delivery and
+#   never recovers, leaving the required check `Build & Test (Linux)` in
+#   "Expected -- Waiting" forever for that PR. Recovery is folklore (push an
+#   empty commit, or close+reopen). This workflow detects the condition on
+#   any open PR and posts a single recovery comment so contributors are not
+#   silently blocked.
+#
+#   It complements `merge-gate.yml`, which makes new PRs self-healing.
+#   The watchdog is a safety net for: (a) PRs opened before merge-gate is
+#   required, and (b) any future required check that stops dispatching.
+
+name: Watchdog Stuck PRs
+
+on:
+  schedule:
+    # Every 15 minutes. GitHub may delay schedule triggers under load; that
+    # is fine -- the watchdog is a backstop, not a primary control loop.
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Log decisions but do not post comments'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: read
+
+concurrency:
+  group: watchdog-stuck-prs
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/scripts/ci
+
+      - name: Scan open PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          WATCHDOG_DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '1' || '0' }}
+        run: |
+          chmod +x .github/scripts/ci/watchdog_scan.sh
+          .github/scripts/ci/watchdog_scan.sh

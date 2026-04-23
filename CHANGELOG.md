@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - New `enterprise/governance-guide.md` documentation page: flagship governance reference for CISO / VPE / Platform Tech Lead audiences, covering enforcement points, bypass contract, failure semantics, air-gapped operation, rollout playbook, and known gaps. Trims duplicated content in `governance.md`, `apm-policy.md`, and `integrations/github-rulesets.md`. Adds `templates/apm-policy-starter.yml`. (#851)
 - `apm install` now supports Azure DevOps AAD bearer-token auth via `az account get-access-token`, with PAT-first fallback for orgs that disable PAT creation. Closes #852 (#856)
+- New CI safety nets: `merge-gate.yml` orchestrator turns dropped `pull_request` webhook deliveries into clear red checks (currently shadow mode), and `watchdog-stuck-prs.yml` posts a recovery comment on PRs whose required check never dispatched. (PR follow-up to #856 CI flake)
 
 ## [0.9.1] - 2026-04-22
 
