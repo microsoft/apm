@@ -128,9 +128,9 @@ fi
 # Ubuntu 24.04+ enforces PEP 668 ("externally managed environment") and rejects
 # plain `pip install`. Detect the specific error and retry with the flag.
 install_apm() {
-    _install_out=$($PIP_CMD install "$PKG_SPEC" 2>&1) && { echo "$_install_out"; return 0; }
-    echo "$_install_out"
-    if echo "$_install_out" | grep -q "externally-managed-environment"; then
+    _install_out=$($PIP_CMD install "$PKG_SPEC" 2>&1) && { printf '%s\n' "$_install_out"; return 0; }
+    printf '%s\n' "$_install_out"
+    if printf '%s\n' "$_install_out" | grep -q "externally-managed-environment"; then
         echo "Retrying with --break-system-packages (PEP 668 distro)..."
         $PIP_CMD install --break-system-packages "$PKG_SPEC"
     else
