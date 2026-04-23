@@ -14,8 +14,8 @@
   entry: apm audit --ci
   files: |-
     (?x)^(
-      apm.yml|
-      apm.lock.yaml|
+      apm\.yml|
+      apm\.lock\.yaml|
       apm-policy\.yml|
       .claude/.*|
       .cursor/.*|
