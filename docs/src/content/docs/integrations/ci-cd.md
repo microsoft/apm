@@ -74,6 +74,10 @@ To ensure `.github/`, `.claude/`, `.cursor/`, and `.opencode/` integration files
 
 This catches cases where a developer updates `apm.yml` but forgets to re-run `apm install`.
 
+:::tip[We dogfood this]
+APM's own repo uses the `APM Self-Check` job in [`microsoft/apm`'s `ci.yml`](https://github.com/microsoft/apm/blob/main/.github/workflows/ci.yml) as a reference implementation for installing APM, running CI validation commands such as `apm audit --ci`, and checking for drift with `git status --porcelain`. Use it as a practical example when wiring these checks into your own workflow.
+:::
+
 ## Azure Pipelines
 
 ```yaml

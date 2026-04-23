@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `apm-primitives-architect` agent: reusable persona for designing and critiquing `.apm/` skill bundles and agent files; anchors on PROSE constraints and Agent Skills best practices.
+- CI: add `APM Self-Check` to `ci.yml` for `apm audit --ci`, regeneration-drift validation, and `merge-gate.yml` `EXPECTED_CHECKS` coverage. (#885)
 
 ### Changed
 
