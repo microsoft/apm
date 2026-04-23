@@ -1,0 +1,29 @@
+---
+- id: apm_audit
+  name: apm_audit
+  description: |
+    Check that apm dependencies are in sync and policy compliant.
+
+    Note: `args` can have `--policy {apm-policy.yml}` passed to run further checks - that file can live in an org's `org/.github` repository for centralizing compliance. For that, use `--policy org`.
+
+    Note: `files` should include:
+
+    - apm*yml configuration files (and schema).
+    - toolchain manager configuration files (to trigger this when apm changes versions).
+    - agent configuration directories - to cause audit to detect if apm-delivered assets become modified.
+  entry: apm audit --ci
+  files: |-
+    (?x)^(
+      apm.yml|
+      apm.lock.yaml|
+      apm-policy\.yml|
+      .claude/.*|
+      .cursor/.*|
+      .github/agents/.*|
+      .github/instructions/.*|
+      .github/hooks/.*|
+      .opencode/.*|
+      .agents/.*
+    )$
+  language: system
+  pass_filenames: false
