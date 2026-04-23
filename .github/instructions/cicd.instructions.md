@@ -88,9 +88,10 @@ integration suite runs only at merge time via GitHub Merge Queue
 - **Cross-workflow artifacts**: ci-integration.yml builds the binary inline (no cross-workflow artifact transfer); build-release.yml jobs share artifacts within the same workflow run.
 
 ## Branch Protection & Required Checks
-- **Single required check**: branch protection (`main-protection` ruleset id 9294522) requires only one status check: `gate` from `merge-gate.yml`. All other PR-time signals are aggregated by that workflow's poll loop.
-- **CRITICAL ruleset gotcha**: the `context` field stored in the ruleset must match the **check-run name** (the job key, e.g. `gate`), NOT the GitHub UI's display string (`Merge Gate / gate`). Storing the display string causes permanent "Expected - Waiting for status to be reported" because no check-run with that literal name ever posts. The integration_id (`15368` = github-actions) plus the check-run name is what GitHub matches.
-- **Adding a new required check**: add it to `EXPECTED_CHECKS` in `merge-gate.yml`. Do NOT touch the ruleset.
+- **Single required check**: branch protection (`main-protection` ruleset id 9294522) requires exactly one status check context: `gate` from `merge-gate.yml`. All other PR-time signals are aggregated by that workflow's poll loop.
+- **CRITICAL ruleset gotcha**: the ruleset `context` must be the literal check-run name `gate`. `Merge Gate / gate` is only how GitHub may render the workflow and job together in the UI; it is not the context value to store in the ruleset. If the ruleset stores `Merge Gate / gate`, GitHub waits forever with "Expected - Waiting for status to be reported" because no check-run with that literal name is posted.
+- **How the name is derived**: GitHub matches the check by `integration_id` (`15368` = github-actions) plus the emitted check-run name. That emitted name comes from the job `name:` if one is set; otherwise it falls back to the job id. In `merge-gate.yml` the job id is `gate` and `name: gate`, so the emitted check-run name is `gate` -- that is the exact string the ruleset must require.
+- **Adding a new aggregated check**: add it to `EXPECTED_CHECKS` in `merge-gate.yml`. Do not change the ruleset unless you intentionally rename the merge gate job's emitted check-run name, in which case the ruleset `context` must be updated to the new exact name.
 
 ## Trust Model
 - **PR push (any contributor, including forks)**: Runs Tier 1 only. No CI secrets exposed. PR code is checked out and tested in an unprivileged context.
