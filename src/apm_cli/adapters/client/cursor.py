@@ -19,10 +19,20 @@ from .copilot import CopilotClientAdapter
 class CursorClientAdapter(CopilotClientAdapter):
     """Cursor IDE MCP client adapter.
 
-    Inherits all config formatting from :class:`CopilotClientAdapter`
-    (``mcpServers`` JSON with ``command``/``args``/``env``).  Only the
-    config-file location differs: repo-local ``.cursor/mcp.json`` instead
-    of global ``~/.copilot/mcp-config.json``.
+    Inherits config path and read/write logic from this class, but
+    **must** override :meth:`_format_server_config` because Cursor's JSON
+    schema differs from Copilot CLI's in two critical ways:
+
+    - ``type`` must be ``"stdio"`` or ``"http"`` (NOT ``"local"``).
+    - ``tools`` and ``id`` fields must **never** be emitted — they are
+      Copilot-CLI-specific and cause Cursor's MCP loader to silently
+      reject the server.
+
+    .. note::
+
+        This inheritance design is a known fragility.  ``_format_server_config``
+        **must** be explicitly overridden in each subclass; silently inheriting
+        the Copilot version will produce invalid configs for the target runtime.
     """
 
     supports_user_scope: bool = False
@@ -138,3 +148,114 @@ class CursorClientAdapter(CopilotClientAdapter):
         except Exception as e:
             print(f"Error configuring MCP server: {e}")
             return False
+
+    # ------------------------------------------------------------------ #
+    # _format_server_config — MUST override; do NOT silently inherit Copilot
+    # ------------------------------------------------------------------ #
+
+    def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):
+        """Format server info into Cursor-compatible ``.cursor/mcp.json`` format.
+
+        Cursor uses ``"type": "stdio"`` or ``"type": "http"`` (NOT ``"local"``)
+        and does NOT support the ``tools`` or ``id`` fields that Copilot CLI uses.
+
+        Args:
+            server_info (dict): Server information from registry.
+            env_overrides (dict, optional): Pre-collected environment variable overrides.
+            runtime_vars (dict, optional): Pre-collected runtime variable values.
+
+        Returns:
+            dict: Cursor-compatible server configuration.
+        """
+        if runtime_vars is None:
+            runtime_vars = {}
+
+        raw = server_info.get("_raw_stdio")
+        if raw:
+            config = {
+                "type": "stdio",
+                "command": raw["command"],
+                "args": raw["args"],
+            }
+            if raw.get("env"):
+                config["env"] = raw["env"]
+                self._warn_input_variables(raw["env"], server_info.get("name", ""), "Cursor")
+            return config
+
+        remotes = server_info.get("remotes", [])
+        if remotes:
+            remote = remotes[0]
+            transport = (remote.get("transport_type") or "http").strip()
+            if transport in ("sse", "streamable-http"):
+                transport = "http"
+            config = {
+                "type": "http",
+                "url": remote.get("url", ""),
+            }
+            headers = remote.get("headers", [])
+            if headers:
+                if isinstance(headers, list):
+                    config["headers"] = {
+                        h["name"]: h["value"] for h in headers if "name" in h and "value" in h
+                    }
+                else:
+                    config["headers"] = headers
+            return config
+
+        packages = server_info.get("packages", [])
+        if not packages:
+            raise ValueError(
+                f"MCP server has incomplete configuration in registry - no package "
+                f"information or remote endpoints available. "
+                f"Server: {server_info.get('name', 'unknown')}"
+            )
+
+        package = self._select_best_package(packages)
+        if not package:
+            raise ValueError(
+                f"No suitable package found for MCP server "
+                f"'{server_info.get('name', 'unknown')}'"
+            )
+
+        registry_name = self._infer_registry_name(package)
+        package_name = package.get("name", "")
+        runtime_hint = package.get("runtime_hint", "")
+        runtime_arguments = package.get("runtime_arguments", [])
+        package_arguments = package.get("package_arguments", [])
+        env_vars = package.get("environment_variables", [])
+
+        resolved_env = self._resolve_environment_variables(env_vars, env_overrides)
+        processed_runtime_args = self._process_arguments(runtime_arguments, resolved_env, runtime_vars)
+        processed_package_args = self._process_arguments(package_arguments, resolved_env, runtime_vars)
+
+        config = {"type": "stdio"}
+
+        if registry_name == "npm":
+            config["command"] = runtime_hint or "npx"
+            config["args"] = ["-y", package_name] + processed_runtime_args + processed_package_args
+        elif registry_name == "docker":
+            config["command"] = "docker"
+            if processed_runtime_args:
+                config["args"] = self._inject_env_vars_into_docker_args(
+                    processed_runtime_args, resolved_env
+                )
+            else:
+                from ...core.docker_args import DockerArgsProcessor
+                config["args"] = DockerArgsProcessor.process_docker_args(
+                    ["run", "-i", "--rm", package_name],
+                    resolved_env
+                )
+        elif registry_name == "pypi":
+            config["command"] = runtime_hint or "uvx"
+            config["args"] = [package_name] + processed_runtime_args + processed_package_args
+        elif registry_name == "homebrew":
+            config["command"] = package_name.split("/")[-1] if "/" in package_name else package_name
+            config["args"] = processed_runtime_args + processed_package_args
+        else:
+            config["command"] = runtime_hint or package_name
+            config["args"] = processed_runtime_args + processed_package_args
+
+        if resolved_env:
+            config["env"] = resolved_env
+
+        return config

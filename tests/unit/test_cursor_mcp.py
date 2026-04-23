@@ -120,6 +120,83 @@ class TestCursorClientAdapter(unittest.TestCase):
         result = self.adapter.configure_mcp_server("some-server")
         self.assertTrue(result)
 
+    # -- _format_server_config --
+
+    def test_stdio_server_outputs_type_stdio(self):
+        """Self-defined stdio deps must emit type=stdio, not type=local."""
+        server_info = {
+            "name": "my-cli",
+            "_raw_stdio": {
+                "command": "./my-cli",
+                "args": ["mcp"],
+                "env": {"API_KEY": "secret"},
+            },
+        }
+        config = self.adapter._format_server_config(server_info)
+        self.assertEqual(config["type"], "stdio")
+        self.assertEqual(config["command"], "./my-cli")
+        self.assertEqual(config["args"], ["mcp"])
+        self.assertEqual(config["env"], {"API_KEY": "secret"})
+
+    def test_stdio_server_no_copilot_fields(self):
+        """Cursor config must NOT emit 'tools' or 'id' fields (Copilot-specific)."""
+        server_info = {
+            "id": "registry-uuid-12345",
+            "name": "my-cli",
+            "_raw_stdio": {
+                "command": "./my-cli",
+                "args": ["mcp"],
+            },
+        }
+        config = self.adapter._format_server_config(server_info)
+        self.assertNotIn("tools", config)
+        self.assertNotIn("id", config)
+
+    @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")
+    def test_http_server_outputs_type_http(self, mock_find):
+        """Remote servers must emit type=http, not type=local."""
+        mock_find.return_value = {
+            "id": "remote-uuid",
+            "name": "remote-srv",
+            "packages": [],
+            "remotes": [
+                {
+                    "url": "https://example.com/mcp",
+                    "transport_type": "http",
+                    "headers": [{"name": "Authorization", "value": "Bearer token"}],
+                }
+            ],
+        }
+        ok = self.adapter.configure_mcp_server("remote-srv", "remote-srv")
+        self.assertTrue(ok)
+        data = json.loads(self.mcp_json.read_text(encoding="utf-8"))
+        self.assertEqual(data["mcpServers"]["remote-srv"]["type"], "http")
+        self.assertNotIn("tools", data["mcpServers"]["remote-srv"])
+        self.assertNotIn("id", data["mcpServers"]["remote-srv"])
+
+    @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")
+    def test_stdio_with_packages_outputs_type_stdio(self, mock_find):
+        """NPM/docker packages must also emit type=stdio, not type=local."""
+        mock_find.return_value = {
+            "id": "pkg-uuid",
+            "name": "npm-pkg",
+            "packages": [
+                {
+                    "registry_name": "npm",
+                    "name": "some-npm-pkg",
+                    "runtime_hint": "npx",
+                    "arguments": [],
+                    "environment_variables": [],
+                }
+            ],
+        }
+        ok = self.adapter.configure_mcp_server("npm-pkg", "npm-pkg")
+        self.assertTrue(ok)
+        data = json.loads(self.mcp_json.read_text(encoding="utf-8"))
+        self.assertEqual(data["mcpServers"]["npm-pkg"]["type"], "stdio")
+        self.assertNotIn("tools", data["mcpServers"]["npm-pkg"])
+        self.assertNotIn("id", data["mcpServers"]["npm-pkg"])
+
 
 class TestMCPIntegratorCursorStaleCleanup(unittest.TestCase):
     """remove_stale() cleans .cursor/mcp.json."""
