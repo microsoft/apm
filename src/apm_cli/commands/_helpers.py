@@ -228,6 +228,25 @@ def print_version(ctx, param, value):
             f"{TITLE}Agent Package Manager (APM) CLI{RESET} version {version_str}"
         )
 
+    # Gated verbose-version output (experimental flag)
+    try:
+        from ..core.experimental import is_enabled
+
+        if is_enabled("verbose_version"):
+            import platform
+            import sys
+
+            python_ver = platform.python_version()
+            plat = f"{sys.platform}-{platform.machine()}"
+            install_path = str(Path(__file__).resolve().parent.parent)
+
+            _rich_echo(f"  {'Python:':<14}{python_ver}", color="dim")
+            _rich_echo(f"  {'Platform:':<14}{plat}", color="dim")
+            _rich_echo(f"  {'Install path:':<14}{install_path}", color="dim")
+    except Exception:
+        # Never let experimental flag logic break --version
+        pass
+
     ctx.exit()
 
 
