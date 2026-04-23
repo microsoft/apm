@@ -205,6 +205,40 @@ def test_build_ado_api_url():
     assert "api-version=7.0" in url
 
 
+def test_build_authorization_header_git_env_bearer():
+    """Bearer scheme produces correct GIT_CONFIG_* env overlay."""
+    env = github_host.build_authorization_header_git_env("Bearer", "eyJabc.def.ghi")
+    assert env == {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.extraheader",
+        "GIT_CONFIG_VALUE_0": "Authorization: Bearer eyJabc.def.ghi",
+    }
+
+
+def test_build_authorization_header_git_env_basic():
+    """Basic scheme works the same way; helper is scheme-agnostic."""
+    env = github_host.build_authorization_header_git_env("Basic", "dXNlcjpwYXNz")
+    assert env["GIT_CONFIG_VALUE_0"] == "Authorization: Basic dXNlcjpwYXNz"
+    assert env["GIT_CONFIG_KEY_0"] == "http.extraheader"
+    assert env["GIT_CONFIG_COUNT"] == "1"
+
+
+def test_build_ado_bearer_git_env():
+    """ADO bearer wrapper delegates to the generic helper with 'Bearer' scheme."""
+    token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.payload.signature"
+    env = github_host.build_ado_bearer_git_env(token)
+    assert env["GIT_CONFIG_VALUE_0"] == f"Authorization: Bearer {token}"
+    assert env["GIT_CONFIG_KEY_0"] == "http.extraheader"
+    assert env["GIT_CONFIG_COUNT"] == "1"
+
+
+def test_build_ado_bearer_git_env_does_not_url_encode():
+    """Tokens are passed through verbatim; git handles header value as-is."""
+    token = "abc/def+ghi=jkl"
+    env = github_host.build_ado_bearer_git_env(token)
+    assert env["GIT_CONFIG_VALUE_0"] == f"Authorization: Bearer {token}"
+
+
 # Unsupported host error message tests
 
 def test_unsupported_host_error_message():

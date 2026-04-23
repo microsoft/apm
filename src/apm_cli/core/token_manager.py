@@ -40,7 +40,11 @@ def _format_credential_host(host: str, port: Optional[int]) -> str:
 
 class GitHubTokenManager:
     """Manages GitHub token environment setup for different AI runtimes."""
-    
+
+    # Diagnostic source label for bearer-resolved tokens (AAD via az CLI).
+    # Used by AuthResolver and downstream diagnostics to identify bearer auth.
+    ADO_BEARER_SOURCE = "AAD_BEARER_AZ_CLI"
+
     # Define token precedence for different use cases
     TOKEN_PRECEDENCE = {
         'copilot': ['GITHUB_COPILOT_PAT', 'GITHUB_TOKEN', 'GITHUB_APM_PAT'],
