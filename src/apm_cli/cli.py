@@ -20,6 +20,7 @@ from apm_cli.commands.audit import audit
 from apm_cli.commands.compile import compile as compile_cmd
 from apm_cli.commands.config import config
 from apm_cli.commands.deps import deps
+from apm_cli.commands.experimental import experimental
 from apm_cli.commands.view import view as view_cmd
 from apm_cli.commands.init import init
 from apm_cli.commands.install import install
@@ -81,6 +82,7 @@ cli.add_command(run)
 cli.add_command(preview)
 cli.add_command(list_cmd, name="list")
 cli.add_command(config)
+cli.add_command(experimental)
 cli.add_command(runtime)
 cli.add_command(mcp)
 cli.add_command(policy)

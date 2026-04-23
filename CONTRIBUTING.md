@@ -144,6 +144,44 @@ uv run isort .
 
 If your changes affect how users interact with the project, update the documentation accordingly.
 
+## Extending APM
+
+### How to add an experimental feature flag
+
+Use an experimental flag to de-risk rollout of a user-visible behavioural change that may need early adopter feedback. Do not add a flag for a bug fix, internal refactor, or any change that should simply ship as the default behaviour.
+
+Experimental flags MUST NOT gate security-critical behaviour (content scanning, path validation, lockfile integrity, token handling, MCP trust, collision detection). Flags are ergonomic/UX toggles only.
+
+When adding a new experimental flag:
+
+1. Register it in `src/apm_cli/core/experimental.py` in the `FLAGS` dict with a frozen `ExperimentalFlag(name=..., description=..., default=False, hint=...)`.
+2. Gate the code path with a function-scope import (avoids import cycles):
+   ```python
+   def my_function():
+       from apm_cli.core.experimental import is_enabled
+       if is_enabled("my_flag"):
+           ...
+   ```
+3. Add tests that cover both the enabled and disabled code paths.
+4. Update the experimental command reference page at `docs/src/content/docs/reference/experimental.md`.
+
+Naming rules:
+
+- Use `snake_case` in the registry and config.
+- Use `kebab-case` for display and other user-facing strings.
+- The CLI accepts both forms on input.
+
+Graduation and retirement:
+
+1. When a flag becomes the default, remove the gate and remove the matching `FLAGS` entry in the same PR.
+2. Add a `CHANGELOG.md` entry under `Changed` with a migration note if the previous default differed.
+
+Avoid these anti-patterns:
+
+- Do not gate security-critical behaviour behind an experimental flag.
+- Do not read `is_enabled()` at module import time.
+- Do not persist flag state anywhere other than `~/.apm/config.json` via `update_config`.
+
 ## License
 
 By contributing to this project, you agree that your contributions will be licensed under the project's [MIT License](LICENSE).

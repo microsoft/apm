@@ -11,19 +11,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `find_primitive_files()` now uses `os.walk` with early directory pruning so `compilation.exclude` patterns prevent traversal into excluded subtrees on large repos. (#870)
+- CI: smoke tests in `build-release.yml`'s `build-and-test` job (Linux x86_64, Linux arm64, Windows) are now gated to promotion boundaries (tag/schedule/dispatch) instead of running on every push to main. Push-time smoke duplicated the merge-time smoke gate in `ci-integration.yml` and burned ~15 redundant codex-binary downloads/day. Tag-cut releases still run smoke as a pre-ship gate; nightly catches upstream codex URL drift; merge-time still gates merges into main. (#878)
+- CI docs: clarify that branch-protection ruleset must store the check-run name (`gate`), not the workflow display string (`Merge Gate / gate`); document the merge-gate aggregator in `cicd.instructions.md` and mark the legacy stub workflow as deprecated.
+
+### Removed
+
+- CI: deleted `ci-integration-pr-stub.yml`. The four stubs were a holdover from the pre-merge-gate model where branch protection required each Tier 2 check name directly. After #867, branch protection requires only `gate`, so the stubs are dead weight. Reduced `EXPECTED_CHECKS` in `merge-gate.yml` to just `Build & Test (Linux)`.
+
+## [0.9.2] - 2026-04-23
 
 ### Added
 
-- New `enterprise/governance-guide.md` documentation page: flagship governance reference for CISO / VPE / Platform Tech Lead audiences, covering enforcement points, bypass contract, failure semantics, air-gapped operation, rollout playbook, and known gaps. Trims duplicated content in `governance.md`, `apm-policy.md`, and `integrations/github-rulesets.md`. Adds `templates/apm-policy-starter.yml`. (#851)
-- `apm install` now supports Azure DevOps AAD bearer-token auth via `az account get-access-token`, with PAT-first fallback for orgs that disable PAT creation. Closes #852 (#856)
-- New CI safety net: `merge-gate.yml` orchestrator turns dropped `pull_request` webhook deliveries into clear red checks instead of stuck `Expected -- Waiting for status to be reported`. Triggers on both `pull_request` and `pull_request_target` for redundancy. (#865) (PR follow-up to #856 CI flake)
-- `merge-gate.yml` now aggregates ALL PR-time required checks (`Build & Test (Linux)` + 4 stubs from `ci-integration-pr-stub.yml`) into a single `Merge Gate / gate` verdict. Branch protection requires only this single check, decoupling the ruleset from CI workflow topology (Tide / bors pattern).
+- `apm install` supports Azure DevOps AAD bearer-token auth via `az account get-access-token`, with PAT-first fallback for orgs that disable PAT creation. Closes #852 (#856)
+- New `enterprise/governance-guide.md`: flagship governance reference for CISO / VPE / Platform Tech Lead audiences; trims duplication across `governance.md`, `apm-policy.md`, `integrations/github-rulesets.md`; adds `templates/apm-policy-starter.yml`. (#851)
+- Enterprise docs IA refactor: hub page + merged team guides, deduped governance content. (#858)
+- Landing page rewritten around the three-pillar spine. (#855)
+- First-package tutorial rewritten end-to-end; fixes `.apm/` anatomy hallucinations. (#866)
+
+### Changed
+
+- gh-aw workflows now use `imports:` for shared APM context instead of the deprecated `dependencies:` field. (#864)
+- CI: `merge-gate.yml` orchestrator turns dropped `pull_request` webhook deliveries into clear red checks instead of stuck `Expected -- Waiting for status to be reported`. (#865)
+- CI: `Merge Gate / gate` aggregates all PR-time required checks (`Build & Test (Linux)` + 4 stubs) into a single verdict; branch protection requires only this one check, decoupling the ruleset from CI workflow topology (Tide / bors pattern). (#867, #868)
+- CI: `merge-gate.yml` simplified to a single `pull_request` trigger with `workflow_dispatch` for manual recovery; the dual-trigger redundancy attempt was poisoning the branch-protection rollup with `CANCELLED` check-runs. (#868)
+
+### Fixed
+
+- `apm install` surfaces the custom port in clone / `ls-remote` error messages for generic git hosts. (#804)
 
 ## [0.9.1] - 2026-04-22
 
 ### Added
 
 - `apm install` enforces org `apm-policy.yml` at install time (deps deny/allow/require, MCP deny/transport/trust-transitive, `compilation.target.allow`, `extends:` chains, `policy.fetch_failure` knob, `policy.hash` pin); `--no-policy` / `APM_POLICY_DISABLE=1` escape hatch; `--dry-run` previews verdicts; failed package installs roll back `apm.yml`. New `apm policy status` diagnostic (table / `--json`, exit-0 by default, `--check` for CI). `apm audit --ci` auto-discovers org policy. **Migration**: orgs publishing `enforcement: block` may see installs that previously succeeded now fail -- preview with `apm install --dry-run`. Closes #827, #829, #831, #834 (#832)
+- `apm experimental` command group - a feature-flag registry with `list` / `enable` / `disable` / `reset` subcommands. Opt in to new behaviour before it graduates to default. Ships with one built-in flag (`verbose-version`) and a contributor recipe for proposing new flags (#845)
 - `pr-review-panel` gh-aw workflow: runs the `apm-review-panel` skill on PRs labelled `panel-review` and posts a synthesized verdict (#824)
 
 ### Changed
