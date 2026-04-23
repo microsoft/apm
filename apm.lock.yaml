@@ -26,6 +26,7 @@ local_deployed_files:
 - .github/skills/cli-logging-ux
 - .github/skills/devx-ux
 - .github/skills/oss-growth
+- .github/skills/pr-description-skill
 - .github/skills/python-architecture
 - .github/skills/supply-chain-security
 local_deployed_file_hashes:
@@ -40,7 +41,7 @@ local_deployed_file_hashes:
   .github/agents/python-architect.agent.md: sha256:4118e60a56d4b94183915a3650d2a4c3294d2b4a5daecbb547a731b04a679b54
   .github/agents/supply-chain-security-expert.agent.md: sha256:9a4e731b12e7658f71d54c22e90f80ce0c45e3eacbb069b8505ed96ec9e79ba5
   .github/instructions/changelog.instructions.md: sha256:1e51ec4c74e847967962bd279dc4c6e582c5d3578490b3c28d5f3acd3e05f73e
-  .github/instructions/cicd.instructions.md: sha256:170e6fa09bcf4064d33420ffca6b3125bf7011982c4c7a00320af71f2f6c6bf9
+  .github/instructions/cicd.instructions.md: sha256:9c0fafc74f743aa97e5adba2168d66c9e3a327b135065e3b804bdbb5f04cda5d
   .github/instructions/cli.instructions.md: sha256:8e39e8d5047ce88575cb02f87c2bcede584dfef258bd86f7466c7badf136541a
   .github/instructions/doc-sync.instructions.md: sha256:bb3816254f8df6bffc6faacd556871f36903e9d7f348982f1e2de0339384c696
   .github/instructions/encoding.instructions.md: sha256:93db7377dc896f6efecf2c5d8c5d89255a555562f468d034d64c42edd5cf46d5
