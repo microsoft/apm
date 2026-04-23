@@ -5,10 +5,15 @@ set -e
 # shellcheck source=/dev/null
 source dev-container-features-test-lib
 
-# ── Tests ────────────────────────────────────────────────────────────────────
+# Source generic checks (applies to all scenarios)
+# shellcheck source=/dev/null
+source "$(dirname "$0")/generic-checks.sh"
 
-check "apm --version outputs exactly 0.8.11" \
-    bash -c "apm --version | grep -q '0.8.11'"
+# Scenario-specific checks
+check "apm --version reports the pinned version (0.8.11)" \
+    bash -c "apm --version | grep -q '0\.8\.11'"
 
-# ── Report ────────────────────────────────────────────────────────────────────
+check "no other apm-cli version was installed" \
+    bash -c "! apm --version | grep -Evq '0\.8\.11'"
+
 reportResults
