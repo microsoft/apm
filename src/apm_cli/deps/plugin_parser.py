@@ -18,6 +18,54 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 import yaml
 
+from ..utils.path_security import ensure_path_within, PathTraversalError
+from ..utils.console import _rich_warning
+
+
+_logger = logging.getLogger(__name__)
+
+
+def _surface_warning(message: str, logger: logging.Logger) -> None:
+    """Emit a warning to both the stdlib logger and the rich console.
+
+    The ``apm`` stdlib logger has no handlers configured by default, so
+    ``logger.warning`` calls are silently dropped in non-debug runs. For
+    user-visible plugin-parse issues (skipped MCP servers, validation
+    failures), also route through ``_rich_warning`` so the user sees them
+    even without ``--verbose``. Falls back gracefully if Rich is unavailable.
+    """
+    logger.warning(message)
+    try:
+        _rich_warning(message, symbol="warning")
+    except Exception:
+        # Console output is best-effort; never mask the underlying warning.
+        pass
+
+
+def _is_within_plugin(candidate: Path, plugin_root: Path, *, component: str) -> bool:
+    """Return True iff *candidate* resolves inside *plugin_root*.
+
+    Logs a warning and returns False when the path escapes the plugin
+    root (absolute path, ``..`` traversal, or symlink pointing outside).
+    Used to enforce the trust boundary on attacker-controlled manifest
+    fields (agents/skills/commands/hooks) during plugin normalization.
+
+    The rejected path string and resolved exception are deliberately
+    omitted from log output: manifest values are externally controlled
+    and static-analysis tooling treats them as tainted/sensitive. The
+    component name alone is sufficient to identify which manifest field
+    was rejected; operators that need the full value can reproduce
+    locally with a clean checkout.
+    """
+    try:
+        ensure_path_within(candidate, plugin_root)
+    except PathTraversalError:
+        _logger.warning(
+            "Skipping %s entry: path escapes plugin root", component,
+        )
+        return False
+    return True
+
 
 def parse_plugin_manifest(plugin_json_path: Path) -> Dict[str, Any]:
     """Parse a plugin.json manifest file.
@@ -260,6 +308,14 @@ def _mcp_servers_to_apm_deps(
 
     Every entry gets ``registry: false`` (self-defined, not registry lookups).
 
+    All resulting entries are routed through ``MCPDependency.from_dict()``
+    so plugin-synthesized servers must clear the same security validation
+    chokepoint as CLI-authored or manually edited entries (name shape, URL
+    scheme allowlist, header CRLF, command path-traversal). Entries that
+    fail validation are skipped with a warning rather than crashing the
+    plugin install -- a single malformed server should not block the
+    whole plugin.
+
     Args:
         servers: Mapping of server name -> server config dict.
         plugin_path: Plugin root (used for log context only).
@@ -267,6 +323,8 @@ def _mcp_servers_to_apm_deps(
     Returns:
         List of dicts consumable by ``MCPDependency.from_dict()``.
     """
+    from ..models.dependency.mcp import MCPDependency
+
     logger = logging.getLogger("apm")
     deps: List[Dict[str, Any]] = []
 
@@ -290,9 +348,10 @@ def _mcp_servers_to_apm_deps(
             if "headers" in cfg:
                 dep["headers"] = cfg["headers"]
         else:
-            logger.warning(
-                "Skipping MCP server '%s' from plugin '%s': no 'command' or 'url'",
-                name, plugin_path.name,
+            _surface_warning(
+                f"Skipping MCP server '{name}' from plugin "
+                f"'{plugin_path.name}': no 'command' or 'url'",
+                logger,
             )
             continue
 
@@ -300,6 +359,21 @@ def _mcp_servers_to_apm_deps(
             dep["env"] = cfg["env"]
         if "tools" in cfg:
             dep["tools"] = cfg["tools"]
+
+        # Route through the validation chokepoint. Plugins are an ingress
+        # path: a malicious plugin could otherwise smuggle path traversal,
+        # CRLF, or unsafe URL schemes that bypass MCPDependency.validate().
+        # PR #809 follow-up: surface validation errors to the user via the
+        # rich console (stdlib logger has no handlers configured).
+        try:
+            MCPDependency.from_dict(dep)
+        except (ValueError, Exception) as exc:
+            _surface_warning(
+                f"Skipping invalid MCP server '{name}' from plugin "
+                f"'{plugin_path.name}': {exc}",
+                logger,
+            )
+            continue
 
         deps.append(dep)
 
@@ -333,21 +407,46 @@ def _map_plugin_artifacts(plugin_path: Path, apm_dir: Path, manifest: Optional[D
 
     # Resolve source paths  -- use manifest arrays if present, else defaults.
     # Custom paths may be directories OR individual files.
+    #
+    # Security: every manifest-controlled path is verified to resolve
+    # inside *plugin_path* before it is copied.  Without this guard, a
+    # malicious plugin could set ``"commands": "/etc/passwd"`` or
+    # ``"agents": ["../../host"]`` and trick ``apm install`` into copying
+    # arbitrary host files into the project's ``.apm/`` tree (and from
+    # there into ``.github/prompts/`` via auto-integration).
     def _resolve_sources(component: str, default_dir: str):
         """Return list of existing source paths (dirs or files) for a component."""
         custom = manifest.get(component)
         if isinstance(custom, list):
             paths = []
             for p in custom:
-                src = plugin_path / str(p)
-                if src.exists() and not src.is_symlink():
+                raw = str(p)
+                src = plugin_path / raw
+                if (
+                    src.exists()
+                    and not src.is_symlink()
+                    and _is_within_plugin(src, plugin_path, component=component)
+                ):
                     paths.append(src)
             return paths
         elif isinstance(custom, str):
             src = plugin_path / custom
-            return [src] if src.exists() and not src.is_symlink() else []
+            if (
+                src.exists()
+                and not src.is_symlink()
+                and _is_within_plugin(src, plugin_path, component=component)
+            ):
+                return [src]
+            return []
         default = plugin_path / default_dir
-        return [default] if default.exists() and default.is_dir() else []
+        if (
+            default.exists()
+            and not default.is_symlink()
+            and default.is_dir()
+            and _is_within_plugin(default, plugin_path, component=component)
+        ):
+            return [default]
+        return []
 
     # Map agents/
     # Unlike skills (which are named directories containing SKILL.md), agents
@@ -435,10 +534,14 @@ def _map_plugin_artifacts(plugin_path: Path, apm_dir: Path, manifest: Optional[D
         )
     elif isinstance(hooks_value, str) and (plugin_path / hooks_value).is_file():
         # Config file path (e.g. "hooks": "hooks.json")
-        target_hooks = apm_dir / "hooks"
-        target_hooks.mkdir(parents=True, exist_ok=True)
         src_file = plugin_path / hooks_value
-        if not src_file.is_symlink():
+        if src_file.is_symlink() or not _is_within_plugin(
+            src_file, plugin_path, component="hooks"
+        ):
+            pass
+        else:
+            target_hooks = apm_dir / "hooks"
+            target_hooks.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src_file, target_hooks / "hooks.json")
     else:
         # Directory path(s)  -- standard flow

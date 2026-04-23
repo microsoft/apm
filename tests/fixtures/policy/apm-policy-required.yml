@@ -1,0 +1,9 @@
+# Fixture 3: Required-deps policy (enforcement=block)
+# Tests: missing required dep blocks install
+name: required-deps-policy
+version: "1.0.0"
+enforcement: block
+
+dependencies:
+  require:
+    - "DevExpGbb/required-standards"

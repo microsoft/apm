@@ -159,8 +159,19 @@ class MCPServerOperations:
                 else:
                     invalid_servers.append(server_ref)
             except requests.RequestException:
-                # Network/transient error — assume server exists and let
-                # downstream installation attempt the actual resolution.
+                if getattr(self.registry_client, "_is_custom_url", False):
+                    # Custom registry: fail-closed. The user explicitly configured
+                    # this endpoint; unreachable means hard error, not a silent
+                    # assumption of validity. Prevents silent misconfiguration
+                    # from reaching production. (#814)
+                    raise RuntimeError(
+                        f"Could not reach MCP registry at "
+                        f"{self.registry_client.registry_url} while validating "
+                        f"server '{server_ref}'. MCP_REGISTRY_URL is set -- "
+                        f"verify the URL is correct and reachable."
+                    )
+                # Default registry: transient error -- assume server exists and
+                # let downstream installation attempt the actual resolution.
                 logger.debug(
                     "Registry lookup failed for %s, assuming valid (transient error)",
                     server_ref,

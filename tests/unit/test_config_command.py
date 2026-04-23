@@ -233,7 +233,6 @@ class TestConfigSet:
         assert result.exit_code == 0
         mock_set.assert_called_once_with(True)
 
-
 class TestConfigGet:
     """Tests for `apm config get [key]`."""
 
@@ -494,3 +493,4 @@ class TestConfigGetTempDir:
             result = self.runner.invoke(config, ["get"])
         assert result.exit_code == 0
         assert "temp-dir: /my/temp" in result.output
+

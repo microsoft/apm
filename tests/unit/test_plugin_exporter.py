@@ -310,6 +310,24 @@ class TestCollectBareSkill:
         _collect_bare_skill(tmp_path, dep, out)
         assert any(r.startswith("skills/frontend-design/") for _, r in out)
 
+    def test_skills_prefix_stripped_from_virtual_path(self, tmp_path):
+        """A skills/ virtual path should not produce skills/skills/ nesting."""
+        from apm_cli.bundle.plugin_exporter import _collect_bare_skill
+
+        (tmp_path / "SKILL.md").write_text("# Jest")
+        dep = LockedDependency(
+            repo_url="github/awesome-copilot",
+            resolved_commit="abc123",
+            depth=1,
+            virtual_path="skills/javascript-typescript-jest",
+            is_virtual=True,
+        )
+        out: list = []
+        _collect_bare_skill(tmp_path, dep, out)
+        rel_paths = [r for _, r in out]
+        assert "skills/javascript-typescript-jest/SKILL.md" in rel_paths
+        assert not any(r.startswith("skills/skills/") for r in rel_paths)
+
     def test_skips_when_no_skill_md(self, tmp_path):
         """No SKILL.md at root means nothing collected."""
         from apm_cli.bundle.plugin_exporter import _collect_bare_skill
@@ -633,6 +651,42 @@ class TestExportPluginBundle:
 
         assert (result.bundle_path / "agents" / "dep-agent.agent.md").exists()
         assert (result.bundle_path / "agents" / "own.agent.md").exists()
+
+    def test_virtual_skill_dependency_does_not_duplicate_skills_dir(self, tmp_path):
+        project = _setup_plugin_project(tmp_path)
+
+        dep = LockedDependency(
+            repo_url="github/awesome-copilot",
+            depth=1,
+            resolved_commit="abc123",
+            virtual_path="skills/javascript-typescript-jest",
+            is_virtual=True,
+        )
+        _write_lockfile(project, [dep])
+        dep_path = (
+            project
+            / "apm_modules"
+            / "github"
+            / "awesome-copilot"
+            / "skills"
+            / "javascript-typescript-jest"
+        )
+        dep_path.mkdir(parents=True)
+        (dep_path / "SKILL.md").write_text("# Jest", encoding="utf-8")
+
+        out = tmp_path / "build"
+        result = export_plugin_bundle(project, out)
+
+        assert (
+            result.bundle_path / "skills" / "javascript-typescript-jest" / "SKILL.md"
+        ).exists()
+        assert not (
+            result.bundle_path
+            / "skills"
+            / "skills"
+            / "javascript-typescript-jest"
+            / "SKILL.md"
+        ).exists()
 
     def test_dev_dependency_excluded(self, tmp_path):
         project = _setup_plugin_project(

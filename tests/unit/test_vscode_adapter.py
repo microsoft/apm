@@ -335,6 +335,123 @@ class TestVSCodeClientAdapter(unittest.TestCase):
             config["servers"]["my-private-srv"]["url"], "http://localhost:8787/"
         )
 
+    @patch("apm_cli.adapters.client.vscode.VSCodeClientAdapter.get_config_path")
+    def test_format_server_config_remote_missing_transport_type(self, mock_get_path):
+        """Remote with no transport_type defaults to http (issue #654)."""
+        mock_get_path.return_value = self.temp_path
+        adapter = VSCodeClientAdapter()
+
+        server_info = {
+            "name": "atlassian-mcp-server",
+            "remotes": [{"url": "https://mcp.atlassian.com/v1/mcp"}],
+        }
+        config, inputs = adapter._format_server_config(server_info)
+
+        self.assertEqual(config["type"], "http")
+        self.assertEqual(config["url"], "https://mcp.atlassian.com/v1/mcp")
+        self.assertEqual(config["headers"], {})
+
+    @patch("apm_cli.adapters.client.vscode.VSCodeClientAdapter.get_config_path")
+    def test_format_server_config_remote_empty_transport_type(self, mock_get_path):
+        """Remote with empty transport_type defaults to http."""
+        mock_get_path.return_value = self.temp_path
+        adapter = VSCodeClientAdapter()
+
+        server_info = {
+            "name": "remote-srv",
+            "remotes": [{"transport_type": "", "url": "https://example.com/mcp"}],
+        }
+        config, inputs = adapter._format_server_config(server_info)
+
+        self.assertEqual(config["type"], "http")
+        self.assertEqual(config["url"], "https://example.com/mcp")
+
+    @patch("apm_cli.adapters.client.vscode.VSCodeClientAdapter.get_config_path")
+    def test_format_server_config_remote_none_transport_type(self, mock_get_path):
+        """Remote with transport_type=None defaults to http."""
+        mock_get_path.return_value = self.temp_path
+        adapter = VSCodeClientAdapter()
+
+        server_info = {
+            "name": "remote-srv",
+            "remotes": [{"transport_type": None, "url": "https://example.com/mcp"}],
+        }
+        config, inputs = adapter._format_server_config(server_info)
+
+        self.assertEqual(config["type"], "http")
+
+    @patch("apm_cli.adapters.client.vscode.VSCodeClientAdapter.get_config_path")
+    def test_format_server_config_remote_whitespace_transport_type(self, mock_get_path):
+        """Remote with whitespace-only transport_type defaults to http."""
+        mock_get_path.return_value = self.temp_path
+        adapter = VSCodeClientAdapter()
+
+        server_info = {
+            "name": "remote-srv",
+            "remotes": [{"transport_type": "  ", "url": "https://example.com/mcp"}],
+        }
+        config, inputs = adapter._format_server_config(server_info)
+
+        self.assertEqual(config["type"], "http")
+
+    @patch("apm_cli.adapters.client.vscode.VSCodeClientAdapter.get_config_path")
+    def test_format_server_config_remote_unsupported_transport_raises(self, mock_get_path):
+        """Remote with an unrecognized transport_type raises ValueError."""
+        mock_get_path.return_value = self.temp_path
+        adapter = VSCodeClientAdapter()
+
+        server_info = {
+            "name": "future-srv",
+            "remotes": [{"transport_type": "grpc", "url": "https://example.com/mcp"}],
+        }
+        with self.assertRaises(ValueError) as ctx:
+            adapter._format_server_config(server_info)
+
+        self.assertIn("Unsupported remote transport", str(ctx.exception))
+        self.assertIn("grpc", str(ctx.exception))
+
+    @patch("apm_cli.adapters.client.vscode.VSCodeClientAdapter.get_config_path")
+    def test_format_server_config_remote_skips_entries_without_url(self, mock_get_path):
+        """Remotes with empty URLs are skipped; first with a valid URL is used."""
+        mock_get_path.return_value = self.temp_path
+        adapter = VSCodeClientAdapter()
+
+        server_info = {
+            "name": "multi-remote",
+            "remotes": [
+                {"transport_type": "http", "url": ""},
+                {"transport_type": "sse", "url": "https://good.example.com/sse"},
+            ],
+        }
+        config, inputs = adapter._format_server_config(server_info)
+
+        self.assertEqual(config["type"], "sse")
+        self.assertEqual(config["url"], "https://good.example.com/sse")
+
+    @patch("apm_cli.adapters.client.vscode.VSCodeClientAdapter.get_config_path")
+    def test_format_server_config_remote_default_http_preserves_headers(self, mock_get_path):
+        """Defaulting to http still normalizes headers and extracts input vars."""
+        mock_get_path.return_value = self.temp_path
+        adapter = VSCodeClientAdapter()
+
+        server_info = {
+            "name": "header-srv",
+            "remotes": [
+                {
+                    "url": "https://example.com/mcp",
+                    "headers": [
+                        {"name": "Authorization", "value": "${input:auth-token}"},
+                    ],
+                }
+            ],
+        }
+        config, inputs = adapter._format_server_config(server_info)
+
+        self.assertEqual(config["type"], "http")
+        self.assertEqual(config["headers"], {"Authorization": "${input:auth-token}"})
+        self.assertTrue(len(inputs) > 0)
+        self.assertEqual(inputs[0]["id"], "auth-token")
+
 
 class TestVSCodeSelectBestPackage(unittest.TestCase):
     """Test cases for _select_best_package logic."""

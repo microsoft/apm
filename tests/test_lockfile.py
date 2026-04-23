@@ -37,6 +37,83 @@ class TestLockedDependency:
         assert locked.repo_url == "owner/repo"
         assert locked.resolved_commit == "abc123"
 
+    def test_port_round_trip_ssh(self):
+        """Custom SSH port survives to_dict → from_dict."""
+        dep = LockedDependency(
+            repo_url="team/repo",
+            host="bitbucket.example.com",
+            port=7999,
+        )
+        data = dep.to_dict()
+        assert data["port"] == 7999
+        restored = LockedDependency.from_dict(data)
+        assert restored.port == 7999
+        assert restored.host == "bitbucket.example.com"
+
+    def test_port_round_trip_https(self):
+        """Custom HTTPS port survives to_dict → from_dict."""
+        dep = LockedDependency(
+            repo_url="team/repo",
+            host="git.internal",
+            port=8443,
+        )
+        data = dep.to_dict()
+        assert data["port"] == 8443
+        restored = LockedDependency.from_dict(data)
+        assert restored.port == 8443
+
+    def test_port_omitted_when_none(self):
+        """port should not appear in the serialized dict when unset."""
+        dep = LockedDependency(repo_url="owner/repo", host="github.com")
+        data = dep.to_dict()
+        assert "port" not in data
+
+    def test_port_defensive_cast_invalid(self):
+        """Garbage port values in a lockfile are rejected (defensive read)."""
+        # Non-numeric string
+        dep = LockedDependency.from_dict({"repo_url": "o/r", "port": "not-a-port"})
+        assert dep.port is None
+        # Out-of-range
+        dep = LockedDependency.from_dict({"repo_url": "o/r", "port": 99999})
+        assert dep.port is None
+        dep = LockedDependency.from_dict({"repo_url": "o/r", "port": 0})
+        assert dep.port is None
+        dep = LockedDependency.from_dict({"repo_url": "o/r", "port": -1})
+        assert dep.port is None
+
+    def test_port_from_dependency_ref(self):
+        """from_dependency_ref carries port through."""
+        dep_ref = DependencyReference(
+            repo_url="team/repo",
+            host="bitbucket.example.com",
+            port=7999,
+        )
+        locked = LockedDependency.from_dependency_ref(dep_ref, "abc123", 1, None)
+        assert locked.port == 7999
+
+    def test_deployed_file_hashes_round_trip(self):
+        dep = LockedDependency(
+            repo_url="owner/repo",
+            deployed_files=["a.md", "b.md"],
+            deployed_file_hashes={"b.md": "sha256:dead", "a.md": "sha256:beef"},
+        )
+        d = dep.to_dict()
+        # Serialised deterministically (sorted by key).
+        assert list(d["deployed_file_hashes"].keys()) == ["a.md", "b.md"]
+        assert (
+            LockedDependency.from_dict(d).deployed_file_hashes
+            == dep.deployed_file_hashes
+        )
+
+    def test_deployed_file_hashes_omitted_when_empty(self):
+        """Backward compat: legacy dicts without the field stay clean."""
+        dep = LockedDependency(repo_url="owner/repo")
+        assert "deployed_file_hashes" not in dep.to_dict()
+
+    def test_from_dict_missing_hashes_defaults_empty(self):
+        loaded = LockedDependency.from_dict({"repo_url": "owner/repo"})
+        assert loaded.deployed_file_hashes == {}
+
 
 class TestLockFile:
     def test_add_and_get_dependency(self):
@@ -77,7 +154,6 @@ class TestLockFile:
         lock.add_dependency(LockedDependency(repo_url="owner/repo"))
         lock_path = tmp_path / "apm.lock"
         lock.write(lock_path)
-
         loaded = LockFile.read(lock_path)
         assert loaded is not None
         assert loaded.mcp_servers == ["acme-kb", "atlassian", "github"]  # sorted
@@ -87,6 +163,24 @@ class TestLockFile:
         assert lock.mcp_servers == []
         yaml_str = lock.to_yaml()
         assert "mcp_servers" not in yaml_str  # omitted when empty
+
+    def test_local_deployed_file_hashes_round_trip(self, tmp_path):
+        """local_deployed_file_hashes must survive a write -> read cycle."""
+        lock = LockFile()
+        lock.local_deployed_files = ["a.md", "b.md"]
+        lock.local_deployed_file_hashes = {"a.md": "sha256:1", "b.md": "sha256:2"}
+        path = tmp_path / "apm.lock"
+        lock.write(path)
+        loaded = LockFile.read(path)
+        assert loaded is not None
+        assert loaded.local_deployed_file_hashes == {
+            "a.md": "sha256:1",
+            "b.md": "sha256:2",
+        }
+
+    def test_local_deployed_file_hashes_omitted_when_empty(self):
+        lock = LockFile()
+        assert "local_deployed_file_hashes" not in lock.to_yaml()
 
     def test_mcp_servers_from_yaml(self):
         yaml_str = (

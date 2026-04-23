@@ -448,13 +448,22 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
     help="Force fresh policy fetch (skip cache).",
 )
 @click.option(
+    "--no-policy",
+    "no_policy",
+    is_flag=True,
+    help=(
+        "Skip org policy discovery and enforcement. "
+        "Overridden when --policy is passed explicitly."
+    ),
+)
+@click.option(
     "--no-fail-fast",
     "no_fail_fast",
     is_flag=True,
     help="Run all checks even after a failure (default: stop at first failure).",
 )
 @click.pass_context
-def audit(ctx, package, file_path, strip, verbose, dry_run, output_format, output_path, ci, policy_source, no_cache, no_fail_fast):
+def audit(ctx, package, file_path, strip, verbose, dry_run, output_format, output_path, ci, policy_source, no_cache, no_policy, no_fail_fast):
     """Scan deployed prompt files for hidden Unicode characters.
 
     Detects invisible characters that could embed hidden instructions in
@@ -512,45 +521,81 @@ def audit(ctx, package, file_path, strip, verbose, dry_run, output_format, outpu
         # Always run baseline checks
         ci_result = run_baseline_checks(project_root, fail_fast=fail_fast)
 
-        # Optionally run policy checks (skip if baseline already failed in fail-fast mode)
-        if policy_source and (not fail_fast or ci_result.passed):
-            from ..policy.discovery import discover_policy
+        # Resolve policy source: explicit --policy wins; otherwise mirror
+        # install's auto-discovery (closes #827) so CI catches sideloaded
+        # files via unmanaged-files checks. --no-policy skips discovery.
+        from ..policy.discovery import discover_policy, discover_policy_with_chain
+        from ..policy.project_config import (
+            read_project_fetch_failure_default,
+        )
 
+        fetch_result = None
+        if policy_source and (not fail_fast or ci_result.passed):
             fetch_result = discover_policy(
                 project_root,
                 policy_override=policy_source,
                 no_cache=no_cache,
             )
+        elif (
+            not policy_source
+            and not no_policy
+            and (not fail_fast or ci_result.passed)
+        ):
+            # Auto-discovery (mirror install path)
+            fetch_result = discover_policy_with_chain(project_root)
+            # Treat outcomes that mean "no policy to enforce" as a no-op.
+            if fetch_result.outcome in ("absent", "no_git_remote", "empty", "disabled"):
+                fetch_result = None
 
-            if fetch_result.error:
-                logger.error(f"Policy fetch failed: {fetch_result.error}")
-                sys.exit(1)
-
-            if fetch_result.found:
-                policy_obj = fetch_result.policy
-
-                # Respect enforcement level
-                if policy_obj.enforcement == "off":
-                    pass  # Policy checks disabled
-                else:
-                    from ..policy.models import CheckResult
-
-                    policy_result = run_policy_checks(
-                        project_root, policy_obj, fail_fast=fail_fast
+        if fetch_result is not None:
+            # Honor project-side fetch_failure_default when the org policy
+            # could not be fetched / parsed (closes #829). Default "warn"
+            # downgrades the previous unconditional sys.exit(1) into a log.
+            if fetch_result.error or (
+                fetch_result.outcome
+                in ("malformed", "cache_miss_fetch_fail", "garbage_response")
+            ):
+                project_default = read_project_fetch_failure_default(project_root)
+                err_text = fetch_result.error or fetch_result.fetch_error or fetch_result.outcome
+                if project_default == "block":
+                    logger.error(
+                        f"Policy fetch failed: {err_text} "
+                        "(policy.fetch_failure_default=block)"
                     )
-                    if policy_obj.enforcement == "block":
-                        ci_result.checks.extend(policy_result.checks)
-                    else:
-                        # enforcement == "warn": include results but don't fail
-                        for check in policy_result.checks:
-                            ci_result.checks.append(
-                                CheckResult(
-                                    name=check.name,
-                                    passed=True,  # downgrade to pass
-                                    message=check.message + (" (enforcement: warn)" if not check.passed else ""),
-                                    details=check.details,
-                                )
+                    sys.exit(1)
+                else:
+                    logger.warning(
+                        f"Policy fetch failed: {err_text}; "
+                        "proceeding without policy checks "
+                        "(set policy.fetch_failure_default=block in apm.yml to fail closed)"
+                    )
+                    fetch_result = None
+
+        if fetch_result is not None and fetch_result.found:
+            policy_obj = fetch_result.policy
+
+            # Respect enforcement level
+            if policy_obj.enforcement == "off":
+                pass  # Policy checks disabled
+            else:
+                from ..policy.models import CheckResult
+
+                policy_result = run_policy_checks(
+                    project_root, policy_obj, fail_fast=fail_fast
+                )
+                if policy_obj.enforcement == "block":
+                    ci_result.checks.extend(policy_result.checks)
+                else:
+                    # enforcement == "warn": include results but don't fail
+                    for check in policy_result.checks:
+                        ci_result.checks.append(
+                            CheckResult(
+                                name=check.name,
+                                passed=True,  # downgrade to pass
+                                message=check.message + (" (enforcement: warn)" if not check.passed else ""),
+                                details=check.details,
                             )
+                        )
 
         # Resolve effective format
         effective_format = output_format

@@ -144,6 +144,49 @@ class TestBuildArtifactoryArchiveUrl:
         assert parsed.hostname == "artifactory.example.com"
         assert parsed.path == "/artifactory/github/microsoft/apm-sample-package/archive/refs/heads/main.zip"
 
+    def test_codeload_upstream_heads_ref(self):
+        """When Artifactory upstream targets codeload.github.com, generate codeload-style archive URLs.
+
+        codeload.github.com uses /zip/refs/heads/{ref} (no .zip extension) instead of
+        the github.com-style /archive/refs/heads/{ref}.zip.
+        """
+        urls = build_artifactory_archive_url(
+            "art.example.com", "artifactory/github", "owner", "repo", ref="main"
+        )
+        assert any("/zip/refs/heads/main" in u and not u.endswith("archive/refs/heads/main") for u in urls), (
+            "codeload-style /zip/refs/heads/{ref} URL must be present"
+        )
+
+    def test_codeload_upstream_tags_ref(self):
+        """Tags fallback for codeload-style upstream — /zip/refs/tags/{ref}."""
+        urls = build_artifactory_archive_url(
+            "art.example.com", "artifactory/github", "owner", "repo", ref="v2.0.0"
+        )
+        assert any("/zip/refs/tags/v2.0.0" in u for u in urls), (
+            "codeload-style /zip/refs/tags/{ref} URL must be present for tags fallback"
+        )
+
+    def test_github_archive_urls_unchanged(self):
+        """Existing github.com archive URL patterns must not be broken by codeload support."""
+        urls = build_artifactory_archive_url(
+            "art.example.com", "artifactory/github", "owner", "repo", ref="main"
+        )
+        assert any("/archive/refs/heads/main.zip" in u for u in urls), (
+            "github.com-style /archive/refs/heads/{ref}.zip must still be present"
+        )
+        assert any("/archive/refs/tags/main.zip" in u for u in urls), (
+            "github.com-style /archive/refs/tags/{ref}.zip must still be present"
+        )
+
+    def test_gitlab_archive_urls_unchanged(self):
+        """Existing GitLab archive URL pattern must not be broken by codeload support."""
+        urls = build_artifactory_archive_url(
+            "art.example.com", "artifactory/github", "owner", "repo", ref="main"
+        )
+        assert any("/-/archive/main/repo-main.zip" in u for u in urls), (
+            "GitLab-style /-/archive/{ref}/{repo}-{ref}.zip must still be present"
+        )
+
 
 # ── apm_package.py: DependencyReference Artifactory parsing ──
 
@@ -346,10 +389,10 @@ class TestArtifactoryDownloader:
         assert not self.downloader._should_use_artifactory_proxy(dep)
 
     def test_parse_artifactory_base_url_valid(self):
-        """Parse valid ARTIFACTORY_BASE_URL."""
+        """Parse valid PROXY_REGISTRY_URL."""
         with patch.dict(
             os.environ,
-            {"ARTIFACTORY_BASE_URL": "https://art.example.com/artifactory/github"},
+            {"PROXY_REGISTRY_URL": "https://art.example.com/artifactory/github"},
         ):
             result = self.downloader._parse_artifactory_base_url()
             assert result is not None
@@ -362,7 +405,7 @@ class TestArtifactoryDownloader:
         """Trailing slash in URL should be stripped."""
         with patch.dict(
             os.environ,
-            {"ARTIFACTORY_BASE_URL": "https://art.example.com/artifactory/github/"},
+            {"PROXY_REGISTRY_URL": "https://art.example.com/artifactory/github/"},
         ):
             result = self.downloader._parse_artifactory_base_url()
             assert result is not None
@@ -377,7 +420,7 @@ class TestArtifactoryDownloader:
 
     def test_parse_artifactory_base_url_empty(self):
         """Returns None for empty string."""
-        with patch.dict(os.environ, {"ARTIFACTORY_BASE_URL": ""}, clear=True):
+        with patch.dict(os.environ, {"PROXY_REGISTRY_URL": ""}, clear=True):
             result = self.downloader._parse_artifactory_base_url()
             assert result is None
 
@@ -703,28 +746,28 @@ class TestArtifactoryEdgeCases:
                     )
 
     def test_parse_base_url_rejects_ftp_scheme(self):
-        """ARTIFACTORY_BASE_URL with non-http(s) scheme is rejected."""
+        """PROXY_REGISTRY_URL with non-http(s) scheme is rejected."""
         with patch.dict(
             os.environ,
-            {"ARTIFACTORY_BASE_URL": "ftp://art.example.com/artifactory/github"},
+            {"PROXY_REGISTRY_URL": "ftp://art.example.com/artifactory/github"},
         ):
             result = self.downloader._parse_artifactory_base_url()
             assert result is None
 
     def test_parse_base_url_rejects_no_scheme(self):
-        """ARTIFACTORY_BASE_URL without scheme is rejected."""
+        """PROXY_REGISTRY_URL without scheme is rejected."""
         with patch.dict(
             os.environ,
-            {"ARTIFACTORY_BASE_URL": "art.example.com/artifactory/github"},
+            {"PROXY_REGISTRY_URL": "art.example.com/artifactory/github"},
         ):
             result = self.downloader._parse_artifactory_base_url()
             assert result is None
 
     def test_parse_base_url_accepts_http(self):
-        """ARTIFACTORY_BASE_URL with http scheme is accepted (local dev)."""
+        """PROXY_REGISTRY_URL with http scheme is accepted (local dev)."""
         with patch.dict(
             os.environ,
-            {"ARTIFACTORY_BASE_URL": "http://localhost:8081/artifactory/github"},
+            {"PROXY_REGISTRY_URL": "http://localhost:8081/artifactory/github"},
         ):
             result = self.downloader._parse_artifactory_base_url()
             assert result is not None
@@ -764,31 +807,31 @@ class TestArtifactoryEdgeCases:
                 ), f"Found forbidden term '{term}' in {py_file}"
 
 
-# ── ARTIFACTORY_ONLY mode tests ──
+# -- PROXY_REGISTRY_ONLY mode tests --
 
 
-class TestArtifactoryOnlyMode:
-    """Test ARTIFACTORY_ONLY env var blocking direct git operations."""
+class TestProxyRegistryOnlyMode:
+    """Test PROXY_REGISTRY_ONLY env var blocking direct git operations."""
 
     def setup_method(self):
         self.downloader = GitHubPackageDownloader()
 
     def test_is_artifactory_only_flag(self):
         """_is_artifactory_only reads env var."""
-        with patch.dict(os.environ, {"ARTIFACTORY_ONLY": "1"}):
+        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}):
             assert GitHubPackageDownloader._is_artifactory_only()
-        with patch.dict(os.environ, {"ARTIFACTORY_ONLY": "true"}):
+        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "true"}):
             assert GitHubPackageDownloader._is_artifactory_only()
-        with patch.dict(os.environ, {"ARTIFACTORY_ONLY": "yes"}):
+        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "yes"}):
             assert GitHubPackageDownloader._is_artifactory_only()
-        with patch.dict(os.environ, {"ARTIFACTORY_ONLY": ""}):
+        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": ""}):
             assert not GitHubPackageDownloader._is_artifactory_only()
         with patch.dict(os.environ, {}, clear=True):
             assert not GitHubPackageDownloader._is_artifactory_only()
 
     def test_proxy_routes_all_when_artifactory_only(self):
-        """ARTIFACTORY_ONLY makes _should_use_artifactory_proxy return True for all non-Artifactory deps."""
-        with patch.dict(os.environ, {"ARTIFACTORY_ONLY": "1"}):
+        """PROXY_REGISTRY_ONLY makes _should_use_artifactory_proxy return True for all non-Artifactory deps."""
+        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}):
             # GitHub dep
             dep = DependencyReference.parse("microsoft/apm-sample-package")
             assert self.downloader._should_use_artifactory_proxy(dep)
@@ -800,16 +843,16 @@ class TestArtifactoryOnlyMode:
             assert self.downloader._should_use_artifactory_proxy(dep)
 
     def test_proxy_still_skips_explicit_artifactory(self):
-        """Already-Artifactory deps should not be double-proxied even with ARTIFACTORY_ONLY."""
-        with patch.dict(os.environ, {"ARTIFACTORY_ONLY": "1"}):
+        """Already-Artifactory deps should not be double-proxied even with PROXY_REGISTRY_ONLY."""
+        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}):
             dep = DependencyReference.parse("art.example.com/artifactory/github/owner/repo")
             assert not self.downloader._should_use_artifactory_proxy(dep)
 
     def test_resolve_ref_skips_git_when_artifactory_only(self):
-        """resolve_git_reference skips git for all deps when ARTIFACTORY_ONLY is set."""
+        """resolve_git_reference skips git for all deps when PROXY_REGISTRY_ONLY is set."""
         with patch.dict(os.environ, {
-            "ARTIFACTORY_ONLY": "1",
-            "ARTIFACTORY_BASE_URL": "https://art.example.com/artifactory/github",
+            "PROXY_REGISTRY_ONLY": "1",
+            "PROXY_REGISTRY_URL": "https://art.example.com/artifactory/github",
         }):
             dl = GitHubPackageDownloader()
             ref = dl.resolve_git_reference("gitlab.com/owner/repo#develop")
@@ -817,15 +860,15 @@ class TestArtifactoryOnlyMode:
             assert ref.resolved_commit is None
 
     def test_download_package_errors_without_base_url(self):
-        """ARTIFACTORY_ONLY without ARTIFACTORY_BASE_URL raises for non-Artifactory deps."""
-        with patch.dict(os.environ, {"ARTIFACTORY_ONLY": "1"}, clear=True):
+        """PROXY_REGISTRY_ONLY without PROXY_REGISTRY_URL raises for non-proxy deps."""
+        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True):
             dl = GitHubPackageDownloader()
             with pytest.raises(RuntimeError, match="PROXY_REGISTRY_ONLY is set"):
                 dl.download_package("microsoft/some-package", Path("/tmp/test-pkg"))
 
     def test_virtual_file_errors_without_base_url(self):
-        """ARTIFACTORY_ONLY without ARTIFACTORY_BASE_URL raises for virtual file packages."""
-        with patch.dict(os.environ, {"ARTIFACTORY_ONLY": "1"}, clear=True):
+        """PROXY_REGISTRY_ONLY without PROXY_REGISTRY_URL raises for virtual file packages."""
+        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True):
             dl = GitHubPackageDownloader()
             with pytest.raises(RuntimeError, match="PROXY_REGISTRY_ONLY is set"):
                 dl.download_package(
@@ -833,8 +876,8 @@ class TestArtifactoryOnlyMode:
                 )
 
     def test_virtual_collection_errors_without_base_url(self):
-        """ARTIFACTORY_ONLY without ARTIFACTORY_BASE_URL raises for virtual collection packages."""
-        with patch.dict(os.environ, {"ARTIFACTORY_ONLY": "1"}, clear=True):
+        """PROXY_REGISTRY_ONLY without PROXY_REGISTRY_URL raises for virtual collection packages."""
+        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True):
             dl = GitHubPackageDownloader()
             with pytest.raises(RuntimeError, match="PROXY_REGISTRY_ONLY is set"):
                 dl.download_package(
@@ -842,8 +885,8 @@ class TestArtifactoryOnlyMode:
                 )
 
     def test_virtual_subdirectory_errors_without_base_url(self):
-        """ARTIFACTORY_ONLY without ARTIFACTORY_BASE_URL raises for virtual subdirectory packages."""
-        with patch.dict(os.environ, {"ARTIFACTORY_ONLY": "1"}, clear=True):
+        """PROXY_REGISTRY_ONLY without PROXY_REGISTRY_URL raises for virtual subdirectory packages."""
+        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True):
             dl = GitHubPackageDownloader()
             with pytest.raises(RuntimeError, match="PROXY_REGISTRY_ONLY is set"):
                 dl.download_package(
@@ -851,8 +894,8 @@ class TestArtifactoryOnlyMode:
                 )
 
     def test_explicit_artifactory_fqdn_virtual_file_passes(self):
-        """Explicit Artifactory FQDN on virtual file dep is NOT blocked by ARTIFACTORY_ONLY."""
-        with patch.dict(os.environ, {"ARTIFACTORY_ONLY": "1"}, clear=True):
+        """Explicit Artifactory FQDN on virtual file dep is NOT blocked by PROXY_REGISTRY_ONLY."""
+        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True):
             dl = GitHubPackageDownloader()
             dep = DependencyReference.parse(
                 "art.example.com/artifactory/github/owner/repo/prompts/deploy.prompt.md"
@@ -864,8 +907,8 @@ class TestArtifactoryOnlyMode:
                 dl.download_package(dep, Path("/tmp/test-pkg"))
 
     def test_explicit_artifactory_fqdn_virtual_collection_passes(self):
-        """Explicit Artifactory FQDN on virtual collection dep is NOT blocked by ARTIFACTORY_ONLY."""
-        with patch.dict(os.environ, {"ARTIFACTORY_ONLY": "1"}, clear=True):
+        """Explicit Artifactory FQDN on virtual collection dep is NOT blocked by PROXY_REGISTRY_ONLY."""
+        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True):
             dl = GitHubPackageDownloader()
             dep = DependencyReference.parse(
                 "art.example.com/artifactory/github/owner/repo/collections/my-collection"
@@ -876,8 +919,8 @@ class TestArtifactoryOnlyMode:
             with patch.object(dl, 'download_collection_package', return_value=MagicMock()):
                 dl.download_package(dep, Path("/tmp/test-pkg"))
 
-    def test_proxy_registry_only_raises_same_as_artifactory_only(self):
-        """PROXY_REGISTRY_ONLY=1 is the canonical name and also raises for non-proxy deps."""
+    def test_proxy_registry_only_is_canonical(self):
+        """PROXY_REGISTRY_ONLY=1 is the canonical name and raises for non-proxy deps."""
         with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True):
             dl = GitHubPackageDownloader()
             with pytest.raises(RuntimeError, match="PROXY_REGISTRY_ONLY is set"):
@@ -1323,8 +1366,9 @@ class TestArchiveEntryDownload:
         )
 
         assert result is None
-        # Should have tried all 3 URL patterns
-        assert mock_get.call_count == 3
+        # Should have tried all 5 URL patterns (GitHub heads, GitLab, GitHub tags,
+        # codeload heads, codeload tags)
+        assert mock_get.call_count == 5
 
     def test_entry_download_returns_none_on_connection_error(self):
         """Returns None when the HTTP call raises an exception."""
@@ -1523,3 +1567,156 @@ class TestArchiveEntryDownload:
 
         assert result == b"public"
         assert mock_get.call_args[1]["headers"] == {}
+
+
+# -- Fix A: _parse_artifactory_base_url reads PROXY_REGISTRY_URL --
+
+
+class TestParseArtifactoryBaseUrlCanonicalVar:
+    """_parse_artifactory_base_url reads PROXY_REGISTRY_URL first, falls back to ARTIFACTORY_BASE_URL."""
+
+    def setup_method(self):
+        self.downloader = GitHubPackageDownloader()
+
+    def test_proxy_registry_url_is_preferred(self):
+        """PROXY_REGISTRY_URL takes precedence over ARTIFACTORY_BASE_URL."""
+        with patch.dict(
+            os.environ,
+            {
+                "PROXY_REGISTRY_URL": "https://proxy.example.com/registry/github",
+                "ARTIFACTORY_BASE_URL": "https://art.example.com/artifactory/github",
+            },
+            clear=True,
+        ):
+            result = self.downloader._parse_artifactory_base_url()
+            assert result is not None
+            host, prefix, scheme = result
+            assert host == "proxy.example.com"
+            assert prefix == "registry/github"
+
+    def test_proxy_registry_url_alone(self):
+        """PROXY_REGISTRY_URL works when ARTIFACTORY_BASE_URL is not set."""
+        with patch.dict(
+            os.environ,
+            {"PROXY_REGISTRY_URL": "https://art.example.com/artifactory/github"},
+            clear=True,
+        ):
+            result = self.downloader._parse_artifactory_base_url()
+            assert result is not None
+            host, prefix, scheme = result
+            assert host == "art.example.com"
+            assert prefix == "artifactory/github"
+            assert scheme == "https"
+
+    def test_falls_back_to_deprecated_var(self):
+        """Falls back to ARTIFACTORY_BASE_URL when PROXY_REGISTRY_URL is absent."""
+        with patch.dict(
+            os.environ,
+            {"ARTIFACTORY_BASE_URL": "https://art.example.com/artifactory/github"},
+            clear=True,
+        ):
+            result = self.downloader._parse_artifactory_base_url()
+            assert result is not None
+            assert result[0] == "art.example.com"
+
+    def test_deprecated_var_emits_warning(self):
+        """Falling back to ARTIFACTORY_BASE_URL emits DeprecationWarning."""
+        import warnings
+
+        with patch.dict(
+            os.environ,
+            {"ARTIFACTORY_BASE_URL": "https://art.example.com/artifactory/github"},
+            clear=True,
+        ):
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                self.downloader._parse_artifactory_base_url()
+            assert any(issubclass(x.category, DeprecationWarning) for x in w)
+            assert any("ARTIFACTORY_BASE_URL" in str(x.message) for x in w)
+
+    def test_neither_var_set(self):
+        """Returns None when neither env var is set."""
+        with patch.dict(os.environ, {}, clear=True):
+            result = self.downloader._parse_artifactory_base_url()
+            assert result is None
+
+
+# -- Fix B: virtual subdirectory uses lockfile FQDN (Mode 1) --
+
+
+class TestVirtualSubdirectoryLockfileReinstall:
+    """Virtual subdirectory packages use lockfile FQDN metadata directly."""
+
+    def setup_method(self):
+        self.downloader = GitHubPackageDownloader()
+
+    def test_subdirectory_uses_lockfile_fqdn(self):
+        """When dep_ref.is_artifactory(), subdirectory download uses FQDN, not env var."""
+        dep = DependencyReference.parse(
+            "art.example.com/artifactory/github/owner/repo//subdir"
+        )
+        assert dep.is_artifactory()
+        assert dep.is_virtual_subdirectory()
+
+        target = Path("/tmp/test-subdir")
+        with patch.object(
+            self.downloader,
+            "_download_subdirectory_from_artifactory",
+            return_value=Mock(),
+        ) as mock_dl:
+            self.downloader.download_package(dep, target)
+            mock_dl.assert_called_once()
+            proxy_info = mock_dl.call_args[0][2]
+            assert proxy_info[0] == "art.example.com"
+            assert proxy_info[1] == "artifactory/github"
+
+    def test_subdirectory_fqdn_no_env_var_needed(self):
+        """Lockfile FQDN path works without any env var set."""
+        dep = DependencyReference.parse(
+            "art.example.com/artifactory/github/owner/repo//subdir"
+        )
+        target = Path("/tmp/test-subdir")
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(
+                self.downloader,
+                "_download_subdirectory_from_artifactory",
+                return_value=Mock(),
+            ) as mock_dl:
+                self.downloader.download_package(dep, target)
+                mock_dl.assert_called_once()
+
+    def test_subdirectory_fqdn_takes_precedence_over_only_mode(self):
+        """Mode 1 FQDN takes precedence even when PROXY_REGISTRY_ONLY is set."""
+        dep = DependencyReference.parse(
+            "art.example.com/artifactory/github/owner/repo//subdir"
+        )
+        target = Path("/tmp/test-subdir")
+        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True):
+            with patch.object(
+                self.downloader,
+                "_download_subdirectory_from_artifactory",
+                return_value=Mock(),
+            ) as mock_dl:
+                self.downloader.download_package(dep, target)
+                mock_dl.assert_called_once()
+                proxy_info = mock_dl.call_args[0][2]
+                assert proxy_info[0] == "art.example.com"
+
+
+# -- Backward compat: deprecated ARTIFACTORY_ONLY still works --
+
+
+class TestDeprecatedArtifactoryOnlyBackwardCompat:
+    """ARTIFACTORY_ONLY (deprecated) still works through _is_artifactory_only()."""
+
+    def test_artifactory_only_still_triggers_enforce(self):
+        """Deprecated ARTIFACTORY_ONLY=1 still activates enforce-only mode."""
+        with patch.dict(os.environ, {"ARTIFACTORY_ONLY": "1"}, clear=True):
+            assert GitHubPackageDownloader._is_artifactory_only()
+
+    def test_artifactory_only_still_blocks_direct_git(self):
+        """Deprecated ARTIFACTORY_ONLY=1 still blocks direct git downloads."""
+        with patch.dict(os.environ, {"ARTIFACTORY_ONLY": "1"}, clear=True):
+            dl = GitHubPackageDownloader()
+            with pytest.raises(RuntimeError, match="PROXY_REGISTRY_ONLY is set"):
+                dl.download_package("microsoft/some-package", Path("/tmp/test-pkg"))

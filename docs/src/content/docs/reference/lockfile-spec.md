@@ -126,6 +126,8 @@ fields:
 | `deployed_files` | array of strings | MUST | Every file path APM deployed for this dependency, relative to project root. |
 | `source` | string | MAY | Dependency source. `"local"` for local path dependencies. Omitted for remote (git) dependencies. |
 | `local_path` | string | MAY | Filesystem path (relative or absolute) to the local package. Present only when `source` is `"local"`. |
+| `is_insecure` | boolean | MAY | `true` when the dep was fetched over HTTP (unencrypted). Omitted when `false`. Presence forces re-approval on the next install: the apm.yml entry MUST carry `allow_insecure: true` and the invocation MUST pass `--allow-insecure` (or `--allow-insecure-host` for transitive deps). Absent or `false` means HTTPS/SSH. |
+| `allow_insecure` | boolean | MAY | `true` when the user's manifest explicitly approved the HTTP fetch with `allow_insecure: true`. Persisted alongside `is_insecure` for replay safety: a legacy lockfile with `is_insecure: true` but no `allow_insecure` fail-closes to `allow_insecure: false`, forcing re-approval. Omitted when `false`. |
 
 Fields with empty or default values (empty strings, `false` booleans, empty
 lists) SHOULD be omitted from the serialized output to keep the file concise.
@@ -258,6 +260,50 @@ git log -1 --format='%an <%ae> %ai' -- apm.lock.yaml
 
 In CI pipelines, `apm audit --ci` verifies lockfile consistency (exit 0 = pass,
 1 = fail). Add `--policy org` for organizational policy enforcement.
+
+### 9.1 SOC 2 evidence
+
+The lock file is the system of record for "what configuration was active when".
+Three SOC 2-relevant questions answered directly from git:
+
+- **Change authorization.** Every change to `apm.lock.yaml` is reviewed in a pull
+  request before merge. The PR record is the change-authorization evidence.
+- **Change history.** `git log apm.lock.yaml` produces a complete, tamper-evident
+  history in git of every dependency change with author, timestamp, and commit message.
+- **Point-in-time state.** `git show <ref>:apm.lock.yaml` reproduces the exact
+  dependency set active at any tag, branch, or commit -- including past releases.
+
+### 9.2 Security audit / incident forensics
+
+When a vulnerability is disclosed in a dependency or a security incident requires
+identifying which environments were exposed:
+
+```bash
+# Was the vulnerable package ever in the lock file?
+git log -p apm.lock.yaml | grep -B2 -A2 "vulnerable-package"
+
+# Which release included the vulnerable version?
+git log --all --oneline -S 'vulnerable-package' -- apm.lock.yaml
+
+# What is the current state of the dependency in production?
+git show production:apm.lock.yaml | grep -A5 "vulnerable-package"
+```
+
+### 9.3 Change management pipeline
+
+The lockfile-as-audit-trail model maps onto a standard 5-step change management
+pipeline:
+
+1. **Declaration** -- developer edits `apm.yml` and opens a PR.
+2. **Resolution** -- `apm install` updates `apm.lock.yaml` with pinned versions.
+3. **Review** -- PR reviewers see the manifest and lockfile diff together.
+4. **Verification** -- CI runs `apm audit --ci` to confirm consistency and
+   (optionally) policy compliance.
+5. **Traceability** -- the merge commit becomes the durable record of the change,
+   readable by every downstream environment via `apm install` from the same ref.
+
+For organization-wide policy enforcement on top of this lockfile audit trail,
+see [Governance](../../enterprise/governance-guide/).
 
 ## 10. Example: Complete Lock File
 

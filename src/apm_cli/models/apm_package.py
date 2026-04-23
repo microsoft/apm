@@ -73,7 +73,7 @@ class APMPackage:
     dev_dependencies: Optional[Dict[str, List[Union[DependencyReference, str, dict]]]] = None
     scripts: Optional[Dict[str, str]] = None
     package_path: Optional[Path] = None  # Local path to package
-    target: Optional[str] = None  # Target agent: vscode, claude, or all (applies to compile and install)
+    target: Optional[Union[str, List[str]]] = None  # Target agent(s): single string or list (applies to compile and install)
     type: Optional[PackageContentType] = None  # Package content type: instructions, skill, hybrid, or prompts
     
     @classmethod

@@ -150,20 +150,37 @@ def build_raw_content_url(owner: str, repo: str, ref: str, file_path: str) -> st
     return f"https://raw.githubusercontent.com/{owner}/{repo}/{encoded_ref}/{file_path}"
 
 
-def build_ssh_url(host: str, repo_ref: str) -> str:
-    """Build an SSH clone URL for the given host and repo_ref (owner/repo)."""
+def build_ssh_url(host: str, repo_ref: str, port: Optional[int] = None) -> str:
+    """Build an SSH clone URL for the given host and repo_ref (owner/repo).
+
+    When ``port`` is set, emit the explicit ``ssh://`` form because SCP
+    shorthand (``git@host:path``) cannot carry a port — the ``:`` is the path
+    separator. Without a port, keep the compact SCP shorthand (no behavioural
+    change for the common case).
+    """
+    if port:
+        return f"ssh://git@{host}:{port}/{repo_ref}.git"
     return f"git@{host}:{repo_ref}.git"
 
 
-def build_https_clone_url(host: str, repo_ref: str, token: Optional[str] = None) -> str:
+def build_https_clone_url(
+    host: str,
+    repo_ref: str,
+    token: Optional[str] = None,
+    port: Optional[int] = None,
+) -> str:
     """Build an HTTPS clone URL. If token provided, use x-access-token format (no escaping done).
+
+    ``port`` is embedded in the netloc (``host:port``) when set so custom
+    HTTPS ports (e.g. self-hosted Git servers on 8443) are preserved.
 
     Note: callers must avoid logging raw token-bearing URLs.
     """
+    netloc = f"{host}:{port}" if port else host
     if token:
         # Use x-access-token format which is compatible with GitHub Enterprise and GH Actions
-        return f"https://x-access-token:{token}@{host}/{repo_ref}.git"
-    return f"https://{host}/{repo_ref}"
+        return f"https://x-access-token:{token}@{netloc}/{repo_ref}.git"
+    return f"https://{netloc}/{repo_ref}"
 
 
 # Azure DevOps URL builders
@@ -278,9 +295,16 @@ def build_artifactory_archive_url(host: str, prefix: str, owner: str, repo: str,
     """Build Artifactory VCS archive download URLs.
 
     Returns a tuple of URLs to try in order.  Because Artifactory proxies
-    the upstream server's native URL scheme, we attempt both GitHub-style
-    and GitLab-style archive paths so the caller does not need to know
-    what sits behind the Artifactory remote repository.
+    the upstream server's native URL scheme, we attempt GitHub-style,
+    GitLab-style, and codeload.github.com-style archive paths so the caller
+    does not need to know what sits behind the Artifactory remote repository.
+
+    Organizations using private GitHub repositories must configure their
+    Artifactory upstream as ``codeload.github.com`` (instead of ``github.com``)
+    because Artifactory cannot follow GitHub's cross-host redirect (which
+    carries short-lived tokens) to codeload.  When the upstream is
+    ``codeload.github.com``, the required archive path is
+    ``/{owner}/{repo}/zip/refs/heads/{ref}`` (no ``.zip`` extension).
 
     Args:
         host: Artifactory hostname (e.g., 'artifactory.example.com')
@@ -301,6 +325,12 @@ def build_artifactory_archive_url(host: str, prefix: str, owner: str, repo: str,
         f"{base}/-/archive/{ref}/{repo}-{ref}.zip",
         # GitHub-style tags fallback
         f"{base}/archive/refs/tags/{ref}.zip",
+        # codeload.github.com-style: /zip/refs/heads/{ref}
+        # Required when Artifactory upstream is configured as codeload.github.com
+        # (workaround for private repos where github.com redirects to codeload with tokens
+        # that Artifactory cannot follow across hosts)
+        f"{base}/zip/refs/heads/{ref}",
+        f"{base}/zip/refs/tags/{ref}",
     )
 
 

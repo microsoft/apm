@@ -40,6 +40,8 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
     and writes to ``opencode.json`` in the project root.
     """
 
+    supports_user_scope: bool = False
+
     def get_config_path(self):
         """Return the path to ``opencode.json`` in the repository root."""
         return str(Path(os.getcwd()) / "opencode.json")

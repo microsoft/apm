@@ -122,3 +122,63 @@ class TestActiveTargets:
             (self.root / d).mkdir()
         targets = active_targets(self.root)
         assert len(targets) == 5
+
+    # -- explicit list of targets --
+
+    def test_explicit_list_single_target(self):
+        targets = active_targets(self.root, explicit_target=["claude"])
+        assert [t.name for t in targets] == ["claude"]
+
+    def test_explicit_list_multiple_targets(self):
+        targets = active_targets(self.root, explicit_target=["claude", "copilot"])
+        assert [t.name for t in targets] == ["claude", "copilot"]
+
+    def test_explicit_list_deduplicates_aliases(self):
+        """copilot and vscode are aliases -- should return one profile."""
+        targets = active_targets(self.root, explicit_target=["copilot", "vscode"])
+        assert [t.name for t in targets] == ["copilot"]
+
+    def test_explicit_list_with_all_returns_every_known_target(self):
+        targets = active_targets(self.root, explicit_target=["all"])
+        assert len(targets) == len(KNOWN_TARGETS)
+
+    def test_explicit_list_all_mixed_returns_every_known_target(self):
+        """'all' anywhere in the list wins."""
+        targets = active_targets(self.root, explicit_target=["claude", "all"])
+        assert len(targets) == len(KNOWN_TARGETS)
+
+    def test_explicit_list_unknown_targets_falls_back_to_copilot(self):
+        targets = active_targets(self.root, explicit_target=["nonexistent", "bogus"])
+        assert [t.name for t in targets] == ["copilot"]
+
+    def test_explicit_list_mixed_known_unknown(self):
+        """Known targets are included, unknown ones are silently skipped."""
+        targets = active_targets(self.root, explicit_target=["claude", "nonexistent"])
+        assert [t.name for t in targets] == ["claude"]
+
+    def test_explicit_list_overrides_detection(self):
+        """Explicit list wins even if dirs for other targets exist."""
+        (self.root / ".github").mkdir()
+        (self.root / ".claude").mkdir()
+        targets = active_targets(self.root, explicit_target=["cursor"])
+        assert [t.name for t in targets] == ["cursor"]
+
+    def test_explicit_list_agents_alias(self):
+        targets = active_targets(self.root, explicit_target=["agents", "claude"])
+        assert [t.name for t in targets] == ["copilot", "claude"]
+
+    def test_explicit_empty_list_falls_through_to_autodetect(self):
+        """Empty list is falsy -- should auto-detect (fallback to copilot)."""
+        targets = active_targets(self.root, explicit_target=[])
+        assert [t.name for t in targets] == ["copilot"]  # fallback
+
+    def test_explicit_list_preserves_order(self):
+        """Result order matches input order."""
+        targets = active_targets(
+            self.root, explicit_target=["cursor", "claude", "copilot"]
+        )
+        assert [t.name for t in targets] == ["cursor", "claude", "copilot"]
+
+    def test_explicit_list_codex_at_project_scope(self):
+        targets = active_targets(self.root, explicit_target=["codex"])
+        assert [t.name for t in targets] == ["codex"]

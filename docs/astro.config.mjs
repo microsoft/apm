@@ -9,6 +9,10 @@ import mermaid from 'astro-mermaid';
 export default defineConfig({
 	site: 'https://microsoft.github.io',
 	base: '/apm/',
+	redirects: {
+		'/enterprise/teams': '/enterprise/making-the-case',
+		'/enterprise/governance': '/enterprise/governance-guide',
+	},
 	integrations: [
 		mermaid(),
 		starlight({
@@ -65,6 +69,7 @@ export default defineConfig({
 						{ label: 'Skills', slug: 'guides/skills' },
 						{ label: 'Prompts', slug: 'guides/prompts' },
 						{ label: 'Plugins', slug: 'guides/plugins' },
+						{ label: 'MCP Servers', slug: 'guides/mcp-servers' },
 						{ label: 'Dependencies & Lockfile', slug: 'guides/dependencies' },
 						{ label: 'Pack & Distribute', slug: 'guides/pack-distribute' },
 						{ label: 'Private Packages', slug: 'guides/private-packages' },
@@ -77,12 +82,14 @@ export default defineConfig({
 				{
 					label: 'Enterprise',
 					items: [
-						{ label: 'APM for Teams', slug: 'enterprise/teams' },
-						{ label: 'Governance & Compliance', slug: 'enterprise/governance' },
-						{ label: 'Policy Reference', slug: 'enterprise/policy-reference' },
-						{ label: 'Security Model', slug: 'enterprise/security' },
-						{ label: 'Adoption Playbook', slug: 'enterprise/adoption-playbook' },
+						{ label: 'Enterprise', slug: 'enterprise' },
 						{ label: 'Making the Case', slug: 'enterprise/making-the-case' },
+						{ label: 'Adoption Playbook', slug: 'enterprise/adoption-playbook' },
+						{ label: 'Security Model', slug: 'enterprise/security' },
+						{ label: 'Governance', slug: 'enterprise/governance-guide' },
+						{ label: 'Registry Proxy & Air-gapped', slug: 'enterprise/registry-proxy' },
+						{ label: 'Policy Files', slug: 'enterprise/apm-policy' },
+						{ label: 'Policy Reference', slug: 'enterprise/policy-reference' },
 					],
 				},
 				{

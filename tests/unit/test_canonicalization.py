@@ -464,3 +464,129 @@ class TestOnlyPackagesFilter:
         dep = DependencyReference.parse("gitlab.com/microsoft/apm-sample-package")
         filter_ref = DependencyReference.parse("microsoft/apm-sample-package")
         assert dep.get_identity() != filter_ref.get_identity()
+
+
+# ── HTTP (allow_insecure) ────────────────────────────────────────────────────
+
+class TestHttpInsecureDeps:
+    """Tests for HTTP (insecure) dependency parsing and serialization."""
+
+    def test_http_scheme_detection_is_case_insensitive(self):
+        """Parsing an uppercase HTTP scheme still marks the ref as insecure."""
+        dep = DependencyReference.parse("HTTP://my-server.example.com/owner/repo")
+        assert dep.is_insecure is True
+
+    def test_http_url_sets_insecure_flag(self):
+        """Parsing an http:// URL marks the ref as insecure."""
+        dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
+        assert dep.is_insecure is True
+        assert dep.host == "my-server.example.com"
+        assert dep.repo_url == "owner/repo"
+
+    def test_https_url_is_not_insecure(self):
+        """Parsing an https:// URL does not mark the ref as insecure."""
+        dep = DependencyReference.parse("https://gitlab.com/owner/repo.git")
+        assert dep.is_insecure is False
+
+    def test_shorthand_is_not_insecure(self):
+        """Parsing shorthand owner/repo does not mark the ref as insecure."""
+        dep = DependencyReference.parse("owner/repo")
+        assert dep.is_insecure is False
+
+    def test_http_allow_insecure_default_false(self):
+        """Freshly parsed HTTP dep has allow_insecure=False by default."""
+        dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
+        assert dep.allow_insecure is False
+
+    def test_http_to_canonical_is_scheme_free(self):
+        """to_canonical() for HTTP dep keeps the canonical identifier scheme-free."""
+        dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
+        canonical = dep.to_canonical()
+        assert canonical == "my-server.example.com/owner/repo"
+
+    def test_http_to_canonical_with_ref(self):
+        """to_canonical() for HTTP dep with ref stays scheme-free."""
+        dep = DependencyReference.parse("http://my-server.example.com/owner/repo#main")
+        canonical = dep.to_canonical()
+        assert canonical == "my-server.example.com/owner/repo#main"
+
+    def test_http_to_apm_yml_entry_returns_dict(self):
+        """to_apm_yml_entry() for HTTP dep returns a dict with git key."""
+        dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
+        dep.allow_insecure = True
+        entry = dep.to_apm_yml_entry()
+        assert isinstance(entry, dict)
+        assert entry["git"] == "http://my-server.example.com/owner/repo"
+        assert entry["allow_insecure"] is True
+
+    def test_http_to_apm_yml_entry_preserves_allow_insecure_false(self):
+        """to_apm_yml_entry() preserves an explicit False opt-in state."""
+        dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
+        entry = dep.to_apm_yml_entry()
+        assert isinstance(entry, dict)
+        assert entry["allow_insecure"] is False
+
+    def test_http_to_apm_yml_entry_includes_ref(self):
+        """to_apm_yml_entry() includes ref when present."""
+        dep = DependencyReference.parse("http://my-server.example.com/owner/repo#v1.0")
+        dep.allow_insecure = True
+        entry = dep.to_apm_yml_entry()
+        assert entry.get("ref") == "v1.0"
+        assert "http://my-server.example.com/owner/repo" in entry["git"]
+
+    def test_https_to_apm_yml_entry_returns_string(self):
+        """to_apm_yml_entry() for HTTPS dep returns canonical string (not dict)."""
+        dep = DependencyReference.parse("owner/repo")
+        entry = dep.to_apm_yml_entry()
+        assert isinstance(entry, str)
+        assert entry == "owner/repo"
+
+    def test_parse_from_dict_git_http(self):
+        """parse_from_dict() supports git: http://... for HTTP deps."""
+        entry = {"git": "http://my-server.example.com/owner/repo", "allow_insecure": True}
+        dep = DependencyReference.parse_from_dict(entry)
+        assert dep.is_insecure is True
+        assert dep.allow_insecure is True
+        assert dep.repo_url == "owner/repo"
+        assert dep.host == "my-server.example.com"
+
+    def test_parse_from_dict_git_http_with_ref(self):
+        """parse_from_dict() reads ref from dict with git key."""
+        entry = {"git": "http://my-server.example.com/owner/repo", "ref": "main", "allow_insecure": True}
+        dep = DependencyReference.parse_from_dict(entry)
+        assert dep.reference == "main"
+
+    def test_parse_from_dict_git_http_allow_insecure_default_false(self):
+        """parse_from_dict() with git http URL defaults allow_insecure to False."""
+        entry = {"git": "http://my-server.example.com/owner/repo"}
+        dep = DependencyReference.parse_from_dict(entry)
+        assert dep.allow_insecure is False
+
+    def test_parse_from_dict_rejects_non_boolean_allow_insecure(self):
+        """parse_from_dict() rejects non-boolean allow_insecure values."""
+        entry = {
+            "git": "http://my-server.example.com/owner/repo",
+            "allow_insecure": "false",
+        }
+        with pytest.raises(ValueError, match="'allow_insecure' field must be a boolean"):
+            DependencyReference.parse_from_dict(entry)
+
+    def test_http_to_github_url_uses_http_scheme(self):
+        """to_github_url() uses http:// for HTTP deps."""
+        dep = DependencyReference.parse("http://my-server.example.com/owner/repo")
+        url = dep.to_github_url()
+        assert url.startswith("http://")
+        assert "my-server.example.com/owner/repo" in url
+
+    def test_https_to_github_url_uses_https_scheme(self):
+        """to_github_url() still uses https:// for HTTPS deps."""
+        dep = DependencyReference.parse("https://gitlab.com/owner/repo.git")
+        url = dep.to_github_url()
+        assert url.startswith("https://")
+
+    def test_http_identity_scheme_agnostic(self):
+        """HTTP and HTTPS deps to the same host/repo have the same identity."""
+        http_dep = DependencyReference.parse("http://gitlab.com/owner/repo")
+        https_dep = DependencyReference.parse("https://gitlab.com/owner/repo.git")
+        # Identity includes host but not scheme, so they are the same package
+        assert http_dep.get_identity() == https_dep.get_identity()

@@ -4,7 +4,7 @@ These functions are stateless and side-effect-free, making them easy to test
 in isolation and to reuse from multiple call sites in ``install.py`` without
 duplicating logic.
 
-Three kinds of drift are detected:
+Four kinds of drift are detected:
 
 * **Ref drift** — the ``ref`` pinned in ``apm.yml`` differs from what the
   lockfile recorded as ``resolved_ref``.  This includes transitions such as
@@ -18,6 +18,11 @@ Three kinds of drift are detected:
 * **Config drift** — an already-installed dependency's serialised configuration
   differs from the baseline stored in the lockfile.  (Currently only MCP
   servers; extendable to other integrator types.)
+
+* **Stale-file drift** -- files previously deployed for a still-present
+  package that are no longer produced by the current install (e.g. a
+  rename or removal inside the package).  The now-unused paths should be
+  removed.  See :func:`detect_stale_files`.
 
 Scope / non-goals
 -----------------
@@ -33,12 +38,13 @@ Scope / non-goals
   formatting-only change that produces the same unique key and is correctly
   treated as no drift.
 
-* **Source/host changes** — *not* detected.  If a user changes the host of
-  an otherwise identical package (e.g. adding an enterprise FQDN prefix), the
-  unique key (``repo_url``, host-blind for the default host) may not change
-  and ``detect_ref_change()`` will not signal a re-download.  Host-level
-  changes require the user to ``apm remove`` + ``apm install`` the package, or
-  use ``--update``.
+* **Host changes** — *not* detected.  If a user changes the host of an otherwise
+  identical package, the unique key may not change and ``detect_ref_change()``
+  will not signal a re-download.  Host-level changes still require the user to
+  ``apm remove`` + ``apm install`` the package, or use ``--update``.
+* **HTTP transport flips** — detected.  Switching between HTTPS and insecure
+  HTTP toggles ``is_insecure`` and forces a re-download even when the package
+  identity and ref are otherwise unchanged.
 """
 
 from __future__ import annotations
@@ -91,7 +97,12 @@ def detect_ref_change(
         return False  # new package — not drift, just a first install
     # Direct comparison: handles None→value, value→None, and value→value.
     # No truthiness guard on locked_dep.resolved_ref — None != "v1.0.0" is True.
-    return dep_ref.reference != locked_dep.resolved_ref
+    if dep_ref.reference != locked_dep.resolved_ref:
+        return True
+
+    return (getattr(dep_ref, "is_insecure", False) is True) != (
+        getattr(locked_dep, "is_insecure", False) is True
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +142,36 @@ def detect_orphans(
         if dep_key not in intended_dep_keys:
             orphaned.update(dep.deployed_files)
     return orphaned
+
+
+# ---------------------------------------------------------------------------
+# File-level stale detection (intra-package)
+# ---------------------------------------------------------------------------
+
+def detect_stale_files(
+    old_deployed: builtins.list,
+    new_deployed: builtins.list,
+) -> builtins.set:
+    """Return the set of paths that were deployed previously but are no longer produced.
+
+    Complements :func:`detect_orphans`, which operates at the *package* level
+    (a whole package left the manifest).  This helper operates at the *file*
+    level *inside* a still-present package: if a package renamed or removed a
+    file between installs, the now-unused path is flagged as stale.
+
+    Pure set-difference semantics: ``set(old_deployed) - set(new_deployed)``.
+    The function does not touch the filesystem; the caller is responsible for
+    actually removing the files.
+
+    Args:
+        old_deployed: Paths recorded in the previous lockfile's
+                      ``deployed_files`` for this package.
+        new_deployed: Paths produced by the current install for this package.
+
+    Returns:
+        Workspace-relative path strings that should no longer exist on disk.
+    """
+    return builtins.set(old_deployed) - builtins.set(new_deployed)
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +255,12 @@ def build_download_ref(
                 overrides["artifactory_prefix"] = locked_dep.registry_prefix
             elif isinstance(getattr(locked_dep, "host", None), str) and locked_dep.host != dep_ref.host:
                 overrides["host"] = locked_dep.host
+
+            if getattr(locked_dep, "is_insecure", False) is True:
+                overrides["is_insecure"] = True
+                overrides["allow_insecure"] = getattr(
+                    locked_dep, "allow_insecure", False
+                )
 
             # Use locked commit SHA for byte-for-byte reproducibility.
             if locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
