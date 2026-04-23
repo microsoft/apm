@@ -1,31 +1,31 @@
 # Merge Gate -- single-authority orchestrator that aggregates ALL required
 # PR-time checks into one verdict. Branch protection requires only this
-# check; this workflow verifies all underlying checks via the Checks API.
+# check; this workflow polls the Checks API for all underlying checks.
 #
 # Why this file exists:
 #   GitHub's required-status-checks model is name-based, not workflow-based.
-#   We tier our CI: ci.yml runs Tier 1 on `pull_request` and emits
-#   `Build & Test (Linux)`, while ci-integration-pr-stub.yml stubs the four
-#   Tier 2 checks via `pull_request_target`. That asymmetry means required
-#   checks depend on TWO independent webhook deliveries succeeding. If the
-#   `pull_request` event is dropped (transient, observed on PR #856), 4/5
-#   stubs go green and the 5th hangs in "Expected -- Waiting" indefinitely.
+#   Our CI is tiered: ci.yml emits 'Build & Test (Linux)' and
+#   ci-integration-pr-stub.yml emits four stubs that hold positions for
+#   merge-queue jobs in ci-integration.yml. Without this gate, branch
+#   protection had to require all 5 checks individually -- adding or
+#   renaming a check meant a ruleset edit. With this gate, branch
+#   protection requires only 'Merge Gate / gate' and the gate aggregates.
+#   Tide / bors pattern.
 #
-#   This workflow collapses N separately-required checks into a single
-#   `Merge Gate / gate` check that:
-#     - dispatches via two redundant triggers (pull_request +
-#       pull_request_target) so a single dropped delivery is recoverable;
-#     - polls the Checks API for ALL underlying required checks;
-#     - exits red if any check fails, never appears, or never completes;
-#     - is the SOLE required check, decoupling branch protection from
-#       workflow topology (Tide / bors pattern).
+# Why a single trigger (not dual pull_request + pull_request_target):
+#   We tried dual-trigger redundancy in PR #865 to harden against rare
+#   dropped 'pull_request' webhook deliveries (observed once on PR #856).
+#   It backfired: 'concurrency: cancel-in-progress' produced TWO check-runs
+#   per SHA -- one SUCCESS and one CANCELLED -- which poisons branch
+#   protection's status-check rollup ('CANCELLED' counts as failure ->
+#   PR BLOCKED). No GitHub Actions primitive cleanly de-duplicates checks
+#   across event channels. World-class OSS projects (k8s, rust, deno,
+#   next.js) accept this and use a single trigger plus manual recovery.
 #
-# Security:
-#   `pull_request_target` is used here for redundancy ONLY. This workflow
-#   never checks out PR code under that trigger, never interpolates PR data
-#   into `run:`, and has read-only token permissions. The classic
-#   pull_request_target+checkout(head) exploit is impossible by construction.
-#   See ci-integration-pr-stub.yml for the same security model.
+# Recovery if a 'pull_request' webhook is dropped:
+#   - Push an empty commit:  git commit --allow-empty -m 'retrigger' && git push
+#   - Or trigger manually:   gh workflow run merge-gate.yml -f pr_number=NNN
+#   - Or close + reopen the PR.
 
 name: Merge Gate
 
@@ -36,18 +36,18 @@ on:
       - 'docs/**'
       - '.gitignore'
       - 'LICENSE'
-  pull_request_target:
-    branches: [ main ]
-    types: [ opened, synchronize, reopened, ready_for_review ]
-    paths-ignore:
-      - 'docs/**'
-      - '.gitignore'
-      - 'LICENSE'
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to re-run the gate against'
+        required: true
+        type: string
 
-# Single in-flight gate per PR. If both pull_request and pull_request_target
-# fire (the happy redundant case), the second one cancels the first.
+# Dedup pushes to the same PR: cancel any older in-flight gate run on
+# the same PR head. Now safe -- only one trigger channel, so cancellations
+# only happen on rapid push-after-push, not on cross-event collisions.
 concurrency:
-  group: merge-gate-${{ github.event.pull_request.number || github.ref }}
+  group: merge-gate-${{ github.event.pull_request.number || inputs.pr_number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -56,53 +56,47 @@ permissions:
   pull-requests: read
 
 jobs:
-  gate:
-    name: gate
+  resolve-sha:
+    name: resolve
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
     steps:
-      # On pull_request we can safely checkout PR head: the runner has no
-      # secrets and a read-only token. Under pull_request_target we MUST NOT
-      # checkout PR head -- we fetch from the base branch via API instead.
-      - name: Checkout PR head (pull_request only)
-        if: github.event_name == 'pull_request'
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          sparse-checkout: |
-            .github/scripts/ci
-
-      - name: Fetch script from base (pull_request_target only)
-        if: github.event_name == 'pull_request_target'
+      - name: Resolve PR head SHA
+        id: sha
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p .github/scripts/ci
-          # Self-bootstrap: if the script does not yet exist on base (i.e. this
-          # is the PR adding the script), degrade to a no-op that passes. Once
-          # the script lands on main, this branch becomes a real gate.
-          status=$(curl -fsSL -o .github/scripts/ci/merge_gate_wait.sh \
-            --retry 5 --retry-delay 3 --retry-connrefused --max-time 30 \
-            -w '%{http_code}' \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github.raw" \
-            "https://api.github.com/repos/${{ github.repository }}/contents/.github/scripts/ci/merge_gate_wait.sh?ref=${GITHUB_BASE_REF}" \
-            || echo "404")
-          if [ "$status" = "404" ] || [ ! -s .github/scripts/ci/merge_gate_wait.sh ]; then
-            echo "::warning::merge_gate_wait.sh not found on base ref '${GITHUB_BASE_REF}' yet -- self-bootstrap pass."
-            cat > .github/scripts/ci/merge_gate_wait.sh <<'BOOTSTRAP'
-          #!/usr/bin/env bash
-          echo "[merge-gate] self-bootstrap pass: script not yet on base"
-          exit 0
-          BOOTSTRAP
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            sha=$(gh api "repos/${{ github.repository }}/pulls/${{ inputs.pr_number }}" --jq '.head.sha')
+          else
+            sha="${{ github.event.pull_request.head.sha }}"
           fi
-          chmod +x .github/scripts/ci/merge_gate_wait.sh
+          if [ -z "$sha" ]; then
+            echo "::error::Could not resolve PR head SHA"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "[merge-gate] resolved head SHA: $sha"
+
+  gate:
+    name: gate
+    needs: resolve-sha
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-sha.outputs.sha }}
+          sparse-checkout: |
+            .github/scripts/ci
 
       - name: Wait for all required checks
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          SHA: ${{ github.event.pull_request.head.sha }}
+          SHA: ${{ needs.resolve-sha.outputs.sha }}
           # All PR-time checks the gate aggregates. Keep this in sync with
           # the underlying workflows: ci.yml emits Build & Test (Linux),
           # ci-integration-pr-stub.yml emits the other four.
@@ -114,3 +108,4 @@ jobs:
         run: |
           chmod +x .github/scripts/ci/merge_gate_wait.sh
           .github/scripts/ci/merge_gate_wait.sh
+
