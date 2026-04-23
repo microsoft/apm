@@ -1,6 +1,6 @@
-# Merge Gate -- shadow-mode orchestrator that aggregates required PR checks
-# into a single verdict and turns "stuck pull_request webhook" failures into
-# loud red checks instead of silent yellow "Expected -- Waiting" forever.
+# Merge Gate -- single-authority orchestrator that aggregates ALL required
+# PR-time checks into one verdict. Branch protection requires only this
+# check; this workflow verifies all underlying checks via the Checks API.
 #
 # Why this file exists:
 #   GitHub's required-status-checks model is name-based, not workflow-based.
@@ -11,27 +11,19 @@
 #   `pull_request` event is dropped (transient, observed on PR #856), 4/5
 #   stubs go green and the 5th hangs in "Expected -- Waiting" indefinitely.
 #
-#   This workflow eventually replaces the per-test required checks with a
-#   single `Merge Gate / gate` check that:
+#   This workflow collapses N separately-required checks into a single
+#   `Merge Gate / gate` check that:
 #     - dispatches via two redundant triggers (pull_request +
 #       pull_request_target) so a single dropped delivery is recoverable;
-#     - polls the Checks API for the real Tier 1 check and aggregates;
-#     - times out cleanly with a clear error message if Tier 1 never fires
-#       (the bug we are catching);
-#     - is the SOLE required check after rollout, decoupling branch
-#       protection from workflow topology.
-#
-# Rollout plan:
-#   Phase 1 (this PR):    workflow runs in shadow mode -- not required.
-#                         Observe behaviour on real PRs for >=1 week.
-#   Phase 2 (post-merge): flip branch protection to require only
-#                         `Merge Gate / gate` and drop the four stub names.
-#                         Stub workflow can then be deleted.
+#     - polls the Checks API for ALL underlying required checks;
+#     - exits red if any check fails, never appears, or never completes;
+#     - is the SOLE required check, decoupling branch protection from
+#       workflow topology (Tide / bors pattern).
 #
 # Security:
 #   `pull_request_target` is used here for redundancy ONLY. This workflow
-#   never checks out PR code, never interpolates PR data into `run:`, and
-#   has read-only token permissions. The classic
+#   never checks out PR code under that trigger, never interpolates PR data
+#   into `run:`, and has read-only token permissions. The classic
 #   pull_request_target+checkout(head) exploit is impossible by construction.
 #   See ci-integration-pr-stub.yml for the same security model.
 
@@ -106,12 +98,17 @@ jobs:
           fi
           chmod +x .github/scripts/ci/merge_gate_wait.sh
 
-      - name: Wait for Tier 1 (Build & Test Linux)
+      - name: Wait for all required checks
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.event.pull_request.head.sha }}
-          EXPECTED_CHECK: 'Build & Test (Linux)'
+          # All PR-time checks the gate aggregates. Keep this in sync with
+          # the underlying workflows: ci.yml emits Build & Test (Linux),
+          # ci-integration-pr-stub.yml emits the other four.
+          # NOTE: 'Merge Gate / gate' itself MUST NOT appear here -- it
+          # would deadlock waiting for itself.
+          EXPECTED_CHECKS: 'Build & Test (Linux),Build (Linux),Smoke Test (Linux),Integration Tests (Linux),Release Validation (Linux)'
           TIMEOUT_MIN: '30'
           POLL_SEC: '30'
         run: |
