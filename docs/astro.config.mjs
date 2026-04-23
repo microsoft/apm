@@ -50,6 +50,7 @@ export default defineConfig({
 						{ label: 'Why APM?', slug: 'introduction/why-apm' },
 						{ label: 'How It Works', slug: 'introduction/how-it-works' },
 						{ label: 'Key Concepts', slug: 'introduction/key-concepts' },
+						{ label: 'Anatomy of an APM Package', slug: 'introduction/anatomy-of-an-apm-package' },
 					],
 				},
 				{
