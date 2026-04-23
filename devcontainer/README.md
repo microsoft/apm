@@ -1,4 +1,4 @@
-# APM Dev Container Feature — Overview
+# APM Dev Container Feature -- Overview
 
 A comprehensive reference for the APM (Agent Package Manager) Dev Container Feature: what it does, how it's structured, how to use it, how it's tested, and where it's supported.
 
@@ -10,14 +10,14 @@ The APM Dev Container Feature packages the `apm-cli` tool as a reusable, declara
 
 **What it installs**
 
-- [uv](https://github.com/astral-sh/uv) — Astral's fast Python tool (installed to `/usr/local/bin`)
-- Python 3.10+ — only if not already present
-- `git` — required by `apm-cli` (uses GitPython at startup)
-- `apm-cli` — installed via `pip` (with automatic PEP 668 fallback)
+- [uv](https://github.com/astral-sh/uv) -- Astral's fast Python tool (installed to `/usr/local/bin`)
+- Python 3.10+ -- only if not already present
+- `git` -- required by `apm-cli` (uses GitPython at startup)
+- `apm-cli` -- installed via `pip` (with automatic PEP 668 fallback)
 
 **What motivated it**
 
-- APM was previously only installable via ad-hoc `postCreateCommand` lines — not reusable, not discoverable, hard to standardise.
+- APM was previously only installable via ad-hoc `postCreateCommand` lines -- not reusable, not discoverable, hard to standardise.
 - See [docs/01-feature-717.md](docs/01-feature-717.md) for the original feature request.
 
 **Options**
@@ -34,25 +34,25 @@ The feature declares `installsAfter: ghcr.io/devcontainers/features/python` so t
 
 ```
 devcontainer/
-├── src/
-│   └── apm/
-│       ├── devcontainer-feature.json   # Feature manifest (id, options, metadata)
-│       └── install.sh                  # Install script executed inside the container
-└── test/
-    ├── apm/
-    │   ├── scenarios.json              # Integration test matrix (base image × options)
-    │   ├── generic-checks.sh           # Shared post-install checks (apm on PATH, --version, --help)
-    │   ├── default-ubuntu-24.sh        # Ubuntu 24.04 scenario (PEP 668 path)
-    │   ├── default-debian-12.sh        # Debian 12 scenario (apt-get path)
-    │   ├── default-alpine-3.sh         # Alpine 3.20 scenario (apk path)
-    │   ├── default-fedora.sh           # Fedora 41 scenario (dnf path)
-    │   ├── pinned-version.sh           # Confirms `version: "0.8.11"` option is honoured
-    │   ├── with-python-feature.sh      # Confirms compatibility with the Python feature
-    │   ├── test.sh                     # Fallback "auto" test (currently unused)
-    │   └── unit/
-    │       └── install.bats            # Bats unit tests for install.sh (37 tests)
-    ├── bats/                           # git submodule — bats-core runner
-    └── test_helper/                    # git submodules — bats-support, bats-assert
++-- src/
+|   \-- apm/
+|       +-- devcontainer-feature.json   # Feature manifest (id, options, metadata)
+|       \-- install.sh                  # Install script executed inside the container
+\-- test/
+    +-- apm/
+    |   +-- scenarios.json              # Integration test matrix (base image x options)
+    |   +-- generic-checks.sh           # Shared post-install checks (apm on PATH, --version, --help)
+    |   +-- default-ubuntu-24.sh        # Ubuntu 24.04 scenario (PEP 668 path)
+    |   +-- default-debian-12.sh        # Debian 12 scenario (apt-get path)
+    |   +-- default-alpine-3.sh         # Alpine 3.20 scenario (apk path)
+    |   +-- default-fedora.sh           # Fedora 41 scenario (dnf path)
+    |   +-- pinned-version.sh           # Confirms `version: "0.8.11"` option is honoured
+    |   +-- with-python-feature.sh      # Confirms compatibility with the Python feature
+    |   +-- test.sh                     # Fallback "auto" test (currently unused)
+    |   \-- unit/
+    |       \-- install.bats            # Bats unit tests for install.sh (37 tests)
+    +-- bats/                           # git submodule -- bats-core runner
+    \-- test_helper/                    # git submodules -- bats-support, bats-assert
 ```
 
 ---
@@ -67,33 +67,33 @@ devcontainer/
 
 When a devcontainer is built, the CLI injects each option as an uppercased environment variable (e.g. `VERSION`) and runs [src/apm/install.sh](src/apm/install.sh) as root. The script:
 
-1. **Validates `VERSION`** — accepts `latest` or a strict semver `X.Y.Z`; otherwise exits `1`.
-2. **Verifies it is running as root** — fails with a clear message otherwise.
-3. **Installs `uv`** (idempotent) — installs `curl` first via the detected package manager if needed, downloads `https://astral.sh/uv/install.sh`, and runs it with `UV_INSTALL_DIR=/usr/local/bin`. The installer temp file is cleaned up via `trap` on exit.
-4. **Ensures Python 3.10+ is present** — if `python3` is missing, installs `python3`, `python3-pip`, and `git` using `apt-get`, `apk`, or `dnf`. Then asserts `python3 --version` is ≥ 3.10.
-5. **Ensures `git` is present** — installs via the detected package manager if absent.
-6. **Locates a working `pip`** — prefers `pip3`, falls back to `pip`, then bootstraps via `python3 -m ensurepip --upgrade`.
-7. **Installs `apm-cli`** — `pip install apm-cli` (or `apm-cli==<version>` when pinned). On Ubuntu 24.04+ `pip` rejects the install under PEP 668 ("externally-managed-environment"); the script detects that specific error and retries with `--break-system-packages`.
-8. **Adds `bash` on Alpine** — required because devcontainer test scripts use `#!/bin/bash`.
-9. **Verifies `apm` is on `PATH`** — prints the installed version and path. If it isn't on `PATH`, prints a warning (not a failure).
+1. **Validates `VERSION`** -- accepts `latest` or a strict semver `X.Y.Z`; otherwise exits `1`.
+2. **Verifies it is running as root** -- fails with a clear message otherwise.
+3. **Installs `uv`** (idempotent) -- installs `curl` first via the detected package manager if needed, downloads `https://astral.sh/uv/install.sh`, and runs it with `UV_INSTALL_DIR=/usr/local/bin`. The installer temp file is cleaned up via `trap` on exit.
+4. **Ensures Python 3.10+ is present** -- if `python3` is missing, installs `python3`, `python3-pip`, and `git` using `apt-get`, `apk`, or `dnf`. Then asserts `python3 --version` is >= 3.10.
+5. **Ensures `git` is present** -- installs via the detected package manager if absent.
+6. **Locates a working `pip`** -- prefers `pip3`, falls back to `pip`, then bootstraps via `python3 -m ensurepip --upgrade`.
+7. **Installs `apm-cli`** -- `pip install apm-cli` (or `apm-cli==<version>` when pinned). On Ubuntu 24.04+ `pip` rejects the install under PEP 668 ("externally-managed-environment"); the script detects that specific error and retries with `--break-system-packages`.
+8. **Adds `bash` on Alpine** -- required because devcontainer test scripts use `#!/bin/bash`.
+9. **Verifies `apm` is on `PATH`** -- prints the installed version and path. If it isn't on `PATH`, prints a warning (not a failure).
 
 ### Compatibility with the official Python feature
 
-`installsAfter` guarantees that if a user also declares `ghcr.io/devcontainers/features/python`, Python is already present when `install.sh` runs — the script then detects `python3` and skips the distro package-manager branch.
+`installsAfter` guarantees that if a user also declares `ghcr.io/devcontainers/features/python`, Python is already present when `install.sh` runs -- the script then detects `python3` and skips the distro package-manager branch.
 
 ---
 
 ## 4. How to use `devcontainer` in your project
 
-### Option A — test it locally
+### Option A -- test it locally
 
-Recent versions of the Dev Containers CLI (bundled with `ms-vscode-remote.remote-containers` ≥ 0.454.0) enforce that a local Feature path must resolve **inside** the `.devcontainer/` folder. An upward `../devcontainer/src/apm` path — and symlinks pointing outside `.devcontainer/` — are rejected with:
+Recent versions of the Dev Containers CLI (bundled with `ms-vscode-remote.remote-containers` >= 0.454.0) enforce that a local Feature path must resolve **inside** the `.devcontainer/` folder. An upward `../devcontainer/src/apm` path -- and symlinks pointing outside `.devcontainer/` -- are rejected with:
 
 ```
 Local file path parse error. Resolved path must be a child of the .devcontainer/ folder.
 ```
 
-To test the feature against this repo's own dev container, run the helper script from the repo root before opening the container — it copies the feature into `.devcontainer/apm-feature` and writes a matching `devcontainer.json`:
+To test the feature against this repo's own dev container, run the helper script from the repo root before opening the container -- it copies the feature into `.devcontainer/apm-feature` and writes a matching `devcontainer.json`:
 
 ```sh
 ./devcontainer/scripts/sync-local-devcontainer.sh
@@ -103,7 +103,7 @@ The script is idempotent: re-run it whenever [src/apm/install.sh](src/apm/instal
 
 This constraint only affects local consumption and is primarily meant for local testing. Published OCI references (Option B) and tarball references are unaffected.
 
-### Option B — consume it from the published OCI reference
+### Option B -- consume it from the published OCI reference
 
 Once published, users add it to `devcontainer.json` like any other feature:
 
@@ -143,7 +143,7 @@ Once published, users add it to `devcontainer.json` like any other feature:
 
 ### Requirements for the base image
 
-- Linux (Debian/Ubuntu, Alpine, or Fedora family — see [§7](#7-supported-environments-os-and-shells)).
+- Linux (Debian/Ubuntu, Alpine, or Fedora family -- see [#7](#7-supported-environments-os-and-shells)).
 - Root on install (the feature runs as root; most base images already do).
 - A reachable network (needs to fetch `uv` and `apm-cli`).
 - Either a pre-installed Python 3.10+ or one of `apt-get` / `apk` / `dnf` available so the feature can install it.
@@ -158,9 +158,9 @@ Once published, users add it to `devcontainer.json` like any other feature:
 
 ### Approach
 
-The tests create a **temporary stub directory** (`STUB_BIN`) and populate it with fake versions of every command `install.sh` touches — `apt-get`, `apk`, `dnf`, `curl`, `pip3`, `python3`, `git`, and so on. Each stub records its arguments and returns a configurable exit code. `PATH` is then locked to `STUB_BIN:/bin` via `run_with_stubs()`, so the script sees only the fakes.
+The tests create a **temporary stub directory** (`STUB_BIN`) and populate it with fake versions of every command `install.sh` touches -- `apt-get`, `apk`, `dnf`, `curl`, `pip3`, `python3`, `git`, and so on. Each stub records its arguments and returns a configurable exit code. `PATH` is then locked to `STUB_BIN:/bin` via `run_with_stubs()`, so the script sees only the fakes.
 
-This makes it possible to exhaustively cover every branch — success paths, each package-manager variant, the PEP 668 retry, the ensurepip bootstrap, every invalid `VERSION` shape, missing-root, missing-curl, temp-file cleanup — in milliseconds, with no Docker and no network.
+This makes it possible to exhaustively cover every branch -- success paths, each package-manager variant, the PEP 668 retry, the ensurepip bootstrap, every invalid `VERSION` shape, missing-root, missing-curl, temp-file cleanup -- in milliseconds, with no Docker and no network.
 
 ### What's covered (representative)
 
@@ -196,7 +196,7 @@ cd devcontainer/test/apm/unit
 
 ## 6. Integration tests
 
-**Tool:** `devcontainer features test` from [`@devcontainers/cli`](https://github.com/devcontainers/cli) — the official Microsoft test runner for Dev Container Features.
+**Tool:** `devcontainer features test` from [`@devcontainers/cli`](https://github.com/devcontainers/cli) -- the official Microsoft test runner for Dev Container Features.
 **Matrix:** [test/apm/scenarios.json](test/apm/scenarios.json).
 
 ### How scenarios are wired
@@ -205,7 +205,7 @@ For each entry in `scenarios.json` the CLI:
 
 1. Builds a Docker image from the scenario's base `image`.
 2. Runs the real `install.sh` inside the container with the scenario's options injected as environment variables.
-3. Copies the `<scenario-id>.sh` file into the container and runs it — the scenario id must match a filename under `test/apm/`.
+3. Copies the `<scenario-id>.sh` file into the container and runs it -- the scenario id must match a filename under `test/apm/`.
 4. The test script sources `dev-container-features-test-lib` (provided by the CLI) and `generic-checks.sh`, then issues per-distro assertions, and calls `reportResults`.
 
 ### Scenario matrix
@@ -228,7 +228,7 @@ For each entry in `scenarios.json` the CLI:
 - `apm --version` outputs a semver
 - `apm --help` exits `0`
 
-Per-scenario scripts add distro-specific assertions — e.g. `default-alpine-3.sh` confirms `apk` is the package manager and that `python3` / `git` came from apk (proving the right branch was actually exercised).
+Per-scenario scripts add distro-specific assertions -- e.g. `default-alpine-3.sh` confirms `apk` is the package manager and that `python3` / `git` came from apk (proving the right branch was actually exercised).
 
 ### How to run
 
@@ -270,7 +270,7 @@ devcontainer features test \
 | Alpine    | 3.20          | `apk`           | No               |
 | Fedora    | 41            | `dnf`           | No               |
 
-**Not supported:** `ubuntu:focal` (20.04) and earlier — Python 3.10+ is not available from the default repos, and the feature's Python version check fails fast with a clear error. macOS and Windows as host OSes are fine (Dev Containers runs Linux inside Docker on both); they are not valid feature-install targets.
+**Not supported:** `ubuntu:focal` (20.04) and earlier -- Python 3.10+ is not available from the default repos, and the feature's Python version check fails fast with a clear error. macOS and Windows as host OSes are fine (Dev Containers runs Linux inside Docker on both); they are not valid feature-install targets.
 
 ### Shells
 

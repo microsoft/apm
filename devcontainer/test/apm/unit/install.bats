@@ -7,7 +7,7 @@ load "../../test_helper/bats-assert/load"
 
 INSTALL_SH="$(cd "$(dirname "$BATS_TEST_FILENAME")/../../../src/apm" && pwd)/install.sh"
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+# -- Helpers ------------------------------------------------------------------
 
 setup() {
     STUB_BIN="$BATS_TEST_TMPDIR/bin"
@@ -100,7 +100,7 @@ setup_happy_path() {
     make_stub    apm  0 "0.9.0"
 }
 
-# ── Root check ────────────────────────────────────────────────────────────────
+# -- Root check ----------------------------------------------------------------
 
 @test "exits 1 with clear message when not run as root" {
     make_stub id 0 "1"   # id -u → 1 (non-root)
@@ -111,7 +111,7 @@ setup_happy_path() {
     assert_output --partial "must run as root"
 }
 
-# ── Python 3 install ──────────────────────────────────────────────────────────
+# -- Python 3 install ----------------------------------------------------------
 
 @test "installs python3 via apt-get when missing" {
     setup_happy_path
@@ -185,7 +185,7 @@ EOF
     assert_output --partial "package manager is not recognised"
 }
 
-# ── git install ───────────────────────────────────────────────────────────────
+# -- git install ---------------------------------------------------------------
 
 # The apt-get branch is representative; apk/dnf mirror the same logic tested
 # exhaustively in the python3-install block above.
@@ -216,7 +216,7 @@ EOF
     assert_output --partial "git"
 }
 
-# ── Python version guard ───────────────────────────────────────────────────────
+# -- Python version guard -------------------------------------------------------
 
 @test "continues when Python is exactly 3.10 (minimum boundary)" {
     setup_happy_path
@@ -236,7 +236,7 @@ EOF
     assert_success
 }
 
-# ── pip discovery ─────────────────────────────────────────────────────────────
+# -- pip discovery -------------------------------------------------------------
 
 @test "falls back to pip when pip3 is absent" {
     setup_happy_path
@@ -282,7 +282,7 @@ EOF
     assert_failure
 }
 
-# ── Package spec ──────────────────────────────────────────────────────────────
+# -- Package spec --------------------------------------------------------------
 
 @test "pins version when VERSION is set to a semver string" {
     setup_happy_path
@@ -299,7 +299,7 @@ EOF
     assert_output --partial "ARGS:install apm-cli==0.8.11"
 }
 
-# ── PEP 668 retry ─────────────────────────────────────────────────────────────
+# -- PEP 668 retry -------------------------------------------------------------
 
 @test "retries install with --break-system-packages on PEP 668 error" {
     setup_happy_path
@@ -353,7 +353,7 @@ EOF
     refute_output --partial "--break-system-packages"
 }
 
-# ── Post-install verification ─────────────────────────────────────────────────
+# -- Post-install verification -------------------------------------------------
 
 @test "prints warning (not failure) when apm is not on PATH after install" {
     setup_happy_path
@@ -365,7 +365,7 @@ EOF
     assert_output --partial "WARNING: apm was installed but is not in PATH"
 }
 
-# ── curl install ─────────────────────────────────────────────────────────────
+# -- curl install -------------------------------------------------------------
 # Removing the uv stub forces the uv-install path, which requires curl.
 # Without a curl stub in STUB_BIN, the curl-install block fires first.
 
@@ -446,7 +446,7 @@ EOF
     assert_output --partial "package manager is not recognised"
 }
 
-# ── uv install failure ────────────────────────────────────────────────────────
+# -- uv install failure --------------------------------------------------------
 
 @test "exits non-zero when curl fails during uv install" {
     setup_happy_path
@@ -478,7 +478,7 @@ EOF
     assert_output --partial "ERROR: uv installation failed"
 }
 
-# ── uv install via curl ───────────────────────────────────────────────────────
+# -- uv install via curl -------------------------------------------------------
 
 @test "installs uv via curl when uv is not on PATH; UV_INSTALL_DIR is set correctly" {
     setup_happy_path
@@ -559,7 +559,7 @@ EOF
     refute_output --partial "Installing uv"
 }
 
-# ── VERSION default ───────────────────────────────────────────────────────────
+# -- VERSION default -----------------------------------------------------------
 
 @test "defaults to latest when VERSION is unset" {
     setup_happy_path
@@ -578,7 +578,7 @@ EOF
     refute_output --partial "apm-cli=="
 }
 
-# ── Python 3.9 boundary ───────────────────────────────────────────────────────
+# -- Python 3.9 boundary -------------------------------------------------------
 
 @test "exits 1 when Python is 3.9 (one below minimum)" {
     setup_happy_path
@@ -591,7 +591,7 @@ EOF
     assert_output --partial "3.9"
 }
 
-# ── VERSION validation ────────────────────────────────────────────────────────
+# -- VERSION validation --------------------------------------------------------
 
 @test "exits 1 with clear message when VERSION is empty string" {
     setup_happy_path
@@ -641,7 +641,7 @@ EOF
     assert_output --partial "VERSION"
 }
 
-# ── POSIX compliance ─────────────────────────────────────────────────────────
+# -- POSIX compliance ---------------------------------------------------------
 # The script shebang is /bin/sh, so it must stay POSIX-clean. `local` is a
 # common non-POSIX trap that works on bash/dash/ash but is not guaranteed.
 

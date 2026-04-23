@@ -19,7 +19,7 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-# ── Install uv (idempotent — skip if already on PATH) ────────────────────────
+# -- Install uv (idempotent — skip if already on PATH) ------------------------
 if command -v uv >/dev/null 2>&1; then
     echo "uv already installed at $(command -v uv) — skipping"
 else
@@ -47,7 +47,7 @@ fi
 
 echo "Installing APM CLI (version: ${VERSION})..."
 
-# ── Ensure Python 3.10+ is available ─────────────────────────────────────────
+# -- Ensure Python 3.10+ is available -----------------------------------------
 if ! command -v python3 >/dev/null 2>&1; then
     echo "Python 3 not found — installing via system package manager..."
     if command -v apt-get >/dev/null 2>&1; then
@@ -64,7 +64,7 @@ if ! command -v python3 >/dev/null 2>&1; then
     fi
 fi
 
-# ── Ensure git is available (apm uses GitPython at startup) ──────────────────
+# -- Ensure git is available (apm uses GitPython at startup) ------------------
 if ! command -v git >/dev/null 2>&1; then
     if command -v apt-get >/dev/null 2>&1; then
         apt-get update -y -qq
@@ -90,7 +90,7 @@ if [ "$PYTHON_MAJOR" -lt 3 ] || { [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR"
     exit 1
 fi
 
-# ── Locate pip ────────────────────────────────────────────────────────────────
+# -- Locate pip ----------------------------------------------------------------
 PIP_CMD=""
 if command -v pip3 >/dev/null 2>&1; then
     PIP_CMD="pip3"
@@ -108,14 +108,14 @@ else
     fi
 fi
 
-# ── Build pip package spec ───────────────────────────────────────────────────
+# -- Build pip package spec ---------------------------------------------------
 if [ "$VERSION" = "latest" ]; then
     PKG_SPEC="apm-cli"
 else
     PKG_SPEC="apm-cli==${VERSION}"
 fi
 
-# ── Install ──────────────────────────────────────────────────────────────────
+# -- Install ------------------------------------------------------------------
 # Ubuntu 24.04+ enforces PEP 668 ("externally managed environment") and rejects
 # plain `pip install`. Detect the specific error and retry with the flag.
 install_apm() {
@@ -131,14 +131,14 @@ install_apm() {
 
 install_apm
 
-# ── Ensure bash is present (Alpine ships only ash; devcontainer test scripts require bash) ──
+# -- Ensure bash is present (Alpine ships only ash; devcontainer test scripts require bash) --
 if command -v apk >/dev/null 2>&1 && ! command -v bash >/dev/null 2>&1; then
     apk add --no-cache bash
 fi
 
-# ── Verify ───────────────────────────────────────────────────────────────────
+# -- Verify -------------------------------------------------------------------
 if command -v apm >/dev/null 2>&1; then
-    echo "✓ APM $(apm --version) installed at $(command -v apm)"
+    echo "[+] APM $(apm --version) installed at $(command -v apm)"
 else
     echo "WARNING: apm was installed but is not in PATH."
     echo "Ensure the pip bin directory is in PATH (usually /usr/local/bin or ~/.local/bin)."
