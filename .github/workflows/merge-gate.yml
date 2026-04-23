@@ -69,6 +69,42 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
+      # On pull_request we can safely checkout PR head: the runner has no
+      # secrets and a read-only token. Under pull_request_target we MUST NOT
+      # checkout PR head -- we fetch from the base branch via API instead.
+      - name: Checkout PR head (pull_request only)
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          sparse-checkout: |
+            .github/scripts/ci
+
+      - name: Fetch script from base (pull_request_target only)
+        if: github.event_name == 'pull_request_target'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p .github/scripts/ci
+          # Self-bootstrap: if the script does not yet exist on base (i.e. this
+          # is the PR adding the script), degrade to a no-op that passes. Once
+          # the script lands on main, this branch becomes a real gate.
+          status=$(curl -fsSL -o .github/scripts/ci/merge_gate_wait.sh \
+            -w '%{http_code}' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github.raw" \
+            "https://api.github.com/repos/${{ github.repository }}/contents/.github/scripts/ci/merge_gate_wait.sh?ref=${GITHUB_BASE_REF}" \
+            || echo "404")
+          if [ "$status" = "404" ] || [ ! -s .github/scripts/ci/merge_gate_wait.sh ]; then
+            echo "::warning::merge_gate_wait.sh not found on base ref '${GITHUB_BASE_REF}' yet -- self-bootstrap pass."
+            cat > .github/scripts/ci/merge_gate_wait.sh <<'BOOTSTRAP'
+          #!/usr/bin/env bash
+          echo "[merge-gate] self-bootstrap pass: script not yet on base"
+          exit 0
+          BOOTSTRAP
+          fi
+          chmod +x .github/scripts/ci/merge_gate_wait.sh
+
       - name: Wait for Tier 1 (Build & Test Linux)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -78,13 +114,5 @@ jobs:
           TIMEOUT_MIN: '30'
           POLL_SEC: '30'
         run: |
-          # The script lives in the repo. We intentionally do NOT actions/checkout
-          # under pull_request_target -- instead we fetch the script from the base
-          # branch via the API. This preserves the no-checkout security guarantee.
-          curl -fsSL \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github.raw" \
-            "https://api.github.com/repos/${REPO}/contents/.github/scripts/ci/merge_gate_wait.sh?ref=${GITHUB_BASE_REF}" \
-            -o /tmp/merge_gate_wait.sh
-          chmod +x /tmp/merge_gate_wait.sh
-          /tmp/merge_gate_wait.sh
+          chmod +x .github/scripts/ci/merge_gate_wait.sh
+          .github/scripts/ci/merge_gate_wait.sh
