@@ -82,6 +82,18 @@ Set `MCP_REGISTRY_URL` (default `https://api.mcp.github.com`) to point all `apm 
 | `apm runtime remove {copilot\|codex\|llm}` | Remove a runtime | `--yes` |
 | `apm runtime status` | Show active runtime | -- |
 
+## Experimental features
+
+| Command | Purpose | Key flags |
+|---------|---------|-----------|
+| `apm experimental` | Default to `apm experimental list` | `-v` verbose |
+| `apm experimental list` | List registered experimental flags or emit JSON for automation | `--enabled`, `--disabled`, `--json`, `-v` verbose |
+| `apm experimental enable NAME` | Enable an opt-in experimental flag | `-v` verbose |
+| `apm experimental disable NAME` | Disable an opt-in experimental flag | `-v` verbose |
+| `apm experimental reset [NAME]` | Reset one flag or all flags to defaults; also cleans malformed overrides during bulk reset | `-y` skip confirm, `-v` verbose |
+
+Experimental flags MUST NOT gate security-critical behaviour (content scanning, path validation, lockfile integrity, token handling, MCP trust, collision detection). Flags are ergonomic/UX toggles only.
+
 ## Configuration and updates
 
 | Command | Purpose | Key flags |
