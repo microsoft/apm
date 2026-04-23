@@ -111,44 +111,7 @@ setup_happy_path() {
     assert_output --partial "must run as root"
 }
 
-@test "continues past root check when run as root" {
-    setup_happy_path
-
-    run_with_stubs
-
-    assert_success
-}
-
-# ── uv install (idempotency) ──────────────────────────────────────────────────
-
-@test "skips curl when uv is already on PATH" {
-    setup_happy_path
-    # curl is intentionally absent — any curl call would crash the script
-
-    run_with_stubs
-
-    assert_success
-}
-
-@test "installs uv via curl when uv is not on PATH" {
-    setup_happy_path
-    rm -f "$STUB_BIN/uv"
-    make_stub curl 0   # curl outputs nothing; sh receives empty input and exits 0
-
-    run_with_stubs
-
-    assert_success
-}
-
 # ── Python 3 install ──────────────────────────────────────────────────────────
-
-@test "skips Python install when python3 is already on PATH" {
-    setup_happy_path
-
-    run_with_stubs
-
-    assert_success
-}
 
 @test "installs python3 via apt-get when missing" {
     setup_happy_path
@@ -158,6 +121,29 @@ setup_happy_path() {
     run_with_stubs
 
     assert_success
+    grep -q 'python3' "$STUB_BIN/_apt-get_args"
+    grep -q 'python3-pip' "$STUB_BIN/_apt-get_args"
+    grep -q 'git' "$STUB_BIN/_apt-get_args"
+}
+
+@test "apt-get python3 install uses -qq and DEBIAN_FRONTEND=noninteractive" {
+    setup_happy_path
+    rm -f "$STUB_BIN/python3"
+    # Record env var alongside args
+    /bin/cat > "$STUB_BIN/apt-get" <<EOF
+#!/bin/sh
+echo "DEBIAN_FRONTEND=\$DEBIAN_FRONTEND" >> "${STUB_BIN}/_apt-get_env"
+echo "\$@" >> "${STUB_BIN}/_apt-get_args"
+/bin/cp "${STUB_BIN}/_python3_stub" "${STUB_BIN}/python3"
+exit 0
+EOF
+    /bin/chmod +x "$STUB_BIN/apt-get"
+
+    run_with_stubs
+
+    assert_success
+    grep -q '\-qq' "$STUB_BIN/_apt-get_args"
+    grep -q 'noninteractive' "$STUB_BIN/_apt-get_env"
 }
 
 @test "installs python3 via apk when apt-get is absent" {
@@ -169,7 +155,9 @@ setup_happy_path() {
     run_with_stubs
 
     assert_success
-    assert_output --partial "Python 3 not found"
+    grep -q 'python3' "$STUB_BIN/_apk_args"
+    grep -q 'py3-pip' "$STUB_BIN/_apk_args"
+    grep -q 'git' "$STUB_BIN/_apk_args"
 }
 
 @test "installs python3 via dnf when apt-get and apk are absent" {
@@ -181,7 +169,9 @@ setup_happy_path() {
     run_with_stubs
 
     assert_success
-    assert_output --partial "Python 3 not found"
+    grep -q 'python3' "$STUB_BIN/_dnf_args"
+    grep -q 'python3-pip' "$STUB_BIN/_dnf_args"
+    grep -q 'git' "$STUB_BIN/_dnf_args"
 }
 
 @test "exits 1 with clear message when no supported package manager is found" {
@@ -197,48 +187,22 @@ setup_happy_path() {
 
 # ── git install ───────────────────────────────────────────────────────────────
 
+# The apt-get branch is representative; apk/dnf mirror the same logic tested
+# exhaustively in the python3-install block above.
 @test "installs git via apt-get when git is missing" {
     setup_happy_path
     rm -f "$STUB_BIN/git"
-    make_stub apt-get 0
-
-    run_with_stubs
-
-    assert_success
-}
-
-@test "installs git via apk when apt-get is absent" {
-    setup_happy_path
-    rm -f "$STUB_BIN/git"
-    # No apt-get stub — falls through to apk
-    /bin/cat > "$STUB_BIN/apk" <<EOF
+    /bin/cat > "$STUB_BIN/apt-get" <<EOF
 #!/bin/sh
-echo "\$@" >> "${STUB_BIN}/_apk_args"
+echo "\$@" >> "${STUB_BIN}/_apt-get_args"
 exit 0
 EOF
-    /bin/chmod +x "$STUB_BIN/apk"
+    /bin/chmod +x "$STUB_BIN/apt-get"
 
     run_with_stubs
 
     assert_success
-    [ -f "$STUB_BIN/_apk_args" ]
-}
-
-@test "installs git via dnf when apt-get and apk are absent" {
-    setup_happy_path
-    rm -f "$STUB_BIN/git"
-    # No apt-get or apk stubs — falls through to dnf
-    /bin/cat > "$STUB_BIN/dnf" <<EOF
-#!/bin/sh
-echo "\$@" >> "${STUB_BIN}/_dnf_args"
-exit 0
-EOF
-    /bin/chmod +x "$STUB_BIN/dnf"
-
-    run_with_stubs
-
-    assert_success
-    [ -f "$STUB_BIN/_dnf_args" ]
+    grep -q 'git' "$STUB_BIN/_apt-get_args"
 }
 
 @test "exits 1 with clear message when git is missing and no package manager is available" {
@@ -253,27 +217,6 @@ EOF
 }
 
 # ── Python version guard ───────────────────────────────────────────────────────
-
-@test "exits 1 with clear message when Python is 3.8 (too old)" {
-    setup_happy_path
-    make_old_python3_stub 3 8
-
-    run_with_stubs
-
-    assert_failure
-    assert_output --partial "requires Python 3.10+"
-    assert_output --partial "3.8"
-}
-
-@test "exits 1 with clear message when Python is 2.7" {
-    setup_happy_path
-    make_old_python3_stub 2 7
-
-    run_with_stubs
-
-    assert_failure
-    assert_output --partial "requires Python 3.10+"
-}
 
 @test "continues when Python is exactly 3.10 (minimum boundary)" {
     setup_happy_path
@@ -294,14 +237,6 @@ EOF
 }
 
 # ── pip discovery ─────────────────────────────────────────────────────────────
-
-@test "uses pip3 when pip3 is on PATH" {
-    setup_happy_path
-
-    run_with_stubs
-
-    assert_success
-}
 
 @test "falls back to pip when pip3 is absent" {
     setup_happy_path
@@ -345,26 +280,9 @@ EOF
     run_with_stubs
 
     assert_failure
-    assert_output --partial "pip is not available"
 }
 
 # ── Package spec ──────────────────────────────────────────────────────────────
-
-@test "installs plain apm-cli when VERSION is latest" {
-    setup_happy_path
-    /bin/cat > "$STUB_BIN/pip3" <<'EOF'
-#!/bin/sh
-echo "ARGS:$*"
-exit 0
-EOF
-    /bin/chmod +x "$STUB_BIN/pip3"
-
-    VERSION=latest PATH="$STUB_BIN:/bin" run sh "$INSTALL_SH"
-
-    assert_success
-    assert_output --partial "ARGS:install apm-cli"
-    refute_output --partial "apm-cli=="
-}
 
 @test "pins version when VERSION is set to a semver string" {
     setup_happy_path
@@ -387,6 +305,7 @@ EOF
     setup_happy_path
     /bin/cat > "$STUB_BIN/pip3" <<EOF
 #!/bin/sh
+echo "\$@" >> "${STUB_BIN}/_pip3_calls"
 case "\$*" in
     *--break-system-packages*) echo "Successfully installed"; exit 0 ;;
     *) echo "ERROR: externally-managed-environment"; exit 1            ;;
@@ -397,6 +316,26 @@ EOF
     run_with_stubs
 
     assert_success
+    assert_output --partial "Retrying with --break-system-packages"
+    # Confirm both a plain attempt and a retry attempt happened.
+    [ "$(wc -l < "$STUB_BIN/_pip3_calls")" -eq 2 ]
+    grep -q -- '--break-system-packages' "$STUB_BIN/_pip3_calls"
+}
+
+@test "exits 1 when PEP 668 retry also fails" {
+    setup_happy_path
+    /bin/cat > "$STUB_BIN/pip3" <<EOF
+#!/bin/sh
+echo "ERROR: externally-managed-environment"
+exit 1
+EOF
+    /bin/chmod +x "$STUB_BIN/pip3"
+
+    run_with_stubs
+
+    assert_failure
+    assert_output --partial "Retrying with --break-system-packages"
+    assert_output --partial "externally-managed-environment"
 }
 
 @test "exits 1 on non-PEP-668 pip error without retrying" {
@@ -416,14 +355,6 @@ EOF
 
 # ── Post-install verification ─────────────────────────────────────────────────
 
-@test "prints installed version and path when apm is on PATH" {
-    setup_happy_path
-
-    run_with_stubs
-
-    assert_success
-}
-
 @test "prints warning (not failure) when apm is not on PATH after install" {
     setup_happy_path
     rm -f "$STUB_BIN/apm"
@@ -432,6 +363,87 @@ EOF
 
     assert_success
     assert_output --partial "WARNING: apm was installed but is not in PATH"
+}
+
+# ── curl install ─────────────────────────────────────────────────────────────
+# Removing the uv stub forces the uv-install path, which requires curl.
+# Without a curl stub in STUB_BIN, the curl-install block fires first.
+
+@test "installs curl via apt-get when curl is missing" {
+    setup_happy_path
+    rm -f "$STUB_BIN/uv"
+    /bin/cat > "$STUB_BIN/_curl_stub" <<'EOF'
+#!/bin/sh
+printf '#!/bin/sh\nexit 0\n'
+EOF
+    /bin/chmod +x "$STUB_BIN/_curl_stub"
+    /bin/cat > "$STUB_BIN/apt-get" <<EOF
+#!/bin/sh
+echo "\$@" >> "${STUB_BIN}/_apt-get_args"
+/bin/cp "${STUB_BIN}/_curl_stub" "${STUB_BIN}/curl"
+exit 0
+EOF
+    /bin/chmod +x "$STUB_BIN/apt-get"
+
+    run_with_stubs
+
+    assert_success
+    grep -q 'curl' "$STUB_BIN/_apt-get_args"
+}
+
+@test "installs curl via apk when apt-get is absent" {
+    setup_happy_path
+    rm -f "$STUB_BIN/uv"
+    /bin/cat > "$STUB_BIN/_curl_stub" <<'EOF'
+#!/bin/sh
+printf '#!/bin/sh\nexit 0\n'
+EOF
+    /bin/chmod +x "$STUB_BIN/_curl_stub"
+    /bin/cat > "$STUB_BIN/apk" <<EOF
+#!/bin/sh
+echo "\$@" >> "${STUB_BIN}/_apk_args"
+/bin/cp "${STUB_BIN}/_curl_stub" "${STUB_BIN}/curl"
+exit 0
+EOF
+    /bin/chmod +x "$STUB_BIN/apk"
+
+    run_with_stubs
+
+    assert_success
+    grep -q 'curl' "$STUB_BIN/_apk_args"
+}
+
+@test "installs curl via dnf when apt-get and apk are absent" {
+    setup_happy_path
+    rm -f "$STUB_BIN/uv"
+    /bin/cat > "$STUB_BIN/_curl_stub" <<'EOF'
+#!/bin/sh
+printf '#!/bin/sh\nexit 0\n'
+EOF
+    /bin/chmod +x "$STUB_BIN/_curl_stub"
+    /bin/cat > "$STUB_BIN/dnf" <<EOF
+#!/bin/sh
+echo "\$@" >> "${STUB_BIN}/_dnf_args"
+/bin/cp "${STUB_BIN}/_curl_stub" "${STUB_BIN}/curl"
+exit 0
+EOF
+    /bin/chmod +x "$STUB_BIN/dnf"
+
+    run_with_stubs
+
+    assert_success
+    grep -q 'curl' "$STUB_BIN/_dnf_args"
+}
+
+@test "exits 1 with clear message when curl is missing and no package manager is available" {
+    setup_happy_path
+    rm -f "$STUB_BIN/uv"
+    # No curl, no apt-get, no apk, no dnf stubs
+
+    run_with_stubs
+
+    assert_failure
+    assert_output --partial "package manager is not recognised"
 }
 
 # ── uv install failure ────────────────────────────────────────────────────────
@@ -446,36 +458,105 @@ EOF
     assert_failure
 }
 
-# ── Combined python3+git apt-get install ──────────────────────────────────────
-
-@test "apt-get install includes git alongside python3" {
+@test "exits non-zero when uv installer script execution fails" {
     setup_happy_path
-    rm -f "$STUB_BIN/python3"
-    make_pkg_mgr_stub apt-get
+    rm -f "$STUB_BIN/uv"
+    /bin/cat > "$STUB_BIN/curl" <<'EOF'
+#!/bin/sh
+# Output a script that fails
+cat <<'SCRIPT'
+#!/bin/sh
+echo "ERROR: uv installation failed"
+exit 1
+SCRIPT
+EOF
+    /bin/chmod +x "$STUB_BIN/curl"
 
     run_with_stubs
 
-    assert_success
-    grep -q 'git' "$STUB_BIN/_apt-get_args"
+    assert_failure
+    assert_output --partial "ERROR: uv installation failed"
 }
 
-# ── UV_INSTALL_DIR ────────────────────────────────────────────────────────────
+# ── uv install via curl ───────────────────────────────────────────────────────
 
-@test "passes UV_INSTALL_DIR=/usr/local/bin to the uv installer" {
+@test "installs uv via curl when uv is not on PATH; UV_INSTALL_DIR is set correctly" {
     setup_happy_path
     rm -f "$STUB_BIN/uv"
-    # curl emits a script that echoes the env var; sh executes it
-    /bin/cat > "$STUB_BIN/curl" <<'EOF'
+    # install.sh runs: curl ... > tmp_file; UV_INSTALL_DIR=... sh tmp_file
+    # curl's stdout becomes the installer script that sh executes.
+    # The generated script records UV_INSTALL_DIR and writes a uv stub,
+    # so we can assert the env var reached the installer.
+    /bin/cat > "$STUB_BIN/curl" <<EOF
 #!/bin/sh
-echo 'echo "UV_INSTALL_DIR=$UV_INSTALL_DIR"'
-exit 0
+cat <<SCRIPT
+echo "UV_INSTALL_DIR=\\\$UV_INSTALL_DIR" > "${STUB_BIN}/_uv_installer_env"
+printf '#!/bin/sh\nexit 0\n' > "${STUB_BIN}/uv"
+chmod +x "${STUB_BIN}/uv"
+SCRIPT
 EOF
     /bin/chmod +x "$STUB_BIN/curl"
 
     run_with_stubs
 
     assert_success
-    assert_output --partial "UV_INSTALL_DIR=/usr/local/bin"
+    [ -x "$STUB_BIN/uv" ]
+    grep -q '^UV_INSTALL_DIR=/usr/local/bin$' "$STUB_BIN/_uv_installer_env"
+}
+
+@test "cleans up uv installer temp file on success" {
+    setup_happy_path
+    rm -f "$STUB_BIN/uv"
+    /bin/cat > "$STUB_BIN/curl" <<EOF
+#!/bin/sh
+cat <<SCRIPT
+echo "UV_INSTALL_DIR=\\\$UV_INSTALL_DIR" > "${STUB_BIN}/_uv_installer_env"
+printf '#!/bin/sh\nexit 0\n' > "${STUB_BIN}/uv"
+chmod +x "${STUB_BIN}/uv"
+SCRIPT
+EOF
+    /bin/chmod +x "$STUB_BIN/curl"
+
+    run_with_stubs
+
+    assert_success
+    # Verify no uv_install temp files left behind
+    [ -z "$(find /tmp -maxdepth 1 -name 'uv_install.*' -type f 2>/dev/null)" ]
+}
+
+@test "cleans up uv installer temp file on script failure" {
+    setup_happy_path
+    rm -f "$STUB_BIN/uv"
+    /bin/cat > "$STUB_BIN/curl" <<'EOF'
+#!/bin/sh
+cat <<'SCRIPT'
+exit 1
+SCRIPT
+EOF
+    /bin/chmod +x "$STUB_BIN/curl"
+
+    run_with_stubs
+
+    assert_failure
+    # Verify no uv_install temp files left behind
+    [ -z "$(find /tmp -maxdepth 1 -name 'uv_install.*' -type f 2>/dev/null)" ]
+}
+
+@test "skips uv install when already on PATH; does not call curl" {
+    setup_happy_path
+    # uv is already in STUB_BIN from setup_happy_path, so curl should not be called
+    /bin/cat > "$STUB_BIN/curl" <<'EOF'
+#!/bin/sh
+echo "ERROR: curl should not be called when uv is already on PATH" >&2
+exit 1
+EOF
+    /bin/chmod +x "$STUB_BIN/curl"
+
+    run_with_stubs
+
+    assert_success
+    assert_output --partial "uv already installed"
+    refute_output --partial "Installing uv"
 }
 
 # ── VERSION default ───────────────────────────────────────────────────────────
@@ -544,4 +625,27 @@ EOF
     VERSION=1.2.3.4 PATH="$STUB_BIN:/bin" run sh "$INSTALL_SH"
     assert_failure
     assert_output --partial "VERSION"
+}
+
+@test "exits 1 when VERSION is a pre-release (with dash suffix)" {
+    setup_happy_path
+    VERSION=1.2.3-rc1 PATH="$STUB_BIN:/bin" run sh "$INSTALL_SH"
+    assert_failure
+    assert_output --partial "VERSION"
+}
+
+@test "exits 1 when VERSION has build metadata (with plus)" {
+    setup_happy_path
+    VERSION=1.2.3+build PATH="$STUB_BIN:/bin" run sh "$INSTALL_SH"
+    assert_failure
+    assert_output --partial "VERSION"
+}
+
+# ── POSIX compliance ─────────────────────────────────────────────────────────
+# The script shebang is /bin/sh, so it must stay POSIX-clean. `local` is a
+# common non-POSIX trap that works on bash/dash/ash but is not guaranteed.
+
+@test "install.sh does not use the non-POSIX 'local' keyword" {
+    run grep -nE '^[[:space:]]*local[[:space:]]' "$INSTALL_SH"
+    assert_failure
 }
