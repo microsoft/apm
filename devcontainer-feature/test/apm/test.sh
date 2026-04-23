@@ -5,19 +5,8 @@ set -e
 # shellcheck source=/dev/null
 source dev-container-features-test-lib
 
-# ── Tests ────────────────────────────────────────────────────────────────────
+# Source generic checks (applies to all distros)
+# shellcheck source=/dev/null
+source "$(dirname "$0")/generic-checks.sh"
 
-check "apm binary is on PATH" \
-    command -v apm
-
-check "apm --version exits cleanly" \
-    apm --version
-
-check "apm --version outputs a semver string" \
-    bash -c "apm --version | grep -E '[0-9]+\.[0-9]+\.[0-9]+'"
-
-check "apm --help exits cleanly" \
-    apm --help
-
-# ── Report ────────────────────────────────────────────────────────────────────
 reportResults
