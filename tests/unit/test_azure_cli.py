@@ -57,8 +57,10 @@ class TestGetBearerToken:
             provider = AzureCliBearerProvider()
             token = provider.get_bearer_token()
             assert token == FAKE_JWT
-            # Verify cache is populated
-            assert provider._cache[AzureCliBearerProvider.ADO_RESOURCE_ID] == FAKE_JWT
+            # Verify cache is populated (tuple of (token, expires_at) since #856 follow-up F4)
+            cached_token, cached_expiry = provider._cache[AzureCliBearerProvider.ADO_RESOURCE_ID]
+            assert cached_token == FAKE_JWT
+            assert cached_expiry is None  # bare-JWT fallback path -- no expiry parsed
 
     def test_get_bearer_caches_result(self):
         mock_result = MagicMock()
@@ -209,6 +211,6 @@ class TestThreadSafety:
 
             # All threads got the same token
             assert all(r == FAKE_JWT for r in results)
-            # subprocess.run called at most a small number of times
-            # (ideally 1, but a few is acceptable under contention)
-            assert mock_run.call_count <= 3
+            # Singleflight under the lock guarantees exactly one subprocess call
+            # even under heavy thread contention. Tightened in #856 follow-up C7+C8.
+            assert mock_run.call_count == 1

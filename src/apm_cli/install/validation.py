@@ -255,7 +255,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                             )
                             if bearer_result.returncode == 0:
                                 # Emit deferred stale-PAT warning via resolver
-                                auth_resolver._emit_stale_pat_diagnostic(
+                                auth_resolver.emit_stale_pat_diagnostic(
                                     dep_ref.host or "dev.azure.com"
                                 )
                                 if verbose_log:

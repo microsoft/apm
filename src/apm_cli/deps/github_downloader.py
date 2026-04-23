@@ -18,7 +18,7 @@ import git
 from git import Repo, RemoteProgress
 from git.exc import GitCommandError, InvalidGitRepositoryError
 
-from ..core.auth import AuthResolver
+from ..core.auth import AuthContext, AuthResolver
 from ..models.apm_package import (
     DependencyReference,
     PackageInfo,
@@ -502,7 +502,7 @@ class GitHubPackageDownloader:
         dep_ctx = self.auth_resolver.resolve_for_dep(dep_ref)
         return dep_ctx.token
 
-    def _resolve_dep_auth_ctx(self, dep_ref: Optional[DependencyReference] = None):
+    def _resolve_dep_auth_ctx(self, dep_ref: Optional[DependencyReference] = None) -> Optional[AuthContext]:
         """Resolve the full AuthContext for a dependency.
 
         Returns the AuthContext from AuthResolver, or None for generic hosts
@@ -523,25 +523,12 @@ class GitHubPackageDownloader:
             return None
 
         ctx = self.auth_resolver.resolve_for_dep(dep_ref)
-        # Verbose source surfacing (#852): when APM_VERBOSE=1 is set by the
-        # caller (install --verbose), emit a one-time per-host log line so
-        # users can see which credential source was actually used.
+        # Verbose source surfacing (#852): one-time per-host log line so users
+        # can see which credential source was actually used. Routed through
+        # AuthResolver.notify_auth_source() (#856 follow-up F2) so the line
+        # obeys the same verbose-channel logic as every other diagnostic.
         if os.environ.get("APM_VERBOSE") == "1":
-            host_key = (dep_host or "").lower()
-            if not hasattr(self, "_verbose_auth_logged_hosts"):
-                self._verbose_auth_logged_hosts = set()
-            if host_key and host_key not in self._verbose_auth_logged_hosts:
-                self._verbose_auth_logged_hosts.add(host_key)
-                if ctx and ctx.source != "none":
-                    if ctx.auth_scheme == "bearer":
-                        sys.stderr.write(
-                            f"  [i] {host_key} -- using bearer from az cli "
-                            f"(source: {ctx.source})\n"
-                        )
-                    else:
-                        sys.stderr.write(
-                            f"  [i] {host_key} -- token from {ctx.source}\n"
-                        )
+            self.auth_resolver.notify_auth_source(dep_host or "", ctx)
         return ctx
 
     def _build_noninteractive_git_env(
@@ -989,7 +976,7 @@ class GitHubPackageDownloader:
                                     bearer_url, target_path, env=bearer_env,
                                     progress=progress_reporter, **clone_kwargs,
                                 )
-                                self.auth_resolver._emit_stale_pat_diagnostic(
+                                self.auth_resolver.emit_stale_pat_diagnostic(
                                     dep_host or "dev.azure.com"
                                 )
                                 if verbose_callback:
@@ -1225,7 +1212,7 @@ class GitHubPackageDownloader:
                             output = g.ls_remote("--tags", "--heads", bearer_url, env=bearer_env)
                             refs = self._parse_ls_remote_output(output)
                             # Emit stale-PAT diagnostic via the resolver
-                            self.auth_resolver._emit_stale_pat_diagnostic(
+                            self.auth_resolver.emit_stale_pat_diagnostic(
                                 dep_ref.host or default_host()
                             )
                             return self._sort_remote_refs(refs)

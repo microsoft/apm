@@ -104,8 +104,45 @@ def _init_project(project_dir: Path) -> None:
     }))
 
 
-ADO_TEST_REPO = "dev.azure.com/dmeppiel-org/market-js-app/_git/compliance-rules"
-EXPECTED_PATH_PARTS = ("dmeppiel-org", "market-js-app", "compliance-rules")
+def _expected_path_parts_from_repo(repo: str) -> tuple[str, str, str]:
+    """Derive the (org, project, repo) path parts from an ADO repo URL fragment.
+
+    Accepts forms like:
+      dev.azure.com/<org>/<project>/_git/<repo>
+      <org>.visualstudio.com/<project>/_git/<repo>
+
+    Mirrors how :func:`apm_cli.utils.github_host.parse_ado_url` normalizes
+    the on-disk install path. Used by the bearer e2e tests so #856 review C2/C3
+    can override the test repo via APM_TEST_ADO_REPO without editing source.
+    """
+    cleaned = repo.replace("https://", "").replace("http://", "")
+    parts = cleaned.split("/")
+    if not parts:
+        raise ValueError(f"Cannot parse ADO repo: {repo!r}")
+    host = parts[0]
+    if host == "dev.azure.com":
+        if len(parts) < 5 or parts[3] != "_git":
+            raise ValueError(
+                f"Expected dev.azure.com/<org>/<project>/_git/<repo>, got {repo!r}"
+            )
+        return (parts[1], parts[2], parts[4])
+    if host.endswith(".visualstudio.com"):
+        if len(parts) < 4 or parts[2] != "_git":
+            raise ValueError(
+                f"Expected <org>.visualstudio.com/<project>/_git/<repo>, got {repo!r}"
+            )
+        org = host.split(".", 1)[0]
+        return (org, parts[1], parts[3])
+    raise ValueError(f"Unrecognised ADO host {host!r} in {repo!r}")
+
+
+# C2/C3 #856: read APM_TEST_ADO_REPO so the workflow can override the
+# test target via input without code change.
+ADO_TEST_REPO = os.getenv(
+    "APM_TEST_ADO_REPO",
+    "dev.azure.com/dmeppiel-org/market-js-app/_git/compliance-rules",
+)
+EXPECTED_PATH_PARTS = _expected_path_parts_from_repo(ADO_TEST_REPO)
 
 
 # ---------------------------------------------------------------------------

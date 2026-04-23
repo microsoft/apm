@@ -1088,6 +1088,9 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         apm install --mcp api --url https://example.com/mcp                   # remote http/sse
         apm install --mcp fetch -- npx -y @modelcontextprotocol/server-fetch  # stdio (post-- argv)
     """
+    # C1 #856: defaults BEFORE try so the finally clause never sees an
+    # UnboundLocalError if InstallLogger(...) raises during construction.
+    _apm_verbose_prev = os.environ.get("APM_VERBOSE")
     try:
         # Create structured logger for install output early so exception
         # handlers can always reference it (avoids UnboundLocalError if
@@ -1097,7 +1100,6 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         # HACK(#852): surface --verbose to deeper auth layers via env var until
         # AuthResolver gains a first-class verbose channel. Restored in finally
         # below to keep the mutation scoped to this command invocation.
-        _apm_verbose_prev = os.environ.get("APM_VERBOSE")
         if verbose:
             os.environ["APM_VERBOSE"] = "1"
 
@@ -1280,6 +1282,10 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         # Create shared auth resolver for all downloads in this CLI invocation
         # to ensure credentials are cached and reused (prevents duplicate auth popups)
         auth_resolver = AuthResolver()
+        # F2/F3 #856: thread the InstallLogger into AuthResolver so the verbose
+        # auth-source line and the deferred stale-PAT [!] warning route through
+        # CommandLogger / DiagnosticCollector instead of stderr/inline writes.
+        auth_resolver.set_logger(logger)
 
         # Check if apm.yml exists
         apm_yml_exists = manifest_path.exists()

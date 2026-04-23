@@ -19,10 +19,13 @@ Usage::
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import threading
-from typing import Optional
+import time
+from datetime import datetime, timezone
+from typing import Optional, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -73,9 +76,18 @@ class AzureCliBearerProvider:
 
     ADO_RESOURCE_ID: str = "499b84ac-1321-427f-aa17-267ca6975798"
 
+    # Refresh slack: refresh tokens this many seconds before their actual expiry
+    # so that an in-flight request never gets HTTP 401 on a token we considered
+    # "fresh" 100ms ago.
+    _EXPIRY_SLACK_SECONDS: int = 60
+
     def __init__(self, az_command: str = "az") -> None:
         self._az_command = az_command
-        self._cache: dict[str, str] = {}
+        # Cache stores (token, expires_at_epoch_seconds). expires_at is None
+        # if the response did not include an expiresOn field (very old az
+        # versions); in that case the token is treated as never-expiring
+        # within this process, matching the prior behaviour.
+        self._cache: dict[str, Tuple[str, Optional[float]]] = {}
         self._lock = threading.Lock()
 
     # -- public API ---------------------------------------------------------
@@ -103,23 +115,30 @@ class AzureCliBearerProvider:
                 - ``"subprocess_error"`` -- some other subprocess failure
                   (timeout, signal, malformed response).
         """
+        # C7/F4 #852: singleflight via lock-held subprocess. Holding the lock
+        # across the (potentially 200-500 ms) `az` invocation means concurrent
+        # callers wait for the first one to populate the cache instead of all
+        # spawning their own subprocess. APM is a CLI -- this contention is
+        # rare in practice, and the simplicity is worth the brief stall.
         with self._lock:
             cached = self._cache.get(self.ADO_RESOURCE_ID)
             if cached is not None:
-                return cached
+                token, expires_at = cached
+                if expires_at is None or expires_at > time.time():
+                    return token
+                # Expired -- fall through to refresh under the same lock.
 
-        # az availability check (outside lock -- no shared-state mutation).
-        if not self.is_available():
-            raise AzureCliBearerError(
-                "az CLI is not installed or not on PATH",
-                kind="az_not_found",
-            )
+            # az availability check (also under lock so we don't race with
+            # a hypothetical clear_cache + chdir/PATH change in another thread).
+            if not self.is_available():
+                raise AzureCliBearerError(
+                    "az CLI is not installed or not on PATH",
+                    kind="az_not_found",
+                )
 
-        token = self._run_get_access_token()
-
-        with self._lock:
-            self._cache[self.ADO_RESOURCE_ID] = token
-        return token
+            token, expires_at = self._run_get_access_token()
+            self._cache[self.ADO_RESOURCE_ID] = (token, expires_at)
+            return token
 
     def get_current_tenant_id(self) -> Optional[str]:
         """Return the active Entra tenant ID (best-effort).
@@ -153,21 +172,27 @@ class AzureCliBearerProvider:
 
     # -- internals ----------------------------------------------------------
 
-    def _run_get_access_token(self) -> str:
-        """Shell out to ``az account get-access-token`` and return the JWT.
+    def _run_get_access_token(self) -> Tuple[str, Optional[float]]:
+        """Shell out to ``az account get-access-token`` and return ``(jwt, expires_at)``.
+
+        ``expires_at`` is the absolute epoch-second timestamp at which the
+        token expires (already adjusted by ``_EXPIRY_SLACK_SECONDS`` so callers
+        can use a strict ``> time.time()`` comparison). It may be ``None`` if
+        the az version in use does not include ``expiresOn`` in JSON output --
+        in which case the token is treated as never-expiring within this
+        process (the prior behaviour).
 
         Raises AzureCliBearerError on any failure.
         """
+        # F4 #852: query JSON so we can read both accessToken and expiresOn.
         cmd = [
             self._az_command,
             "account",
             "get-access-token",
             "--resource",
             self.ADO_RESOURCE_ID,
-            "--query",
-            "accessToken",
             "-o",
-            "tsv",
+            "json",
         ]
 
         try:
@@ -198,14 +223,29 @@ class AzureCliBearerProvider:
                 stderr=stderr_text,
             )
 
-        token = result.stdout.strip()
+        raw = (result.stdout or "").strip()
+        token: str = ""
+        expires_at: Optional[float] = None
+        # Try JSON first (modern az). Fall back to treating stdout as a bare
+        # JWT for backwards compatibility (very old az or unusual configs).
+        try:
+            payload = json.loads(raw)
+            token = (payload.get("accessToken") or "").strip()
+            expires_on = payload.get("expiresOn") or payload.get("expires_on")
+            if isinstance(expires_on, str) and expires_on:
+                expires_at = _parse_expires_on(expires_on)
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            token = raw
+
         if not _looks_like_jwt(token):
             raise AzureCliBearerError(
                 "az CLI returned a response that does not look like a JWT",
                 kind="subprocess_error",
                 stderr=(result.stderr or "").strip() or None,
             )
-        return token
+        if expires_at is not None:
+            expires_at -= self._EXPIRY_SLACK_SECONDS
+        return token, expires_at
 
 
 # ---------------------------------------------------------------------------
@@ -243,3 +283,29 @@ def _looks_like_jwt(value: str) -> bool:
     server's job.
     """
     return value.startswith("eyJ") and len(value) > 100
+
+
+def _parse_expires_on(value: str) -> Optional[float]:
+    """Parse an ``expiresOn`` field from ``az account get-access-token`` JSON.
+
+    Accepts both forms emitted by various az versions:
+      * ISO-8601 with timezone, e.g. ``"2025-01-15T08:30:00.000000+00:00"``.
+      * Local-naive datetime, e.g. ``"2025-01-15 08:30:00.000000"`` (older az).
+
+    Returns the absolute epoch seconds (UTC), or ``None`` on parse failure.
+    Local-naive timestamps are interpreted as the local timezone since that
+    is what those az versions emit.
+    """
+    raw = value.strip()
+    if not raw:
+        return None
+    # Normalize ISO 8601 separator if present.
+    candidate = raw.replace(" ", "T", 1) if " " in raw and "T" not in raw else raw
+    try:
+        dt = datetime.fromisoformat(candidate)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        # az emits naive timestamps in *local* time on older versions; respect that.
+        dt = dt.astimezone()
+    return dt.astimezone(timezone.utc).timestamp()
