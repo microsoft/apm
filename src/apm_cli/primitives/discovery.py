@@ -437,9 +437,10 @@ def _glob_match(rel_path: str, pattern: str) -> bool:
             memo[key] = False
             return False
 
-        # fnmatchcase keeps case sensitivity (POSIX-correct on all OSes)
+        # Use platform-aware fnmatch semantics so Windows matching remains
+        # case-insensitive, consistent with prior glob.glob() behavior.
         result = (
-            fnmatch.fnmatchcase(path_parts[pi], current)
+            fnmatch.fnmatch(path_parts[pi], current)
             and _match(pi + 1, qi + 1)
         )
         memo[key] = result
