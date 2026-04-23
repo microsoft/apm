@@ -56,11 +56,10 @@ permissions:
   pull-requests: read
 
 jobs:
-  resolve-sha:
-    name: resolve
+  gate:
+    name: gate
     runs-on: ubuntu-24.04
-    outputs:
-      sha: ${{ steps.sha.outputs.sha }}
+    timeout-minutes: 35
     steps:
       - name: Resolve PR head SHA
         id: sha
@@ -79,16 +78,10 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "[merge-gate] resolved head SHA: $sha"
 
-  gate:
-    name: gate
-    needs: resolve-sha
-    runs-on: ubuntu-24.04
-    timeout-minutes: 35
-    steps:
       - name: Checkout PR head
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.resolve-sha.outputs.sha }}
+          ref: ${{ steps.sha.outputs.sha }}
           sparse-checkout: |
             .github/scripts/ci
 
@@ -96,7 +89,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          SHA: ${{ needs.resolve-sha.outputs.sha }}
+          SHA: ${{ steps.sha.outputs.sha }}
           # All PR-time checks the gate aggregates. Keep this in sync with
           # the underlying workflows: ci.yml emits Build & Test (Linux),
           # ci-integration-pr-stub.yml emits the other four.
@@ -108,4 +101,5 @@ jobs:
         run: |
           chmod +x .github/scripts/ci/merge_gate_wait.sh
           .github/scripts/ci/merge_gate_wait.sh
+
 
