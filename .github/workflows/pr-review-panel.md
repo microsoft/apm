@@ -117,29 +117,6 @@ gh pr diff "$PR"
 Load the **apm-review-panel** skill and follow its execution checklist
 and output contract exactly. The skill owns reviewer routing, persona
 dispatch, the Auth Expert conditional rule, the pre-arbitration
-completeness gate, template loading, and verdict shape.
-
-Auth Expert is the only conditional panelist. The skill decides
-activation from the already-fetched PR title/body/files/diff using a
-fast-path file list plus a fallback self-check. Do not invent a
-separate scope-analysis sub-agent for this. If the skill marks Auth
-Expert inactive, do not dispatch it; keep the Auth Expert heading in
-the final verdict and fill it with `Not activated -- <reason>`.
-
-## Step 3: Output contract
-
-- You may post **exactly one** comment for this entire panel run, and it
-  **must** be the final synthesized verdict from the **CEO** (after
-  arbitration). Sub-agent personas (Python Architect, CLI Logging
-  Expert, DevX UX Expert, Supply Chain Security Expert, OSS Growth
-  Hacker, Auth Expert when active) **do not** post comments — they
-  return their findings to the CEO, who synthesizes the single verdict.
-  When dispatching each sub-agent, instruct it explicitly: "do not post
-  any comment; return your findings to the orchestrator."
-- Do not call the GitHub API directly. Write the comment via the
-  provided output channel; a downstream publisher posts it.
-
-## Step 4: Emit the verdict
-
-Write the CEO's final verdict comment body to the agent output channel.
-The downstream publisher will post it to PR #$PR.
+completeness gate, CEO arbitration, template loading, verdict shape,
+and the one-comment emission contract -- including writing the final
+comment to `safe-outputs.add-comment` rather than the GitHub API.
