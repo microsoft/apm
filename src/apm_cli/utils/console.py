@@ -56,10 +56,17 @@ STATUS_SYMBOLS = {
 
 
 def _get_console() -> Optional[Any]:
-    """Get Rich console instance if available."""
+    """Get Rich console instance if available.
+
+    Passes ``force_terminal=False`` when stdout is not a TTY so that Rich
+    does not emit ANSI escape sequences (bold, italic, colour) to non-terminal
+    outputs such as pipes, files, or test runners.  Box-drawing characters
+    used in Rich tables are still emitted; those are acceptable Unicode output.
+    """
     if RICH_AVAILABLE:
         try:
-            return Console()
+            is_tty = getattr(sys.stdout, "isatty", lambda: False)()
+            return Console(force_terminal=is_tty)
         except Exception:
             pass
     return None
