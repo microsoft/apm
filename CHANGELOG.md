@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` (user scope): `init_link_resolver` now scopes `discover_primitives` to `~/.apm/` instead of `~/`, preventing recursive-glob across the entire home directory. Fixes #830 (#850)
 - Audit blindness for local `.apm/` content -- `apm audit --ci` now detects drift, missing files, and content tampering on locally-authored files (not just installed packages). (#887)
 - Packer leak risk: local-content fields (`local_deployed_files`, `local_deployed_file_hashes`) are now stripped from bundled lockfiles, preventing phantom self-entries on unpack. (#887)
 
