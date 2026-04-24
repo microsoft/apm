@@ -34,7 +34,7 @@ from ..core.target_detection import TargetParamType
     default="./build",
     help="Output directory (default: ./build).",
 )
-@click.option("--dry-run", is_flag=True, default=False, help="Show what would be packed without writing.")
+@click.option("--dry-run", is_flag=True, default=False, help="Show what would be packed without writing")
 @click.option("--force", is_flag=True, default=False, help="On collision, last writer wins.")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed packing information")
 @click.pass_context
@@ -107,7 +107,7 @@ def pack_cmd(ctx, fmt, target, archive, output, dry_run, force, verbose):
     help="Target directory (default: current directory).",
 )
 @click.option("--skip-verify", is_flag=True, default=False, help="Skip bundle completeness check.")
-@click.option("--dry-run", is_flag=True, default=False, help="Show what would be unpacked without writing.")
+@click.option("--dry-run", is_flag=True, default=False, help="Show what would be unpacked without writing")
 @click.option("--force", is_flag=True, default=False, help="Deploy despite critical hidden-character findings.")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed unpacking information")
 @click.pass_context

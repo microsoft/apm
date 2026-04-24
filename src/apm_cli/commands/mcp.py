@@ -84,8 +84,63 @@ def mcp():
         "  apm mcp install api --transport http --url https://example.com/mcp"
     ),
 )
+@click.argument("name", required=True)
+@click.option(
+    "--transport",
+    type=click.Choice(["stdio", "http", "sse", "streamable-http"]),
+    default=None,
+    help="MCP transport. Inferred from --url or post-`--` argv when omitted",
+)
+@click.option(
+    "--url",
+    default=None,
+    help="MCP server URL for http/sse/streamable-http transports",
+)
+@click.option(
+    "--env",
+    "env_pairs",
+    multiple=True,
+    help="Environment variable for stdio MCP, repeatable",
+)
+@click.option(
+    "--header",
+    "header_pairs",
+    multiple=True,
+    help="HTTP header for remote MCP, repeatable",
+)
+@click.option(
+    "--mcp-version",
+    "mcp_version",
+    default=None,
+    help="Pin MCP registry entry to a specific version",
+)
+@click.option(
+    "--registry",
+    "registry_url",
+    default=None,
+    help="MCP registry URL for resolving NAME",
+)
+@click.option("--dev", is_flag=True, default=False, help="Add to devDependencies")
+@click.option("--dry-run", is_flag=True, default=False, help="Show what would be added without writing")
+@click.option("--force", is_flag=True, default=False, help="Replace an existing MCP entry")
+@click.option("--verbose", "-v", is_flag=True, default=False, help="Show detailed output")
+@click.option("--no-policy", is_flag=True, default=False, help="Skip org policy enforcement for this invocation")
 @click.pass_context
-def mcp_install(ctx):
+def mcp_install(
+    ctx,
+    name,
+    transport,
+    url,
+    env_pairs,
+    header_pairs,
+    mcp_version,
+    registry_url,
+    dev,
+    dry_run,
+    force,
+    verbose,
+    no_policy,
+):
     """Forward all args to 'apm install --mcp ...'.
 
     Examples:
@@ -103,12 +158,35 @@ def mcp_install(ctx):
     # ``-y`` would be re-parsed as Click options when forwarded to
     # ``cli.main()``.  Re-insert the boundary by inspecting the raw
     # process argv (same seam the ``install`` command uses).
+    forwarded = ["install", "--mcp", name]
+    if transport:
+        forwarded.extend(["--transport", transport])
+    if url:
+        forwarded.extend(["--url", url])
+    for env_pair in env_pairs:
+        forwarded.extend(["--env", env_pair])
+    for header_pair in header_pairs:
+        forwarded.extend(["--header", header_pair])
+    if mcp_version:
+        forwarded.extend(["--mcp-version", mcp_version])
+    if registry_url:
+        forwarded.extend(["--registry", registry_url])
+    if dev:
+        forwarded.append("--dev")
+    if dry_run:
+        forwarded.append("--dry-run")
+    if force:
+        forwarded.append("--force")
+    if verbose:
+        forwarded.append("--verbose")
+    if no_policy:
+        forwarded.append("--no-policy")
+
     _, post_dd = _split_argv_at_double_dash(_get_invocation_argv())
     if post_dd:
-        pre_args = ctx.args[: len(ctx.args) - len(post_dd)]
-        forwarded = ["install", "--mcp", *pre_args, "--", *post_dd]
+        forwarded.extend(["--", *post_dd])
     else:
-        forwarded = ["install", "--mcp", *ctx.args]
+        forwarded.extend(ctx.args)
 
     try:
         cli.main(args=forwarded, standalone_mode=False)
