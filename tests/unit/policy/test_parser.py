@@ -321,6 +321,26 @@ class TestLoadPolicyFromString(unittest.TestCase):
         policy, warnings = load_policy("version: '2.0'")
         self.assertEqual(policy.version, "2.0")
 
+    def test_long_yaml_string_does_not_crash(self):
+        """Long YAML strings (> PATH_MAX on macOS) must not raise OSError."""
+        # Build a YAML payload larger than typical PATH_MAX limits (1024 bytes)
+        # so that Path.is_file() can raise ENAMETOOLONG on macOS.
+        long_comment = "# " + "x" * 2048 + "\n"
+        yaml_str = (
+            long_comment
+            + "name: long-policy\n"
+            + "version: '1.0'\n"
+            + "enforcement: off\n"
+        )
+        # Ensure the string is long enough to trigger ENAMETOOLONG on macOS
+        self.assertGreater(len(yaml_str), 1024)
+
+        # This should parse as inline YAML, not as a file path
+        policy, warnings = load_policy(yaml_str)
+        self.assertEqual(policy.name, "long-policy")
+        self.assertEqual(policy.version, "1.0")
+        self.assertEqual(policy.enforcement, "off")
+
 
 class TestLoadPolicyFromFile(unittest.TestCase):
     """Test load_policy from a file path."""

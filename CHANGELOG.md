@@ -10,15 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- New `pr-description-skill` skill bundle: enforces a 10-section PR body shape (TL;DR / Problem / Approach / Implementation / Diagrams / Trade-offs / Benefits / Validation / How to test, plus the `Co-authored-by` trailer) with a cite-or-omit rule for every WHY-claim, GFM-rendered output, ASCII-only template source, and validated mermaid diagrams. Captures the meta-pattern from PR #882 as a reusable scaffold so future PR bodies meet the same bar without per-PR specialist subagent intervention. (#884)
 - `includes:` manifest field (auto | list) for explicit governance of local `.apm/` content. Closes audit-blindness gap (#887).
 - `apm audit --ci` now verifies hash integrity of locally deployed files, detecting hand-edits and config drift. (#887)
 - `policy.manifest.require_explicit_includes` policy field enforces explicit `includes` lists (rejects `auto` + undeclared). (#887)
 - `includes-consent` advisory appears in `apm audit` CLI/JSON output when local content is deployed without an explicit `includes:` declaration (#887)
 - `apm-primitives-architect` agent: reusable persona for designing and critiquing `.apm/` skill bundles. (#882)
+- `apm-triage-panel` skill: three-persona panel (DevX UX, Supply Chain Security, APM CEO; conditional OSS Growth Hacker) for issue triage producing single labelled-decision comment with structured JSON tail. Mirrors `apm-review-panel` orchestration model. (#915)
 - CI: add `APM Self-Check` to `ci.yml` for `apm audit --ci`, regeneration-drift validation, and `merge-gate.yml` `EXPECTED_CHECKS` coverage. (#885)
 
 ### Changed
 
+- `find_primitive_files()` now uses `os.walk` with early directory pruning so `compilation.exclude` patterns prevent traversal into excluded subtrees on large repos. (#870)
 - Lockfile in-memory shape: a synthesized self-entry now appears in `LockFile.dependencies` for local content. The on-disk YAML format is unchanged (data still serialized as flat `local_deployed_files`/`local_deployed_file_hashes` fields). (#887)
 - Hardened `apm-review-panel` skill: one-comment output contract, pre-arbitration completeness gate, Hybrid E Auth Expert routing, verdict template extracted to `assets/`, and `python-architect` mandatory three-artifact PR review contract (classDiagram + flowchart + Design patterns). (#882)
 - CI: smoke tests in `build-release.yml`'s `build-and-test` job (Linux x86_64, Linux arm64, Windows) are now gated to promotion boundaries (tag/schedule/dispatch) instead of running on every push to main. Push-time smoke duplicated the merge-time smoke gate in `ci-integration.yml` and burned ~15 redundant codex-binary downloads/day. Tag-cut releases still run smoke as a pre-ship gate; nightly catches upstream codex URL drift; merge-time still gates merges into main. (#878)
@@ -26,12 +29,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` (user scope): `init_link_resolver` now scopes `discover_primitives` to `~/.apm/` instead of `~/`, preventing recursive-glob across the entire home directory. Fixes #830 (#850)
 - Audit blindness for local `.apm/` content -- `apm audit --ci` now detects drift, missing files, and content tampering on locally-authored files (not just installed packages). (#887)
 - Packer leak risk: local-content fields (`local_deployed_files`, `local_deployed_file_hashes`) are now stripped from bundled lockfiles, preventing phantom self-entries on unpack. (#887)
 
 ### Removed
 
 - CI: deleted `ci-integration-pr-stub.yml`. The four stubs were a holdover from the pre-merge-gate model where branch protection required each Tier 2 check name directly. After #867, branch protection requires only `gate`, so the stubs are dead weight. Reduced `EXPECTED_CHECKS` in `merge-gate.yml` to just `Build & Test (Linux)`.
+
+### Fixed
+
+- `apm update` sanitises the subprocess environment before invoking the platform installer so the bundled PyInstaller `LD_LIBRARY_PATH` / `DYLD_*` no longer leak into system binaries (`curl`, `tar`, `sudo`) spawned by `install.sh`. Previously the installer's first `curl` call could abort with `libssl.so.3: version 'OPENSSL_3.2.0' not found` on distros whose system `libcurl` requires a newer OpenSSL ABI than the APM bundle ships (Debian trixie arm64 dev-containers, Fedora 43, and similar). Restoration uses PyInstaller's official `<VAR>_ORIG` protocol, preserving the user's own `LD_LIBRARY_PATH` exports. Closes #894
 
 ## [0.9.2] - 2026-04-23
 
@@ -52,6 +60,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+<<<<<<< fix-copilot-transport-validation-791
+- VS Code adapter now defaults to `http` transport when `transport_type` is missing from remote registry data, matching Copilot adapter behavior (#654)
+- Copilot adapter now validates remote `transport_type`, defaulting to `http` when missing/empty/whitespace and raising a clear `ValueError` for unrecognized transports, mirroring the VS Code adapter so both refuse bad registry data instead of silently writing garbage config (#791)
+- `apm install` no longer silently drops skills, agents, and commands when a Claude Code plugin also ships `hooks/*.json`. The package-type detection cascade now classifies plugin-shaped packages as `MARKETPLACE_PLUGIN` (which already maps hooks via the plugin synthesizer) before falling back to the hook-only classification, and emits a default-visibility `[!]` warning when a hook-only classification disagrees with the package's directory contents (#780)
+- Preserve custom git ports across protocols: non-default ports on `ssh://` and `https://` dependency URLs (e.g. Bitbucket Datacenter on SSH port 7999, self-hosted GitLab on HTTPS port 8443) are now captured as a first-class `port` field on `DependencyReference` and threaded through all clone URL builders. When the SSH clone fails, the HTTPS fallback reuses the same port instead of silently dropping it (#661, #731)
+- Detect port-like first path segment in SCP shorthand (`git@host:7999/path`) and raise an actionable error suggesting the `ssh://` URL form, instead of silently misparsing the port as part of the repository path (#784)
+- `apm install --global` now installs MCP servers to global-capable runtimes (Copilot CLI, Codex CLI) instead of blanket-skipping all MCP installation at user scope. Note: lockfile-path behavior at `--global` tracked in #794 (#638)
+- `--trust-transitive-mcp` no longer silently ignored when combined with `--global` (#638)
+- Token resolution now discriminates by port, fixing credential collisions across multiple self-hosted Git instances on the same host. Thanks @edenfunf! (#785)
+=======
 - `apm install` surfaces the custom port in clone / `ls-remote` error messages for generic git hosts. (#804)
 
 ## [0.9.1] - 2026-04-22
@@ -111,6 +129,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MCP_REGISTRY_URL` validated at startup (schemeless / unsupported schemes rejected; `http://` rejected by default, opt in via `MCP_REGISTRY_ALLOW_HTTP=1`); APM fails closed when a custom registry is unreachable during install pre-flight, instead of silently approving every MCP dep. Default registry keeps assume-valid for transient errors. (#814)
 - `apm install --mcp` defense-in-depth: rejects embedded `..` in dep names with a valid positive example, redacts URL credentials in diagnostic output (`https://user:token@host/` -> `https://host/`), warns on `--registry` / `MCP_REGISTRY_URL` pointing at loopback / link-local / RFC1918 / cloud-metadata hosts (including decimal-encoded loopback). (#810)
 - `SimpleRegistryClient` applies a `(connect=10s, read=30s)` timeout on every registry HTTP call, removing the unbounded-hang failure mode. Tunable via `MCP_REGISTRY_CONNECT_TIMEOUT` / `MCP_REGISTRY_READ_TIMEOUT`. (#810)
+>>>>>>> main
 
 ## [0.8.12] - 2026-04-19
 
