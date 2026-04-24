@@ -119,9 +119,15 @@ def pack_bundle(
         if effective_target == "minimal":
             effective_target = "all"
 
-    # 4. Collect deployed_files from all dependencies, filtered by target
+    # 4. Collect deployed_files from all dependencies, filtered by target.
+    #    Skip local-source entries: these include the synthesized root self-entry
+    #    (local_path == ".") and any local-path manifest deps. Local content is
+    #    not portable and is bundled separately via the project's own files
+    #    (or rejected outright at L89-97 for manifest-declared local deps).
     all_deployed: List[str] = []
     for dep in lockfile.get_all_dependencies():
+        if dep.source == "local":
+            continue
         all_deployed.extend(dep.deployed_files)
 
     filtered_files, path_mappings = _filter_files_by_target(all_deployed, effective_target)

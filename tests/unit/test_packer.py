@@ -562,3 +562,378 @@ class TestPackBundleMultiTarget:
         # Should include files from both .github/ (copilot) and .claude/ (claude)
         assert ".github/agents/a.md" in result.files
         assert ".claude/commands/b.md" in result.files
+
+
+class TestPackSourceLocalGuard:
+    """Source-local entries (self-entry, local-path deps) must NOT be bundled.
+
+    Issue #887 / task packer-source-guard: Local content is not portable.
+    The synthesized root self-entry (source='local', local_path='.') and
+    any manifest local-path deps must be excluded from the apm-format
+    bundle's collected deployed_files.
+    """
+
+    def _setup_with_self_entry(
+        self,
+        tmp_path: Path,
+        remote_files: list[str],
+        local_files: list[str],
+        *,
+        local_path: str = ".",
+        is_dev: bool = True,
+    ) -> Path:
+        """Create a project where the lockfile has a remote dep AND a local entry."""
+        project = tmp_path / "project"
+        project.mkdir()
+
+        (project / "apm.yml").write_text(
+            yaml.dump({"name": "test-pkg", "version": "1.0.0"}), encoding="utf-8"
+        )
+
+        # Materialize all referenced files on disk (covers both groups)
+        for fpath in remote_files + local_files:
+            full = project / fpath
+            if fpath.endswith("/"):
+                full.mkdir(parents=True, exist_ok=True)
+            else:
+                full.parent.mkdir(parents=True, exist_ok=True)
+                full.write_text(f"content of {fpath}", encoding="utf-8")
+
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="owner/remote-repo",
+                resolved_commit="abc123",
+                deployed_files=remote_files,
+            )
+        )
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="<self>" if local_path == "." else "local-pkg",
+                source="local",
+                local_path=local_path,
+                is_dev=is_dev,
+                deployed_files=local_files,
+            )
+        )
+        lockfile.write(project / "apm.lock.yaml")
+        return project
+
+    def test_apm_format_excludes_self_entry_files(self, tmp_path):
+        """Self-entry (source=local, local_path='.') files are excluded from apm bundle."""
+        remote = [".github/agents/remote.md"]
+        local = [".github/agents/local-self.md"]
+        project = self._setup_with_self_entry(tmp_path, remote, local)
+        out = tmp_path / "build"
+
+        result = pack_bundle(project, out, fmt="apm")
+
+        assert ".github/agents/remote.md" in result.files
+        assert ".github/agents/local-self.md" not in result.files
+
+    def test_apm_format_excludes_local_path_dep_files(self, tmp_path):
+        """Manifest local-path deps (source=local, local_path='./pkg/...') excluded.
+
+        L89-97 already rejects local manifest deps when apm.yml is parsed; this
+        test guards the lockfile-side path where the lockfile already contains
+        such a dep (e.g. produced by a prior install) but apm.yml has been
+        cleaned up. Behavior must remain consistent: do not bundle.
+        """
+        remote = [".github/agents/remote.md"]
+        local = [".github/agents/from-local-dep.md"]
+        project = self._setup_with_self_entry(
+            tmp_path,
+            remote,
+            local,
+            local_path="./packages/foo",
+            is_dev=False,
+        )
+        out = tmp_path / "build"
+
+        result = pack_bundle(project, out, fmt="apm")
+
+        assert ".github/agents/remote.md" in result.files
+        assert ".github/agents/from-local-dep.md" not in result.files
+
+    def test_apm_format_all_remote_unchanged(self, tmp_path):
+        """No local deps -> all remote files included (no regression)."""
+        remote = [".github/agents/a.md", ".github/agents/b.md"]
+        project = _setup_project(tmp_path, remote)
+        out = tmp_path / "build"
+
+        result = pack_bundle(project, out, fmt="apm")
+
+        assert set(result.files) == set(remote)
+
+    def test_apm_format_dry_run_excludes_local(self, tmp_path):
+        """Dry-run path also honours the source-local guard."""
+        remote = [".github/agents/remote.md"]
+        local = [".github/agents/leaked.md"]
+        project = self._setup_with_self_entry(tmp_path, remote, local)
+        out = tmp_path / "build"
+
+        result = pack_bundle(project, out, fmt="apm", dry_run=True)
+
+        assert ".github/agents/remote.md" in result.files
+        assert ".github/agents/leaked.md" not in result.files
+
+    def test_plugin_format_self_entry_not_processed_via_deps_loop(self, tmp_path):
+        """Regression: plugin exporter's deps loop must skip the self-entry.
+
+        Plugin format does not use ``dep.deployed_files`` directly; instead it
+        resolves each dep's install path on disk and scans it. If the self-entry
+        (source='local', local_path='.', is_dev=True) were not filtered, the
+        deps loop would resolve its install path to the project root and
+        re-collect every own-component, generating spurious collisions against
+        step 6's own-component collection.
+
+        The existing ``is_dev`` filter at plugin_exporter.py:473 prevents this.
+        This test guards that behavior by asserting no collision-from-deps is
+        reported when only the self-entry would have collided.
+        """
+        from apm_cli.bundle.plugin_exporter import export_plugin_bundle
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "apm.yml").write_text(
+            yaml.dump({"name": "test-pkg", "version": "1.0.0"}), encoding="utf-8"
+        )
+        # Own component on disk under .apm/agents/
+        (project / ".apm" / "agents").mkdir(parents=True)
+        (project / ".apm" / "agents" / "own.md").write_text("own", encoding="utf-8")
+
+        # Lockfile contains ONLY a self-entry (is_dev=True). No remote deps.
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="<self>",
+                source="local",
+                local_path=".",
+                is_dev=True,
+                deployed_files=[".apm/agents/own.md"],
+            )
+        )
+        lockfile.write(project / "apm.lock.yaml")
+
+        result = export_plugin_bundle(
+            project_root=project,
+            output_dir=tmp_path / "plugin-out",
+            dry_run=True,
+        )
+
+        # Own component must appear exactly once -- if the self-entry leaked
+        # through the deps loop, we'd see a collision (deps run before own).
+        own_matches = [f for f in result.files if f.endswith("own.md")]
+        assert len(own_matches) == 1, (
+            f"Self-entry should not be re-processed via deps loop; "
+            f"files={result.files}"
+        )
+
+    def test_plugin_format_self_entry_with_is_dev_false_would_leak(self, tmp_path):
+        """Confirm the is_dev filter is the active gate.
+
+        If a self-entry slipped in WITHOUT is_dev=True (older lockfile, bug),
+        the plugin deps loop would attempt to process it. This negative test
+        documents the current behavior and guards the contract that the
+        synthesizer in lockfile-self-entry MUST set is_dev=True.
+        """
+        from apm_cli.bundle.plugin_exporter import export_plugin_bundle
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "apm.yml").write_text(
+            yaml.dump({"name": "test-pkg", "version": "1.0.0"}), encoding="utf-8"
+        )
+        (project / ".apm" / "agents").mkdir(parents=True)
+        (project / ".apm" / "agents" / "own.md").write_text("own", encoding="utf-8")
+
+        # Self-entry WITHOUT is_dev -- simulates a buggy synthesizer
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="<self>",
+                source="local",
+                local_path=".",
+                is_dev=False,
+                deployed_files=[".apm/agents/own.md"],
+            )
+        )
+        lockfile.write(project / "apm.lock.yaml")
+
+        # The deps loop will try _dep_install_path on the self-entry. Whether
+        # this raises, double-collects, or silently no-ops is implementation
+        # detail; the contract we assert is just that no exception escapes
+        # AND the own component still appears at least once.
+        result = export_plugin_bundle(
+            project_root=project,
+            output_dir=tmp_path / "plugin-out2",
+            dry_run=True,
+        )
+        assert any(f.endswith("own.md") for f in result.files)
+
+
+class TestPackBundleStripsLocalFields:
+    """Issue #887 N1: enriched bundle lockfile must not carry the packager's
+    own ``local_deployed_files`` / ``local_deployed_file_hashes``.
+
+    Those fields describe packaging-time repo content, which is intentionally
+    excluded from the bundle by the source-local guard in pack_bundle().
+    Persisting them would cause LockFile.from_yaml() on the consumer side to
+    synthesize a self-entry whose deployed_files do not exist in the bundle
+    source dir -- breaking unpacker verification (unpacker.py:129).
+    """
+
+    def _setup_with_local_content(
+        self,
+        tmp_path: Path,
+        remote_files: list[str],
+        local_files: list[str],
+    ) -> Path:
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "apm.yml").write_text(
+            yaml.dump({"name": "test-pkg", "version": "1.0.0"}), encoding="utf-8"
+        )
+        for fpath in remote_files + local_files:
+            full = project / fpath
+            full.parent.mkdir(parents=True, exist_ok=True)
+            full.write_text(f"content of {fpath}", encoding="utf-8")
+
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="owner/remote-repo",
+                resolved_commit="abc123",
+                deployed_files=remote_files,
+            )
+        )
+        # Persist packager's own local content via the flat fields.
+        lockfile.local_deployed_files = list(local_files)
+        lockfile.local_deployed_file_hashes = {f: "deadbeef" for f in local_files}
+        lockfile.write(project / "apm.lock.yaml")
+        return project
+
+    def test_pack_apm_bundle_excludes_local_self_entry(self, tmp_path):
+        """Bundle lockfile has no self-entry and no flat local-content fields."""
+        remote = [".github/agents/remote.md"]
+        local = [".github/agents/own.md", ".github/instructions/own.md"]
+        project = self._setup_with_local_content(tmp_path, remote, local)
+        out = tmp_path / "build"
+
+        result = pack_bundle(project, out, fmt="apm")
+
+        # File payload: no local content shipped (existing source-local guard)
+        assert ".github/agents/remote.md" in result.files
+        for f in local:
+            assert f not in result.files
+
+        # Bundle lockfile: must not carry packager-side local-content metadata
+        bundle_lock_text = (result.bundle_path / "apm.lock.yaml").read_text(
+            encoding="utf-8"
+        )
+        bundle_lock = yaml.safe_load(bundle_lock_text)
+        assert "local_deployed_files" not in bundle_lock
+        assert "local_deployed_file_hashes" not in bundle_lock
+
+        # Round-trip through LockFile.from_yaml() must NOT synthesize a self-entry
+        # (since the flat fields are absent, the synthesizer guard short-circuits).
+        # Strip the pack: section first since LockFile parser ignores it.
+        loaded = LockFile.from_yaml(bundle_lock_text)
+        assert loaded.local_deployed_files == []
+        assert loaded.local_deployed_file_hashes == {}
+        for dep in loaded.get_all_dependencies():
+            assert dep.source != "local", (
+                f"Unexpected local-source dep in bundle lockfile: {dep.repo_url}"
+            )
+            assert dep.repo_url != "<self>"
+
+    def test_pack_plugin_bundle_excludes_local_self_entry(self, tmp_path):
+        """Plugin format does not write a lockfile, but the file payload must
+        still exclude packager-side local content. Confirms the plugin path
+        (plugin_exporter.py is_dev filter at L470-476) keeps local content out.
+        """
+        from apm_cli.bundle.plugin_exporter import export_plugin_bundle
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "apm.yml").write_text(
+            yaml.dump({"name": "test-pkg", "version": "1.0.0"}), encoding="utf-8"
+        )
+        # Packager's own component on disk
+        (project / ".apm" / "agents").mkdir(parents=True)
+        (project / ".apm" / "agents" / "own.md").write_text("own", encoding="utf-8")
+
+        # Lockfile carries flat local-content fields (synthesizes a self-entry
+        # via from_yaml). The plugin exporter must still treat the project's
+        # own components as the canonical source (collected once in step 6),
+        # not double-process them via the deps loop.
+        lockfile = LockFile()
+        lockfile.local_deployed_files = [".apm/agents/own.md"]
+        lockfile.local_deployed_file_hashes = {".apm/agents/own.md": "deadbeef"}
+        lockfile.write(project / "apm.lock.yaml")
+
+        result = export_plugin_bundle(
+            project_root=project,
+            output_dir=tmp_path / "plugin-out",
+            dry_run=True,
+        )
+
+        # Own component appears exactly once -- no self-entry leakage from deps loop
+        own_matches = [f for f in result.files if f.endswith("own.md")]
+        assert len(own_matches) == 1, (
+            f"Self-entry leaked into plugin deps loop; files={result.files}"
+        )
+
+    def test_unpack_bundle_with_no_local_content(self, tmp_path):
+        """Round-trip: pack a project with packager local content, then unpack.
+
+        Without the N1 fix the unpacker would fail verification because the
+        bundle lockfile would synthesize a self-entry whose deployed_files
+        (the packager's own .github/.. paths) do not exist under the bundle
+        source dir.
+        """
+        from apm_cli.bundle.unpacker import unpack_bundle
+
+        remote = [".github/agents/remote.md"]
+        local = [".github/agents/own.md"]
+        project = self._setup_with_local_content(tmp_path, remote, local)
+        out = tmp_path / "build"
+
+        result = pack_bundle(project, out, fmt="apm")
+
+        # Unpack into a fresh dest -- must NOT raise about missing local files.
+        dest = tmp_path / "unpacked"
+        dest.mkdir()
+        unpack_result = unpack_bundle(result.bundle_path, dest)
+        assert unpack_result is not None
+
+    def test_enrich_lockfile_strips_local_fields(self):
+        """Direct unit test of enrich_lockfile_for_pack(): the returned YAML
+        must not contain local_deployed_files / local_deployed_file_hashes,
+        regardless of whether the input lockfile carries them.
+        """
+        from apm_cli.bundle.lockfile_enrichment import enrich_lockfile_for_pack
+
+        lock = LockFile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="owner/r",
+                resolved_commit="abc",
+                deployed_files=[".github/agents/r.md"],
+            )
+        )
+        lock.local_deployed_files = [".github/agents/own.md"]
+        lock.local_deployed_file_hashes = {".github/agents/own.md": "h"}
+
+        enriched_yaml = enrich_lockfile_for_pack(lock, fmt="apm", target="copilot")
+
+        # Strings should not even appear as keys
+        parsed = yaml.safe_load(enriched_yaml)
+        assert "local_deployed_files" not in parsed
+        assert "local_deployed_file_hashes" not in parsed
+        # Pack metadata still present
+        assert "pack" in parsed
+        assert parsed["pack"]["format"] == "apm"
+        # Original lockfile object is not mutated
+        assert lock.local_deployed_files == [".github/agents/own.md"]
+        assert lock.local_deployed_file_hashes == {".github/agents/own.md": "h"}

@@ -153,6 +153,17 @@ def enrich_lockfile_for_pack(
                 dep["deployed_files"] = filtered
                 all_mappings.update(mappings)
 
+    # Issue #887: strip packaging-time local-content fields from the bundle
+    # lockfile. ``local_deployed_files`` / ``local_deployed_file_hashes``
+    # describe the packager's own repo content, which is intentionally NOT
+    # shipped in the bundle (see packer.py source-local guard). Leaving them
+    # in the bundle lockfile would cause ``LockFile.from_yaml()`` on the
+    # consumer side to synthesize a self-entry whose ``deployed_files`` do
+    # not exist under the bundle source dir, breaking unpacker verification.
+    if isinstance(data, dict):
+        data.pop("local_deployed_files", None)
+        data.pop("local_deployed_file_hashes", None)
+
     # Build the pack: metadata section (after filtering so we know if mapping
     # occurred).
     # Serialize target as a comma-joined string for backward compatibility
