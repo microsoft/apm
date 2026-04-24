@@ -424,7 +424,7 @@ apm audit [PACKAGE] [OPTIONS]
 - `-v, --verbose` - Show info-level findings and file details
 - `-f, --format [text|json|sarif|markdown]` - Output format: `text` (default), `json` (machine-readable), `sarif` (GitHub Code Scanning), `markdown` (step summaries). Cannot be combined with `--strip` or `--dry-run`.
 - `-o, --output PATH` - Write report to file. Auto-detects format from extension (`.sarif`, `.sarif.json` → SARIF; `.json` → JSON; `.md` → Markdown) when `--format` is not specified.
-- `--ci` - Run lockfile consistency checks for CI/CD gates. Exit 0 if clean, 1 if violations found. Auto-discovers org policy from the org `.github` repo unless `--no-policy` is set.
+- `--ci` - Run lockfile consistency checks for CI/CD gates. Exit 0 if clean, 1 if violations found. Auto-discovers org policy from the org `.github` repo unless `--no-policy` is set. Runs the 7 baseline checks: lockfile presence, ref consistency, deployed files present, no orphaned packages, MCP config consistency, content integrity (Unicode + hash drift on every deployed file including local content), includes consent (advisory).
 - `--policy SOURCE` - *(Experimental)* Override discovery: `org` (auto-discover from org), file path, or URL. Without this flag, `--ci` auto-discovers.
 - `--no-policy` - Skip policy discovery and enforcement entirely. Equivalent to `APM_POLICY_DISABLE=1`.
 - `--no-cache` - Force fresh policy fetch (skip cache). Only relevant with policy discovery active.
@@ -498,6 +498,7 @@ apm audit --ci --policy org --no-fail-fast
 - **Critical**: Tag characters (U+E0001–E007F), bidi overrides (U+202A–E, U+2066–9), variation selectors 17–256 (U+E0100–E01EF, Glassworm attack vector)
 - **Warning**: Zero-width spaces/joiners (U+200B–D), variation selectors 1–15 (U+FE00–FE0E), bidi marks (U+200E–F, U+061C), invisible operators (U+2061–4), annotation markers (U+FFF9–B), deprecated formatting (U+206A–F), soft hyphen (U+00AD), mid-file BOM
 - **Info**: Non-breaking spaces, unusual whitespace, emoji presentation selector (U+FE0F). ZWJ between emoji characters is context-downgraded to info.
+- **Hash drift (`--ci` only)**: Files deployed by `apm install` whose on-disk SHA-256 no longer matches the value recorded in the lockfile (`deployed_file_hashes`). Covers content from package dependencies AND local `.apm/` content via the synthesized self-entry.
 
 ### `apm policy` - Inspect organization policy
 

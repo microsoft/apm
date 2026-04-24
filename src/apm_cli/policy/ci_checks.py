@@ -272,10 +272,20 @@ def _check_content_integrity(
     # self-entry is included in ``lock.dependencies`` so local content is
     # covered through the same iteration).
     hash_mismatches: List[tuple] = []  # (dep_key, rel_path, expected, actual)
+    # Local import: matches the scoping pattern used in
+    # _check_deployed_files_present (line 131); avoids cycles.
+    from ..integration.base_integrator import BaseIntegrator as _BaseIntegrator
     for dep_key, dep in lock.dependencies.items():
         if not dep.deployed_file_hashes:
             continue
         for rel_path, expected_hash in dep.deployed_file_hashes.items():
+            # Path safety: silently skip any rel_path that escapes
+            # project_root or targets a non-allowlisted prefix.  Mirrors
+            # the guard in _check_deployed_files_present so a forged
+            # lockfile cannot induce reads outside managed locations.
+            safe_rel = rel_path.rstrip("/")
+            if not _BaseIntegrator.validate_deploy_path(safe_rel, project_root):
+                continue
             file_path = project_root / rel_path
             if not file_path.exists():
                 continue  # _check_deployed_files_present owns this signal
@@ -296,23 +306,30 @@ def _check_content_integrity(
     for rel_path in critical_files:
         details.append(f"unicode: {rel_path}")
     for dep_key, rel_path, expected, actual in hash_mismatches:
+        # Truncate hashes for terminal width; full hashes available via JSON output.
+        exp_short = expected.split(":", 1)[-1][:12] if ":" in expected else expected[:12]
+        act_short = actual.split(":", 1)[-1][:12] if ":" in actual else actual[:12]
+        # Render the synthesized self-entry with a friendly label rather
+        # than the internal _SELF_KEY constant ("." is opaque to users).
+        dep_label = "<self>" if dep_key == _SELF_KEY else dep_key
         details.append(
-            f"hash-drift: {rel_path} (dep={dep_key}, expected={expected}, actual={actual})"
+            f"hash-drift: {rel_path} (dep={dep_label}, expected={exp_short}..., actual={act_short}...)"
         )
 
     parts: List[str] = []
+    remedies: List[str] = []
     if critical_files:
         parts.append(f"{len(critical_files)} file(s) with critical hidden Unicode")
+        remedies.append("'apm audit --strip' to clean Unicode")
     if hash_mismatches:
         parts.append(f"{len(hash_mismatches)} file(s) with hash drift")
+        remedies.append("'apm install' to restore drifted files")
     summary = "; ".join(parts)
+    remedy = " and ".join(remedies)
     return CheckResult(
         name="content-integrity",
         passed=False,
-        message=(
-            f"{summary} -- run 'apm audit --strip' to clean Unicode and "
-            "'apm install' to restore drifted files"
-        ),
+        message=f"{summary} -- run {remedy}",
         details=details,
     )
 
@@ -325,15 +342,17 @@ def _check_includes_consent(
 
     This check never hard-fails -- it always returns ``passed=True``.  When
     the lockfile records local content but the manifest does not declare an
-    ``includes:`` field, the result message carries an ``[!]`` advisory so
-    audit output prompts the maintainer to add ``includes: auto`` (or an
-    explicit list) for governance clarity.
+    ``includes:`` field, the result message advises the maintainer to add
+    ``includes: auto`` (or an explicit list) for governance clarity.  The
+    ``[+]`` rendered by the CI table is intentional: this is informational,
+    not a violation.  Use ``manifest.require_explicit_includes`` policy to
+    promote this to a hard block.
     """
     if not lock.local_deployed_files:
         return CheckResult(
             name="includes-consent",
             passed=True,
-            message="No local content deployed -- consent check N/A",
+            message="No local content deployed -- includes consent check skipped",
         )
 
     if manifest.includes is None:
@@ -341,7 +360,7 @@ def _check_includes_consent(
             name="includes-consent",
             passed=True,
             message=(
-                "[!] Local content deployed but 'includes:' not declared in "
+                "Local content deployed but 'includes:' not declared in "
                 "apm.yml -- consider adding 'includes: auto' for explicit consent"
             ),
         )

@@ -11,7 +11,7 @@ These tests pin down that contract so future changes don't accidentally:
 * Drop hashes for regular files (silent audit blindness).
 * Add hashes for directories or symlinks (false provenance claims).
 
-The architect's §1.6 edge cases (directories, symlinks, empty files,
+The architect's section 1.6 edge cases (directories, symlinks, empty files,
 hidden files) are exercised against a synthesized fixture project that
 mirrors the real ``.apm/`` shape this repo emits.
 """

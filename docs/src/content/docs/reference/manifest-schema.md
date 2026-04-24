@@ -193,7 +193,7 @@ includes: auto
 #   - .apm/skills/my-skill/
 ```
 
-When `policy.manifest.require_explicit_includes` is `true` (see [Governance guide](../../enterprise/governance-guide/)), only form 3 is accepted; `auto` and undeclared are rejected at parse time.
+When `policy.manifest.require_explicit_includes` is `true` (see [Governance guide](../../enterprise/governance-guide/)), only form 3 passes the policy check; `auto` and undeclared are rejected at install/audit time by the `explicit-includes` policy check (not at YAML parse time).
 
 ### 3.10. `policy`
 

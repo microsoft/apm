@@ -959,7 +959,7 @@ class TestIncludesConsent:
         manifest, lock = self._load(tmp_path)
         result = _check_includes_consent(manifest, lock)
         assert result.passed  # advisory, not a hard failure
-        assert "[!]" in result.message
+        assert "consider adding 'includes: auto'" in result.message
         assert "includes:" in result.message
         assert "consent" in result.message.lower()
         # ASCII-only convention: no unicode warning glyphs.
@@ -976,7 +976,7 @@ class TestIncludesConsent:
         result = _check_includes_consent(manifest, lock)
         assert result.passed
         assert "[!]" not in result.message
-        assert "n/a" in result.message.lower()
+        assert "skipped" in result.message.lower()
 
     def test_list_with_local_content_passes_silently(self, tmp_path):
         from apm_cli.policy.ci_checks import _check_includes_consent
@@ -1020,4 +1020,4 @@ class TestIncludesConsent:
         assert names[-1] == "includes-consent"  # appears last
         consent = next(c for c in result.checks if c.name == "includes-consent")
         assert consent.passed
-        assert "[!]" in consent.message
+        assert "consider adding 'includes: auto'" in consent.message

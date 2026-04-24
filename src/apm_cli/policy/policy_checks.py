@@ -593,18 +593,31 @@ def _check_includes_explicit(
             message="Explicit includes not required by policy",
         )
 
-    if manifest_includes is None or manifest_includes == "auto":
+    if manifest_includes is None:
         return CheckResult(
             name="explicit-includes",
             passed=False,
             message=(
-                "Policy requires explicit 'includes:' paths but manifest has "
-                "'includes: auto' or no includes field. Replace 'includes: auto' "
-                "with an explicit list of paths."
+                "Policy requires explicit 'includes:' paths but none are "
+                "declared. Add 'includes: [<path>, ...]' to apm.yml with "
+                "the paths you intend to publish."
             ),
             details=[
-                f"includes: {manifest_includes!r}, "
-                "require_explicit_includes: true",
+                "includes: <absent>, require_explicit_includes: true",
+            ],
+        )
+
+    if manifest_includes == "auto":
+        return CheckResult(
+            name="explicit-includes",
+            passed=False,
+            message=(
+                "Policy requires explicit 'includes:' paths but manifest "
+                "uses 'includes: auto'. Replace with an explicit list of "
+                "paths."
+            ),
+            details=[
+                "includes: 'auto', require_explicit_includes: true",
             ],
         )
 
