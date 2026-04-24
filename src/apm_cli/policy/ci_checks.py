@@ -286,10 +286,12 @@ def _check_content_integrity(
             safe_rel = rel_path.rstrip("/")
             if not _BaseIntegrator.validate_deploy_path(safe_rel, project_root):
                 continue
-            file_path = project_root / rel_path
+            file_path = project_root / safe_rel
             if not file_path.exists():
                 continue  # _check_deployed_files_present owns this signal
             if file_path.is_symlink():
+                continue
+            if not file_path.is_file():
                 continue
             actual_hash = compute_file_hash(file_path)
             if actual_hash != expected_hash:

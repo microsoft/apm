@@ -196,14 +196,17 @@ class TestLocalContentAudit:
         assert ci["passed"] is True, f"content-integrity not passing: {ci}"
 
         consent = _check(payload, "includes-consent")
-        # Advisory is encoded in the message text; the check itself never
-        # hard-fails (passed is True by design).
+        # Advisory is encoded in the raw message text; the JSON payload does
+        # not guarantee CLI-style status markers such as [!].
         assert consent["passed"] is True
-        assert "[!]" in consent["message"], (
-            f"expected '[!]' advisory in includes-consent message, got: "
+        assert "includes:" in consent["message"], (
+            f"expected includes guidance in includes-consent message, got: "
             f"{consent['message']!r}"
         )
-        assert "includes:" in consent["message"]
+        assert "includes: auto" in consent["message"], (
+            f"expected auto-includes advisory in includes-consent message, "
+            f"got: {consent['message']!r}"
+        )
 
     def test_audit_detects_drift(self, tmp_path, apm_command):
         """Test C: hand-edit a deployed file -> hash-drift detected."""

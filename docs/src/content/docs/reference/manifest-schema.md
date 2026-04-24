@@ -176,7 +176,7 @@ Declares how the package's content is processed during install and compile. Curr
 
 Declares which local `.apm/` content the project consents to publish when packing or deploying. Three forms are supported:
 
-1. **Undeclared** -- field omitted. Legacy behaviour: all local `.apm/` content is published as if `auto` were set. `apm audit` emits an `[!]` includes-consent advisory whenever local content is deployed under this form.
+1. **Undeclared** -- field omitted. Legacy behaviour: all local `.apm/` content is published as if `auto` were set. `apm audit` emits an `includes-consent` advisory (the check itself passes; the message recommends declaring `includes: auto`) whenever local content is deployed under this form.
 2. **`includes: auto`** -- explicit consent to publish all local `.apm/` content via the file scanner. No path enumeration required. Default for newly initialised projects.
 3. **`includes: [<path>, ...]`** -- explicit allow-list of paths the project consents to publish. Strongest governance form; changes are reviewable in PR diffs.
 

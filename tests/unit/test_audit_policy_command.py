@@ -101,8 +101,10 @@ class TestCiWithPolicyFlag:
         )
         assert result.exit_code == 0
         data = json.loads(result.output)
-        # Baseline: up to 7 checks, Policy: 16 checks -> total > 7
-        assert data["summary"]["total"] > 6
+        # Baseline: up to 7 checks, Policy: 17 checks -> total > 7 when
+        # policy evaluation actually ran.  Asserting > 7 (not > 6) catches
+        # the regression where only baseline checks are returned.
+        assert data["summary"]["total"] > 7
 
     def test_ci_with_policy_deny_fails(self, runner, tmp_path, monkeypatch):
         """Policy deny list causing failure -> exit 1."""
