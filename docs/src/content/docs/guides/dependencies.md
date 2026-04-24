@@ -8,14 +8,14 @@ Complete guide to APM package dependency management - share and reuse context co
 
 ## What Are APM Dependencies?
 
-APM dependencies are git repositories containing `.apm/` directories with context collections (instructions, chatmodes, contexts) and agent workflows (prompts). They enable teams to:
+APM dependencies are reusable APM packages that APM can fetch either directly from git or indirectly through configured repositories such as an OCI registry. They enable teams to:
 
 - **Share proven workflows** across projects and team members
 - **Standardize compliance and design patterns** organization-wide
 - **Build on tested context** instead of starting from scratch
 - **Maintain consistency** across multiple repositories and teams
 
-APM supports any git-accessible host — GitHub, GitLab, Bitbucket, self-hosted instances, and more.
+APM supports direct git hosts such as GitHub, GitLab, Bitbucket, Azure DevOps, and self-hosted servers, plus repository-driven resolution for logical package requirements.
 
 ## Dependency Types
 
@@ -81,8 +81,13 @@ name: my-project
 version: 1.0.0
 dependencies:
   apm:
-    # GitHub shorthand (default)
+    # Logical package requirements resolved through configured repositories
     - microsoft/apm-sample-package#v1.0.0
+    - name: acme/security-pack
+      version: 1.2.0
+      repository: ghcr
+
+    # Logical requirement that will usually resolve from the default GitHub repository
     - github/awesome-copilot/skills/review-and-refactor
 
     # Full HTTPS git URL (any host)
@@ -116,10 +121,12 @@ dependencies:
         KB_TOKEN: "${KB_TOKEN}"
 ```
 
-APM accepts dependencies in two forms:
+APM accepts dependencies in three forms:
 
-**String format** (simple cases):
-- **Shorthand** (`owner/repo`) — defaults to GitHub
+**Logical requirement strings**:
+- **Logical package requirement** (`owner/repo` or `owner/repo#v1.2.0`) — resolved through configured repositories
+
+**Direct source strings**:
 - **HTTPS URL** (`https://host/owner/repo.git`) — any git host, whole repo
   - Custom port: `https://host:8443/owner/repo.git` — port is preserved in clone URLs
 - **SSH URL** (`git@host:owner/repo.git`) — any git host, whole repo
@@ -130,11 +137,19 @@ APM accepts dependencies in two forms:
   - For nested groups + virtual paths, use the object format below
 - **Local path** (`./path`, `../path`, `/absolute/path`) — local filesystem package
 
-**Object format** (when you need `path`, `ref`, or `alias` on a git URL):
+**Object format**:
+- **Logical requirement object** (`name` + optional `version` / `repository` / `alias`)
+- **Git object** (`git` + optional `path` / `ref` / `alias`)
+- **Local path object** (`path`)
 
 ```yaml
 dependencies:
   apm:
+    - name: acme/security-pack
+      version: 1.2.0
+      repository: corp-oci
+      alias: security-pack
+
     - git: https://gitlab.com/acme/coding-standards.git
       path: instructions/security        # virtual sub-path inside the repo
       ref: v2.0                          # pin to a tag, branch, or commit
@@ -174,12 +189,61 @@ transitive host you want to allow.
 >   path: file.prompt.md
 > ```
 
+## Repository-Driven Resolution
+
+Logical requirements keep package identity separate from transport. APM resolves them using repositories configured on the client machine in `~/.apm/repositories.yml`.
+
+Built-in defaults:
+
+| Name | Type | Base | Priority |
+|------|------|------|----------|
+| `github` | `git` | `https://github.com` | `100` |
+| `gitlab` | `git` | `https://gitlab.com` | `90` |
+| `ghcr` | `oci` | `ghcr.io/apm` | `80` |
+
+Example override:
+
+```yaml
+repositories:
+  - name: corp-oci
+    type: oci
+    base: registry.example.com/apm
+    priority: 110
+
+  - name: github
+    type: git
+    base: https://github.com
+    priority: 100
+```
+
+Resolution rules:
+
+1. If a dependency sets `repository: <name>`, APM only tries that configured repository.
+2. Otherwise APM tries repositories in descending `priority` order.
+3. The first repository that resolves and fetches the package wins.
+4. The resolved transport details are recorded in `apm.lock.yaml`.
+
+Bare `owner/repo` strings in `apm.yml` are treated as logical requirements. Use explicit git URLs or host-qualified refs such as `gitlab.com/group/repo` when you want to bypass repository resolution and point at a specific source.
+
+## OCI-backed Packages
+
+The current OCI prototype supports consuming raw APM packages from OCI registries through configured repositories.
+
+Expected artifact shape:
+
+- exactly one `*.tar.gz` file in the OCI artifact
+- the archive contains raw APM package sources
+- `apm.yml` is at the archive root or under one top-level directory
+
+This prototype currently uses the `oras` CLI to pull OCI artifacts. Publishing OCI packages and media-type enforcement are not implemented yet.
+
 ### How Dependencies Are Stored (Canonical Format)
 
 APM normalizes every dependency entry on write — no matter how you specify a package, the stored form in `apm.yml` is always a clean, canonical string. This works like Docker's default registry convention:
 
 - **GitHub** is the default registry. The `github.com` host is stripped, leaving just `owner/repo`.
 - **Non-default hosts** (GitLab, Bitbucket, self-hosted) keep their FQDN: `gitlab.com/owner/repo`.
+- **Logical requirement objects** are preserved as objects because they carry repository-selection metadata.
 
 | You type | Stored in apm.yml |
 |----------|-------------------|

@@ -5,7 +5,11 @@
 ```yaml
 dependencies:
   apm:
-    # GitHub shorthand
+    # Logical package requirements resolved via configured repositories
+    - microsoft/apm-sample-package#v1.0.0
+    - acme/security-pack#1.2.0
+
+    # Logical requirement that will usually resolve from the default GitHub repository
     - microsoft/apm-sample-package
     - microsoft/apm-sample-package#v1.0.0       # pinned tag
     - microsoft/apm-sample-package#main          # branch
@@ -34,6 +38,47 @@ dependencies:
     - ./packages/my-shared-skills
     - ../sibling-repo/my-package
 ```
+
+## Repository-driven requirements
+
+Logical requirements keep package identity separate from transport:
+
+```yaml
+dependencies:
+  apm:
+    - name: acme/security-pack
+      version: 1.2.0
+
+    - name: acme/security-pack
+      version: 1.2.0
+      repository: corp-oci
+      alias: security-pack
+```
+
+APM resolves those entries through `~/.apm/repositories.yml`:
+
+```yaml
+repositories:
+  - name: github
+    type: git
+    base: https://github.com
+    priority: 100
+
+  - name: corp-oci
+    type: oci
+    base: registry.example.com/apm
+    priority: 110
+```
+
+Resolution order:
+
+1. If `repository:` is set, APM only tries that repository.
+2. Otherwise repositories are tried by descending `priority`.
+3. The resolved source is written to `apm.lock.yaml`.
+
+Bare `owner/repo` strings in `apm.yml` are treated as logical requirements.
+Use explicit git URLs or host-qualified refs such as `gitlab.com/group/repo`
+when you want to bypass repository resolution and point at a specific git host.
 
 ### Custom git ports
 
@@ -95,6 +140,11 @@ both protocols.
 ## Object form (complex cases)
 
 ```yaml
+- name: acme/security-pack
+  version: 1.2.0
+  repository: corp-oci
+  alias: security-pack
+
 - git: https://gitlab.com/acme/repo.git
   path: instructions/security                   # virtual sub-path
   ref: v2.0                                     # tag, branch, or SHA
@@ -108,6 +158,15 @@ both protocols.
 
 - path: ./packages/my-skills                    # local only
 ```
+
+## OCI package expectations
+
+The current OCI prototype is consume-only.
+
+- A configured OCI repository resolves a logical package name to an OCI reference.
+- The OCI artifact must contain exactly one `*.tar.gz`.
+- That archive must contain raw APM package sources with `apm.yml` at the root or under one top-level directory.
+- APM currently shells out to `oras` to pull the artifact.
 
 ## Virtual package types
 
@@ -134,6 +193,7 @@ APM normalizes dependency strings when saving to apm.yml:
 | `./packages/my-skills` | `./packages/my-skills` |
 
 GitHub URLs are stripped to shorthand; non-GitHub hosts keep the FQDN.
+Logical requirement objects stay as objects because they carry repository-selection metadata.
 
 ## MCP dependency formats
 

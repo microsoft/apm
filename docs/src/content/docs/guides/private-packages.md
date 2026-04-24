@@ -5,7 +5,7 @@ sidebar:
   order: 9
 ---
 
-A private APM package is just a private git repository with an `apm.yml`. There is no registry and no publish step — make the repo private, grant read access, and `apm install` handles the rest.
+A private APM package can be consumed either from a private git repository or from a private OCI-backed repository configured in `~/.apm/repositories.yml`. In both cases, the package itself is still just an APM package with an `apm.yml`.
 
 ## Create the package
 
@@ -56,6 +56,29 @@ dependencies:
 ```
 
 APM reuses the same port across protocols during clone fallback (so `ssh://host:7999/...` falls back to `https://host:7999/...`). If your host serves SSH and HTTPS on different ports and SSH is unreachable, pin the protocol that matches the port you need.
+
+For private OCI-backed package storage, configure a repository on each client:
+
+```yaml
+# ~/.apm/repositories.yml
+repositories:
+  - name: corp-oci
+    type: oci
+    base: registry.example.com/apm
+    priority: 100
+```
+
+Then reference the package logically in `apm.yml`:
+
+```yaml
+dependencies:
+  apm:
+    - name: your-org/my-private-package
+      version: 1.0.0
+      repository: corp-oci
+```
+
+Current OCI support is consume-only in this prototype. The OCI artifact is expected to contain one `*.tar.gz` with raw APM package sources.
 
 ## Share with your team
 
