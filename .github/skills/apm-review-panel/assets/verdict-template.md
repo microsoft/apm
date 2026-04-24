@@ -16,9 +16,9 @@ Rules when filling the template:
   write "Not activated -- <reason>" as that persona's body. Do not omit
   the persona heading. All other persona headings always have findings.
 - The Python Architect block MUST contain the two mermaid diagrams and
-  the Design patterns subsection declared in
-  `.apm/agents/python-architect.agent.md`. If those are missing, the
-  synthesis is incomplete -- re-invoke the Python Architect before emitting.
+  the Design patterns subsection from the python-architect persona's
+  PR review output contract. If those are missing, the synthesis is
+  incomplete -- re-invoke the Python Architect before emitting.
 -->
 
 ## APM Review Panel Verdict
@@ -29,7 +29,7 @@ Rules when filling the template:
 
 ### Per-persona findings
 
-**Python Architect**: <findings; MUST include the OO/class mermaid diagram, the execution-flow mermaid diagram, and the Design patterns subsection per python-architect.agent.md>
+**Python Architect**: <findings; MUST include the OO/class mermaid diagram, the execution-flow mermaid diagram, and the Design patterns subsection per the python-architect persona's PR review output contract>
 
 **CLI Logging Expert**: <findings>
 
