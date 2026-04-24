@@ -46,7 +46,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
       - name: Pack APM packages
         id: apm_pack
-        uses: microsoft/apm-action@v1.4.1
+        uses: microsoft/apm-action@v1.4.2
         env:
           GITHUB_TOKEN: ${{ secrets.GH_AW_PLUGINS_TOKEN || secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
         with:
@@ -74,7 +74,7 @@ steps:
     id: apm_bundle
     run: echo "path=$(find /tmp/gh-aw/apm-bundle -name '*.tar.gz' | head -1)" >> "$GITHUB_OUTPUT"
   - name: Restore APM packages
-    uses: microsoft/apm-action@v1.4.1
+    uses: microsoft/apm-action@v1.4.2
     with:
       bundle: ${{ steps.apm_bundle.outputs.path }}
 ---
