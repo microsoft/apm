@@ -38,7 +38,7 @@ APM_MODULES_GITIGNORE_PATTERN = "apm_modules/"
 # in primitives/discovery.py to prune traversal.
 # NOTE: .apm is intentionally absent -- it is where primitives live.
 # ---------------------------------------------------------------------------
-DEFAULT_SKIP_DIRS: frozenset = frozenset({
+DEFAULT_SKIP_DIRS: frozenset[str] = frozenset({
     ".git",
     "node_modules",
     "__pycache__",

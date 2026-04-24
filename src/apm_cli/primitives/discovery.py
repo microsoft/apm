@@ -11,6 +11,7 @@ from .models import PrimitiveCollection
 from .parser import parse_primitive_file, parse_skill_file
 from ..constants import DEFAULT_SKIP_DIRS
 from ..utils.exclude import should_exclude, validate_exclude_patterns
+from ..utils.paths import portable_relpath
 
 logger = logging.getLogger(__name__)
 from ..models.apm_package import APMPackage
@@ -490,7 +491,7 @@ def find_primitive_files(
         # Sort files for deterministic discovery order across platforms
         for file_name in sorted(files):
             file_path = current / file_name
-            rel_str = str(file_path.relative_to(base_path)).replace(os.sep, '/')
+            rel_str = portable_relpath(file_path, base_path)
             # File-level exclude: a pattern like "**/*.draft.md" should drop
             # individual files even when their parent directory is included.
             if exclude_patterns and should_exclude(file_path, base_path, exclude_patterns):
