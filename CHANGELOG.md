@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - CI: deleted `ci-integration-pr-stub.yml`. The four stubs were a holdover from the pre-merge-gate model where branch protection required each Tier 2 check name directly. After #867, branch protection requires only `gate`, so the stubs are dead weight. Reduced `EXPECTED_CHECKS` in `merge-gate.yml` to just `Build & Test (Linux)`.
 
+### Fixed
+
+- `apm update` sanitises the subprocess environment before invoking the platform installer so the bundled PyInstaller `LD_LIBRARY_PATH` / `DYLD_*` no longer leak into system binaries (`curl`, `tar`, `sudo`) spawned by `install.sh`. Previously the installer's first `curl` call could abort with `libssl.so.3: version 'OPENSSL_3.2.0' not found` on distros whose system `libcurl` requires a newer OpenSSL ABI than the APM bundle ships (Debian trixie arm64 dev-containers, Fedora 43, and similar). Restoration uses PyInstaller's official `<VAR>_ORIG` protocol, preserving the user's own `LD_LIBRARY_PATH` exports. Closes #894
+
 ## [0.9.2] - 2026-04-23
 
 ### Added
