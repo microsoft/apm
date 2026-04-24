@@ -18,7 +18,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import pytest
 
@@ -172,6 +172,11 @@ class TestConsoleSingletonScaling:
 
         _reset_console()
 
+    def teardown_method(self):
+        from apm_cli.utils.console import _reset_console
+
+        _reset_console()
+
     def test_scaling_ratio(self):
         from apm_cli.utils.console import _get_console
 
@@ -189,5 +194,97 @@ class TestConsoleSingletonScaling:
         assert ratio < 15, (
             f"Scaling ratio {ratio:.1f}x for 10x calls suggests "
             f"caching regression (t_small={t_small:.6f}s, "
+            f"t_large={t_large:.6f}s)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 4. compute_package_hash scaling
+# ---------------------------------------------------------------------------
+
+def _populate_hash_dir(base: Path, file_count: int) -> None:
+    """Create *file_count* files (~1 KB each) under *base*."""
+    base.mkdir(parents=True, exist_ok=True)
+    for i in range(file_count):
+        subdir = base / f"sub-{i // 20}"
+        subdir.mkdir(parents=True, exist_ok=True)
+        (subdir / f"file-{i}.dat").write_bytes(os.urandom(1024))
+
+
+class TestComputePackageHashScaling:
+    """compute_package_hash must stay O(n) in file count."""
+
+    def test_scaling_ratio(self, tmp_path):
+        from apm_cli.utils.content_hash import compute_package_hash
+
+        small_dir = tmp_path / "small"
+        large_dir = tmp_path / "large"
+        _populate_hash_dir(small_dir, 50)
+        _populate_hash_dir(large_dir, 500)
+
+        t_small = _median_time(lambda: compute_package_hash(small_dir))
+        t_large = _median_time(lambda: compute_package_hash(large_dir))
+
+        if t_small < 1e-7:
+            pytest.skip("below measurement threshold -- too fast to measure reliably")
+
+        ratio = t_large / t_small
+        assert ratio < 25, (
+            f"Scaling ratio {ratio:.1f}x for 10x input suggests "
+            f"O(n^2) regression (t_small={t_small:.6f}s, "
+            f"t_large={t_large:.6f}s)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 5. is_semantically_equivalent scaling
+# ---------------------------------------------------------------------------
+
+def _make_equiv_lockfile_pair(n: int, files_per_dep: int = 10):
+    """Build two identical LockFiles with *n* deps, each carrying *files_per_dep* files."""
+    from apm_cli.deps.lockfile import LockFile, LockedDependency
+
+    def _build(count: int) -> "LockFile":
+        lf = LockFile()
+        for i in range(count):
+            dep = LockedDependency(
+                repo_url=f"https://github.com/org/pkg-{i}",
+                depth=(i % 5) + 1,
+                deployed_files=[
+                    f".github/agents/agent-{i}-{j}.agent.md"
+                    for j in range(files_per_dep)
+                ],
+                deployed_file_hashes={
+                    f".github/agents/agent-{i}-{j}.agent.md": f"sha256:{'ab' * 32}"
+                    for j in range(files_per_dep)
+                },
+            )
+            lf.add_dependency(dep)
+        return lf
+
+    return _build(n), _build(n)
+
+
+class TestSemanticEquivalenceScaling:
+    """is_semantically_equivalent must stay O(n) in dependency count."""
+
+    def test_scaling_ratio(self):
+        lf1_small, lf2_small = _make_equiv_lockfile_pair(50)
+        lf1_large, lf2_large = _make_equiv_lockfile_pair(500)
+
+        t_small = _median_time(
+            lambda: lf1_small.is_semantically_equivalent(lf2_small)
+        )
+        t_large = _median_time(
+            lambda: lf1_large.is_semantically_equivalent(lf2_large)
+        )
+
+        if t_small < 1e-7:
+            pytest.skip("below measurement threshold -- too fast to measure reliably")
+
+        ratio = t_large / t_small
+        assert ratio < 25, (
+            f"Scaling ratio {ratio:.1f}x for 10x input suggests "
+            f"O(n^2) regression (t_small={t_small:.6f}s, "
             f"t_large={t_large:.6f}s)"
         )
