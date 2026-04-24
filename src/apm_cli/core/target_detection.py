@@ -21,7 +21,9 @@ are accepted as aliases and map to the same internal value.
 """
 
 from pathlib import Path
-from typing import Literal, Optional, Tuple
+from typing import List, Literal, Optional, Tuple, Union
+
+import click
 
 # Valid target values (internal canonical form)
 TargetType = Literal["vscode", "claude", "cursor", "opencode", "codex", "all", "minimal"]
@@ -222,3 +224,142 @@ def get_target_description(target: UserTargetType) -> str:
         "minimal": "AGENTS.md only (create .github/ or .claude/ for full integration)",
     }
     return descriptions.get(normalized, "unknown target")
+
+
+# ---------------------------------------------------------------------------
+# Multi-target helpers (used by active_targets() in the integration layer)
+# ---------------------------------------------------------------------------
+
+#: The complete set of real (non-pseudo) canonical targets.
+#: "minimal" is intentionally excluded -- it is a fallback pseudo-target.
+ALL_CANONICAL_TARGETS = frozenset({"vscode", "claude", "cursor", "opencode", "codex"})
+
+#: Alias mapping: user-facing name -> canonical internal name.
+TARGET_ALIASES: dict[str, str] = {
+    "copilot": "vscode",
+    "agents": "vscode",
+    "vscode": "vscode",
+}
+
+
+def normalize_target_list(
+    value: Union[str, List[str], None],
+) -> Optional[List[str]]:
+    """Normalize a user-provided target value to a list of canonical names.
+
+    Handles:
+    - ``None`` -> ``None`` (auto-detect)
+    - ``"claude"`` -> ``["claude"]``
+    - ``"copilot"`` -> ``["vscode"]``  (alias resolution)
+    - ``"all"`` -> ``["claude", "codex", "copilot", "cursor", "opencode"]``
+    - ``["claude", "copilot"]`` -> ``["claude", "vscode"]``
+    - Deduplicates while preserving first-seen order.
+
+    Args:
+        value: A single target string, a list of target strings, or ``None``.
+
+    Returns:
+        A deduplicated list of canonical target names, or ``None`` if the
+        input was ``None`` (meaning "auto-detect").
+    """
+    if value is None:
+        return None
+
+    raw: List[str] = [value] if isinstance(value, str) else list(value)
+
+    # "all" anywhere in the input means "every target" -- expand to the
+    # full sorted list of canonical targets.
+    if "all" in raw:
+        return sorted(ALL_CANONICAL_TARGETS)
+
+    seen: set[str] = set()
+    result: List[str] = []
+    for item in raw:
+        canonical = TARGET_ALIASES.get(item, item)
+        if canonical not in seen:
+            seen.add(canonical)
+            result.append(canonical)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Click parameter type for --target (comma-separated multi-target support)
+# ---------------------------------------------------------------------------
+
+#: All values accepted by the ``--target`` CLI option.
+#: Derived from canonical targets, alias keys, and the ``"all"`` keyword.
+VALID_TARGET_VALUES: frozenset[str] = (
+    ALL_CANONICAL_TARGETS | frozenset(TARGET_ALIASES) | frozenset({"all"})
+)
+
+
+class TargetParamType(click.ParamType):
+    """Click parameter type accepting comma-separated target values.
+
+    Single values and ``"all"`` are returned as plain strings for backward
+    compatibility with existing command handlers.  Multiple comma-separated
+    targets are returned as a deduplicated ``list[str]`` of canonical names.
+
+    Examples::
+
+        -t claude             -> "claude"
+        -t claude,copilot     -> ["claude", "vscode"]
+        -t all                -> "all"
+        -t copilot,vscode     -> ["vscode"]  (deduped aliases)
+    """
+
+    name = "target"
+
+    def convert(
+        self,
+        value: Union[str, List[str], None],
+        param: Optional[click.Parameter],
+        ctx: Optional[click.Context],
+    ) -> Union[str, List[str], None]:
+        if value is None:
+            return None
+        # If already converted (e.g. from a default), pass through.
+        if isinstance(value, list):
+            return value
+
+        # Split on comma, normalize whitespace & case, drop empty parts.
+        parts = [v.strip().lower() for v in value.split(",") if v.strip()]
+        if not parts:
+            self.fail("target value must not be empty", param, ctx)
+
+        # Validate every token.
+        for p in parts:
+            if p not in VALID_TARGET_VALUES:
+                self.fail(
+                    f"'{p}' is not a valid target. "
+                    f"Choose from: {', '.join(sorted(VALID_TARGET_VALUES))}",
+                    param,
+                    ctx,
+                )
+
+        # "all" is exclusive -- reject combinations like "all,claude".
+        if "all" in parts:
+            if len(parts) > 1:
+                self.fail(
+                    "'all' cannot be combined with other targets",
+                    param,
+                    ctx,
+                )
+            return "all"
+
+        # Single target -> plain string (backward compat).
+        if len(parts) == 1:
+            return parts[0]
+
+        # Multi-target: resolve aliases and deduplicate.
+        seen: set[str] = set()
+        result: List[str] = []
+        for p in parts:
+            canonical = TARGET_ALIASES.get(p, p)
+            if canonical not in seen:
+                seen.add(canonical)
+                result.append(canonical)
+        # If aliases collapsed everything to one target, return a string.
+        if len(result) == 1:
+            return result[0]
+        return result

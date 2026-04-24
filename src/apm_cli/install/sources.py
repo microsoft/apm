@@ -40,6 +40,27 @@ if TYPE_CHECKING:
     from apm_cli.models.apm_package import PackageInfo
 
 
+def _format_package_type_label(pkg_type) -> Optional[str]:
+    """Human-readable label for a detected ``PackageType``.
+
+    Centralised so every install path emits the same wording and so
+    new ``PackageType`` values can be added without grepping for ad-hoc
+    dicts.  Missing ``HOOK_PACKAGE`` from this table is what made
+    microsoft/apm#780 silent -- keep all classifiable enum members
+    covered.
+    """
+    from apm_cli.models.apm_package import PackageType
+
+    return {
+        PackageType.CLAUDE_SKILL: "Skill (SKILL.md detected)",
+        PackageType.MARKETPLACE_PLUGIN:
+            "Marketplace Plugin (plugin.json or agents/skills/commands)",
+        PackageType.HYBRID: "Hybrid (apm.yml + SKILL.md)",
+        PackageType.APM_PACKAGE: "APM Package (apm.yml)",
+        PackageType.HOOK_PACKAGE: "Hook Package (hooks/*.json only)",
+    }.get(pkg_type)
+
+
 @dataclass
 class Materialization:
     """Outcome of ``DependencySource.acquire()``.
@@ -443,7 +464,7 @@ class FreshDependencySource(DependencySource):
                             if dep_ref.repo_url and "/" in dep_ref.repo_url
                             else None
                         )
-                        _ctx = ctx.auth_resolver.resolve(_host, org=_org)
+                        _ctx = ctx.auth_resolver.resolve(_host, org=_org, port=dep_ref.port)
                         logger.package_auth(_ctx.source, _ctx.token_type or "none")
                     except Exception:
                         pass
@@ -510,12 +531,7 @@ class FreshDependencySource(DependencySource):
 
             if hasattr(package_info, "package_type"):
                 package_type = package_info.package_type
-                _type_label = {
-                    PackageType.CLAUDE_SKILL: "Skill (SKILL.md detected)",
-                    PackageType.MARKETPLACE_PLUGIN: "Marketplace Plugin (plugin.json detected)",
-                    PackageType.HYBRID: "Hybrid (apm.yml + SKILL.md)",
-                    PackageType.APM_PACKAGE: "APM Package (apm.yml)",
-                }.get(package_type)
+                _type_label = _format_package_type_label(package_type)
                 if _type_label and logger:
                     logger.package_type_info(_type_label)
 

@@ -8,6 +8,7 @@ import click
 from ..bundle.packer import pack_bundle
 from ..bundle.unpacker import unpack_bundle
 from ..core.command_logger import CommandLogger
+from ..core.target_detection import TargetParamType
 
 
 @click.command(name="pack", help="Create a self-contained bundle from installed dependencies")
@@ -21,9 +22,9 @@ from ..core.command_logger import CommandLogger
 @click.option(
     "--target",
     "-t",
-    type=click.Choice(["copilot", "claude", "cursor", "opencode", "codex", "vscode", "agents", "all"]),
+    type=TargetParamType(),
     default=None,
-    help="Filter files by target (default: auto-detect). 'vscode' is a deprecated alias for 'copilot'.",
+    help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Auto-detects if not specified.",
 )
 @click.option("--archive", is_flag=True, default=False, help="Produce a .tar.gz archive.")
 @click.option(

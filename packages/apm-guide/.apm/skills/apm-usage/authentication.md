@@ -42,14 +42,35 @@ For SSO-protected orgs, authorize the token under Settings > Tokens > Configure 
 
 ## Azure DevOps (ADO)
 
-ADO uses a dedicated token variable -- the GitHub token chain does not apply:
+ADO supports two auth modes; the GitHub token chain does not apply. Resolution order:
+
+1. `ADO_APM_PAT` env var if set
+2. AAD bearer from `az account get-access-token` if `az` is installed and signed in
+3. Otherwise: auth-failed error
 
 ```bash
+# PAT mode
 export ADO_APM_PAT=your_ado_pat
+apm install dev.azure.com/org/project/_git/repo
+
+# Bearer mode (no env var needed)
+az login --tenant <tenant-id>
 apm install dev.azure.com/org/project/_git/repo
 ```
 
 ADO paths use the 3-segment format: `org/project/repo`. Auth is always required.
+
+If `ADO_APM_PAT` is set but ADO returns 401, APM silently retries with the `az` bearer and warns:
+`[!] ADO_APM_PAT was rejected for {host} (HTTP 401); fell back to az cli bearer.`
+
+### ADO auth troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `No ADO_APM_PAT was set and az CLI is not installed` | Neither path available | Install `az` from https://aka.ms/installazurecli and run `az login --tenant <tenant>`, or set `ADO_APM_PAT` |
+| `az CLI is installed but no active session was found` | `az account show` fails | Run `az login --tenant <tenant>` against the tenant that owns the org |
+| `az CLI returned a token but the org does not accept it (likely a tenant mismatch)` | Wrong tenant | Run `az login --tenant <correct-tenant>`, or set `ADO_APM_PAT` |
+| `ADO_APM_PAT was rejected (HTTP 401) and no az cli fallback was available` | Stale PAT, no `az` | Rotate the PAT, or install `az` and run `az login --tenant <tenant>` |
 
 ## GitHub Enterprise Server (GHES)
 
@@ -96,6 +117,28 @@ apm install --verbose your-org/package
 # Increase git credential timeout (default 30s, max 180s)
 export APM_GIT_CREDENTIAL_TIMEOUT=120
 ```
+
+### Custom-port hosts and per-port credentials
+
+Self-hosted Git instances on non-standard ports (e.g. Bitbucket Datacenter
+on port 7999) are now first-class. APM sends `host=<host>:<port>` to
+`git credential fill` per the [`gitcredentials(7)`](https://git-scm.com/docs/gitcredentials)
+protocol; the credential cache and token resolution are also keyed by
+`(host, port)` so distinct PATs on the same hostname do not collide.
+
+Whether the helper actually returns per-port credentials depends on the
+backend:
+
+| Helper | Honors port-in-host? |
+|---|---|
+| git-credential-manager (GCM) | Yes |
+| macOS Keychain (`osxkeychain`) | Yes (stores full `host:port` as key) |
+| `libsecret` (Linux) | Yes (port in URI) |
+| `gh auth git-credential` | No -- but only used for GitHub hosts, which do not use custom ports |
+
+If APM resolves the wrong credential for a custom-port host, confirm your
+helper keys by `host:port`; otherwise either switch helpers or store the
+credential under a fully qualified `https://<host>:<port>/` URL.
 
 ### SSH connection hangs on corporate/VPN networks
 

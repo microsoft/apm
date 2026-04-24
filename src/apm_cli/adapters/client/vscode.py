@@ -320,17 +320,25 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 }
             # Check for remotes (similar to Copilot adapter)
             elif "remotes" in server_info and server_info["remotes"]:
-                remotes = server_info["remotes"]
-                remote = remotes[0]  # Take the first remote
-                transport = remote.get("transport_type", "")
-                if transport in ("sse", "http", "streamable-http"):
+                remote = self._select_remote_with_url(server_info["remotes"])
+                if remote:
+                    transport = (remote.get("transport_type") or "").strip()
+                    # Default to "http" when transport_type is missing/empty,
+                    # matching the Copilot adapter behavior (copilot.py:190-192).
+                    if not transport:
+                        transport = "http"
+                    elif transport not in ("sse", "http", "streamable-http"):
+                        raise ValueError(
+                            f"Unsupported remote transport '{transport}' for VS Code. "
+                            f"Server: {server_info.get('name', 'unknown')}. "
+                            f"Supported transports: http, sse, streamable-http.")
                     headers = remote.get("headers", {})
                     # Normalize header list format to dict
                     if isinstance(headers, list):
                         headers = {h["name"]: h["value"] for h in headers if "name" in h and "value" in h}
                     server_config = {
                         "type": transport,
-                        "url": remote.get("url", ""),
+                        "url": remote["url"].strip(),
                         "headers": headers,
                     }
                     input_vars.extend(
@@ -423,6 +431,19 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 return args
         
         return []
+
+    @staticmethod
+    def _select_remote_with_url(remotes):
+        """Return the first remote entry that has a non-empty URL.
+
+        Returns:
+            dict or None: The first usable remote, or None if none found.
+        """
+        for remote in remotes:
+            url = (remote.get("url") or "").strip()
+            if url:
+                return remote
+        return None
 
     def _select_best_package(self, packages):
         """Select the best package for VS Code installation from available packages.

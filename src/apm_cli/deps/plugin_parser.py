@@ -19,9 +19,27 @@ from typing import Dict, Any, List, Optional
 import yaml
 
 from ..utils.path_security import ensure_path_within, PathTraversalError
+from ..utils.console import _rich_warning
 
 
 _logger = logging.getLogger(__name__)
+
+
+def _surface_warning(message: str, logger: logging.Logger) -> None:
+    """Emit a warning to both the stdlib logger and the rich console.
+
+    The ``apm`` stdlib logger has no handlers configured by default, so
+    ``logger.warning`` calls are silently dropped in non-debug runs. For
+    user-visible plugin-parse issues (skipped MCP servers, validation
+    failures), also route through ``_rich_warning`` so the user sees them
+    even without ``--verbose``. Falls back gracefully if Rich is unavailable.
+    """
+    logger.warning(message)
+    try:
+        _rich_warning(message, symbol="warning")
+    except Exception:
+        # Console output is best-effort; never mask the underlying warning.
+        pass
 
 
 def _is_within_plugin(candidate: Path, plugin_root: Path, *, component: str) -> bool:
@@ -290,6 +308,14 @@ def _mcp_servers_to_apm_deps(
 
     Every entry gets ``registry: false`` (self-defined, not registry lookups).
 
+    All resulting entries are routed through ``MCPDependency.from_dict()``
+    so plugin-synthesized servers must clear the same security validation
+    chokepoint as CLI-authored or manually edited entries (name shape, URL
+    scheme allowlist, header CRLF, command path-traversal). Entries that
+    fail validation are skipped with a warning rather than crashing the
+    plugin install -- a single malformed server should not block the
+    whole plugin.
+
     Args:
         servers: Mapping of server name -> server config dict.
         plugin_path: Plugin root (used for log context only).
@@ -297,6 +323,8 @@ def _mcp_servers_to_apm_deps(
     Returns:
         List of dicts consumable by ``MCPDependency.from_dict()``.
     """
+    from ..models.dependency.mcp import MCPDependency
+
     logger = logging.getLogger("apm")
     deps: List[Dict[str, Any]] = []
 
@@ -320,9 +348,10 @@ def _mcp_servers_to_apm_deps(
             if "headers" in cfg:
                 dep["headers"] = cfg["headers"]
         else:
-            logger.warning(
-                "Skipping MCP server '%s' from plugin '%s': no 'command' or 'url'",
-                name, plugin_path.name,
+            _surface_warning(
+                f"Skipping MCP server '{name}' from plugin "
+                f"'{plugin_path.name}': no 'command' or 'url'",
+                logger,
             )
             continue
 
@@ -330,6 +359,21 @@ def _mcp_servers_to_apm_deps(
             dep["env"] = cfg["env"]
         if "tools" in cfg:
             dep["tools"] = cfg["tools"]
+
+        # Route through the validation chokepoint. Plugins are an ingress
+        # path: a malicious plugin could otherwise smuggle path traversal,
+        # CRLF, or unsafe URL schemes that bypass MCPDependency.validate().
+        # PR #809 follow-up: surface validation errors to the user via the
+        # rich console (stdlib logger has no handlers configured).
+        try:
+            MCPDependency.from_dict(dep)
+        except (ValueError, Exception) as exc:
+            _surface_warning(
+                f"Skipping invalid MCP server '{name}' from plugin "
+                f"'{plugin_path.name}': {exc}",
+                logger,
+            )
+            continue
 
         deps.append(dep)
 

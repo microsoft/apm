@@ -284,6 +284,19 @@ class TestInitPlugin:
             finally:
                 os.chdir(self.original_dir)
 
+    def test_plugin_does_not_create_start_prompt(self):
+        """start.prompt.md is NOT created in plugin mode."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            project_dir = Path(tmp_dir) / "my-plugin"
+            project_dir.mkdir()
+            os.chdir(project_dir)
+            try:
+                result = self.runner.invoke(cli, ["init", "--plugin", "--yes"])
+                assert result.exit_code == 0, result.output
+                assert not Path("start.prompt.md").exists()
+            finally:
+                os.chdir(self.original_dir)
+
     def test_plugin_apm_yml_has_dependencies(self):
         """apm.yml created with --plugin still has regular dependencies section."""
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -1,0 +1,8 @@
+# Chain level 1: extends depth-0
+name: depth-level-1
+version: "1.0.0"
+extends: contoso-depth-0/policy
+
+dependencies:
+  deny:
+    - "deprecated-vendor/*"

@@ -3,6 +3,37 @@
 import os
 import requests
 from typing import Dict, List, Optional, Any, Tuple
+from urllib.parse import urlparse
+
+
+_DEFAULT_REGISTRY_URL = "https://api.mcp.github.com"
+
+# Network timeouts for registry HTTP calls. ``connect`` bounds the TCP
+# handshake (typo in --registry / unreachable host) so ``apm install``
+# never hangs in CI; ``read`` bounds slow registries / proxies.
+# Exposed via ``MCP_REGISTRY_CONNECT_TIMEOUT`` / ``MCP_REGISTRY_READ_TIMEOUT``
+# for enterprise tuning, with sane defaults otherwise.
+_DEFAULT_CONNECT_TIMEOUT = 10.0
+_DEFAULT_READ_TIMEOUT = 30.0
+
+
+def _resolve_timeout() -> tuple:
+    """Return the ``(connect, read)`` timeout tuple for registry HTTP calls."""
+    def _read_float(env_key: str, default: float) -> float:
+        raw = os.environ.get(env_key)
+        if not raw:
+            return default
+        try:
+            value = float(raw)
+            if value <= 0:
+                return default
+            return value
+        except (TypeError, ValueError):
+            return default
+    return (
+        _read_float("MCP_REGISTRY_CONNECT_TIMEOUT", _DEFAULT_CONNECT_TIMEOUT),
+        _read_float("MCP_REGISTRY_READ_TIMEOUT", _DEFAULT_READ_TIMEOUT),
+    )
 
 
 class SimpleRegistryClient:
@@ -14,12 +45,49 @@ class SimpleRegistryClient:
         Args:
             registry_url (str, optional): URL of the MCP registry.
                 If not provided, uses the MCP_REGISTRY_URL environment variable
-                or falls back to the default demo registry.
+                or falls back to the default public registry.
+
+        Raises:
+            ValueError: If the resolved URL is missing a scheme/netloc, uses an
+                unsupported scheme, or uses ``http://`` without
+                ``MCP_REGISTRY_ALLOW_HTTP=1`` opt-in.
         """
-        self.registry_url = registry_url or os.environ.get(
-            "MCP_REGISTRY_URL", "https://api.mcp.github.com"
-        )
+        env_override = os.environ.get("MCP_REGISTRY_URL")
+        # Treat empty-string env var as unset (common shell idiom: ``export FOO=``).
+        if env_override is not None and env_override.strip() == "":
+            env_override = None
+
+        resolved = registry_url or env_override or _DEFAULT_REGISTRY_URL
+        # Normalise: strip whitespace and trailing slashes so path joins
+        # never produce double-slash URLs (e.g. ``https://host//v0/servers``).
+        resolved = resolved.strip().rstrip("/")
+
+        parsed = urlparse(resolved)
+        if not parsed.scheme or not parsed.netloc:
+            raise ValueError(
+                f"Invalid MCP registry URL {resolved!r}: expected scheme://host "
+                f"(e.g. https://mcp.example.com). Check MCP_REGISTRY_URL if set."
+            )
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(
+                f"Unsupported scheme {parsed.scheme!r} in MCP registry URL "
+                f"{resolved!r}: only https:// is supported (http:// requires "
+                f"MCP_REGISTRY_ALLOW_HTTP=1). Check MCP_REGISTRY_URL if set."
+            )
+        if parsed.scheme == "http" and not os.environ.get("MCP_REGISTRY_ALLOW_HTTP"):
+            raise ValueError(
+                f"Insecure MCP registry URL {resolved!r}: http:// is not allowed "
+                f"by default. Set MCP_REGISTRY_ALLOW_HTTP=1 to opt in to plaintext "
+                f"HTTP (not recommended for production). "
+                f"Check MCP_REGISTRY_URL if set."
+            )
+
+        self.registry_url = resolved
+        # True when the URL came from an explicit caller arg or MCP_REGISTRY_URL env var.
+        # Consumed by validate_servers_exist() to fail-closed on overrides.
+        self._is_custom_url = registry_url is not None or env_override is not None
         self.session = requests.Session()
+        self._timeout = _resolve_timeout()
 
     def list_servers(self, limit: int = 100, cursor: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         """List all available servers in the registry.
@@ -42,7 +110,7 @@ class SimpleRegistryClient:
         if cursor is not None:
             params['cursor'] = cursor
             
-        response = self.session.get(url, params=params)
+        response = self.session.get(url, params=params, timeout=self._timeout)
         response.raise_for_status()
         data = response.json()
         
@@ -80,7 +148,7 @@ class SimpleRegistryClient:
         url = f"{self.registry_url}/v0/servers/search"
         params = {'q': search_query}
         
-        response = self.session.get(url, params=params)
+        response = self.session.get(url, params=params, timeout=self._timeout)
         response.raise_for_status()
         data = response.json()
         
@@ -109,7 +177,7 @@ class SimpleRegistryClient:
             ValueError: If the server is not found.
         """
         url = f"{self.registry_url}/v0/servers/{server_id}"
-        response = self.session.get(url)
+        response = self.session.get(url, timeout=self._timeout)
         response.raise_for_status()
         data = response.json()
         
