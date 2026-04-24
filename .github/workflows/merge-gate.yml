@@ -43,10 +43,6 @@ name: Merge Gate
 on:
   pull_request:
     branches: [ main ]
-    paths-ignore:
-      - 'docs/**'
-      - '.gitignore'
-      - 'LICENSE'
   merge_group:
     branches: [ main ]
     types: [ checks_requested ]
