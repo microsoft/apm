@@ -19,6 +19,8 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import patch
 
+from apm_cli.core.experimental import is_enabled as _real_is_enabled
+
 import pytest
 from click.testing import CliRunner
 
@@ -206,11 +208,16 @@ class TestAuthoringCommandsGated:
 
 
 class TestAuthoringCommandsEnabled:
-    """Authoring commands proceed normally when the flag is enabled.
+    """Authoring commands proceed normally when the flag is enabled."""
 
-    The conftest already patches is_enabled to return True for
-    marketplace_authoring, so no additional setup needed.
-    """
+    @pytest.fixture(autouse=True)
+    def _enable_flag(self):
+        """Enable marketplace_authoring for this class's tests."""
+        with patch(
+            "apm_cli.core.experimental.is_enabled",
+            side_effect=lambda name: True if name == "marketplace_authoring" else _real_is_enabled(name),
+        ):
+            yield
 
     @pytest.mark.parametrize("subcmd", ["init", "build", "check", "outdated", "doctor", "publish"])
     def test_authoring_command_help_reachable_when_enabled(self, subcmd: str) -> None:

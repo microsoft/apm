@@ -540,7 +540,7 @@ class TestPublishInteractive:
 
         result = runner.invoke(marketplace, ["publish"], input="n\n")
         assert result.exit_code == 0
-        assert "aborted" in result.output.lower()
+        assert "cancelled" in result.output.lower()
         mock_pub.execute.assert_not_called()
 
     @patch("apm_cli.commands.marketplace.PrIntegrator")

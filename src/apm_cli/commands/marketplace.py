@@ -39,6 +39,7 @@ from ..marketplace.ref_resolver import RefResolver, RemoteRef
 from ..marketplace.semver import SemVer, parse_semver, satisfies_range
 from ..marketplace.yml_schema import load_marketplace_yml
 from ..utils.path_security import PathTraversalError, validate_path_segments
+from ..utils.console import _rich_info, _rich_warning
 from ._helpers import _get_console, _is_interactive
 
 
@@ -147,12 +148,23 @@ def _require_authoring_flag():
     from ..core.experimental import is_enabled
 
     if not is_enabled("marketplace_authoring"):
-        click.echo(
-            "[!] Marketplace authoring commands are experimental.\n"
-            "    Enable with: apm experimental enable marketplace-authoring\n"
-            "    Learn more:  apm experimental list"
+        _rich_warning(
+            "Marketplace authoring commands are experimental.",
+            symbol="warning",
         )
-        raise SystemExit(1)
+        _rich_info(
+            "Enable with: apm experimental enable marketplace-authoring",
+            symbol="info",
+        )
+        _rich_info(
+            "Learn more:  apm experimental list",
+            symbol="info",
+        )
+        _rich_info(
+            "Docs: https://microsoft.github.io/apm/guides/marketplace-authoring/",
+            symbol="info",
+        )
+        sys.exit(1)
 
 
 @click.group(cls=MarketplaceGroup, help="Manage marketplaces for discovery and governance")
@@ -578,7 +590,7 @@ def update(name, verbose):
 
 @marketplace.command(help="Remove a registered marketplace")
 @click.argument("name", required=True)
-@click.option("--yes", "-y", is_flag=True, help="Skip confirmation")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def remove(name, yes, verbose):
     """Unregister a marketplace."""
@@ -661,7 +673,7 @@ def validate(name, check_refs, verbose):
         warning_count = 0
         error_count = 0
         click.echo()
-        click.echo("Validation Results:")
+        logger.progress("Validation Results:", symbol="info")
         for r in results:
             if r.passed and not r.warnings:
                 logger.success(
@@ -681,9 +693,10 @@ def validate(name, check_refs, verbose):
                 warning_count += len(r.warnings)
 
         click.echo()
-        click.echo(
+        logger.progress(
             f"Summary: {passed} passed, {warning_count} warnings, "
-            f"{error_count} errors"
+            f"{error_count} errors",
+            symbol="info",
         )
 
         if error_count > 0:
@@ -1239,9 +1252,9 @@ def _render_check_table(logger, results):
     )
     table.add_column("Status", no_wrap=True, width=6)
     table.add_column("Package", style="bold white", no_wrap=True)
-    table.add_column("Reachable", style="white", justify="centre")
-    table.add_column("Version Found", style="white", justify="centre")
-    table.add_column("Ref OK", style="white", justify="centre")
+    table.add_column("Reachable", style="white", justify="center")
+    table.add_column("Version Found", style="white", justify="center")
+    table.add_column("Ref OK", style="white", justify="center")
     table.add_column("Detail", style="dim")
 
     for r in results:
@@ -1625,14 +1638,16 @@ def publish(
                 symbol="error",
             )
             sys.exit(1)
-        answer = click.prompt(
-            f"Confirm publish to {len(targets)} repositories? [y/N]",
-            default="N",
-            show_default=False,
-        )
-        if answer.strip().lower() != "y":
-            logger.progress("Publish aborted by user.", symbol="info")
-            return
+        try:
+            if not click.confirm(
+                f"Confirm publish to {len(targets)} repositories?",
+                default=False,
+            ):
+                logger.progress("Publish cancelled.", symbol="info")
+                sys.exit(0)
+        except click.Abort:
+            logger.progress("Publish cancelled.", symbol="info")
+            sys.exit(0)
 
     if dry_run:
         logger.progress(

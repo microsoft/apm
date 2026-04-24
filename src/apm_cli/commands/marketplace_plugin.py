@@ -354,7 +354,7 @@ def set_cmd(
 
 @package.command(help="Remove a package from marketplace.yml")
 @click.argument("name")
-@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt.")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def remove(name, yes, verbose):
     """Remove a package entry from marketplace.yml."""
@@ -371,7 +371,7 @@ def remove(name, yes, verbose):
                 abort=True,
             )
         except click.Abort:
-            click.echo("Cancelled.")
+            logger.progress("Cancelled.", symbol="info")
             return
 
     try:

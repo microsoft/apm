@@ -86,6 +86,11 @@ apm marketplace add acme/plugin-marketplace
 
 This registers the marketplace and fetches its `marketplace.json`. By default APM tracks the `main` branch.
 
+:::tip[Create your own marketplace]
+You can author and publish your own marketplace registry.
+See the [Marketplace Authoring Guide](../marketplace-authoring/) for details.
+:::
+
 **Options:**
 - `--name/-n` -- Custom display name for the marketplace
 - `--branch/-b` -- Branch to track (default: `main`)

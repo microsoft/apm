@@ -24,6 +24,16 @@ Both files are committed to git. `marketplace.yml` is edited; `marketplace.json`
 
 APM does not emit a `versions[]` array. Each compiled plugin has exactly one resolved `source.ref` -- the latest commit SHA (or explicit ref) that satisfies the declared range at build time. Consumers pin to that single resolved ref.
 
+:::caution[Experimental Feature]
+Marketplace authoring commands are behind an experimental flag. Enable it once before following this guide:
+
+```bash
+apm experimental enable marketplace-authoring
+```
+
+See [Experimental Flags](../../reference/experimental/) for details.
+:::
+
 ## Quickstart
 
 ```bash
