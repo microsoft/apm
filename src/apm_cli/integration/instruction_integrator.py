@@ -354,53 +354,20 @@ class InstructionIntegrator(BaseIntegrator):
         return links_resolved
 
     # ------------------------------------------------------------------
-    # Kiro Steering (.md with inclusion/fileMatchPattern frontmatter)
+    # Kiro Steering (.md — verbatim, Kiro uses applyTo: natively)
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _convert_to_kiro_steering(content: str) -> str:
-        """Convert APM instruction content to Kiro steering ``.md`` format.
+    def copy_instruction_kiro(self, source: Path, target: Path) -> int:
+        """Copy instruction file verbatim for Kiro steering.
 
-        Parses existing YAML frontmatter and maps ``applyTo`` to Kiro's
-        ``inclusion: fileMatch`` + ``fileMatchPattern:`` fields.
-        Instructions without ``applyTo`` get ``inclusion: always``.
+        Kiro steering files in ``.kiro/steering/`` use the same ``applyTo:``
+        frontmatter field as APM instructions, so no transformation is needed.
+        Only the filename is changed (from ``.instructions.md`` to ``.md``),
+        which is handled by ``integrate_instructions_for_target``.
 
         Ref: https://kiro.dev/docs/steering-files/
         """
-        body = content
-        apply_to = ""
-
-        fm_match = re.match(r'^---\s*\n(.*?)\n---\s*\n?', content, re.DOTALL)
-        if fm_match:
-            fm_block = fm_match.group(1)
-            body = content[fm_match.end():]
-
-            for line in fm_block.splitlines():
-                line_stripped = line.strip()
-                if line_stripped.startswith("applyTo:"):
-                    apply_to = line_stripped[len("applyTo:"):].strip().strip("'\"")
-
-        parts = ["---"]
-        if apply_to:
-            parts.append("inclusion: fileMatch")
-            parts.append(f'fileMatchPattern: "{apply_to}"')
-        else:
-            parts.append("inclusion: always")
-        parts.append("---")
-
-        return "\n".join(parts) + "\n\n" + body.lstrip("\n")
-
-    def copy_instruction_kiro(self, source: Path, target: Path) -> int:
-        """Copy instruction file converted to Kiro steering format.
-
-        Converts ``applyTo:`` to ``inclusion``/``fileMatchPattern:`` frontmatter
-        and resolves links.
-        """
-        content = source.read_text(encoding='utf-8')
-        content = self._convert_to_kiro_steering(content)
-        content, links_resolved = self.resolve_links(content, source, target)
-        target.write_text(content, encoding='utf-8')
-        return links_resolved
+        return self.copy_instruction(source, target)
 
     # DEPRECATED: use integrate_instructions_for_target(KNOWN_TARGETS["claude"], ...) instead.
     def integrate_package_instructions_claude(

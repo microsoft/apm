@@ -96,11 +96,6 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
         target_key="cursor",
         require_dir=True,
     ),
-    "kiro": _MergeHookConfig(
-        config_filename="hooks.json",
-        target_key="kiro",
-        require_dir=True,
-    ),
     "codex": _MergeHookConfig(
         config_filename="hooks.json",
         target_key="codex",
@@ -655,7 +650,7 @@ class HookIntegrator(BaseIntegrator):
         All other merge-based targets are dispatched via the
         ``_MERGE_HOOK_TARGETS`` registry.
         """
-        if target.name == "copilot":
+        if target.name in ("copilot", "kiro"):
             return self.integrate_package_hooks(
                 package_info, project_root,
                 force=force, managed_files=managed_files,

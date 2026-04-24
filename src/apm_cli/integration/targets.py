@@ -272,6 +272,9 @@ KNOWN_TARGETS: Dict[str, TargetProfile] = {
             "instructions": PrimitiveMapping(
                 "steering", ".md", "kiro_steering"
             ),
+            "agents": PrimitiveMapping(
+                "agents", ".json", "kiro_agent"
+            ),
             "skills": PrimitiveMapping(
                 "skills", "/SKILL.md", "skill_standard"
             ),
@@ -281,6 +284,8 @@ KNOWN_TARGETS: Dict[str, TargetProfile] = {
         },
         auto_create=False,
         detect_by_dir=True,
+        user_supported=True,
+        user_root_dir=".kiro",
     ),
     # Codex CLI: skills use the cross-tool .agents/ dir (agent skills standard),
     # agents are TOML under .codex/agents/, hooks merge into .codex/hooks.json.

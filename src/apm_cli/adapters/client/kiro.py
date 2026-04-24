@@ -1,12 +1,14 @@
-"""Kiro IDE implementation of MCP client adapter.
+"""Kiro IDE/CLI implementation of MCP client adapter.
 
-Kiro uses the standard ``mcpServers`` JSON format at ``.kiro/mcp.json``
-(repo-local).  The config schema is identical to GitHub Copilot CLI, so this
-adapter subclasses :class:`CopilotClientAdapter` and only overrides the
-config-path logic and the user-facing labels.
+Kiro stores MCP configuration at ``.kiro/settings/mcp.json`` (project-local)
+or ``~/.kiro/settings/mcp.json`` (global/user scope).  The schema uses the
+standard ``mcpServers`` object so the Copilot formatter is reused directly.
 
-APM only writes to ``.kiro/mcp.json`` when the ``.kiro/`` directory
-already exists — Kiro support is opt-in.
+APM writes to ``.kiro/settings/mcp.json`` only when the ``.kiro/`` directory
+already exists — Kiro support is opt-in at project scope.  At user scope
+(``--global``), ``~/.kiro/settings/`` is auto-created.
+
+Ref: https://kiro.dev/docs/mcp/configuration/
 """
 
 import json
@@ -17,33 +19,48 @@ from .copilot import CopilotClientAdapter
 
 
 class KiroClientAdapter(CopilotClientAdapter):
-    """Kiro IDE MCP client adapter.
+    """Kiro IDE/CLI MCP client adapter.
 
     Inherits all config formatting from :class:`CopilotClientAdapter`
-    (``mcpServers`` JSON with ``command``/``args``/``env``).  Only the
-    config-file location differs: repo-local ``.kiro/mcp.json`` instead
-    of global ``~/.copilot/mcp-config.json``.
+    (``mcpServers`` JSON with ``command``/``args``/``env``).  Overrides
+    the config-file path to target ``.kiro/settings/mcp.json``.
+
+    User-scope (``--global``) writes to ``~/.kiro/settings/mcp.json``.
+    Project-scope writes to ``<cwd>/.kiro/settings/mcp.json`` only when
+    ``.kiro/`` already exists.
     """
 
-    supports_user_scope: bool = False
+    supports_user_scope: bool = True
 
-    def get_config_path(self):
-        """Return the path to ``.kiro/mcp.json`` in the repository root."""
+    def get_config_path(self, user_scope: bool = False):
+        """Return path to the Kiro MCP config file.
+
+        Args:
+            user_scope: When True, return the global ``~/.kiro/settings/mcp.json``.
+        """
+        if user_scope:
+            return str(Path.home() / ".kiro" / "settings" / "mcp.json")
         kiro_dir = Path(os.getcwd()) / ".kiro"
-        return str(kiro_dir / "mcp.json")
+        return str(kiro_dir / "settings" / "mcp.json")
 
-    def update_config(self, config_updates):
+    def update_config(self, config_updates, user_scope: bool = False):
         """Merge *config_updates* into the ``mcpServers`` section.
 
-        The ``.kiro/`` directory must already exist; if it does not, this
-        method returns silently (opt-in behaviour).
+        At project scope the ``.kiro/`` directory must already exist; if it
+        does not, this method returns silently (opt-in behaviour).
+        At user scope the ``~/.kiro/settings/`` directory is created on demand.
         """
-        config_path = Path(self.get_config_path())
+        config_path = Path(self.get_config_path(user_scope=user_scope))
 
-        if not config_path.parent.exists():
-            return
+        if user_scope:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            kiro_root = config_path.parent.parent  # .kiro/
+            if not kiro_root.exists():
+                return
+            config_path.parent.mkdir(parents=True, exist_ok=True)
 
-        current_config = self.get_current_config()
+        current_config = self.get_current_config(user_scope=user_scope)
         if "mcpServers" not in current_config:
             current_config["mcpServers"] = {}
 
@@ -52,9 +69,9 @@ class KiroClientAdapter(CopilotClientAdapter):
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(current_config, f, indent=2)
 
-    def get_current_config(self):
-        """Read the current ``.kiro/mcp.json`` contents."""
-        config_path = self.get_config_path()
+    def get_current_config(self, user_scope: bool = False):
+        """Read the current Kiro MCP config file contents."""
+        config_path = self.get_config_path(user_scope=user_scope)
 
         if not os.path.exists(config_path):
             return {}
@@ -74,7 +91,7 @@ class KiroClientAdapter(CopilotClientAdapter):
         server_info_cache=None,
         runtime_vars=None,
     ):
-        """Configure an MCP server in Kiro's ``.kiro/mcp.json``."""
+        """Configure an MCP server in ``.kiro/settings/mcp.json``."""
         if not server_url:
             print("Error: server_url cannot be empty")
             return False

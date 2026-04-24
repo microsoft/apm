@@ -600,9 +600,9 @@ class MCPIntegrator:
                         exc_info=True,
                     )
 
-        # Clean .kiro/mcp.json (only if .kiro/ directory exists)
+        # Clean .kiro/settings/mcp.json (only if .kiro/ directory exists)
         if "kiro" in target_runtimes:
-            kiro_mcp = Path.cwd() / ".kiro" / "mcp.json"
+            kiro_mcp = Path.cwd() / ".kiro" / "settings" / "mcp.json"
             if kiro_mcp.exists():
                 try:
                     import json as _json
@@ -619,15 +619,15 @@ class MCPIntegrator:
                         for name in removed:
                             if logger:
                                 logger.progress(
-                                    f"Removed stale MCP server '{name}' from .kiro/mcp.json"
+                                    f"Removed stale MCP server '{name}' from .kiro/settings/mcp.json"
                                 )
                             else:
                                 _rich_info(
-                                    f"+ Removed stale MCP server '{name}' from .kiro/mcp.json"
+                                    f"+ Removed stale MCP server '{name}' from .kiro/settings/mcp.json"
                                 )
                 except Exception:
                     _log.debug(
-                        "Failed to clean stale MCP servers from .kiro/mcp.json",
+                        "Failed to clean stale MCP servers from .kiro/settings/mcp.json",
                         exc_info=True,
                     )
 
