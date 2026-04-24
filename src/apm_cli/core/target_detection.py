@@ -26,10 +26,10 @@ from typing import List, Literal, Optional, Tuple, Union
 import click
 
 # Valid target values (internal canonical form)
-TargetType = Literal["vscode", "claude", "cursor", "opencode", "codex", "all", "minimal"]
+TargetType = Literal["vscode", "claude", "cursor", "kiro", "opencode", "codex", "all", "minimal"]
 
 # User-facing target values (includes aliases accepted by CLI)
-UserTargetType = Literal["copilot", "vscode", "agents", "claude", "cursor", "opencode", "codex", "all", "minimal"]
+UserTargetType = Literal["copilot", "vscode", "agents", "claude", "cursor", "kiro", "opencode", "codex", "all", "minimal"]
 
 
 def detect_target(
@@ -57,13 +57,15 @@ def detect_target(
             return "claude", "explicit --target flag"
         elif explicit_target == "cursor":
             return "cursor", "explicit --target flag"
+        elif explicit_target == "kiro":
+            return "kiro", "explicit --target flag"
         elif explicit_target == "opencode":
             return "opencode", "explicit --target flag"
         elif explicit_target == "codex":
             return "codex", "explicit --target flag"
         elif explicit_target == "all":
             return "all", "explicit --target flag"
-    
+
     # Priority 2: apm.yml target setting
     if config_target:
         if config_target in ("copilot", "vscode", "agents"):
@@ -72,6 +74,8 @@ def detect_target(
             return "claude", "apm.yml target"
         elif config_target == "cursor":
             return "cursor", "apm.yml target"
+        elif config_target == "kiro":
+            return "kiro", "apm.yml target"
         elif config_target == "opencode":
             return "opencode", "apm.yml target"
         elif config_target == "codex":
@@ -83,6 +87,7 @@ def detect_target(
     github_exists = (project_root / ".github").exists()
     claude_exists = (project_root / ".claude").exists()
     cursor_exists = (project_root / ".cursor").is_dir()
+    kiro_exists = (project_root / ".kiro").is_dir()
     opencode_exists = (project_root / ".opencode").is_dir()
     codex_exists = (project_root / ".codex").is_dir()
     detected = []
@@ -92,6 +97,8 @@ def detect_target(
         detected.append(".claude/")
     if cursor_exists:
         detected.append(".cursor/")
+    if kiro_exists:
+        detected.append(".kiro/")
     if opencode_exists:
         detected.append(".opencode/")
     if codex_exists:
@@ -105,13 +112,15 @@ def detect_target(
         return "claude", "detected .claude/ folder"
     elif cursor_exists:
         return "cursor", "detected .cursor/ folder"
+    elif kiro_exists:
+        return "kiro", "detected .kiro/ folder"
     elif opencode_exists:
         return "opencode", "detected .opencode/ folder"
     elif codex_exists:
         return "codex", "detected .codex/ folder"
     else:
         # No known target folders exist - minimal output
-        return "minimal", "no .github/, .claude/, .cursor/, .opencode/, or .codex/ folder found"
+        return "minimal", "no .github/, .claude/, .cursor/, .kiro/, .opencode/, or .codex/ folder found"
 
 
 def should_integrate_vscode(target: TargetType) -> bool:
@@ -160,6 +169,18 @@ def should_integrate_cursor(target: TargetType) -> bool:
         bool: True if Cursor integration (agents, skills, rules) should run
     """
     return target in ("cursor", "all")
+
+
+def should_integrate_kiro(target: TargetType) -> bool:
+    """Check if Kiro integration should be performed.
+
+    Args:
+        target: The detected or configured target
+
+    Returns:
+        bool: True if Kiro integration (steering, skills, hooks, MCP) should run
+    """
+    return target in ("kiro", "all")
 
 
 def should_integrate_codex(target: TargetType) -> bool:
@@ -218,9 +239,10 @@ def get_target_description(target: UserTargetType) -> str:
         "vscode": "AGENTS.md + .github/prompts/ + .github/agents/",
         "claude": "CLAUDE.md + .claude/commands/ + .claude/agents/ + .claude/skills/",
         "cursor": ".cursor/agents/ + .cursor/skills/ + .cursor/rules/",
+        "kiro": ".kiro/steering/ + .kiro/skills/ + .kiro/hooks/ + .kiro/mcp.json",
         "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .opencode/skills/",
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
-        "all": "AGENTS.md + CLAUDE.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .agents/",
+        "all": "AGENTS.md + CLAUDE.md + .github/ + .claude/ + .cursor/ + .kiro/ + .opencode/ + .codex/ + .agents/",
         "minimal": "AGENTS.md only (create .github/ or .claude/ for full integration)",
     }
     return descriptions.get(normalized, "unknown target")
@@ -232,7 +254,7 @@ def get_target_description(target: UserTargetType) -> str:
 
 #: The complete set of real (non-pseudo) canonical targets.
 #: "minimal" is intentionally excluded -- it is a fallback pseudo-target.
-ALL_CANONICAL_TARGETS = frozenset({"vscode", "claude", "cursor", "opencode", "codex"})
+ALL_CANONICAL_TARGETS = frozenset({"vscode", "claude", "cursor", "kiro", "opencode", "codex"})
 
 #: Alias mapping: user-facing name -> canonical internal name.
 TARGET_ALIASES: dict[str, str] = {

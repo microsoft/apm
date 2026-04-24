@@ -2082,6 +2082,108 @@ class TestCodexHookIntegration:
         assert result.files_integrated == 0
 
 
+# ─── Kiro hook integration tests ─────────────────────────────────────────────
+
+
+class TestKiroHookIntegration:
+    """Tests for Kiro hook integration (.kiro/hooks/ individual JSON files)."""
+
+    @pytest.fixture
+    def temp_project(self):
+        temp_dir = tempfile.mkdtemp()
+        project = Path(temp_dir)
+        (project / ".kiro").mkdir()
+        yield project
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def _setup_hookify_package(self, project: Path) -> PackageInfo:
+        pkg_dir = project / "apm_modules" / "anthropics" / "hookify"
+        hooks_dir = pkg_dir / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        (hooks_dir / "hooks.json").write_text(json.dumps(HOOKIFY_HOOKS_JSON, indent=2))
+        for script in ["pretooluse.py", "posttooluse.py", "stop.py", "userpromptsubmit.py"]:
+            (hooks_dir / script).write_text(f"#!/usr/bin/env python3\n# {script}")
+        return _make_package_info(pkg_dir, "hookify")
+
+    def _kiro_target(self):
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        return KNOWN_TARGETS["kiro"]
+
+    def test_integrate_hookify_kiro(self, temp_project):
+        """Kiro deploys individual JSON files to .kiro/hooks/."""
+        pkg_info = self._setup_hookify_package(temp_project)
+        integrator = HookIntegrator()
+
+        result = integrator.integrate_hooks_for_target(
+            self._kiro_target(), pkg_info, temp_project,
+        )
+
+        assert result.files_integrated == 1
+        assert result.scripts_copied == 4
+
+        target_json = temp_project / ".kiro" / "hooks" / "hookify-hooks.json"
+        assert target_json.exists()
+
+        data = json.loads(target_json.read_text())
+        assert "hooks" in data
+        assert "PreToolUse" in data["hooks"]
+
+        # Script paths must point into .kiro/hooks/ (no scripts/ subdir)
+        cmd = data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        assert ".kiro/hooks/hookify/hooks/pretooluse.py" in cmd
+        assert "${CLAUDE_PLUGIN_ROOT}" not in cmd
+
+    def test_skips_when_no_kiro_dir(self, temp_project):
+        """Kiro hooks are not deployed when .kiro/ directory does not exist."""
+        shutil.rmtree(temp_project / ".kiro")
+
+        pkg_info = self._setup_hookify_package(temp_project)
+        integrator = HookIntegrator()
+
+        result = integrator.integrate_hooks_for_target(
+            self._kiro_target(), pkg_info, temp_project,
+        )
+
+        assert result.files_integrated == 0
+        assert not (temp_project / ".kiro").exists()
+
+    def test_scripts_copied_to_kiro_hooks_dir(self, temp_project):
+        """Scripts are copied to .kiro/hooks/<pkg>/ (no scripts/ subdir)."""
+        pkg_info = self._setup_hookify_package(temp_project)
+        integrator = HookIntegrator()
+
+        integrator.integrate_hooks_for_target(
+            self._kiro_target(), pkg_info, temp_project,
+        )
+
+        scripts_dir = temp_project / ".kiro" / "hooks" / "hookify" / "hooks"
+        assert scripts_dir.exists()
+        for script in ["pretooluse.py", "posttooluse.py", "stop.py", "userpromptsubmit.py"]:
+            assert (scripts_dir / script).exists()
+
+    def test_sync_removes_kiro_hook_files(self, temp_project):
+        """sync_integration removes APM-managed Kiro hook files via managed_files."""
+        kiro_hooks = temp_project / ".kiro" / "hooks" / "hookify"
+        kiro_hooks.mkdir(parents=True, exist_ok=True)
+        (kiro_hooks / "pretooluse.py").write_text("# script")
+        hook_json = temp_project / ".kiro" / "hooks" / "hookify-hooks.json"
+        hook_json.write_text(json.dumps({"hooks": {}}))
+
+        integrator = HookIntegrator()
+        managed = {
+            ".kiro/hooks/hookify/pretooluse.py",
+            ".kiro/hooks/hookify-hooks.json",
+        }
+        stats = integrator.sync_integration(
+            None, temp_project, managed_files=managed,
+            targets=[self._kiro_target()],
+        )
+
+        assert stats["files_removed"] == 2
+        assert not hook_json.exists()
+        assert not (kiro_hooks / "pretooluse.py").exists()
+
+
 # ─── Scope-resolved target tests (PR #566 rework) ────────────────────────────
 
 

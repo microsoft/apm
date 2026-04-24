@@ -145,6 +145,9 @@ class AgentIntegrator(BaseIntegrator):
             if mapping.format_id == "codex_agent":
                 self._write_codex_agent(source_file, target_path)
                 links_resolved = 0
+            elif mapping.format_id == "kiro_agent":
+                self._write_kiro_agent(source_file, target_path)
+                links_resolved = 0
             else:
                 links_resolved = self.copy_agent(source_file, target_path)
             total_links_resolved += links_resolved
@@ -262,6 +265,49 @@ class AgentIntegrator(BaseIntegrator):
             "developer_instructions": body.strip(),
         }
         target.write_text(_toml.dumps(doc), encoding="utf-8")
+
+    @staticmethod
+    def _write_kiro_agent(source: Path, target: Path) -> None:
+        """Transform an ``.agent.md`` file to Kiro ``.json`` agent format.
+
+        Parses YAML frontmatter for ``name``, ``description``, and ``model``,
+        uses the markdown body as ``prompt``.
+
+        Ref: https://kiro.dev/docs/cli/custom-agents/configuration-reference/
+        """
+        import json as _json
+
+        content = source.read_text(encoding="utf-8")
+
+        name = source.stem
+        if name.endswith(".agent"):
+            name = name[: -len(".agent")]
+        description = ""
+        model = ""
+        body = content
+
+        fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
+        if fm_match:
+            body = content[fm_match.end():]
+            try:
+                import yaml
+
+                fm = yaml.safe_load(fm_match.group(1)) or {}
+                name = fm.get("name", name)
+                description = fm.get("description", description)
+                model = fm.get("model", model)
+            except Exception:
+                pass
+
+        doc: dict = {
+            "name": name,
+            "description": description,
+            "prompt": body.strip(),
+        }
+        if model:
+            doc["model"] = model
+
+        target.write_text(_json.dumps(doc, indent=2), encoding="utf-8")
 
     # DEPRECATED: use integrate_agents_for_target(KNOWN_TARGETS["copilot"], ...) instead.
     def integrate_package_agents(self, package_info, project_root: Path,

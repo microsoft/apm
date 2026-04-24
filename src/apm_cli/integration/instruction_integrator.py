@@ -91,7 +91,7 @@ class InstructionIntegrator(BaseIntegrator):
         deploy_dir.mkdir(parents=True, exist_ok=True)
 
         fmt = mapping.format_id
-        needs_rename = fmt in ("cursor_rules", "claude_rules")
+        needs_rename = fmt in ("cursor_rules", "claude_rules", "kiro_steering")
 
         files_integrated = 0
         files_skipped = 0
@@ -121,6 +121,8 @@ class InstructionIntegrator(BaseIntegrator):
                 links_resolved = self.copy_instruction_cursor(source_file, target_path)
             elif fmt == "claude_rules":
                 links_resolved = self.copy_instruction_claude(source_file, target_path)
+            elif fmt == "kiro_steering":
+                links_resolved = self.copy_instruction_kiro(source_file, target_path)
             else:
                 links_resolved = self.copy_instruction(source_file, target_path)
 
@@ -350,6 +352,22 @@ class InstructionIntegrator(BaseIntegrator):
         content, links_resolved = self.resolve_links(content, source, target)
         target.write_text(content, encoding='utf-8')
         return links_resolved
+
+    # ------------------------------------------------------------------
+    # Kiro Steering (.md — verbatim, Kiro uses applyTo: natively)
+    # ------------------------------------------------------------------
+
+    def copy_instruction_kiro(self, source: Path, target: Path) -> int:
+        """Copy instruction file verbatim for Kiro steering.
+
+        Kiro steering files in ``.kiro/steering/`` use the same ``applyTo:``
+        frontmatter field as APM instructions, so no transformation is needed.
+        Only the filename is changed (from ``.instructions.md`` to ``.md``),
+        which is handled by ``integrate_instructions_for_target``.
+
+        Ref: https://kiro.dev/docs/steering-files/
+        """
+        return self.copy_instruction(source, target)
 
     # DEPRECATED: use integrate_instructions_for_target(KNOWN_TARGETS["claude"], ...) instead.
     def integrate_package_instructions_claude(

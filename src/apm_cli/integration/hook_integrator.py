@@ -225,6 +225,9 @@ class HookIntegrator(BaseIntegrator):
         elif target == "cursor":
             base_root = root_dir or ".cursor"
             scripts_base = f"{base_root}/hooks/{package_name}"
+        elif target == "kiro":
+            base_root = root_dir or ".kiro"
+            scripts_base = f"{base_root}/hooks/{package_name}"
         elif target == "codex":
             base_root = root_dir or ".codex"
             scripts_base = f"{base_root}/hooks/{package_name}"
@@ -397,6 +400,15 @@ class HookIntegrator(BaseIntegrator):
             )
 
         root_dir = target.root_dir if target else ".github"
+
+        # Opt-in guard: targets with auto_create=False skip when their root dir is absent.
+        if target and not getattr(target, "auto_create", True):
+            if not (project_root / root_dir).is_dir():
+                return HookIntegrationResult(
+                    files_integrated=0, files_updated=0,
+                    files_skipped=0, target_paths=[],
+                )
+
         hooks_dir = project_root / root_dir / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
 
@@ -405,14 +417,17 @@ class HookIntegrator(BaseIntegrator):
         scripts_copied = 0
         target_paths: List[Path] = []
 
+        # Select rewrite target: Kiro uses its own script-path layout;
+        # all other individual-file targets (Copilot) use the VSCode layout.
+        rewrite_target = target.name if target and target.name == "kiro" else "vscode"
+
         for hook_file in hook_files:
             data = self._parse_hook_json(hook_file)
             if data is None:
                 continue
 
-            # Rewrite script paths for VSCode target
             rewritten, scripts = self._rewrite_hooks_data(
-                data, package_info.install_path, package_name, "vscode",
+                data, package_info.install_path, package_name, rewrite_target,
                 hook_file_dir=hook_file.parent,
                 root_dir=root_dir,
             )
@@ -647,7 +662,7 @@ class HookIntegrator(BaseIntegrator):
         All other merge-based targets are dispatched via the
         ``_MERGE_HOOK_TARGETS`` registry.
         """
-        if target.name == "copilot":
+        if target.name in ("copilot", "kiro"):
             return self.integrate_package_hooks(
                 package_info, project_root,
                 force=force, managed_files=managed_files,
