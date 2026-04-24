@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- PGS project board sync: `scripts/project/sync_item.py` and `.github/workflows/project-sync.yml` keep https://github.com/orgs/microsoft/projects/2304 in lockstep with `theme/*`, `area/*`, `type/*`, `priority/*` labels and milestones. Backfill helper at `scripts/project/backfill.sh`. (#919)
 
 - `includes:` manifest field (auto | list) for explicit governance of local `.apm/` content. Closes audit-blindness gap (#887).
 - `apm audit --ci` now verifies hash integrity of locally deployed files, detecting hand-edits and config drift. (#887)
