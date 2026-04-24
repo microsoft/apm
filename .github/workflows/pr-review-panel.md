@@ -17,7 +17,9 @@ description: Multi-persona expert panel review of labelled PRs, posting a single
 #        `gh pr diff` which return inert text
 #      - imports are pinned to microsoft/apm#main (panel skill +
 #        persona definitions are trusted, not from the PR)
-#      - the only write surface is safe-outputs.add-comment (max 1)
+#      - the only write surface is safe-outputs.add-comment (max 7
+#        is a safety ceiling; the agent is instructed to emit one
+#        synthesized verdict comment)
 #      - `roles: [admin, maintainer, write]` ensures only repo
 #        maintainers can trigger -- matches the trust model that
 #        applying the `panel-review` label requires write access.
@@ -73,7 +75,7 @@ network:
 
 safe-outputs:
   add-comment:
-    max: 1
+    max: 7
 
 timeout-minutes: 30
 ---
@@ -124,24 +126,20 @@ separate scope-analysis sub-agent for this. If the skill marks Auth
 Expert inactive, do not dispatch it; keep the Auth Expert heading in
 the final verdict and fill it with `Not activated -- <reason>`.
 
-## Step 3: Workflow-only guardrails
+## Step 3: Output contract
 
-These guardrails are enforced at the workflow boundary. The skill
-owns the review behavior; this step owns only the emission boundary.
+- You may post **exactly one** comment for this entire panel run, and it
+  **must** be the final synthesized verdict from the **CEO** (after
+  arbitration). Sub-agent personas (Python Architect, CLI Logging
+  Expert, DevX UX Expert, Supply Chain Security Expert, OSS Growth
+  Hacker, Auth Expert when active) **do not** post comments — they
+  return their findings to the CEO, who synthesizes the single verdict.
+  When dispatching each sub-agent, instruct it explicitly: "do not post
+  any comment; return your findings to the orchestrator."
+- Do not call the GitHub API directly. Write the comment via the
+  provided output channel; a downstream publisher posts it.
 
-- Emit exactly **one** safe-output comment for this entire panel run.
-- Do **not** call the GitHub API directly -- write only to the
-  `safe-outputs.add-comment` channel; the permission-isolated
-  downstream job publishes the comment to PR
-  #${{ github.event.pull_request.number || inputs.pr_number }}.
-- ASCII only -- no emojis, no Unicode box-drawing (project encoding rule).
+## Step 4: Emit the verdict
 
-## Step 4: Emit the safe output
-
-Post the verdict by writing the comment body to the agent output channel.
-The `safe-outputs.add-comment` job (capped at 1) will pick it up and
-post it to PR #$PR.
-
-You do NOT call the GitHub API directly -- write the structured request to
-the safe-outputs channel and gh-aw's permission-isolated downstream job
-publishes the comment.
+Write the CEO's final verdict comment body to the agent output channel.
+The downstream publisher will post it to PR #$PR.
