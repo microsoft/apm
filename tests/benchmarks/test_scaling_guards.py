@@ -288,3 +288,62 @@ class TestSemanticEquivalenceScaling:
             f"O(n^2) regression (t_small={t_small:.6f}s, "
             f"t_large={t_large:.6f}s)"
         )
+
+
+# ---------------------------------------------------------------------------
+# 6. should_exclude scaling with ** patterns
+# ---------------------------------------------------------------------------
+
+def _make_test_tree(base: Path, depth: int) -> Path:
+    """Create a file at the given depth under *base* and return its path.
+
+    E.g. depth=5 -> base/a/b/c/d/test.py
+    """
+    parts = [chr(ord("a") + (i % 26)) for i in range(depth - 1)]
+    parts.append("test.py")
+    file_path = base
+    for p in parts:
+        file_path = file_path / p
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_text("# test\n")
+    return file_path
+
+
+class TestShouldExcludeScaling:
+    """should_exclude() with ** patterns must stay sub-quadratic in path depth.
+
+    Both test paths are designed to NOT match the pattern, exercising the full
+    backtracking path before rejection -- the worst case for recursive matchers.
+    """
+
+    def test_scaling_ratio(self, tmp_path):
+        """Depth 5 vs depth 15 with a 2-segment ** pattern.
+
+        For a 3x depth increase, the ratio should be < 25x (sub-quadratic).
+        A quadratic algorithm would give ~9x just from depth, but with
+        2 ** segments the branching factor can compound.  25x is our
+        generous guard against super-quadratic blowup.
+        """
+        from apm_cli.utils.exclude import should_exclude, validate_exclude_patterns
+
+        pattern = validate_exclude_patterns(["**/a/**/b/*.py"])
+
+        shallow_file = _make_test_tree(tmp_path / "shallow", 5)
+        deep_file = _make_test_tree(tmp_path / "deep", 15)
+
+        t_shallow = _median_time(
+            lambda: should_exclude(shallow_file, tmp_path / "shallow", pattern)
+        )
+        t_deep = _median_time(
+            lambda: should_exclude(deep_file, tmp_path / "deep", pattern)
+        )
+
+        if t_shallow < 1e-7:
+            pytest.skip("below measurement threshold -- too fast to measure reliably")
+
+        ratio = t_deep / t_shallow
+        assert ratio < 25, (
+            f"Scaling ratio {ratio:.1f}x for 3x depth increase suggests "
+            f"super-quadratic regression (t_shallow={t_shallow:.6f}s, "
+            f"t_deep={t_deep:.6f}s)"
+        )
