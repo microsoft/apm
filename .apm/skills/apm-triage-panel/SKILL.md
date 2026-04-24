@@ -9,12 +9,12 @@ description: >-
 
 # APM Triage Panel -- Single-Issue Triage Orchestration
 
-The panel is fixed at **3 mandatory specialist lenses + 1 conditional
-growth lens + 1 arbiter lens = up to 5 persona sections in one triage
-comment**. You play each lens in turn from inside a single agent loop
-(progressive-disclosure skill model -- no sub-agent dispatch). Routing
-chooses *which* lenses execute; it never changes which headings appear
-in the final comment.
+The panel is fixed at **3 mandatory specialist lenses + up to 3
+conditional lenses + 1 arbiter lens = up to 6 active persona sections
+in one triage comment** (3 mandatory + 3 conditional). You play each
+lens in turn from inside a single agent loop (progressive-disclosure
+skill model -- no sub-agent dispatch). Routing chooses *which* lenses
+execute; it never changes which headings appear in the final comment.
 
 This skill mirrors the `apm-review-panel` orchestration shape on
 purpose. Same single-comment discipline, same completeness gate, same
@@ -29,10 +29,12 @@ output template differ.
 | [Supply Chain Security Expert](../../agents/supply-chain-security-expert.agent.md) | Risk-Surface Reviewer | Yes |
 | [APM CEO](../../agents/apm-ceo.agent.md) | Triage Arbiter | Yes (always arbitrates) |
 | [OSS Growth Hacker](../../agents/oss-growth-hacker.agent.md) | Contributor-Tone Reviewer | Conditional (see below) |
+| [Python Architect](../../agents/python-architect.agent.md) | Architecture Reviewer | Conditional (see below) |
+| [Doc Writer](../../agents/doc-writer.agent.md) | Documentation Reviewer | Conditional (see below) |
 
-Skipped by default: Python Architect, CLI Logging Expert, Auth Expert.
-Triage operates on issue intent, not on diffs -- those personas are
-invoked downstream by `apm-review-panel` once a PR exists.
+Skipped by default: CLI Logging Expert, Auth Expert. Triage operates
+on issue intent, not on diffs -- those personas are invoked downstream
+by `apm-review-panel` once a PR exists.
 
 ## Routing topology
 
@@ -40,6 +42,11 @@ invoked downstream by `apm-review-panel` once a PR exists.
    devx-ux-expert      supply-chain-security-expert
         \_______________________/
                     |
+                    |   <-- python-architect (conditional; design /
+                    |       architecture / new primitive / new schema)
+                    |
+                    |   <-- doc-writer (conditional; docs work or
+                    |       user-facing change that needs new doc pages)
                     v
                 apm-ceo               <----  oss-growth-hacker
            (final call / arbiter)           (conditional; tunes tone
@@ -49,14 +56,27 @@ invoked downstream by `apm-review-panel` once a PR exists.
 - **Specialists raise findings independently** -- no implicit consensus.
 - **CEO arbitrates** the theme, milestone, priority, and tone of the
   reply. CEO has the final call on the decision rubric.
-- **Growth Hacker is a side-channel** to the CEO when activated:
-  never blocks a specialist finding; tunes the comment's tone for
-  first-time and low-interaction contributors.
+- **Growth Hacker, Python Architect, and Doc Writer are side-channels**
+  to the CEO when activated. They never block a specialist finding;
+  they feed the CEO's arbitration:
+  - Growth Hacker tunes the comment's tone for first-time and
+    low-interaction contributors.
+  - Python Architect flags feasibility and cross-cutting impact, and
+    pushes the decision toward `status/needs-design` when warranted.
+  - Doc Writer flags whether docs work is implied and whether the
+    suggested comment wording is grounded in the user vocabulary used
+    in the README and guides.
 
-## Conditional panelist: OSS Growth Hacker
+## Conditional panelists
 
-Growth Hacker is the only conditional panelist. Activate
-`oss-growth-hacker` if either rule below matches.
+Three personas are conditional: OSS Growth Hacker, Python Architect,
+and Doc Writer. Each follows the same shape: an explicit YES/NO
+activation rule plus an inactive-reason fallback. Maximum lenses in a
+single triage = 6 (3 mandatory + 3 conditional).
+
+### OSS Growth Hacker
+
+Activate `oss-growth-hacker` if either rule below matches.
 
 1. **Fast-path author trigger.** Activate the Growth Hacker lens
    immediately when the issue's author meets ANY of:
@@ -81,6 +101,71 @@ Routing rule:
   procedure) and capture its tone-tuning findings.
 - **NO**  -> record `OSS Growth Hacker inactive reason: <one sentence>`
   in working notes; do not take the lens.
+
+### Python Architect
+
+Activate `python-architect` if either rule below matches.
+
+1. **Fast-path label / scope trigger.** Activate the Architecture
+   Reviewer lens immediately when ANY of:
+   - The issue carries `type/architecture` (current or proposed) or
+     the `breaking-change` preserved label.
+   - The issue body proposes a new top-level CLI command, or a schema
+     change to `apm.yml`, `apm.lock.yaml`, or `apm-policy.yml`.
+   - The issue body contains keywords indicating cross-module or
+     cross-file work, a new module, a new pattern, a new contract, or
+     a new primitive design -- e.g. "refactor", "rearchitect", "new
+     module", "design", "abstraction", "schema change", "pluggable",
+     "introduce X pattern".
+
+2. **Fallback self-check.** If the issue is ambiguous, answer this
+   before activating the lens:
+
+   > Does this issue, if accepted as written, require a cross-cutting
+   > design decision (interface, data model, migration boundary, or
+   > new primitive) before code can land safely? Answer YES or NO
+   > with one sentence. If unsure, answer YES.
+
+Routing rule:
+
+- **YES** -> take the Python Architect lens. Capture: feasibility of
+  the design as proposed, callouts of cross-cutting impact, and
+  whether the issue should land as `status/needs-design` instead of
+  `status/accepted`.
+- **NO**  -> record `Python Architect inactive reason: <one sentence>`
+  in working notes; do not take the lens.
+
+### Doc Writer
+
+Activate `doc-writer` if either rule below matches.
+
+1. **Fast-path label / scope trigger.** Activate the Documentation
+   Reviewer lens immediately when ANY of:
+   - The issue is `type/docs` or carries `area/docs-site` (current or
+     proposed).
+   - The issue body proposes documentation, README, reference, guide,
+     or migration-note changes.
+   - The issue is a user-facing feature that will require new doc
+     pages -- e.g. a new CLI flag, a new primitive, a new authoring
+     concept.
+
+2. **Fallback self-check.** If the issue is ambiguous, answer this
+   before activating the lens:
+
+   > Will an implementing PR for this issue need to add or change
+   > user-facing documentation in `docs/src/content/docs/` or in the
+   > README? Answer YES or NO with one sentence. If unsure, answer
+   > YES.
+
+Routing rule:
+
+- **YES** -> take the Doc Writer lens. Capture: whether docs work is
+  implied (and whether `area/docs-site` should be added as a
+  secondary `area/*` so the implementing PR is reminded), and whether
+  the proposed comment wording is clear and grounded in the user
+  vocabulary used in the README and guides.
+- **NO**  -> record `Doc Writer inactive reason: <one sentence>` in
+  working notes; do not take the lens.
 
 ## Triage decision rubric
 
@@ -178,9 +263,15 @@ A triage comment passes when:
       or auth, `theme/security` or `theme/governance` is on the set
 - [ ] APM CEO: theme, milestone, priority, decision, and reply tone
       ratified
-- [ ] OSS Growth Hacker (only if activated): tone tuned for a new or
-      low-interaction contributor; reply names a concrete next step
-      they can take
+- [ ] OSS Growth Hacker lens taken or inactive reason recorded; if
+      taken, tone tuned for a new or low-interaction contributor and
+      the reply names a concrete next step they can take
+- [ ] Python Architect lens taken or inactive reason recorded; if
+      taken, feasibility, cross-cutting impact, and any
+      `status/needs-design` recommendation are captured
+- [ ] Doc Writer lens taken or inactive reason recorded; if taken,
+      docs implication is named and any `area/docs-site` secondary
+      label is proposed when the implementing PR will need new pages
 
 ## Notes
 
@@ -203,20 +294,21 @@ any output before the final step.
    `author_association`, prior comments). The orchestrating workflow
    already fetches this with `gh issue view --json` -- do not
    re-fetch from inside the skill.
-2. Resolve the **OSS Growth Hacker conditional case** using the rule
-   in "Conditional panelist" above. Record either an activation
-   decision or an `OSS Growth Hacker inactive reason: <one sentence>`
-   in working notes.
-3. For each mandatory persona (plus `oss-growth-hacker` if
+2. Resolve the **three conditional cases** -- OSS Growth Hacker,
+   Python Architect, Doc Writer -- using the rules in "Conditional
+   panelists" above. For each, record either an activation decision
+   or `<Persona> inactive reason: <one sentence>` in working notes.
+3. For each mandatory persona (plus any conditional persona that
    activated), follow the **Persona pass procedure** below, one
    persona at a time. Do not try to play multiple personas in a
    single pass.
 4. Run the **pre-arbitration completeness gate**:
    - Findings exist in working notes for the 2 mandatory specialists
      (DevX UX Expert, Supply Chain Security Expert).
-   - Exactly one of `OSS Growth Hacker findings` or `OSS Growth
-     Hacker inactive reason` exists (neither = incomplete; both =
-     inconsistent routing).
+   - For EACH of OSS Growth Hacker, Python Architect, and Doc Writer:
+     exactly one of `<Persona> findings` or `<Persona> inactive
+     reason` exists (neither = incomplete; both = inconsistent
+     routing).
    - No persona section is missing or empty.
    If any check fails, redo that persona's pass and repeat the gate.
    Do not proceed to step 5 until the gate passes.
@@ -250,8 +342,8 @@ For each persona, run this exact procedure in your own context:
    author signals, and any prior comments against the scope declared
    in the file.
 3. Write the findings to working notes under
-   `<persona-name>: <findings>` (or, for an inactive Growth Hacker,
-   `OSS Growth Hacker inactive reason: <one sentence>`).
+   `<persona-name>: <findings>` (or, for an inactive conditional
+   persona, `<Persona> inactive reason: <one sentence>`).
 4. Drop the persona lens before moving on. Do not emit any comment
    from inside a persona pass; persona findings stay in working
    notes until step 7 synthesizes them.
@@ -302,6 +394,10 @@ per-persona noise.
 - **Wildcard heuristics.** Do not activate the OSS Growth Hacker on
   `*new*` or `*first*` keyword matches alone -- always cross-check
   `author_association` and prior interactions on `microsoft/apm`.
+  Same discipline for Python Architect (do not fire on the bare word
+  "refactor" in unrelated context -- check the issue's actual scope)
+  and Doc Writer (do not fire purely on the word "docs" appearing in
+  passing -- the issue must propose or imply a doc-surface change).
 
 ## Gotchas
 
@@ -310,10 +406,10 @@ per-persona noise.
   quality gates MUST agree on the persona set. If you change one,
   change all of them in the same edit.
 - **No new persona required.** This skill deliberately reuses
-  `devx-ux-expert`, `supply-chain-security-expert`, `apm-ceo`, and
-  `oss-growth-hacker`. Do not create a `triage-*` persona; the
-  README spine plus the new label taxonomy plus the existing CEO
-  arbiter are sufficient grounding.
+  `devx-ux-expert`, `supply-chain-security-expert`, `apm-ceo`,
+  `oss-growth-hacker`, `python-architect`, and `doc-writer`. Do not
+  create a `triage-*` persona; the README spine plus the label
+  taxonomy plus the existing CEO arbiter are sufficient grounding.
 - **Bundle layout on the runner.** When this skill runs inside an
   agentic workflow, the APM bundle is unpacked under
   `.github/skills/apm-triage-panel/` first, with `.apm/skills/...`

@@ -14,9 +14,10 @@ Rules when filling the template:
 - Do NOT split this output across multiple comments under any condition.
 - Routing changes which personas run, not which persona headings appear
   in the per-lens notes block.
-- Only OSS Growth Hacker is conditional. If it was not activated for the
-  issue, write "Not activated -- <reason>" as that persona's body. Do
-  not omit the persona heading.
+- OSS Growth Hacker, Python Architect, and Doc Writer are conditional.
+  If one was not activated for the issue, write
+  "Not activated -- <reason>" as that persona's body. Do not omit any
+  persona heading.
 - The trailing ```json block named `triage-decision` is REQUIRED and is
   the machine-readable contract for label application, milestone setting,
   and comment posting. Keep its keys exactly as written below.
@@ -78,6 +79,20 @@ End with a concrete next step the author can take.>
 <summary>OSS Growth Hacker -- Contributor-Tone Reviewer</summary>
 
 <one paragraph: tone-tuning for the suggested comment given author signals (first-time contributor? low prior interaction count?). Or: "Not activated -- <one sentence reason>".>
+
+</details>
+
+<details>
+<summary>Python Architect -- Architecture Reviewer</summary>
+
+<one paragraph: feasibility of the design as proposed, cross-cutting impact across modules / files / contracts, and whether the issue should land as `status/needs-design` instead of `status/accepted`. Or: "Not activated -- <one sentence reason>".>
+
+</details>
+
+<details>
+<summary>Doc Writer -- Documentation Reviewer</summary>
+
+<one paragraph: is docs work implied? should `area/docs-site` ride as a secondary `area/*` so the implementing PR is reminded? is the suggested comment wording clear and grounded in the user vocabulary used in the README and guides? Or: "Not activated -- <one sentence reason>".>
 
 </details>
 
