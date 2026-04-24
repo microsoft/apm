@@ -132,7 +132,7 @@ def _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir: Path
             expected.add(str(install_path))
 
     if lockfile:
-        for dep in lockfile.get_all_dependencies():
+        for dep in lockfile.get_package_dependencies():
             if dep.depth is not None and dep.depth > 1:
                 dep_ref = dep.to_dependency_ref()
                 install_path = dep_ref.get_install_path(apm_modules_dir)
@@ -481,6 +481,12 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
         "description": config["description"],
         "author": config["author"],
         "dependencies": {"apm": [], "mcp": []},
+        # Issue #887: scaffold with explicit consent for local content
+        # deployment so day-2 audit doesn't surprise the maintainer with
+        # an "includes not declared" advisory the moment they drop a
+        # primitive in .apm/.  Override with an explicit path list to
+        # gate what gets deployed.
+        "includes": "auto",
     }
 
     if plugin:
