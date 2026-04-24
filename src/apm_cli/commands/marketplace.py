@@ -136,10 +136,10 @@ def marketplace(ctx):
     """Register, browse, and search marketplaces."""
     from ..core.experimental import is_enabled
 
-    if not is_enabled("marketplace_commands"):
+    if not is_enabled("marketplace_authoring"):
         click.echo(
             "[!] Marketplace commands are experimental.\n"
-            "    Enable with: apm experimental enable marketplace-commands\n"
+            "    Enable with: apm experimental enable marketplace-authoring\n"
             "    Learn more:  apm experimental list"
         )
         ctx.exit(1)

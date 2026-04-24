@@ -70,8 +70,8 @@ FLAGS: dict[str, ExperimentalFlag] = {
             "See https://microsoft.github.io/apm/integrations/copilot-cowork/"
         ),
     ),
-    "marketplace_commands": ExperimentalFlag(
-        name="marketplace_commands",
+    "marketplace_authoring": ExperimentalFlag(
+        name="marketplace_authoring",
         description="Enable marketplace authoring and discovery commands.",
         default=False,
         hint="Run 'apm marketplace --help' to see available commands.",

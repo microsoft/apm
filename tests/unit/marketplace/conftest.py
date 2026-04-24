@@ -12,15 +12,15 @@ from apm_cli.core.experimental import is_enabled as _real_is_enabled
 
 
 def _marketplace_enabled_is_enabled(name: str) -> bool:
-    """Stub that forces ``marketplace_commands`` to True."""
-    if name == "marketplace_commands":
+    """Stub that forces ``marketplace_authoring`` to True."""
+    if name == "marketplace_authoring":
         return True
     return _real_is_enabled(name)
 
 
 @pytest.fixture(autouse=True)
 def _enable_marketplace_flag():
-    """Pre-enable the ``marketplace_commands`` experimental flag.
+    """Pre-enable the ``marketplace_authoring`` experimental flag.
 
     Tests in this directory that invoke the ``marketplace`` Click group
     need the flag enabled so the group callback does not exit early.

@@ -1,12 +1,12 @@
 """Tests for marketplace experimental flag gating.
 
 Verifies:
-  - ``marketplace_commands`` flag is registered in the ``FLAGS`` registry
+  - ``marketplace_authoring`` flag is registered in the ``FLAGS`` registry
   - Marketplace group callback exits with a helpful message when flag disabled
   - Marketplace group callback proceeds normally when flag enabled
 
 Note: The directory-level conftest patches ``is_enabled`` to return True
-for ``marketplace_commands`` (so existing marketplace subcommand tests pass).
+for ``marketplace_authoring`` (so existing marketplace subcommand tests pass).
 Tests here that need the flag *disabled* wrap their assertions in an
 explicit ``patch`` context manager that overrides the conftest mock.
 """
@@ -26,33 +26,33 @@ from click.testing import CliRunner
 
 
 class TestMarketplaceFlagRegistration:
-    """Verify the marketplace_commands flag exists with correct metadata."""
+    """Verify the marketplace_authoring flag exists with correct metadata."""
 
     def test_marketplace_flag_in_registry(self) -> None:
-        """marketplace_commands is a registered ExperimentalFlag."""
+        """marketplace_authoring is a registered ExperimentalFlag."""
         from apm_cli.core.experimental import FLAGS
 
-        assert "marketplace_commands" in FLAGS
+        assert "marketplace_authoring" in FLAGS
 
     def test_flag_default_is_false(self) -> None:
         """Flag ships disabled by default."""
         from apm_cli.core.experimental import FLAGS
 
-        flag = FLAGS["marketplace_commands"]
+        flag = FLAGS["marketplace_authoring"]
         assert flag.default is False
 
     def test_flag_name_matches_key(self) -> None:
         """Registry key matches the flag's .name attribute."""
         from apm_cli.core.experimental import FLAGS
 
-        flag = FLAGS["marketplace_commands"]
-        assert flag.name == "marketplace_commands"
+        flag = FLAGS["marketplace_authoring"]
+        assert flag.name == "marketplace_authoring"
 
     def test_flag_has_hint(self) -> None:
         """Flag provides a post-enable hint."""
         from apm_cli.core.experimental import FLAGS
 
-        flag = FLAGS["marketplace_commands"]
+        flag = FLAGS["marketplace_authoring"]
         assert flag.hint is not None
         assert "marketplace" in flag.hint.lower()
 
@@ -80,13 +80,13 @@ class TestMarketplaceGroupCallbackGuard:
 
         assert result.exit_code != 0
         assert "experimental" in result.output.lower()
-        assert "apm experimental enable marketplace-commands" in result.output
+        assert "apm experimental enable marketplace-authoring" in result.output
 
     def test_proceeds_when_enabled(self) -> None:
         """When flag is enabled, marketplace group does not block subcommands.
 
         The conftest already patches is_enabled to return True for
-        marketplace_commands, so no additional setup needed.
+        marketplace_authoring, so no additional setup needed.
         """
         from apm_cli.commands.marketplace import marketplace
 
@@ -118,13 +118,13 @@ class TestMarketplaceGroupCallbackGuard:
 class TestCliRegistrationGate:
     """Verify the conditional registration references the correct flag."""
 
-    def test_cli_py_references_marketplace_commands_flag(self) -> None:
-        """cli.py source code checks the marketplace_commands flag."""
+    def test_cli_py_references_marketplace_authoring_flag(self) -> None:
+        """cli.py source code checks the marketplace_authoring flag."""
         import inspect
         import apm_cli.cli as cli_mod
 
         source = inspect.getsource(cli_mod)
-        assert "_xp_enabled(\"marketplace_commands\")" in source
+        assert "_xp_enabled(\"marketplace_authoring\")" in source
 
     def test_cli_py_wraps_registration_in_try_except(self) -> None:
         """cli.py wraps marketplace registration in try/except for resilience."""
@@ -133,7 +133,7 @@ class TestCliRegistrationGate:
 
         source = inspect.getsource(cli_mod)
         # Find the marketplace gating block
-        idx = source.index("marketplace_commands")
+        idx = source.index("marketplace_authoring")
         # Look backwards for 'try' and forwards for 'except'
         block = source[max(0, idx - 200):idx + 200]
         assert "try:" in block

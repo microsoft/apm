@@ -91,7 +91,7 @@ cli.add_command(outdated_cmd, name="outdated")
 try:
     from apm_cli.core.experimental import is_enabled as _xp_enabled
 
-    if _xp_enabled("marketplace_commands"):
+    if _xp_enabled("marketplace_authoring"):
         cli.add_command(marketplace)
         cli.add_command(marketplace_search, name="search")
 except Exception:

@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `apm marketplace` commands ring-fenced behind `apm experimental enable marketplace-commands` feature flag (default: disabled) (#790)
+- `apm marketplace` commands ring-fenced behind `apm experimental enable marketplace-authoring` feature flag (default: disabled) (#790)
 
 ### Fixed
 

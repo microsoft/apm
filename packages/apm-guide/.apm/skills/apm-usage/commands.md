@@ -50,7 +50,7 @@
 
 ## Marketplace (experimental)
 
-> **Gated behind `apm experimental enable marketplace-commands`**. Hidden from `--help` and non-functional until enabled.
+> **Gated behind `apm experimental enable marketplace-authoring`**. Hidden from `--help` and non-functional until enabled.
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
