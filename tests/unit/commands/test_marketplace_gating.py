@@ -2,8 +2,11 @@
 
 Verifies:
   - ``marketplace_authoring`` flag is registered in the ``FLAGS`` registry
-  - Marketplace group callback exits with a helpful message when flag disabled
-  - Marketplace group callback proceeds normally when flag enabled
+  - Consumer commands (add, list, browse, update, remove, validate) work
+    WITHOUT the flag enabled
+  - Authoring commands (init, build, check, outdated, doctor, publish, package)
+    are blocked when the flag is disabled, with an enablement message
+  - Authoring commands proceed when the flag is enabled
 
 Note: The directory-level conftest patches ``is_enabled`` to return True
 for ``marketplace_authoring`` (so existing marketplace subcommand tests pass).
@@ -56,47 +59,95 @@ class TestMarketplaceFlagRegistration:
         assert flag.hint is not None
         assert "marketplace" in flag.hint.lower()
 
+    def test_flag_description_mentions_authoring(self) -> None:
+        """Flag description is scoped to authoring commands only."""
+        from apm_cli.core.experimental import FLAGS
+
+        flag = FLAGS["marketplace_authoring"]
+        assert "authoring" in flag.description.lower()
+
 
 # ---------------------------------------------------------------------------
-# Defence-in-depth: marketplace group callback guard
+# Consumer commands: always available (no flag required)
 # ---------------------------------------------------------------------------
 
 
-class TestMarketplaceGroupCallbackGuard:
-    """Verify the guard inside the marketplace() group callback."""
+class TestConsumerCommandsUngated:
+    """Consumer commands must work without marketplace_authoring enabled."""
 
-    def test_exits_with_message_when_disabled(self) -> None:
-        """When flag is disabled, marketplace group exits with enablement hint."""
+    @pytest.mark.parametrize("subcmd", ["add", "list", "browse", "update", "remove", "validate"])
+    def test_consumer_command_reachable_when_flag_disabled(self, subcmd: str) -> None:
+        """Consumer subcommands are not blocked by the authoring flag."""
         from apm_cli.commands.marketplace import marketplace
 
         runner = CliRunner()
-        # Override the conftest patch to force the flag off
         with patch(
             "apm_cli.core.experimental.is_enabled",
             side_effect=lambda name: False,
         ):
-            # Invoke a subcommand so the group callback fires (--help is eager)
-            result = runner.invoke(marketplace, ["list"])
+            result = runner.invoke(marketplace, [subcmd, "--help"])
+
+        # --help should succeed (exit 0) and NOT show the experimental
+        # gating message -- the command is reachable.
+        assert result.exit_code == 0
+        assert "experimental" not in result.output.lower()
+
+    def test_marketplace_help_works_when_flag_disabled(self) -> None:
+        """``marketplace --help`` shows all sections without the flag."""
+        from apm_cli.commands.marketplace import marketplace
+
+        runner = CliRunner()
+        with patch(
+            "apm_cli.core.experimental.is_enabled",
+            side_effect=lambda name: False,
+        ):
+            result = runner.invoke(marketplace, ["--help"])
+
+        assert result.exit_code == 0
+        assert "Consumer commands" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Authoring commands: blocked without the flag
+# ---------------------------------------------------------------------------
+
+
+class TestAuthoringCommandsGated:
+    """Authoring commands must be blocked when the flag is disabled."""
+
+    @pytest.mark.parametrize("subcmd", ["init", "build", "check", "outdated", "doctor", "publish"])
+    def test_authoring_command_blocked_when_disabled(self, subcmd: str) -> None:
+        """Authoring subcommand exits with enablement hint when flag off."""
+        from apm_cli.commands.marketplace import marketplace
+
+        runner = CliRunner()
+        with patch(
+            "apm_cli.core.experimental.is_enabled",
+            side_effect=lambda name: False,
+        ):
+            result = runner.invoke(marketplace, [subcmd])
 
         assert result.exit_code != 0
         assert "experimental" in result.output.lower()
         assert "apm experimental enable marketplace-authoring" in result.output
 
-    def test_proceeds_when_enabled(self) -> None:
-        """When flag is enabled, marketplace group does not block subcommands.
-
-        The conftest already patches is_enabled to return True for
-        marketplace_authoring, so no additional setup needed.
-        """
+    def test_package_subgroup_blocked_when_disabled(self) -> None:
+        """``marketplace package`` exits with enablement hint when flag off."""
         from apm_cli.commands.marketplace import marketplace
 
         runner = CliRunner()
-        result = runner.invoke(marketplace, ["--help"])
+        with patch(
+            "apm_cli.core.experimental.is_enabled",
+            side_effect=lambda name: False,
+        ):
+            result = runner.invoke(marketplace, ["package", "add", "x/y"])
 
-        assert result.exit_code == 0
-        assert "marketplace" in result.output.lower()
+        assert result.exit_code != 0
+        assert "experimental" in result.output.lower()
+        assert "apm experimental enable marketplace-authoring" in result.output
 
-    def test_guard_message_includes_learn_more(self) -> None:
+    @pytest.mark.parametrize("subcmd", ["init", "build", "check", "outdated", "doctor", "publish"])
+    def test_authoring_guard_message_includes_learn_more(self, subcmd: str) -> None:
         """Guard message includes 'apm experimental list' for discoverability."""
         from apm_cli.commands.marketplace import marketplace
 
@@ -105,36 +156,40 @@ class TestMarketplaceGroupCallbackGuard:
             "apm_cli.core.experimental.is_enabled",
             side_effect=lambda name: False,
         ):
-            result = runner.invoke(marketplace, ["list"])
+            result = runner.invoke(marketplace, [subcmd])
 
         assert "apm experimental list" in result.output
 
 
 # ---------------------------------------------------------------------------
-# CLI registration gate (cli.py conditional add_command)
+# Authoring commands: accessible when the flag IS enabled
 # ---------------------------------------------------------------------------
 
 
-class TestCliRegistrationGate:
-    """Verify the conditional registration references the correct flag."""
+class TestAuthoringCommandsEnabled:
+    """Authoring commands proceed normally when the flag is enabled.
 
-    def test_cli_py_references_marketplace_authoring_flag(self) -> None:
-        """cli.py source code checks the marketplace_authoring flag."""
-        import inspect
-        import apm_cli.cli as cli_mod
+    The conftest already patches is_enabled to return True for
+    marketplace_authoring, so no additional setup needed.
+    """
 
-        source = inspect.getsource(cli_mod)
-        assert "_xp_enabled(\"marketplace_authoring\")" in source
+    @pytest.mark.parametrize("subcmd", ["init", "build", "check", "outdated", "doctor", "publish"])
+    def test_authoring_command_help_reachable_when_enabled(self, subcmd: str) -> None:
+        """Authoring subcommand --help works when flag is enabled."""
+        from apm_cli.commands.marketplace import marketplace
 
-    def test_cli_py_wraps_registration_in_try_except(self) -> None:
-        """cli.py wraps marketplace registration in try/except for resilience."""
-        import inspect
-        import apm_cli.cli as cli_mod
+        runner = CliRunner()
+        result = runner.invoke(marketplace, [subcmd, "--help"])
 
-        source = inspect.getsource(cli_mod)
-        # Find the marketplace gating block
-        idx = source.index("marketplace_authoring")
-        # Look backwards for 'try' and forwards for 'except'
-        block = source[max(0, idx - 200):idx + 200]
-        assert "try:" in block
-        assert "except" in block
+        assert result.exit_code == 0
+        assert "experimental" not in result.output.lower()
+
+    def test_package_subgroup_help_reachable_when_enabled(self) -> None:
+        """``marketplace package --help`` works when flag is enabled."""
+        from apm_cli.commands.marketplace import marketplace
+
+        runner = CliRunner()
+        result = runner.invoke(marketplace, ["package", "--help"])
+
+        assert result.exit_code == 0
+        assert "experimental" not in result.output.lower()

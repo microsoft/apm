@@ -130,19 +130,23 @@ def _find_duplicate_names(yml):
         return f"Duplicate names: {', '.join(duplicates)}"
     return ""
 
-@click.group(cls=MarketplaceGroup, help="Manage marketplaces for discovery and governance")
-@click.pass_context
-def marketplace(ctx):
-    """Register, browse, and search marketplaces."""
+def _require_authoring_flag():
+    """Exit with enablement hint if marketplace-authoring flag is disabled."""
     from ..core.experimental import is_enabled
 
     if not is_enabled("marketplace_authoring"):
         click.echo(
-            "[!] Marketplace commands are experimental.\n"
+            "[!] Marketplace authoring commands are experimental.\n"
             "    Enable with: apm experimental enable marketplace-authoring\n"
             "    Learn more:  apm experimental list"
         )
-        ctx.exit(1)
+        raise SystemExit(1)
+
+
+@click.group(cls=MarketplaceGroup, help="Manage marketplaces for discovery and governance")
+@click.pass_context
+def marketplace(ctx):
+    """Register, browse, and search marketplaces."""
 
 
 from .marketplace_plugin import package  # noqa: E402
@@ -167,6 +171,7 @@ marketplace.add_command(package)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def init(force, no_gitignore_check, name, owner, verbose):
     """Create a richly-commented marketplace.yml scaffold."""
+    _require_authoring_flag()
     from ..marketplace.init_template import render_marketplace_yml_template
 
     logger = CommandLogger("marketplace-init", verbose=verbose)
@@ -693,6 +698,7 @@ def validate(name, check_refs, verbose):
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def build(dry_run, offline, include_prerelease, verbose):
     """Resolve packages and compile marketplace.json."""
+    _require_authoring_flag()
     logger = CommandLogger("marketplace-build", verbose=verbose)
     yml_path = Path.cwd() / "marketplace.yml"
 
@@ -822,6 +828,7 @@ def _render_build_table(logger, report):
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def outdated(offline, include_prerelease, verbose):
     """Compare installed versions against latest available tags."""
+    _require_authoring_flag()
     logger = CommandLogger("marketplace-outdated", verbose=verbose)
 
     yml = _load_yml_or_exit(logger)
@@ -1072,6 +1079,7 @@ def _render_outdated_table(logger, rows):
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def check(offline, verbose):
     """Validate marketplace.yml and check each entry is resolvable."""
+    _require_authoring_flag()
     logger = CommandLogger("marketplace-check", verbose=verbose)
 
     yml = _load_yml_or_exit(logger)
@@ -1251,6 +1259,7 @@ def _render_check_table(logger, results):
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def doctor(verbose):
     """Check git, network, auth, and marketplace.yml readiness."""
+    _require_authoring_flag()
     logger = CommandLogger("marketplace-doctor", verbose=verbose)
     checks = []
 
@@ -1523,6 +1532,7 @@ def publish(
     verbose,
 ):
     """Publish marketplace updates to consumer repositories."""
+    _require_authoring_flag()
     logger = CommandLogger("marketplace-publish", verbose=verbose)
 
     # ------------------------------------------------------------------

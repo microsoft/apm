@@ -48,9 +48,9 @@
 | `apm pack` | Bundle package for distribution | `-o PATH`, `-t TARGET`, `--archive`, `--dry-run`, `--format [apm\|plugin]`, `--force` |
 | `apm unpack BUNDLE` | Extract a bundle | `-o PATH`, `--skip-verify`, `--force`, `--dry-run` |
 
-## Marketplace (experimental)
+## Marketplace (experimental — authoring only)
 
-> **Gated behind `apm experimental enable marketplace-authoring`**. Hidden from `--help` and non-functional until enabled.
+> **Authoring commands gated behind `apm experimental enable marketplace-authoring`**. Consumer commands (add, list, browse, update, remove, validate, search) are always available.
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|

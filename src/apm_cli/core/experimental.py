@@ -72,7 +72,7 @@ FLAGS: dict[str, ExperimentalFlag] = {
     ),
     "marketplace_authoring": ExperimentalFlag(
         name="marketplace_authoring",
-        description="Enable marketplace authoring and discovery commands.",
+        description="Enable marketplace authoring commands (init, build, publish, etc.).",
         default=False,
         hint="Run 'apm marketplace --help' to see available commands.",
     ),

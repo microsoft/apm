@@ -170,7 +170,9 @@ def _resolve_ref(
 @click.group(help="Manage packages in marketplace.yml (add, set, remove)")
 def package():
     """Add, update, or remove packages in marketplace.yml."""
-    pass
+    from ..commands.marketplace import _require_authoring_flag
+
+    _require_authoring_flag()
 
 
 # -------------------------------------------------------------------
