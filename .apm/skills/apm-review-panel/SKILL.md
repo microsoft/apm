@@ -184,12 +184,16 @@ the final step.
    - No persona return is missing or empty.
    If any check fails, re-invoke the missing persona and repeat the
    gate. Do not proceed to step 5 until the gate passes.
-5. Run the CEO arbitration pass over the collected findings. CEO
-   arbitration may run only after the completeness gate has passed.
+5. Run the CEO arbitration pass over the collected findings **as
+   yourself** (the orchestrator). Do NOT dispatch a separate sub-agent
+   for arbitration -- you are the arbiter. CEO arbitration may run
+   only after the completeness gate has passed.
 6. Now (and only now) load `assets/verdict-template.md` and fill it
    in with the collected findings + arbitration.
 7. Emit the filled template as exactly ONE comment via the workflow's
-   `safe-outputs.add-comment` channel.
+   `safe-outputs.add-comment` channel. You (the orchestrator) write
+   the comment; never delegate emission to a sub-agent and never call
+   the GitHub API directly.
 
 ### Dispatch contract
 
@@ -217,8 +221,9 @@ panel review that lands as one cohesive verdict and one that fragments
 into per-persona noise.
 
 - Produce **exactly one** comment per panel run. The
-  `safe-outputs.add-comment.max: 1` cap in the workflow is a backstop;
-  the discipline lives here.
+  `safe-outputs.add-comment.max` cap in the workflow is a fail-soft
+  ceiling (currently 7, one per persona slot); the one-comment
+  discipline lives here.
 - Use `assets/verdict-template.md` as the comment body. Keep its
   section headings exactly as written. Adapt the body of each section
   to the PR. Do not invent new top-level sections or drop existing
