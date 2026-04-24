@@ -1,14 +1,17 @@
 """Discovery functionality for primitive files."""
 
+import fnmatch
+import glob
 import logging
 import os
-import glob
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 from .models import PrimitiveCollection
 from .parser import parse_primitive_file, parse_skill_file
+from ..constants import DEFAULT_SKIP_DIRS
 from ..utils.exclude import should_exclude, validate_exclude_patterns
+from ..utils.paths import portable_relpath
 
 logger = logging.getLogger(__name__)
 from ..models.apm_package import APMPackage
@@ -92,12 +95,9 @@ def discover_primitives(
     
     # Find and parse files for each primitive type
     for primitive_type, patterns in LOCAL_PRIMITIVE_PATTERNS.items():
-        files = find_primitive_files(base_dir, patterns)
+        files = find_primitive_files(base_dir, patterns, exclude_patterns=safe_patterns)
         
         for file_path in files:
-            if should_exclude(file_path, base_path, safe_patterns):
-                logger.debug("Excluded by pattern: %s", file_path)
-                continue
             try:
                 primitive = parse_primitive_file(file_path, source="local")
                 collection.add_primitive(primitive)
@@ -159,7 +159,7 @@ def scan_local_primitives(
     """
     # Find and parse files for each primitive type
     for primitive_type, patterns in LOCAL_PRIMITIVE_PATTERNS.items():
-        files = find_primitive_files(base_dir, patterns)
+        files = find_primitive_files(base_dir, patterns, exclude_patterns=exclude_patterns)
         
         # Filter out files from apm_modules to avoid conflicts with dependency scanning
         local_files = []
@@ -169,10 +169,6 @@ def scan_local_primitives(
         for file_path in files:
             # Only include files that are NOT in apm_modules directory
             if _is_under_directory(file_path, apm_modules_path):
-                continue
-            # Apply compilation.exclude patterns
-            if should_exclude(file_path, base_path, exclude_patterns):
-                logger.debug("Excluded by pattern: %s", file_path)
                 continue
             local_files.append(file_path)
         
@@ -397,42 +393,118 @@ def _discover_skill_in_directory(directory: Path, collection: PrimitiveCollectio
             print(f"Warning: Failed to parse SKILL.md in {directory}: {e}")
 
 
-def find_primitive_files(base_dir: str, patterns: List[str]) -> List[Path]:
+def _glob_match(rel_path: str, pattern: str) -> bool:
+    """Match a forward-slash relative path against a glob pattern.
+
+    Segment-aware: ``*`` and ``?`` match within a single path segment only,
+    while ``**`` matches zero or more complete segments. This preserves
+    standard glob semantics so a pattern like
+    ``**/.apm/instructions/*.instructions.md`` does not accidentally match
+    ``.apm/instructions/sub/x.instructions.md`` (the trailing ``*`` must
+    not cross ``/``).
+
+    Args:
+        rel_path: Relative path using forward slashes.
+        pattern: Glob pattern using forward slashes.
+
+    Returns:
+        True if the path matches the pattern.
+    """
+    path_parts: List[str] = [p for p in rel_path.split('/') if p]
+    pattern_parts: List[str] = [p for p in pattern.split('/') if p]
+    memo: Dict[Tuple[int, int], bool] = {}
+
+    def _match(pi: int, qi: int) -> bool:
+        key = (pi, qi)
+        if key in memo:
+            return memo[key]
+
+        if qi == len(pattern_parts):
+            result = pi == len(path_parts)
+            memo[key] = result
+            return result
+
+        current = pattern_parts[qi]
+
+        if current == '**':
+            # ** matches zero segments, OR consumes one segment and stays at **
+            result = _match(pi, qi + 1)
+            if not result and pi < len(path_parts):
+                result = _match(pi + 1, qi)
+            memo[key] = result
+            return result
+
+        if pi >= len(path_parts):
+            memo[key] = False
+            return False
+
+        # Use platform-aware fnmatch semantics so Windows matching remains
+        # case-insensitive, consistent with prior glob.glob() behavior.
+        result = (
+            fnmatch.fnmatch(path_parts[pi], current)
+            and _match(pi + 1, qi + 1)
+        )
+        memo[key] = result
+        return result
+
+    return _match(0, 0)
+
+
+def find_primitive_files(
+    base_dir: str,
+    patterns: List[str],
+    exclude_patterns: Optional[List[str]] = None,
+) -> List[Path]:
     """Find primitive files matching the given patterns.
-    
+
+    Uses os.walk with early directory pruning instead of glob.glob(recursive=True)
+    so that exclude_patterns prevent traversal into expensive subtrees.
+
     Symlinks are rejected outright to prevent symlink-based traversal
     attacks from malicious packages.
-    
+
     Args:
         base_dir (str): Base directory to search in.
         patterns (List[str]): List of glob patterns to match.
-    
+        exclude_patterns (Optional[List[str]]): Pre-validated exclude patterns
+            to prune directories early during traversal.
+
     Returns:
-        List[Path]: List of unique file paths found.
+        List[Path]: List of file paths found.
     """
     if not os.path.isdir(base_dir):
         return []
-    
-    all_files = []
-    
-    for pattern in patterns:
-        # Use glob to find files matching the pattern
-        matching_files = glob.glob(os.path.join(base_dir, pattern), recursive=True)
-        all_files.extend(matching_files)
-    
-    # Remove duplicates while preserving order and convert to Path objects
-    seen = set()
-    unique_files = []
-    
-    for file_path in all_files:
-        abs_path = os.path.abspath(file_path)
-        if abs_path not in seen:
-            seen.add(abs_path)
-            unique_files.append(Path(abs_path))
-    
+
+    base_path = Path(base_dir).resolve()
+
+    all_files: List[Path] = []
+
+    for root, dirs, files in os.walk(str(base_path)):
+        current = Path(root)
+        # Prune excluded directories BEFORE descending
+        dirs[:] = sorted(
+            d for d in dirs
+            if d not in DEFAULT_SKIP_DIRS
+            and not _exclude_matches_dir(current / d, base_path, exclude_patterns)
+        )
+
+        # Sort files for deterministic discovery order across platforms
+        for file_name in sorted(files):
+            file_path = current / file_name
+            rel_str = portable_relpath(file_path, base_path)
+            # File-level exclude: a pattern like "**/*.draft.md" should drop
+            # individual files even when their parent directory is included.
+            if exclude_patterns and should_exclude(file_path, base_path, exclude_patterns):
+                logger.debug("Excluded by pattern: %s", file_path)
+                continue
+            for pattern in patterns:
+                if _glob_match(rel_str, pattern):
+                    all_files.append(file_path)
+                    break
+
     # Filter out directories, symlinks, and unreadable files
     valid_files = []
-    for file_path in unique_files:
+    for file_path in all_files:
         if not file_path.is_file():
             continue
         if file_path.is_symlink():
@@ -440,8 +512,19 @@ def find_primitive_files(base_dir: str, patterns: List[str]) -> List[Path]:
             continue
         if _is_readable(file_path):
             valid_files.append(file_path)
-    
+
     return valid_files
+
+
+def _exclude_matches_dir(
+    dir_path: Path,
+    base_path: Path,
+    exclude_patterns: Optional[List[str]],
+) -> bool:
+    """Check if a directory matches any exclude pattern (for early pruning)."""
+    if not exclude_patterns:
+        return False
+    return should_exclude(dir_path, base_path, exclude_patterns)
 
 
 def _is_readable(file_path: Path) -> bool:
@@ -471,18 +554,5 @@ def _should_skip_directory(dir_path: str) -> bool:
     Returns:
         bool: True if directory should be skipped, False otherwise.
     """
-    skip_patterns = {
-        '.git',
-        'node_modules',
-        '__pycache__',
-        '.pytest_cache',
-        '.venv',
-        'venv',
-        '.tox',
-        'build',
-        'dist',
-        '.mypy_cache'
-    }
-    
     dir_name = os.path.basename(dir_path)
-    return dir_name in skip_patterns
+    return dir_name in DEFAULT_SKIP_DIRS

@@ -84,6 +84,7 @@ class ManifestPolicy:
     required_fields: Tuple[str, ...] = ()
     scripts: str = "allow"  # allow | deny
     content_types: Optional[Dict] = None  # {"allow": [...]}
+    require_explicit_includes: bool = False
 
 
 @dataclass(frozen=True)

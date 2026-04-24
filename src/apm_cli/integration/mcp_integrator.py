@@ -87,7 +87,7 @@ class MCPIntegrator:
             lockfile = LockFile.read(lock_path)
             if lockfile is not None:
                 locked_paths = builtins.set()
-                for dep in lockfile.get_all_dependencies():
+                for dep in lockfile.get_package_dependencies():
                     if dep.repo_url:
                         yml = (
                             apm_modules_dir / dep.repo_url / dep.virtual_path / "apm.yml"

@@ -15,6 +15,7 @@ from apm_cli.policy.policy_checks import (
     _check_compilation_target,
     _check_dependency_allowlist,
     _check_dependency_denylist,
+    _check_includes_explicit,
     _check_mcp_allowlist,
     _check_mcp_denylist,
     _check_mcp_self_defined,
@@ -753,8 +754,8 @@ class TestUnmanagedFiles:
 
 
 class TestRunPolicyChecks:
-    def test_returns_all_16_checks(self, tmp_path):
-        """Full run should produce exactly 16 checks."""
+    def test_returns_all_17_checks(self, tmp_path):
+        """Full run should produce exactly 17 checks."""
         _write_apm_yml(
             tmp_path,
             {
@@ -778,7 +779,7 @@ class TestRunPolicyChecks:
 
         policy = ApmPolicy()
         result = run_policy_checks(tmp_path, policy)
-        assert len(result.checks) == 16
+        assert len(result.checks) == 17
         # Default policy = all checks pass
         assert result.passed
 
