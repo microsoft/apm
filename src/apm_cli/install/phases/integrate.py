@@ -227,6 +227,7 @@ def _integrate_root_project(
             diagnostics=diagnostics,
             logger=logger,
             scope=ctx.scope,
+            ctx=ctx,
         )
 
         # Track deployed files for the post-deps-local phase (stale
@@ -268,6 +269,72 @@ def _integrate_root_project(
                 f"Root project primitives could not be integrated: {e}"
             )
         return None
+
+
+# ======================================================================
+# Cowork cap checks (Amendment 7)
+# ======================================================================
+
+_COWORK_MAX_SKILLS: int = 50
+"""Warn when the cowork skills directory contains more than this many skills."""
+
+_COWORK_MAX_SKILL_SIZE: int = 1_048_576  # 1 MB
+"""Warn when any source SKILL.md exceeds this size in bytes."""
+
+
+def _check_cowork_caps(ctx: "InstallContext") -> None:
+    """Emit warn-only diagnostics for cowork skill count and size caps.
+
+    Walks ``<cowork_root>/skills/*/SKILL.md`` (existing + just-installed)
+    and checks against ``_COWORK_MAX_SKILLS`` and ``_COWORK_MAX_SKILL_SIZE``.
+    Install still succeeds regardless.
+    """
+    if not ctx.targets:
+        return
+
+    cowork_root = None
+    for t in ctx.targets:
+        if t.name == "cowork" and t.resolved_deploy_root is not None:
+            cowork_root = t.resolved_deploy_root
+            break
+    if cowork_root is None:
+        return
+    if not cowork_root.is_dir():
+        return
+
+    skill_dirs = sorted(
+        d for d in cowork_root.iterdir()
+        if d.is_dir() and (d / "SKILL.md").exists()
+    )
+
+    # --- count cap ---
+    if len(skill_dirs) > _COWORK_MAX_SKILLS:
+        msg = (
+            f"Cowork skills directory contains {len(skill_dirs)} skills "
+            f"(cap: {_COWORK_MAX_SKILLS}). Consider removing unused skills."
+        )
+        if ctx.logger:
+            ctx.logger.warning(msg, symbol="warning")
+        if ctx.diagnostics:
+            ctx.diagnostics.warn(msg, package="cowork")
+
+    # --- per-file size cap ---
+    for skill_dir in skill_dirs:
+        skill_md = skill_dir / "SKILL.md"
+        try:
+            size = skill_md.stat().st_size
+        except OSError:
+            continue
+        if size > _COWORK_MAX_SKILL_SIZE:
+            size_mb = size / (1024 * 1024)
+            msg = (
+                f"Skill '{skill_dir.name}/SKILL.md' is {size_mb:.1f} MB "
+                f"(cap: 1 MB). Large skills may degrade Copilot performance."
+            )
+            if ctx.logger:
+                ctx.logger.warning(msg, symbol="warning")
+            if ctx.diagnostics:
+                ctx.diagnostics.warn(msg, package="cowork")
 
 
 # ======================================================================
@@ -435,3 +502,10 @@ def run(ctx: "InstallContext") -> None:
     ctx.total_commands_integrated = total_commands_integrated
     ctx.total_hooks_integrated = total_hooks_integrated
     ctx.total_links_resolved = total_links_resolved
+
+    # ------------------------------------------------------------------
+    # Amendment 7: cowork 50-skill / 1 MB cap check (warn-only).
+    # Runs once per install, after all packages integrate, only when
+    # a cowork target with a resolved_deploy_root is active.
+    # ------------------------------------------------------------------
+    _check_cowork_caps(ctx)

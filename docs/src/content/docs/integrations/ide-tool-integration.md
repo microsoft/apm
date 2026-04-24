@@ -51,7 +51,7 @@ apm compile
 
 For running agentic workflows locally, see the [Agent Workflows guide](../../guides/agent-workflows/).
 
-> **User-scope deployment**: `apm install -g` deploys primitives to user-level directories (`~/.copilot/`, `~/.claude/`, etc.), making packages available across all projects. See [Global Installation](../../guides/dependencies/#global-user-scope-installation) for per-target coverage.
+> **User-scope deployment**: `apm install -g` deploys primitives to user-level directories (`~/.copilot/`, `~/.claude/`, etc.), making packages available across all projects. See [Global Installation](../../guides/dependencies/#global-user-scope-installation) for per-target coverage. For Microsoft 365 Copilot Cowork custom skills, enable `cowork` with `apm experimental enable cowork` and use `apm install --target cowork --global`. See [Microsoft 365 Copilot Cowork](../cowork/).
 
 ## VS Code Integration
 

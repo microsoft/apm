@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Optional
 if TYPE_CHECKING:
     from ..core.command_logger import InstallLogger
     from ..core.scope import InstallScope
+    from ..install.context import InstallContext
     from ..utils.diagnostics import DiagnosticCollector
 
 
@@ -35,6 +36,41 @@ if TYPE_CHECKING:
 set = builtins.set
 list = builtins.list
 dict = builtins.dict
+
+
+def _deployed_path_entry(
+    target_path: Path,
+    project_root: Path,
+    targets: Any,
+) -> str:
+    """Return the lockfile-safe path string for a deployed file.
+
+    For standard targets the entry is ``project_root``-relative.  For
+    cowork (dynamic-root) targets the entry uses the synthetic
+    ``cowork://`` URI scheme so the lockfile pipeline does not attempt
+    a ``Path.relative_to(project_root)`` that would crash.
+
+    Raises
+    ------
+    RuntimeError
+        If the path is outside the project tree and cannot be
+        translated to a ``cowork://`` URI via any available target.
+    """
+    try:
+        return target_path.relative_to(project_root).as_posix()
+    except ValueError:
+        # Path is outside the project tree -- must be a dynamic-root
+        # target.  Find the matching target and translate.
+        if targets:
+            for _t in targets:
+                if _t.resolved_deploy_root is not None:
+                    from apm_cli.integration.cowork_paths import to_lockfile_path
+                    return to_lockfile_path(target_path, _t.resolved_deploy_root)
+        raise RuntimeError(
+            f"Cannot translate {target_path!r} to a lockfile path: "
+            f"path is outside the project tree and no dynamic-root "
+            f"target matched. This is a bug — please report it."
+        )
 
 
 def integrate_package_primitives(
@@ -55,6 +91,7 @@ def integrate_package_primitives(
     logger: Optional["InstallLogger"] = None,
     scope: Optional["InstallScope"] = None,
     skill_subset: "Optional[tuple]" = None,
+    ctx: Optional["InstallContext"] = None,
 ) -> dict:
     """Run the full integration pipeline for a single package.
 
@@ -65,6 +102,10 @@ def integrate_package_primitives(
 
     When *scope* is ``InstallScope.USER``, targets and primitives that
     do not support user-scope deployment are silently skipped.
+
+    When *ctx* is provided, the cowork non-skill primitive warning
+    (Amendment 6) is emitted once per install run for packages that
+    contain non-skill primitives when the cowork target is active.
 
     Returns a dict with integration counters and the list of deployed file paths.
     """
@@ -87,6 +128,37 @@ def integrate_package_primitives(
 
     if not targets:
         return result
+
+    # --- Amendment 6: cowork non-skill primitive warning (once per run) ---
+    _cowork_active = any(t.name == "cowork" for t in targets)
+    if _cowork_active and ctx is not None and not ctx.cowork_nonsupported_warned:
+        _apm_dir = Path(package_info.install_path) / ".apm"
+        _NON_SKILL_DIRS = {
+            "agents": "agents",
+            "prompts": "prompts",
+            "instructions": "instructions",
+            "hooks": "hooks",
+            # Commands live under ``.apm/prompts/`` and cannot be
+            # distinguished from general prompts at directory level
+            # without inspecting frontmatter.  Omitted to avoid
+            # misleading duplicate warnings.
+        }
+        _found_types = [
+            ptype for ptype, subdir in _NON_SKILL_DIRS.items()
+            if (_apm_dir / subdir).is_dir() and any((_apm_dir / subdir).iterdir())
+        ]
+        if _found_types:
+            _pkg_label = package_name or getattr(package_info, "name", "unknown")
+            _types_str = ", ".join(sorted(builtins.set(_found_types)))
+            _warn_msg = (
+                f"cowork target only supports skills; "
+                f"non-skill primitives in {_pkg_label} "
+                f"({_types_str}) will not deploy to cowork"
+            )
+            if logger:
+                logger.warning(_warn_msg, symbol="warning")
+            diagnostics.warn(_warn_msg)
+            ctx.cowork_nonsupported_warned = True
 
     def _log_integration(msg):
         if logger:
@@ -137,7 +209,7 @@ def integrate_package_primitives(
                 )
             result["links_resolved"] += _int_result.links_resolved
             for tp in _int_result.target_paths:
-                deployed.append(tp.relative_to(project_root).as_posix())
+                deployed.append(_deployed_path_entry(tp, project_root, targets))
 
     skill_result = skill_integrator.integrate_package_skill(
         package_info, project_root,
@@ -146,9 +218,13 @@ def integrate_package_primitives(
     )
     _skill_target_dirs: set = builtins.set()
     for tp in skill_result.target_paths:
-        rel = tp.relative_to(project_root)
-        if rel.parts:
-            _skill_target_dirs.add(rel.parts[0])
+        try:
+            rel = tp.relative_to(project_root)
+            if rel.parts:
+                _skill_target_dirs.add(rel.parts[0])
+        except ValueError:
+            # Dynamic-root target (cowork) -- path is outside project tree.
+            _skill_target_dirs.add("cowork")
     _skill_targets = sorted(_skill_target_dirs)
     _skill_target_str = ", ".join(f"{d}/skills/" for d in _skill_targets) or "skills/"
     if skill_result.skill_created:
@@ -158,7 +234,7 @@ def integrate_package_primitives(
         result["sub_skills"] += skill_result.sub_skills_promoted
         _log_integration(f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_target_str}")
     for tp in skill_result.target_paths:
-        deployed.append(tp.relative_to(project_root).as_posix())
+        deployed.append(_deployed_path_entry(tp, project_root, targets))
 
     return result
 
@@ -178,6 +254,7 @@ def integrate_local_content(
     diagnostics: "DiagnosticCollector",
     logger: Optional["InstallLogger"] = None,
     scope: Optional["InstallScope"] = None,
+    ctx: Optional["InstallContext"] = None,
 ) -> dict:
     """Integrate primitives from the project's own .apm/ directory.
 
@@ -222,6 +299,7 @@ def integrate_local_content(
         package_name="_local",
         logger=logger,
         scope=scope,
+        ctx=ctx,
     )
 
 

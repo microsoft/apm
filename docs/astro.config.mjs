@@ -105,6 +105,7 @@ export default defineConfig({
 						{ label: 'CI/CD Pipelines', slug: 'integrations/ci-cd' },
 						{ label: 'GitHub Agentic Workflows', slug: 'integrations/gh-aw' },
 						{ label: 'IDE & Tool Integration', slug: 'integrations/ide-tool-integration' },
+						{ label: 'Microsoft 365 Copilot Cowork (Experimental)', slug: 'integrations/cowork' },
 						{ label: 'AI Runtime Compatibility', slug: 'integrations/runtime-compatibility' },
 						{ label: 'GitHub Rulesets', slug: 'integrations/github-rulesets' },
 					],

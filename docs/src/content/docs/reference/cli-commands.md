@@ -87,7 +87,8 @@ apm install [PACKAGES...] [OPTIONS]
 - `--runtime TEXT` - Target specific runtime only (copilot, codex, gemini, vscode)
 - `--exclude TEXT` - Exclude specific runtime from installation
 - `--only [apm|mcp]` - Install only specific dependency type
-- `--target [copilot|claude|cursor|codex|opencode|gemini|all]` - Force deployment to specific target(s). Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Overrides auto-detection
+- `--target [copilot|claude|cursor|codex|opencode|gemini|cowork|all]` - Force deployment to specific target(s). Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Overrides auto-detection
+  - `cowork` - Microsoft 365 Copilot Cowork skills (user scope only, requires `cowork` experimental flag)
 - `--update` - Update dependencies to latest Git references  
 - `--force` - Overwrite locally-authored files on collision; bypass security scan blocks
 - `--dry-run` - Show what would be installed without installing
@@ -1572,6 +1573,7 @@ apm config get [KEY]
 - `KEY` (optional) - Configuration key to retrieve. Supported keys:
   - `auto-integrate` - Whether to automatically integrate `.prompt.md` files into AGENTS.md
   - `temp-dir` - Custom temporary directory for clone/download operations
+  - `cowork-skills-dir` - Override the resolved Cowork OneDrive skills directory
 
 If `KEY` is omitted, displays all configuration values.
 
@@ -1596,6 +1598,7 @@ apm config set KEY VALUE
 - `KEY` - Configuration key to set. Supported keys:
   - `auto-integrate` - Enable/disable automatic integration of `.prompt.md` files
   - `temp-dir` - Set a custom temporary directory path
+  - `cowork-skills-dir` - Override the resolved Cowork OneDrive skills directory
 - `VALUE` - Value to set. For boolean keys, use: `true`, `false`, `yes`, `no`, `1`, `0`
 
 **Configuration Keys:**
@@ -1640,6 +1643,30 @@ apm config get temp-dir
 # Or use the environment variable instead
 export APM_TEMP_DIR=/tmp/apm-work
 ```
+
+**`cowork-skills-dir`** - Override the resolved Cowork OneDrive skills directory
+- **Type:** String (absolute directory path)
+- **Default:** Auto-detected Cowork skills directory (not stored)
+- **Description:** Override the resolved Cowork OneDrive skills directory. Gated on the `cowork` experimental flag for `set`; `get` and `unset` are always available for cleanup.
+- **Resolution order:** `APM_COWORK_SKILLS_DIR` environment variable > `cowork_skills_dir` in `~/.apm/config.json` > platform auto-detection.
+- **Use Cases:**
+  - Set a specific OneDrive-backed Cowork skills directory instead of relying on auto-detection
+  - Clear the override with `apm config unset cowork-skills-dir` when returning to auto-detection
+
+**Examples:**
+```bash
+# Enable the experimental flag, then set an explicit Cowork skills directory
+apm experimental enable cowork
+apm config set cowork-skills-dir ~/Library/CloudStorage/OneDrive-Contoso/Documents/Cowork/skills
+
+# Check the current cowork-skills-dir setting
+apm config get cowork-skills-dir
+
+# Remove the override and return to auto-detection
+apm config unset cowork-skills-dir
+```
+
+See also: [Cowork integration](../integrations/cowork/).
 
 ## Runtime Management (Experimental)
 

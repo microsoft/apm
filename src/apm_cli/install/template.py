@@ -98,6 +98,7 @@ def _integrate_materialization(
                     tuple(dep_ref.skill_subset) if dep_ref.skill_subset else None
                 )
             ),
+            ctx=ctx,
         )
         for k in (
             "prompts", "agents", "skills", "sub_skills",

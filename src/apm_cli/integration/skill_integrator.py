@@ -504,6 +504,8 @@ class SkillIntegrator(BaseIntegrator):
             try:
                 rel_prefix = target_skills_root.relative_to(project_root).as_posix()
             except ValueError:
+                # Dynamic-root targets (cowork): use synthetic prefix
+                # when the skills root lives outside the project tree.
                 rel_prefix = target_skills_root.name
         else:
             rel_prefix = target_skills_root.name
@@ -676,8 +678,12 @@ class SkillIntegrator(BaseIntegrator):
 
             is_primary = (idx == 0)  # first active target owns diagnostics
             skills_mapping = target.primitives["skills"]
-            effective_root = skills_mapping.deploy_root or target.root_dir
-            target_skills_root = project_root / effective_root / "skills"
+            # Dynamic-root targets (cowork): use resolved_deploy_root.
+            if target.resolved_deploy_root is not None:
+                target_skills_root = target.resolved_deploy_root
+            else:
+                effective_root = skills_mapping.deploy_root or target.root_dir
+                target_skills_root = project_root / effective_root / "skills"
             target_skills_root.mkdir(parents=True, exist_ok=True)
 
             n, deployed = self._promote_sub_skills(
@@ -784,8 +790,12 @@ class SkillIntegrator(BaseIntegrator):
 
             is_primary = (idx == 0)  # first active target owns diagnostics
             skills_mapping = target.primitives["skills"]
-            effective_root = skills_mapping.deploy_root or target.root_dir
-            target_skill_dir = project_root / effective_root / "skills" / skill_name
+            # Dynamic-root targets (cowork): use resolved_deploy_root.
+            if target.resolved_deploy_root is not None:
+                target_skill_dir = target.resolved_deploy_root / skill_name
+            else:
+                effective_root = skills_mapping.deploy_root or target.root_dir
+                target_skill_dir = project_root / effective_root / "skills" / skill_name
 
             if is_primary:
                 skill_created = not target_skill_dir.exists()
@@ -806,6 +816,8 @@ class SkillIntegrator(BaseIntegrator):
                         try:
                             rel_prefix = target_skill_dir.parent.relative_to(project_root).as_posix()
                         except ValueError:
+                            # Dynamic-root targets (cowork): directory is
+                            # outside the project tree.
                             rel_prefix = "skills"
                         rel_path = f"{rel_prefix}/{skill_name}"
                         # Issue 1: package= should identify the package causing the
@@ -850,7 +862,10 @@ class SkillIntegrator(BaseIntegrator):
                 files_copied = sum(1 for _ in target_skill_dir.rglob('*') if _.is_file())
 
             # Promote sub-skills for this target
-            target_skills_root = project_root / effective_root / "skills"
+            if target.resolved_deploy_root is not None:
+                target_skills_root = target.resolved_deploy_root
+            else:
+                target_skills_root = project_root / effective_root / "skills"
             _, sub_deployed = self._promote_sub_skills(
                 sub_skills_dir, target_skills_root, skill_name,
                 warn=is_primary,
