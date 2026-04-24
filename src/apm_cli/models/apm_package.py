@@ -16,6 +16,7 @@ from .dependency import (
     GitReferenceType,
     MCPDependency,
     RemoteRef,
+    PackageRequirement,
     ResolvedReference,
     parse_git_reference,
 )
@@ -35,6 +36,7 @@ __all__ = [
     "GitReferenceType",
     "MCPDependency",
     "RemoteRef",
+    "PackageRequirement",
     "ResolvedReference",
     "parse_git_reference",
     # Backward-compatible re-exports from .validation
@@ -69,8 +71,8 @@ class APMPackage:
     license: Optional[str] = None
     source: Optional[str] = None  # Source location (for dependencies)
     resolved_commit: Optional[str] = None  # Resolved commit SHA (for dependencies)
-    dependencies: Optional[Dict[str, List[Union[DependencyReference, str, dict]]]] = None  # Mixed types for APM/MCP/inline
-    dev_dependencies: Optional[Dict[str, List[Union[DependencyReference, str, dict]]]] = None
+    dependencies: Optional[Dict[str, List[Union[DependencyReference, PackageRequirement, str, dict]]]] = None  # Mixed types for APM/MCP/inline
+    dev_dependencies: Optional[Dict[str, List[Union[DependencyReference, PackageRequirement, str, dict]]]] = None
     scripts: Optional[Dict[str, str]] = None
     package_path: Optional[Path] = None  # Local path to package
     target: Optional[Union[str, List[str]]] = None  # Target agent(s): single string or list (applies to compile and install)
@@ -127,12 +129,22 @@ class APMPackage:
                         for dep_entry in dep_list:
                             if isinstance(dep_entry, str):
                                 try:
-                                    parsed_deps.append(DependencyReference.parse(dep_entry))
+                                    if _should_parse_as_requirement(dep_entry):
+                                        parsed_deps.append(PackageRequirement.parse(dep_entry))
+                                    else:
+                                        parsed_deps.append(DependencyReference.parse(dep_entry))
                                 except ValueError as e:
                                     raise ValueError(f"Invalid APM dependency '{dep_entry}': {e}")
                             elif isinstance(dep_entry, dict):
                                 try:
-                                    parsed_deps.append(DependencyReference.parse_from_dict(dep_entry))
+                                    if "git" in dep_entry or (
+                                        "path" in dep_entry and "name" not in dep_entry
+                                    ):
+                                        parsed_deps.append(DependencyReference.parse_from_dict(dep_entry))
+                                    elif "name" in dep_entry:
+                                        parsed_deps.append(PackageRequirement.from_dict(dep_entry))
+                                    else:
+                                        parsed_deps.append(DependencyReference.parse_from_dict(dep_entry))
                                 except ValueError as e:
                                     raise ValueError(f"Invalid APM dependency {dep_entry}: {e}")
                         dependencies[dep_type] = parsed_deps
@@ -162,12 +174,22 @@ class APMPackage:
                         for dep_entry in dep_list:
                             if isinstance(dep_entry, str):
                                 try:
-                                    parsed_deps.append(DependencyReference.parse(dep_entry))
+                                    if _should_parse_as_requirement(dep_entry):
+                                        parsed_deps.append(PackageRequirement.parse(dep_entry))
+                                    else:
+                                        parsed_deps.append(DependencyReference.parse(dep_entry))
                                 except ValueError as e:
                                     raise ValueError(f"Invalid dev APM dependency '{dep_entry}': {e}")
                             elif isinstance(dep_entry, dict):
                                 try:
-                                    parsed_deps.append(DependencyReference.parse_from_dict(dep_entry))
+                                    if "git" in dep_entry or (
+                                        "path" in dep_entry and "name" not in dep_entry
+                                    ):
+                                        parsed_deps.append(DependencyReference.parse_from_dict(dep_entry))
+                                    elif "name" in dep_entry:
+                                        parsed_deps.append(PackageRequirement.from_dict(dep_entry))
+                                    else:
+                                        parsed_deps.append(DependencyReference.parse_from_dict(dep_entry))
                                 except ValueError as e:
                                     raise ValueError(f"Invalid dev APM dependency {dep_entry}: {e}")
                         dev_dependencies[dep_type] = parsed_deps
@@ -212,13 +234,15 @@ class APMPackage:
         _apm_yml_cache[resolved] = result
         return result
     
-    def get_apm_dependencies(self) -> List[DependencyReference]:
-        """Get list of APM dependencies."""
+    def get_apm_dependencies(self) -> List[Union[DependencyReference, "PackageRequirement"]]:
+        """Get list of manifest APM dependencies."""
         if not self.dependencies or 'apm' not in self.dependencies:
             return []
-        # Filter to only return DependencyReference objects
-        return [dep for dep in self.dependencies['apm'] if isinstance(dep, DependencyReference)]
-    
+        return [
+            dep for dep in self.dependencies['apm']
+            if isinstance(dep, (DependencyReference, PackageRequirement))
+        ]
+
     def get_mcp_dependencies(self) -> List["MCPDependency"]:
         """Get list of MCP dependencies."""
         if not self.dependencies or 'mcp' not in self.dependencies:
@@ -227,14 +251,17 @@ class APMPackage:
                 if isinstance(dep, MCPDependency)]
     
     def has_apm_dependencies(self) -> bool:
-        """Check if this package has APM dependencies."""
+        """Check if this package has any APM dependencies."""
         return bool(self.get_apm_dependencies())
 
-    def get_dev_apm_dependencies(self) -> List[DependencyReference]:
+    def get_dev_apm_dependencies(self) -> List[Union[DependencyReference, "PackageRequirement"]]:
         """Get list of dev APM dependencies."""
         if not self.dev_dependencies or 'apm' not in self.dev_dependencies:
             return []
-        return [dep for dep in self.dev_dependencies['apm'] if isinstance(dep, DependencyReference)]
+        return [
+            dep for dep in self.dev_dependencies['apm']
+            if isinstance(dep, (DependencyReference, PackageRequirement))
+        ]
 
     def get_dev_mcp_dependencies(self) -> List["MCPDependency"]:
         """Get list of dev MCP dependencies."""
@@ -289,3 +316,21 @@ class PackageInfo:
             return True
         
         return False
+
+
+def _should_parse_as_requirement(dep_entry: str) -> bool:
+    """Return True when a string dependency should be resolved via repositories."""
+    value = dep_entry.strip()
+    if not value:
+        return False
+    if DependencyReference.is_local_path(value):
+        return False
+    if "://" in value or value.startswith("git@") or value.startswith("//"):
+        return False
+
+    raw = value.split("#", 1)[0]
+    first_segment = raw.split("/", 1)[0]
+    # Explicit host-qualified refs stay on the direct VCS path.
+    if "." in first_segment:
+        return False
+    return True

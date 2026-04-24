@@ -9,17 +9,22 @@ from ...utils.path_security import PathTraversalError, safe_rmtree
 from ...utils.paths import portable_relpath
 
 from ...deps.lockfile import LockFile
-from ...models.apm_package import APMPackage, DependencyReference
+from ...models.apm_package import APMPackage, DependencyReference, PackageRequirement
 from ...integration.mcp_integrator import MCPIntegrator
 
 
 def _parse_dependency_entry(dep_entry):
     """Parse a dependency entry from apm.yml into a DependencyReference."""
-    if isinstance(dep_entry, DependencyReference):
+    if isinstance(dep_entry, (DependencyReference, PackageRequirement)):
         return dep_entry
     if isinstance(dep_entry, str):
-        return DependencyReference.parse(dep_entry)
+        try:
+            return PackageRequirement.parse(dep_entry)
+        except Exception:
+            return DependencyReference.parse(dep_entry)
     if isinstance(dep_entry, builtins.dict):
+        if "name" in dep_entry and "git" not in dep_entry:
+            return PackageRequirement.from_dict(dep_entry)
         return DependencyReference.parse_from_dict(dep_entry)
     raise ValueError(f"Unsupported dependency entry type: {type(dep_entry).__name__}")
 
@@ -70,6 +75,8 @@ def _dry_run_uninstall(packages_to_remove, apm_modules_dir, logger):
         logger.progress(f"  - {pkg} from apm.yml")
         try:
             dep_ref = _parse_dependency_entry(pkg)
+            if not hasattr(dep_ref, "get_install_path"):
+                continue
             package_path = dep_ref.get_install_path(apm_modules_dir)
         except (ValueError, TypeError, AttributeError, KeyError):
             pkg_str = pkg if isinstance(pkg, str) else str(pkg)
@@ -117,6 +124,10 @@ def _remove_packages_from_disk(packages_to_remove, apm_modules_dir, logger):
     for package in packages_to_remove:
         try:
             dep_ref = _parse_dependency_entry(package)
+            if not hasattr(dep_ref, "get_install_path"):
+                logger.progress(f"Removed {package} from manifest (OCI dependency)")
+                removed += 1
+                continue
             package_path = dep_ref.get_install_path(apm_modules_dir)
         except (PathTraversalError,) as e:
             logger.error(f"Refusing to remove {package}: {e}")
@@ -156,7 +167,7 @@ def _cleanup_transitive_orphans(lockfile, packages_to_remove, apm_modules_dir, a
     for pkg in packages_to_remove:
         try:
             ref = _parse_dependency_entry(pkg)
-            removed_repo_urls.add(ref.repo_url)
+            removed_repo_urls.add(getattr(ref, "repo_url", getattr(ref, "package", str(pkg))))
         except (ValueError, TypeError, AttributeError, KeyError):
             removed_repo_urls.add(pkg)
 
@@ -186,7 +197,7 @@ def _cleanup_transitive_orphans(lockfile, packages_to_remove, apm_modules_dir, a
                 ref = _parse_dependency_entry(dep_str)
                 remaining_deps.add(ref.get_unique_key())
             except (ValueError, TypeError, AttributeError, KeyError):
-                remaining_deps.add(dep_str)
+                remaining_deps.add(str(dep_str))
     except Exception:
         pass
 
