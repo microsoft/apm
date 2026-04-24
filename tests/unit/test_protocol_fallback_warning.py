@@ -266,3 +266,117 @@ class TestProtocolFallbackPortWarning:
         )
         assert any("7999" in m for m in port_warnings), port_warnings
         assert any("8443" in m for m in port_warnings), port_warnings
+
+    def test_warning_dedup_normalises_hostname_casing(self):
+        """Issue #800: DNS hostnames are case-insensitive per RFC 4343, so
+        two deps that differ only in host casing denote the same identity.
+        The dedup key must lowercase the host axis to match the
+        ``AuthResolver._cache`` convention.
+
+        Note: ``DependencyReference.parse`` already lowercases the host on
+        URL-string inputs, so this test must build the deps via the
+        dataclass constructor directly to reach the dedup key with casing
+        preserved -- that is the code path the dedup-key fix defends."""
+        dep_lower = DependencyReference(
+            repo_url="project/repo",
+            host="bitbucket.example.com",
+            port=7999,
+        )
+        dep_mixed = DependencyReference(
+            repo_url="project/repo",
+            host="Bitbucket.Example.com",
+            port=7999,
+        )
+        assert dep_mixed.host == "Bitbucket.Example.com", (
+            "direct constructor must preserve host casing, else this "
+            "test cannot reproduce the #800 regression"
+        )
+        dl = _make_downloader()
+        dl.auth_resolver._cache.clear()
+        dl._allow_fallback = True
+
+        def _fake_clone(url, *a, **kw):
+            raise GitCommandError("clone", "failed")
+
+        captured = []
+
+        def _capture(message, symbol=None):
+            captured.append((message, symbol))
+
+        with patch.dict(os.environ, {}, clear=True), patch(
+            "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+            return_value=None,
+        ), patch(
+            "apm_cli.deps.github_downloader.Repo"
+        ) as MockRepo, patch(
+            "apm_cli.deps.github_downloader._rich_warning", side_effect=_capture
+        ):
+            MockRepo.clone_from.side_effect = _fake_clone
+            for dep in (dep_lower, dep_mixed):
+                target = Path(tempfile.mkdtemp())
+                try:
+                    dl._clone_with_fallback(dep.repo_url, target, dep_ref=dep)
+                except (RuntimeError, GitCommandError):
+                    pass
+                finally:
+                    import shutil
+                    shutil.rmtree(target, ignore_errors=True)
+
+        port_warnings = [m for m, _s in captured if "Custom port" in m]
+        assert len(port_warnings) == 1, (
+            f"case-differing hostnames must dedup to one warning, "
+            f"got {len(port_warnings)}: {port_warnings!r}"
+        )
+
+    def test_host_normalisation_does_not_collapse_distinct_repos(self):
+        """Guard against over-normalisation: even when host casing is
+        folded, the dedup key must still discriminate on repo path, so
+        two deps sharing host+port but differing on repo still warn
+        twice. Built via the direct constructor for the same reason as
+        ``test_warning_dedup_normalises_hostname_casing``."""
+        dep_a = DependencyReference(
+            repo_url="project/repo-a",
+            host="bitbucket.example.com",
+            port=7999,
+        )
+        dep_b = DependencyReference(
+            repo_url="project/repo-b",
+            host="Bitbucket.Example.com",
+            port=7999,
+        )
+        dl = _make_downloader()
+        dl.auth_resolver._cache.clear()
+        dl._allow_fallback = True
+
+        def _fake_clone(url, *a, **kw):
+            raise GitCommandError("clone", "failed")
+
+        captured = []
+
+        def _capture(message, symbol=None):
+            captured.append((message, symbol))
+
+        with patch.dict(os.environ, {}, clear=True), patch(
+            "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+            return_value=None,
+        ), patch(
+            "apm_cli.deps.github_downloader.Repo"
+        ) as MockRepo, patch(
+            "apm_cli.deps.github_downloader._rich_warning", side_effect=_capture
+        ):
+            MockRepo.clone_from.side_effect = _fake_clone
+            for dep in (dep_a, dep_b):
+                target = Path(tempfile.mkdtemp())
+                try:
+                    dl._clone_with_fallback(dep.repo_url, target, dep_ref=dep)
+                except (RuntimeError, GitCommandError):
+                    pass
+                finally:
+                    import shutil
+                    shutil.rmtree(target, ignore_errors=True)
+
+        port_warnings = [m for m, _s in captured if "Custom port" in m]
+        assert len(port_warnings) == 2, (
+            f"same host+port with distinct repos must still warn "
+            f"separately, got {len(port_warnings)}: {port_warnings!r}"
+        )

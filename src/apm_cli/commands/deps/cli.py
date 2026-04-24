@@ -29,11 +29,13 @@ def deps():
     pass
 
 
-def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich):
+def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_only=False):
     """Display dependencies for a single scope (Project or Global)."""
     from ...deps.lockfile import LockFile, get_lockfile_path
 
     apm_modules_path = apm_dir / APM_MODULES_DIR
+    lockfile = None
+    insecure_lock_deps = {}
 
     # Check if apm_modules exists
     if not apm_modules_path.exists():
@@ -95,6 +97,8 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich):
                 dep_key = dep.get_unique_key()
                 if dep_key and dep_key not in declared_sources:
                     declared_sources[dep_key] = 'github'
+                if getattr(dep, "is_insecure", False):
+                    insecure_lock_deps[dep_key] = dep
     except Exception:
         pass  # Continue without lockfile if it can't be read
 
@@ -135,21 +139,32 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich):
             if is_orphaned:
                 orphaned_packages.append(org_repo_name)
 
+            locked_dep = insecure_lock_deps.get(org_repo_name)
             installed_packages.append({
                 'name': org_repo_name,
                 'version': version,
                 'source': 'orphaned' if is_orphaned else declared_sources.get(org_repo_name, 'github'),
                 'primitives': primitives,
                 'path': str(candidate),
-                'is_orphaned': is_orphaned
+                'is_orphaned': is_orphaned,
+                'is_insecure': locked_dep is not None,
+                'insecure_via': (
+                    f"via {locked_dep.resolved_by}" if locked_dep and locked_dep.resolved_by else "direct"
+                ),
             })
         except Exception as e:
             logger.warning(f"Failed to read package {org_repo_name}: {e}")
 
+    if insecure_only:
+        installed_packages = [pkg for pkg in installed_packages if pkg['is_insecure']]
+
     if not installed_packages:
-        logger.progress(
-            f"apm_modules/ directory exists but contains no valid packages ({scope_label} scope)"
-        )
+        if insecure_only:
+            logger.progress(f"No insecure APM dependencies installed ({scope_label} scope)")
+        else:
+            logger.progress(
+                f"apm_modules/ directory exists but contains no valid packages ({scope_label} scope)"
+            )
         return
 
     # Display packages in table format
@@ -157,13 +172,19 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich):
         from rich.table import Table
 
         table = Table(
-            title=f" APM Dependencies ({scope_label})",
+            title=(
+                f" Insecure APM Dependencies ({scope_label})"
+                if insecure_only
+                else f" APM Dependencies ({scope_label})"
+            ),
             show_header=True,
             header_style="bold cyan",
         )
         table.add_column("Package", style="bold white")
         table.add_column("Version", style="yellow")
         table.add_column("Source", style="blue")
+        if insecure_only:
+            table.add_column("Origin", style="bold red")
         table.add_column("Prompts", style="magenta", justify="center")
         table.add_column("Instructions", style="green", justify="center")
         table.add_column("Agents", style="cyan", justify="center")
@@ -176,6 +197,7 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich):
                 pkg['name'],
                 pkg['version'],
                 pkg['source'],
+                *([pkg['insecure_via']] if insecure_only else []),
                 str(p.get('prompts', 0)) if p.get('prompts', 0) > 0 else "-",
                 str(p.get('instructions', 0)) if p.get('instructions', 0) > 0 else "-",
                 str(p.get('agents', 0)) if p.get('agents', 0) > 0 else "-",
@@ -193,21 +215,36 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich):
             console.print("\n Run 'apm prune' to remove orphaned packages", style="cyan")
     else:
         # Fallback text table
-        click.echo(f" APM Dependencies ({scope_label}):")
-        click.echo(f"{'Package':<30} {'Version':<10} {'Source':<12} {'Prompts':>7} {'Instr':>7} {'Agents':>7} {'Skills':>7} {'Hooks':>7}")
-        click.echo("-" * 98)
+        if insecure_only:
+            click.echo(f" Insecure APM Dependencies ({scope_label}):")
+            click.echo(
+                f"{'Package':<30} {'Version':<10} {'Source':<12} {'Origin':<18} "
+                f"{'Prompts':>7} {'Instr':>7} {'Agents':>7} {'Skills':>7} {'Hooks':>7}"
+            )
+            click.echo("-" * 117)
+        else:
+            click.echo(f" APM Dependencies ({scope_label}):")
+            click.echo(f"{'Package':<30} {'Version':<10} {'Source':<12} {'Prompts':>7} {'Instr':>7} {'Agents':>7} {'Skills':>7} {'Hooks':>7}")
+            click.echo("-" * 98)
 
         for pkg in installed_packages:
             p = pkg['primitives']
             name = pkg['name'][:28]
             version = pkg['version'][:8]
             source = pkg['source'][:10]
+            insecure_via = pkg['insecure_via'][:16]
             prompts = str(p.get('prompts', 0)) if p.get('prompts', 0) > 0 else "-"
             instructions = str(p.get('instructions', 0)) if p.get('instructions', 0) > 0 else "-"
             agents = str(p.get('agents', 0)) if p.get('agents', 0) > 0 else "-"
             skills = str(p.get('skills', 0)) if p.get('skills', 0) > 0 else "-"
             hooks = str(p.get('hooks', 0)) if p.get('hooks', 0) > 0 else "-"
-            click.echo(f"{name:<30} {version:<10} {source:<12} {prompts:>7} {instructions:>7} {agents:>7} {skills:>7} {hooks:>7}")
+            if insecure_only:
+                click.echo(
+                    f"{name:<30} {version:<10} {source:<12} {insecure_via:<18} "
+                    f"{prompts:>7} {instructions:>7} {agents:>7} {skills:>7} {hooks:>7}"
+                )
+            else:
+                click.echo(f"{name:<30} {version:<10} {source:<12} {prompts:>7} {instructions:>7} {agents:>7} {skills:>7} {hooks:>7}")
 
         # Show orphaned packages warning
         if orphaned_packages:
@@ -222,7 +259,9 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich):
               help="List user-scope dependencies (~/.apm/) instead of project")
 @click.option("--all", "show_all", is_flag=True, default=False,
               help="Show both project and user-scope dependencies")
-def list_packages(global_, show_all):
+@click.option("--insecure", "insecure_only", is_flag=True, default=False,
+              help="Show only installed dependencies locked to http:// sources")
+def list_packages(global_, show_all, insecure_only):
     """Show all installed APM dependencies with context files and agent workflows."""
     logger = CommandLogger("deps-list")
 
@@ -242,14 +281,14 @@ def list_packages(global_, show_all):
 
         if show_all:
             # Show both scopes
-            _show_scope_deps("Project", get_apm_dir(InstallScope.PROJECT), logger, console, has_rich)
+            _show_scope_deps("Project", get_apm_dir(InstallScope.PROJECT), logger, console, has_rich, insecure_only=insecure_only)
             if console and has_rich:
                 console.print()  # spacing between tables
-            _show_scope_deps("Global", get_apm_dir(InstallScope.USER), logger, console, has_rich)
+            _show_scope_deps("Global", get_apm_dir(InstallScope.USER), logger, console, has_rich, insecure_only=insecure_only)
         elif global_:
-            _show_scope_deps("Global", get_apm_dir(InstallScope.USER), logger, console, has_rich)
+            _show_scope_deps("Global", get_apm_dir(InstallScope.USER), logger, console, has_rich, insecure_only=insecure_only)
         else:
-            _show_scope_deps("Project", get_apm_dir(InstallScope.PROJECT), logger, console, has_rich)
+            _show_scope_deps("Project", get_apm_dir(InstallScope.PROJECT), logger, console, has_rich, insecure_only=insecure_only)
     except Exception as e:
         logger.error(f"Error listing dependencies: {e}")
         sys.exit(1)
@@ -297,7 +336,7 @@ def tree(global_):
             if lockfile_path.exists():
                 lockfile = LockFile.read(lockfile_path)
                 if lockfile:
-                    lockfile_deps = lockfile.get_all_dependencies()
+                    lockfile_deps = lockfile.get_package_dependencies()
         except Exception:
             pass
         

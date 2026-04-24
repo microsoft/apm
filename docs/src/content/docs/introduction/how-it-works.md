@@ -114,7 +114,7 @@ graph TD
 
 **Key Architecture Components**:
 
-1. **Context** (.apm/ directory) - Your source code for AI workflows
+1. **Context** (.apm/ directory) - Your source code for AI workflows. See [Anatomy of an APM Package](../anatomy-of-an-apm-package/) for the directory layout.
 2. **APM CLI** - Three core engines working together:
    - **Package Manager** - Dependency resolution and distribution
    - **Primitives Compiler** - Transforms primitives → agents.md format  

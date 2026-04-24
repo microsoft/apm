@@ -67,9 +67,16 @@ def run(ctx: InstallContext) -> None:
         # absent from package_deployed_files; deriving orphans from the outcome
         # set would then misclassify it as removed and delete its previously
         # deployed files even though it is still in apm.yml.
+        from apm_cli.deps.lockfile import _SELF_KEY
         _orphan_total_deleted = 0
         _orphan_deleted_targets: list = []
         for _orphan_key, _orphan_dep in existing_lockfile.dependencies.items():
+            # Issue #887: skip the synthesized self-entry (local .apm/
+            # content). Local content stale cleanup happens in the
+            # post_deps_local phase, not here. Treating self-entry as
+            # an orphan would delete the project's own .github/ files.
+            if _orphan_key == _SELF_KEY:
+                continue
             if _orphan_key in intended_dep_keys:
                 continue  # still in manifest -- handled by stale-cleanup below
             if not _orphan_dep.deployed_files:

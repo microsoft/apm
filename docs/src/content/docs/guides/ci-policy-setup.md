@@ -13,8 +13,8 @@ Set up automated policy enforcement so every pull request is checked against you
 ## Prerequisites
 
 - An organization on GitHub with repositories using APM
-- `apm audit --ci` runs 6 baseline consistency checks with no configuration
-- `apm audit --ci --policy org` adds 16 policy checks defined in `apm-policy.yml`
+- `apm audit --ci` runs 7 baseline consistency checks with no configuration
+- `apm audit --ci --policy org` adds 17 policy checks defined in `apm-policy.yml`
 
 For the full policy schema, see the [Policy Reference](../../enterprise/policy-reference/).
 
@@ -84,7 +84,11 @@ This catches lockfile/manifest drift, missing files, and hidden Unicode — with
 
 ## Step 3: Enable policy enforcement
 
-Add `--policy org` to run the full 16 policy checks on top of baseline:
+Add `--policy org` to run the full 17 policy checks on top of baseline:
+
+:::note
+Since this release, `apm audit --ci` auto-discovers the org policy. `--policy org` remains valid as an explicit override; use `--no-policy` to skip discovery.
+:::
 
 ```yaml
       - name: Run policy checks
@@ -196,6 +200,26 @@ apm-policy:
     GITHUB_TOKEN: $(GITHUB_TOKEN)
 ```
 
+## What a violation looks like
+
+When a developer adds a denied package to `apm.yml`:
+
+```yaml
+dependencies:
+  apm:
+    - untrusted-org/random-skills
+```
+
+The CI run fails with a clear pointer to the offending rule:
+
+```
+[x] Policy violation: dependency 'untrusted-org/random-skills' is denied by org policy
+    Policy: contoso/.github/apm-policy.yml
+    Rule:   dependencies.deny matches 'untrusted-org/**'
+```
+
+With `-f sarif -o results.sarif` and the GitHub Code Scanning upload step (Step 3 above), the same finding renders inline on the PR diff. The required status check stays red until the violation is resolved or the org policy is amended through its own change-management process.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -215,6 +239,7 @@ Combine with `-o <path>` to write to a file.
 
 ## Related
 
-- [Governance & Compliance](../../enterprise/governance/) -- conceptual overview of APM's governance model
+- [Governance](../../enterprise/governance-guide/) -- conceptual overview, bypass contract, and rollout playbook
+- [`apm-policy.yml`](../../enterprise/apm-policy/) -- mental model and how the policy file works
 - [Policy Reference](../../enterprise/policy-reference/) -- full `apm-policy.yml` schema reference
 - [GitHub Rulesets](../../integrations/github-rulesets/) -- enforce policy as a required status check

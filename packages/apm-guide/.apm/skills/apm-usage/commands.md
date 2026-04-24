@@ -10,10 +10,10 @@
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm install [PKGS...]` | Install packages | `--update` refresh refs, `--force` overwrite, `--dry-run`, `--verbose`, `--only [apm\|mcp]`, `--target` (comma-separated), `--dev`, `-g` global, `--trust-transitive-mcp`, `--parallel-downloads N` |
+| `apm install [PKGS...]` | Install packages | `--update` refresh refs, `--force` overwrite, `--dry-run`, `--verbose`, `--only [apm\|mcp]`, `--target` (comma-separated), `--dev`, `-g` global, `--trust-transitive-mcp`, `--parallel-downloads N`, `--allow-insecure`, `--allow-insecure-host HOSTNAME`, `--mcp NAME` add MCP entry, `--transport`, `--url`, `--env KEY=VAL`, `--header KEY=VAL`, `--mcp-version`, `--registry URL` custom MCP registry |
 | `apm uninstall PKGS...` | Remove packages | `--dry-run`, `-g` global |
 | `apm prune` | Remove orphaned packages | `--dry-run` |
-| `apm deps list` | List installed packages | `-g` global, `--all` both scopes |
+| `apm deps list` | List installed packages | `-g` global, `--all` both scopes, `--insecure` |
 | `apm deps tree` | Show dependency tree | -- |
 | `apm view PKG [FIELD]` | View package details or remote refs | `-g` global, `FIELD=versions` |
 | `apm outdated` | Check locked deps via SHA/semver comparison | `-g` global, `-v` verbose, `-j N` parallel checks |
@@ -66,9 +66,12 @@
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
+| `apm mcp install NAME [-- CMD...]` | Add an MCP server (alias for `apm install --mcp`) | `--transport`, `--url`, `--env`, `--header`, `--mcp-version`, `--registry URL`, `--dev`, `--force`, `--dry-run` |
 | `apm mcp list` | List MCP servers in project | `--limit N` |
 | `apm mcp search QUERY` | Search MCP registry | `--limit N` |
 | `apm mcp show SERVER` | Show server details | -- |
+
+Set `MCP_REGISTRY_URL` (default `https://api.mcp.github.com`) to point all `apm mcp` commands and `apm install --mcp` at a custom MCP registry. The URL is validated at startup and must use `https://`; set `MCP_REGISTRY_ALLOW_HTTP=1` to opt in to plaintext `http://` for development. When the override is set and the registry is unreachable during install pre-flight, APM fails closed.
 
 ## Runtime management (experimental)
 
@@ -78,6 +81,18 @@
 | `apm runtime list` | Show installed runtimes | -- |
 | `apm runtime remove {copilot\|codex\|llm}` | Remove a runtime | `--yes` |
 | `apm runtime status` | Show active runtime | -- |
+
+## Experimental features
+
+| Command | Purpose | Key flags |
+|---------|---------|-----------|
+| `apm experimental` | Default to `apm experimental list` | `-v` verbose |
+| `apm experimental list` | List registered experimental flags or emit JSON for automation | `--enabled`, `--disabled`, `--json`, `-v` verbose |
+| `apm experimental enable NAME` | Enable an opt-in experimental flag | `-v` verbose |
+| `apm experimental disable NAME` | Disable an opt-in experimental flag | `-v` verbose |
+| `apm experimental reset [NAME]` | Reset one flag or all flags to defaults; also cleans malformed overrides during bulk reset | `-y` skip confirm, `-v` verbose |
+
+Experimental flags MUST NOT gate security-critical behaviour (content scanning, path validation, lockfile integrity, token handling, MCP trust, collision detection). Flags are ergonomic/UX toggles only.
 
 ## Configuration and updates
 

@@ -145,7 +145,22 @@ dependencies:
       ref: v1.0
 ```
 
-Fields: `git` (required), `path`, `ref`, `alias` (all optional). The `git` value is any HTTPS or SSH clone URL. Explicit URL schemes are honored exactly -- see [Transport selection](#transport-selection-ssh-vs-https) for the full contract. Custom ports are preserved across every attempt (including any cross-protocol fallback enabled with `--allow-protocol-fallback`), so `ssh://host:7999/...` retried over HTTPS becomes `https://host:7999/...`.
+Fields: `git` (required), `path`, `ref`, `alias` (all optional). The `git` value is any HTTPS, HTTP or SSH clone URL.
+
+Explicit URL schemes are honored exactly -- see [Transport selection](#transport-selection-ssh-vs-https) for the full contract. Custom ports are preserved across every attempt (including any cross-protocol fallback enabled with `--allow-protocol-fallback`), so `ssh://host:7999/...` retried over HTTPS becomes `https://host:7999/...`.
+
+:::caution
+Use HTTP dependencies only on trusted private networks. Declare them with
+`git: http://...` and `allow_insecure: true` in `apm.yml`. Installing them
+still requires `apm install --allow-insecure`.
+
+HTTP has no transport authentication, so anyone who can intercept the
+connection can swap the package contents in transit. APM warns on every
+`http://` fetch, allows same-host transitive HTTP dependencies when you
+already passed `--allow-insecure` for a direct HTTP dependency on that host,
+and otherwise requires `--allow-insecure-host <hostname>` for each additional
+transitive host you want to allow.
+:::
 
 > **Nested groups (GitLab, Gitea, etc.):** APM treats all path segments after the host as the repo path, so `gitlab.com/group/subgroup/repo` resolves to a repo at `group/subgroup/repo`. Virtual paths on simple 2-segment repos work with shorthand (`gitlab.com/owner/repo/file.prompt.md`). But for **nested-group repos + virtual paths**, use the object format — the shorthand is ambiguous:
 >
@@ -215,6 +230,9 @@ apm install --dry-run
 ```bash
 # List installed packages
 apm deps list
+
+# Show only installed HTTP-backed packages
+apm deps list --insecure
 
 # Show dependency tree
 apm deps tree
@@ -342,6 +360,10 @@ Local path dependencies (`./path`, `../path`, `/abs/path`) are rejected at user 
 
 ## MCP Dependency Formats
 
+:::tip[Quick start]
+For the CLI-first walkthrough (`apm install --mcp ...`), see the [MCP Servers guide](../mcp-servers/). This section covers the `apm.yml` manifest format in depth.
+:::
+
 MCP dependencies support three forms: string references, overlay objects, and self-defined servers.
 
 ### String Reference (default)
@@ -372,7 +394,7 @@ mcp:
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | string | Server reference (required) |
-| `transport` | string | `stdio`, `sse`, `http`, or `streamable-http` |
+| `transport` | string | `stdio`, `sse`, `http`, or `streamable-http` (MCP transport names, not URL schemes -- remote variants connect over HTTPS) |
 | `env` | dict | Environment variable overrides |
 | `args` | list or dict | Runtime argument overrides |
 | `version` | string | Pin server version |
@@ -442,7 +464,7 @@ migrating CI), set `APM_ALLOW_PROTOCOL_FALLBACK=1` or pass
 | Dependency form | What APM tries |
 |-----------------|----------------|
 | `ssh://...` or `git@host:...` | SSH only |
-| `https://...` or `http://...` | HTTPS only |
+| `https://...` or `http://...` | HTTP(S) only |
 | Shorthand (`owner/repo`, `host/owner/repo`) with `git config url.<base>.insteadOf` rewriting to SSH | SSH only |
 | Shorthand without a matching `insteadOf` rewrite | HTTPS only |
 

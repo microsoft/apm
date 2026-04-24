@@ -8,29 +8,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed (BREAKING)
+### Added
 
-- Strict-by-default transport selection: explicit `ssh://`/`https://` URLs no longer silently fall back to the other protocol; shorthand consults `git config url.<base>.insteadOf` and otherwise defaults to HTTPS. Set `APM_ALLOW_PROTOCOL_FALLBACK=1` (or pass `--allow-protocol-fallback`) to restore the legacy permissive chain; cross-protocol retries then emit a `[!]` warning. Closes #328 (#778)
+- `includes:` manifest field (auto | list) for explicit governance of local `.apm/` content. Closes audit-blindness gap (#887).
+- `apm audit --ci` now verifies hash integrity of locally deployed files, detecting hand-edits and config drift. (#887)
+- `policy.manifest.require_explicit_includes` policy field enforces explicit `includes` lists (rejects `auto` + undeclared). (#887)
+- `includes-consent` advisory appears in `apm audit` CLI/JSON output when local content is deployed without an explicit `includes:` declaration (#887)
+- `apm-primitives-architect` agent: reusable persona for designing and critiquing `.apm/` skill bundles. (#882)
+- `apm-triage-panel` skill: three-persona panel (DevX UX, Supply Chain Security, APM CEO; conditional OSS Growth Hacker) for issue triage producing single labelled-decision comment with structured JSON tail. Mirrors `apm-review-panel` orchestration model. (#915)
+- CI: add `APM Self-Check` to `ci.yml` for `apm audit --ci`, regeneration-drift validation, and `merge-gate.yml` `EXPECTED_CHECKS` coverage. (#885)
 
 ### Changed
 
-- `apm install --allow-protocol-fallback` now emits a one-shot `[!]` warning before the first clone attempt when a dependency carries a custom port and both SSH and HTTPS attempts are planned, naming the dependency and recommending either pinning the URL scheme (with fallback disabled) or dropping the flag to fail fast. Servers like Bitbucket Datacenter that serve SSH and HTTPS on different ports can otherwise hit a silent port mismatch. Closes #786 (#789)
-
-### Added
-
-- `apm install --ssh` / `--https` flags and `APM_GIT_PROTOCOL=ssh|https` env to pick the initial transport for shorthand dependencies (#778)
-- `apm install --allow-protocol-fallback` flag and `APM_ALLOW_PROTOCOL_FALLBACK=1` env as the migration escape hatch for cross-protocol fallback (#778)
-- Add APM Review Panel skill (`.github/skills/apm-review-panel/`) and four new specialist personas (`devx-ux-expert`, `supply-chain-security-expert`, `apm-ceo`, `oss-growth-hacker`) with auto-activating per-persona skills. Routes specialist findings through an APM CEO arbiter for strategic / breaking-change calls, with the OSS growth hacker side-channeling adoption insights via `WIP/growth-strategy.md`. Instrumentation per Handbook Ch. 9 (`The Instrumented Codebase`); PROSE-compliant (thin SKILL.md routers, persona detail lazy-loaded via markdown links, explicit boundaries per persona).
-- `apm view plugin@marketplace` displays marketplace plugin metadata (name, version, source, description) (#514)
-- `apm outdated` checks marketplace plugin refs and shows a "Source" column distinguishing marketplace vs git updates (#514)
-- `apm marketplace validate` command with schema validation and duplicate name detection (#514)
-- Ref immutability advisory: caches plugin-to-ref pins and warns when a previously pinned plugin's ref changes (#514)
-- Multi-marketplace shadow detection: warns when the same plugin name appears in multiple registered marketplaces (#514)
-
-- Multi-target support: `apm.yml` `target` field now accepts a list (`target: [claude, copilot]`) and CLI `--target` accepts comma-separated values (`-t claude,copilot`). Only specified targets are compiled, installed, and packed -- no redundant output for unused tools. Single-string syntax is fully backward compatible. (#628)
+- `find_primitive_files()` now uses `os.walk` with early directory pruning so `compilation.exclude` patterns prevent traversal into excluded subtrees on large repos. (#870)
+- Lockfile in-memory shape: a synthesized self-entry now appears in `LockFile.dependencies` for local content. The on-disk YAML format is unchanged (data still serialized as flat `local_deployed_files`/`local_deployed_file_hashes` fields). (#887)
+- Hardened `apm-review-panel` skill: one-comment output contract, pre-arbitration completeness gate, Hybrid E Auth Expert routing, verdict template extracted to `assets/`, and `python-architect` mandatory three-artifact PR review contract (classDiagram + flowchart + Design patterns). (#882)
+- CI: smoke tests in `build-release.yml`'s `build-and-test` job (Linux x86_64, Linux arm64, Windows) are now gated to promotion boundaries (tag/schedule/dispatch) instead of running on every push to main. Push-time smoke duplicated the merge-time smoke gate in `ci-integration.yml` and burned ~15 redundant codex-binary downloads/day. Tag-cut releases still run smoke as a pre-ship gate; nightly catches upstream codex URL drift; merge-time still gates merges into main. (#878)
+- CI docs: clarify that branch-protection ruleset must store the check-run name (`gate`), not the workflow display string (`Merge Gate / gate`); document the merge-gate aggregator in `cicd.instructions.md` and mark the legacy stub workflow as deprecated.
 
 ### Fixed
 
+- `apm install` (user scope): `init_link_resolver` now scopes `discover_primitives` to `~/.apm/` instead of `~/`, preventing recursive-glob across the entire home directory. Fixes #830 (#850)
+- Audit blindness for local `.apm/` content -- `apm audit --ci` now detects drift, missing files, and content tampering on locally-authored files (not just installed packages). (#887)
+- Packer leak risk: local-content fields (`local_deployed_files`, `local_deployed_file_hashes`) are now stripped from bundled lockfiles, preventing phantom self-entries on unpack. (#887)
+
+### Removed
+
+- CI: deleted `ci-integration-pr-stub.yml`. The four stubs were a holdover from the pre-merge-gate model where branch protection required each Tier 2 check name directly. After #867, branch protection requires only `gate`, so the stubs are dead weight. Reduced `EXPECTED_CHECKS` in `merge-gate.yml` to just `Build & Test (Linux)`.
+
+### Fixed
+
+- `apm update` sanitises the subprocess environment before invoking the platform installer so the bundled PyInstaller `LD_LIBRARY_PATH` / `DYLD_*` no longer leak into system binaries (`curl`, `tar`, `sudo`) spawned by `install.sh`. Previously the installer's first `curl` call could abort with `libssl.so.3: version 'OPENSSL_3.2.0' not found` on distros whose system `libcurl` requires a newer OpenSSL ABI than the APM bundle ships (Debian trixie arm64 dev-containers, Fedora 43, and similar). Restoration uses PyInstaller's official `<VAR>_ORIG` protocol, preserving the user's own `LD_LIBRARY_PATH` exports. Closes #894
+
+## [0.9.2] - 2026-04-23
+
+### Added
+
+- `apm install` supports Azure DevOps AAD bearer-token auth via `az account get-access-token`, with PAT-first fallback for orgs that disable PAT creation. Closes #852 (#856)
+- New `enterprise/governance-guide.md`: flagship governance reference for CISO / VPE / Platform Tech Lead audiences; trims duplication across `governance.md`, `apm-policy.md`, `integrations/github-rulesets.md`; adds `templates/apm-policy-starter.yml`. (#851)
+- Enterprise docs IA refactor: hub page + merged team guides, deduped governance content. (#858)
+- Landing page rewritten around the three-pillar spine. (#855)
+- First-package tutorial rewritten end-to-end; fixes `.apm/` anatomy hallucinations. (#866)
+
+### Changed
+
+- gh-aw workflows now use `imports:` for shared APM context instead of the deprecated `dependencies:` field. (#864)
+- CI: `merge-gate.yml` orchestrator turns dropped `pull_request` webhook deliveries into clear red checks instead of stuck `Expected -- Waiting for status to be reported`. (#865)
+- CI: `Merge Gate / gate` aggregates all PR-time required checks (`Build & Test (Linux)` + 4 stubs) into a single verdict; branch protection requires only this one check, decoupling the ruleset from CI workflow topology (Tide / bors pattern). (#867, #868)
+- CI: `merge-gate.yml` simplified to a single `pull_request` trigger with `workflow_dispatch` for manual recovery; the dual-trigger redundancy attempt was poisoning the branch-protection rollup with `CANCELLED` check-runs. (#868)
+
+### Fixed
+
+<<<<<<< fix-copilot-transport-validation-791
 - VS Code adapter now defaults to `http` transport when `transport_type` is missing from remote registry data, matching Copilot adapter behavior (#654)
 - Copilot adapter now validates remote `transport_type`, defaulting to `http` when missing/empty/whitespace and raising a clear `ValueError` for unrecognized transports, mirroring the VS Code adapter so both refuse bad registry data instead of silently writing garbage config (#791)
 - `apm install` no longer silently drops skills, agents, and commands when a Claude Code plugin also ships `hooks/*.json`. The package-type detection cascade now classifies plugin-shaped packages as `MARKETPLACE_PLUGIN` (which already maps hooks via the plugin synthesizer) before falling back to the hook-only classification, and emits a default-visibility `[!]` warning when a hook-only classification disagrees with the package's directory contents (#780)
@@ -39,6 +68,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --global` now installs MCP servers to global-capable runtimes (Copilot CLI, Codex CLI) instead of blanket-skipping all MCP installation at user scope. Note: lockfile-path behavior at `--global` tracked in #794 (#638)
 - `--trust-transitive-mcp` no longer silently ignored when combined with `--global` (#638)
 - Token resolution now discriminates by port, fixing credential collisions across multiple self-hosted Git instances on the same host. Thanks @edenfunf! (#785)
+=======
+- `apm install` surfaces the custom port in clone / `ls-remote` error messages for generic git hosts. (#804)
+
+## [0.9.1] - 2026-04-22
+
+### Added
+
+- `apm install` enforces org `apm-policy.yml` at install time (deps deny/allow/require, MCP deny/transport/trust-transitive, `compilation.target.allow`, `extends:` chains, `policy.fetch_failure` knob, `policy.hash` pin); `--no-policy` / `APM_POLICY_DISABLE=1` escape hatch; `--dry-run` previews verdicts; failed package installs roll back `apm.yml`. New `apm policy status` diagnostic (table / `--json`, exit-0 by default, `--check` for CI). `apm audit --ci` auto-discovers org policy. **Migration**: orgs publishing `enforcement: block` may see installs that previously succeeded now fail -- preview with `apm install --dry-run`. Closes #827, #829, #831, #834 (#832)
+- `apm experimental` command group - a feature-flag registry with `list` / `enable` / `disable` / `reset` subcommands. Opt in to new behaviour before it graduates to default. Ships with one built-in flag (`verbose-version`) and a contributor recipe for proposing new flags (#845)
+- `pr-review-panel` gh-aw workflow: runs the `apm-review-panel` skill on PRs labelled `panel-review` and posts a synthesized verdict (#824)
+
+### Changed
+
+- Docs site publishes only on stable APM releases, not on every push to `main`. Closes #641 (#822)
+- Dogfood APM: authored skills, agents, and instructions live in `.apm/`; `.github/{skills,agents,instructions}/` are regenerated by `apm install --target copilot` and committed (#823)
+
+### Fixed
+
+- `pr-review-panel` workflow now runs on PRs from forks: switched to `pull_request_target` with label-only triggering and a workflow-dispatch path (#826, #836, #837)
+
+### Fixed
+
+- Lowercase the host axis of the `_fallback_port_warned` dedup key so deps that differ only in hostname casing collapse to one cross-protocol fallback warning, matching the `AuthResolver._cache` convention (RFC 4343). Closes #800 (#815)
+
+## [0.9.0] - 2026-04-21
+
+### Changed (BREAKING)
+
+- Strict-by-default git transport selection: explicit `ssh://`/`https://` URLs no longer silently cross-fall back; shorthand defaults to HTTPS (consults `url.<base>.insteadOf`). Opt back into the legacy chain with `--allow-protocol-fallback` or `APM_ALLOW_PROTOCOL_FALLBACK=1`. Adds `--ssh` / `--https` / `APM_GIT_PROTOCOL` for explicit shorthand selection. Closes #328 (#778)
+- MCP entry validation hardened: names must match `^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$`, URLs limited to `http`/`https`, headers reject CR/LF, stdio commands reject `..`. Error messages now include a valid positive example. (#807)
+- Stdio MCP entries with whitespace in `command` and no `args` are rejected at parse time with a fix-it error pointing at the canonical `command: <binary>, args: [...]` shape. Closes #806 (#809)
+
+### Added
+
+- `apm install --mcp NAME` (and `apm mcp install` alias) for declaratively adding MCP servers to `apm.yml`, with `--transport` / `--url` / `--env` / `--header` / `--mcp-version` / `--registry` flags and stdio passthrough. TTY prompts on replace, `--force` required in CI. Includes `--registry URL` and `MCP_REGISTRY_URL` env for custom (enterprise) MCP registries. Closes #807 (#810)
+- HTTP dependency support via `--allow-insecure` + `allow_insecure: true` dual opt-in; `--allow-insecure-host` for transitive HTTP from new hosts; credential-helper suppression on HTTP attempts to prevent token leakage; new `apm deps list --insecure` view with `Origin` column. Threat model in `enterprise/security.md`. Thanks @arika0093! (#700)
+- Multi-target support: `apm.yml` `target` accepts a list (`[claude, copilot]`) and CLI `--target` accepts comma-separated values; only specified targets are compiled/installed/packed. Single-string form remains backward compatible. (#628)
+- Marketplace UX overhaul: `apm view plugin@marketplace`, `apm outdated` Source column, `apm marketplace validate`, ref-immutability advisory, multi-marketplace shadow detection. (#514)
+- New **MCP Servers** guide (`docs/guides/mcp-servers.md`) consolidating stdio / registry / remote shapes, flag reference, validation rules, and the conflict matrix in one page; assorted MCP doc drift fixes (#808)
+- Build-time `update_policy` module so package-manager distributions (conda-forge, brew, pixi) can disable `apm update` and show custom guidance. Thanks @joostsijm! (#675)
+- APM Review Panel skill (`.github/skills/apm-review-panel/`) plus four specialist personas (devx-ux, supply-chain-security, apm-ceo, oss-growth-hacker) routing through an APM CEO arbiter (#777)
+
+### Fixed
+
+- Preserve custom git ports across protocols: non-default ports on `ssh://` / `https://` dependency URLs (e.g. Bitbucket Datacenter SSH 7999, self-hosted GitLab HTTPS 8443) are captured as `DependencyReference.port` and reused on HTTPS fallback. Closes #661, #731 (#665)
+- Token resolution now discriminates by port, fixing credential collisions across multiple self-hosted Git instances on the same host. Thanks @edenfunf! Closes #785 (#788)
+- Detect port-like first path segment in SCP shorthand (`git@host:7999/path`) and raise an actionable error suggesting the `ssh://` form. Closes #784 (#787)
+- `--allow-protocol-fallback` emits a one-shot `[!]` warning when a dependency's custom port is about to be tried across both SSH and HTTPS, recommending pinning the scheme. Closes #786 (#789)
+- `apm install --global` now installs MCP servers to global-capable runtimes (Copilot CLI, Codex CLI) instead of skipping all MCP at user scope; `--trust-transitive-mcp` no longer ignored under `--global`. Lockfile-path behavior at `--global` tracked in #794 (#638)
+- `apm install` no longer silently drops skills/agents/commands when a Claude Code plugin also ships `hooks/*.json`: detection cascade now classifies plugin-shaped packages as `MARKETPLACE_PLUGIN` first; emits a `[!]` warning when a hook-only classification disagrees with package contents (#780)
+- `apm mcp search` / `list` / `show` now honour `MCP_REGISTRY_URL` (previously hardcoded to the public registry), print a `Registry: <url>` diagnostic when set, and surface the configured URL in network-error messages (#813)
+- VS Code adapter defaults to `http` transport when `transport_type` is missing from remote registry data, matching Copilot adapter behavior (#654)
+- `apm init` no longer prompts to overwrite three times on Windows CP950 terminals. Closes #602 (#647)
+- `apm init` Next Steps panel surfaces install/marketplace/plugin workflows instead of the dead-end `apm run start` reference. Closes #603 (#649)
+
+### Security
+
+- `MCP_REGISTRY_URL` validated at startup (schemeless / unsupported schemes rejected; `http://` rejected by default, opt in via `MCP_REGISTRY_ALLOW_HTTP=1`); APM fails closed when a custom registry is unreachable during install pre-flight, instead of silently approving every MCP dep. Default registry keeps assume-valid for transient errors. (#814)
+- `apm install --mcp` defense-in-depth: rejects embedded `..` in dep names with a valid positive example, redacts URL credentials in diagnostic output (`https://user:token@host/` -> `https://host/`), warns on `--registry` / `MCP_REGISTRY_URL` pointing at loopback / link-local / RFC1918 / cloud-metadata hosts (including decimal-encoded loopback). (#810)
+- `SimpleRegistryClient` applies a `(connect=10s, read=30s)` timeout on every registry HTTP call, removing the unbounded-hang failure mode. Tunable via `MCP_REGISTRY_CONNECT_TIMEOUT` / `MCP_REGISTRY_READ_TIMEOUT`. (#810)
+>>>>>>> main
 
 ## [0.8.12] - 2026-04-19
 
@@ -47,11 +137,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` now automatically discovers and deploys local `.apm/` primitives (skills, instructions, agents, prompts, hooks, commands) to target directories, with local content taking priority over dependencies on collision (#626, #644)
 - Deploy primitives from the project root's own `.apm/` directory alongside declared dependencies, so single-package projects no longer need a sub-package stub to install their own content (#715)
 - Add `temp-dir` configuration key (`apm config set temp-dir PATH`) to override the system temporary directory, resolving `[WinError 5] Access is denied` in corporate Windows environments (#629)
+
 ### Changed
 
-- Refactor `apm install` into a modular engine package (`apm_cli/install/`) with discrete phases (resolve, targets, download, integrate, cleanup, lockfile, finalize, post-deps local) and apply design patterns -- introduce a `DependencySource` Strategy hierarchy with shared `run_integration_template()` Template Method (kills ~300 LOC duplication across local/cached/fresh dep handlers), add `services.py` DI seam to eliminate `_install_mod` indirection, and wrap the pipeline in a typed `InstallService` Application Service consuming a frozen `InstallRequest`. `install/phases/integrate.py` shrinks from 1013 to ~400 LOC; the public `apm install` behaviour and CLI surface are unchanged. Preserves the `#762` cleanup chokepoint and remains backward-compatible (`_install_apm_dependencies` re-export and 55 healthy test patches keep working) (#764)
+- Refactor `apm install` into a modular engine package (`apm_cli/install/`) with discrete phases and apply Strategy / Template Method / Application Service patterns; public CLI behaviour and the `#762` cleanup chokepoint unchanged (#764)
 - `apm marketplace browse/search/add/update` now route through the registry proxy when `PROXY_REGISTRY_URL` is set; `PROXY_REGISTRY_ONLY=1` blocks direct GitHub API calls (#506, #617)
-- CI: adopt GitHub Merge Queue with tiered CI and add an inert `pull_request_target` stub workflow (`ci-integration-pr-stub.yml`) for the four Tier 2 required checks. `ci.yml` (Tier 1: unit tests + binary build) now runs on `pull_request` and `merge_group`. The integration + release-validation suite (Tier 2) moves to `merge_group`-only, replacing the previous `workflow_run` + environment-approval flow. PR branches no longer need manual updates against `main`, and the heavy integration suite runs once at merge time instead of on every PR push. The PR-time stub satisfies branch protection's required-check gate without burning CI minutes, holds no secrets, runs no checkout, and grants `permissions: {}` so it cannot be turned into a supply-chain attack vector. CODEOWNERS now requires Lead Maintainer review for any change to `.github/workflows/**` (#770, #771)
+- CI: adopt GitHub Merge Queue with tiered CI (Tier 1 unit + binary on `pull_request` + `merge_group`; Tier 2 integration + release-validation on `merge_group` only) plus an inert `pull_request_target` stub workflow for required-check satisfaction. CODEOWNERS now requires Lead Maintainer review for any change to `.github/workflows/**` (#770, #771)
 - Bump `pytest` from 8.4.2 to 9.0.3 (#698)
 - Bump `dompurify` from 3.3.2 to 3.4.0 in `/docs` (#730)
 - Bump `lodash-es` and `langium` in `/docs` (#761)

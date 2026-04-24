@@ -137,7 +137,8 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             if not result and verbose_log:
                 try:
                     err_ctx = auth_resolver.build_error_context(
-                        host, f"accessing {package}", org=org, port=dep_ref.port
+                        host, f"accessing {package}", org=org, port=dep_ref.port,
+                        dep_url=dep_ref.repo_url,
                     )
                     for line in err_ctx.splitlines():
                         verbose_log(line)
@@ -174,27 +175,36 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                 dep_ref.repo_url, use_ssh=False, dep_ref=dep_ref, token=_url_token
             )
 
+            explicit_scheme = getattr(dep_ref, "explicit_scheme", None)
+            is_insecure = bool(getattr(dep_ref, "is_insecure", False))
+            prefer_web_probe_first = explicit_scheme in ("http", "https") or is_insecure
+
             # For generic hosts (not GitHub, not ADO), relax the env so native
             # credential helpers (SSH keys, macOS Keychain, etc.) can work.
             # This mirrors _clone_with_fallback() which does the same relaxation.
             if is_generic:
-                validate_env = {k: v for k, v in ado_downloader.git_env.items()
-                                if k not in ('GIT_ASKPASS', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM')}
-                validate_env['GIT_TERMINAL_PROMPT'] = '0'
+                validate_env = ado_downloader._build_noninteractive_git_env(
+                    preserve_config_isolation=prefer_web_probe_first,
+                    suppress_credential_helpers=is_insecure,
+                )
             else:
                 validate_env = {**os.environ, **ado_downloader.git_env}
 
             if verbose_log:
                 verbose_log(f"Trying git ls-remote for {dep_ref.host}")
 
-            # For generic hosts, try SSH first (no credentials needed when SSH
-            # keys are configured) before falling back to HTTPS.
+            # Generic shorthand keeps the legacy SSH-first probe order. Explicit
+            # HTTP(S) should test the web transport first so validation matches
+            # the clone plan closely enough to avoid surprise SSH prompts.
             urls_to_try = []
             if is_generic:
                 ssh_url = ado_downloader._build_repo_url(
                     dep_ref.repo_url, use_ssh=True, dep_ref=dep_ref
                 )
-                urls_to_try = [ssh_url, package_url]
+                if prefer_web_probe_first:
+                    urls_to_try = [package_url, ssh_url]
+                else:
+                    urls_to_try = [ssh_url, package_url]
             else:
                 urls_to_try = [package_url]
 
@@ -211,6 +221,53 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                 )
                 if result.returncode == 0:
                     break
+
+            # ADO bearer fallback: if PAT was rejected (rc != 0 with auth-failure
+            # signal) AND the dep is on Azure DevOps AND we resolved a PAT,
+            # silently retry with az-cli bearer token.
+            if (
+                result is not None
+                and result.returncode != 0
+                and dep_ref.is_azure_devops()
+                and _url_token is not None  # we had a PAT
+                and (
+                    "401" in (result.stderr or "")
+                    or "Authentication failed" in (result.stderr or "")
+                    or "Unauthorized" in (result.stderr or "")
+                )
+            ):
+                try:
+                    from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
+                    from apm_cli.utils.github_host import build_ado_bearer_git_env
+                    provider = get_bearer_provider()
+                    if provider.is_available():
+                        try:
+                            bearer = provider.get_bearer_token()
+                            bearer_url = ado_downloader._build_repo_url(
+                                dep_ref.repo_url, use_ssh=False, dep_ref=dep_ref,
+                                token=None, auth_scheme="bearer",
+                            )
+                            bearer_env = {**validate_env, **build_ado_bearer_git_env(bearer)}
+                            cmd = ["git", "ls-remote", "--heads", "--exit-code", bearer_url]
+                            bearer_result = subprocess.run(
+                                cmd, capture_output=True, text=True,
+                                encoding="utf-8", timeout=30, env=bearer_env,
+                            )
+                            if bearer_result.returncode == 0:
+                                # Emit deferred stale-PAT warning via resolver
+                                auth_resolver.emit_stale_pat_diagnostic(
+                                    dep_ref.host or "dev.azure.com"
+                                )
+                                if verbose_log:
+                                    verbose_log(
+                                        f"git ls-remote rc=0 for {package} "
+                                        f"(via AAD bearer fallback)"
+                                    )
+                                return True
+                        except AzureCliBearerError:
+                            pass
+                except ImportError:
+                    pass
 
             if verbose_log:
                 if result.returncode == 0:
@@ -291,7 +348,8 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             if verbose_log:
                 try:
                     ctx = auth_resolver.build_error_context(
-                        host, f"accessing {package}", org=org, port=port
+                        host, f"accessing {package}", org=org, port=port,
+                        dep_url=getattr(dep_ref, "repo_url", None),
                     )
                     for line in ctx.splitlines():
                         verbose_log(line)
@@ -341,7 +399,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
         except Exception:
             if verbose_log:
                 try:
-                    ctx = auth_resolver.build_error_context(host, f"accessing {package}", org=org)
+                    ctx = auth_resolver.build_error_context(host, f"accessing {package}", org=org, dep_url=package)
                     for line in ctx.splitlines():
                         verbose_log(line)
                 except Exception:

@@ -74,7 +74,7 @@ apm init my-plugin --plugin
 
 ### `apm install` - Install dependencies and deploy local content
 
-Install APM package and MCP server dependencies from `apm.yml` and deploy the project's own `.apm/` content to target directories (like `npm install`). Auto-creates minimal `apm.yml` when packages are specified but no manifest exists.
+Install APM package and MCP server dependencies from `apm.yml` and deploy the project's own `.apm/` content to target directories (like `npm install`). Auto-creates minimal `apm.yml` when packages are specified but no manifest exists. For `http://` dependencies, use `--allow-insecure`.
 
 ```bash
 apm install [PACKAGES...] [OPTIONS]
@@ -94,11 +94,22 @@ apm install [PACKAGES...] [OPTIONS]
 - `--parallel-downloads INTEGER` - Max concurrent package downloads (default: 4, 0 to disable)
 - `--verbose` - Show individual file paths and full error details in the diagnostic summary
 - `--trust-transitive-mcp` - Trust self-defined MCP servers from transitive packages (skip re-declaration requirement)
+- `--mcp NAME` - Add an MCP server entry to `apm.yml` and install it. See the [MCP Servers guide](../../guides/mcp-servers/) for the full workflow.
+- `--transport [stdio|http|sse|streamable-http]` - MCP transport (only with `--mcp`). Inferred from `--url` or post-`--` argv when omitted.
+- `--url URL` - Endpoint for `http`/`sse` MCP servers (only with `--mcp`). Scheme must be `http` or `https`.
+- `--env KEY=VALUE` - Environment variable for stdio MCP servers (only with `--mcp`). Repeatable.
+- `--header KEY=VALUE` - HTTP header for remote MCP servers (only with `--mcp`). Repeatable. Requires `--url`.
+- `--mcp-version VER` - Pin a registry MCP entry to a specific version (only with `--mcp`).
+- `--registry URL` - Custom MCP registry URL (`http://` or `https://`) for resolving the registry-form `--mcp NAME`. Overrides `MCP_REGISTRY_URL`. Persisted to `apm.yml` for reproducible installs. Not valid with `--url` or a stdio command. Only with `--mcp`.
 - `--dev` - Add packages to [`devDependencies`](../manifest-schema/#5-devdependencies) instead of `dependencies`. Dev deps are installed locally but excluded from `apm pack --format plugin` bundles
 - `-g, --global` - Install to user scope (`~/.apm/`) instead of the current project. Primitives deploy to `~/.copilot/`, `~/.claude/`, etc. MCP servers are only installed for global-capable runtimes (Copilot CLI, Codex CLI); workspace-only runtimes are skipped.
+- `--allow-insecure` - Allow HTTP (insecure) dependencies. Required when adding or installing dependencies that use an `http://` URL.
+- `--allow-insecure-host HOSTNAME` - Allow transitive HTTP (insecure) dependencies from `HOSTNAME`. Repeat the flag to allow multiple hosts.
 - `--ssh` - Force SSH for shorthand (`owner/repo`) dependencies. Mutually exclusive with `--https`. Ignored for URLs with an explicit scheme.
 - `--https` - Force HTTPS for shorthand dependencies. Mutually exclusive with `--ssh`. Default unless `git config url.<base>.insteadOf` rewrites the candidate to SSH.
 - `--allow-protocol-fallback` - Restore the legacy permissive cross-protocol fallback chain (HTTPS-then-SSH or vice-versa). Strict-by-default otherwise. Each retry emits a `[!]` warning naming both protocols. When the dependency URL carries a custom port, APM also emits a one-shot `[!]` warning before the first clone attempt noting that the same port will be reused across schemes (wrong on servers like Bitbucket Datacenter that serve SSH and HTTPS on different ports) -- to avoid the mismatch, omit this flag and pin the dependency with an explicit `ssh://` or `https://` URL.
+- `--no-policy` -- Skip org policy enforcement for this invocation. Loudly logged. Does NOT bypass `apm audit --ci`. Available on `apm install`, `apm install <pkg>`, and `apm install --mcp <name>`.
+  - Equivalent env var: `APM_POLICY_DISABLE=1` (applies to the entire shell session). Note: `apm deps update` runs the install pipeline and is gated by policy but does not currently expose a `--no-policy` flag -- use `APM_POLICY_DISABLE=1` as the only escape hatch there.
 
 **Transport env vars:**
 
@@ -112,6 +123,8 @@ See [Dependencies: Transport selection](../../guides/dependencies/#transport-sel
 **Behavior:**
 - `apm install` (no args): Installs **all** packages from `apm.yml` and deploys the project's own `.apm/` content
 - `apm install <package>`: Installs **only** the specified package (adds to `apm.yml` if not present)
+- Each `http://` dependency is warned at install time before any fetch begins
+- Transitive `http://` dependencies are allowed automatically when they use the same host as a direct insecure dependency you approved with `--allow-insecure`; other transitive hosts require `--allow-insecure-host HOSTNAME`
 
 **Local `.apm/` Content Deployment:**
 
@@ -178,6 +191,10 @@ apm install --exclude codex
 
 # Trust self-defined MCP servers from transitive packages
 apm install --trust-transitive-mcp
+
+# Add an MCP server in one shot (writes apm.yml + wires every detected client)
+apm install --mcp filesystem -- npx -y @modelcontextprotocol/server-filesystem /workspace
+apm install --mcp io.github.github/github-mcp-server
 
 # Install as a dev dependency (excluded from plugin bundles)
 apm install --dev owner/test-helpers
@@ -268,10 +285,10 @@ When you run `apm install`, APM automatically integrates primitives from install
 After installation completes, APM prints a grouped diagnostic summary instead of inline warnings. Categories include collisions (skipped files), cross-package skill replacements, warnings, and errors.
 
 - **Normal mode**: Shows counts and actionable tips (e.g., "9 files skipped -- use `apm install --force` to overwrite")
-- **Verbose mode** (`--verbose`): Additionally lists individual file paths grouped by package, and full error details
+- **Verbose mode** (`--verbose`): Additionally lists individual file paths grouped by package, full error details, and **the resolved auth source per remote host** (e.g., `[i] dev.azure.com -- using bearer from az cli (source: AAD_BEARER_AZ_CLI)` or `[i] github.com -- token from GITHUB_APM_PAT`). Useful for diagnosing PAT vs. Entra-ID-bearer behaviour against Azure DevOps.
 
 ```bash
-# See exactly which files were skipped or had issues
+# See exactly which files were skipped or had issues, and which auth source was used
 apm install --verbose
 ```
 
@@ -407,9 +424,10 @@ apm audit [PACKAGE] [OPTIONS]
 - `-v, --verbose` - Show info-level findings and file details
 - `-f, --format [text|json|sarif|markdown]` - Output format: `text` (default), `json` (machine-readable), `sarif` (GitHub Code Scanning), `markdown` (step summaries). Cannot be combined with `--strip` or `--dry-run`.
 - `-o, --output PATH` - Write report to file. Auto-detects format from extension (`.sarif`, `.sarif.json` → SARIF; `.json` → JSON; `.md` → Markdown) when `--format` is not specified.
-- `--ci` - Run lockfile consistency checks for CI/CD gates. Exit 0 if clean, 1 if violations found.
-- `--policy SOURCE` - *(Experimental)* Policy source: `org` (auto-discover from org), file path, or URL. Used with `--ci` to run policy checks on top of baseline.
-- `--no-cache` - Force fresh policy fetch (skip cache). Only relevant with `--policy`.
+- `--ci` - Run lockfile consistency checks for CI/CD gates. Exit 0 if clean, 1 if violations found. Auto-discovers org policy from the org `.github` repo unless `--no-policy` is set. Runs the 7 baseline checks: lockfile presence, ref consistency, deployed files present, no orphaned packages, MCP config consistency, content integrity (Unicode + hash drift on every deployed file including local content), includes consent (advisory).
+- `--policy SOURCE` - *(Experimental)* Override discovery: `org` (auto-discover from org), file path, or URL. Without this flag, `--ci` auto-discovers.
+- `--no-policy` - Skip policy discovery and enforcement entirely. Equivalent to `APM_POLICY_DISABLE=1`.
+- `--no-cache` - Force fresh policy fetch (skip cache). Only relevant with policy discovery active.
 - `--no-fail-fast` - Run all checks even after a failure. By default, CI mode stops at the first failing check to save time.
 
 **Examples:**
@@ -444,17 +462,20 @@ apm audit -o report.sarif
 # JSON report to file
 apm audit -f json -o results.json
 
-# CI lockfile consistency gate
+# CI lockfile consistency gate (auto-discovers org policy)
 apm audit --ci
 
-# CI gate with org policy checks
+# CI gate skipping policy discovery (baseline checks only)
+apm audit --ci --no-policy
+
+# CI gate with explicit policy source (overrides auto-discovery)
 apm audit --ci --policy org
 
 # CI gate with local policy file
 apm audit --ci --policy ./apm-policy.yml
 
 # Force fresh policy fetch
-apm audit --ci --policy org --no-cache
+apm audit --ci --no-cache
 
 # Run all checks (no fail-fast) for full diagnostic report
 apm audit --ci --policy org --no-fail-fast
@@ -477,6 +498,52 @@ apm audit --ci --policy org --no-fail-fast
 - **Critical**: Tag characters (U+E0001–E007F), bidi overrides (U+202A–E, U+2066–9), variation selectors 17–256 (U+E0100–E01EF, Glassworm attack vector)
 - **Warning**: Zero-width spaces/joiners (U+200B–D), variation selectors 1–15 (U+FE00–FE0E), bidi marks (U+200E–F, U+061C), invisible operators (U+2061–4), annotation markers (U+FFF9–B), deprecated formatting (U+206A–F), soft hyphen (U+00AD), mid-file BOM
 - **Info**: Non-breaking spaces, unusual whitespace, emoji presentation selector (U+FE0F). ZWJ between emoji characters is context-downgraded to info.
+- **Hash drift (`--ci` only)**: Files deployed by `apm install` whose on-disk SHA-256 no longer matches the value recorded in the lockfile (`deployed_file_hashes`). Covers content from package dependencies AND local `.apm/` content via the synthesized self-entry.
+
+### `apm policy` - Inspect organization policy
+
+Diagnostic commands for the organization-level `apm-policy.yml` resolved by APM at install / audit time. See [Policy Reference](../../enterprise/policy-reference/) for the full schema and enforcement model.
+
+#### `apm policy status` - Show resolved policy state
+
+Show what policy APM resolved for the current project: discovery outcome, source, enforcement level, cache age, `extends:` chain, and effective rule counts. Trust-but-verify diagnostic for admins and CI gates.
+
+```bash
+apm policy status [OPTIONS]
+```
+
+**Options:**
+- `--policy-source SOURCE` - Override discovery: `org`, file path, or URL. Same shape as `apm install --policy`.
+- `--no-cache` - Force fresh fetch (skip cache).
+- `--json` / `-o json` - Machine-readable output for SIEM ingestion or CI inspection.
+- `--check` - Exit non-zero (1) when no usable policy is found. Default is always 0; use `--check` for CI pre-checks.
+
+**Exit codes:**
+
+| Mode | `outcome=found` | Anything else (absent, error, disabled, ...) |
+|------|-----------------|-----------------------------------------------|
+| default | 0 | 0 |
+| `--check` | 0 | 1 |
+
+The default is exit-0 so the command is safe for human and SIEM use; `--check` opts into a CI-friendly contract similar to `npm audit` / `pip check`. To gate on policy compliance (rule violations) instead of resolvability, use `apm audit --ci`.
+
+**Examples:**
+```bash
+# Show resolved org policy state
+apm policy status
+
+# Force fresh fetch (bypass cache)
+apm policy status --no-cache
+
+# Machine-readable JSON for SIEM
+apm policy status --json
+
+# Inspect a specific policy without committing it
+apm policy status --policy-source ./draft-policy.yml
+
+# CI gate: fail the job if no usable policy is resolved
+apm policy status --check
+```
 
 ### `apm pack` - Create a portable bundle
 
@@ -742,6 +809,7 @@ apm deps list [OPTIONS]
 **Options:**
 - `-g, --global` - List user-scope packages from `~/.apm/` instead of the current project
 - `--all` - List packages from both project and user scope
+- `--insecure` - Show only installed dependencies locked to `http://` sources
 
 **Examples:**
 ```bash
@@ -753,6 +821,9 @@ apm deps list -g
 
 # Show both scopes
 apm deps list --all
+
+# Show only insecure installed dependencies
+apm deps list --insecure
 ```
 
 **Sample Output:**
@@ -763,6 +834,20 @@ apm deps list --all
 │ compliance-rules    │ 1.0.0   │ github   │    2    │      1       │   -    │   1    │
 │ design-guidelines   │ 1.0.0   │ github   │    -    │      1       │   1    │   -    │
 └─────────────────────┴─────────┴──────────┴─────────┴──────────────┴────────┴────────┘
+```
+
+With `--insecure`, an additional `Origin` column (rendered bold red) sits
+between `Source` and `Prompts`. Values are `direct` for HTTP deps declared
+in `apm.yml` and `via <parent>` for transitive HTTP deps pulled in by
+another package:
+
+```
+┌─────────────────┬─────────┬──────────┬────────────────┬─────────┬──────────────┬────────┬────────┐
+│ Package         │ Version │ Source   │ Origin         │ Prompts │ Instructions │ Agents │ Skills │
+├─────────────────┼─────────┼──────────┼────────────────┼─────────┼──────────────┼────────┼────────┤
+│ internal-pkg    │ 1.0.0   │ github   │ direct         │    1    │      -       │   -    │   -    │
+│ shared-rules    │ 2.0.0   │ github   │ via acme/pkg   │    -    │      1       │   -    │   -    │
+└─────────────────┴─────────┴──────────┴────────────────┴─────────┴──────────────┴────────┴────────┘
 ```
 
 **Output includes:**
@@ -874,6 +959,8 @@ apm deps update [PACKAGES...] [OPTIONS]
 - `--target, -t` - Force deployment to specific target(s). Accepts comma-separated values (e.g., `-t claude,copilot`). Valid values: copilot, claude, cursor, opencode, vscode, agents, all
 - `--parallel-downloads` - Max concurrent downloads (default: 4)
 
+**Policy enforcement:** `apm deps update` runs the install pipeline and is therefore gated by org `apm-policy.yml`. There is no `--no-policy` flag on this command -- the only escape hatch is `APM_POLICY_DISABLE=1` for the shell session. See [Policy reference](../../enterprise/policy-reference/#install-time-enforcement).
+
 **Examples:**
 ```bash
 # Update all APM dependencies to latest refs
@@ -899,6 +986,30 @@ Browse and discover MCP servers from the GitHub MCP Registry.
 ```bash
 apm mcp COMMAND [OPTIONS]
 ```
+
+All `apm mcp` subcommands and `apm install --mcp` honour the [`MCP_REGISTRY_URL`](../../guides/mcp-servers/#custom-registry-enterprise) environment variable for custom (e.g. enterprise) MCP registries.
+
+#### `apm mcp install` - Add an MCP server (alias)
+
+Alias for [`apm install --mcp`](#apm-install---install-dependencies-and-deploy-local-content). Forwards every argument and flag. See the [MCP Servers guide](../../guides/mcp-servers/) for the full reference.
+
+```bash
+apm mcp install NAME [OPTIONS] [-- COMMAND ARGV...]
+```
+
+**Examples:**
+```bash
+# stdio (post-`--` argv)
+apm mcp install filesystem -- npx -y @modelcontextprotocol/server-filesystem /workspace
+
+# Registry
+apm mcp install io.github.github/github-mcp-server
+
+# Remote
+apm mcp install linear --transport http --url https://mcp.linear.app/sse
+```
+
+Set the [`MCP_REGISTRY_URL`](../../guides/mcp-servers/#custom-registry-enterprise) environment variable to point all `apm mcp` commands and `apm install --mcp` at a custom MCP registry. The URL must use `https://`; set `MCP_REGISTRY_ALLOW_HTTP=1` to opt in to plaintext `http://` for development. When a custom registry is set and unreachable during install pre-flight, network errors are fatal (the default registry keeps the existing assume-valid behaviour).
 
 #### `apm mcp list` - List MCP servers
 
@@ -1479,10 +1590,6 @@ apm config set auto-integrate true
 
 # Disable auto-integration
 apm config set auto-integrate false
-
-# Using alternative boolean values
-apm config set auto-integrate yes
-apm config set auto-integrate 1
 ```
 
 **`temp-dir`** - Override the system temporary directory
@@ -1607,3 +1714,7 @@ apm runtime status
 - Runtime preference order (copilot → codex → llm)
 - Currently active runtime
 - Next steps if no runtime is available
+
+## Experimental Features
+
+`apm experimental` manages opt-in flags that gate new or changing behaviour. Subcommands: `list`, `enable`, `disable`, `reset`. `apm experimental list` also supports `--json`, and `-v` / `--verbose` works on each subcommand. See the full reference in [Experimental Flags](../experimental/).

@@ -1,0 +1,12 @@
+# Project with an allowed direct dep that transitively pulls a denied dep.
+# Direct dep: DevExpGbb/transitive-carrier (allowed)
+# Transitive dep: test-blocked/hidden-dep (denied)
+# Against apm-policy-deny.yml: transitive dep matches deny pattern.
+# Expected: install blocked on transitive in block mode (L13).
+name: denied-transitive-project
+version: "1.0.0"
+description: Project with a transitively denied dependency
+
+dependencies:
+  apm:
+    - DevExpGbb/transitive-carrier

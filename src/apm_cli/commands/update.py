@@ -8,6 +8,7 @@ import click
 
 from ..core.command_logger import CommandLogger
 from ..update_policy import get_self_update_disabled_message, is_self_update_enabled
+from ..utils.subprocess_env import external_process_env
 from ..version import get_version
 
 
@@ -138,7 +139,16 @@ def update(check):
             logger.progress("Running installer...", symbol="gear")
 
             # Note: We don't capture output so the installer can prompt when needed.
-            result = subprocess.run(_get_installer_run_command(temp_script), check=False)
+            # Sanitise the environment so the installer (and the system binaries
+            # it spawns -- curl, tar, sudo) do not inherit the PyInstaller
+            # bootloader's LD_LIBRARY_PATH / DYLD_* overrides, which would
+            # otherwise redirect system linkers at this binary's bundled
+            # _internal directory.  See issue #894.
+            result = subprocess.run(
+                _get_installer_run_command(temp_script),
+                check=False,
+                env=external_process_env(),
+            )
 
             # Clean up temp file
             try:

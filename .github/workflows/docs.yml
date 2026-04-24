@@ -1,9 +1,12 @@
 name: Deploy Docs
 
 on:
-  push:
-    branches: [main]
-    paths: ['docs/**']
+  # Deploy docs only when a new APM version is released, so the published
+  # site always matches the latest released binary (see microsoft/apm#641).
+  # PR runs build (no deploy) to catch breakage before merge. Manual
+  # workflow_dispatch is supported for re-publishing the current docs.
+  release:
+    types: [published]
   pull_request:
     paths: ['docs/**']
   workflow_dispatch:
@@ -40,14 +43,20 @@ jobs:
         run: npm run build
 
       - name: Upload build artifacts
-        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        if: |
+          github.event_name == 'workflow_dispatch' ||
+          (github.event_name == 'release' && github.event.release.prerelease == false)
         uses: actions/upload-pages-artifact@v3
         with:
           path: docs/dist
 
   deploy:
     needs: build
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    # Only stable releases (or manual dispatch) update the public docs site,
+    # so prerelease tags (vX.Y.Z-rc1, etc.) don't clobber published docs.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'release' && github.event.release.prerelease == false)
     runs-on: ubuntu-latest
     permissions:
       pages: write

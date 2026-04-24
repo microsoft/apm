@@ -192,6 +192,18 @@ class TestValidatePathSegments:
         with pytest.raises(PathTraversalError):
             validate_path_segments("..")
 
+    def test_allow_current_dir_accepts_dot_segments(self):
+        # ./bin/server pattern for shell command call sites
+        validate_path_segments("./bin/server", allow_current_dir=True)
+        validate_path_segments(".", allow_current_dir=True)
+        validate_path_segments("a/./b", allow_current_dir=True)
+
+    def test_allow_current_dir_still_rejects_dotdot(self):
+        with pytest.raises(PathTraversalError):
+            validate_path_segments("../escape", allow_current_dir=True)
+        with pytest.raises(PathTraversalError):
+            validate_path_segments("a/../b", allow_current_dir=True)
+
     def test_empty_string_with_reject_empty(self):
         with pytest.raises(PathTraversalError):
             validate_path_segments("", reject_empty=True)

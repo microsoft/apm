@@ -312,7 +312,13 @@ class BaseIntegrator:
         """Initialise and register the link resolver for a package."""
         self.link_resolver = UnifiedLinkResolver(project_root)
         try:
-            primitives = discover_primitives(package_info.install_path)
+            scan_root = package_info.install_path
+            # When install_path is $HOME (user-scope local package),
+            # only scan the .apm/ subdirectory to avoid recursive-
+            # globbing the entire home tree.  See issue #830.
+            if scan_root == Path.home():
+                scan_root = scan_root / ".apm"
+            primitives = discover_primitives(scan_root)
             self.link_resolver.register_contexts(primitives)
         except Exception:
             self.link_resolver = None

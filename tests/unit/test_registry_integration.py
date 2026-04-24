@@ -178,10 +178,16 @@ class TestMCPServerOperationsValidation(unittest.TestCase):
     """Tests for MCPServerOperations.validate_servers_exist resilience."""
 
     def _make_ops(self):
-        """Create an MCPServerOperations with a mocked registry client."""
+        """Create an MCPServerOperations with a mocked registry client.
+
+        Defaults ``_is_custom_url`` to False so existing assume-valid tests
+        do not accidentally trip the new fail-closed path. Tests that need
+        the override behaviour set it explicitly.
+        """
         from apm_cli.registry.operations import MCPServerOperations
         ops = MCPServerOperations.__new__(MCPServerOperations)
         ops.registry_client = mock.MagicMock()
+        ops.registry_client._is_custom_url = False
         return ops
 
     def test_valid_server(self):
@@ -203,17 +209,33 @@ class TestMCPServerOperationsValidation(unittest.TestCase):
         self.assertEqual(invalid, ["io.github.test/no-such"])
 
     def test_network_error_assumes_valid(self):
-        """Transient network error → assume server valid (not invalid)."""
+        """Transient network error on default registry → assume server valid (not invalid)."""
         ops = self._make_ops()
+        # Default registry: not a user-configured override.
+        ops.registry_client._is_custom_url = False
         ops.registry_client.find_server_by_reference.side_effect = requests.ConnectionError("flaky")
 
         valid, invalid = ops.validate_servers_exist(["io.github.test/flaky-srv"])
         self.assertEqual(valid, ["io.github.test/flaky-srv"])
         self.assertEqual(invalid, [])
 
+    def test_network_error_fatal_on_custom_registry(self):
+        """When MCP_REGISTRY_URL override is active, network errors are fatal (#814)."""
+        ops = self._make_ops()
+        ops.registry_client._is_custom_url = True
+        ops.registry_client.registry_url = "https://internal.example.com"
+        ops.registry_client.find_server_by_reference.side_effect = requests.ConnectionError("boom")
+
+        with self.assertRaises(RuntimeError) as cm:
+            ops.validate_servers_exist(["io.github.test/srv"])
+        msg = str(cm.exception)
+        self.assertIn("internal.example.com", msg)
+        self.assertIn("MCP_REGISTRY_URL", msg)
+
     def test_mixed_results(self):
         """Mix of found, missing, and errored servers."""
         ops = self._make_ops()
+        ops.registry_client._is_custom_url = False
 
         def side_effect(ref):
             if ref == "found":
