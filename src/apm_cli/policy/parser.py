@@ -140,6 +140,11 @@ def validate_policy(data: dict) -> Tuple[List[str], List[str]]:
             errors.append(
                 f"manifest.scripts must be one of {sorted(_VALID_SCRIPTS)}, got '{scripts}'"
             )
+        rei = manifest.get("require_explicit_includes")
+        if rei is not None and not isinstance(rei, bool):
+            errors.append(
+                f"manifest.require_explicit_includes must be a boolean, got '{rei}'"
+            )
 
     # unmanaged_files.action
     uf = data.get("unmanaged_files")
@@ -210,6 +215,9 @@ def _build_policy(data: dict) -> ApmPolicy:
         required_fields=_parse_tuple(manifest_data.get("required_fields")),
         scripts=manifest_data.get("scripts", ManifestPolicy.scripts),
         content_types=manifest_data.get("content_types"),
+        require_explicit_includes=bool(
+            manifest_data.get("require_explicit_includes", False)
+        ),
     )
 
     uf_data = data.get("unmanaged_files") or {}

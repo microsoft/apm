@@ -10,12 +10,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `includes:` manifest field (auto | list) for explicit governance of local `.apm/` content. Closes audit-blindness gap (#887).
+- `apm audit --ci` now verifies hash integrity of locally deployed files, detecting hand-edits and config drift. (#887)
+- `policy.manifest.require_explicit_includes` policy field enforces explicit `includes` lists (rejects `auto` + undeclared). (#887)
+- `includes-consent` advisory appears in `apm audit` CLI/JSON output when local content is deployed without an explicit `includes:` declaration (#887)
+- `apm-primitives-architect` agent: reusable persona for designing and critiquing `.apm/` skill bundles. (#882)
 - CI: add `APM Self-Check` to `ci.yml` for `apm audit --ci`, regeneration-drift validation, and `merge-gate.yml` `EXPECTED_CHECKS` coverage. (#885)
 
 ### Changed
 
+- Lockfile in-memory shape: a synthesized self-entry now appears in `LockFile.dependencies` for local content. The on-disk YAML format is unchanged (data still serialized as flat `local_deployed_files`/`local_deployed_file_hashes` fields). (#887)
+- Hardened `apm-review-panel` skill: one-comment output contract, pre-arbitration completeness gate, Hybrid E Auth Expert routing, verdict template extracted to `assets/`, and `python-architect` mandatory three-artifact PR review contract (classDiagram + flowchart + Design patterns). (#882)
 - CI: smoke tests in `build-release.yml`'s `build-and-test` job (Linux x86_64, Linux arm64, Windows) are now gated to promotion boundaries (tag/schedule/dispatch) instead of running on every push to main. Push-time smoke duplicated the merge-time smoke gate in `ci-integration.yml` and burned ~15 redundant codex-binary downloads/day. Tag-cut releases still run smoke as a pre-ship gate; nightly catches upstream codex URL drift; merge-time still gates merges into main. (#878)
 - CI docs: clarify that branch-protection ruleset must store the check-run name (`gate`), not the workflow display string (`Merge Gate / gate`); document the merge-gate aggregator in `cicd.instructions.md` and mark the legacy stub workflow as deprecated.
+
+### Fixed
+
+- Audit blindness for local `.apm/` content -- `apm audit --ci` now detects drift, missing files, and content tampering on locally-authored files (not just installed packages). (#887)
+- Packer leak risk: local-content fields (`local_deployed_files`, `local_deployed_file_hashes`) are now stripped from bundled lockfiles, preventing phantom self-entries on unpack. (#887)
 
 ### Removed
 

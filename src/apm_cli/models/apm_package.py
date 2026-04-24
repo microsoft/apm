@@ -75,7 +75,8 @@ class APMPackage:
     package_path: Optional[Path] = None  # Local path to package
     target: Optional[Union[str, List[str]]] = None  # Target agent(s): single string or list (applies to compile and install)
     type: Optional[PackageContentType] = None  # Package content type: instructions, skill, hybrid, or prompts
-    
+    includes: Optional[Union[str, List[str]]] = None  # Include-only manifest: 'auto' or list of repo paths
+
     @classmethod
     def from_apm_yml(cls, apm_yml_path: Path) -> "APMPackage":
         """Load APM package from apm.yml file.
@@ -196,6 +197,21 @@ class APMPackage:
             except ValueError as e:
                 raise ValueError(f"Invalid 'type' field in apm.yml: {e}")
         
+        # Parse includes (auto-publish opt-in): either the literal "auto" or a list of repo paths
+        includes = None
+        if 'includes' in data and data['includes'] is not None:
+            includes_value = data['includes']
+            if isinstance(includes_value, str):
+                if includes_value != 'auto':
+                    raise ValueError("'includes' must be 'auto' or a list of strings")
+                includes = 'auto'
+            elif isinstance(includes_value, list):
+                if not all(isinstance(item, str) for item in includes_value):
+                    raise ValueError("'includes' must be 'auto' or a list of strings")
+                includes = list(includes_value)
+            else:
+                raise ValueError("'includes' must be 'auto' or a list of strings")
+
         result = cls(
             name=data['name'],
             version=data['version'],
@@ -208,6 +224,7 @@ class APMPackage:
             package_path=apm_yml_path.parent,
             target=data.get('target'),
             type=pkg_type,
+            includes=includes,
         )
         _apm_yml_cache[resolved] = result
         return result

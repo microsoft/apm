@@ -92,7 +92,7 @@ Policy is evaluated at two points. Both use the same policy file and the same me
 
 ### CI time (audit gate)
 
-`apm audit --ci --policy org` runs the same checks (plus 6 baseline lockfile checks) and is intended as a required status check on pull requests. It produces SARIF output that GitHub Code Scanning renders inline on the PR diff.
+`apm audit --ci --policy org` runs the same checks (plus 7 baseline lockfile checks) and is intended as a required status check on pull requests. It produces SARIF output that GitHub Code Scanning renders inline on the PR diff.
 
 For setup, see [CI Policy Enforcement](../../guides/ci-policy-setup/).
 
