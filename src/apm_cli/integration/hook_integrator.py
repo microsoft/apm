@@ -96,6 +96,11 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
         target_key="cursor",
         require_dir=True,
     ),
+    "kiro": _MergeHookConfig(
+        config_filename="hooks.json",
+        target_key="kiro",
+        require_dir=True,
+    ),
     "codex": _MergeHookConfig(
         config_filename="hooks.json",
         target_key="codex",
@@ -224,6 +229,9 @@ class HookIntegrator(BaseIntegrator):
             scripts_base = f"{base_root}/hooks/scripts/{package_name}"
         elif target == "cursor":
             base_root = root_dir or ".cursor"
+            scripts_base = f"{base_root}/hooks/{package_name}"
+        elif target == "kiro":
+            base_root = root_dir or ".kiro"
             scripts_base = f"{base_root}/hooks/{package_name}"
         elif target == "codex":
             base_root = root_dir or ".codex"

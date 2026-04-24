@@ -462,7 +462,7 @@ class MCPIntegrator:
             return
 
         # Determine which runtimes to clean, mirroring install-time logic.
-        all_runtimes = {"vscode", "copilot", "codex", "cursor", "opencode"}
+        all_runtimes = {"vscode", "copilot", "codex", "cursor", "kiro", "opencode"}
         if runtime:
             target_runtimes = {runtime}
         else:
@@ -597,6 +597,37 @@ class MCPIntegrator:
                 except Exception:
                     _log.debug(
                         "Failed to clean stale MCP servers from .cursor/mcp.json",
+                        exc_info=True,
+                    )
+
+        # Clean .kiro/mcp.json (only if .kiro/ directory exists)
+        if "kiro" in target_runtimes:
+            kiro_mcp = Path.cwd() / ".kiro" / "mcp.json"
+            if kiro_mcp.exists():
+                try:
+                    import json as _json
+
+                    config = _json.loads(kiro_mcp.read_text(encoding="utf-8"))
+                    servers = config.get("mcpServers", {})
+                    removed = [n for n in expanded_stale if n in servers]
+                    for name in removed:
+                        del servers[name]
+                    if removed:
+                        kiro_mcp.write_text(
+                            _json.dumps(config, indent=2), encoding="utf-8"
+                        )
+                        for name in removed:
+                            if logger:
+                                logger.progress(
+                                    f"Removed stale MCP server '{name}' from .kiro/mcp.json"
+                                )
+                            else:
+                                _rich_info(
+                                    f"+ Removed stale MCP server '{name}' from .kiro/mcp.json"
+                                )
+                except Exception:
+                    _log.debug(
+                        "Failed to clean stale MCP servers from .kiro/mcp.json",
                         exc_info=True,
                     )
 
@@ -930,7 +961,7 @@ class MCPIntegrator:
                 manager = RuntimeManager()
                 installed_runtimes = []
 
-                for runtime_name in ["copilot", "codex", "vscode", "cursor", "opencode"]:
+                for runtime_name in ["copilot", "codex", "vscode", "cursor", "kiro", "opencode"]:
                     try:
                         if runtime_name == "vscode":
                             if _is_vscode_available():
@@ -939,6 +970,11 @@ class MCPIntegrator:
                         elif runtime_name == "cursor":
                             # Cursor is opt-in: only target when .cursor/ exists
                             if (Path.cwd() / ".cursor").is_dir():
+                                ClientFactory.create_client(runtime_name)
+                                installed_runtimes.append(runtime_name)
+                        elif runtime_name == "kiro":
+                            # Kiro is opt-in: only target when .kiro/ exists
+                            if (Path.cwd() / ".kiro").is_dir():
                                 ClientFactory.create_client(runtime_name)
                                 installed_runtimes.append(runtime_name)
                         elif runtime_name == "opencode":
@@ -964,6 +1000,9 @@ class MCPIntegrator:
                 # Cursor is directory-presence based, not binary-based
                 if (Path.cwd() / ".cursor").is_dir():
                     installed_runtimes.append("cursor")
+                # Kiro is directory-presence based
+                if (Path.cwd() / ".kiro").is_dir():
+                    installed_runtimes.append("kiro")
                 # OpenCode is directory-presence based
                 if (Path.cwd() / ".opencode").is_dir():
                     installed_runtimes.append("opencode")

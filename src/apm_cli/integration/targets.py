@@ -260,6 +260,28 @@ KNOWN_TARGETS: Dict[str, TargetProfile] = {
         user_root_dir=".config/opencode",
         unsupported_user_primitives=("hooks",),
     ),
+    # Kiro (Amazon) -- spec-driven development editor.
+    # Steering files are the Kiro equivalent of instructions and live in .kiro/steering/.
+    # Skills map to .kiro/skills/ (Kiro native skills), MCP to .kiro/mcp.json,
+    # and hooks to .kiro/hooks/.
+    # Ref: https://kiro.dev/docs/steering-files/
+    "kiro": TargetProfile(
+        name="kiro",
+        root_dir=".kiro",
+        primitives={
+            "instructions": PrimitiveMapping(
+                "steering", ".md", "kiro_steering"
+            ),
+            "skills": PrimitiveMapping(
+                "skills", "/SKILL.md", "skill_standard"
+            ),
+            "hooks": PrimitiveMapping(
+                "hooks", ".json", "kiro_hooks"
+            ),
+        },
+        auto_create=False,
+        detect_by_dir=True,
+    ),
     # Codex CLI: skills use the cross-tool .agents/ dir (agent skills standard),
     # agents are TOML under .codex/agents/, hooks merge into .codex/hooks.json.
     # Instructions are compile-only (AGENTS.md) -- not installed.
