@@ -128,6 +128,8 @@ def integrate_package_primitives(
                         _deploy_dir = ".cursor/hooks.json"
                     elif _target.name == "codex":
                         _deploy_dir = ".codex/hooks.json"
+                    elif _target.name == "kiro":
+                        _deploy_dir = ".kiro/hooks/"
                     _label = "hook(s)"
                 else:
                     _label = _prim_name
