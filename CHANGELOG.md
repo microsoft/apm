@@ -26,7 +26,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `apm marketplace` authoring commands (init, build, check, outdated, doctor, publish, package) ring-fenced behind `apm experimental enable marketplace-authoring` feature flag (default: disabled) (#790)
-
 ### Fixed
 
 - `apm install` no longer fails behind corporate TLS-intercepting proxies: validation now honours `REQUESTS_CA_BUNDLE` instead of misreporting CA failures as auth errors. (#911)
@@ -60,9 +59,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm-action` bumped to `v1.4.2` (used by `shared/apm.md` workflows): fixes restore-mode workspace pollution that was overwriting your tracked `apm.lock.yaml` / `apm.yml` / `apm_modules`. (#904)
 - CI release-binary smoke (Linux x64/arm64, Windows) only runs on tag/schedule/dispatch instead of every push, cutting ~15 redundant codex downloads/day; release-time gating unchanged. (#878)
 - Branch-protection docs: clarify the required check-run name is `gate` (not the workflow display string `Merge Gate / gate`). (#874)
-- Renamed `apm marketplace plugin` subgroup to `apm marketplace package` for npm/pip/cargo familiarity (#722)
-- Grouped `apm marketplace --help` output into "Consumer commands" and "Authoring commands" sections (#722)
-- `apm marketplace init` now accepts `--name` and `--owner` flags for non-interactive scaffolding (#722)
+- [Experimental] Renamed `apm marketplace plugin` subgroup to `apm marketplace package` for npm/pip/cargo familiarity (#722)
+- [Experimental] Grouped `apm marketplace --help` output into "Consumer commands" and "Authoring commands" sections (#722)
+- [Experimental] `apm marketplace init` now accepts `--name` and `--owner` flags for non-interactive scaffolding (#722)
 
 ### Fixed
 
@@ -75,8 +74,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - macOS: long inline policy YAML strings (>1023 bytes) no longer crash with `OSError [Errno 63] File name too long`; they fall back to string-mode parsing. Closes #848 (#860)
 - Merge queue: `gate` check now reports inside the queue (added `merge_group` trigger), unblocking PRs that were stuck on "Expected -- Waiting for status to be reported". (#921)
 - `apm-review-panel` workflow only runs on PRs labelled `panel-review`, eliminating spurious panel runs on every PR. (#948)
-- Hidden unimplemented `--check-refs` flag on `validate` command (#722)
-- Fixed `includePrerelease` camelCase typo in init template comment (#722)
+- [Experimental] Hidden unimplemented `--check-refs` flag on `validate` command (#722)
+- [Experimental] Fixed `includePrerelease` camelCase typo in init template comment (#722)
 
 ### Removed
 
@@ -91,14 +90,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enterprise docs IA refactor: hub page + merged team guides, deduped governance content. (#858)
 - Landing page rewritten around the three-pillar spine. (#855)
 - First-package tutorial rewritten end-to-end; fixes `.apm/` anatomy hallucinations. (#866)
-- `apm marketplace package add/set`: mutable git refs (`HEAD`, branch names) are now auto-resolved to concrete SHAs for supply-chain safety. When no `--ref` is provided, the current HEAD SHA is pinned automatically. (#790)
-- `apm marketplace init` subcommand to scaffold a richly-commented `marketplace.yml` in the current directory, with an optional `.gitignore` staleness check (#790)
-- `apm marketplace build` subcommand to compile `marketplace.yml` into an Anthropic-compliant `marketplace.json` with `--dry-run`, `--offline`, and `--include-prerelease` flags; APM-only build options are stripped and `metadata:` is passed through verbatim (#790)
-- `apm marketplace outdated` subcommand to report upgradable package versions, distinguishing "latest in range" from "latest overall" so maintainers know when a manual range bump is required (#790)
-- `apm marketplace check` subcommand to validate `marketplace.yml` and verify every package entry resolves (`--offline` for schema + cached-ref checks) (#790)
-- `apm marketplace doctor` subcommand for environment diagnostics (git, network, auth, `gh` CLI, and `marketplace.yml` readiness) (#790)
-- `apm marketplace publish` subcommand to open PRs across consumer repositories from a `consumer-targets.yml`, with `--dry-run`, `--no-pr`, `--draft`, `--allow-downgrade`, `--allow-ref-change`, `--parallel N`, and a `.apm/publish-state.json` run history (#790)
-- `apm marketplace package add|set|remove` subcommands for programmatic management of marketplace.yml entries (#790)
+- [Experimental] `apm marketplace package add/set`: mutable git refs (`HEAD`, branch names) are now auto-resolved to concrete SHAs for supply-chain safety. When no `--ref` is provided, the current HEAD SHA is pinned automatically. (#790)
+- [Experimental] `apm marketplace init` subcommand to scaffold a richly-commented `marketplace.yml` in the current directory, with an optional `.gitignore` staleness check (#790)
+- [Experimental] `apm marketplace build` subcommand to compile `marketplace.yml` into an Anthropic-compliant `marketplace.json` with `--dry-run`, `--offline`, and `--include-prerelease` flags; APM-only build options are stripped and `metadata:` is passed through verbatim (#790)
+- [Experimental] `apm marketplace outdated` subcommand to report upgradable package versions, distinguishing "latest in range" from "latest overall" so maintainers know when a manual range bump is required (#790)
+- [Experimental] `apm marketplace check` subcommand to validate `marketplace.yml` and verify every package entry resolves (`--offline` for schema + cached-ref checks) (#790)
+- [Experimental] `apm marketplace doctor` subcommand for environment diagnostics (git, network, auth, `gh` CLI, and `marketplace.yml` readiness) (#790)
+- [Experimental] `apm marketplace publish` subcommand to open PRs across consumer repositories from a `consumer-targets.yml`, with `--dry-run`, `--no-pr`, `--draft`, `--allow-downgrade`, `--allow-ref-change`, `--parallel N`, and a `.apm/publish-state.json` run history (#790)
+- [Experimental] `apm marketplace package add|set|remove` subcommands for programmatic management of marketplace.yml entries (#790)
 - `apm install --ssh` / `--https` flags and `APM_GIT_PROTOCOL=ssh|https` env to pick the initial transport for shorthand dependencies (#778)
 - `apm install --allow-protocol-fallback` flag and `APM_ALLOW_PROTOCOL_FALLBACK=1` env as the migration escape hatch for cross-protocol fallback (#778)
 - Add APM Review Panel skill (`.github/skills/apm-review-panel/`) and four new specialist personas (`devx-ux-expert`, `supply-chain-security-expert`, `apm-ceo`, `oss-growth-hacker`) with auto-activating per-persona skills. Routes specialist findings through an APM CEO arbiter for strategic / breaking-change calls, with the OSS growth hacker side-channeling adoption insights via `WIP/growth-strategy.md`. Instrumentation per Handbook Ch. 9 (`The Instrumented Codebase`); PROSE-compliant (thin SKILL.md routers, persona detail lazy-loaded via markdown links, explicit boundaries per persona).
