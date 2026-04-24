@@ -11,7 +11,6 @@ from ...utils.github_host import (
     is_artifactory_path,
     is_azure_devops_hostname,
     is_github_hostname,
-    is_gitlab_hostname,
     is_supported_git_host,
     parse_artifactory_path,
     unsupported_host_error,
@@ -581,18 +580,10 @@ class DependencyReference:
                 for seg in path_segments
             )
             has_collection = "collections" in path_segments
-            # GitLab supports nested groups (group/subgroup/repo), so the full
-            # path is the repo -- no shorthand subdirectory splitting.
-            # Use https://gitlab.com/group/subgroup/repo.git for GitLab nested
-            # groups; shorthand subdirectory syntax is not supported for GitLab.
-            # All other generic hosts (Gitea, Bitbucket, self-hosted, etc.) use
-            # the owner/repo convention, so extra segments are a virtual subdir.
             if has_virtual_ext or has_collection:
                 min_base_segments = 2
-            elif is_gitlab_hostname(validated_host):
-                min_base_segments = len(path_segments)
             else:
-                min_base_segments = 2
+                min_base_segments = len(path_segments)
         else:
             min_base_segments = 2
 
