@@ -587,7 +587,7 @@ class SkillIntegrator(BaseIntegrator):
         lockfile = LockFile.read(get_lockfile_path(project_root))
         if not lockfile:
             return owned_by, native_owners
-        for dep in lockfile.get_all_dependencies():
+        for dep in lockfile.get_package_dependencies():
             short_owner = (dep.virtual_path or dep.repo_url).rsplit("/", 1)[-1]
             unique_key = dep.get_unique_key()
             for deployed_path in dep.deployed_files:

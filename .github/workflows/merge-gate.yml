@@ -4,13 +4,11 @@
 #
 # Why this file exists:
 #   GitHub's required-status-checks model is name-based, not workflow-based.
-#   Our CI is tiered: ci.yml emits 'Build & Test (Linux)' and
-#   ci-integration-pr-stub.yml emits four stubs that hold positions for
-#   merge-queue jobs in ci-integration.yml. Without this gate, branch
-#   protection had to require all 5 checks individually -- adding or
-#   renaming a check meant a ruleset edit. With this gate, branch
-#   protection requires only 'Merge Gate / gate' and the gate aggregates.
-#   Tide / bors pattern.
+#   Without this gate, branch protection had to require each PR-time check
+#   individually -- adding or renaming a check meant a ruleset edit. With
+#   this gate, branch protection requires only 'gate' (the check-run name
+#   of the job below) and the gate aggregates whatever underlying checks
+#   we declare in EXPECTED_CHECKS. Tide / bors single-authority pattern.
 #
 # Why a single trigger (not dual pull_request + pull_request_target):
 #   We tried dual-trigger redundancy in PR #865 to harden against rare
@@ -91,11 +89,12 @@ jobs:
           REPO: ${{ github.repository }}
           SHA: ${{ steps.sha.outputs.sha }}
           # All PR-time checks the gate aggregates. Keep this in sync with
-          # the underlying workflows: ci.yml emits Build & Test (Linux),
-          # ci-integration-pr-stub.yml emits the other four.
-          # NOTE: 'Merge Gate / gate' itself MUST NOT appear here -- it
-          # would deadlock waiting for itself.
-          EXPECTED_CHECKS: 'Build & Test (Linux),Build (Linux),Smoke Test (Linux),Integration Tests (Linux),Release Validation (Linux)'
+          # the underlying workflows. Currently only ci.yml emits PR-time
+          # checks ('Build & Test (Linux)', 'APM Self-Check');
+          # ci-integration.yml is merge_group-only and is NOT polled here.
+          # NOTE: 'gate' (this job) MUST NOT appear here -- it would
+          # deadlock waiting for itself.
+          EXPECTED_CHECKS: 'Build & Test (Linux),APM Self-Check'
           TIMEOUT_MIN: '30'
           POLL_SEC: '30'
         run: |

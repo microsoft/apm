@@ -569,6 +569,65 @@ def _check_required_manifest_fields(
     )
 
 
+_INCLUDES_NOT_PROVIDED = object()
+
+
+def _check_includes_explicit(
+    manifest_includes,
+    policy: "ManifestPolicy",
+) -> CheckResult:
+    """Check: manifest declares an explicit ``includes:`` list when policy requires it.
+
+    ``manifest_includes`` is the parsed value of the manifest's ``includes:``
+    field as exposed by :class:`APMPackage` -- one of ``None`` (field
+    absent), the literal string ``"auto"``, or a list of repo-relative
+    path strings.
+
+    Violation when ``policy.require_explicit_includes`` is True and
+    ``manifest_includes`` is ``None`` or ``"auto"``.
+    """
+    if not policy.require_explicit_includes:
+        return CheckResult(
+            name="explicit-includes",
+            passed=True,
+            message="Explicit includes not required by policy",
+        )
+
+    if manifest_includes is None:
+        return CheckResult(
+            name="explicit-includes",
+            passed=False,
+            message=(
+                "Policy requires explicit 'includes:' paths but none are "
+                "declared. Add 'includes: [<path>, ...]' to apm.yml with "
+                "the paths you intend to publish."
+            ),
+            details=[
+                "includes: <absent>, require_explicit_includes: true",
+            ],
+        )
+
+    if manifest_includes == "auto":
+        return CheckResult(
+            name="explicit-includes",
+            passed=False,
+            message=(
+                "Policy requires explicit 'includes:' paths but manifest "
+                "uses 'includes: auto'. Replace with an explicit list of "
+                "paths."
+            ),
+            details=[
+                "includes: 'auto', require_explicit_includes: true",
+            ],
+        )
+
+    return CheckResult(
+        name="explicit-includes",
+        passed=True,
+        message="Manifest declares explicit includes paths",
+    )
+
+
 def _check_scripts_policy(
     raw_yml: Optional[dict],
     policy: "ManifestPolicy",
@@ -708,6 +767,7 @@ def run_dependency_policy_checks(
     effective_target: Optional[str] = None,
     fetch_outcome: Optional[str] = None,
     fail_fast: bool = True,
+    manifest_includes=_INCLUDES_NOT_PROVIDED,
 ) -> CIAuditResult:
     """Evaluate :class:`ApmPolicy` against an already-resolved dependency set.
 
@@ -739,6 +799,12 @@ def run_dependency_policy_checks(
         ``"cached"``, ``"fetched"``).  Currently informational only.
     fail_fast:
         Stop after the first failing check (default ``True``).
+    manifest_includes:
+        The parsed value of the manifest's ``includes:`` field
+        (``None``, ``"auto"``, or a list of paths).  When omitted,
+        the ``explicit-includes`` check is skipped -- callers that
+        do not have manifest information available (e.g. dep-only
+        seams) can leave it unset.
 
     Returns
     -------
@@ -816,6 +882,15 @@ def run_dependency_policy_checks(
         ):
             return result
 
+    # -- Manifest-level explicit-includes check --------------------
+    # Only run when the caller supplied the manifest includes value.
+    # Dep-only seams that lack manifest context (legacy callers) skip
+    # this check; the install pipeline and ``apm audit`` wrappers both
+    # supply it.
+    if manifest_includes is not _INCLUDES_NOT_PROVIDED:
+        if _run(_check_includes_explicit(manifest_includes, policy.manifest)):
+            return result
+
     # NOTE: compilation strategy, source attribution, manifest fields,
     # scripts policy, and unmanaged files are disk-level / manifest-level
     # concerns.  They are NOT included in the resolved-dep seam because
@@ -886,6 +961,7 @@ def run_policy_checks(
         mcp_deps=mcp_deps,
         # effective_target=None: target checks handled below from raw_yml
         fail_fast=fail_fast,
+        manifest_includes=manifest.includes,
     )
     result.checks.extend(dep_result.checks)
 

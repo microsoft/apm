@@ -95,6 +95,17 @@ def run(ctx: "InstallContext") -> None:
 
     mcp_deps = getattr(ctx, "direct_mcp_deps", None)
 
+    # Pass manifest.includes only when we actually have an APMPackage --
+    # leaving the kwarg unset preserves the legacy behaviour for callers
+    # that have no manifest context (the seam treats "unset" as "skip
+    # explicit-includes check").
+    extra_kwargs = {}
+    apm_package = getattr(ctx, "apm_package", None)
+    if apm_package is not None:
+        extra_kwargs["manifest_includes"] = getattr(
+            apm_package, "includes", None
+        )
+
     audit_result = run_dependency_policy_checks(
         ctx.deps_to_install,
         lockfile=ctx.existing_lockfile,
@@ -103,6 +114,7 @@ def run(ctx: "InstallContext") -> None:
         effective_target=None,  # target-aware checks after targets phase
         fetch_outcome=fetch_result.outcome,
         fail_fast=(enforcement == "block"),
+        **extra_kwargs,
     )
 
     # ------------------------------------------------------------------
