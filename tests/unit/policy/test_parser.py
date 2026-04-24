@@ -56,6 +56,28 @@ class TestValidatePolicy(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("scripts", errors[0])
 
+    def test_valid_require_explicit_includes(self):
+        for val in (True, False):
+            errors, warnings = validate_policy(
+                {"manifest": {"require_explicit_includes": val}}
+            )
+            self.assertEqual(errors, [])
+            self.assertEqual(warnings, [])
+
+    def test_invalid_require_explicit_includes_string(self):
+        errors, warnings = validate_policy(
+            {"manifest": {"require_explicit_includes": "true"}}
+        )
+        self.assertEqual(len(errors), 1)
+        self.assertIn("require_explicit_includes", errors[0])
+
+    def test_invalid_require_explicit_includes_int(self):
+        errors, warnings = validate_policy(
+            {"manifest": {"require_explicit_includes": 1}}
+        )
+        self.assertEqual(len(errors), 1)
+        self.assertIn("require_explicit_includes", errors[0])
+
     def test_invalid_unmanaged_action(self):
         errors, warnings = validate_policy({"unmanaged_files": {"action": "block"}})
         self.assertEqual(len(errors), 1)
@@ -211,6 +233,25 @@ class TestLoadPolicyFromString(unittest.TestCase):
         self.assertEqual(policy.cache.ttl, 3600)
         self.assertIsNone(policy.dependencies.allow)
         self.assertEqual(policy.dependencies.max_depth, 50)
+        self.assertFalse(policy.manifest.require_explicit_includes)
+
+    def test_require_explicit_includes_true(self):
+        yaml_str = textwrap.dedent("""
+            manifest:
+              require_explicit_includes: true
+        """)
+        policy, warnings = load_policy(yaml_str)
+        self.assertEqual(warnings, [])
+        self.assertTrue(policy.manifest.require_explicit_includes)
+
+    def test_require_explicit_includes_no_unknown_warning(self):
+        yaml_str = textwrap.dedent("""
+            manifest:
+              require_explicit_includes: false
+        """)
+        policy, warnings = load_policy(yaml_str)
+        self.assertEqual(warnings, [])
+        self.assertFalse(policy.manifest.require_explicit_includes)
 
     def test_empty_yaml(self):
         policy, warnings = load_policy("")

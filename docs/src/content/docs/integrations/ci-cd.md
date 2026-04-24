@@ -74,6 +74,10 @@ To ensure `.github/`, `.claude/`, `.cursor/`, and `.opencode/` integration files
 
 This catches cases where a developer updates `apm.yml` but forgets to re-run `apm install`.
 
+:::tip[We dogfood this]
+APM's own repo uses the `APM Self-Check` job in [`microsoft/apm`'s `ci.yml`](https://github.com/microsoft/apm/blob/main/.github/workflows/ci.yml) as a reference implementation for installing APM, running CI validation commands such as `apm audit --ci`, and checking for drift with `git status --porcelain`. Use it as a practical example when wiring these checks into your own workflow.
+:::
+
 ## Azure Pipelines
 
 ```yaml
@@ -143,7 +147,7 @@ apm install
 
 ## Governance with `apm audit`
 
-`apm audit --ci` verifies lockfile consistency in CI (6 baseline checks, no configuration). Add `--policy org` to enforce organizational rules (16 additional checks). For full setup including SARIF integration and GitHub Code Scanning, see the [CI Policy Enforcement guide](../../guides/ci-policy-setup/).
+`apm audit --ci` verifies lockfile consistency in CI (7 baseline checks, no configuration). Add `--policy org` to enforce organizational rules (17 additional checks). For full setup including SARIF integration and GitHub Code Scanning, see the [CI Policy Enforcement guide](../../guides/ci-policy-setup/).
 
 For content scanning and hidden Unicode detection, `apm install` automatically blocks critical findings. Run `apm audit` for on-demand reporting. See [Governance](../../enterprise/governance-guide/) for the full governance model.
 

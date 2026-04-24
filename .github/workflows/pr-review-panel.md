@@ -17,7 +17,9 @@ description: Multi-persona expert panel review of labelled PRs, posting a single
 #        `gh pr diff` which return inert text
 #      - imports are pinned to microsoft/apm#main (panel skill +
 #        persona definitions are trusted, not from the PR)
-#      - the only write surface is safe-outputs.add-comment (max 1)
+#      - the only write surface is safe-outputs.add-comment (max 7
+#        is a safety ceiling; the agent is instructed to emit one
+#        synthesized verdict comment)
 #      - `roles: [admin, maintainer, write]` ensures only repo
 #        maintainers can trigger -- matches the trust model that
 #        applying the `panel-review` label requires write access.
@@ -73,7 +75,7 @@ network:
 
 safe-outputs:
   add-comment:
-    max: 1
+    max: 7
 
 timeout-minutes: 30
 ---
@@ -98,24 +100,7 @@ if [ "$EVENT" = "pull_request_target" ] && [ "$LABEL" != "panel-review" ]; then
 fi
 ```
 
-## Step 1: Load the panel skill
-
-The APM bundle has been unpacked into the runner workspace by the `apm` pre-job.
-Read the skill definition before doing anything else:
-
-```bash
-# The Copilot engine looks for skills under .github/skills/. Confirm and read:
-ls .github/skills/apm-review-panel/ 2>/dev/null || ls .apm/skills/apm-review-panel/
-cat .github/skills/apm-review-panel/SKILL.md 2>/dev/null \
-  || cat .apm/skills/apm-review-panel/SKILL.md
-```
-
-The skill describes the seven personas (Python Architect, CLI Logging Expert,
-DevX UX Expert, Supply Chain Security Expert, APM CEO, OSS Growth Hacker,
-Auth Expert) and the routing rules between them. Each persona is a separate
-agent definition under `.github/agents/` (or `.apm/agents/`).
-
-## Step 2: Gather PR context (read-only)
+## Step 1: Gather PR context (read-only)
 
 Use `gh` CLI -- never `git checkout` of PR head. We are running in the base
 repo context with read-only permissions; the PR diff is the only untrusted
@@ -127,52 +112,11 @@ gh pr view "$PR" --json title,body,author,additions,deletions,changedFiles,files
 gh pr diff "$PR"
 ```
 
-## Step 3: Run the panel
+## Step 2: Run the panel via the apm-review-panel skill
 
-Follow the apm-review-panel SKILL.md routing exactly:
-- Specialists raise findings against their domain.
-- The CEO arbitrates disagreements and makes the strategic call.
-- The OSS Growth Hacker side-channels conversion / `WIP/growth-strategy.md`
-  insights to the CEO.
-
-Do not skip personas. Do not invent personas not declared in the skill.
-
-## Step 4: Synthesize a single verdict
-
-Compose ONE comment with this structure:
-
-```
-## APM Review Panel Verdict
-
-**Disposition**: APPROVE | REQUEST_CHANGES | NEEDS_DISCUSSION
-
-### Per-persona findings
-- **Python Architect**: ...
-- **CLI Logging Expert**: ...
-- **DevX UX Expert**: ...
-- **Supply Chain Security Expert**: ...
-- **Auth Expert**: ...
-- **OSS Growth Hacker**: ...
-
-### CEO arbitration
-<one-paragraph synthesis from apm-ceo>
-
-### Required actions before merge
-1. ...
-2. ...
-
-### Optional follow-ups
-- ...
-```
-
-Keep total length under ~600 lines. ASCII only -- no emojis, no Unicode
-box-drawing (project encoding rule).
-
-## Step 5: Emit the safe output
-
-Post the verdict by writing the comment body to the agent output channel.
-The `safe-outputs.add-comment` job will pick it up and post it to PR #$PR.
-
-You do NOT call the GitHub API directly -- write the structured request to
-the safe-outputs channel and gh-aw's permission-isolated downstream job
-publishes the comment.
+Load the **apm-review-panel** skill and follow its execution checklist
+and output contract exactly. The skill owns reviewer routing, persona
+dispatch, the Auth Expert conditional rule, the pre-arbitration
+completeness gate, CEO arbitration, template loading, verdict shape,
+and the one-comment emission contract -- including writing the final
+comment to `safe-outputs.add-comment` rather than the GitHub API.

@@ -568,3 +568,66 @@ class TestCombinedProjectWinsScenario:
             c for c in result.checks if c.name == "required-package-version"
         ]
         assert ver_check and ver_check[0].details
+
+
+class TestExplicitIncludesSeam:
+    """Wiring of the explicit-includes check into run_dependency_policy_checks.
+
+    Covers the sentinel behaviour: when the caller does not supply
+    ``manifest_includes`` the check is skipped (preserves legacy
+    callers that lack manifest context); when the caller supplies it
+    the check runs against ``policy.manifest.require_explicit_includes``.
+    """
+
+    def _policy(self, *, require: bool):
+        from apm_cli.policy.schema import ManifestPolicy
+
+        return ApmPolicy(manifest=ManifestPolicy(require_explicit_includes=require))
+
+    def test_skipped_when_manifest_includes_not_provided(self):
+        # Default: no manifest_includes kwarg -> no explicit-includes
+        # CheckResult appears in the result.
+        result = run_dependency_policy_checks(
+            [], policy=self._policy(require=True)
+        )
+        assert "explicit-includes" not in _check_names(result)
+
+    def test_violation_when_required_and_includes_none(self):
+        result = run_dependency_policy_checks(
+            [],
+            policy=self._policy(require=True),
+            manifest_includes=None,
+            fail_fast=False,
+        )
+        assert "explicit-includes" in _failed_names(result)
+
+    def test_violation_when_required_and_includes_auto(self):
+        result = run_dependency_policy_checks(
+            [],
+            policy=self._policy(require=True),
+            manifest_includes="auto",
+            fail_fast=False,
+        )
+        assert "explicit-includes" in _failed_names(result)
+
+    def test_pass_when_required_and_includes_explicit_list(self):
+        result = run_dependency_policy_checks(
+            [],
+            policy=self._policy(require=True),
+            manifest_includes=["a.md", "b.md"],
+            fail_fast=False,
+        )
+        assert "explicit-includes" in _check_names(result)
+        assert "explicit-includes" not in _failed_names(result)
+
+    def test_pass_when_not_required_regardless_of_includes(self):
+        for value in (None, "auto", ["a.md"]):
+            result = run_dependency_policy_checks(
+                [],
+                policy=self._policy(require=False),
+                manifest_includes=value,
+                fail_fast=False,
+            )
+            assert "explicit-includes" not in _failed_names(result), (
+                f"unexpected violation for includes={value!r}"
+            )
