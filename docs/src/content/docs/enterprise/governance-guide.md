@@ -85,12 +85,15 @@ The scope matrix below is the contract. Every row maps a security or operational
 | Source attribution | `compilation.source_attribution` | `source-attribution` | `[i] audit-only` | Yes |
 | Required manifest fields | `manifest.required_fields` | `required-manifest-fields` | `[i] audit-only` | Yes |
 | Manifest scripts policy | `manifest.scripts` | `scripts-policy` | `[i] audit-only` | Yes |
+| Explicit manifest includes | `manifest.require_explicit_includes` | `explicit-includes` | `[i] audit-only` | Yes |
 | Unmanaged files in governed dirs | `unmanaged_files.action`, `.directories` | `unmanaged-files` | `[i] audit-only` | Yes |
 | Cache TTL override | `policy.cache.ttl` | -- | `[!] parsed but not enforced` (cache reader uses hardcoded 1h) | -- |
 | Transitive MCP trust (policy field) | `mcp.trust_transitive` | -- | `[!] parsed but not enforced` (gate is the `--trust-transitive-mcp` CLI flag) | -- |
 | Manifest content types | `manifest.content_types` | -- | `[!] parsed but not enforced` | -- |
 
 The full schema and the canonical 6+16 check enumeration live in the [Policy Reference](../policy-reference/). The 6 baseline lockfile checks (lockfile presence, ref consistency, deployed files present, no orphaned packages, MCP config consistency, content integrity) run on every `apm audit --ci` regardless of policy and are non-bypassable -- they are covered in section 7.
+
+`manifest.require_explicit_includes` (`bool`, default `false`) deserves a callout: when set to `true`, the `explicit-includes` check rejects any `apm.yml` that omits `includes:` or sets `includes: auto`. Use this when every published local file must be enumerated in the manifest and reviewable in PR diffs. See the [`includes` field](../../reference/manifest-schema/#39-includes) for the three accepted forms.
 
 ---
 
@@ -104,7 +107,6 @@ Be clear with stakeholders about what is out of scope today:
 - **File integration paths.** Where files land on disk inside the repo is decided by the integrators in each APM package. Policy cannot rewrite a package's file layout.
 - **Custom agent tools beyond MCP.** If an agent stack ships its own non-MCP tool plugins, they sit outside policy scope. Govern them indirectly through `dependencies.allow`/`deny` and `unmanaged_files`.
 - **Token scopes and OAuth scopes.** APM does not audit the scope of the GitHub PAT or app token used to fetch policies and packages. Manage that through the standard GitHub controls on the token issuer.
-- **Drift on deployed files after install.** `deployed_file_hashes` are recorded in the lockfile but never re-verified. A developer who hand-edits a deployed instruction file post-install will not be detected by `apm install` or `apm audit --ci`. See section 14.
 - **Anything `apm compile` or `apm run` does.** Those commands trust whatever `apm install` placed on disk. They do not re-check policy.
 
 For the underlying threat model (what the content scanner protects against, MCP trust boundary, dependency provenance), see the [Security Model](../security/).
@@ -275,7 +277,7 @@ This is the certitude section. Read it twice if you are deciding whether `apm au
 | `apm install --no-policy` | All 16 policy checks at install (incl. transitive MCP, hash pin) | The 6 baseline checks in `apm audit --ci` | git diff of `apm.lock.yaml` in PR |
 | `APM_POLICY_DISABLE=1` env | Same as `--no-policy` plus the 16 audit policy checks | The 6 baseline checks in `apm audit --ci` | PR diff; CI env vars in Actions logs |
 | Manual edit to `apm.lock.yaml` | Nothing; install regenerates the file each run | Audit baseline `ref-consistency` and `deployed-files-present` | git diff |
-| Manual edit to deployed file post-install | Content-equality drift (no re-hash) | Hidden-Unicode scan in `apm audit` content mode | git diff of the deployed file in PR |
+| Manual edit to deployed file post-install | Local file content until next audit | Audit baseline `content-integrity` (re-hashes deployed files); hidden-Unicode scan in `apm audit` content mode | git diff of the deployed file in PR |
 | Direct `git clone` of an APM package, bypassing install | Everything; nothing detects out-of-band file drops | Audit baseline `no-orphaned-packages` and audit-only `unmanaged-files` | git diff |
 | Fork repo to a personal org | Org policy auto-discovery (resolves to fork's `.github`) | Whatever your CI requires on the canonical repo | branch protection on canonical repo |
 | `--trust-transitive-mcp` CLI flag | The transitive MCP preflight (second pass) | Direct MCP preflight; baseline content scan; audit MCP checks | CI command lines and Actions logs |
@@ -312,7 +314,7 @@ When `apm install` returns exit code 0 and the effective org policy is in `enfor
 
 You are NOT guaranteed:
 
-- That files on disk are still what install wrote. There is no drift detection on `deployed_file_hashes`.
+- That files on disk are still what install wrote. `apm install` itself does not re-verify deployed files; drift is caught by `apm audit --ci` baseline `content-integrity` (re-hashes against `deployed_file_hashes`).
 - That prompt or instruction content is semantically safe. Only the hidden-Unicode scan runs.
 - That the audit-only checks (`compilation-strategy`, `source-attribution`, `required-manifest-fields`, `scripts-policy`, `unmanaged-files`) passed. Run `apm audit --ci --policy <scope>` in CI for those.
 - That non-APM files in the repo conform to anything. APM only governs files it placed.
@@ -487,7 +489,6 @@ We publish this list because silent gaps are worse than known ones. Every item b
 
 These are the sharp edges. Plan around them; do not assume they are solved.
 
-- **No drift detection on deployed files.** `deployed_file_hashes` are recorded in the lockfile but never re-verified by `apm install` or `apm audit --ci`. A developer who hand-edits a deployed instruction file post-install will not be detected. Operational mitigation: rely on git diff in PR review for files in `.github/`, `.apm/`, and other governed directories.
 - **`policy.cache.ttl` field is parsed but not honored.** The cache reader uses a hardcoded 1-hour TTL. Setting `policy.cache.ttl: 86400` in your policy will be silently ignored. Operational mitigation: do not rely on this field; assume 1-hour cache TTL universally.
 - **`mcp.trust_transitive` policy field is parsed but not enforced.** The transitive-MCP gate is the `--trust-transitive-mcp` CLI flag, NOT the policy field. Operational mitigation: govern transitive MCP trust through CI command lines and code review of workflow files, not through policy YAML.
 - **`manifest.content_types` field is parsed but no check enforces it.** Operational mitigation: do not advertise this field as a control to stakeholders.

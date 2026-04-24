@@ -453,6 +453,10 @@ class LockFile:
             return False
         if sorted(self.local_deployed_files) != sorted(other.local_deployed_files):
             return False
+        # Issue #887: include hash dict in equivalence so post-install
+        # hash updates persist even when the file list is unchanged.
+        if dict(self.local_deployed_file_hashes) != dict(other.local_deployed_file_hashes):
+            return False
         return True
 
     @classmethod
