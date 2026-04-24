@@ -93,7 +93,7 @@ class TestConsumerCommandsUngated:
         assert "experimental" not in result.output.lower()
 
     def test_marketplace_help_works_when_flag_disabled(self) -> None:
-        """``marketplace --help`` shows all sections without the flag."""
+        """``marketplace --help`` shows consumer section without the flag."""
         from apm_cli.commands.marketplace import marketplace
 
         runner = CliRunner()
@@ -105,6 +105,45 @@ class TestConsumerCommandsUngated:
 
         assert result.exit_code == 0
         assert "Consumer commands" in result.output
+
+    def test_marketplace_help_hides_authoring_when_flag_disabled(self) -> None:
+        """``marketplace --help`` omits authoring section when flag is off."""
+        from apm_cli.commands.marketplace import marketplace
+
+        runner = CliRunner()
+        with patch(
+            "apm_cli.core.experimental.is_enabled",
+            side_effect=lambda name: False,
+        ):
+            result = runner.invoke(marketplace, ["--help"])
+
+        assert result.exit_code == 0
+        assert "Authoring commands" not in result.output
+
+    @pytest.mark.parametrize("subcmd", ["init", "build", "check", "outdated", "doctor", "publish", "package"])
+    def test_authoring_commands_hidden_from_help_when_flag_disabled(self, subcmd: str) -> None:
+        """Individual authoring command names are absent from --help when flag is off."""
+        from apm_cli.commands.marketplace import marketplace
+
+        runner = CliRunner()
+        with patch(
+            "apm_cli.core.experimental.is_enabled",
+            side_effect=lambda name: False,
+        ):
+            result = runner.invoke(marketplace, ["--help"])
+
+        assert result.exit_code == 0
+        # Each authoring command name should not appear as a listed subcommand
+        # (it may appear in the group description; check the commands section)
+        lines = result.output.split("\n")
+        command_lines = [
+            line for line in lines
+            if line.strip().startswith(subcmd)
+        ]
+        assert not command_lines, (
+            f"Authoring command '{subcmd}' should be hidden from --help "
+            f"when flag is disabled, but found: {command_lines}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -193,3 +232,33 @@ class TestAuthoringCommandsEnabled:
 
         assert result.exit_code == 0
         assert "experimental" not in result.output.lower()
+
+    def test_marketplace_help_shows_both_sections_when_enabled(self) -> None:
+        """``marketplace --help`` shows Consumer and Authoring sections when flag on."""
+        from apm_cli.commands.marketplace import marketplace
+
+        runner = CliRunner()
+        result = runner.invoke(marketplace, ["--help"])
+
+        assert result.exit_code == 0
+        assert "Consumer commands" in result.output
+        assert "Authoring commands" in result.output
+
+    @pytest.mark.parametrize("subcmd", ["init", "build", "check", "outdated", "doctor", "publish", "package"])
+    def test_authoring_commands_listed_in_help_when_enabled(self, subcmd: str) -> None:
+        """Authoring command names appear in --help when flag is on."""
+        from apm_cli.commands.marketplace import marketplace
+
+        runner = CliRunner()
+        result = runner.invoke(marketplace, ["--help"])
+
+        assert result.exit_code == 0
+        lines = result.output.split("\n")
+        command_lines = [
+            line for line in lines
+            if line.strip().startswith(subcmd)
+        ]
+        assert command_lines, (
+            f"Authoring command '{subcmd}' should be visible in --help "
+            f"when flag is enabled"
+        )

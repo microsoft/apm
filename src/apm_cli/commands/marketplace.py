@@ -50,13 +50,25 @@ from ._helpers import _get_console, _is_interactive
 class MarketplaceGroup(click.Group):
     """Custom group that organises commands by audience."""
 
-    _sections = {
-        "Consumer commands": ["add", "list", "browse", "update", "remove", "validate"],
-        "Authoring commands": ["init", "build", "check", "outdated", "doctor", "publish", "package"],
-    }
+    _consumer_commands = ["add", "list", "browse", "update", "remove", "validate"]
+    _authoring_commands = ["init", "build", "check", "outdated", "doctor", "publish", "package"]
+
+    @staticmethod
+    def _authoring_visible() -> bool:
+        """Return True when authoring commands should appear in ``--help``."""
+        try:
+            from ..core.experimental import is_enabled
+
+            return is_enabled("marketplace_authoring")
+        except Exception:
+            return True  # fail open — show commands if flag check fails
 
     def format_commands(self, ctx, formatter):
-        for section_name, cmd_names in self._sections.items():
+        sections = [("Consumer commands", self._consumer_commands)]
+        if self._authoring_visible():
+            sections.append(("Authoring commands", self._authoring_commands))
+
+        for section_name, cmd_names in sections:
             commands = []
             for name in cmd_names:
                 cmd = self.get_command(ctx, name)
