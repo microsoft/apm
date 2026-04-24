@@ -87,8 +87,15 @@ cli.add_command(runtime)
 cli.add_command(mcp)
 cli.add_command(policy)
 cli.add_command(outdated_cmd, name="outdated")
-cli.add_command(marketplace)
-cli.add_command(marketplace_search, name="search")
+# Marketplace commands -- gated behind experimental flag
+try:
+    from apm_cli.core.experimental import is_enabled as _xp_enabled
+
+    if _xp_enabled("marketplace_commands"):
+        cli.add_command(marketplace)
+        cli.add_command(marketplace_search, name="search")
+except Exception:
+    pass  # fail closed -- marketplace hidden if flag subsystem errors
 
 
 def _get_current_code_page() -> "Optional[int]":

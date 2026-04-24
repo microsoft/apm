@@ -131,9 +131,18 @@ def _find_duplicate_names(yml):
     return ""
 
 @click.group(cls=MarketplaceGroup, help="Manage marketplaces for discovery and governance")
-def marketplace():
+@click.pass_context
+def marketplace(ctx):
     """Register, browse, and search marketplaces."""
-    pass
+    from ..core.experimental import is_enabled
+
+    if not is_enabled("marketplace_commands"):
+        click.echo(
+            "[!] Marketplace commands are experimental.\n"
+            "    Enable with: apm experimental enable marketplace-commands\n"
+            "    Learn more:  apm experimental list"
+        )
+        ctx.exit(1)
 
 
 from .marketplace_plugin import package  # noqa: E402

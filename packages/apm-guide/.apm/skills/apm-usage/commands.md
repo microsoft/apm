@@ -48,7 +48,9 @@
 | `apm pack` | Bundle package for distribution | `-o PATH`, `-t TARGET`, `--archive`, `--dry-run`, `--format [apm\|plugin]`, `--force` |
 | `apm unpack BUNDLE` | Extract a bundle | `-o PATH`, `--skip-verify`, `--force`, `--dry-run` |
 
-## Marketplace
+## Marketplace (experimental)
+
+> **Gated behind `apm experimental enable marketplace-commands`**. Hidden from `--help` and non-functional until enabled.
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
@@ -62,7 +64,7 @@
 | `apm install NAME@MKT[#ref]` | Install from marketplace | Optional `#ref` override |
 | `apm view NAME@MARKETPLACE` | View marketplace plugin info | -- |
 
-## Marketplace authoring
+## Marketplace authoring (experimental)
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
