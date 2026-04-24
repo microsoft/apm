@@ -114,7 +114,7 @@ graph TD
 
 **Key Architecture Components**:
 
-1. **Context** (.apm/ directory) - Your source code for AI workflows
+1. **Context** (.apm/ directory) - Your source code for AI workflows. See [Anatomy of an APM Package](../anatomy-of-an-apm-package/) for the directory layout.
 2. **APM CLI** - Three core engines working together:
    - **Package Manager** - Dependency resolution and distribution
    - **Primitives Compiler** - Transforms primitives → agents.md format  
@@ -251,7 +251,7 @@ These tools support the full set of APM primitives. Running `apm install` deploy
 - **GitHub Copilot** (AGENTS.md + .github/) - instructions, prompts, chat modes, context, hooks, MCP
 - **Claude Code** (CLAUDE.md + .claude/) - commands, skills, MCP configuration
 
-APM auto-detects targets based on project structure -- deploying to every recognized directory (`.github/`, `.claude/`, `.cursor/`, `.opencode/`) that exists, falling back to `.github/` when none do.
+APM auto-detects targets based on project structure -- deploying to every recognized directory (`.github/`, `.claude/`, `.cursor/`, `.opencode/`) that exists, falling back to `.github/` when none do. Set `target` in `apm.yml` to restrict to specific targets (single string or list).
 
 ### Compiled instructions
 

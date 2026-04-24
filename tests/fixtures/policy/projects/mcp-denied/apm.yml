@@ -1,0 +1,13 @@
+# Project with a denied MCP server.
+# Against apm-policy-mcp.yml: io.github.untrusted/* is denied.
+# Expected: install --mcp blocked; transitive MCP also blocked
+#           when trust_transitive: false (rubber-duck C2).
+name: mcp-denied-project
+version: "1.0.0"
+description: Project with a denied MCP server dependency
+
+dependencies:
+  apm:
+    - DevExpGbb/safe-package
+  mcp:
+    - io.github.untrusted/evil-mcp-server

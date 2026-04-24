@@ -92,3 +92,57 @@ def set_auto_integrate(enabled: bool) -> None:
         enabled: Whether to enable auto-integration.
     """
     update_config({"auto_integrate": enabled})
+
+
+def get_temp_dir() -> Optional[str]:
+    """Get the configured temporary directory.
+
+    Returns:
+        The stored temp_dir config value, or None if not set.
+    """
+    return get_config().get("temp_dir")
+
+
+def set_temp_dir(path: str) -> None:
+    """Set the temporary directory after validating it exists and is writable.
+
+    The path is normalised (``~`` expansion + absolute) before validation and
+    storage so that relative or home-relative paths work predictably.
+
+    Args:
+        path: Filesystem path to use as temporary directory.
+
+    Raises:
+        ValueError: If the path does not exist, is not a directory, or is not
+            writable.
+    """
+    resolved = os.path.abspath(os.path.expanduser(path))
+    if not os.path.exists(resolved):
+        raise ValueError(f"Directory does not exist: {resolved}")
+    if not os.path.isdir(resolved):
+        raise ValueError(f"Path is not a directory: {resolved}")
+    if not os.access(resolved, os.W_OK):
+        raise ValueError(f"Directory is not writable: {resolved}")
+    update_config({"temp_dir": resolved})
+
+
+def get_apm_temp_dir() -> Optional[str]:
+    """Return the effective temporary directory for APM operations.
+
+    Resolution order:
+      1. ``APM_TEMP_DIR`` environment variable (escape-hatch override)
+      2. ``temp_dir`` value from ``~/.apm/config.json``
+      3. ``None`` (caller falls back to the system default)
+
+    Empty or whitespace-only values are treated as unset and skipped.
+
+    Returns:
+        Directory path string, or None when the system default should be used.
+    """
+    env_val = os.environ.get("APM_TEMP_DIR", "").strip()
+    if env_val:
+        return env_val
+    config_val = (get_temp_dir() or "").strip()
+    if config_val:
+        return config_val
+    return None

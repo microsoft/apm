@@ -7,6 +7,7 @@ import sys
 import click
 
 from ..core.command_logger import CommandLogger
+from ..update_policy import get_self_update_disabled_message, is_self_update_enabled
 from ..version import get_version
 
 
@@ -65,6 +66,11 @@ def update(check):
         import tempfile
 
         logger = CommandLogger("update")
+
+        if not is_self_update_enabled():
+            logger.warning(get_self_update_disabled_message())
+            return
+
         current_version = get_version()
 
         # Skip check for development versions
@@ -117,8 +123,10 @@ def update(check):
             response.raise_for_status()
 
             # Create temporary file for install script
+            from ..config import get_apm_temp_dir
             with tempfile.NamedTemporaryFile(
-                mode="w", suffix=_get_update_installer_suffix(), delete=False
+                mode="w", suffix=_get_update_installer_suffix(), delete=False,
+                dir=get_apm_temp_dir()
             ) as f:
                 temp_script = f.name
                 f.write(response.text)

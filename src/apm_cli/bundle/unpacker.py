@@ -56,7 +56,8 @@ def unpack_bundle(
     # 1. If archive, extract to temp dir
     cleanup_temp = False
     if bundle_path.is_file() and bundle_path.name.endswith(".tar.gz"):
-        temp_dir = Path(tempfile.mkdtemp(prefix="apm-unpack-"))
+        from ..config import get_apm_temp_dir
+        temp_dir = Path(tempfile.mkdtemp(prefix="apm-unpack-", dir=get_apm_temp_dir()))
         cleanup_temp = True
         try:
             with tarfile.open(bundle_path, "r:gz") as tar:

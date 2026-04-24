@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from src.apm_cli.models.apm_package import DependencyReference
+from src.apm_cli.deps.lockfile import LockedDependency
 from src.apm_cli.utils.github_host import (
     build_https_clone_url,
     build_ssh_url,
@@ -136,9 +137,10 @@ class TestGitLabSSH:
         assert dep.repo_url == "team/rules"
 
     def test_ssh_protocol_with_port(self):
-        """Port is stripped during normalization to git@ format, which uses SSH config for custom ports."""
+        """Non-default ssh:// ports are preserved on the dep_ref.port field."""
         dep = DependencyReference.parse("ssh://git@gitlab.com:2222/acme/repo.git")
         assert dep.host == "gitlab.com"
+        assert dep.port == 2222
         assert dep.repo_url == "acme/repo"
 
 
@@ -215,39 +217,117 @@ class TestGitHubURLs:
         assert dep.repo_url == "microsoft/apm"
 
 
-class TestSSHProtocolNormalization:
-    """Test ssh:// protocol URL normalization."""
+class TestCustomPortParsing:
+    """Port preservation for self-hosted git servers (issues #661, #731).
 
-    def test_basic_ssh_protocol(self):
-        result = DependencyReference._normalize_ssh_protocol_url(
-            "ssh://git@gitlab.com/acme/repo.git"
-        )
-        assert result == "git@gitlab.com:acme/repo.git"
+    Non-default SSH/HTTPS ports must be captured on dep_ref.port so downstream
+    URL builders can emit them instead of silently falling back to default ports.
+    SCP shorthand (``git@host:path``) cannot carry a port because ``:`` is the
+    path separator, so the SCP path must stay port-less.
+    """
 
-    def test_ssh_protocol_with_port(self):
-        result = DependencyReference._normalize_ssh_protocol_url(
-            "ssh://git@gitlab.com:2222/acme/repo.git"
-        )
-        assert result == "git@gitlab.com:acme/repo.git"
+    def test_ssh_protocol_url_preserves_port(self):
+        """``ssh://host:7999/path`` captures port=7999 without intermediate SCP form."""
+        dep = DependencyReference.parse("ssh://git@bitbucket.domain.ext:7999/project/repo.git")
+        assert dep.host == "bitbucket.domain.ext"
+        assert dep.port == 7999
+        assert dep.repo_url == "project/repo"
 
-    def test_ssh_protocol_no_user(self):
-        """ssh:// without user@ defaults to git@."""
-        result = DependencyReference._normalize_ssh_protocol_url(
-            "ssh://gitlab.com/acme/repo.git"
-        )
-        assert result == "git@gitlab.com:acme/repo.git"
+    def test_ssh_protocol_url_no_port(self):
+        """ssh:// without a port leaves ``port=None``."""
+        dep = DependencyReference.parse("ssh://git@bitbucket.domain.ext/project/repo.git")
+        assert dep.host == "bitbucket.domain.ext"
+        assert dep.port is None
+        assert dep.repo_url == "project/repo"
 
-    def test_non_ssh_url_unchanged(self):
-        result = DependencyReference._normalize_ssh_protocol_url(
-            "https://gitlab.com/acme/repo.git"
-        )
-        assert result == "https://gitlab.com/acme/repo.git"
+    def test_https_url_preserves_port(self):
+        """Covers #731: ``https://host:8443/path`` captures port=8443."""
+        dep = DependencyReference.parse("https://bitbucket.domain.ext:8443/project/repo")
+        assert dep.host == "bitbucket.domain.ext"
+        assert dep.port == 8443
+        assert dep.repo_url == "project/repo"
 
-    def test_git_at_url_unchanged(self):
-        result = DependencyReference._normalize_ssh_protocol_url(
-            "git@gitlab.com:acme/repo.git"
+    def test_https_url_with_git_suffix_preserves_port(self):
+        dep = DependencyReference.parse("https://bitbucket.domain.ext:8443/project/repo.git")
+        assert dep.host == "bitbucket.domain.ext"
+        assert dep.port == 8443
+        assert dep.repo_url == "project/repo"
+
+    def test_scp_shorthand_port_is_none(self):
+        """SCP shorthand ``git@host:path`` cannot carry a port — no behaviour change."""
+        dep = DependencyReference.parse("git@bitbucket.org:acme/rules.git")
+        assert dep.host == "bitbucket.org"
+        assert dep.port is None
+        assert dep.repo_url == "acme/rules"
+
+    def test_shorthand_default_host_port_is_none(self):
+        """Bare ``owner/repo`` shorthand has no port."""
+        dep = DependencyReference.parse("microsoft/apm")
+        assert dep.host == "github.com"
+        assert dep.port is None
+
+    def test_ssh_protocol_url_with_ref_and_alias(self):
+        """``ssh://host:7999/path.git#main@alias`` splits fragment cleanly."""
+        dep = DependencyReference.parse(
+            "ssh://git@bitbucket.domain.ext:7999/project/repo.git#main@my-alias"
         )
-        assert result == "git@gitlab.com:acme/repo.git"
+        assert dep.host == "bitbucket.domain.ext"
+        assert dep.port == 7999
+        assert dep.repo_url == "project/repo"
+        assert dep.reference == "main"
+        assert dep.alias == "my-alias"
+
+    def test_ssh_protocol_url_with_bare_alias(self):
+        """``ssh://host/path.git@alias`` (no #ref) still extracts the alias."""
+        dep = DependencyReference.parse(
+            "ssh://git@bitbucket.domain.ext/project/repo.git@my-alias"
+        )
+        assert dep.host == "bitbucket.domain.ext"
+        assert dep.port is None
+        assert dep.alias == "my-alias"
+        assert dep.reference is None
+
+    def test_custom_port_round_trips_through_lockfile(self):
+        """port survives to_dict()/from_dict()."""
+        dep = DependencyReference.parse("ssh://git@bitbucket.domain.ext:7999/project/repo.git")
+        locked = LockedDependency.from_dependency_ref(
+            dep, resolved_commit="abc123", depth=1, resolved_by=None
+        )
+        assert locked.port == 7999
+        restored = LockedDependency.from_dict(locked.to_dict())
+        assert restored.port == 7999
+
+    def test_lockfile_omits_port_when_none(self):
+        """Default-port deps do not emit a ``port`` key (backwards compatibility)."""
+        dep = DependencyReference.parse("https://bitbucket.domain.ext/project/repo.git")
+        locked = LockedDependency.from_dependency_ref(
+            dep, resolved_commit="abc123", depth=1, resolved_by=None
+        )
+        assert locked.port is None
+        assert "port" not in locked.to_dict()
+
+    def test_same_repo_different_ports_dedup_by_repo_url(self):
+        """Two refs to the same logical repo via different ports still collide on repo_url.
+
+        Port is a transport detail, not an identity component — dedup stays on repo_url.
+        """
+        dep_a = DependencyReference.parse("ssh://git@bitbucket.domain.ext:7999/project/repo.git")
+        dep_b = DependencyReference.parse("https://bitbucket.domain.ext:8443/project/repo")
+        assert dep_a.get_unique_key() == dep_b.get_unique_key()
+
+    def test_lockfile_rejects_garbage_port_string(self):
+        restored = LockedDependency.from_dict({"repo_url": "owner/repo", "port": "not-a-number"})
+        assert restored.port is None
+
+    def test_lockfile_rejects_port_out_of_range(self):
+        for bad in (99999, -1, 0):
+            restored = LockedDependency.from_dict({"repo_url": "owner/repo", "port": bad})
+            assert restored.port is None, f"port={bad!r} should be rejected"
+
+    def test_lockfile_accepts_numeric_port_string(self):
+        """YAML tolerance: numeric strings coerce to int when in range."""
+        restored = LockedDependency.from_dict({"repo_url": "owner/repo", "port": "7999"})
+        assert restored.port == 7999
 
 
 class TestCloneURLBuilding:
@@ -276,6 +356,25 @@ class TestCloneURLBuilding:
     def test_self_hosted_ssh_clone_url(self):
         url = build_ssh_url("git.company.internal", "team/repo")
         assert url == "git@git.company.internal:team/repo.git"
+
+    def test_ssh_clone_url_with_custom_port_uses_ssh_scheme(self):
+        """SCP shorthand cannot carry a port, so a port switches to ``ssh://`` form."""
+        url = build_ssh_url("bitbucket.domain.ext", "team/repo", port=7999)
+        assert url == "ssh://git@bitbucket.domain.ext:7999/team/repo.git"
+
+    def test_ssh_clone_url_port_none_keeps_scp_shorthand(self):
+        url = build_ssh_url("bitbucket.domain.ext", "team/repo", port=None)
+        assert url == "git@bitbucket.domain.ext:team/repo.git"
+
+    def test_https_clone_url_with_custom_port(self):
+        url = build_https_clone_url("bitbucket.domain.ext", "team/repo", port=8443)
+        assert url == "https://bitbucket.domain.ext:8443/team/repo"
+
+    def test_https_clone_url_with_token_and_port(self):
+        url = build_https_clone_url(
+            "bitbucket.domain.ext", "team/repo", token="pat-xxx", port=8443
+        )
+        assert url == "https://x-access-token:pat-xxx@bitbucket.domain.ext:8443/team/repo.git"
 
 
 class TestToGithubURLGenericHosts:

@@ -20,6 +20,15 @@ from .template_builder import (
 )
 from .link_resolver import resolve_markdown_links, validate_link_targets
 from ..utils.paths import portable_relpath
+from ..core.target_detection import should_compile_agents_md, should_compile_claude_md
+
+
+# User-facing target aliases that map to the canonical "vscode" target.
+# Kept in sync with target_detection.detect_target().
+_VSCODE_TARGET_ALIASES = ("copilot", "agents")
+_KNOWN_TARGETS = (
+    "vscode", "claude", "cursor", "opencode", "codex", "all", "minimal",
+) + _VSCODE_TARGET_ALIASES
 
 
 @dataclass
@@ -199,17 +208,52 @@ class AgentsCompiler:
                         exclude_patterns=config.exclude,
                     )
             
-            # Route to targets based on config.target
+            # Route to targets based on config.target.
+            # Use target_detection helpers as the single source of truth so
+            # new targets (codex, opencode, cursor, minimal, ...) route
+            # correctly without touching this method again.
+            routing_target = (
+                "vscode" if config.target in _VSCODE_TARGET_ALIASES else config.target
+            )
+
+            if routing_target not in _KNOWN_TARGETS and config.target not in _KNOWN_TARGETS:
+                self.errors.append(
+                    f"Unknown compilation target: {config.target!r}. "
+                    f"Expected one of: {', '.join(sorted(set(_KNOWN_TARGETS)))}"
+                )
+                return CompilationResult(
+                    success=False,
+                    output_path="",
+                    content="",
+                    warnings=self.warnings.copy(),
+                    errors=self.errors.copy(),
+                    stats={},
+                )
+
             results: List[CompilationResult] = []
-            
-            # AGENTS.md target (vscode/agents)
-            if config.target in ("vscode", "agents", "all"):
+
+            if should_compile_agents_md(routing_target):
                 results.append(self._compile_agents_md(config, primitives))
-            
-            # CLAUDE.md target
-            if config.target in ("claude", "all"):
+
+            if should_compile_claude_md(routing_target):
                 results.append(self._compile_claude_md(config, primitives))
-            
+
+            # Defensive: should never happen for a known target, but guards
+            # against future target_detection drift silently producing no-ops.
+            if not results:
+                self.errors.append(
+                    f"Target {config.target!r} did not route to any compiler. "
+                    "This is an internal bug in target routing."
+                )
+                return CompilationResult(
+                    success=False,
+                    output_path="",
+                    content="",
+                    warnings=self.warnings.copy(),
+                    errors=self.errors.copy(),
+                    stats={},
+                )
+
             # Merge results from all targets
             return self._merge_results(results)
                 

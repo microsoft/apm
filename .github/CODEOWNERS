@@ -1,4 +1,8 @@
 * @danielmeppiel @sergio-sisternes-epam
 
-# README.md — Lead Maintainer only
+# README.md - Lead Maintainer only
 README.md @danielmeppiel
+
+# Workflow files - Lead Maintainer review required for any change to CI
+# definitions, especially anything touching `pull_request_target` or secrets.
+.github/workflows/** @danielmeppiel

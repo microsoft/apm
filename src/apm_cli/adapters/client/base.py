@@ -9,6 +9,12 @@ _INPUT_VAR_RE = re.compile(r"\$\{input:([^}]+)\}")
 class MCPClientAdapter(ABC):
     """Base adapter for MCP clients."""
 
+    # Whether this adapter's config path is user/global-scoped (e.g.
+    # ``~/.copilot/``) rather than workspace-scoped (e.g. ``.vscode/``).
+    # Adapters that target a global path should override this to ``True``
+    # so that ``apm install --global`` can install MCP servers to them.
+    supports_user_scope: bool = False
+
     @abstractmethod
     def get_config_path(self):
         """Get the path to the MCP configuration file."""

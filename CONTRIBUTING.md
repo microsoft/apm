@@ -43,19 +43,39 @@ Enhancement suggestions are welcome! Please:
 
 ### Pull Request Process
 
-1. Fill out the PR template — describe what changed, why, and link the issue.
+1. Fill out the PR template - describe what changed, why, and link the issue.
 2. Ensure your PR addresses only one concern (one feature, one bug fix).
 3. Include tests for new functionality.
 4. Update documentation if needed.
 5. PRs must pass all CI checks before they can be merged.
 
+### How merging works
+
+This repo uses GitHub's native **merge queue**. Once your PR is approved, a
+maintainer adds it to the queue. The queue then:
+
+1. Builds a tentative merge of your PR against the latest `main` - no manual
+   "Update branch" needed.
+2. Runs the integration suite against that tentative merge.
+3. Auto-merges if checks pass; ejects from the queue if they fail.
+
+What this means for contributors:
+
+- You don't need to keep your branch up to date with `main` manually.
+- The fast unit + build checks (Tier 1) run on every push to your PR.
+- The full integration suite (Tier 2) only runs once your PR is in the queue,
+  not on every WIP push.
+
+If your PR is ejected from the queue because of a real failure, push a fix and
+ask a maintainer to re-queue.
+
 ### Issue Triage
 
 Every new issue is automatically labeled `needs-triage`. Maintainers review incoming issues and:
 
-1. **Accept** — remove `needs-triage`, add `accepted`, and assign a milestone.
-2. **Prioritize** — optionally add `priority/high` or `priority/low`.
-3. **Close** — if it's a duplicate (`duplicate`) or out of scope, close with a comment explaining why.
+1. **Accept** - remove `needs-triage`, add `accepted`, and assign a milestone.
+2. **Prioritize** - optionally add `priority/high` or `priority/low`.
+3. **Close** - if it's a duplicate (`duplicate`) or out of scope, close with a comment explaining why.
 
 Labels used for triage: `needs-triage`, `accepted`, `needs-design`, `priority/high`, `priority/low`.
 
@@ -77,7 +97,7 @@ uv sync --extra dev
 We use pytest for testing with `pytest-xdist` for parallel execution. After completing the setup above:
 
 ```bash
-# Run the unit test suite (recommended — matches CI, fast)
+# Run the unit test suite (recommended - matches CI, fast)
 uv run pytest tests/unit tests/test_console.py -x
 
 # Run a specific test file (fastest, use during development)
@@ -123,6 +143,44 @@ uv run isort .
 ## Documentation
 
 If your changes affect how users interact with the project, update the documentation accordingly.
+
+## Extending APM
+
+### How to add an experimental feature flag
+
+Use an experimental flag to de-risk rollout of a user-visible behavioural change that may need early adopter feedback. Do not add a flag for a bug fix, internal refactor, or any change that should simply ship as the default behaviour.
+
+Experimental flags MUST NOT gate security-critical behaviour (content scanning, path validation, lockfile integrity, token handling, MCP trust, collision detection). Flags are ergonomic/UX toggles only.
+
+When adding a new experimental flag:
+
+1. Register it in `src/apm_cli/core/experimental.py` in the `FLAGS` dict with a frozen `ExperimentalFlag(name=..., description=..., default=False, hint=...)`.
+2. Gate the code path with a function-scope import (avoids import cycles):
+   ```python
+   def my_function():
+       from apm_cli.core.experimental import is_enabled
+       if is_enabled("my_flag"):
+           ...
+   ```
+3. Add tests that cover both the enabled and disabled code paths.
+4. Update the experimental command reference page at `docs/src/content/docs/reference/experimental.md`.
+
+Naming rules:
+
+- Use `snake_case` in the registry and config.
+- Use `kebab-case` for display and other user-facing strings.
+- The CLI accepts both forms on input.
+
+Graduation and retirement:
+
+1. When a flag becomes the default, remove the gate and remove the matching `FLAGS` entry in the same PR.
+2. Add a `CHANGELOG.md` entry under `Changed` with a migration note if the previous default differed.
+
+Avoid these anti-patterns:
+
+- Do not gate security-critical behaviour behind an experimental flag.
+- Do not read `is_enabled()` at module import time.
+- Do not persist flag state anywhere other than `~/.apm/config.json` via `update_config`.
 
 ## License
 

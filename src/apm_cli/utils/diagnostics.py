@@ -24,11 +24,13 @@ CATEGORY_OVERWRITE = "overwrite"
 CATEGORY_WARNING = "warning"
 CATEGORY_ERROR = "error"
 CATEGORY_SECURITY = "security"
+CATEGORY_POLICY = "policy"
 CATEGORY_AUTH = "auth"
 CATEGORY_INFO = "info"
 
 _CATEGORY_ORDER = [
     CATEGORY_SECURITY,
+    CATEGORY_POLICY,
     CATEGORY_AUTH,
     CATEGORY_COLLISION,
     CATEGORY_OVERWRITE,
@@ -144,6 +146,25 @@ class DiagnosticCollector:
                 )
             )
 
+    def policy(
+        self,
+        message: str,
+        package: str = "",
+        detail: str = "",
+        severity: str = "warning",
+    ) -> None:
+        """Record a policy violation (blocked dep, denied source, etc.)."""
+        with self._lock:
+            self._diagnostics.append(
+                Diagnostic(
+                    message=message,
+                    category=CATEGORY_POLICY,
+                    package=package,
+                    detail=detail,
+                    severity=severity,
+                )
+            )
+
     def auth(self, message: str, package: str = "", detail: str = "") -> None:
         """Record an authentication diagnostic (credential resolution, fallback, EMU detection)."""
         with self._lock:
@@ -178,6 +199,11 @@ class DiagnosticCollector:
     def auth_count(self) -> int:
         """Return number of auth diagnostics."""
         return sum(1 for d in self._diagnostics if d.category == CATEGORY_AUTH)
+
+    @property
+    def policy_count(self) -> int:
+        """Return number of policy diagnostics."""
+        return sum(1 for d in self._diagnostics if d.category == CATEGORY_POLICY)
 
     @property
     def has_critical_security(self) -> bool:
@@ -238,6 +264,8 @@ class DiagnosticCollector:
 
             if cat == CATEGORY_SECURITY:
                 self._render_security_group(items)
+            elif cat == CATEGORY_POLICY:
+                self._render_policy_group(items)
             elif cat == CATEGORY_AUTH:
                 self._render_auth_group(items)
             elif cat == CATEGORY_COLLISION:
@@ -300,6 +328,37 @@ class DiagnosticCollector:
             _rich_info(
                 f"  [i] {len(info)} file(s) contain unusual characters"
             )
+
+    def _render_policy_group(self, items: List[Diagnostic]) -> None:
+        """Render policy violation diagnostics group.
+
+        Blocked items are rendered in red; warnings in yellow.
+        All items show the actionable reason text.
+        """
+        blocked = [d for d in items if d.severity == "block"]
+        warnings = [d for d in items if d.severity != "block"]
+
+        if blocked:
+            noun = "dependency" if len(blocked) == 1 else "dependencies"
+            _rich_echo(
+                f"  [x] {len(blocked)} {noun} blocked by org policy",
+                color="red",
+                bold=True,
+            )
+            for d in blocked:
+                pkg_prefix = f"{d.package} -- " if d.package else ""
+                _rich_echo(f"    +- {pkg_prefix}{d.message}", color="red")
+                if d.detail:
+                    _rich_echo(f"         {d.detail}", color="dim")
+
+        if warnings:
+            noun = "policy warning" if len(warnings) == 1 else "policy warnings"
+            _rich_warning(f"  [!] {len(warnings)} {noun}")
+            for d in warnings:
+                pkg_prefix = f"[{d.package}] " if d.package else ""
+                _rich_echo(f"    +- {pkg_prefix}{d.message}", color="yellow")
+                if d.detail and self.verbose:
+                    _rich_echo(f"         {d.detail}", color="dim")
 
     def _render_auth_group(self, items: List[Diagnostic]) -> None:
         """Render auth diagnostics group."""

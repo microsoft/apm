@@ -9,7 +9,7 @@ import json
 import os
 import shutil
 import tarfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Dict, List, Optional, Set, Tuple
 
 import yaml
@@ -61,6 +61,16 @@ def _rename_prompt(name: str) -> str:
     if name.endswith(".prompt.md"):
         return name[: -len(".prompt.md")] + ".md"
     return name
+
+
+def _normalize_bare_skill_slug(slug: str) -> str:
+    """Normalize bare-skill slugs derived from dependency virtual paths."""
+    normalized = slug.replace("\\", "/").strip("/")
+    while normalized.startswith("skills/"):
+        normalized = normalized[len("skills/") :].lstrip("/")
+    if normalized == "skills":
+        return ""
+    return PurePosixPath(normalized).as_posix() if normalized else ""
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +140,7 @@ def _collect_bare_skill(
         return
     # Derive a slug: prefer virtual_path (e.g. "frontend-design"), else last
     # segment of repo_url (e.g. "my-skill" from "owner/my-skill")
-    slug = (getattr(dep, "virtual_path", "") or "").strip("/")
+    slug = _normalize_bare_skill_slug(getattr(dep, "virtual_path", "") or "")
     if not slug:
         slug = dep.repo_url.rsplit("/", 1)[-1] if dep.repo_url else "skill"
     for f in sorted(install_path.iterdir()):
@@ -386,14 +396,7 @@ def _update_plugin_json_paths(plugin_json: dict, output_files: List[str]) -> dic
 
 def _dep_install_path(dep: LockedDependency, apm_modules_dir: Path) -> Path:
     """Compute the filesystem install path for a locked dependency."""
-    dep_ref = DependencyReference(
-        repo_url=dep.repo_url,
-        host=dep.host,
-        virtual_path=dep.virtual_path,
-        is_virtual=dep.is_virtual,
-        is_local=(dep.source == "local"),
-        local_path=dep.local_path,
-    )
+    dep_ref = dep.to_dependency_ref()
     return dep_ref.get_install_path(apm_modules_dir)
 
 

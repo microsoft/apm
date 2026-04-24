@@ -491,6 +491,11 @@ class HookIntegrator(BaseIntegrator):
         hooks_integrated = 0
         scripts_copied = 0
         target_paths: List[Path] = []
+        # Events whose prior-owned entries have already been cleared on
+        # this install run. Packages can contribute to the same event
+        # from multiple hook files — we must only strip once so earlier
+        # files' fresh entries aren't wiped by later iterations.
+        cleared_events: set = set()
 
         # Read existing JSON config
         json_path = target_dir / config.config_filename
@@ -531,6 +536,20 @@ class HookIntegrator(BaseIntegrator):
                     if isinstance(entry, dict):
                         entry["_apm_source"] = package_name
 
+                # Idempotent upsert: drop any prior entries owned by this
+                # package before appending fresh ones. Without this, every
+                # `apm install` re-run duplicates the package's hooks
+                # because `.extend()` is unconditional. See microsoft/apm#708.
+                # Only strip once per event per install run — a package
+                # with multiple hook files targeting the same event
+                # contributes each file's entries in turn, and stripping
+                # on every iteration would erase earlier files' work.
+                if event_name not in cleared_events:
+                    json_config["hooks"][event_name] = [
+                        e for e in json_config["hooks"][event_name]
+                        if not (isinstance(e, dict) and e.get("_apm_source") == package_name)
+                    ]
+                    cleared_events.add(event_name)
                 json_config["hooks"][event_name].extend(entries)
 
             hooks_integrated += 1

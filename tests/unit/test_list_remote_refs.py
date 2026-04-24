@@ -258,6 +258,7 @@ class TestListRemoteRefsGitHub:
         dep = _make_dep_ref(host="github.com")
 
         dl._resolve_dep_token = MagicMock(return_value="ghp_test_token")
+        dl._resolve_dep_auth_ctx = MagicMock(return_value=None)
         dl._build_repo_url = MagicMock(return_value="https://x-access-token:ghp_test_token@github.com/owner/repo.git")
 
         mock_git = MockGitCmd.return_value
@@ -268,6 +269,7 @@ class TestListRemoteRefsGitHub:
         dl._resolve_dep_token.assert_called_once_with(dep)
         dl._build_repo_url.assert_called_once_with(
             "owner/repo", use_ssh=False, dep_ref=dep, token="ghp_test_token",
+            auth_scheme="basic",
         )
         mock_git.ls_remote.assert_called_once()
         # Env should be the locked-down git_env (token present)
@@ -287,6 +289,7 @@ class TestListRemoteRefsGitHub:
         dep = _make_dep_ref(host="gitlab.example.com")
 
         dl._resolve_dep_token = MagicMock(return_value=None)
+        dl._resolve_dep_auth_ctx = MagicMock(return_value=None)
         dl._build_repo_url = MagicMock(return_value="https://gitlab.example.com/owner/repo.git")
         # Ensure git_env has the keys that should be removed
         dl.git_env["GIT_ASKPASS"] = "echo"
@@ -306,12 +309,42 @@ class TestListRemoteRefsGitHub:
         assert used_env.get("GIT_TERMINAL_PROMPT") == "0"
 
     @patch("apm_cli.deps.github_downloader.git.cmd.Git")
+    def test_insecure_http_host_no_token_suppresses_credential_helpers(self, MockGitCmd):
+        """HTTP ls-remote must block credential helpers and preserve config isolation."""
+        dl = _build_downloader()
+        dep = _make_dep_ref(host="gitlab.example.com")
+        dep.is_insecure = True
+
+        dl._resolve_dep_token = MagicMock(return_value=None)
+        dl._resolve_dep_auth_ctx = MagicMock(return_value=None)
+        dl._build_repo_url = MagicMock(return_value="http://gitlab.example.com/owner/repo.git")
+        dl.git_env["GIT_ASKPASS"] = "echo"
+        dl.git_env["GIT_CONFIG_GLOBAL"] = "/dev/null"
+        dl.git_env["GIT_CONFIG_NOSYSTEM"] = "1"
+
+        mock_git = MockGitCmd.return_value
+        mock_git.ls_remote.return_value = SAMPLE_LS_REMOTE
+
+        dl.list_remote_refs(dep)
+
+        call_kwargs = mock_git.ls_remote.call_args
+        used_env = call_kwargs.kwargs.get("env")
+        assert used_env.get("GIT_ASKPASS") == "echo"
+        assert used_env.get("GIT_CONFIG_GLOBAL") == "/dev/null"
+        assert used_env.get("GIT_CONFIG_NOSYSTEM") == "1"
+        assert used_env.get("GIT_CONFIG_COUNT") == "1"
+        assert used_env.get("GIT_CONFIG_KEY_0") == "credential.helper"
+        assert used_env.get("GIT_CONFIG_VALUE_0") == ""
+        assert used_env.get("GIT_TERMINAL_PROMPT") == "0"
+
+    @patch("apm_cli.deps.github_downloader.git.cmd.Git")
     def test_git_command_error_raises_runtime_error(self, MockGitCmd):
         """GitCommandError is wrapped in RuntimeError with auth context."""
         dl = _build_downloader()
         dep = _make_dep_ref(host="github.com")
 
         dl._resolve_dep_token = MagicMock(return_value="ghp_token")
+        dl._resolve_dep_auth_ctx = MagicMock(return_value=None)
         dl._build_repo_url = MagicMock(return_value="https://github.com/owner/repo.git")
 
         mock_git = MockGitCmd.return_value
@@ -329,6 +362,7 @@ class TestListRemoteRefsGitHub:
         dep = _make_dep_ref(host="github.com")
 
         dl._resolve_dep_token = MagicMock(return_value="tok")
+        dl._resolve_dep_auth_ctx = MagicMock(return_value=None)
         dl._build_repo_url = MagicMock(return_value="https://github.com/owner/repo.git")
 
         mock_git = MockGitCmd.return_value
@@ -354,6 +388,7 @@ class TestListRemoteRefsADO:
         dep = _make_dep_ref(ado=True)
 
         dl._resolve_dep_token = MagicMock(return_value="ado_pat_token")
+        dl._resolve_dep_auth_ctx = MagicMock(return_value=None)
         dl._build_repo_url = MagicMock(
             return_value="https://ado_pat_token@dev.azure.com/myorg/myproj/_git/myrepo",
         )
@@ -366,6 +401,7 @@ class TestListRemoteRefsADO:
         dl._resolve_dep_token.assert_called_once_with(dep)
         dl._build_repo_url.assert_called_once_with(
             "owner/repo", use_ssh=False, dep_ref=dep, token="ado_pat_token",
+            auth_scheme="basic",
         )
         mock_git.ls_remote.assert_called_once()
 
@@ -382,6 +418,7 @@ class TestListRemoteRefsADO:
         dep = _make_dep_ref(ado=True)
 
         dl._resolve_dep_token = MagicMock(return_value="ado_pat")
+        dl._resolve_dep_auth_ctx = MagicMock(return_value=None)
         dl._build_repo_url = MagicMock(
             return_value="https://ado_pat@dev.azure.com/myorg/myproj/_git/myrepo",
         )
@@ -407,6 +444,7 @@ class TestAuthTokenResolution:
         dl = _build_downloader()
         dep = _make_dep_ref(host="github.com")
         dl._resolve_dep_token = MagicMock(return_value="ghp_tok")
+        dl._resolve_dep_auth_ctx = MagicMock(return_value=None)
         dl._build_repo_url = MagicMock(return_value="https://github.com/o/r.git")
         MockGitCmd.return_value.ls_remote.return_value = ""
 
@@ -419,6 +457,7 @@ class TestAuthTokenResolution:
         dl = _build_downloader()
         dep = _make_dep_ref(ado=True)
         dl._resolve_dep_token = MagicMock(return_value="ado_tok")
+        dl._resolve_dep_auth_ctx = MagicMock(return_value=None)
         dl._build_repo_url = MagicMock(
             return_value="https://ado_tok@dev.azure.com/myorg/myproj/_git/myrepo",
         )
@@ -433,6 +472,7 @@ class TestAuthTokenResolution:
         dl = _build_downloader()
         dep = _make_dep_ref(host="gitlab.example.com")
         dl._resolve_dep_token = MagicMock(return_value=None)
+        dl._resolve_dep_auth_ctx = MagicMock(return_value=None)
         dl._build_repo_url = MagicMock(return_value="https://gitlab.example.com/o/r.git")
         MockGitCmd.return_value.ls_remote.return_value = ""
 
@@ -442,6 +482,7 @@ class TestAuthTokenResolution:
         # _build_repo_url should receive token=None for generic hosts
         dl._build_repo_url.assert_called_once_with(
             "owner/repo", use_ssh=False, dep_ref=dep, token=None,
+            auth_scheme="basic",
         )
 
 

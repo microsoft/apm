@@ -10,29 +10,20 @@ Context components are the configurable tools that deploy proven prompt engineer
 
 APM implements Context - the configurable tools that deploy prompt engineering and context engineering techniques to transform unreliable AI interactions into engineered systems.
 
-### Initialize a project with AI-Native structure
+### Initialize a project
 
 ```bash
-apm init my-project  # Creates complete Context scaffolding + apm.yml
+apm init my-project  # Creates apm.yml -- the only file apm init produces
 ```
 
 ### Generated Project Structure
 
 ```yaml
 my-project/
-├── apm.yml              # Project configuration and script definitions
-├── SKILL.md             # Package meta-guide for AI discovery
-└── .apm/
-    ├── agents/          # Role-based AI expertise with tool boundaries
-    │   ├── backend-dev.agent.md        # API development specialist
-    │   └── frontend-dev.agent.md       # UI development specialist
-    ├── instructions/    # Targeted guidance by file type and domain  
-    │   ├── security.instructions.md    # applyTo: "auth/**"
-    │   └── testing.instructions.md     # applyTo: "**/*test*"
-    └── prompts/         # Reusable agent workflows
-        ├── code-review.prompt.md       # Systematic review process
-        └── feature-spec.prompt.md      # Spec-first development
+└── apm.yml              # Project configuration and dependency manifest
 ```
+
+> **Note:** By default, `apm init` creates only `apm.yml`. Add primitives manually or install them with `apm install`. See [Your First Package](../../getting-started/first-package/) for a step-by-step guide.
 
 ### Intelligent Compilation
 
@@ -59,7 +50,7 @@ scripts:
   docs-codex: "codex generate-docs.prompt.md -m github/gpt-4o-mini"
 dependencies:
   mcp:
-    - ghcr.io/github/github-mcp-server
+    - io.github.github/github-mcp-server
 ```
 
 **Share and reuse across projects:**
@@ -80,40 +71,12 @@ The APM CLI supports the following types of primitives:
 
 > **Note**: Both `.agent.md` (new format) and `.chatmode.md` (legacy format) are fully supported. VSCode provides Quick Fix actions to help migrate from `.chatmode.md` to `.agent.md`.
 
-## File Structure
+## Where primitives live
 
-### Supported Locations
-
-APM discovers primitives in these locations:
-
-```
-# APM-native structure
-.apm/
-├── agents/             # AI assistant definitions (new format)
-│   └── *.agent.md
-├── chatmodes/          # AI assistant definitions (legacy format)
-│   └── *.chatmode.md
-├── instructions/        # Coding standards and guidelines  
-│   └── *.instructions.md
-└── hooks/              # Lifecycle event handlers
-    ├── *.json          # Hook definitions (JSON)
-    └── scripts/        # Referenced scripts
-        └── *.sh, *.py
-
-# VSCode-compatible structure  
-.github/
-├── agents/             # VSCode Copilot agents (new format)
-│   └── *.agent.md
-├── chatmodes/          # VSCode Copilot chatmodes (legacy format)
-│   └── *.chatmode.md
-└── instructions/       # VSCode Copilot instructions
-    └── *.instructions.md
-
-# Generic files (anywhere in project)
-*.agent.md
-*.chatmode.md
-*.instructions.md
-```
+Primitives are authored in `.apm/` and deployed to runtime folders
+(`.github/`, `.claude/`, `.cursor/`, `.opencode/`) by `apm install` and
+`apm compile`. For the full layout, source-vs-output distinction, and
+discovery rules, see [Anatomy of an APM Package](../anatomy-of-an-apm-package/).
 
 ## Component Types Overview
 
@@ -394,16 +357,7 @@ Use specific `applyTo` patterns for instructions:
 Keep primitives in version control alongside your code. Use semantic versioning for breaking changes.
 
 ### 4. Organized Structure
-Use the structured `.apm/` directories for better organization:
-```
-.apm/
-├── agents/
-│   ├── code-reviewer.agent.md
-│   └── documentation-writer.agent.md
-└── instructions/
-    ├── python-style.instructions.md
-    └── typescript-conventions.instructions.md
-```
+Use `.apm/` subdirectories by primitive type. See [Anatomy](../anatomy-of-an-apm-package/#what-apm-looks-for).
 
 ### 5. Team Collaboration
 - Include author information in frontmatter
@@ -412,16 +366,7 @@ Use the structured `.apm/` directories for better organization:
 
 ## Integration with VSCode
 
-For VSCode Copilot compatibility, place files in `.github/` directories:
-```
-.github/
-├── agents/
-│   └── assistant.agent.md
-└── instructions/
-    └── coding-standards.instructions.md
-```
-
-These files follow the same format and will be discovered alongside APM-specific primitives. 
+VS Code Copilot reads compiled output in `.github/`. Author in `.apm/` and let `apm install` produce it -- see [Anatomy](../anatomy-of-an-apm-package/) for the source-vs-output model.
 
 ## Error Handling
 
