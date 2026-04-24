@@ -346,6 +346,7 @@ class TestDepsTreeCommand(_DepsCmdBase):
 
             mock_lockfile = MagicMock()
             mock_lockfile.get_all_dependencies.return_value = [mock_dep]
+            mock_lockfile.get_package_dependencies.return_value = [mock_dep]
 
             mock_lf_path = MagicMock()
             mock_lf_path.exists.return_value = True
@@ -369,6 +370,47 @@ class TestDepsTreeCommand(_DepsCmdBase):
                 result = self.runner.invoke(cli, ["deps", "tree"])
         assert result.exit_code == 0
         assert "awesomeproject" in result.output
+
+    def test_tree_does_not_show_self_entry(self):
+        """Lockfile self-entry must not surface as a dependency in the tree.
+
+        Regression for #887: the synthesized '.' entry (repo_url='<self>') is
+        an internal representation of the project's own local content, not a
+        dependency. apm deps tree must skip it.
+        """
+        from apm_cli.deps.lockfile import LockFile, LockedDependency
+
+        with self._chdir_tmp() as tmp:
+            self._make_package(tmp, "realorg", "realrepo")
+            (tmp / "apm.yml").write_text("name: myproj\n")
+
+            lock = LockFile(
+                lockfile_version="1",
+                generated_at="2025-01-01T00:00:00+00:00",
+                apm_version="0.0.0-test",
+            )
+            lock.add_dependency(
+                LockedDependency(
+                    repo_url="realorg/realrepo",
+                    resolved_commit="b" * 40,
+                    depth=1,
+                    version="1.0.0",
+                )
+            )
+            lock.local_deployed_files = [".github/skills/local/SKILL.md"]
+            lock.local_deployed_file_hashes = {
+                ".github/skills/local/SKILL.md": "abc",
+            }
+            lockfile_path = tmp / "apm.lock.yaml"
+            lockfile_path.write_text(lock.to_yaml())
+
+            with patch("apm_cli.core.scope.get_apm_dir", return_value=tmp), _force_rich_fallback():
+                result = self.runner.invoke(cli, ["deps", "tree"])
+
+        assert result.exit_code == 0
+        assert "realorg/realrepo" in result.output
+        # The self-entry must not appear under any of its representations.
+        assert "<self>" not in result.output
 
 
 class TestDepsInfoCommand(_DepsCmdBase):

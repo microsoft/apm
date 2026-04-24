@@ -50,11 +50,24 @@ manifest:
   scripts: allow                        # allow | deny
   content_types:
     allow: []                           # instructions | skill | hybrid | prompts
+  require_explicit_includes: false      # mandate explicit `includes:` list in apm.yml (rejects `auto` and undeclared)
 
 unmanaged_files:
   action: ignore                        # ignore | warn | deny
   directories: []                       # directories to scan
 ```
+
+## Local content governance
+
+The `includes:` field in `apm.yml` controls which local `.apm/` content the
+package publishes:
+
+- `includes: auto` -- publish all local `.apm/` content (default, convenient).
+- `includes: [path/to/file, ...]` -- explicit list of paths (governance-friendly).
+
+For compliance, prefer the explicit list and pair it with
+`policy.manifest.require_explicit_includes: true`, which rejects `auto` and
+undeclared local content at install / audit time.
 
 ## Enforcement modes
 

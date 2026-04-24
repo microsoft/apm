@@ -90,11 +90,11 @@ jobs:
           SHA: ${{ steps.sha.outputs.sha }}
           # All PR-time checks the gate aggregates. Keep this in sync with
           # the underlying workflows. Currently only ci.yml emits PR-time
-          # checks ('Build & Test (Linux)'); ci-integration.yml is
-          # merge_group-only and is NOT polled here.
+          # checks ('Build & Test (Linux)', 'APM Self-Check');
+          # ci-integration.yml is merge_group-only and is NOT polled here.
           # NOTE: 'gate' (this job) MUST NOT appear here -- it would
           # deadlock waiting for itself.
-          EXPECTED_CHECKS: 'Build & Test (Linux)'
+          EXPECTED_CHECKS: 'Build & Test (Linux),APM Self-Check'
           TIMEOUT_MIN: '30'
           POLL_SEC: '30'
         run: |
