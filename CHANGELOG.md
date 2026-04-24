@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Thread-safety infrastructure: `_get_console()` double-checked locking singleton, marketplace registry cache `threading.Lock`.
 - 40 characterisation tests for `MCPIntegrator` methods (`install()`, `remove_stale()`, `collect_transitive()`).
 - `_build_children_index()` helper in uninstall engine for O(n) reverse-dependency lookups.
+- Performance benchmarks and scaling guards for complexity audit refactors (`tests/benchmarks/test_audit_benchmarks.py`, `test_scaling_guards.py`): 16 benchmark tests covering dependency parsing, children index, primitive discovery, registry cache, console singleton, and NullCommandLogger; 3 scaling-ratio guards run in the default test suite to catch O(n^2) regressions.
 
 ### Changed
 
