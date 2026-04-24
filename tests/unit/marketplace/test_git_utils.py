@@ -25,18 +25,18 @@ class TestRedactToken:
         assert "***@" in result
 
     def test_query_param_token_redacted(self) -> None:
-        """``?token=VALUE`` query parameter is redacted."""
+        """``?token=VALUE`` query parameter is redacted, preserving ``?``."""
         text = "https://github.com/archive?token=abc123"
         result = redact_token(text)
         assert "abc123" not in result
-        assert "token=***" in result
+        assert "?token=***" in result
 
     def test_ampersand_query_param_redacted(self) -> None:
-        """``&token=VALUE`` query parameter is redacted."""
+        """``&token=VALUE`` query parameter is redacted, preserving ``&``."""
         text = "https://host/path?ref=main&token=secret42"
         result = redact_token(text)
         assert "secret42" not in result
-        assert "token=***" in result
+        assert "&token=***" in result
 
     def test_no_token_passthrough(self) -> None:
         """Text without any token patterns is returned unchanged."""
