@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `visual-communicator` agent: world-class technical visual communication persona specialized in Mermaid diagrams. (#897)
 - CI: add `APM Self-Check` to `ci.yml` for `apm audit --ci`, regeneration-drift validation, and `merge-gate.yml` `EXPECTED_CHECKS` coverage. (#885)
 
 ### Changed
