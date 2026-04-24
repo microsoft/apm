@@ -14,12 +14,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.commands.uninstall.engine import (
+    _build_children_index,
     _cleanup_stale_mcp,
     _dry_run_uninstall,
     _parse_dependency_entry,
     _remove_packages_from_disk,
     _validate_uninstall_packages,
 )
+from apm_cli.deps.lockfile import LockFile, LockedDependency
 from apm_cli.models.dependency.reference import DependencyReference
 
 
@@ -445,3 +447,79 @@ class TestCleanupStaleMcp:
                 apm_package, lockfile, lockfile_path, old_servers,
                 modules_dir=tmp_path / "apm_modules",
             )
+
+
+# ===========================================================================
+# _build_children_index
+# ===========================================================================
+
+
+class TestBuildChildrenIndex:
+    """Tests for _build_children_index."""
+
+    def test_basic_parent_child_mapping(self):
+        """Index maps parent URLs to their child dependency objects."""
+        lockfile = LockFile()
+        dep_a = LockedDependency(repo_url="org/a", resolved_commit="aaa")
+        dep_b = LockedDependency(
+            repo_url="org/b", resolved_by="org/a", resolved_commit="bbb",
+        )
+        dep_c = LockedDependency(
+            repo_url="org/c", resolved_by="org/b", resolved_commit="ccc",
+        )
+        lockfile.add_dependency(dep_a)
+        lockfile.add_dependency(dep_b)
+        lockfile.add_dependency(dep_c)
+
+        index = _build_children_index(lockfile)
+
+        assert "org/a" in index
+        assert len(index["org/a"]) == 1
+        assert index["org/a"][0].repo_url == "org/b"
+
+        assert "org/b" in index
+        assert len(index["org/b"]) == 1
+        assert index["org/b"][0].repo_url == "org/c"
+
+        # dep_a has no parent, dep_c has no children
+        assert "org/c" not in index
+
+    def test_empty_lockfile_returns_empty_dict(self):
+        """Empty lockfile produces an empty index."""
+        lockfile = LockFile()
+
+        index = _build_children_index(lockfile)
+
+        assert index == {}
+
+    def test_deps_without_resolved_by_are_not_indexed(self):
+        """Dependencies with no resolved_by field are excluded from index."""
+        lockfile = LockFile()
+        dep_a = LockedDependency(repo_url="org/a", resolved_commit="aaa")
+        dep_b = LockedDependency(repo_url="org/b", resolved_commit="bbb")
+        lockfile.add_dependency(dep_a)
+        lockfile.add_dependency(dep_b)
+
+        index = _build_children_index(lockfile)
+
+        assert index == {}
+
+    def test_multiple_children_same_parent(self):
+        """Parent with multiple children collects all of them."""
+        lockfile = LockFile()
+        dep_root = LockedDependency(repo_url="org/root", resolved_commit="rrr")
+        dep_x = LockedDependency(
+            repo_url="org/x", resolved_by="org/root", resolved_commit="xxx",
+        )
+        dep_y = LockedDependency(
+            repo_url="org/y", resolved_by="org/root", resolved_commit="yyy",
+        )
+        lockfile.add_dependency(dep_root)
+        lockfile.add_dependency(dep_x)
+        lockfile.add_dependency(dep_y)
+
+        index = _build_children_index(lockfile)
+
+        assert len(index["org/root"]) == 2
+        child_urls = {d.repo_url for d in index["org/root"]}
+        assert child_urls == {"org/x", "org/y"}

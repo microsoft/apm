@@ -30,6 +30,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pr-description-skill` mermaid guidance hardened with `assets/mermaid-conventions.md` (diagram-type-by-intent + GitHub-renderer gotchas `mmdc` misses). (#984)
 - Cowork tests mock `sys.platform` so the macOS auto-detection paths don't false-fail on Windows CI. (#989)
 
+### Added
+
+- `NullCommandLogger` class (`src/apm_cli/core/null_logger.py`) -- null-object pattern for logger injection, eliminating 32 conditional logger forks in `MCPIntegrator`.
+- Thread-safety infrastructure: `_get_console()` double-checked locking singleton, marketplace registry cache `threading.Lock`.
+- 40 characterisation tests for `MCPIntegrator` methods (`install()`, `remove_stale()`, `collect_transitive()`).
+- `_build_children_index()` helper in uninstall engine for O(n) reverse-dependency lookups.
+
+### Changed
+
+- `MCPIntegrator` logger handling: methods default to `NullCommandLogger` instead of `None`, removing 32 `if logger:` / `elif logger:` conditional forks (net -91 production lines).
+- Install pipeline lockfile reads reduced from 2x to 1x by caching early lockfile on `InstallContext`.
+- `APMPackage.from_apm_yml()`: deduplicated dependency parsing via `_parse_dependency_dict()` classmethod.
+- Uninstall engine BFS orphan detection: O(n^2) full-scan replaced with O(n) reverse-dep index.
+- Primitive discovery scanning: 9+ `glob.glob()` calls replaced with single `os.walk` + `fnmatch` pass.
+- MCP registry config reads: O(servers x runtimes) reduced to O(runtimes) via function-scoped cache.
+- `_get_console()`: returns thread-safe singleton instead of creating new `Console()` per call.
+- Marketplace registry cache: `_load()`, `_save()`, `_invalidate_cache()` protected with `threading.Lock`.
+
 ## [0.9.4] - 2026-04-27
 
 ### Added

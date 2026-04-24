@@ -45,35 +45,37 @@ def run(ctx: "InstallContext") -> None:
     ctx.lockfile_path = lockfile_path
     existing_lockfile = None
     lockfile_count = 0
-    if lockfile_path.exists():
+    if ctx.early_lockfile is not None:
+        existing_lockfile = ctx.early_lockfile
+    elif lockfile_path.exists():
         existing_lockfile = LockFile.read(lockfile_path)
-        if existing_lockfile and existing_lockfile.dependencies:
-            lockfile_count = len(existing_lockfile.dependencies)
-            if ctx.logger:
-                if ctx.update_refs:
-                    ctx.logger.verbose_detail(
-                        f"Loaded apm.lock.yaml for SHA comparison ({lockfile_count} dependencies)"
+    if existing_lockfile and existing_lockfile.dependencies:
+        lockfile_count = len(existing_lockfile.dependencies)
+        if ctx.logger:
+            if ctx.update_refs:
+                ctx.logger.verbose_detail(
+                    f"Loaded apm.lock.yaml for SHA comparison ({lockfile_count} dependencies)"
+                )
+            else:
+                ctx.logger.verbose_detail(
+                    f"Using apm.lock.yaml ({lockfile_count} locked dependencies)"
+                )
+            if ctx.logger.verbose:
+                for locked_dep in existing_lockfile.get_all_dependencies():
+                    _sha = (
+                        locked_dep.resolved_commit[:8]
+                        if locked_dep.resolved_commit
+                        else ""
                     )
-                else:
-                    ctx.logger.verbose_detail(
-                        f"Using apm.lock.yaml ({lockfile_count} locked dependencies)"
+                    _ref = (
+                        locked_dep.resolved_ref
+                        if hasattr(locked_dep, "resolved_ref")
+                        and locked_dep.resolved_ref
+                        else ""
                     )
-                if ctx.logger.verbose:
-                    for locked_dep in existing_lockfile.get_all_dependencies():
-                        _sha = (
-                            locked_dep.resolved_commit[:8]
-                            if locked_dep.resolved_commit
-                            else ""
-                        )
-                        _ref = (
-                            locked_dep.resolved_ref
-                            if hasattr(locked_dep, "resolved_ref")
-                            and locked_dep.resolved_ref
-                            else ""
-                        )
-                        ctx.logger.lockfile_entry(
-                            locked_dep.get_unique_key(), ref=_ref, sha=_sha
-                        )
+                    ctx.logger.lockfile_entry(
+                        locked_dep.get_unique_key(), ref=_ref, sha=_sha
+                    )
     ctx.existing_lockfile = existing_lockfile
 
     # ------------------------------------------------------------------

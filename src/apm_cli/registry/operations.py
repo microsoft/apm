@@ -39,6 +39,11 @@ class MCPServerOperations:
         """
         servers_needing_installation = set()
         
+        # Pre-load installed IDs per runtime (O(R) reads instead of O(S*R))
+        installed_by_runtime: Dict[str, Set[str]] = {}
+        for runtime in target_runtimes:
+            installed_by_runtime[runtime] = self._get_installed_server_ids([runtime])
+        
         # Check each server reference
         for server_ref in server_references:
             try:
@@ -60,8 +65,7 @@ class MCPServerOperations:
                 # Check if this server needs installation in ANY of the target runtimes
                 needs_installation = False
                 for runtime in target_runtimes:
-                    runtime_installed_ids = self._get_installed_server_ids([runtime])
-                    if server_id not in runtime_installed_ids:
+                    if server_id not in installed_by_runtime[runtime]:
                         needs_installation = True
                         break
                 
