@@ -57,6 +57,11 @@ class PackageRequirement:
         name = name.strip().strip("/")
         if not name or "/" not in name:
             raise ValueError("Package requirement must be in 'owner/repo' form")
+        first_segment = name.split("/", 1)[0]
+        if "." in first_segment:
+            raise ValueError(
+                "Host-qualified references must use direct dependency parsing"
+            )
         validate_path_segments(name, context="package name")
         return cls(name=name, version=version)
 

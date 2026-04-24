@@ -51,10 +51,6 @@ class LockedDependency:
 
     def get_unique_key(self) -> str:
         """Returns unique key for this dependency."""
-        if self.source_type == "oci":
-            registry = self.oci_registry or "default"
-            repository = self.oci_repository or self.repo_url
-            return f"oci:{registry}:{repository}"
         if self.source == "local" and self.local_path:
             return self.local_path
         if self.is_virtual and self.virtual_path:

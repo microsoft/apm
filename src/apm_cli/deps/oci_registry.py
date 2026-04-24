@@ -9,7 +9,7 @@ import tarfile
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Optional
 
 from ..models.apm_package import (
@@ -20,6 +20,7 @@ from ..models.apm_package import (
     ResolvedReference,
     validate_apm_package,
 )
+from ..utils.path_security import ensure_path_within
 
 
 @dataclass(frozen=True)
@@ -122,7 +123,9 @@ class OCIRegistryClient:
         """Extract a raw-package archive and return the package root."""
         with tarfile.open(archive_path, "r:gz") as tar:
             for member in tar.getmembers():
-                if member.name.startswith("/") or ".." in Path(member.name).parts:
+                normalized_name = member.name.replace("\\", "/")
+                normalized_path = PurePosixPath(normalized_name)
+                if normalized_name.startswith("/") or ".." in normalized_path.parts:
                     raise RuntimeError(
                         f"Refusing to extract unsafe archive entry: {member.name}"
                     )
@@ -130,6 +133,8 @@ class OCIRegistryClient:
                     raise RuntimeError(
                         f"Refusing to extract symlink/hardlink from OCI archive: {member.name}"
                     )
+                candidate = target_path.joinpath(*normalized_path.parts)
+                ensure_path_within(candidate, target_path)
             if sys.version_info >= (3, 12):
                 tar.extractall(target_path, filter="data")
             else:

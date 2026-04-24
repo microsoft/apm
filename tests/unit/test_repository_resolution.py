@@ -1,4 +1,5 @@
 import tarfile
+from urllib.parse import urlparse
 
 import yaml
 
@@ -66,6 +67,7 @@ def test_locked_dependency_tracks_resolved_requirement_metadata():
     assert round_trip.oci_repository == "acme/security-pack"
     assert round_trip.oci_tag == "1.0.0"
     assert round_trip.oci_digest == "sha256:abc"
+    assert round_trip.get_unique_key() == "acme/security-pack"
 
 
 def test_artifact_resolver_annotates_requirement_for_git(monkeypatch, tmp_path):
@@ -97,7 +99,20 @@ def test_artifact_resolver_annotates_requirement_for_git(monkeypatch, tmp_path):
 
     assert req.resolved_source_type == "git"
     assert req.resolved_repository == "github"
-    assert req.resolved_ref.endswith("microsoft/apm-standards.git#v1.2.0")
+    locator, fragment = req.resolved_ref.split("#", 1)
+    parsed = urlparse(locator)
+    assert parsed.hostname == "github.com"
+    assert parsed.path == "/microsoft/apm-standards.git"
+    assert fragment == "v1.2.0"
+
+
+def test_package_requirement_rejects_host_qualified_refs():
+    try:
+        PackageRequirement.parse("gitlab.com/group/repo")
+    except ValueError as exc:
+        assert "Host-qualified references" in str(exc)
+    else:
+        raise AssertionError("Expected host-qualified ref to be rejected")
 
 
 def test_oci_registry_client_extracts_raw_package_tarball(tmp_path, monkeypatch):

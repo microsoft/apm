@@ -29,6 +29,15 @@ def _parse_dependency_entry(dep_entry):
     raise ValueError(f"Unsupported dependency entry type: {type(dep_entry).__name__}")
 
 
+def _dependency_identity(dep) -> str:
+    """Return the stable identity used for matching and orphan detection."""
+    if getattr(dep, "source", None) == "local" and getattr(dep, "local_path", None):
+        return dep.local_path
+    if getattr(dep, "is_virtual", False) and getattr(dep, "virtual_path", None):
+        return f"{dep.repo_url}/{dep.virtual_path}"
+    return dep.repo_url
+
+
 def _validate_uninstall_packages(packages, current_deps, logger):
     """Validate which packages can be removed and return matched/unmatched lists."""
     packages_to_remove = []
@@ -75,8 +84,6 @@ def _dry_run_uninstall(packages_to_remove, apm_modules_dir, logger):
         logger.progress(f"  - {pkg} from apm.yml")
         try:
             dep_ref = _parse_dependency_entry(pkg)
-            if not hasattr(dep_ref, "get_install_path"):
-                continue
             package_path = dep_ref.get_install_path(apm_modules_dir)
         except (ValueError, TypeError, AttributeError, KeyError):
             pkg_str = pkg if isinstance(pkg, str) else str(pkg)
@@ -124,10 +131,6 @@ def _remove_packages_from_disk(packages_to_remove, apm_modules_dir, logger):
     for package in packages_to_remove:
         try:
             dep_ref = _parse_dependency_entry(package)
-            if not hasattr(dep_ref, "get_install_path"):
-                logger.progress(f"Removed {package} from manifest (OCI dependency)")
-                removed += 1
-                continue
             package_path = dep_ref.get_install_path(apm_modules_dir)
         except (PathTraversalError,) as e:
             logger.error(f"Refusing to remove {package}: {e}")
@@ -167,7 +170,7 @@ def _cleanup_transitive_orphans(lockfile, packages_to_remove, apm_modules_dir, a
     for pkg in packages_to_remove:
         try:
             ref = _parse_dependency_entry(pkg)
-            removed_repo_urls.add(getattr(ref, "repo_url", getattr(ref, "package", str(pkg))))
+            removed_repo_urls.add(_dependency_identity(ref))
         except (ValueError, TypeError, AttributeError, KeyError):
             removed_repo_urls.add(pkg)
 
@@ -195,7 +198,7 @@ def _cleanup_transitive_orphans(lockfile, packages_to_remove, apm_modules_dir, a
         for dep_str in updated_data.get("dependencies", {}).get("apm", []) or []:
             try:
                 ref = _parse_dependency_entry(dep_str)
-                remaining_deps.add(ref.get_unique_key())
+                remaining_deps.add(_dependency_identity(ref))
             except (ValueError, TypeError, AttributeError, KeyError):
                 remaining_deps.add(str(dep_str))
     except Exception:
@@ -203,7 +206,7 @@ def _cleanup_transitive_orphans(lockfile, packages_to_remove, apm_modules_dir, a
 
     for dep in lockfile.get_all_dependencies():
         key = dep.get_unique_key()
-        if key not in orphans and dep.repo_url not in removed_repo_urls:
+        if key not in orphans and _dependency_identity(dep) not in removed_repo_urls:
             remaining_deps.add(key)
 
     actual_orphans = orphans - remaining_deps
