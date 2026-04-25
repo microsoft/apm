@@ -50,12 +50,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP registry config reads: O(servers x runtimes) reduced to O(runtimes) via function-scoped cache.
 - `_get_console()`: returns thread-safe singleton instead of creating new `Console()` per call.
 - Marketplace registry cache: `_load()`, `_save()`, `_invalidate_cache()` protected with `threading.Lock`.
+- Complexity audit -- decomposed god functions in `reference.py`, `audit.py`, `deps/cli.py`, and `script_runner.py` into focused single-responsibility helpers (largest: `audit()` 290 lines split into thin dispatcher + `_audit_ci_gate` + `_audit_content_scan` with shared `_AuditConfig` dataclass).
 
 ### Fixed
 
 - Bare `except:` clauses in `formatters.py` (5) and `script_formatters.py` (2) now catch `Exception` instead of `BaseException`, allowing `KeyboardInterrupt` and `SystemExit` to propagate correctly.
 - Silent auth fallback in `discovery.py:_get_token_for_host()` now logs `logger.debug()` when the token manager fails, making credential resolution failures visible with `--verbose`.
 - Silent `except Exception: pass` handlers in `agents_compiler.py` (3) now emit `_logger.debug()` traces for config loading and constitution injection failures.
+- Double `iterdir()` walk in `script_runner.py:_resolve_prompt_file()` collapsed to a single pass.
 
 ## [0.9.4] - 2026-04-27
 
