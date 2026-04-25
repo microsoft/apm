@@ -47,7 +47,7 @@ def _make_cowork_target(cowork_root: Path) -> Any:
     Returns:
         A frozen TargetProfile suitable for cowork tests.
     """
-    return replace(KNOWN_TARGETS["cowork"], resolved_deploy_root=cowork_root)
+    return replace(KNOWN_TARGETS["copilot-cowork"], resolved_deploy_root=cowork_root)
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +74,7 @@ class TestDeployedPathEntry:
         cowork_target = _make_cowork_target(cowork_root)
 
         with patch(
-            "apm_cli.integration.cowork_paths.to_lockfile_path",
+            "apm_cli.integration.copilot_cowork_paths.to_lockfile_path",
             return_value="cowork://skills/my-skill/SKILL.md",
         ):
             result = _deployed_path_entry(
@@ -178,7 +178,7 @@ class TestAmendment6Warning:
     def test_warning_fires_once_per_run_with_non_skill_primitives(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": True}})
+        inject_config({"experimental": {"copilot_cowork": True}})
         from apm_cli.install.services import integrate_package_primitives
 
         cowork_target = _make_cowork_target(tmp_path / "cowork")
@@ -254,7 +254,7 @@ class TestAmendment6Warning:
     def test_warning_does_not_fire_when_only_skills(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": True}})
+        inject_config({"experimental": {"copilot_cowork": True}})
         from apm_cli.install.services import integrate_package_primitives
 
         cowork_target = _make_cowork_target(tmp_path / "cowork")
@@ -343,7 +343,7 @@ class TestAmendment6Warning:
     def test_warning_does_not_fire_when_ctx_is_none(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": True}})
+        inject_config({"experimental": {"copilot_cowork": True}})
         from apm_cli.install.services import integrate_package_primitives
 
         cowork_target = _make_cowork_target(tmp_path / "cowork")
@@ -383,7 +383,7 @@ class TestAmendment6Warning:
     def test_warning_msg_text_includes_package_name_and_primitive_types(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": True}})
+        inject_config({"experimental": {"copilot_cowork": True}})
         from apm_cli.install.services import integrate_package_primitives
 
         cowork_target = _make_cowork_target(tmp_path / "cowork")
@@ -431,7 +431,7 @@ class TestAmendment6Warning:
     def test_warning_also_emitted_to_diagnostics_warn(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": True}})
+        inject_config({"experimental": {"copilot_cowork": True}})
         from apm_cli.install.services import integrate_package_primitives
 
         cowork_target = _make_cowork_target(tmp_path / "cowork")
@@ -486,7 +486,7 @@ class TestAmendment6Warning:
         self, tmp_path: Path, inject_config: Any
     ) -> None:
         """Package with only prompts/ dir: warning says 'prompts', not 'commands'."""
-        inject_config({"experimental": {"cowork": True}})
+        inject_config({"experimental": {"copilot_cowork": True}})
         from apm_cli.install.services import integrate_package_primitives
 
         cowork_target = _make_cowork_target(tmp_path / "cowork")

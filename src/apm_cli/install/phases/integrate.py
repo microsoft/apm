@@ -294,7 +294,7 @@ def _check_cowork_caps(ctx: "InstallContext") -> None:
 
     cowork_root = None
     for t in ctx.targets:
-        if t.name == "cowork" and t.resolved_deploy_root is not None:
+        if t.name == "copilot-cowork" and t.resolved_deploy_root is not None:
             cowork_root = t.resolved_deploy_root
             break
     if cowork_root is None:

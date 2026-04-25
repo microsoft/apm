@@ -376,11 +376,11 @@ KNOWN_TARGETS: Dict[str, TargetProfile] = {
     # Microsoft 365 Copilot (Cowork) -- experimental, user-scope only.
     # Skills are deployed to <OneDrive>/Documents/Cowork/skills/.
     # The deploy root is resolved dynamically at runtime via
-    # cowork_paths.resolve_cowork_skills_dir().
+    # copilot_cowork_paths.resolve_copilot_cowork_skills_dir().
     # Non-skill primitives are not supported.
-    "cowork": TargetProfile(
-        name="cowork",
-        root_dir="cowork",  # display grouping placeholder only
+    "copilot-cowork": TargetProfile(
+        name="copilot-cowork",
+        root_dir="copilot-cowork",  # display grouping placeholder only
         primitives={
             "skills": PrimitiveMapping(
                 "skills", "/SKILL.md", "skill_standard",
@@ -389,20 +389,20 @@ KNOWN_TARGETS: Dict[str, TargetProfile] = {
         auto_create=False,
         detect_by_dir=False,
         user_supported=True,
-        user_root_resolver=lambda: _resolve_cowork_root(),
-        requires_flag="cowork",
+        user_root_resolver=lambda: _resolve_copilot_cowork_root(),
+        requires_flag="copilot_cowork",
     ),
 }
 
 
-def _resolve_cowork_root() -> "Path | None":
-    """Thin wrapper around ``cowork_paths.resolve_cowork_skills_dir()``.
+def _resolve_copilot_cowork_root() -> "Path | None":
+    """Thin wrapper around ``copilot_cowork_paths.resolve_copilot_cowork_skills_dir()``.
 
     Used as the ``user_root_resolver`` callable for the cowork target.
     Exceptions propagate to the caller (``for_scope`` / install pipeline).
     """
-    from apm_cli.integration.cowork_paths import resolve_cowork_skills_dir
-    return resolve_cowork_skills_dir()
+    from apm_cli.integration.copilot_cowork_paths import resolve_copilot_cowork_skills_dir
+    return resolve_copilot_cowork_skills_dir()
 
 
 def _is_flag_enabled(flag_name: str) -> bool:
@@ -440,7 +440,7 @@ def get_integration_prefixes(targets=None) -> tuple:
     for t in source:
         # Dynamic-root targets (cowork) use cowork:// prefix in lockfile.
         if t.resolved_deploy_root is not None:
-            from apm_cli.integration.cowork_paths import COWORK_LOCKFILE_PREFIX
+            from apm_cli.integration.copilot_cowork_paths import COWORK_LOCKFILE_PREFIX
             if COWORK_LOCKFILE_PREFIX not in seen:
                 seen.add(COWORK_LOCKFILE_PREFIX)
                 prefixes.append(COWORK_LOCKFILE_PREFIX)

@@ -200,7 +200,7 @@ ALL_CANONICAL_TARGETS = frozenset({"vscode", "claude", "cursor", "opencode", "co
 #: ``is_enabled()`` in ``core/experimental.py`` and ``_flag_gated()`` in
 #: ``integration/targets.py``.  They are NOT included in the
 #: ``parse_target_arg("all")`` expansion -- explicit opt-in only.
-EXPERIMENTAL_TARGETS: frozenset[str] = frozenset({"cowork"})
+EXPERIMENTAL_TARGETS: frozenset[str] = frozenset({"copilot-cowork"})
 
 #: Alias mapping: user-facing name -> canonical internal name.
 TARGET_ALIASES: dict[str, str] = {

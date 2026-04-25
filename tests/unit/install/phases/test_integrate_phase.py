@@ -36,7 +36,7 @@ def _make_cowork_target(cowork_root: Path) -> Any:
     Returns:
         A frozen TargetProfile suitable for cowork tests.
     """
-    return replace(KNOWN_TARGETS["cowork"], resolved_deploy_root=cowork_root)
+    return replace(KNOWN_TARGETS["copilot-cowork"], resolved_deploy_root=cowork_root)
 
 
 def _make_ctx(

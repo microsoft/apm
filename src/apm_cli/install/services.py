@@ -64,7 +64,7 @@ def _deployed_path_entry(
         if targets:
             for _t in targets:
                 if _t.resolved_deploy_root is not None:
-                    from apm_cli.integration.cowork_paths import to_lockfile_path
+                    from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
                     return to_lockfile_path(target_path, _t.resolved_deploy_root)
         raise RuntimeError(
             f"Cannot translate {target_path!r} to a lockfile path: "
@@ -130,7 +130,7 @@ def integrate_package_primitives(
         return result
 
     # --- Amendment 6: cowork non-skill primitive warning (once per run) ---
-    _cowork_active = any(t.name == "cowork" for t in targets)
+    _cowork_active = any(t.name == "copilot-cowork" for t in targets)
     if _cowork_active and ctx is not None and not ctx.cowork_nonsupported_warned:
         _apm_dir = Path(package_info.install_path) / ".apm"
         _NON_SKILL_DIRS = {
@@ -151,7 +151,7 @@ def integrate_package_primitives(
             _pkg_label = package_name or getattr(package_info, "name", "unknown")
             _types_str = ", ".join(sorted(builtins.set(_found_types)))
             _warn_msg = (
-                f"cowork target only supports skills; "
+                f"copilot-cowork target only supports skills; "
                 f"non-skill primitives in {_pkg_label} "
                 f"({_types_str}) will not deploy to cowork"
             )
@@ -223,8 +223,8 @@ def integrate_package_primitives(
             if rel.parts:
                 _skill_target_dirs.add(rel.parts[0])
         except ValueError:
-            # Dynamic-root target (cowork) -- path is outside project tree.
-            _skill_target_dirs.add("cowork")
+            # Dynamic-root target (copilot-cowork) -- path is outside project tree.
+            _skill_target_dirs.add("copilot-cowork")
     _skill_targets = sorted(_skill_target_dirs)
     _skill_target_str = ", ".join(f"{d}/skills/" for d in _skill_targets) or "skills/"
     if skill_result.skill_created:

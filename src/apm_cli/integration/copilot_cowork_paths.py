@@ -5,7 +5,7 @@ directory so that Microsoft 365 Copilot can discover them.  This module owns:
 
 1. **Resolution** -- locating the OneDrive mount point on macOS and Windows,
    and mapping it to ``<mount>/Documents/Cowork/skills/``.  The
-   ``APM_COWORK_SKILLS_DIR`` environment variable overrides automatic detection
+   ``APM_COPILOT_COWORK_SKILLS_DIR`` environment variable overrides automatic detection
    for CI or non-standard layouts.
 
 2. **Lockfile translation** -- APM's lockfile pipeline expects paths relative
@@ -51,7 +51,7 @@ the glob must NOT restrict to ``OneDrive-*``.
 _COWORK_SUBDIR: str = "Documents/Cowork"
 """Relative path from the OneDrive mount root to the Cowork directory."""
 
-_COWORK_SKILLS_SUBDIR: str = "Documents/Cowork/skills"
+_COPILOT_COWORK_SKILLS_SUBDIR: str = "Documents/Cowork/skills"
 """Relative path from the OneDrive mount root to the skills directory."""
 
 
@@ -71,13 +71,13 @@ class CoworkResolutionError(Exception):
 # Resolution
 # ---------------------------------------------------------------------------
 
-def resolve_cowork_skills_dir() -> Path | None:
+def resolve_copilot_cowork_skills_dir() -> Path | None:
     """Locate the Cowork skills directory on the current machine.
 
     Resolution order:
 
-    1. ``APM_COWORK_SKILLS_DIR`` environment variable (highest priority).
-    2. ``cowork_skills_dir`` from ``~/.apm/config.json`` (via ``apm config``).
+    1. ``APM_COPILOT_COWORK_SKILLS_DIR`` environment variable (highest priority).
+    2. ``copilot_cowork_skills_dir`` from ``~/.apm/config.json`` (via ``apm config``).
     3. Platform auto-detection:
        - macOS: ``~/Library/CloudStorage/OneDrive*/``.
        - Windows: ``%ONEDRIVECOMMERCIAL%``, then ``%ONEDRIVE%``.
@@ -87,39 +87,39 @@ def resolve_cowork_skills_dir() -> Path | None:
 
     Raises:
         CoworkResolutionError: When multiple OneDrive tenants are detected
-            on macOS and ``APM_COWORK_SKILLS_DIR`` is not set.  The exception
+            on macOS and ``APM_COPILOT_COWORK_SKILLS_DIR`` is not set.  The exception
             message lists the candidates and instructs the user to set the
             env var.
     """
     # --- env-var override ---
-    env_override = os.environ.get("APM_COWORK_SKILLS_DIR")
+    env_override = os.environ.get("APM_COPILOT_COWORK_SKILLS_DIR")
     if env_override:
         from apm_cli.utils.path_security import (
             PathTraversalError,
             validate_path_segments,
         )
         try:
-            validate_path_segments(env_override, context="APM_COWORK_SKILLS_DIR")
+            validate_path_segments(env_override, context="APM_COPILOT_COWORK_SKILLS_DIR")
         except PathTraversalError as exc:
             raise CoworkResolutionError(
-                f"APM_COWORK_SKILLS_DIR contains a traversal sequence: {exc}"
+                f"APM_COPILOT_COWORK_SKILLS_DIR contains a traversal sequence: {exc}"
             ) from exc
         return Path(env_override).expanduser().resolve()
 
     # --- persisted config value ---
-    from apm_cli.config import get_cowork_skills_dir
+    from apm_cli.config import get_copilot_cowork_skills_dir
 
-    config_value = get_cowork_skills_dir()
+    config_value = get_copilot_cowork_skills_dir()
     if config_value:
         from apm_cli.utils.path_security import (
             PathTraversalError,
             validate_path_segments,
         )
         try:
-            validate_path_segments(config_value, context="cowork_skills_dir config")
+            validate_path_segments(config_value, context="copilot_cowork_skills_dir config")
         except PathTraversalError as exc:
             raise CoworkResolutionError(
-                f"cowork_skills_dir config contains a traversal sequence: {exc}"
+                f"copilot_cowork_skills_dir config contains a traversal sequence: {exc}"
             ) from exc
         return Path(config_value).expanduser().resolve()
 
@@ -133,7 +133,7 @@ def resolve_cowork_skills_dir() -> Path | None:
         for _env_name in ("ONEDRIVECOMMERCIAL", "ONEDRIVE"):
             _win_root = os.environ.get(_env_name, "")
             if _win_root:
-                _win_skills = Path(_win_root) / _COWORK_SKILLS_SUBDIR
+                _win_skills = Path(_win_root) / _COPILOT_COWORK_SKILLS_SUBDIR
                 try:
                     validate_path_segments(
                         str(_win_skills), context=f"{_env_name} env var"
@@ -158,12 +158,12 @@ def resolve_cowork_skills_dir() -> Path | None:
         listing = "\n".join(f"  - {c}" for c in candidates)
         raise CoworkResolutionError(
             f"Multiple OneDrive mounts detected:\n{listing}\n"
-            f"Set APM_COWORK_SKILLS_DIR to the desired skills directory, e.g.:\n"
-            f"  export APM_COWORK_SKILLS_DIR="
-            f'"{candidates[0] / _COWORK_SKILLS_SUBDIR}"'
+            f"Set APM_COPILOT_COWORK_SKILLS_DIR to the desired skills directory, e.g.:\n"
+            f"  export APM_COPILOT_COWORK_SKILLS_DIR="
+            f'"{candidates[0] / _COPILOT_COWORK_SKILLS_SUBDIR}"'
         )
 
-    return candidates[0] / _COWORK_SKILLS_SUBDIR
+    return candidates[0] / _COPILOT_COWORK_SKILLS_SUBDIR
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +177,7 @@ def to_lockfile_path(absolute: Path, cowork_root: Path) -> str:
         absolute: Absolute path to a deployed file or directory inside
             the cowork skills tree.
         cowork_root: The resolved cowork skills root (from
-            ``resolve_cowork_skills_dir()``).
+            ``resolve_copilot_cowork_skills_dir()``).
 
     Returns:
         A string like ``cowork://skills/my-skill/SKILL.md``.

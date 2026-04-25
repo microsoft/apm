@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.core.scope import InstallScope
-from apm_cli.integration.cowork_paths import CoworkResolutionError
+from apm_cli.integration.copilot_cowork_paths import CoworkResolutionError
 from apm_cli.integration.targets import KNOWN_TARGETS, TargetProfile
 
 
@@ -48,7 +48,7 @@ def _make_cowork_target(cowork_root: Path) -> TargetProfile:
     Returns:
         A frozen TargetProfile suitable for cowork tests.
     """
-    return replace(KNOWN_TARGETS["cowork"], resolved_deploy_root=cowork_root)
+    return replace(KNOWN_TARGETS["copilot-cowork"], resolved_deploy_root=cowork_root)
 
 
 def _make_ctx(
@@ -90,7 +90,7 @@ class TestProjectScopeGateForCowork:
     def test_project_scope_with_cowork_raises_system_exit(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": True}})
+        inject_config({"experimental": {"copilot_cowork": True}})
         cowork_target = _make_cowork_target(tmp_path / "cowork")
         ctx = _make_ctx(tmp_path, scope=InstallScope.PROJECT)
 
@@ -107,7 +107,7 @@ class TestProjectScopeGateForCowork:
     def test_project_scope_with_cowork_logs_error_before_exit(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": True}})
+        inject_config({"experimental": {"copilot_cowork": True}})
         cowork_target = _make_cowork_target(tmp_path / "cowork")
         ctx = _make_ctx(tmp_path, scope=InstallScope.PROJECT)
 
@@ -129,7 +129,7 @@ class TestProjectScopeGateForCowork:
     def test_project_scope_with_cowork_no_mkdir_before_exit(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": True}})
+        inject_config({"experimental": {"copilot_cowork": True}})
         cowork_target = _make_cowork_target(tmp_path / "cowork")
         ctx = _make_ctx(tmp_path, scope=InstallScope.PROJECT)
 
@@ -142,12 +142,12 @@ class TestProjectScopeGateForCowork:
             with pytest.raises(SystemExit):
                 from apm_cli.install.phases.targets import run
                 run(ctx)
-        assert not (ctx.project_root / "cowork").exists()
+        assert not (ctx.project_root / "copilot-cowork").exists()
 
     def test_user_scope_with_cowork_does_not_raise(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": True}})
+        inject_config({"experimental": {"copilot_cowork": True}})
         cowork_target = _make_cowork_target(tmp_path / "cowork")
         ctx = _make_ctx(tmp_path, scope=InstallScope.USER)
 
@@ -188,10 +188,10 @@ class TestAutoCreateSkipForDynamicRoot:
     def test_dynamic_root_target_skips_mkdir(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": True}})
+        inject_config({"experimental": {"copilot_cowork": True}})
         cowork_target = _make_cowork_target(tmp_path / "cowork")
         ctx = _make_ctx(tmp_path, scope=InstallScope.USER)
-        ctx.target_override = "cowork"
+        ctx.target_override = "copilot-cowork"
 
         with patch(
             "apm_cli.integration.targets.resolve_targets",
@@ -201,7 +201,7 @@ class TestAutoCreateSkipForDynamicRoot:
         ):
             from apm_cli.install.phases.targets import run
             run(ctx)
-        assert not (ctx.project_root / "cowork").exists()
+        assert not (ctx.project_root / "copilot-cowork").exists()
 
     def test_static_root_target_does_mkdir(
         self, tmp_path: Path, inject_config: Any
@@ -233,8 +233,8 @@ class TestCoworkResolutionErrorHandling:
     def test_resolution_error_raises_system_exit(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": True}})
-        ctx = _make_ctx(tmp_path, scope=InstallScope.USER, target_override="cowork")
+        inject_config({"experimental": {"copilot_cowork": True}})
+        ctx = _make_ctx(tmp_path, scope=InstallScope.USER, target_override="copilot-cowork")
 
         with patch(
             "apm_cli.integration.targets.resolve_targets",
@@ -250,8 +250,8 @@ class TestCoworkResolutionErrorHandling:
     def test_resolution_error_logs_message_no_traceback(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": True}})
-        ctx = _make_ctx(tmp_path, scope=InstallScope.USER, target_override="cowork")
+        inject_config({"experimental": {"copilot_cowork": True}})
+        ctx = _make_ctx(tmp_path, scope=InstallScope.USER, target_override="copilot-cowork")
         error_msg = "Multiple OneDrive mounts detected:\n  - /a\n  - /b"
 
         with patch(
@@ -269,8 +269,8 @@ class TestCoworkResolutionErrorHandling:
     def test_resolution_error_no_logger_still_exits(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": True}})
-        ctx = _make_ctx(tmp_path, scope=InstallScope.USER, target_override="cowork")
+        inject_config({"experimental": {"copilot_cowork": True}})
+        ctx = _make_ctx(tmp_path, scope=InstallScope.USER, target_override="copilot-cowork")
         ctx.logger = None
 
         with patch(

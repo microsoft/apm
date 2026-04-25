@@ -648,7 +648,7 @@ def _make_cowork_target(cowork_root: Path) -> "TargetProfile":
     Returns:
         A frozen TargetProfile suitable for cowork tests.
     """
-    return replace(KNOWN_TARGETS["cowork"], resolved_deploy_root=cowork_root)
+    return replace(KNOWN_TARGETS["copilot-cowork"], resolved_deploy_root=cowork_root)
 
 
 class TestValidateDeployPathCowork:
@@ -660,7 +660,7 @@ class TestValidateDeployPathCowork:
         skill_md.touch()
         cowork_target = _make_cowork_target(tmp_path)
         with patch(
-            "apm_cli.integration.cowork_paths.resolve_cowork_skills_dir",
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
             return_value=tmp_path,
         ):
             result = BaseIntegrator.validate_deploy_path(
@@ -684,7 +684,7 @@ class TestValidateDeployPathCowork:
     ) -> None:
         cowork_target = _make_cowork_target(tmp_path)
         with patch(
-            "apm_cli.integration.cowork_paths.resolve_cowork_skills_dir",
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
             return_value=None,
         ):
             result = BaseIntegrator.validate_deploy_path(
@@ -780,7 +780,7 @@ class TestSyncRemoveFilesCowork:
         project_root = tmp_path / "project"
         project_root.mkdir()
         with patch(
-            "apm_cli.integration.cowork_paths.resolve_cowork_skills_dir",
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
             return_value=tmp_path,
         ):
             stats = BaseIntegrator.sync_remove_files(
@@ -799,7 +799,7 @@ class TestSyncRemoveFilesCowork:
         project_root = tmp_path / "project"
         project_root.mkdir()
         with patch(
-            "apm_cli.integration.cowork_paths.resolve_cowork_skills_dir",
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
             return_value=tmp_path,
         ):
             stats = BaseIntegrator.sync_remove_files(
@@ -818,7 +818,7 @@ class TestSyncRemoveFilesCowork:
         project_root = tmp_path / "project"
         project_root.mkdir()
         with patch(
-            "apm_cli.integration.cowork_paths.resolve_cowork_skills_dir",
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
             return_value=None,
         ):
             stats = BaseIntegrator.sync_remove_files(

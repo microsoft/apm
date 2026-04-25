@@ -61,27 +61,27 @@ class TestTargetProfileForScope:
         self, tmp_path: Path
     ) -> None:
         with patch(
-            "apm_cli.integration.targets._resolve_cowork_root",
+            "apm_cli.integration.targets._resolve_copilot_cowork_root",
             return_value=tmp_path,
         ):
-            result = KNOWN_TARGETS["cowork"].for_scope(user_scope=True)
+            result = KNOWN_TARGETS["copilot-cowork"].for_scope(user_scope=True)
         assert result is not None
         assert result.resolved_deploy_root == tmp_path
 
     def test_for_scope_user_scope_resolver_returns_none(self) -> None:
         with patch(
-            "apm_cli.integration.targets._resolve_cowork_root",
+            "apm_cli.integration.targets._resolve_copilot_cowork_root",
             return_value=None,
         ):
-            result = KNOWN_TARGETS["cowork"].for_scope(user_scope=True)
+            result = KNOWN_TARGETS["copilot-cowork"].for_scope(user_scope=True)
         assert result is None
 
     def test_for_scope_result_is_frozen(self, tmp_path: Path) -> None:
         with patch(
-            "apm_cli.integration.targets._resolve_cowork_root",
+            "apm_cli.integration.targets._resolve_copilot_cowork_root",
             return_value=tmp_path,
         ):
-            result = KNOWN_TARGETS["cowork"].for_scope(user_scope=True)
+            result = KNOWN_TARGETS["copilot-cowork"].for_scope(user_scope=True)
         assert result is not None
         with pytest.raises(FrozenInstanceError):
             result.name = "changed"  # type: ignore[misc]
@@ -114,7 +114,7 @@ class TestDeployPath:
         self, tmp_path: Path
     ) -> None:
         cowork = replace(
-            KNOWN_TARGETS["cowork"],
+            KNOWN_TARGETS["copilot-cowork"],
             resolved_deploy_root=tmp_path,
         )
         result = cowork.deploy_path(Path("/unused"), "sub", "file.md")
@@ -124,7 +124,7 @@ class TestDeployPath:
         self, tmp_path: Path
     ) -> None:
         cowork = replace(
-            KNOWN_TARGETS["cowork"],
+            KNOWN_TARGETS["copilot-cowork"],
             resolved_deploy_root=tmp_path,
         )
         result = cowork.deploy_path(Path("/unused"))
@@ -149,77 +149,77 @@ class TestActiveTargetsGating:
     def test_cowork_absent_when_flag_off_auto_detect(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": False}})
-        (tmp_path / "cowork").mkdir()
+        inject_config({"experimental": {"copilot_cowork": False}})
+        (tmp_path / "copilot-cowork").mkdir()
         results = active_targets(tmp_path)
         names = [t.name for t in results]
-        assert "cowork" not in names
+        assert "copilot-cowork" not in names
 
     def test_cowork_absent_when_flag_off_explicit_cowork(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": False}})
-        results = active_targets(tmp_path, explicit_target="cowork")
+        inject_config({"experimental": {"copilot_cowork": False}})
+        results = active_targets(tmp_path, explicit_target="copilot-cowork")
         assert results == []
 
     def test_cowork_absent_from_all_when_flag_off(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": False}})
+        inject_config({"experimental": {"copilot_cowork": False}})
         results = active_targets(tmp_path, explicit_target="all")
         names = [t.name for t in results]
         # "all" returns all targets regardless of flag gating
-        # but explicit_target="cowork" with flag off returns []
+        # but explicit_target="copilot-cowork" with flag off returns []
         # The "all" path returns list(KNOWN_TARGETS.values()) which
         # includes cowork. This is documented: "all" bypasses flag gate.
         # So cowork IS in the "all" set even when flag is off.
         # This matches the implementation comment:
         # "Return all targets regardless of flag gating."
-        assert "cowork" in names
+        assert "copilot-cowork" in names
 
     def test_cowork_absent_when_flag_on_resolver_returns_none(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": True}})
+        inject_config({"experimental": {"copilot_cowork": True}})
         with patch(
-            "apm_cli.integration.targets._resolve_cowork_root",
+            "apm_cli.integration.targets._resolve_copilot_cowork_root",
             return_value=None,
         ):
             results = resolve_targets(
                 tmp_path,
                 user_scope=True,
-                explicit_target="cowork",
+                explicit_target="copilot-cowork",
             )
         names = [t.name for t in results]
-        assert "cowork" not in names
+        assert "copilot-cowork" not in names
 
     def test_cowork_never_auto_detected(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": True}})
-        (tmp_path / "cowork").mkdir()
+        inject_config({"experimental": {"copilot_cowork": True}})
+        (tmp_path / "copilot-cowork").mkdir()
         results = active_targets(tmp_path)
         names = [t.name for t in results]
-        assert "cowork" not in names
+        assert "copilot-cowork" not in names
 
     def test_cowork_present_when_flag_on_explicit(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": True}})
-        results = active_targets(tmp_path, explicit_target="cowork")
+        inject_config({"experimental": {"copilot_cowork": True}})
+        results = active_targets(tmp_path, explicit_target="copilot-cowork")
         assert len(results) == 1
-        assert results[0].name == "cowork"
+        assert results[0].name == "copilot-cowork"
 
     def test_all_user_scope_includes_cowork_when_flag_on_resolver_succeeds(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": True}})
+        inject_config({"experimental": {"copilot_cowork": True}})
         user_profiles = active_targets_user_scope(explicit_target="all")
         names = [t.name for t in user_profiles]
-        assert "cowork" in names
+        assert "copilot-cowork" in names
         # Now resolve via resolve_targets with resolver returning a path
         with patch(
-            "apm_cli.integration.targets._resolve_cowork_root",
+            "apm_cli.integration.targets._resolve_copilot_cowork_root",
             return_value=tmp_path,
         ):
             resolved = resolve_targets(
@@ -228,20 +228,20 @@ class TestActiveTargetsGating:
                 explicit_target="all",
             )
         resolved_names = [t.name for t in resolved]
-        assert "cowork" in resolved_names
+        assert "copilot-cowork" in resolved_names
 
     def test_all_user_scope_excludes_cowork_when_flag_off(
         self, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": False}})
+        inject_config({"experimental": {"copilot_cowork": False}})
         results = active_targets_user_scope(explicit_target="all")
         names = [t.name for t in results]
-        assert "cowork" not in names
+        assert "copilot-cowork" not in names
 
     def test_other_targets_unaffected_when_flag_off(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
-        inject_config({"experimental": {"cowork": False}})
+        inject_config({"experimental": {"copilot_cowork": False}})
         results = active_targets(tmp_path)
         names = [t.name for t in results]
         assert "copilot" in names
@@ -256,7 +256,7 @@ class TestActiveTargetsGating:
         tmp_path: Path,
         inject_config: Any,
     ) -> None:
-        inject_config({"experimental": {"cowork": False}})
+        inject_config({"experimental": {"copilot_cowork": False}})
         assert target_name in KNOWN_TARGETS
 
 
@@ -272,7 +272,7 @@ class TestGetIntegrationPrefixes:
         self, tmp_path: Path
     ) -> None:
         cowork = replace(
-            KNOWN_TARGETS["cowork"],
+            KNOWN_TARGETS["copilot-cowork"],
             resolved_deploy_root=tmp_path,
         )
         prefixes = get_integration_prefixes([cowork])
@@ -297,21 +297,21 @@ class TestGetIntegrationPrefixes:
 
 
 class TestExplicitCoworkFlagOff:
-    """When the user explicitly requests --target cowork and the flag is OFF,
+    """When the user explicitly requests --target copilot-cowork and the flag is OFF,
     the targets phase must emit an info hint and be a no-op."""
 
     def test_user_scope_explicit_cowork_flag_off_is_noop(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
         """User-scope + explicit cowork + flag OFF -> info hint, no error."""
-        inject_config({"experimental": {"cowork": False}})
+        inject_config({"experimental": {"copilot_cowork": False}})
         from apm_cli.install.phases.targets import run
         from apm_cli.core.scope import InstallScope
 
         ctx = MagicMock()
         ctx.project_root = tmp_path
         ctx.scope = InstallScope.USER
-        ctx.target_override = "cowork"
+        ctx.target_override = "copilot-cowork"
         ctx.apm_package = MagicMock()
         ctx.apm_package.target = None
         ctx.logger = MagicMock()
@@ -321,20 +321,20 @@ class TestExplicitCoworkFlagOff:
 
         hint_msg = ctx.logger.progress.call_args[0][0]
         assert "experimental flag" in hint_msg
-        assert "apm experimental enable cowork" in hint_msg
+        assert "apm experimental enable copilot-cowork" in hint_msg
 
     def test_project_scope_explicit_cowork_flag_off_is_noop(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
         """Project-scope + explicit cowork + flag OFF -> info hint, no error."""
-        inject_config({"experimental": {"cowork": False}})
+        inject_config({"experimental": {"copilot_cowork": False}})
         from apm_cli.install.phases.targets import run
         from apm_cli.core.scope import InstallScope
 
         ctx = MagicMock()
         ctx.project_root = tmp_path
         ctx.scope = InstallScope.PROJECT
-        ctx.target_override = "cowork"
+        ctx.target_override = "copilot-cowork"
         ctx.apm_package = MagicMock()
         ctx.apm_package.target = None
         ctx.logger = MagicMock()
@@ -349,7 +349,7 @@ class TestExplicitCoworkFlagOff:
         self, tmp_path: Path, inject_config: Any
     ) -> None:
         """Auto-detect path (no explicit target) stays silent when flag OFF."""
-        inject_config({"experimental": {"cowork": False}})
+        inject_config({"experimental": {"copilot_cowork": False}})
         from apm_cli.install.phases.targets import run
         from apm_cli.core.scope import InstallScope
 
@@ -372,14 +372,14 @@ class TestExplicitCoworkFlagOff:
         self, tmp_path: Path, inject_config: Any
     ) -> None:
         """cowork + copilot targets, flag OFF: cowork dropped, copilot proceeds."""
-        inject_config({"experimental": {"cowork": False}})
+        inject_config({"experimental": {"copilot_cowork": False}})
         from apm_cli.install.phases.targets import run
         from apm_cli.core.scope import InstallScope
 
         ctx = MagicMock()
         ctx.project_root = tmp_path
         ctx.scope = InstallScope.USER
-        ctx.target_override = ["cowork", "copilot"]
+        ctx.target_override = ["copilot-cowork", "copilot"]
         ctx.apm_package = MagicMock()
         ctx.apm_package.target = None
         ctx.logger = MagicMock()
@@ -410,28 +410,28 @@ class TestExplicitCoworkFlagOff:
 
 
 class TestExplicitCoworkUnresolvable:
-    """When the user explicitly requests --target cowork, flag is ON, but
+    """When the user explicitly requests --target copilot-cowork, flag is ON, but
     OneDrive path cannot be resolved, the targets phase must error."""
 
     def test_linux_flag_on_explicit_cowork_no_env_no_config_errors(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
         """Linux + flag ON + explicit cowork + no env + no config -> error."""
-        inject_config({"experimental": {"cowork": True}})
+        inject_config({"experimental": {"copilot_cowork": True}})
         from apm_cli.install.phases.targets import run
         from apm_cli.core.scope import InstallScope
 
         ctx = MagicMock()
         ctx.project_root = tmp_path
         ctx.scope = InstallScope.USER
-        ctx.target_override = "cowork"
+        ctx.target_override = "copilot-cowork"
         ctx.apm_package = MagicMock()
         ctx.apm_package.target = None
         ctx.logger = MagicMock()
 
         with (
             patch(
-                "apm_cli.integration.targets._resolve_cowork_root",
+                "apm_cli.integration.targets._resolve_copilot_cowork_root",
                 return_value=None,
             ),
             patch("apm_cli.core.target_detection.detect_target"),
@@ -442,13 +442,13 @@ class TestExplicitCoworkUnresolvable:
 
         error_msg = ctx.logger.error.call_args[0][0]
         assert "no OneDrive path detected" in error_msg
-        assert "APM_COWORK_SKILLS_DIR" in error_msg
+        assert "APM_COPILOT_COWORK_SKILLS_DIR" in error_msg
 
     def test_linux_flag_on_explicit_cowork_env_set_succeeds(
         self, tmp_path: Path, inject_config: Any
     ) -> None:
         """Linux + flag ON + explicit cowork + env var set -> success."""
-        inject_config({"experimental": {"cowork": True}})
+        inject_config({"experimental": {"copilot_cowork": True}})
         from apm_cli.install.phases.targets import run
         from apm_cli.core.scope import InstallScope
 
@@ -457,14 +457,14 @@ class TestExplicitCoworkUnresolvable:
         ctx = MagicMock()
         ctx.project_root = tmp_path
         ctx.scope = InstallScope.USER
-        ctx.target_override = "cowork"
+        ctx.target_override = "copilot-cowork"
         ctx.apm_package = MagicMock()
         ctx.apm_package.target = None
         ctx.logger = MagicMock()
 
         with (
             patch(
-                "apm_cli.integration.targets._resolve_cowork_root",
+                "apm_cli.integration.targets._resolve_copilot_cowork_root",
                 return_value=cowork_root,
             ),
             patch("apm_cli.core.target_detection.detect_target"),
@@ -475,14 +475,14 @@ class TestExplicitCoworkUnresolvable:
         self, tmp_path: Path, inject_config: Any
     ) -> None:
         """Linux + flag OFF + explicit cowork -> info hint (not error)."""
-        inject_config({"experimental": {"cowork": False}})
+        inject_config({"experimental": {"copilot_cowork": False}})
         from apm_cli.install.phases.targets import run
         from apm_cli.core.scope import InstallScope
 
         ctx = MagicMock()
         ctx.project_root = tmp_path
         ctx.scope = InstallScope.USER
-        ctx.target_override = "cowork"
+        ctx.target_override = "copilot-cowork"
         ctx.apm_package = MagicMock()
         ctx.apm_package.target = None
         ctx.logger = MagicMock()
@@ -499,7 +499,7 @@ class TestExplicitCoworkUnresolvable:
         self, tmp_path: Path, inject_config: Any
     ) -> None:
         """Auto-detect + flag ON + no resolution -> still silent."""
-        inject_config({"experimental": {"cowork": True}})
+        inject_config({"experimental": {"copilot_cowork": True}})
         from apm_cli.install.phases.targets import run
         from apm_cli.core.scope import InstallScope
 
@@ -513,7 +513,7 @@ class TestExplicitCoworkUnresolvable:
 
         with (
             patch(
-                "apm_cli.integration.targets._resolve_cowork_root",
+                "apm_cli.integration.targets._resolve_copilot_cowork_root",
                 return_value=None,
             ),
             patch("apm_cli.core.target_detection.detect_target"),

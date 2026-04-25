@@ -135,7 +135,7 @@ class BaseIntegrator:
         3. Resolves within *project_root* (or within the cowork root
            for ``cowork://`` paths)
         """
-        from apm_cli.integration.cowork_paths import COWORK_URI_SCHEME
+        from apm_cli.integration.copilot_cowork_paths import COWORK_URI_SCHEME
 
         if allowed_prefixes is None:
             allowed_prefixes = BaseIntegrator._get_integration_prefixes(targets=targets)
@@ -148,11 +148,11 @@ class BaseIntegrator:
                 return False
             # Resolve to absolute and validate containment against cowork root.
             try:
-                from apm_cli.integration.cowork_paths import (
+                from apm_cli.integration.copilot_cowork_paths import (
                     from_lockfile_path,
-                    resolve_cowork_skills_dir,
+                    resolve_copilot_cowork_skills_dir,
                 )
-                cowork_root = resolve_cowork_skills_dir()
+                cowork_root = resolve_copilot_cowork_skills_dir()
                 if cowork_root is None:
                     return False
                 # from_lockfile_path internally calls ensure_path_within.
@@ -234,7 +234,7 @@ class BaseIntegrator:
                 # Dynamic-root targets (cowork) use cowork:// URI prefix.
                 if target.resolved_deploy_root is not None:
                     if prim_name == "skills":
-                        from apm_cli.integration.cowork_paths import COWORK_LOCKFILE_PREFIX
+                        from apm_cli.integration.copilot_cowork_paths import COWORK_LOCKFILE_PREFIX
                         skill_prefixes.append(COWORK_LOCKFILE_PREFIX)
                     continue
                 effective_root = mapping.deploy_root or target.root_dir
@@ -416,14 +416,14 @@ class BaseIntegrator:
                 if not BaseIntegrator.validate_deploy_path(rel_path, project_root, targets=targets):
                     continue
                 # Resolve cowork:// paths to absolute before filesystem ops.
-                from apm_cli.integration.cowork_paths import COWORK_URI_SCHEME
+                from apm_cli.integration.copilot_cowork_paths import COWORK_URI_SCHEME
                 if rel_path.startswith(COWORK_URI_SCHEME):
                     try:
-                        from apm_cli.integration.cowork_paths import (
+                        from apm_cli.integration.copilot_cowork_paths import (
                             from_lockfile_path,
-                            resolve_cowork_skills_dir,
+                            resolve_copilot_cowork_skills_dir,
                         )
-                        cowork_root = resolve_cowork_skills_dir()
+                        cowork_root = resolve_copilot_cowork_skills_dir()
                         if cowork_root is None:
                             continue
                         target = from_lockfile_path(rel_path, cowork_root)

@@ -573,64 +573,64 @@ class TestCoworkParserLayer:
     def setup_method(self):
         self.tp = TargetParamType()
 
-    # -- Case 1: single "cowork" accepted ---------------------------------
+    # -- Case 1: single "copilot-cowork" accepted ---------------------------------
 
     def test_convert_cowork_single_returns_string(self):
-        """TargetParamType.convert('cowork') returns the string 'cowork'."""
-        result = self.tp.convert("cowork", None, None)
-        assert result == "cowork"
+        """TargetParamType.convert('copilot-cowork') returns the string 'copilot-cowork'."""
+        result = self.tp.convert("copilot-cowork", None, None)
+        assert result == "copilot-cowork"
         assert isinstance(result, str)
 
-    # -- Case 2: "cowork,claude" accepted as multi-target list -----------
+    # -- Case 2: "copilot-cowork,claude" accepted as multi-target list -----------
 
     def test_convert_cowork_multi_returns_list_with_both(self):
-        """TargetParamType.convert('cowork,claude') returns a list containing both."""
-        result = self.tp.convert("cowork,claude", None, None)
+        """TargetParamType.convert('copilot-cowork,claude') returns a list containing both."""
+        result = self.tp.convert("copilot-cowork,claude", None, None)
         assert isinstance(result, list)
-        assert "cowork" in result
+        assert "copilot-cowork" in result
         assert "claude" in result
 
     def test_convert_cowork_multi_preserves_input_order(self):
-        """'cowork,claude' preserves the parser's natural (input) order."""
-        result = self.tp.convert("cowork,claude", None, None)
-        assert result == ["cowork", "claude"]
+        """'copilot-cowork,claude' preserves the parser's natural (input) order."""
+        result = self.tp.convert("copilot-cowork,claude", None, None)
+        assert result == ["copilot-cowork", "claude"]
 
     # -- Case 3: membership in VALID_TARGET_VALUES -----------------------
 
     def test_cowork_in_valid_target_values(self):
-        """'cowork' must be accepted by the --target parser."""
-        assert "cowork" in VALID_TARGET_VALUES
+        """'copilot-cowork' must be accepted by the --target parser."""
+        assert "copilot-cowork" in VALID_TARGET_VALUES
 
     # -- Case 4: NOT in ALL_CANONICAL_TARGETS (constant-split guard) -----
 
     def test_cowork_not_in_all_canonical_targets(self):
-        """'cowork' must NOT bleed into ALL_CANONICAL_TARGETS (regression guard).
+        """'copilot-cowork' must NOT bleed into ALL_CANONICAL_TARGETS (regression guard).
 
         ALL_CANONICAL_TARGETS drives the 'all' expansion at the parser layer.
         Experimental targets are opt-in only and must live in EXPERIMENTAL_TARGETS.
         """
-        assert "cowork" not in ALL_CANONICAL_TARGETS
+        assert "copilot-cowork" not in ALL_CANONICAL_TARGETS
 
     # -- Case 5: in EXPERIMENTAL_TARGETS --------------------------------
 
     def test_cowork_in_experimental_targets(self):
-        """'cowork' must appear in EXPERIMENTAL_TARGETS."""
-        assert "cowork" in EXPERIMENTAL_TARGETS
+        """'copilot-cowork' must appear in EXPERIMENTAL_TARGETS."""
+        assert "copilot-cowork" in EXPERIMENTAL_TARGETS
 
     # -- Case 6: exact membership lock -----------------------------------
 
     def test_experimental_targets_exact_membership(self):
-        """EXPERIMENTAL_TARGETS must equal frozenset({'cowork'}) exactly.
+        """EXPERIMENTAL_TARGETS must equal frozenset({'copilot-cowork'}) exactly.
 
         This locks the constant so that adding a new experimental target
         requires an intentional test update.
         """
-        assert EXPERIMENTAL_TARGETS == frozenset({"cowork"})
+        assert EXPERIMENTAL_TARGETS == frozenset({"copilot-cowork"})
 
-    # -- Case 7: "all" expansion does NOT include "cowork" ---------------
+    # -- Case 7: "all" expansion does NOT include "copilot-cowork" ---------------
 
     def test_all_expansion_excludes_cowork(self):
-        """parse_target_arg('all') at the parser layer must NOT include 'cowork'.
+        """parse_target_arg('all') at the parser layer must NOT include 'copilot-cowork'.
 
         'all' must expand only to ALL_CANONICAL_TARGETS.  Experimental
         targets are explicitly excluded -- they require opt-in.
@@ -643,12 +643,12 @@ class TestCoworkParserLayer:
 
         result_list = normalize_target_list("all")
         assert isinstance(result_list, list)
-        assert "cowork" not in result_list
+        assert "copilot-cowork" not in result_list
 
     # -- Case 8: invalid target still rejected (sanity check) ------------
 
     def test_invalid_target_still_rejected(self):
-        """'nonsense' must still raise BadParameter after adding cowork."""
+        """'nonsense' must still raise BadParameter after adding copilot-cowork."""
         with pytest.raises(
             click.exceptions.BadParameter,
             match="'nonsense' is not a valid target",

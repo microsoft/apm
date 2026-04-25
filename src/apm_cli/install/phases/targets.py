@@ -30,7 +30,7 @@ def run(ctx: "InstallContext") -> None:
     from apm_cli.integration.hook_integrator import HookIntegrator
     from apm_cli.integration.instruction_integrator import InstructionIntegrator
     from apm_cli.integration.skill_integrator import SkillIntegrator
-    from apm_cli.integration.cowork_paths import CoworkResolutionError
+    from apm_cli.integration.copilot_cowork_paths import CoworkResolutionError
     from apm_cli.integration.targets import resolve_targets as _resolve_targets
 
     # Get config target from apm.yml if available
@@ -55,8 +55,8 @@ def run(ctx: "InstallContext") -> None:
         raise SystemExit(1) from exc
 
     # ------------------------------------------------------------------
-    # Fix 2: explicit --target cowork with flag OFF must error.
-    # Fix 3: explicit --target cowork with flag ON but unresolvable
+    # Fix 2: explicit --target copilot-cowork with flag OFF must error.
+    # Fix 3: explicit --target copilot-cowork with flag ON but unresolvable
     #         OneDrive must error.
     # Only fire when the user explicitly asked for cowork. Auto-detect
     # silently omits cowork when unavailable.
@@ -64,21 +64,21 @@ def run(ctx: "InstallContext") -> None:
     _user_asked_cowork = False
     if _explicit:
         if isinstance(_explicit, list):
-            _user_asked_cowork = "cowork" in _explicit
+            _user_asked_cowork = "copilot-cowork" in _explicit
         else:
-            _user_asked_cowork = _explicit == "cowork"
+            _user_asked_cowork = _explicit == "copilot-cowork"
 
     if _user_asked_cowork:
-        _cowork_resolved = any(t.name == "cowork" for t in _targets)
+        _cowork_resolved = any(t.name == "copilot-cowork" for t in _targets)
         if not _cowork_resolved:
             from apm_cli.core.experimental import is_enabled as _is_flag_on
 
-            if not _is_flag_on("cowork"):
+            if not _is_flag_on("copilot_cowork"):
                 # Flag is OFF — no-op with a targeted enable hint.
                 if ctx.logger:
                     ctx.logger.progress(
-                        "The 'cowork' target requires an experimental flag. "
-                        "Run: apm experimental enable cowork",
+                        "The 'copilot-cowork' target requires an experimental flag. "
+                        "Run: apm experimental enable copilot-cowork",
                         symbol="info",
                     )
             else:
@@ -86,24 +86,24 @@ def run(ctx: "InstallContext") -> None:
                 if ctx.logger:
                     ctx.logger.error(
                         "Cowork: no OneDrive path detected.\n"
-                        "Set APM_COWORK_SKILLS_DIR or run: "
-                        "apm config set cowork-skills-dir <path>",
+                        "Set APM_COPILOT_COWORK_SKILLS_DIR or run: "
+                        "apm config set copilot-cowork-skills-dir <path>",
                         symbol="cross",
                     )
                 raise SystemExit(1)
 
     # ------------------------------------------------------------------
     # Amendment 5: project-scope gate for cowork target.
-    # `--target cowork` without `--global` is an error -- cowork is
+    # `--target copilot-cowork` without `--global` is an error -- cowork is
     # user-scope only.  Abort before any filesystem activity.
     # ------------------------------------------------------------------
     if not _is_user:
-        _cowork_in_set = any(t.name == "cowork" for t in _targets)
+        _cowork_in_set = any(t.name == "copilot-cowork" for t in _targets)
         if _cowork_in_set:
             if ctx.logger:
                 ctx.logger.error(
-                    "The 'cowork' target requires --global (user scope). "
-                    "Run: apm install --target cowork --global"
+                    "The 'copilot-cowork' target requires --global (user scope). "
+                    "Run: apm install --target copilot-cowork --global"
                 )
             raise SystemExit(1)
 
@@ -133,7 +133,7 @@ def run(ctx: "InstallContext") -> None:
             continue
         # Dynamic-root targets (cowork): the integrator creates the
         # directory lazily via resolved_deploy_root.  Do not attempt to
-        # create project_root / root_dir (the placeholder "cowork" dir).
+        # create project_root / root_dir (the placeholder "copilot-cowork" dir).
         if _t.resolved_deploy_root is not None:
             continue
         _root = _t.root_dir

@@ -144,16 +144,16 @@ def unset_temp_dir() -> None:
 # Cowork skills directory
 # ---------------------------------------------------------------------------
 
-def get_cowork_skills_dir() -> Optional[str]:
+def get_copilot_cowork_skills_dir() -> Optional[str]:
     """Get the configured cowork skills directory.
 
     Returns:
-        The stored ``cowork_skills_dir`` config value, or ``None`` if not set.
+        The stored ``copilot_cowork_skills_dir`` config value, or ``None`` if not set.
     """
-    return get_config().get("cowork_skills_dir")
+    return get_config().get("copilot_cowork_skills_dir")
 
 
-def set_cowork_skills_dir(path: str) -> None:
+def set_copilot_cowork_skills_dir(path: str) -> None:
     """Set the cowork skills directory after validation.
 
     The path is expanded (``~``) and verified to be absolute.  The
@@ -172,18 +172,18 @@ def set_cowork_skills_dir(path: str) -> None:
     expanded = os.path.expanduser(path)
     if not os.path.isabs(expanded):
         raise ValueError(f"Path must be absolute: {expanded}")
-    update_config({"cowork_skills_dir": expanded})
+    update_config({"copilot_cowork_skills_dir": expanded})
 
 
-def unset_cowork_skills_dir() -> None:
-    """Remove the ``cowork_skills_dir`` key from the config file.
+def unset_copilot_cowork_skills_dir() -> None:
+    """Remove the ``copilot_cowork_skills_dir`` key from the config file.
 
     No-op if the key is not present.
     """
     _invalidate_config_cache()
     config = get_config()
-    if "cowork_skills_dir" in config:
-        del config["cowork_skills_dir"]
+    if "copilot_cowork_skills_dir" in config:
+        del config["copilot_cowork_skills_dir"]
         with open(CONFIG_FILE, "w") as f:
             json.dump(config, f, indent=2)
     _invalidate_config_cache()

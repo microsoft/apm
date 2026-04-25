@@ -3640,7 +3640,7 @@ def _make_resolved_cowork_target(cowork_root: Path) -> "TargetProfile":
         A frozen TargetProfile suitable for cowork deployment tests.
     """
     from apm_cli.integration.targets import TargetProfile
-    return _dc_replace(KNOWN_TARGETS["cowork"], resolved_deploy_root=cowork_root)
+    return _dc_replace(KNOWN_TARGETS["copilot-cowork"], resolved_deploy_root=cowork_root)
 
 
 def _make_package_info(install_path: Path) -> MagicMock:
@@ -3717,7 +3717,7 @@ class TestIntegrateNativeSkillCowork:
                 pkg_dir / "SKILL.md",
                 targets=[cowork_target],
             )
-        assert not (project_root / "cowork").exists()
+        assert not (project_root / "copilot-cowork").exists()
 
     def test_result_target_paths_contain_absolute_path(
         self, tmp_path: Path
