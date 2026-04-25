@@ -203,6 +203,20 @@ Use type hints in Python code.
         assert result.success
         assert "AGENTS.md" in result.output_path
 
+    def test_target_gemini_generates_gemini_md(self, temp_project, sample_primitives):
+        """target='gemini' must produce GEMINI.md, not a silent no-op."""
+        config = CompilationConfig(
+            target="gemini",
+            dry_run=True,
+        )
+
+        compiler = AgentsCompiler(str(temp_project))
+        result = compiler.compile(config, sample_primitives)
+
+        assert result.success
+        assert result.output_path, "gemini target must route to a compiler, not return empty"
+        assert "GEMINI" in result.output_path
+
     def test_target_minimal_generates_agents_md(self, temp_project, sample_primitives):
         """target='minimal' must route to AGENTS.md-only."""
         config = CompilationConfig(
@@ -1013,6 +1027,21 @@ class TestResolveCompileTarget:
 
         assert _resolve_compile_target(["cursor", "claude"]) == "all"
         assert _resolve_compile_target(["codex", "claude"]) == "all"
+
+    def test_list_gemini_only_returns_gemini(self):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+
+        assert _resolve_compile_target(["gemini"]) == "gemini"
+
+    def test_list_gemini_and_claude_returns_all(self):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+
+        assert _resolve_compile_target(["gemini", "claude"]) == "all"
+
+    def test_list_gemini_and_copilot_returns_all(self):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+
+        assert _resolve_compile_target(["gemini", "vscode"]) == "all"
 
     def test_list_all_targets_returns_all(self):
         from apm_cli.commands.compile.cli import _resolve_compile_target

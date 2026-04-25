@@ -4,7 +4,7 @@
 
 Think `package.json`, `requirements.txt`, or `Cargo.toml` — but for AI agent configuration.
 
-GitHub Copilot · Claude Code · Cursor · OpenCode · Codex
+GitHub Copilot · Claude Code · Cursor · OpenCode · Codex · Gemini
 
 **[Documentation](https://microsoft.github.io/apm/)** · **[Quick Start](https://microsoft.github.io/apm/getting-started/quick-start/)** · **[CLI Reference](https://microsoft.github.io/apm/reference/cli-commands/)** · **[Roadmap](https://github.com/orgs/microsoft/projects/2304)**
 
@@ -50,7 +50,7 @@ apm install    # every agent is configured
 
 One `apm.yml` describes every primitive your agents need — instructions, skills, prompts, agents, hooks, plugins, MCP servers — and `apm install` reproduces the exact same setup across every client on every machine. `apm.lock.yaml` pins the resolved tree the way `package-lock.json` does for npm.
 
-- **[One manifest for everything](https://microsoft.github.io/apm/reference/primitive-types/)** — declared once, deployed across Copilot, Claude, Cursor, OpenCode, Codex
+- **[One manifest for everything](https://microsoft.github.io/apm/reference/primitive-types/)** — declared once, deployed across Copilot, Claude, Cursor, OpenCode, Codex, Gemini
 - **[Install from anywhere](https://microsoft.github.io/apm/guides/dependencies/)** — GitHub, GitLab, Bitbucket, Azure DevOps, GitHub Enterprise, any git host
 - **[Transitive dependencies](https://microsoft.github.io/apm/guides/dependencies/)** — packages can depend on packages; APM resolves the full tree
 - **[Author plugins](https://microsoft.github.io/apm/guides/plugins/)** — build Copilot, Claude, and Cursor plugins with dependency management, then export standard `plugin.json`
@@ -128,7 +128,7 @@ apm marketplace add github/awesome-copilot
 apm install azure-cloud-development@awesome-copilot
 ```
 
-Or add an MCP server (wired into Copilot, Claude, Cursor, Codex, and OpenCode):
+Or add an MCP server (wired into Copilot, Claude, Cursor, Codex, OpenCode, and Gemini):
 
 ```bash
 apm install --mcp io.github.github/github-mcp-server --transport http   # connects over HTTPS

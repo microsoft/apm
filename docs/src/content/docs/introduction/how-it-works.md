@@ -123,7 +123,7 @@ graph TD
 4. **AI Coding Agents** - Execute your compiled workflows (Copilot, Cursor, etc.)
 5. **Supporting Infrastructure** - MCP servers for tools, LLM models for execution
 
-GitHub Copilot and Claude read the deployed primitives natively. Cursor and OpenCode also receive native integration when `.cursor/` or `.opencode/` exists. For other tools (Codex, Gemini), `apm compile` generates an `agents.md` instruction file they can consume.
+GitHub Copilot and Claude read the deployed primitives natively. Cursor, OpenCode, and Gemini also receive native integration when their config directories exist. For instructions, Codex and Gemini use `apm compile` to generate `AGENTS.md` / `GEMINI.md`.
 
 ## The Three Layers Explained
 
@@ -259,8 +259,8 @@ For tools that read a single instructions file, `apm compile` merges your primit
 
 - **Cursor** - native integration to `.cursor/rules/`, `.cursor/agents/`, `.cursor/skills/`, `.cursor/hooks.json`, `.cursor/mcp.json`
 - **OpenCode** - native integration to `.opencode/agents/`, `.opencode/commands/`, `.opencode/skills/`, `opencode.json` (MCP)
+- **Gemini** - native integration to `.gemini/commands/`, `.gemini/skills/`, `.gemini/settings.json` (MCP, hooks); instructions compiled to `GEMINI.md`
 - **Codex CLI** - compiled to `AGENTS.md`
-- **Gemini** - compiled to `GEMINI.md`
 
 See the [Compilation guide](../../guides/compilation/) for details on output formats and options.
 

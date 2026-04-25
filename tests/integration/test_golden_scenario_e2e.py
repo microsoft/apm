@@ -108,9 +108,27 @@ def temp_e2e_home():
         test_home = os.path.join(temp_dir, 'e2e_home')
         os.makedirs(test_home)
         
-        # Set up test environment
+        # Set up test environment -- stash original HOME so tests can
+        # recover credentials (e.g. ADC at ~/.config/gcloud/).
+        os.environ['_APM_ORIGINAL_HOME'] = original_home or ''
         os.environ['HOME'] = test_home
-        
+
+        # Copy only the ADC credentials file (not the entire gcloud
+        # directory) so runtimes that rely on ADC (e.g. gemini-cli with
+        # Vertex AI) can auth without exposing service account keys.
+        real_adc = (
+            Path(original_home or '')
+            / ".config" / "gcloud" / "application_default_credentials.json"
+        )
+        if real_adc.is_file():
+            fake_adc = (
+                Path(test_home)
+                / ".config" / "gcloud" / "application_default_credentials.json"
+            )
+            fake_adc.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(real_adc), str(fake_adc))
+
+
         # Note: Do NOT override token environment variables here
         # Let test-integration.sh handle token management properly
         # It has the correct prioritization: GITHUB_APM_PAT > GITHUB_TOKEN
@@ -118,6 +136,7 @@ def temp_e2e_home():
         yield test_home
         
         # Restore original environment
+        os.environ.pop('_APM_ORIGINAL_HOME', None)
         if original_home:
             os.environ['HOME'] = original_home
         else:
@@ -644,6 +663,151 @@ Instructions for LLM E2E testing.
                 print(f"\\n=== LLM execution failed (expected in CI) ===")
                 print(f"Output: {full_output}")
                 pytest.skip("LLM execution failed, likely due to authentication in CI environment")
+
+    @pytest.mark.skipif(not PRIMARY_TOKEN, reason="GitHub token (GITHUB_APM_PAT or GITHUB_TOKEN) required for E2E tests")
+    def test_complete_golden_scenario_gemini(self, temp_e2e_home, apm_binary):
+        """Test the complete golden scenario using Gemini CLI runtime.
+
+        This test uses the 'review' script which calls Gemini CLI.
+        Gemini CLI authenticates via Google account (browser flow) or
+        GOOGLE_API_KEY, so this test will gracefully skip on auth failure.
+        """
+
+        # Step 1: Setup Gemini runtime (npm install -g @google/gemini-cli)
+        print("\n=== Setting up Gemini CLI runtime ===")
+        result = run_command(f"{apm_binary} runtime setup gemini", timeout=300, show_output=True)
+        assert result.returncode == 0, f"Gemini runtime setup failed: {result.stderr}"
+
+        # Verify gemini is available (npm global install, not in ~/.apm/runtimes)
+        print("\n=== Testing Gemini CLI binary ===")
+        result = run_command("gemini --version", show_output=True, check=False)
+        if result.returncode == 0:
+            print(f"Gemini CLI version: {result.stdout}")
+        else:
+            print(f"Gemini CLI version check failed: {result.stderr}")
+
+        # Verify config directory was created
+        gemini_config_dir = Path(temp_e2e_home) / ".gemini"
+        assert gemini_config_dir.exists(), "Gemini config directory not created"
+
+        gemini_settings = gemini_config_dir / "settings.json"
+        assert gemini_settings.exists(), "Gemini settings.json not created"
+
+        settings_content = gemini_settings.read_text()
+        settings = json.loads(settings_content)
+        assert "mcpServers" in settings, "mcpServers key not in settings.json"
+        print(f"Gemini settings.json: {settings_content}")
+
+        # Step 2: Create test project
+        with tempfile.TemporaryDirectory() as project_workspace:
+            project_dir = Path(project_workspace) / "my-ai-native-project-gemini"
+
+            print("\n=== Initializing Gemini test project ===")
+            result = run_command(f"{apm_binary} init my-ai-native-project-gemini --yes", cwd=project_workspace)
+            assert result.returncode == 0, f"Project init failed: {result.stderr}"
+
+            # Create a simple prompt file
+            prompt_content = """---
+description: Review prompt for Gemini testing
+---
+
+# Review Prompt
+
+This is a test prompt for ${input:name}. Reply with exactly: hello developer
+"""
+            (project_dir / "review.prompt.md").write_text(prompt_content)
+
+            # Create .apm directory with instructions
+            apm_dir = project_dir / ".apm"
+            apm_dir.mkdir(exist_ok=True)
+            (apm_dir / "instructions").mkdir(exist_ok=True)
+
+            instruction_content = """---
+applyTo: "**"
+description: Gemini test instructions
+---
+
+# Test Instructions
+
+Instructions for Gemini CLI E2E testing.
+"""
+            (apm_dir / "instructions" / "test.instructions.md").write_text(instruction_content)
+
+            # Create .gemini directory so target is detected
+            (project_dir / ".gemini").mkdir(exist_ok=True)
+
+            # Update apm.yml to add review script
+            import yaml
+            apm_yml_path = project_dir / "apm.yml"
+            with open(apm_yml_path, 'r') as f:
+                config = yaml.safe_load(f)
+
+            if 'scripts' not in config:
+                config['scripts'] = {}
+            config['scripts']['review'] = 'gemini -y review.prompt.md'
+
+            with open(apm_yml_path, 'w') as f:
+                yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
+
+            print("Created review.prompt.md, .apm/ directory, .gemini/ directory, and updated apm.yml")
+
+            # Step 3: Compile Agent Primitives
+            print("\n=== Compiling Agent Primitives ===")
+            result = run_command(f"{apm_binary} compile", cwd=project_dir)
+            assert result.returncode == 0, f"Compilation failed: {result.stderr}"
+
+            # Step 4: Install dependencies (targets gemini since .gemini/ exists)
+            print("\n=== Installing dependencies ===")
+            env = os.environ.copy()
+            env['HOME'] = temp_e2e_home
+
+            result = run_command(f"{apm_binary} install", cwd=project_dir, env=env)
+            assert result.returncode == 0, f"Dependency install failed: {result.stderr}"
+
+            # Step 5: Run with Gemini CLI
+            print("\n=== Running golden scenario with Gemini CLI ===")
+            env = os.environ.copy()
+            env['HOME'] = temp_e2e_home
+            env['GEMINI_CLI_TRUST_WORKSPACE'] = 'true'
+
+
+            cmd = f'{apm_binary} run review --param name="developer"'
+            process = subprocess.Popen(
+                cmd,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                cwd=project_dir,
+                env=env
+            )
+
+            output_lines = []
+            print("\n--- Gemini CLI Execution Output ---")
+            for line in iter(process.stdout.readline, ''):
+                if line:
+                    print(line.rstrip())
+                    output_lines.append(line)
+
+            return_code = process.wait(timeout=120)
+            full_output = ''.join(output_lines)
+
+            print("--- End Gemini CLI Output ---\n")
+
+            if return_code == 0:
+                output = full_output.lower()
+                assert "developer" in output, "Parameter substitution failed"
+                assert len(output.strip()) > 50, "Output seems too short"
+                print(f"\nGemini CLI scenario completed successfully!")
+                print(f"Output length: {len(full_output)} characters")
+            else:
+                print(f"\n=== Gemini CLI execution failed (expected in some environments) ===")
+                print(f"Output: {full_output}")
+
+                if "authentication" in full_output.lower() or "login" in full_output.lower() or "api_key" in full_output.lower():
+                    pytest.skip("Gemini CLI execution failed due to authentication - this is expected in CI environments without Google credentials")
+                else:
+                    pytest.skip(f"Gemini CLI execution failed with return code {return_code}: {full_output}")
 
     def test_runtime_list_command(self, temp_e2e_home, apm_binary):
         """Test that APM can list installed runtimes."""

@@ -194,14 +194,15 @@ team-skills/
 
 `apm install` auto-detects which runtimes you have. The example above shows
 `.github/` because Copilot is the default fallback. If `.claude/`, `.cursor/`,
-or `.opencode/` exists in the project, they get populated too. To target
+`.opencode/`, or `.gemini/` exists in the project, they get populated too. To target
 explicitly, see the [Compilation guide](/apm/guides/compilation/).
 
 > **What about `apm compile`?** Compile is a different concern: it
-> generates merged `AGENTS.md` / `CLAUDE.md` files for tools that read a
-> single top-level context document (Codex, Gemini, plain `agents`-protocol
-> hosts). Copilot, Claude Code, and Cursor read the per-skill directories
-> directly -- no compile step needed.
+> generates merged `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` files for tools
+> that read a top-level context document for instructions (Codex, Gemini,
+> plain `agents`-protocol hosts). Gemini also receives commands, skills,
+> hooks, and MCP via `apm install`. Copilot, Claude Code, and Cursor read
+> the per-skill directories directly -- no compile step needed.
 
 Now open Copilot or Claude in this project. Ask "draft a PR description for
 my last commit". The `pr-description` skill activates on its own. To get the

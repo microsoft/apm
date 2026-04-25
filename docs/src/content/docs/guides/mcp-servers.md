@@ -1,13 +1,13 @@
 ---
 title: "MCP Servers"
-description: "Add MCP servers to your project with apm install --mcp. Supports stdio, registry, and remote HTTP servers across Copilot, Claude, Cursor, Codex, and OpenCode."
+description: "Add MCP servers to your project with apm install --mcp. Supports stdio, registry, and remote HTTP servers across Copilot, Claude, Cursor, Codex, OpenCode, and Gemini."
 sidebar:
   order: 6
 ---
 
 APM manages your agent configuration in `apm.yml` -- think `package.json` for AI. MCP servers are dependencies in that manifest.
 
-`apm install --mcp` adds a server to `apm.yml` and wires it into every detected client (Copilot, Claude, Cursor, Codex, OpenCode) in one step.
+`apm install --mcp` adds a server to `apm.yml` and wires it into every detected client (Copilot, Claude, Cursor, Codex, OpenCode, Gemini) in one step.
 
 ## Quick Start
 

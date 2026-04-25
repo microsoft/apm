@@ -166,8 +166,10 @@ def _get_validation_suggestion(error_msg):
 def _resolve_compile_target(target):
     """Map CLI target input to compiler-understood target string.
 
-    The compiler only understands ``"vscode"``, ``"claude"``, and ``"all"``.
-    Multi-target lists are mapped to the narrowest equivalent.
+    The compiler understands ``"vscode"``, ``"claude"``, ``"gemini"``,
+    and ``"all"``.  Multi-target lists are mapped to the narrowest
+    equivalent; any combination of two or more distinct compiler
+    families collapses to ``"all"``.
 
     Args:
         target: A single target string, a list of target strings, or ``None``.
@@ -179,15 +181,18 @@ def _resolve_compile_target(target):
         return None  # will trigger detect_target() auto-detection
     if isinstance(target, list):
         target_set = set(target)
-        # Any target that produces AGENTS.md (copilot/vscode/agents/cursor/opencode/codex)
         has_agents_family = bool(
             target_set & {"copilot", "vscode", "agents", "cursor", "opencode", "codex"}
         )
         has_claude = "claude" in target_set
-        if has_agents_family and has_claude:
+        has_gemini = "gemini" in target_set
+        distinct = sum([has_agents_family, has_claude, has_gemini])
+        if distinct >= 2:
             return "all"
         elif has_claude:
             return "claude"
+        elif has_gemini:
+            return "gemini"
         else:
             return "vscode"  # agents-family only
     return target  # single string pass-through
