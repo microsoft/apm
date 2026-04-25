@@ -18,10 +18,14 @@
 # Inputs (environment variables):
 #   GH_TOKEN          required. Token with 'checks:read' for the repo.
 #   REPO              required. owner/repo (e.g. microsoft/apm).
-#   SHA               required. Head SHA of the PR.
+#   SHA               required. Head SHA to poll (PR head, merge_group temp
+#                     branch head, or workflow_dispatch-resolved PR head).
 #   EXPECTED_CHECKS   required. Comma-separated list of check-run names to
 #                     wait for. Whitespace around commas is trimmed.
 #                     Example: "Build & Test (Linux),Build (Linux)"
+#   EVENT_NAME        optional. The triggering event ('pull_request',
+#                     'merge_group', 'workflow_dispatch'). Used only to
+#                     emit the right recovery instructions on timeout.
 #   TIMEOUT_MIN       optional. Total wall-clock budget in minutes.
 #                     Default: 30.
 #   POLL_SEC          optional. Poll interval in seconds. Default: 30.
@@ -96,11 +100,13 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
     [ "${check_status[i]}" = "pending" ] || continue
     pending_count=$((pending_count + 1))
 
-    # Filter by check-run name server-side. Most-recent first.
+    # Filter by check-run name server-side, asking GitHub for only the
+    # latest run per name (avoids client-side sort / pagination races
+    # when a check has been re-run on the same SHA).
     encoded=$(jq -rn --arg n "$c" '$n|@uri')
     payload=$(gh api \
       -H "Accept: application/vnd.github+json" \
-      "repos/${REPO}/commits/${SHA}/check-runs?check_name=${encoded}&per_page=10" \
+      "repos/${REPO}/commits/${SHA}/check-runs?check_name=${encoded}&filter=latest&per_page=10" \
       2>/dev/null) || payload='{"check_runs":[]}'
 
     total=$(echo "$payload" | jq '.check_runs | length' 2>/dev/null || echo 0)
@@ -166,8 +172,15 @@ if [ "${#missing[@]}" -gt 0 ]; then
     for c in "${missing[@]}"; do echo "  - ${c}"; done
     echo ""
     echo "This usually indicates a transient GitHub Actions webhook delivery failure. Recovery:"
-    echo "  1. Push an empty commit to retrigger:  git commit --allow-empty -m 'ci: retrigger' && git push"
-    echo "  2. If that fails, close and reopen the PR."
+    if [ "${EVENT_NAME:-}" = "merge_group" ]; then
+      echo "  Merge-queue context: pushing a commit will NOT retrigger the merge_group event."
+      echo "  1. Remove the PR from the merge queue and re-add it."
+      echo "  2. If it still fails, push an empty commit to the PR branch and re-queue:"
+      echo "       git commit --allow-empty -m 'ci: retrigger' && git push"
+    else
+      echo "  1. Push an empty commit to retrigger:  git commit --allow-empty -m 'ci: retrigger' && git push"
+      echo "  2. If that fails, close and reopen the PR."
+    fi
     echo ""
     echo "Merge Gate catches this failure mode so it surfaces as a clear red check instead of a stuck 'Expected -- Waiting'. See .github/workflows/merge-gate.yml."
   } >&2

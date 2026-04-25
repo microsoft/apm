@@ -234,7 +234,9 @@ class TestCacheReadWrite(unittest.TestCase):
 
     def test_get_cache_dir(self):
         root = Path("/fake/project")
-        expected = root / "apm_modules" / ".policy-cache"
+        # _get_cache_dir resolves project_root (#886), compare
+        # against the resolved form
+        expected = root.resolve() / "apm_modules" / ".policy-cache"
         self.assertEqual(_get_cache_dir(root), expected)
 
 

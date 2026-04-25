@@ -28,6 +28,7 @@ local_deployed_files:
 - .github/skills/cli-logging-ux
 - .github/skills/devx-ux
 - .github/skills/oss-growth
+- .github/skills/pr-description-skill
 - .github/skills/python-architecture
 - .github/skills/supply-chain-security
 local_deployed_file_hashes:
