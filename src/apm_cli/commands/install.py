@@ -1057,8 +1057,23 @@ def _run_mcp_install(
     default=False,
     help="Skip org policy enforcement for this invocation. Loudly logged. Does NOT bypass apm audit --ci.",
 )
+@click.option(
+    "--root",
+    "root",
+    type=click.Path(file_okay=False, resolve_path=True),
+    default=None,
+    metavar="DIR",
+    help=(
+        "Deploy apm-managed writes (apm_modules/, apm.lock.yaml, .claude/, "
+        ".codex/, .agents/, .opencode/) to DIR instead of the current "
+        "directory. Sources (apm.yml, .apm/, local-path packages) "
+        "continue resolving from $PWD. Useful for scratch-dir verification, "
+        "fixture generation, and bootstrap scripts. Mirrors `pip install "
+        "--target` and `npm install --prefix`. Project-scope only."
+    ),
+)
 @click.pass_context
-def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, allow_insecure, allow_insecure_hosts, global_, use_ssh, use_https, allow_protocol_fallback, mcp_name, transport, url, env_pairs, header_pairs, mcp_version, registry_url, no_policy):
+def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, allow_insecure, allow_insecure_hosts, global_, use_ssh, use_https, allow_protocol_fallback, mcp_name, transport, url, env_pairs, header_pairs, mcp_version, registry_url, no_policy, root):
     """Install APM and MCP dependencies from apm.yml (like npm install).
 
     Detects AI runtimes from your apm.yml scripts and installs MCP servers for
@@ -1091,6 +1106,19 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
     # C1 #856: defaults BEFORE try so the finally clause never sees an
     # UnboundLocalError if InstallLogger(...) raises during construction.
     _apm_verbose_prev = os.environ.get("APM_VERBOSE")
+    # --root: redirect project-scope writes to *root* while sources stay
+    # in $PWD.  Conflicts with --global (user scope writes are anchored
+    # at $HOME and have no concept of an arbitrary deploy root).
+    if root and global_:
+        raise click.UsageError("--root is not valid with --global (user scope)")
+    _root_override_active = False
+    if root:
+        from pathlib import Path as _Path
+        from ..core.scope import set_deploy_root_override
+        _root_path = _Path(root)
+        _root_path.mkdir(parents=True, exist_ok=True)
+        set_deploy_root_override(_root_path)
+        _root_override_active = True
     try:
         # Create structured logger for install output early so exception
         # handlers can always reference it (avoids UnboundLocalError if
@@ -1431,10 +1459,11 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
             old_mcp_servers = builtins.set(_existing_lock.mcp_servers)
             old_mcp_configs = builtins.dict(_existing_lock.mcp_configs)
 
-        # Also enter the APM install path when the project root has local .apm/
+        # Also enter the APM install path when the source root has local .apm/
         # primitives, even if there are no external APM dependencies (#714).
-        from apm_cli.core.scope import get_deploy_root as _get_deploy_root
-        _cli_project_root = _get_deploy_root(scope)
+        # Sources resolve from $PWD even when --root redirects writes.
+        from apm_cli.core.scope import get_source_root as _get_source_root
+        _cli_project_root = _get_source_root(scope)
 
         apm_diagnostics = None
         if should_install_apm and (has_any_apm_deps or _project_has_root_primitives(_cli_project_root)):
@@ -1613,6 +1642,11 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
             os.environ.pop("APM_VERBOSE", None)
         else:
             os.environ["APM_VERBOSE"] = _apm_verbose_prev
+        # Clear --root override so it never leaks to subsequent invocations
+        # (test runners, REPL sessions, embedded usage).
+        if _root_override_active:
+            from ..core.scope import set_deploy_root_override
+            set_deploy_root_override(None)
 
 
 # ---------------------------------------------------------------------------

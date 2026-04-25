@@ -177,6 +177,7 @@ def integrate_local_content(
     diagnostics: "DiagnosticCollector",
     logger: Optional["InstallLogger"] = None,
     scope: Optional["InstallScope"] = None,
+    source_root: Optional[Path] = None,
 ) -> dict:
     """Integrate primitives from the project's own .apm/ directory.
 
@@ -188,20 +189,33 @@ def integrate_local_content(
     intentionally ignored (it describes the project itself, not a
     deployable skill).
 
+    Args:
+        project_root: Deploy root -- where ``.claude/``, ``.codex/``,
+            etc. are written.  Also used to compute relative paths for
+            tracking deployed files.
+        source_root: Where to discover the synthetic local package's
+            ``.apm/`` content.  Defaults to ``project_root`` when not
+            provided.  When ``apm install --root`` is in play,
+            ``source_root`` stays at ``$PWD`` while ``project_root``
+            points to the override.
+
     Returns a dict with integration counters and deployed file paths,
     same shape as ``integrate_package_primitives()``.
     """
     from ..models.apm_package import APMPackage, PackageInfo, PackageType
 
+    if source_root is None:
+        source_root = project_root
+
     local_pkg = APMPackage(
         name="_local",
         version="0.0.0",
-        package_path=project_root,
+        package_path=source_root,
         source="local",
     )
     local_info = PackageInfo(
         package=local_pkg,
-        install_path=project_root,
+        install_path=source_root,
         package_type=PackageType.APM_PACKAGE,
     )
 

@@ -97,7 +97,9 @@ def run_install_pipeline(
     except ImportError:
         raise RuntimeError("APM dependency system not available")
 
-    from ..core.scope import InstallScope, get_deploy_root, get_apm_dir
+    from ..core.scope import (
+        InstallScope, get_apm_dir, get_deploy_root, get_source_root,
+    )
 
     if scope is None:
         scope = InstallScope.PROJECT
@@ -106,13 +108,16 @@ def run_install_pipeline(
     dev_apm_deps = apm_package.get_dev_apm_dependencies()
     all_apm_deps = apm_deps + dev_apm_deps
 
-    project_root = get_deploy_root(scope)
+    project_root = get_deploy_root(scope)  # write target
+    source_root = get_source_root(scope)   # source reads (apm.yml, .apm/)
     apm_dir = get_apm_dir(scope)
 
-    # Check whether the project root itself has local .apm/ primitives (#714).
+    # Check whether the source root has local .apm/ primitives (#714).
+    # Sources resolve from $PWD even when --root redirects writes, so the
+    # check uses source_root rather than project_root.
     from apm_cli.install.phases.local_content import _project_has_root_primitives
 
-    _root_has_local_primitives = _project_has_root_primitives(project_root)
+    _root_has_local_primitives = _project_has_root_primitives(source_root)
 
     # Read old local deployed files from the existing lockfile so the
     # post-deps-local phase can run stale cleanup even when no current
@@ -133,6 +138,7 @@ def run_install_pipeline(
     ctx = InstallContext(
         project_root=project_root,
         apm_dir=apm_dir,
+        source_root=source_root,
         apm_package=apm_package,
         update_refs=update_refs,
         verbose=verbose,

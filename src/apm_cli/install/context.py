@@ -34,6 +34,12 @@ class InstallContext:
     # ------------------------------------------------------------------
     project_root: Path
     apm_dir: Path
+    # Source root for reads (apm.yml, .apm/, local-path packages).  Equals
+    # ``project_root`` unless ``apm install --root`` redirects writes; then
+    # ``source_root`` stays at ``$PWD`` while ``project_root`` is the
+    # override.  Pipeline callers that don't pass it default to
+    # ``project_root`` for backward compatibility.
+    source_root: Optional[Path] = None
 
     # ------------------------------------------------------------------
     # Inputs: populated by the caller from CLI args / APMPackage
@@ -124,3 +130,9 @@ class InstallContext:
     old_local_deployed: List[str] = field(default_factory=list)  # pipeline setup
     local_deployed_files: List[str] = field(default_factory=list)  # integrate (root)
     local_content_errors_before: int = 0  # integrate (pre-root)
+
+    def __post_init__(self) -> None:
+        # Default source_root to project_root for backward compatibility
+        # with callers that predate `apm install --root`.
+        if self.source_root is None:
+            self.source_root = self.project_root

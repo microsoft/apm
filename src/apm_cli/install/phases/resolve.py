@@ -115,6 +115,10 @@ def run(ctx: "InstallContext") -> None:
     # This matches the original code's closure over function-level locals.
     scope = ctx.scope
     project_root = ctx.project_root
+    # Local-path package references in apm.yml are relative to the manifest's
+    # location (source_root), not the deploy override.  Defaults to
+    # project_root when --root is not used.
+    source_root = ctx.source_root or ctx.project_root
     update_refs = ctx.update_refs
     logger = ctx.logger
     verbose = ctx.verbose
@@ -141,7 +145,7 @@ def run(ctx: "InstallContext") -> None:
                     callback_failures.add(dep_ref.get_unique_key())
                     return None
                 result_path = _copy_local_package(
-                    dep_ref, install_path, project_root, logger=logger
+                    dep_ref, install_path, source_root, logger=logger
                 )
                 if result_path:
                     callback_downloaded[dep_ref.get_unique_key()] = None
