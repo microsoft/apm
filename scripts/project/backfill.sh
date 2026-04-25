@@ -15,6 +15,9 @@ export PAGER=cat GH_PAGER=cat
 
 echo "Fetching open issues + PRs with any theme/* label..."
 ISSUES=""
+# NOTE: keep this theme list in sync with THEME_MAP in sync_item.py.
+# Search query OR semantics require one round-trip per theme; results are
+# unioned via `sort -u` below.
 for THEME in theme/portability theme/security theme/governance; do
   CHUNK=$(gh api graphql -f query='
   {

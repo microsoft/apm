@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       content_id:
-        description: "Issue or PR node ID to sync"
+        description: "Issue or PR GraphQL node ID (e.g. I_kwDO... / PR_kwDO...). Obtain via: gh api graphql -f query='query{repository(owner:\"microsoft\",name:\"apm\"){issue(number:N){id}}}'"
         required: true
 
 permissions:
@@ -27,9 +27,15 @@ jobs:
           sparse-checkout: scripts/project
       - name: Resolve content node ID
         id: cid
+        env:
+          # Pass workflow_dispatch input through env to avoid shell-level
+          # template interpolation (script-injection hardening, GHSA-pattern).
+          # github.event.* node IDs are GitHub-generated opaque IDs, safe to
+          # interpolate directly.
+          INPUT_CONTENT_ID: ${{ inputs.content_id }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "id=${{ inputs.content_id }}" >> "$GITHUB_OUTPUT"
+            echo "id=$INPUT_CONTENT_ID" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.event_name }}" = "issues" ]; then
             echo "id=${{ github.event.issue.node_id }}" >> "$GITHUB_OUTPUT"
           else

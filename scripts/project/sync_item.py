@@ -21,6 +21,12 @@ import urllib.error
 PROJECT_ID = "PVT_kwDOAF3p4s4BVoGw"
 GQL_URL = "https://api.github.com/graphql"
 
+# Milestone-title prefixes that map to Tier=Now. Keep aligned with the
+# active release lines (current development line + still-open patch lines).
+# See pyproject.toml `version` and the open milestones in microsoft/apm.
+# Anything outside this list with an open milestone falls into Tier=Next.
+NOW_MILESTONE_PREFIXES = ("0.9.", "0.10.", "0.11.")
+
 THEME_MAP = {
     "theme/portability": "Portability",
     "theme/security": "Security",
@@ -159,7 +165,7 @@ def derive_tier(content):
         return "Shipped"
     if ms and ms.get("state") == "OPEN":
         title = ms["title"]
-        if title.startswith(("0.9.", "0.8.")):
+        if title.startswith(NOW_MILESTONE_PREFIXES):
             return "Now"
         return "Next"
     return "Later"
