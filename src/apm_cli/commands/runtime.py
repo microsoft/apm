@@ -23,7 +23,7 @@ def runtime():
 
 
 @runtime.command(help="Set up a runtime")
-@click.argument("runtime_name", type=click.Choice(["copilot", "codex", "llm"]))
+@click.argument("runtime_name", type=click.Choice(["copilot", "codex", "llm", "gemini"]))
 @click.option("--version", help="Specific version to install")
 @click.option(
     "--vanilla",
@@ -123,7 +123,7 @@ def list():
 
 
 @runtime.command(help="Remove an installed runtime")
-@click.argument("runtime_name", type=click.Choice(["copilot", "codex", "llm"]))
+@click.argument("runtime_name", type=click.Choice(["copilot", "codex", "llm", "gemini"]))
 @click.confirmation_option(prompt="Are you sure you want to remove this runtime?", help="Confirm the action without prompting")
 def remove(runtime_name):
     """Remove an installed runtime from APM management."""

@@ -84,10 +84,10 @@ apm install [PACKAGES...] [OPTIONS]
 - `PACKAGES` - Optional APM packages to add and install. Accepts shorthand (`owner/repo`), HTTPS URLs, SSH URLs, FQDN shorthand (`host/owner/repo`), local filesystem paths (`./path`, `../path`, `/absolute/path`, `~/path`), or marketplace references (`NAME@MARKETPLACE[#ref]`). All forms are normalized to canonical format in `apm.yml`.
 
 **Options:**
-- `--runtime TEXT` - Target specific runtime only (copilot, codex, vscode)
+- `--runtime TEXT` - Target specific runtime only (copilot, codex, gemini, vscode)
 - `--exclude TEXT` - Exclude specific runtime from installation
 - `--only [apm|mcp]` - Install only specific dependency type
-- `--target [copilot|claude|cursor|codex|opencode|all]` - Force deployment to specific target(s). Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Overrides auto-detection
+- `--target [copilot|claude|cursor|codex|opencode|gemini|all]` - Force deployment to specific target(s). Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Overrides auto-detection
 - `--update` - Update dependencies to latest Git references  
 - `--force` - Overwrite locally-authored files on collision; bypass security scan blocks
 - `--dry-run` - Show what would be installed without installing
@@ -264,6 +264,8 @@ APM automatically detects which integrations to enable based on your project str
 - **Claude integration**: Enabled when `.claude/` directory exists
 - **Cursor integration**: Enabled when `.cursor/` directory exists
 - **OpenCode integration**: Enabled when `.opencode/` directory exists
+- **Codex integration**: Enabled when `.codex/` directory exists
+- **Gemini integration**: Enabled when `.gemini/` directory exists
 - All integrations can coexist in the same project
 
 **VSCode Integration (`.github/` present):**
@@ -370,6 +372,9 @@ apm uninstall -g microsoft/apm-sample-package
 | OpenCode agents | `.opencode/agents/*.md` |
 | OpenCode commands | `.opencode/commands/*.md` |
 | OpenCode skills | `.opencode/skills/{folder-name}/` |
+| Gemini commands | `.gemini/commands/*.toml` |
+| Gemini skills | `.gemini/skills/{folder-name}/` |
+| Gemini settings | `.gemini/settings.json` (hooks + MCP cleaned) |
 | Lockfile entries | `apm.lock.yaml` (removed packages + orphaned transitives) |
 
 **Behavior:**
@@ -555,7 +560,7 @@ apm pack [OPTIONS]
 
 **Options:**
 - `-o, --output PATH` - Output directory (default: `./build`)
-- `-t, --target [copilot|vscode|claude|cursor|codex|opencode|all]` - Filter files by target. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Auto-detects from `apm.yml` if not specified. `vscode` is an alias for `copilot`
+- `-t, --target [copilot|vscode|claude|cursor|codex|opencode|gemini|all]` - Filter files by target. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Auto-detects from `apm.yml` if not specified. `vscode` is an alias for `copilot`
 - `--archive` - Produce a `.tar.gz` archive instead of a directory
 - `--dry-run` - List files that would be packed without writing anything
 - `--format [apm|plugin]` - Bundle format (default: `apm`). `plugin` produces a standalone plugin directory with `plugin.json`
@@ -597,6 +602,7 @@ apm pack -o dist/
 | `claude` | `.claude/` |
 | `cursor` | `.cursor/` |
 | `opencode` | `.opencode/` |
+| `gemini` | `.gemini/` |
 | `all` | all of the above |
 
 **Enriched lockfile example:**
@@ -956,7 +962,7 @@ apm deps update [PACKAGES...] [OPTIONS]
 - `--verbose, -v` - Show detailed update information
 - `--force` - Overwrite locally-authored files on collision
 - `-g, --global` - Update user-scope dependencies (`~/.apm/`)
-- `--target, -t` - Force deployment to specific target(s). Accepts comma-separated values (e.g., `-t claude,copilot`). Valid values: copilot, claude, cursor, opencode, vscode, agents, all
+- `--target, -t` - Force deployment to specific target(s). Accepts comma-separated values (e.g., `-t claude,copilot`). Valid values: copilot, claude, cursor, opencode, gemini, vscode, agents, all
 - `--parallel-downloads` - Max concurrent downloads (default: 4)
 
 **Policy enforcement:** `apm deps update` runs the install pipeline and is therefore gated by org `apm-policy.yml`. There is no `--no-policy` flag on this command -- the only escape hatch is `APM_POLICY_DISABLE=1` for the shell session. See [Policy reference](../../enterprise/policy-reference/#install-time-enforcement).
@@ -1348,7 +1354,7 @@ apm compile [OPTIONS]
 
 **Options:**
 - `-o, --output TEXT` - Output file path (for single-file mode)
-- `-t, --target [vscode|agents|claude|codex|opencode|all]` - Target agent format. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). `agents` is an alias for `vscode`. Auto-detects if not specified.
+- `-t, --target [vscode|agents|claude|codex|opencode|gemini|all]` - Target agent format. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). `agents` is an alias for `vscode`. Auto-detects if not specified.
 - `--chatmode TEXT` - Chatmode to prepend to the AGENTS.md file
 - `--dry-run` - Preview compilation without writing files (shows placement decisions)
 - `--no-links` - Skip markdown link resolution
@@ -1369,6 +1375,7 @@ When `--target` is not specified, APM auto-detects based on existing project str
 | `.github/` exists only | `vscode` | AGENTS.md + .github/ |
 | `.claude/` exists only | `claude` | CLAUDE.md + .claude/ |
 | `.codex/` exists | `codex` | AGENTS.md + .codex/ + .agents/ |
+| `.gemini/` exists | `gemini` | GEMINI.md + .gemini/ |
 | Both folders exist | `all` | All outputs |
 | Neither folder exists | `minimal` | AGENTS.md only |
 
@@ -1389,10 +1396,11 @@ target: [claude, copilot]  # multiple targets -- only these are compiled/install
 
 | Target | Output Files | Best For |
 |--------|--------------|----------|
-| `vscode` | AGENTS.md, .github/prompts/, .github/agents/, .github/skills/ | GitHub Copilot, Cursor, Gemini |
+| `vscode` | AGENTS.md, .github/prompts/, .github/agents/, .github/skills/ | GitHub Copilot, Cursor |
 | `claude` | CLAUDE.md, .claude/commands/, SKILL.md | Claude Code, Claude Desktop |
 | `codex` | AGENTS.md, .agents/skills/, .codex/agents/, .codex/hooks.json | Codex CLI |
 | `opencode` | AGENTS.md, .opencode/agents/, .opencode/commands/, .opencode/skills/ | OpenCode |
+| `gemini` | GEMINI.md, .gemini/commands/, .gemini/skills/ | Gemini CLI |
 | `all` | All of the above | Universal compatibility |
 
 **Examples:**
@@ -1620,7 +1628,7 @@ export APM_TEMP_DIR=/tmp/apm-work
 
 ### `apm runtime` (Experimental) - Manage AI runtimes
 
-APM manages AI runtime installation and configuration automatically. Currently supports three runtimes: `copilot`, `codex`, and `llm`.
+APM manages AI runtime installation and configuration automatically. Currently supports four runtimes: `copilot`, `codex`, `llm`, and `gemini`.
 
 > See the [Agent Workflows guide](../../guides/agent-workflows/) for usage details.
 
@@ -1632,17 +1640,18 @@ apm runtime COMMAND [OPTIONS]
 - **`copilot`** - GitHub Copilot coding agent
 - **`codex`** - OpenAI Codex CLI with GitHub Models support
 - **`llm`** - Simon Willison's LLM library with multiple providers
+- **`gemini`** - Google Gemini CLI
 
 #### `apm runtime setup` - Install AI runtime
 
 Download and configure an AI runtime from official sources.
 
 ```bash
-apm runtime setup [OPTIONS] {copilot|codex|llm}
+apm runtime setup [OPTIONS] {copilot|codex|llm|gemini}
 ```
 
 **Arguments:**
-- `{copilot|codex|llm}` - Runtime to install
+- `{copilot|codex|llm|gemini}` - Runtime to install
 
 **Options:**
 - `--version TEXT` - Specific version to install
@@ -1693,11 +1702,11 @@ apm runtime list
 Remove an installed runtime and its configuration.
 
 ```bash
-apm runtime remove [OPTIONS] {copilot|codex|llm}
+apm runtime remove [OPTIONS] {copilot|codex|llm|gemini}
 ```
 
 **Arguments:**
-- `{copilot|codex|llm}` - Runtime to remove
+- `{copilot|codex|llm|gemini}` - Runtime to remove
 
 **Options:**
 - `--yes` - Confirm the action without prompting
@@ -1711,7 +1720,7 @@ apm runtime status
 ```
 
 **Output includes:**
-- Runtime preference order (copilot → codex → llm)
+- Runtime preference order (copilot → codex → gemini → llm)
 - Currently active runtime
 - Next steps if no runtime is available
 

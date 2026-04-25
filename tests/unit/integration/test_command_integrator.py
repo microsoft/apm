@@ -477,3 +477,180 @@ class TestIntegratePackagePrimitivesTargetGating:
             integrators["command_integrator"].integrate_commands_for_target.assert_called_once()
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+# ===================================================================
+# Gemini CLI Command Integration (.toml format)
+# ===================================================================
+
+
+class TestGeminiCommandIntegration:
+    """Tests for Gemini CLI command integration (.prompt.md → .toml)."""
+
+    @pytest.fixture
+    def temp_project(self):
+        """Create a temporary project with .gemini/ directory."""
+        temp_dir = tempfile.mkdtemp()
+        temp_path = Path(temp_dir)
+        (temp_path / ".gemini").mkdir()
+        yield temp_path
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    @pytest.fixture
+    def temp_project_no_gemini(self):
+        temp_dir = tempfile.mkdtemp()
+        temp_path = Path(temp_dir)
+        yield temp_path
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def _make_package(self, project_root, prompts):
+        pkg_dir = project_root / "apm_modules" / "test-pkg"
+        pkg_dir.mkdir(parents=True)
+        prompts_dir = pkg_dir / ".apm" / "prompts"
+        prompts_dir.mkdir(parents=True)
+        for name, content in prompts.items():
+            (prompts_dir / name).write_text(content)
+
+        mock_info = MagicMock()
+        mock_info.install_path = pkg_dir
+        mock_info.resolved_reference = None
+        mock_info.package = MagicMock()
+        mock_info.package.name = "test-pkg"
+        return mock_info
+
+    def test_skips_when_no_gemini_dir(self, temp_project_no_gemini):
+        """Opt-in: skip if .gemini/ does not exist."""
+        pkg_info = self._make_package(
+            temp_project_no_gemini,
+            {"test.prompt.md": "---\ndescription: Test\n---\n# Test"},
+        )
+        integrator = CommandIntegrator()
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        result = integrator.integrate_commands_for_target(
+            KNOWN_TARGETS["gemini"], pkg_info, temp_project_no_gemini
+        )
+        assert result.files_integrated == 0
+
+    def test_deploys_toml_commands(self, temp_project):
+        """Deploy .prompt.md → .gemini/commands/<name>.toml."""
+        pkg_info = self._make_package(
+            temp_project,
+            {"review.prompt.md": "---\ndescription: Review code\n---\nReview the code."},
+        )
+        integrator = CommandIntegrator()
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        result = integrator.integrate_commands_for_target(
+            KNOWN_TARGETS["gemini"], pkg_info, temp_project
+        )
+        assert result.files_integrated == 1
+        target = temp_project / ".gemini" / "commands" / "review.toml"
+        assert target.exists()
+        content = target.read_text()
+        assert "Review the code." in content
+        assert "Review code" in content
+
+    def test_toml_is_valid(self, temp_project):
+        """Verify generated file is valid TOML."""
+        import toml
+        pkg_info = self._make_package(
+            temp_project,
+            {"test.prompt.md": "---\ndescription: A test\n---\nDo the thing."},
+        )
+        integrator = CommandIntegrator()
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        integrator.integrate_commands_for_target(
+            KNOWN_TARGETS["gemini"], pkg_info, temp_project
+        )
+        target = temp_project / ".gemini" / "commands" / "test.toml"
+        parsed = toml.loads(target.read_text())
+        assert parsed["description"] == "A test"
+        assert "Do the thing." in parsed["prompt"]
+
+    def test_arguments_replacement(self, temp_project):
+        """$ARGUMENTS is replaced with {{args}}."""
+        pkg_info = self._make_package(
+            temp_project,
+            {"cmd.prompt.md": "---\ndescription: Run cmd\n---\nRun with $ARGUMENTS"},
+        )
+        integrator = CommandIntegrator()
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        integrator.integrate_commands_for_target(
+            KNOWN_TARGETS["gemini"], pkg_info, temp_project
+        )
+        target = temp_project / ".gemini" / "commands" / "cmd.toml"
+        content = target.read_text()
+        assert "{{args}}" in content
+        assert "$ARGUMENTS" not in content
+
+    def test_positional_args_prepends_args_line(self, temp_project):
+        """When $1 or $2 are found, prepend 'Arguments: {{args}}'."""
+        pkg_info = self._make_package(
+            temp_project,
+            {"cmd.prompt.md": "---\ndescription: Fix\n---\nFix file $1"},
+        )
+        integrator = CommandIntegrator()
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        integrator.integrate_commands_for_target(
+            KNOWN_TARGETS["gemini"], pkg_info, temp_project
+        )
+        target = temp_project / ".gemini" / "commands" / "cmd.toml"
+        import toml
+        parsed = toml.loads(target.read_text())
+        assert parsed["prompt"].startswith("Arguments: {{args}}")
+
+    def test_no_description_omits_key(self, temp_project):
+        """When no description in frontmatter, TOML omits description key."""
+        pkg_info = self._make_package(
+            temp_project,
+            {"cmd.prompt.md": "Just do the thing."},
+        )
+        integrator = CommandIntegrator()
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        integrator.integrate_commands_for_target(
+            KNOWN_TARGETS["gemini"], pkg_info, temp_project
+        )
+        target = temp_project / ".gemini" / "commands" / "cmd.toml"
+        import toml
+        parsed = toml.loads(target.read_text())
+        assert "description" not in parsed
+        assert "Just do the thing." in parsed["prompt"]
+
+
+class TestWriteGeminiCommand:
+    """Direct unit tests for CommandIntegrator._write_gemini_command()."""
+
+    def setup_method(self):
+        import tempfile
+        self.temp_dir = tempfile.mkdtemp()
+
+    def teardown_method(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_basic_conversion(self):
+        source = Path(self.temp_dir) / "test.prompt.md"
+        target = Path(self.temp_dir) / "test.toml"
+        source.write_text("---\ndescription: Test command\n---\nDo something.")
+        CommandIntegrator._write_gemini_command(source, target)
+
+        import toml
+        parsed = toml.loads(target.read_text())
+        assert parsed["description"] == "Test command"
+        assert parsed["prompt"] == "Do something."
+
+    def test_arguments_replaced(self):
+        source = Path(self.temp_dir) / "test.prompt.md"
+        target = Path(self.temp_dir) / "test.toml"
+        source.write_text("Review $ARGUMENTS")
+        CommandIntegrator._write_gemini_command(source, target)
+
+        import toml
+        parsed = toml.loads(target.read_text())
+        assert "{{args}}" in parsed["prompt"]
+        assert "$ARGUMENTS" not in parsed["prompt"]
+
+    def test_creates_parent_dirs(self):
+        source = Path(self.temp_dir) / "test.prompt.md"
+        target = Path(self.temp_dir) / "sub" / "dir" / "test.toml"
+        source.write_text("# Test")
+        CommandIntegrator._write_gemini_command(source, target)
+        assert target.exists()
