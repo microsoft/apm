@@ -692,20 +692,23 @@ class AgentsCompiler:
         for primitive in primitives.all_primitives():
             primitive_errors = primitive.validate()
             if primitive_errors:
-                file_path = portable_relpath(primitive.file_path, self.base_dir)
-                
+                # Source files live under source_dir; relativise display
+                # paths against it so `apm compile --root` doesn't render
+                # absolute or `../../` paths in warning messages.
+                file_path = portable_relpath(primitive.file_path, self.source_dir)
+
                 for error in primitive_errors:
                     # Treat validation errors as warnings instead of hard errors
                     # This allows compilation to continue with incomplete primitives
                     self.warnings.append(f"{file_path}: {error}")
-            
+
             # Validate markdown links in each primitive's content using its own directory as base
             if hasattr(primitive, 'content') and primitive.content:
                 primitive_dir = primitive.file_path.parent
                 link_errors = validate_link_targets(primitive.content, primitive_dir)
                 if link_errors:
-                    file_path = portable_relpath(primitive.file_path, self.base_dir)
-                    
+                    file_path = portable_relpath(primitive.file_path, self.source_dir)
+
                     for link_error in link_errors:
                         self.warnings.append(f"{file_path}: {link_error}")
         
@@ -869,7 +872,10 @@ class AgentsCompiler:
             
             for instruction in placement.instructions:
                 source = getattr(instruction, 'source', 'local')
-                inst_path = portable_relpath(instruction.file_path, self.base_dir)
+                # instruction.file_path is a source-tree file; relativise
+                # against source_dir so `apm compile --root` produces
+                # human-readable paths in verbose output.
+                inst_path = portable_relpath(instruction.file_path, self.source_dir)
                 
                 self._log("verbose_detail", f"   * {instruction.apply_to or 'no pattern'} <- {source} {inst_path}")
             self._log("verbose_detail", "")
