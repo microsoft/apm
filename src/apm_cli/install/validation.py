@@ -133,7 +133,9 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             if verbose_log:
                 verbose_log(f"Auth resolved: host={host}, org={org}, source={ctx.source}, type={ctx.token_type}")
             virtual_downloader = GitHubPackageDownloader(auth_resolver=auth_resolver)
-            result = virtual_downloader.validate_virtual_package_exists(dep_ref)
+            result = virtual_downloader.validate_virtual_package_exists(
+                dep_ref, verbose_callback=verbose_log,
+            )
             if not result and verbose_log:
                 try:
                     err_ctx = auth_resolver.build_error_context(
