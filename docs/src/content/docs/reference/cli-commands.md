@@ -87,7 +87,7 @@ apm install [PACKAGES...] [OPTIONS]
 - `--runtime TEXT` - Target specific runtime only (copilot, codex, vscode)
 - `--exclude TEXT` - Exclude specific runtime from installation
 - `--only [apm|mcp]` - Install only specific dependency type
-- `--target [copilot|claude|cursor|codex|opencode|all]` - Force deployment to specific target(s). Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Overrides auto-detection
+- `--target [copilot|claude|cursor|codex|opencode|gemini|all]` - Force deployment to specific target(s). Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Overrides auto-detection
 - `--update` - Update dependencies to latest Git references  
 - `--force` - Overwrite locally-authored files on collision; bypass security scan blocks
 - `--dry-run` - Show what would be installed without installing
@@ -555,7 +555,7 @@ apm pack [OPTIONS]
 
 **Options:**
 - `-o, --output PATH` - Output directory (default: `./build`)
-- `-t, --target [copilot|vscode|claude|cursor|codex|opencode|all]` - Filter files by target. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Auto-detects from `apm.yml` if not specified. `vscode` is an alias for `copilot`
+- `-t, --target [copilot|vscode|claude|cursor|codex|opencode|gemini|all]` - Filter files by target. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Auto-detects from `apm.yml` if not specified. `vscode` is an alias for `copilot`
 - `--archive` - Produce a `.tar.gz` archive instead of a directory
 - `--dry-run` - List files that would be packed without writing anything
 - `--format [apm|plugin]` - Bundle format (default: `apm`). `plugin` produces a standalone plugin directory with `plugin.json`
@@ -956,7 +956,7 @@ apm deps update [PACKAGES...] [OPTIONS]
 - `--verbose, -v` - Show detailed update information
 - `--force` - Overwrite locally-authored files on collision
 - `-g, --global` - Update user-scope dependencies (`~/.apm/`)
-- `--target, -t` - Force deployment to specific target(s). Accepts comma-separated values (e.g., `-t claude,copilot`). Valid values: copilot, claude, cursor, opencode, vscode, agents, all
+- `--target, -t` - Force deployment to specific target(s). Accepts comma-separated values (e.g., `-t claude,copilot`). Valid values: copilot, claude, cursor, opencode, gemini, vscode, agents, all
 - `--parallel-downloads` - Max concurrent downloads (default: 4)
 
 **Policy enforcement:** `apm deps update` runs the install pipeline and is therefore gated by org `apm-policy.yml`. There is no `--no-policy` flag on this command -- the only escape hatch is `APM_POLICY_DISABLE=1` for the shell session. See [Policy reference](../../enterprise/policy-reference/#install-time-enforcement).
@@ -1348,7 +1348,7 @@ apm compile [OPTIONS]
 
 **Options:**
 - `-o, --output TEXT` - Output file path (for single-file mode)
-- `-t, --target [vscode|agents|claude|codex|opencode|all]` - Target agent format. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). `agents` is an alias for `vscode`. Auto-detects if not specified.
+- `-t, --target [vscode|agents|claude|codex|opencode|gemini|all]` - Target agent format. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). `agents` is an alias for `vscode`. Auto-detects if not specified.
 - `--chatmode TEXT` - Chatmode to prepend to the AGENTS.md file
 - `--dry-run` - Preview compilation without writing files (shows placement decisions)
 - `--no-links` - Skip markdown link resolution
@@ -1369,6 +1369,7 @@ When `--target` is not specified, APM auto-detects based on existing project str
 | `.github/` exists only | `vscode` | AGENTS.md + .github/ |
 | `.claude/` exists only | `claude` | CLAUDE.md + .claude/ |
 | `.codex/` exists | `codex` | AGENTS.md + .codex/ + .agents/ |
+| `.gemini/` exists | `gemini` | .gemini/settings.json |
 | Both folders exist | `all` | All outputs |
 | Neither folder exists | `minimal` | AGENTS.md only |
 
@@ -1632,17 +1633,18 @@ apm runtime COMMAND [OPTIONS]
 - **`copilot`** - GitHub Copilot coding agent
 - **`codex`** - OpenAI Codex CLI with GitHub Models support
 - **`llm`** - Simon Willison's LLM library with multiple providers
+- **`gemini`** - Google Gemini CLI
 
 #### `apm runtime setup` - Install AI runtime
 
 Download and configure an AI runtime from official sources.
 
 ```bash
-apm runtime setup [OPTIONS] {copilot|codex|llm}
+apm runtime setup [OPTIONS] {copilot|codex|llm|gemini}
 ```
 
 **Arguments:**
-- `{copilot|codex|llm}` - Runtime to install
+- `{copilot|codex|llm|gemini}` - Runtime to install
 
 **Options:**
 - `--version TEXT` - Specific version to install
@@ -1693,11 +1695,11 @@ apm runtime list
 Remove an installed runtime and its configuration.
 
 ```bash
-apm runtime remove [OPTIONS] {copilot|codex|llm}
+apm runtime remove [OPTIONS] {copilot|codex|llm|gemini}
 ```
 
 **Arguments:**
-- `{copilot|codex|llm}` - Runtime to remove
+- `{copilot|codex|llm|gemini}` - Runtime to remove
 
 **Options:**
 - `--yes` - Confirm the action without prompting

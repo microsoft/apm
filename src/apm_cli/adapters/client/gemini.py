@@ -22,10 +22,14 @@ Ref: https://geminicli.com/docs/reference/configuration/
 """
 
 import json
+import logging
 import os
 from pathlib import Path
 
 from .copilot import CopilotClientAdapter
+from ...utils.console import _rich_error, _rich_info, _rich_success
+
+logger = logging.getLogger(__name__)
 
 
 class GeminiClientAdapter(CopilotClientAdapter):
@@ -93,7 +97,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
         the Gemini CLI settings file.
         """
         if not server_url:
-            print("Error: server_url cannot be empty")
+            _rich_error("server_url cannot be empty", symbol="error")
             return False
 
         gemini_dir = Path(os.getcwd()) / ".gemini"
@@ -107,7 +111,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
                 server_info = self.registry_client.find_server_by_reference(server_url)
 
             if not server_info:
-                print(f"Error: MCP server '{server_url}' not found in registry")
+                _rich_error(f"MCP server '{server_url}' not found in registry", symbol="error")
                 return False
 
             if server_name:
@@ -122,11 +126,12 @@ class GeminiClientAdapter(CopilotClientAdapter):
             )
             self.update_config({config_key: server_config})
 
-            print(
-                f"Successfully configured MCP server '{config_key}' for Gemini CLI"
+            _rich_success(
+                f"Configured MCP server '{config_key}' for Gemini CLI", symbol="success"
             )
             return True
 
         except Exception as e:
-            print(f"Error configuring MCP server: {e}")
+            logger.debug("Gemini MCP configuration failed: %s", e)
+            _rich_error("Failed to configure MCP server for Gemini CLI", symbol="error")
             return False
