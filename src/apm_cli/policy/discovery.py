@@ -990,7 +990,8 @@ def _get_token_for_host(host: str) -> Optional[str]:
 
         manager = GitHubTokenManager()
         return manager.get_token_with_credential_fallback("modules", host)
-    except Exception:
+    except Exception as exc:
+        logger.debug("Token manager failed for %s: %s", host, exc)
         if _is_github_host(host):
             return (
                 os.environ.get("GITHUB_TOKEN")

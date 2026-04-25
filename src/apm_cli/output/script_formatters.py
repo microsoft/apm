@@ -171,7 +171,7 @@ class ScriptExecutionFormatter:
                 panel_output = capture.get()
                 if panel_output.strip():
                     lines.extend(panel_output.split('\n'))
-            except:
+            except Exception:
                 # Fallback to simple formatting
                 lines.append("-" * 50)
                 lines.append(content_preview)
@@ -327,7 +327,7 @@ class ScriptExecutionFormatter:
                 with self.console.capture() as capture:
                     self.console.print(text)
                 return capture.get().rstrip('\n')
-            except:
+            except Exception:
                 # Fallback to simple formatting
                 return f"[i] Auto-discovered: {prompt_file} (runtime: {runtime})"
         else:

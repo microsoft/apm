@@ -5,6 +5,7 @@ full content assembly. This keeps repeated compiles byte-identical when source
 primitives & constitution are unchanged.
 """
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -21,6 +22,8 @@ from .template_builder import (
 from .link_resolver import resolve_markdown_links, validate_link_targets
 from ..utils.paths import portable_relpath
 from ..core.target_detection import should_compile_agents_md, should_compile_claude_md, should_compile_gemini_md
+
+_logger = logging.getLogger(__name__)
 
 
 # User-facing target aliases that map to the canonical "vscode" target.
@@ -125,9 +128,8 @@ class CompilationConfig:
                         # Support single pattern as string
                         config.exclude = [exclude_patterns]
                 
-        except Exception:
-            # If config loading fails, use defaults
-            pass
+        except Exception as exc:
+            _logger.debug("Config loading failed, using defaults: %s", exc)
         
         # Apply command-line overrides (highest priority)
         for key, value in overrides.items():
@@ -526,8 +528,8 @@ class AgentsCompiler:
                             with_constitution=True,
                             output_path=claude_path
                         )
-                    except Exception:
-                        pass  # Use original content if injection fails
+                    except Exception as exc:
+                        _logger.debug("Constitution injection failed for %s: %s", claude_path, exc)
                 
                 # Defense-in-depth: scan compiled output before writing
                 verdict = SecurityGate.scan_text(
@@ -858,9 +860,8 @@ class AgentsCompiler:
                         with_constitution=True, 
                         output_path=agents_path
                     )
-                except Exception:
-                    # If constitution injection fails, use original content
-                    pass
+                except Exception as exc:
+                    _logger.debug("Constitution injection failed for %s: %s", agents_path, exc)
             
             # Create directory if it doesn't exist
             agents_path.parent.mkdir(parents=True, exist_ok=True)

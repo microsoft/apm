@@ -51,6 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `_get_console()`: returns thread-safe singleton instead of creating new `Console()` per call.
 - Marketplace registry cache: `_load()`, `_save()`, `_invalidate_cache()` protected with `threading.Lock`.
 
+### Fixed
+
+- Bare `except:` clauses in `formatters.py` (5) and `script_formatters.py` (2) now catch `Exception` instead of `BaseException`, allowing `KeyboardInterrupt` and `SystemExit` to propagate correctly.
+- Silent auth fallback in `discovery.py:_get_token_for_host()` now logs `logger.debug()` when the token manager fails, making credential resolution failures visible with `--verbose`.
+- Silent `except Exception: pass` handlers in `agents_compiler.py` (3) now emit `_logger.debug()` traces for config loading and constitution injection failures.
+
 ## [0.9.4] - 2026-04-27
 
 ### Added
