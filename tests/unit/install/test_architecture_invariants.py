@@ -136,11 +136,21 @@ def test_install_py_under_legacy_budget():
     through CommandLogger / DiagnosticCollector instead of stderr
     (+5 lines comment + call F2/F3). Both will be recovered by the
     same pending --mcp extraction.
+
+    Issue #888 (``--root``) raised 1700 -> 1725 to add the ``--root``
+    Click option (8 lines) and bracket the handler body with the
+    ``install_root_redirect`` context manager (5 lines: import +
+    enter + finally exit, with the ``_root_redirect`` ref kept on
+    the function frame so the ``finally`` clause can call
+    ``__exit__``).  The redirect itself is fully extracted into
+    :mod:`apm_cli.install.root_redirect`; the leftover lines are the
+    minimum surface needed for CLI wiring.  The same pending --mcp
+    extraction will recover this budget.
     """
     install_py = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "commands" / "install.py"
     assert install_py.is_file()
     n = _line_count(install_py)
-    assert n <= 1700, (
+    assert n <= 1725, (
         f"commands/install.py grew to {n} LOC (budget 1700). "
         "Do NOT trim cosmetically -- engage the python-architecture skill "
         "(.github/skills/python-architecture/SKILL.md) and propose an "

@@ -10,15 +10,20 @@ Defines where packages are deployed based on scope:
 User-scope support varies by target -- see ``TargetProfile.user_supported``
 in ``apm_cli.integration.targets`` for the canonical registry.
 
-Deploy-root override
+Source-root override
 --------------------
-``set_deploy_root_override`` redirects project-scope writes to an
-arbitrary directory while sources continue to resolve from ``$PWD``.
-This backs the ``apm install --root`` and ``apm compile --root``
-flags.  Source helpers (:func:`get_source_root`, :func:`get_manifest_path`)
-ignore the override; write helpers (:func:`get_deploy_root`,
-:func:`get_apm_dir`, :func:`get_modules_dir`, :func:`get_lockfile_dir`)
-honour it.
+``set_source_root_override`` pins the source root (where ``apm.yml``
+and local-path packages resolve from) to an explicit directory.  The
+``apm install --root`` flow uses this together with ``os.chdir(root)``
+so existing call-sites that hardcode ``Path.cwd()`` automatically
+resolve to the deploy root, while sources continue to read from the
+captured original working directory.
+
+Write helpers (:func:`get_deploy_root`, :func:`get_apm_dir`,
+:func:`get_modules_dir`, :func:`get_lockfile_dir`) intentionally do
+NOT consult the override -- after ``chdir`` they already point to the
+deploy root.  Source helpers (:func:`get_source_root`,
+:func:`get_manifest_path`) consult it.
 """
 
 from __future__ import annotations
@@ -49,34 +54,32 @@ class InstallScope(Enum):
 
 
 # ---------------------------------------------------------------------------
-# Deploy-root override (process-global; managed by --root flag handlers)
+# Source-root override (process-global; managed by --root flag handlers)
 # ---------------------------------------------------------------------------
 
 
-_DEPLOY_ROOT_OVERRIDE: Optional[Path] = None
+_SOURCE_ROOT_OVERRIDE: Optional[Path] = None
 
 
-def set_deploy_root_override(path: Optional[Path]) -> None:
-    """Override the project-scope deploy root for write helpers.
+def set_source_root_override(path: Optional[Path]) -> None:
+    """Pin the project-scope source root to *path*.
 
-    When set, :func:`get_deploy_root`, :func:`get_apm_dir`,
-    :func:`get_modules_dir`, and :func:`get_lockfile_dir` return *path*
-    (resolved) instead of ``Path.cwd()`` for project-scope callers.
+    Used by ``apm install --root`` (and any command that ``chdir``s
+    into a deploy directory) to remember the user's original working
+    directory so :func:`get_source_root` and :func:`get_manifest_path`
+    keep reading sources from there.
 
-    Source helpers (:func:`get_source_root`, :func:`get_manifest_path`)
-    are unaffected -- they always resolve from ``$PWD``.
-
-    Pass ``None`` to clear the override.  Command handlers should always
-    clear in a ``try/finally`` block so the global state never leaks
-    across CLI invocations.
+    Pass ``None`` to clear the override.  Command handlers should
+    always clear in a ``try/finally`` block so the global state never
+    leaks across CLI invocations.
     """
-    global _DEPLOY_ROOT_OVERRIDE
-    _DEPLOY_ROOT_OVERRIDE = path.resolve() if path is not None else None
+    global _SOURCE_ROOT_OVERRIDE
+    _SOURCE_ROOT_OVERRIDE = path.resolve() if path is not None else None
 
 
-def get_deploy_root_override() -> Optional[Path]:
-    """Return the active deploy-root override, or ``None`` when unset."""
-    return _DEPLOY_ROOT_OVERRIDE
+def get_source_root_override() -> Optional[Path]:
+    """Return the active source-root override, or ``None`` when unset."""
+    return _SOURCE_ROOT_OVERRIDE
 
 
 # ---------------------------------------------------------------------------
@@ -87,8 +90,8 @@ def get_deploy_root_override() -> Optional[Path]:
 def get_source_root(scope: InstallScope) -> Path:
     """Return the directory used to read project sources.
 
-    Project scope: ``Path.cwd()`` -- always, never affected by
-    :func:`set_deploy_root_override`.  User scope: ``Path.home()``.
+    Project scope: the active source-root override when set, otherwise
+    ``Path.cwd()``.  User scope: ``Path.home()``.
 
     Sources resolved from this root: ``apm.yml``, ``.apm/`` local
     primitives, and the resolution base for local-path package
@@ -96,34 +99,32 @@ def get_source_root(scope: InstallScope) -> Path:
     """
     if scope is InstallScope.USER:
         return Path.home()
+    if _SOURCE_ROOT_OVERRIDE is not None:
+        return _SOURCE_ROOT_OVERRIDE
     return Path.cwd()
 
 
 def get_deploy_root(scope: InstallScope) -> Path:
     """Return the root used to construct deployment paths.
 
-    For project scope this is ``Path.cwd()`` unless
-    :func:`set_deploy_root_override` is active, in which case the
-    override path is returned.  For user scope this is ``Path.home()``
-    so that integrators produce paths like ``~/.claude/commands/``.
+    For project scope this is ``Path.cwd()`` -- callers that want to
+    redirect deployment should ``chdir`` into the target directory and
+    use :func:`set_source_root_override` to remember the original
+    source root.  For user scope this is ``Path.home()``.
     """
     if scope is InstallScope.USER:
         return Path.home()
-    if _DEPLOY_ROOT_OVERRIDE is not None:
-        return _DEPLOY_ROOT_OVERRIDE
     return Path.cwd()
 
 
 def get_apm_dir(scope: InstallScope) -> Path:
     """Return the directory that holds APM metadata (lockfile, modules).
 
-    * Project scope: ``<cwd>/`` (or the deploy-root override when set)
+    * Project scope: ``<cwd>/`` (the active deploy root)
     * User scope: ``~/.apm/``
     """
     if scope is InstallScope.USER:
         return Path.home() / USER_APM_DIR
-    if _DEPLOY_ROOT_OVERRIDE is not None:
-        return _DEPLOY_ROOT_OVERRIDE
     return Path.cwd()
 
 
@@ -137,17 +138,17 @@ def get_modules_dir(scope: InstallScope) -> Path:
 def get_manifest_path(scope: InstallScope) -> Path:
     """Return the ``apm.yml`` path for *scope*.
 
-    The manifest is a SOURCE -- always resolved from ``$PWD`` for
-    project scope, even when :func:`set_deploy_root_override` is
-    active.  Decoupling here keeps ``apm install --root`` reading
-    the manifest from the user's working directory rather than from
-    the (typically empty) deploy root.
+    The manifest is a SOURCE -- its location follows
+    :func:`get_source_root`, which honours
+    :func:`set_source_root_override`.  This keeps ``apm install --root``
+    reading the manifest from the user's original working directory
+    rather than from the (typically empty) deploy root.
     """
     from ..constants import APM_YML_FILENAME
 
     if scope is InstallScope.USER:
         return Path.home() / USER_APM_DIR / APM_YML_FILENAME
-    return Path.cwd() / APM_YML_FILENAME
+    return get_source_root(scope) / APM_YML_FILENAME
 
 
 def get_lockfile_dir(scope: InstallScope) -> Path:

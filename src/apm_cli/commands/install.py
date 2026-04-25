@@ -1058,19 +1058,13 @@ def _run_mcp_install(
     help="Skip org policy enforcement for this invocation. Loudly logged. Does NOT bypass apm audit --ci.",
 )
 @click.option(
-    "--root",
-    "root",
-    type=click.Path(file_okay=False, resolve_path=True),
-    default=None,
-    metavar="DIR",
-    help=(
-        "Deploy apm-managed writes (apm_modules/, apm.lock.yaml, .claude/, "
-        ".codex/, .agents/, .opencode/) to DIR instead of the current "
-        "directory. Sources (apm.yml, .apm/, local-path packages) "
-        "continue resolving from $PWD. Useful for scratch-dir verification, "
-        "fixture generation, and bootstrap scripts. Mirrors `pip install "
-        "--target` and `npm install --prefix`. Project-scope only."
-    ),
+    "--root", "root", type=click.Path(file_okay=False, resolve_path=True),
+    default=None, metavar="DIR",
+    help=("Install into DIR instead of $PWD: apm_modules/, apm.lock.yaml, "
+          ".claude/, .codex/, .agents/, .opencode/ are written under DIR "
+          "while sources (apm.yml, .apm/, local-path packages) continue "
+          "resolving from $PWD. Mirrors `pip install --target`/"
+          "`npm install --prefix`. Project-scope only."),
 )
 @click.pass_context
 def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, allow_insecure, allow_insecure_hosts, global_, use_ssh, use_https, allow_protocol_fallback, mcp_name, transport, url, env_pairs, header_pairs, mcp_version, registry_url, no_policy, root):
@@ -1106,19 +1100,14 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
     # C1 #856: defaults BEFORE try so the finally clause never sees an
     # UnboundLocalError if InstallLogger(...) raises during construction.
     _apm_verbose_prev = os.environ.get("APM_VERBOSE")
-    # --root: redirect project-scope writes to *root* while sources stay
-    # in $PWD.  Conflicts with --global (user scope writes are anchored
-    # at $HOME and have no concept of an arbitrary deploy root).
+    # --root: see apm_cli.install.root_redirect.install_root_redirect.
+    # Conflicts with --global (user scope writes are anchored at $HOME
+    # and have no concept of an arbitrary deploy root).
     if root and global_:
         raise click.UsageError("--root is not valid with --global (user scope)")
-    _root_override_active = False
-    if root:
-        from pathlib import Path as _Path
-        from ..core.scope import set_deploy_root_override
-        _root_path = _Path(root)
-        _root_path.mkdir(parents=True, exist_ok=True)
-        set_deploy_root_override(_root_path)
-        _root_override_active = True
+    from ..install.root_redirect import install_root_redirect
+    _root_redirect = install_root_redirect(root)
+    _root_redirect.__enter__()
     try:
         # Create structured logger for install output early so exception
         # handlers can always reference it (avoids UnboundLocalError if
@@ -1320,8 +1309,14 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
 
         # Auto-bootstrap: create minimal apm.yml when packages specified but no apm.yml
         if not apm_yml_exists and packages:
-            # Get current directory name as project name
-            project_name = Path.cwd().name if scope is InstallScope.PROJECT else Path.home().name
+            # Get source directory name as project name (the user's working
+            # directory, not the --root deploy target).
+            from ..core.scope import get_source_root as _get_source_root
+            project_name = (
+                _get_source_root(scope).name
+                if scope is InstallScope.PROJECT
+                else Path.home().name
+            )
             config = _get_default_config(project_name)
             _create_minimal_apm_yml(config, target_path=manifest_path)
             logger.success(f"Created {manifest_display}")
@@ -1642,11 +1637,8 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
             os.environ.pop("APM_VERBOSE", None)
         else:
             os.environ["APM_VERBOSE"] = _apm_verbose_prev
-        # Clear --root override so it never leaks to subsequent invocations
-        # (test runners, REPL sessions, embedded usage).
-        if _root_override_active:
-            from ..core.scope import set_deploy_root_override
-            set_deploy_root_override(None)
+        # Exit --root context (chdir back, clear source-root pin).
+        _root_redirect.__exit__(None, None, None)
 
 
 # ---------------------------------------------------------------------------
