@@ -2,10 +2,6 @@
 
 from apm_cli.core.target_detection import (
     detect_target,
-    should_integrate_vscode,
-    should_integrate_claude,
-    should_integrate_cursor,
-    should_integrate_opencode,
     should_compile_agents_md,
     should_compile_claude_md,
     get_target_description,
@@ -173,46 +169,6 @@ class TestDetectTarget:
         assert "no target folder found" in reason
 
 
-class TestShouldIntegrateVscode:
-    """Tests for should_integrate_vscode function."""
-
-    def test_vscode_target(self):
-        """VSCode integration enabled for vscode target."""
-        assert should_integrate_vscode("vscode") is True
-
-    def test_all_target(self):
-        """VSCode integration enabled for all target."""
-        assert should_integrate_vscode("all") is True
-
-    def test_claude_target(self):
-        """VSCode integration disabled for claude target."""
-        assert should_integrate_vscode("claude") is False
-
-    def test_minimal_target(self):
-        """VSCode integration disabled for minimal target."""
-        assert should_integrate_vscode("minimal") is False
-
-
-class TestShouldIntegrateClaude:
-    """Tests for should_integrate_claude function."""
-
-    def test_claude_target(self):
-        """Claude integration enabled for claude target."""
-        assert should_integrate_claude("claude") is True
-
-    def test_all_target(self):
-        """Claude integration enabled for all target."""
-        assert should_integrate_claude("all") is True
-
-    def test_vscode_target(self):
-        """Claude integration disabled for vscode target."""
-        assert should_integrate_claude("vscode") is False
-
-    def test_minimal_target(self):
-        """Claude integration disabled for minimal target."""
-        assert should_integrate_claude("minimal") is False
-
-
 class TestShouldCompileAgentsMd:
     """Tests for should_compile_agents_md function."""
 
@@ -290,54 +246,6 @@ class TestGetTargetDescription:
         desc = get_target_description("opencode")
         assert "AGENTS.md" in desc
         assert ".opencode/" in desc
-
-
-class TestShouldIntegrateCursor:
-    """Tests for should_integrate_cursor function."""
-
-    def test_cursor_target(self):
-        """Cursor integration enabled for cursor target."""
-        assert should_integrate_cursor("cursor") is True
-
-    def test_all_target(self):
-        """Cursor integration enabled for all target."""
-        assert should_integrate_cursor("all") is True
-
-    def test_vscode_target(self):
-        """Cursor integration disabled for vscode target."""
-        assert should_integrate_cursor("vscode") is False
-
-    def test_claude_target(self):
-        """Cursor integration disabled for claude target."""
-        assert should_integrate_cursor("claude") is False
-
-    def test_minimal_target(self):
-        """Cursor integration disabled for minimal target."""
-        assert should_integrate_cursor("minimal") is False
-
-
-class TestShouldIntegrateOpencode:
-    """Tests for should_integrate_opencode function."""
-
-    def test_opencode_target(self):
-        """OpenCode integration enabled for opencode target."""
-        assert should_integrate_opencode("opencode") is True
-
-    def test_all_target(self):
-        """OpenCode integration enabled for all target."""
-        assert should_integrate_opencode("all") is True
-
-    def test_vscode_target(self):
-        """OpenCode integration disabled for vscode target."""
-        assert should_integrate_opencode("vscode") is False
-
-    def test_claude_target(self):
-        """OpenCode integration disabled for claude target."""
-        assert should_integrate_opencode("claude") is False
-
-    def test_minimal_target(self):
-        """OpenCode integration disabled for minimal target."""
-        assert should_integrate_opencode("minimal") is False
 
 
 class TestDetectTargetCursor:
