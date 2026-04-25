@@ -196,6 +196,12 @@ def get_target_description(target: UserTargetType) -> str:
 #: "minimal" is intentionally excluded -- it is a fallback pseudo-target.
 ALL_CANONICAL_TARGETS = frozenset({"vscode", "claude", "cursor", "opencode", "codex", "gemini"})
 
+#: Targets that the parser must accept but that are gated at runtime by
+#: ``is_enabled()`` in ``core/experimental.py`` and ``_flag_gated()`` in
+#: ``integration/targets.py``.  They are NOT included in the
+#: ``parse_target_arg("all")`` expansion -- explicit opt-in only.
+EXPERIMENTAL_TARGETS: frozenset[str] = frozenset({"cowork"})
+
 #: Alias mapping: user-facing name -> canonical internal name.
 TARGET_ALIASES: dict[str, str] = {
     "copilot": "vscode",
@@ -251,7 +257,7 @@ def normalize_target_list(
 #: All values accepted by the ``--target`` CLI option.
 #: Derived from canonical targets, alias keys, and the ``"all"`` keyword.
 VALID_TARGET_VALUES: frozenset[str] = (
-    ALL_CANONICAL_TARGETS | frozenset(TARGET_ALIASES) | frozenset({"all"})
+    ALL_CANONICAL_TARGETS | EXPERIMENTAL_TARGETS | frozenset(TARGET_ALIASES) | frozenset({"all"})
 )
 
 
