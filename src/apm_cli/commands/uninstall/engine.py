@@ -298,20 +298,43 @@ def _sync_integrations_after_uninstall(apm_package, project_root, all_deployed_f
             if (project_root / er / "skills").exists():
                 _skill_dirs_exist = True
                 break
-    # Also trigger skill sync when the skills bucket contains cowork://
-    # entries -- their on-disk location is outside project_root so the
-    # directory check above will never find them.
-    _has_cowork_skills = False
-    if _buckets and _buckets.get("skills"):
+
+    # Scan sync_managed DIRECTLY for cowork:// entries.
+    # partition_managed_files() uses resolved_deploy_root to detect
+    # dynamic-root targets, but the static KNOWN_TARGETS["copilot-cowork"]
+    # always has resolved_deploy_root=None (it is only set after for_scope()
+    # resolves the OneDrive path at install time).  As a result, cowork://
+    # paths are never routed into _buckets["skills"] by the partition, so
+    # the bucket-based _has_cowork_skills check in the previous fix always
+    # returned False.  Bypassing the bucket and scanning sync_managed
+    # directly is the correct approach: no partition logic is involved.
+    _cowork_skill_files: "set" = set()
+    if sync_managed:
         from ...integration.copilot_cowork_paths import COWORK_URI_SCHEME
-        _has_cowork_skills = any(
-            p.startswith(COWORK_URI_SCHEME) for p in _buckets["skills"]
-        )
+        _cowork_skill_files = {
+            p for p in sync_managed if p.startswith(COWORK_URI_SCHEME)
+        }
+    _has_cowork_skills = bool(_cowork_skill_files)
+
     if _skill_dirs_exist or _has_cowork_skills:
+        # Merge cowork entries into the skills bucket so sync_integration
+        # receives them via managed_files.
+        if _has_cowork_skills and _buckets is not None:
+            _buckets.setdefault("skills", set()).update(_cowork_skill_files)
+        elif _has_cowork_skills:
+            _buckets = {"skills": _cowork_skill_files, "hooks": set()}
+
+        # When cowork entries are present, pass targets=None so
+        # sync_integration builds skill_prefix_tuple from KNOWN_TARGETS
+        # (which includes the copilot-cowork target with user_root_resolver
+        # set).  Using _resolved_targets alone would yield only the local
+        # prefix (.copilot/skills/) and cowork:// paths would be silently
+        # skipped by the startswith() guard inside sync_integration.
+        _sync_targets = None if _has_cowork_skills else _resolved_targets
         result = _integrators["skills"].sync_integration(
             apm_package, project_root,
             managed_files=_buckets["skills"] if _buckets else None,
-            targets=_resolved_targets,
+            targets=_sync_targets,
         )
         counts["skills"] = result.get("files_removed", 0)
 
