@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - CI: add `APM Self-Check` to `ci.yml` for `apm audit --ci`, regeneration-drift validation, and `merge-gate.yml` `EXPECTED_CHECKS` coverage. (#885)
+- Virtual package support for self-hosted Git services (Gitea, Gogs): `apm install` now resolves subdirectory packages and raw file downloads from generic Git hosts via raw URL and API version negotiation (v1/v3). GitLab nested-group paths (`group/subgroup/repo`) are treated as full repo URLs (dict form required for virtual packages). -- by @ganesanviji (#587)
 
 ### Changed
 

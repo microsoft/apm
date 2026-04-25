@@ -29,23 +29,6 @@ def is_azure_devops_hostname(hostname: Optional[str]) -> bool:
     return False
 
 
-def is_gitlab_hostname(hostname: Optional[str]) -> bool:
-    """Return True if hostname is GitLab (cloud or self-hosted).
-
-    GitLab supports nested groups (group/subgroup/repo), so paths with
-    more than two segments should be treated as repo paths, not virtual
-    subdirectory packages.
-
-    Accepts:
-    - gitlab.com
-    - Any hostname starting with 'gitlab.' (common self-hosted convention)
-    """
-    if not hostname:
-        return False
-    h = hostname.lower()
-    return h == "gitlab.com" or h.startswith("gitlab.")
-
-
 def is_github_hostname(hostname: Optional[str]) -> bool:
     """Return True if hostname should be treated as GitHub (cloud or enterprise).
 

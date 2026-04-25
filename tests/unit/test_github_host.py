@@ -71,29 +71,6 @@ def test_is_github_hostname_defaults():
     assert not github_host.is_github_hostname("example.com")
 
 
-def test_is_gitlab_hostname():
-    """is_gitlab_hostname() matches gitlab.com and self-hosted gitlab.* instances.
-
-    This drives _detect_virtual_package: GitLab supports nested groups so the
-    full path is kept as the repo URL.  All other generic hosts (Gitea,
-    Bitbucket, etc.) use the owner/repo convention (2 base segments).
-    """
-    # Cloud and conventional self-hosted GitLab
-    assert github_host.is_gitlab_hostname("gitlab.com")
-    assert github_host.is_gitlab_hostname("gitlab.mycompany.com")
-    assert github_host.is_gitlab_hostname("gitlab.internal")
-    assert github_host.is_gitlab_hostname("GITLAB.COM")  # case-insensitive
-
-    # Non-GitLab hosts must NOT match
-    assert not github_host.is_gitlab_hostname("github.com")
-    assert not github_host.is_gitlab_hostname("bitbucket.org")
-    assert not github_host.is_gitlab_hostname("gitea.myorg.com")
-    assert not github_host.is_gitlab_hostname("git.company.internal")
-    assert not github_host.is_gitlab_hostname("dev.azure.com")
-    assert not github_host.is_gitlab_hostname(None)
-    assert not github_host.is_gitlab_hostname("")
-
-
 def test_is_azure_devops_hostname():
     """Test Azure DevOps hostname detection."""
     # Valid Azure DevOps hosts
