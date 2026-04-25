@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 from pathlib import Path
 from typing import Any, List, Optional, Tuple, Union
 
@@ -140,6 +141,11 @@ def validate_policy(data: dict) -> Tuple[List[str], List[str]]:
             errors.append(
                 f"manifest.scripts must be one of {sorted(_VALID_SCRIPTS)}, got '{scripts}'"
             )
+        rei = manifest.get("require_explicit_includes")
+        if rei is not None and not isinstance(rei, bool):
+            errors.append(
+                f"manifest.require_explicit_includes must be a boolean, got '{rei}'"
+            )
 
     # unmanaged_files.action
     uf = data.get("unmanaged_files")
@@ -210,6 +216,9 @@ def _build_policy(data: dict) -> ApmPolicy:
         required_fields=_parse_tuple(manifest_data.get("required_fields")),
         scripts=manifest_data.get("scripts", ManifestPolicy.scripts),
         content_types=manifest_data.get("content_types"),
+        require_explicit_includes=bool(
+            manifest_data.get("require_explicit_includes", False)
+        ),
     )
 
     uf_data = data.get("unmanaged_files") or {}
@@ -233,18 +242,49 @@ def _build_policy(data: dict) -> ApmPolicy:
     )
 
 
+def _looks_like_yaml_content(source: str) -> bool:
+    """Return True when a string is more likely inline YAML than a file path.
+
+    This avoids probing the filesystem for large YAML payloads, which can raise
+    platform-specific path errors such as ENAMETOOLONG on macOS.
+    """
+    stripped = source.lstrip()
+
+    if "\n" in source or "\r" in source:
+        return True
+
+    if stripped.startswith(("{", "[", "---", "- ")):
+        return True
+
+    first_line = stripped.splitlines()[0] if stripped else ""
+    return ": " in first_line or first_line.endswith(":")
+
+
 def load_policy(source: Union[str, Path]) -> Tuple[ApmPolicy, List[str]]:
     """Load and validate an apm-policy.yml from a file path or YAML string.
 
     Returns (policy, warnings). Raises PolicyValidationError on invalid input.
     """
-    path = Path(source) if not isinstance(source, Path) else source
+    raw: str
 
-    if path.is_file():
-        raw = path.read_text(encoding="utf-8")
+    if isinstance(source, Path):
+        raw = source.read_text(encoding="utf-8") if source.is_file() else str(source)
+    elif _looks_like_yaml_content(source):
+        raw = source
     else:
-        # Treat source as a YAML string
-        raw = str(source)
+        path = Path(source)
+        try:
+            is_file = path.is_file()
+        except OSError as exc:
+            if exc.errno == errno.ENAMETOOLONG:
+                is_file = False
+            else:
+                raise
+
+        if is_file:
+            raw = path.read_text(encoding="utf-8")
+        else:
+            raw = source
 
     try:
         data = yaml.safe_load(raw)

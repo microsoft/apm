@@ -6,10 +6,6 @@ env:
 on:
   pull_request:
     branches: [ main ]
-    paths-ignore:
-      - 'docs/**'
-      - '.gitignore'
-      - 'LICENSE'
   # Tier 1 also runs in merge queue context so the same unit + build checks
   # execute against the tentative merge commit that the queue creates. See
   # microsoft/apm#770 for the design.

@@ -4,6 +4,7 @@ dependencies: []
 local_deployed_files:
 - .github/agents/agentic-workflows.agent.md
 - .github/agents/apm-ceo.agent.md
+- .github/agents/apm-primitives-architect.agent.md
 - .github/agents/auth-expert.agent.md
 - .github/agents/cli-logging-expert.agent.md
 - .github/agents/devx-ux-expert.agent.md
@@ -22,25 +23,28 @@ local_deployed_files:
 - .github/instructions/tests.instructions.md
 - .github/skills/apm-review-panel
 - .github/skills/apm-strategy
+- .github/skills/apm-triage-panel
 - .github/skills/auth
 - .github/skills/cli-logging-ux
 - .github/skills/devx-ux
 - .github/skills/oss-growth
+- .github/skills/pr-description-skill
 - .github/skills/python-architecture
 - .github/skills/supply-chain-security
 local_deployed_file_hashes:
   .github/agents/agentic-workflows.agent.md: sha256:d1ea2d038e2af8be11d6c95b3213b03b9777fae46f0438efa95d5a803e6c3765
   .github/agents/apm-ceo.agent.md: sha256:dfc436e6eeffc7ec1c2f556edb78e4a5166ac36d162ea720d08b4b79af0a9938
-  .github/agents/auth-expert.agent.md: sha256:efdc8c7fd046409f4467ecf14da9f0d5f0e4a86372e5885c3763e89ff6f9ea69
+  .github/agents/apm-primitives-architect.agent.md: sha256:6c01eab74ba18d70f21d45010d636cc6535d63cee81da12e61898d8036e0b028
+  .github/agents/auth-expert.agent.md: sha256:85409aab097cf239e5aa7ad61db6c4586be9884ef64a45fa9c894017b046b56b
   .github/agents/cli-logging-expert.agent.md: sha256:24bf6c4b420c42292700ad0eb80b53d275be5c9cb186d471d706211f8419e3b9
   .github/agents/devx-ux-expert.agent.md: sha256:3472680f43b2b4411b9437ec31529216afd4e576e1874c14430935e7f1ded1f2
   .github/agents/doc-analyser.agent.md: sha256:47b1d0204904b786c19d4fe84343e86cdab6f92f862f676ba741ffe6e1385679
   .github/agents/doc-writer.agent.md: sha256:328a5b9ea079869b8ccd914a6e2135c204225a5eedb42f59a1ec73058f7f0b47
   .github/agents/oss-growth-hacker.agent.md: sha256:8d18f5be46913c40ad3aa66fb984575a88988cfac402d39353cdfb09f7e582c5
-  .github/agents/python-architect.agent.md: sha256:4118e60a56d4b94183915a3650d2a4c3294d2b4a5daecbb547a731b04a679b54
+  .github/agents/python-architect.agent.md: sha256:32ed3390cb0e41fea28b3fd95b00124cd097ea0db51f992d2349e6837742723c
   .github/agents/supply-chain-security-expert.agent.md: sha256:9a4e731b12e7658f71d54c22e90f80ce0c45e3eacbb069b8505ed96ec9e79ba5
   .github/instructions/changelog.instructions.md: sha256:1e51ec4c74e847967962bd279dc4c6e582c5d3578490b3c28d5f3acd3e05f73e
-  .github/instructions/cicd.instructions.md: sha256:170e6fa09bcf4064d33420ffca6b3125bf7011982c4c7a00320af71f2f6c6bf9
+  .github/instructions/cicd.instructions.md: sha256:9c0fafc74f743aa97e5adba2168d66c9e3a327b135065e3b804bdbb5f04cda5d
   .github/instructions/cli.instructions.md: sha256:8e39e8d5047ce88575cb02f87c2bcede584dfef258bd86f7466c7badf136541a
   .github/instructions/doc-sync.instructions.md: sha256:bb3816254f8df6bffc6faacd556871f36903e9d7f348982f1e2de0339384c696
   .github/instructions/encoding.instructions.md: sha256:93db7377dc896f6efecf2c5d8c5d89255a555562f468d034d64c42edd5cf46d5
