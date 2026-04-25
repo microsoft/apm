@@ -298,7 +298,16 @@ def _sync_integrations_after_uninstall(apm_package, project_root, all_deployed_f
             if (project_root / er / "skills").exists():
                 _skill_dirs_exist = True
                 break
-    if _skill_dirs_exist:
+    # Also trigger skill sync when the skills bucket contains cowork://
+    # entries -- their on-disk location is outside project_root so the
+    # directory check above will never find them.
+    _has_cowork_skills = False
+    if _buckets and _buckets.get("skills"):
+        from ...integration.copilot_cowork_paths import COWORK_URI_SCHEME
+        _has_cowork_skills = any(
+            p.startswith(COWORK_URI_SCHEME) for p in _buckets["skills"]
+        )
+    if _skill_dirs_exist or _has_cowork_skills:
         result = _integrators["skills"].sync_integration(
             apm_package, project_root,
             managed_files=_buckets["skills"] if _buckets else None,

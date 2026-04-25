@@ -418,3 +418,140 @@ class TestCoworkCleanupOrphanFlow:
         assert "cowork://skills/demo-skill/SKILL.md" in result.deleted
         assert not result.failed
         assert not result.skipped_unmanaged
+
+
+# ---------------------------------------------------------------------------
+# TestCoworkUninstallSyncIntegration -- regression test for PR #926
+# ---------------------------------------------------------------------------
+
+
+class TestCoworkUninstallSyncIntegration:
+    """Regression test: SkillIntegrator.sync_integration must delete cowork://
+    entries during uninstall (the _sync_integrations_after_uninstall flow).
+
+    Before the fix, sync_integration built a skill_prefix_tuple from only
+    local directory prefixes (.github/skills/, .copilot/skills/, etc.) and
+    never included cowork://skills/.  Cowork entries were silently skipped,
+    leaving orphaned skill directories on disk in OneDrive forever.
+    """
+
+    def test_uninstall_deletes_cowork_skill_directory(
+        self, tmp_path: Path
+    ) -> None:
+        """Simulate the uninstall flow via SkillIntegrator.sync_integration:
+
+        1. A cowork://skills/demo-skill entry is in managed_files.
+        2. The cowork skills dir has demo-skill/ with SKILL.md.
+        3. sync_integration is called with targets including the cowork target.
+        4. The skill directory MUST be deleted (was silently skipped before).
+        """
+        from unittest.mock import MagicMock
+        from apm_cli.integration.skill_integrator import SkillIntegrator
+        from apm_cli.integration.targets import TargetProfile, PrimitiveMapping
+
+        # -- setup: cowork skills dir with a skill ---
+        cowork_root = tmp_path / "cowork-skills"
+        cowork_root.mkdir()
+        skill_dir = cowork_root / "demo-skill"
+        skill_dir.mkdir()
+        skill_md = skill_dir / "SKILL.md"
+        skill_md.write_text(
+            "---\nname: demo-skill\n---\n# Demo\n", encoding="ascii"
+        )
+        assert skill_md.exists()
+
+        # -- setup: project root (unrelated to cowork) ---
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        # -- setup: cowork target profile ---
+        cowork_target = TargetProfile(
+            name="copilot-cowork",
+            root_dir="copilot-cowork",
+            primitives={
+                "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            },
+            auto_create=False,
+            detect_by_dir=False,
+            user_supported=True,
+            user_root_resolver=lambda: cowork_root,
+        )
+
+        # -- setup: minimal apm_package ---
+        apm_package = MagicMock()
+        apm_package.get_apm_dependencies.return_value = []
+
+        integrator = SkillIntegrator()
+
+        # -- exercise: sync_integration with cowork entry ---
+        with patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=cowork_root,
+        ):
+            result = integrator.sync_integration(
+                apm_package,
+                project_root,
+                managed_files={"cowork://skills/demo-skill"},
+                targets=[cowork_target],
+            )
+
+        # -- verify: the skill directory was deleted ---
+        assert not skill_dir.exists(), (
+            "demo-skill/ still exists in cowork root -- "
+            "sync_integration did not handle the cowork:// entry. "
+            "This is the PR #926 uninstall regression."
+        )
+        assert result["files_removed"] == 1
+        assert result["errors"] == 0
+
+    def test_uninstall_cowork_with_resolver_none_skips_gracefully(
+        self, tmp_path: Path
+    ) -> None:
+        """When OneDrive is unavailable, cowork entries are skipped (not error)."""
+        from unittest.mock import MagicMock
+        from apm_cli.integration.skill_integrator import SkillIntegrator
+        from apm_cli.integration.targets import TargetProfile, PrimitiveMapping
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        cowork_target = TargetProfile(
+            name="copilot-cowork",
+            root_dir="copilot-cowork",
+            primitives={
+                "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            },
+            auto_create=False,
+            detect_by_dir=False,
+            user_supported=True,
+            user_root_resolver=lambda: None,
+        )
+
+        apm_package = MagicMock()
+        apm_package.get_apm_dependencies.return_value = []
+
+        integrator = SkillIntegrator()
+
+        with (
+            patch(
+                "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+                return_value=None,
+            ),
+            patch(
+                "apm_cli.utils.console._rich_warning",
+            ) as mock_warn,
+        ):
+            result = integrator.sync_integration(
+                apm_package,
+                project_root,
+                managed_files={"cowork://skills/demo-skill"},
+                targets=[cowork_target],
+            )
+
+        # Entry skipped, not counted as error.
+        assert result["files_removed"] == 0
+        assert result["errors"] == 0
+
+        # Warning must have been emitted.
+        mock_warn.assert_called_once()
+
