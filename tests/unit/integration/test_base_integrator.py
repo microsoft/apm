@@ -714,6 +714,45 @@ class TestValidateDeployPathCowork:
         )
         assert result is True
 
+    # -- Regression tests for cleanup with targets=None (PR #926) ----------
+
+    def test_validate_deploy_path_accepts_cowork_uri_during_cleanup_with_targets_none(
+        self, tmp_path: Path
+    ) -> None:
+        """Simulate the cleanup call site: targets=None, cowork:// URI.
+        The static KNOWN_TARGETS registry has resolved_deploy_root=None
+        but the fix ensures the cowork prefix is still included via the
+        user_root_resolver capability check.
+        """
+        with patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=tmp_path,
+        ):
+            result = BaseIntegrator.validate_deploy_path(
+                "cowork://skills/my-skill/SKILL.md",
+                tmp_path,
+                targets=None,
+            )
+        assert result is True
+
+    def test_validate_deploy_path_rejects_cowork_uri_when_resolver_returns_none(
+        self, tmp_path: Path
+    ) -> None:
+        """Even with the cowork prefix in the allowed list, validation
+        must still reject when the resolver returns None (no OneDrive
+        available). This preserves the safe-default behaviour.
+        """
+        with patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=None,
+        ):
+            result = BaseIntegrator.validate_deploy_path(
+                "cowork://skills/my-skill/SKILL.md",
+                tmp_path,
+                targets=None,
+            )
+        assert result is False
+
 
 class TestPartitionManagedFilesCowork:
     """Tests for partition_managed_files with cowork targets."""

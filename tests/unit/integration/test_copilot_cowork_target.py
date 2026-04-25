@@ -290,6 +290,48 @@ class TestGetIntegrationPrefixes:
         prefixes = get_integration_prefixes([copilot])
         assert ".github/" in prefixes
 
+    # -- Regression tests for cleanup with targets=None (PR #926) ----------
+
+    def test_get_integration_prefixes_includes_cowork_with_targets_none(
+        self,
+    ) -> None:
+        """When targets=None, KNOWN_TARGETS is iterated. The static
+        copilot-cowork entry has resolved_deploy_root=None but DOES have
+        a user_root_resolver. The cowork prefix must be included so
+        cleanup/uninstall can validate cowork:// lockfile entries.
+        """
+        prefixes = get_integration_prefixes(targets=None)
+        assert "cowork://skills/" in prefixes
+
+    def test_get_integration_prefixes_includes_cowork_with_explicit_static_targets(
+        self,
+    ) -> None:
+        """Passing the static KNOWN_TARGETS['copilot-cowork'] instance
+        (resolved_deploy_root=None, user_root_resolver is set) must
+        include the cowork prefix -- same scenario as targets=None but
+        with an explicit list containing only the static entry.
+        """
+        static_cowork = KNOWN_TARGETS["copilot-cowork"]
+        # Confirm this is the unresolved static instance.
+        assert static_cowork.resolved_deploy_root is None
+        assert static_cowork.user_root_resolver is not None
+        prefixes = get_integration_prefixes([static_cowork])
+        assert "cowork://skills/" in prefixes
+
+    def test_get_integration_prefixes_resolved_target_still_works(
+        self, tmp_path: Path
+    ) -> None:
+        """A fully-resolved per-install target (resolved_deploy_root set)
+        must still produce the cowork prefix -- regression guard for the
+        normal install path.
+        """
+        resolved_cowork = replace(
+            KNOWN_TARGETS["copilot-cowork"],
+            resolved_deploy_root=tmp_path,
+        )
+        prefixes = get_integration_prefixes([resolved_cowork])
+        assert "cowork://skills/" in prefixes
+
 
 # ---------------------------------------------------------------------------
 # TestExplicitCoworkFlagOff (Fix 2)

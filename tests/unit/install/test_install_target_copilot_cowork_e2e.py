@@ -288,3 +288,133 @@ class TestCoworkParserE2E:
             "Expected '--global' hint in project-scope error output.\n"
             f"Output:\n{combined}"
         )
+
+
+# ---------------------------------------------------------------------------
+# TestCoworkCleanupSyncRemove -- regression test for PR #926
+# ---------------------------------------------------------------------------
+
+
+class TestCoworkCleanupSyncRemove:
+    """Regression test: sync_remove_files must delete cowork:// entries
+    when called with targets=None (the cleanup/uninstall call site).
+
+    Before the fix, get_integration_prefixes(targets=None) omitted the
+    cowork:// prefix because it checked resolved_deploy_root (always None
+    on the static KNOWN_TARGETS registry) instead of user_root_resolver
+    (a capability flag).  This caused validate_deploy_path to reject
+    every cowork:// path, silently skipping deletion.
+    """
+
+    def test_cowork_skill_deleted_via_sync_remove_with_targets_none(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact scenario that triggers the regression:
+
+        1. A lockfile has a cowork://skills/foo entry.
+        2. The cowork skills dir has a foo/SKILL.md file.
+        3. sync_remove_files is called with targets=None (cleanup path).
+        4. The file MUST be deleted (was silently skipped before the fix).
+        """
+        from apm_cli.integration.base_integrator import BaseIntegrator
+
+        # -- setup: cowork skills dir with a skill file ---
+        cowork_root = tmp_path / "cowork-skills"
+        cowork_root.mkdir()
+        skill_dir = cowork_root / "foo"
+        skill_dir.mkdir()
+        skill_md = skill_dir / "SKILL.md"
+        skill_md.write_text("---\nname: foo\n---\n# Foo skill\n", encoding="ascii")
+        assert skill_md.exists()
+
+        # -- setup: project root (unrelated to cowork) ---
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        # -- exercise: sync_remove with targets=None ---
+        with patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=cowork_root,
+        ):
+            stats = BaseIntegrator.sync_remove_files(
+                project_root,
+                managed_files={"cowork://skills/foo/SKILL.md"},
+                prefix="cowork://skills/",
+                targets=None,
+            )
+
+        # -- verify: the file was deleted ---
+        assert not skill_md.exists(), (
+            "SKILL.md still exists -- cowork:// path was not cleaned up. "
+            "This is the PR #926 regression."
+        )
+        assert stats["files_removed"] == 1
+        assert stats["errors"] == 0
+
+
+class TestCoworkCleanupOrphanFlow:
+    """Integration-style regression test simulating the uninstall flow.
+
+    Exercises remove_stale_deployed_files (the orphan cleanup path)
+    with a cowork:// bearing package and a real temp cowork root.
+    Before the fix, the cowork file would silently survive because
+    the cleanup helper computed ``project_root / "cowork://skills/..."``
+    instead of resolving the URI to the actual OneDrive path.
+    """
+
+    def test_orphan_cleanup_deletes_cowork_skill_directory(
+        self, tmp_path: Path
+    ) -> None:
+        """Simulate uninstalling a package that deployed a cowork skill:
+
+        1. A lockfile has cowork://skills/demo-skill entries.
+        2. The cowork skills dir has demo-skill/SKILL.md.
+        3. remove_stale_deployed_files (orphan path) is called with
+           targets=None.
+        4. The skill file MUST be deleted.
+        """
+        from apm_cli.integration.cleanup import remove_stale_deployed_files
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        # -- setup: cowork skills dir with a skill ---
+        cowork_root = tmp_path / "cowork-skills"
+        cowork_root.mkdir()
+        skill_dir = cowork_root / "demo-skill"
+        skill_dir.mkdir()
+        skill_md = skill_dir / "SKILL.md"
+        skill_md.write_text(
+            "---\nname: demo-skill\n---\n# Demo\n", encoding="ascii"
+        )
+        assert skill_md.exists()
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        diagnostics = DiagnosticCollector(verbose=False)
+
+        # The lockfile would have recorded these deployed files.
+        stale_entries = ["cowork://skills/demo-skill/SKILL.md"]
+
+        with patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=cowork_root,
+        ):
+            result = remove_stale_deployed_files(
+                stale_entries,
+                project_root,
+                dep_key="some-org/skill-pack",
+                targets=None,
+                diagnostics=diagnostics,
+                failed_path_retained=False,  # orphan cleanup path
+            )
+
+        # -- verify: the skill file was deleted ---
+        assert not skill_md.exists(), (
+            "SKILL.md still exists in cowork root -- "
+            "remove_stale_deployed_files did not resolve the "
+            "cowork:// URI. This is the cleanup half of the PR #926 "
+            "regression."
+        )
+        assert "cowork://skills/demo-skill/SKILL.md" in result.deleted
+        assert not result.failed
+        assert not result.skipped_unmanaged
