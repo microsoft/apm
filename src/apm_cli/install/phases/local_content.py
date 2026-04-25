@@ -75,13 +75,16 @@ def _has_local_apm_content(project_root):
 # ---------------------------------------------------------------------------
 
 
-def _copy_local_package(dep_ref, install_path, project_root, logger=None):
+def _copy_local_package(dep_ref, install_path, base_dir, logger=None):
     """Copy a local package to apm_modules/.
 
     Args:
         dep_ref: DependencyReference with is_local=True
         install_path: Target path under apm_modules/
-        project_root: Project root for resolving relative paths
+        base_dir: Directory used to resolve a relative ``dep_ref.local_path``.
+            For direct deps from the root project this is the project root;
+            for transitive deps it is the source directory of the package
+            whose apm.yml declared *dep_ref* (#857).
         logger: Optional CommandLogger for structured output
 
     Returns:
@@ -91,7 +94,7 @@ def _copy_local_package(dep_ref, install_path, project_root, logger=None):
 
     local = Path(dep_ref.local_path).expanduser()
     if not local.is_absolute():
-        local = (project_root / local).resolve()
+        local = (base_dir / local).resolve()
     else:
         local = local.resolve()
 

@@ -11,10 +11,13 @@ from .dependency_graph import (
 )
 
 # Type alias for the download callback.
-# Takes (dep_ref, apm_modules_dir, parent_chain) and returns the install path
-# if successful.  ``parent_chain`` is a human-readable breadcrumb string like
-# "root-pkg > mid-pkg > this-pkg" showing the full dependency path including
-# the current node, or just the node's display name for direct (depth-1) deps.
+# Takes (dep_ref, apm_modules_dir, parent_chain, parent_pkg) and returns the
+# install path if successful. ``parent_chain`` is a human-readable breadcrumb
+# string like "root-pkg > mid-pkg > this-pkg" showing the full dependency path
+# including the current node, or just the node's display name for direct
+# (depth-1) deps. ``parent_pkg`` is the APMPackage that declared this
+# dependency (None for direct deps from the root); callers use its
+# ``source_path`` to anchor relative ``local_path`` resolution (#857).
 @runtime_checkable
 class DownloadCallback(Protocol):
     def __call__(
@@ -22,6 +25,7 @@ class DownloadCallback(Protocol):
         dep_ref: 'DependencyReference',
         apm_modules_dir: Path,
         parent_chain: str = "",
+        parent_pkg: Optional['APMPackage'] = None,
     ) -> Optional[Path]: ...
 
 
@@ -79,6 +83,8 @@ class APMDependencyResolver:
         
         try:
             root_package = APMPackage.from_apm_yml(apm_yml_path)
+            # Anchor for relative local_path dependencies declared at the root.
+            root_package.source_path = project_root.resolve()
         except (ValueError, FileNotFoundError) as e:
             # Create error graph
             empty_package = APMPackage(name="error", version="0.0.0", package_path=project_root)
@@ -213,7 +219,9 @@ class APMDependencyResolver:
                 parent_chain = node.get_ancestor_chain()
 
                 loaded_package = self._try_load_dependency_package(
-                    dep_ref, parent_chain=parent_chain
+                    dep_ref,
+                    parent_chain=parent_chain,
+                    parent_pkg=parent_node.package if parent_node else None,
                 )
                 if loaded_package:
                     # Update the node with the actual loaded package
@@ -358,35 +366,43 @@ class APMDependencyResolver:
         return True
     
     def _try_load_dependency_package(
-        self, dep_ref: DependencyReference, parent_chain: str = ""
+        self,
+        dep_ref: DependencyReference,
+        parent_chain: str = "",
+        parent_pkg: Optional[APMPackage] = None,
     ) -> Optional[APMPackage]:
         """
         Try to load a dependency package from apm_modules/.
-        
+
         This method scans apm_modules/ to find installed packages and loads their
         apm.yml to enable transitive dependency resolution. If a package is not
         installed and a download_callback is available, it will attempt to fetch
         the package first.
-        
+
         Args:
             dep_ref: Reference to the dependency to load
             parent_chain: Human-readable breadcrumb of the dependency path
                 that led here (e.g. "root-pkg > mid-pkg").  Forwarded to the
                 download callback for contextual error messages.
-            
+            parent_pkg: APMPackage that declared *dep_ref* (None for direct
+                deps from the root project). Its ``source_path`` is forwarded
+                to the download callback so relative ``local_path`` deps
+                resolve against the directory containing the declaring
+                apm.yml rather than the root consumer (#857).
+
         Returns:
             APMPackage: Loaded package if found, None otherwise
-            
+
         Raises:
             ValueError: If package exists but has invalid format
             FileNotFoundError: If package cannot be found
         """
         if self._apm_modules_dir is None:
             return None
-        
+
         # Get the canonical install path for this dependency
         install_path = dep_ref.get_install_path(self._apm_modules_dir)
-        
+
         # If package doesn't exist locally, try to download it
         if not install_path.exists():
             if self._download_callback is not None:
@@ -395,7 +411,10 @@ class APMDependencyResolver:
                 if unique_key not in self._downloaded_packages:
                     try:
                         downloaded_path = self._download_callback(
-                            dep_ref, self._apm_modules_dir, parent_chain
+                            dep_ref,
+                            self._apm_modules_dir,
+                            parent_chain,
+                            parent_pkg,
                         )
                         if downloaded_path and downloaded_path.exists():
                             self._downloaded_packages.add(unique_key)
@@ -403,11 +422,18 @@ class APMDependencyResolver:
                     except Exception:
                         # Download failed - continue without this dependency's sub-deps
                         pass
-            
+
             # Still doesn't exist after download attempt
             if not install_path.exists():
                 return None
-        
+
+        # Anchor for resolving this package's own relative local_path deps:
+        # the *original* source dir for local deps (not the apm_modules copy),
+        # otherwise the install_path itself.
+        resolved_source_path = self._compute_dep_source_path(
+            dep_ref, install_path, parent_pkg
+        )
+
         # Look for apm.yml in the install path
         apm_yml_path = install_path / "apm.yml"
         if not apm_yml_path.exists():
@@ -420,22 +446,56 @@ class APMDependencyResolver:
                     name=dep_ref.get_display_name(),
                     version="1.0.0",
                     source=dep_ref.repo_url,
-                    package_path=install_path
+                    package_path=install_path,
+                    source_path=resolved_source_path,
                 )
             # No manifest found
             return None
-        
+
         # Load and return the package
         try:
             package = APMPackage.from_apm_yml(apm_yml_path)
             # Ensure source is set for tracking
             if not package.source:
                 package.source = dep_ref.repo_url
+            # Set source_path so transitive resolution of THIS package's
+            # local-path deps anchors on the right directory.
+            package.source_path = resolved_source_path
             return package
         except (ValueError, FileNotFoundError) as e:
             # Package has invalid apm.yml - log warning but continue
             # In production, we might want to surface this to the user
             return None
+
+    def _compute_dep_source_path(
+        self,
+        dep_ref: DependencyReference,
+        install_path: Path,
+        parent_pkg: Optional[APMPackage],
+    ) -> Path:
+        """Return the on-disk anchor for resolving *dep_ref*'s own local deps.
+
+        For local dependencies this is the *original* directory the user
+        referenced (so relative paths inside the package's apm.yml mean what
+        a developer reading the file would expect). For remote deps it is
+        ``install_path`` (the clone location), which is also where the
+        package's apm.yml lives.
+        """
+        if dep_ref.is_local and dep_ref.local_path:
+            local = Path(dep_ref.local_path).expanduser()
+            if local.is_absolute():
+                return local.resolve()
+            base_dir = (
+                parent_pkg.source_path
+                if parent_pkg is not None and parent_pkg.source_path is not None
+                else self._project_root
+            )
+            if base_dir is None:
+                # Fallback: best-effort relative-to-cwd. Rare; only hit if
+                # the resolver was driven without a project root.
+                return local.resolve()
+            return (base_dir / local).resolve()
+        return install_path.resolve()
     
     def _create_resolution_summary(self, graph: DependencyGraph) -> str:
         """
