@@ -1712,7 +1712,7 @@ class GitHubPackageDownloader:
     def validate_virtual_package_exists(
         self,
         dep_ref: DependencyReference,
-        verbose_callback=None,
+        verbose_callback: Optional[Callable[[str], None]] = None,
     ) -> bool:
         """Validate that a virtual package (file, collection, or subdirectory) exists on GitHub.
 
@@ -1806,7 +1806,7 @@ class GitHubPackageDownloader:
         dep_ref: DependencyReference,
         path: str,
         ref: str,
-        log,
+        log: Callable[[str], None],
     ) -> bool:
         """Check if a directory exists at the given ref via the Contents API.
 
@@ -1864,7 +1864,7 @@ class GitHubPackageDownloader:
         self,
         dep_ref: DependencyReference,
         ref: str,
-        log,
+        log: Callable[[str], None],
     ) -> bool:
         """Check if ``ref`` exists in the remote repo via ``git ls-remote``.
 
