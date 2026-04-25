@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install <package>` validation no longer false-rejects subdirectory packages whose root has no marker file (`apm.yml` / `SKILL.md` / `plugin.json` / `README.md`) and packages whose env-var PAT has narrower access than the system Git credential helper. The validator now adds (1) a directory-exists probe via the GitHub Contents API and (2) a `git ls-remote` fallback that mirrors `_clone_with_fallback`'s auth chain (authenticated PAT, then plain HTTPS letting the user's credential helper resolve), gated to packages with an explicit `#ref`. Validation now agrees with what the install pipeline would actually do, so `apm install owner/repo/sub#BR` succeeds wherever the equivalent `- owner/repo/sub#BR` in `apm.yml` does.
 - `apm install` (user scope): `init_link_resolver` now scopes `discover_primitives` to `~/.apm/` instead of `~/`, preventing recursive-glob across the entire home directory. Fixes #830 (#850)
 - Audit blindness for local `.apm/` content -- `apm audit --ci` now detects drift, missing files, and content tampering on locally-authored files (not just installed packages). (#887)
 - Packer leak risk: local-content fields (`local_deployed_files`, `local_deployed_file_hashes`) are now stripped from bundled lockfiles, preventing phantom self-entries on unpack. (#887)

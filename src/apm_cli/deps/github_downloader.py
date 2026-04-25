@@ -1709,16 +1709,27 @@ class GitHubPackageDownloader:
         except requests.exceptions.RequestException as e:
             raise RuntimeError(f"Network error downloading {file_path}: {e}")
 
-    def validate_virtual_package_exists(self, dep_ref: DependencyReference) -> bool:
+    def validate_virtual_package_exists(
+        self,
+        dep_ref: DependencyReference,
+        verbose_callback=None,
+    ) -> bool:
         """Validate that a virtual package (file, collection, or subdirectory) exists on GitHub.
 
         Supports:
         - Virtual files: owner/repo/path/file.prompt.md
         - Collections: owner/repo/collections/name (checks for .collection.yml)
-        - Subdirectory packages: owner/repo/path/subdir (checks for apm.yml, SKILL.md, or plugin.json)
+        - Subdirectory packages: owner/repo/path/subdir (checks for apm.yml,
+          SKILL.md, plugin.json, README.md, then falls back to a true
+          directory-exists probe so validation matches install semantics --
+          install just clones the repo at the ref and copies the directory,
+          marker file or no marker file).
 
         Args:
             dep_ref: Parsed dependency reference for virtual package
+            verbose_callback: Optional callable for verbose logging.
+                When provided, each probe attempt is logged so failures are
+                debuggable without re-running with print statements.
 
         Returns:
             bool: True if the package exists and is accessible, False otherwise
@@ -1727,74 +1738,233 @@ class GitHubPackageDownloader:
             raise ValueError("Can only validate virtual packages with this method")
 
         ref = dep_ref.reference or "main"
-        file_path = dep_ref.virtual_path
+        vpath = dep_ref.virtual_path
 
-        # For collections, check for .collection.yml file
+        def _log(msg: str) -> None:
+            if verbose_callback:
+                verbose_callback(msg)
+
+        def _probe(path: str) -> bool:
+            try:
+                self.download_raw_file(dep_ref, path, ref)
+                _log(f"  [+] {path}@{ref}")
+                return True
+            except RuntimeError as exc:
+                _log(f"  [x] {path}@{ref} ({exc})")
+                return False
+
+        _log(f"Validating virtual package at ref '{ref}': {dep_ref.repo_url}/{vpath}")
+
         if dep_ref.is_virtual_collection():
-            file_path = f"{dep_ref.virtual_path}.collection.yml"
-            try:
-                self.download_raw_file(dep_ref, file_path, ref)
-                return True
-            except RuntimeError:
-                return False
+            return _probe(f"{vpath}.collection.yml")
 
-        # For virtual files, check the file directly
         if dep_ref.is_virtual_file():
-            try:
-                self.download_raw_file(dep_ref, file_path, ref)
-                return True
-            except RuntimeError:
-                return False
+            return _probe(vpath)
 
-        # For subdirectory packages: apm.yml or SKILL.md confirm the type;
-        # plugin.json confirms a Claude plugin; README.md is a last-resort
-        # signal that the directory exists (any directory that follows the
-        # Claude plugin spec may have none of the above).
+        # Subdirectory packages: marker files are a fast positive signal.
+        # Their absence is NOT a failure -- the two final fallbacks below
+        # match install semantics so we don't reject paths that install
+        # would happily clone-and-copy.
         if dep_ref.is_virtual_subdirectory():
-            # Try apm.yml first
-            try:
-                self.download_raw_file(dep_ref, f"{dep_ref.virtual_path}/apm.yml", ref)
-                return True
-            except RuntimeError:
-                pass
-
-            # Try SKILL.md
-            try:
-                self.download_raw_file(dep_ref, f"{dep_ref.virtual_path}/SKILL.md", ref)
-                return True
-            except RuntimeError:
-                pass
-
-            # Try plugin.json at various plugin locations
-            plugin_locations = [
-                f"{dep_ref.virtual_path}/plugin.json",                                    # Root
-                f"{dep_ref.virtual_path}/.github/plugin/plugin.json",                     # GitHub Copilot format
-                f"{dep_ref.virtual_path}/.claude-plugin/plugin.json",                     # Claude format
-                f"{dep_ref.virtual_path}/.cursor-plugin/plugin.json",                     # Cursor format
+            marker_paths = [
+                f"{vpath}/apm.yml",
+                f"{vpath}/SKILL.md",
+                f"{vpath}/plugin.json",
+                f"{vpath}/.github/plugin/plugin.json",
+                f"{vpath}/.claude-plugin/plugin.json",
+                f"{vpath}/.cursor-plugin/plugin.json",
+                f"{vpath}/README.md",
             ]
-
-            for plugin_path in plugin_locations:
-                try:
-                    self.download_raw_file(dep_ref, plugin_path, ref)
+            for marker_path in marker_paths:
+                if _probe(marker_path):
                     return True
-                except RuntimeError:
-                    continue
 
-            # Last resort: README.md  -- any well-formed directory should have one.
-            # A directory that follows the Claude plugin spec (agents/, commands/,
-            # skills/ ...) with no manifest files is still a valid plugin.
-            try:
-                self.download_raw_file(dep_ref, f"{dep_ref.virtual_path}/README.md", ref)
+            # Fallback 1: directory-exists probe via Contents API.
+            if self._directory_exists_at_ref(dep_ref, vpath, ref, _log):
                 return True
-            except RuntimeError:
-                pass
 
-        # Fallback: try to download the file directly
-        try:
-            self.download_raw_file(dep_ref, file_path, ref)
-            return True
-        except RuntimeError:
+            # Fallback 2: explicit ref + git ls-remote. Mirrors install's
+            # auth chain so we accept packages whose API auth is stricter
+            # than their git auth (SSO-half-authorized PATs, fine-grained
+            # scope mismatches). Only kicks in when the user gave an
+            # explicit ref -- without one we keep strict validation so
+            # path typos still fail fast on the default branch.
+            if dep_ref.reference is not None and self._ref_exists_via_ls_remote(
+                dep_ref, ref, _log
+            ):
+                _log(
+                    f"  [+] ref '{ref}' resolves via ls-remote; "
+                    "deferring path validation to install"
+                )
+                return True
             return False
+
+        return _probe(vpath)
+
+    def _directory_exists_at_ref(
+        self,
+        dep_ref: DependencyReference,
+        path: str,
+        ref: str,
+        log,
+    ) -> bool:
+        """Check if a directory exists at the given ref via the Contents API.
+
+        Uses the default ``Accept: application/vnd.github+json`` so the
+        endpoint returns the directory listing for directories (and file
+        metadata for files).  A 200 means the path resolves at the ref,
+        which is what install needs.
+
+        Returns ``True`` on 200; ``False`` on 404 or any error.  Only
+        implemented for github.com / GHE; non-GitHub hosts return ``False``
+        and rely on the marker-file probes above.
+        """
+        from urllib.parse import quote
+        from ..utils.github_host import is_github_hostname
+
+        host = dep_ref.host or default_host()
+        if dep_ref.is_azure_devops() or not is_github_hostname(host):
+            log(f"  [i] directory-exists probe skipped (host {host} not supported)")
+            return False
+
+        owner, repo = dep_ref.repo_url.split('/', 1)
+        token = self.auth_resolver.resolve(host, owner, port=dep_ref.port).token
+
+        # Encode path (preserve '/' as segment separator) and ref (full
+        # encode -- '/' becomes %2F in the query string). Defends against
+        # any future ref/path containing reserved URL characters; for
+        # typical refs/paths the encoded form is identical to the raw form.
+        encoded_path = quote(path, safe="/")
+        encoded_ref = quote(ref, safe="")
+
+        host_lc = host.lower()
+        if host_lc == "github.com":
+            api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{encoded_path}?ref={encoded_ref}"
+        elif host_lc.endswith(".ghe.com"):
+            api_url = f"https://api.{host}/repos/{owner}/{repo}/contents/{encoded_path}?ref={encoded_ref}"
+        else:
+            api_url = f"https://{host}/api/v3/repos/{owner}/{repo}/contents/{encoded_path}?ref={encoded_ref}"
+
+        headers = {"Accept": "application/vnd.github+json"}
+        if token:
+            headers["Authorization"] = f"token {token}"
+
+        try:
+            response = self._resilient_get(api_url, headers=headers, timeout=30)
+            if response.status_code == 200:
+                log(f"  [+] {path}@{ref} (directory)")
+                return True
+            log(f"  [x] {path}@{ref} (HTTP {response.status_code})")
+            return False
+        except (requests.exceptions.RequestException, RuntimeError) as exc:
+            log(f"  [x] {path}@{ref} ({exc})")
+            return False
+
+    def _ref_exists_via_ls_remote(
+        self,
+        dep_ref: DependencyReference,
+        ref: str,
+        log,
+    ) -> bool:
+        """Check if ``ref`` exists in the remote repo via ``git ls-remote``.
+
+        Lenient fallback for when the Contents API rejects a path with 404
+        even though ``git clone`` would succeed -- e.g. SSO-half-authorized
+        PATs, fine-grained PAT scope mismatches between API and git
+        protocols, or repo policies that gate the Contents API more
+        strictly than git.
+
+        Mirrors the auth chain in ``_clone_with_fallback``:
+
+        1. **Authenticated HTTPS** -- explicit PAT in ``self.git_env``
+           (silences credential helpers via ``GIT_ASKPASS=echo``).
+        2. **Plain HTTPS w/ credential helper** -- token stripped from the
+           URL, relaxed env, so the user's git credential helper resolves
+           the credential install ultimately uses. Critical for orgs with
+           SSO-half-authorized PATs.
+        3. **SSH** -- only when the user signaled SSH is acceptable (via
+           ``--ssh`` or ``--allow-protocol-fallback``). Wrapped in
+           ``ssh -o BatchMode=yes -o ConnectTimeout=10`` so it never
+           hangs waiting for a passphrase prompt.
+
+        Returns ``True`` on the first attempt that resolves the ref;
+        ``False`` if every attempt fails.
+        """
+        if dep_ref.is_artifactory():
+            return False
+
+        dep_token = self._resolve_dep_token(dep_ref)
+        dep_auth_ctx = self._resolve_dep_auth_ctx(dep_ref)
+        dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
+        is_insecure = dep_ref.is_insecure
+
+        attempts: list = []
+
+        # Attempt 1: explicit PAT, locked-down env. Skipped when no token.
+        if dep_token:
+            token_env = (
+                dep_auth_ctx.git_env
+                if dep_auth_scheme == "bearer" and dep_auth_ctx is not None
+                else self.git_env
+            )
+            token_url = self._build_repo_url(
+                dep_ref.repo_url, use_ssh=False, dep_ref=dep_ref,
+                token=dep_token, auth_scheme=dep_auth_scheme,
+            )
+            attempts.append(("authenticated HTTPS", token_url, token_env))
+
+        # Attempt 2: plain HTTPS w/ credential helper.
+        plain_env = self._build_noninteractive_git_env(
+            preserve_config_isolation=is_insecure,
+            suppress_credential_helpers=is_insecure,
+        )
+        plain_url = self._build_repo_url(
+            dep_ref.repo_url, use_ssh=False, dep_ref=dep_ref, token="",
+        )
+        attempts.append(("plain HTTPS w/ credential helper", plain_url, plain_env))
+
+        # Attempt 3 (SSH): only when allowed. BatchMode prevents passphrase
+        # prompts from hanging validation; ssh-agent users still succeed.
+        if not is_insecure and self._ssh_attempt_allowed():
+            try:
+                ssh_url = self._build_repo_url(
+                    dep_ref.repo_url, use_ssh=True, dep_ref=dep_ref,
+                )
+                ssh_env = dict(plain_env)
+                ssh_env["GIT_SSH_COMMAND"] = (
+                    "ssh -o BatchMode=yes -o ConnectTimeout=10"
+                )
+                attempts.append(("SSH", ssh_url, ssh_env))
+            except Exception as exc:
+                log(f"  [i] SSH URL build skipped: {exc}")
+
+        g = git.cmd.Git()
+        for label, url, env in attempts:
+            try:
+                output = g.ls_remote("--heads", "--tags", url, ref, env=env)
+                if output and output.strip():
+                    log(f"  [+] ls-remote ok via {label}")
+                    return True
+                log(f"  [x] ls-remote returned no matching refs via {label}")
+            except (GitCommandError, OSError) as exc:
+                log(f"  [x] ls-remote failed via {label}: {exc}")
+
+        return False
+
+    def _ssh_attempt_allowed(self) -> bool:
+        """Whether the SSH ls-remote attempt should run.
+
+        Mirrors ``_clone_with_fallback``'s gating: SSH is in scope when the
+        user explicitly preferred it (``--ssh``) or when cross-protocol
+        fallback is allowed. Default HTTPS-preferring users get no SSH
+        attempt -- keeps validation output clean and never invokes ssh on
+        machines that don't have it configured.
+        """
+        try:
+            from ..deps.transport_selection import ProtocolPreference
+        except Exception:
+            return False
+        return self._protocol_pref == ProtocolPreference.SSH or self._allow_fallback
 
     def download_virtual_file_package(self, dep_ref: DependencyReference, target_path: Path, progress_task_id=None, progress_obj=None) -> PackageInfo:
         """Download a single file as a virtual APM package.
