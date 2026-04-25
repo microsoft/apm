@@ -156,13 +156,21 @@ class CompilationResult:
 class AgentsCompiler:
     """Main compiler for generating AGENTS.md files."""
     
-    def __init__(self, base_dir: str = "."):
+    def __init__(self, base_dir: str = ".", source_dir: Optional[str] = None):
         """Initialize the compiler.
-        
+
         Args:
-            base_dir (str): Base directory for compilation. Defaults to current directory.
+            base_dir (str): Base directory for compilation -- where AGENTS.md /
+                CLAUDE.md outputs are written and the relative root for
+                placement decisions.  Defaults to the current directory.
+            source_dir (Optional[str]): Where primitives (``.apm/``,
+                ``apm_modules/``) and source files are discovered.  Defaults to
+                ``base_dir`` for back-compat; set explicitly when ``apm
+                compile --root`` redirects writes but sources remain in
+                ``$PWD``.
         """
         self.base_dir = Path(base_dir)
+        self.source_dir = Path(source_dir) if source_dir else self.base_dir
         self.warnings: List[str] = []
         self.errors: List[str] = []
         self._logger = None
@@ -197,14 +205,14 @@ class AgentsCompiler:
                 if config.local_only:
                     # Use basic discovery for local-only mode
                     primitives = discover_primitives(
-                        str(self.base_dir),
+                        str(self.source_dir),
                         exclude_patterns=config.exclude,
                     )
                 else:
                     # Use enhanced discovery with dependencies (Task 4 integration)
                     from ..primitives.discovery import discover_primitives_with_dependencies
                     primitives = discover_primitives_with_dependencies(
-                        str(self.base_dir),
+                        str(self.source_dir),
                         exclude_patterns=config.exclude,
                     )
             
@@ -300,12 +308,16 @@ class AgentsCompiler:
         errors = self.validate_primitives(primitives)
         self.errors.extend(errors)
         
-        # Create distributed compiler with exclude patterns
+        # Create distributed compiler with exclude patterns.  source_dir
+        # carries through so primitive discovery + project-tree scoring
+        # honor `apm compile --root` (sources stay in $PWD, writes
+        # redirect to base_dir).
         distributed_compiler = DistributedAgentsCompiler(
             str(self.base_dir),
-            exclude_patterns=config.exclude
+            exclude_patterns=config.exclude,
+            source_dir=str(self.source_dir),
         )
-        
+
         # Prepare configuration for distributed compilation
         distributed_config = {
             'min_instructions_per_file': config.min_instructions_per_file,
@@ -462,7 +474,8 @@ class AgentsCompiler:
         from .distributed_compiler import DistributedAgentsCompiler
         distributed_compiler = DistributedAgentsCompiler(
             str(self.base_dir),
-            exclude_patterns=config.exclude
+            exclude_patterns=config.exclude,
+            source_dir=str(self.source_dir),
         )
         
         # Analyze directory structure and determine placement
@@ -726,8 +739,12 @@ class AgentsCompiler:
         Returns:
             TemplateData: Template data for generation.
         """
-        # Build instructions content
-        instructions_content = build_conditional_sections(primitives.instructions)
+        # Build instructions content.  source_dir keeps `<!-- Source: -->`
+        # display paths relative to the user's working directory when
+        # `apm compile --root` redirects writes elsewhere.
+        instructions_content = build_conditional_sections(
+            primitives.instructions, source_dir=self.source_dir,
+        )
 
         # Metadata (version only; timestamp intentionally omitted for determinism)
         version = get_version()

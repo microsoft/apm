@@ -17,47 +17,57 @@ class TemplateData:
     chatmode_content: Optional[str] = None
     
 
-def build_conditional_sections(instructions: List[Instruction]) -> str:
+def build_conditional_sections(
+    instructions: List[Instruction],
+    source_dir: Optional[Path] = None,
+) -> str:
     """Build sections grouped by applyTo patterns.
-    
+
     Args:
-        instructions (List[Instruction]): List of instruction primitives.
-    
+        instructions: List of instruction primitives.
+        source_dir: Root used to compute display-relative paths in
+            ``<!-- Source: ... -->`` comments.  Defaults to ``Path.cwd()``;
+            callers using ``apm compile --root`` should pass the source
+            root so attribution paths render relative to the user's
+            working directory rather than the deploy target.
+
     Returns:
         str: Formatted conditional sections content.
     """
     if not instructions:
         return ""
-    
+
+    relpath_root = source_dir if source_dir is not None else Path.cwd()
+
     # Group instructions by pattern - use raw patterns
     pattern_groups = _group_instructions_by_pattern(instructions)
-    
+
     sections = []
-    
+
     for pattern, pattern_instructions in sorted(pattern_groups.items()):
         sections.append(f"## Files matching `{pattern}`")
         sections.append("")
 
         # Combine content from all instructions for this pattern
-        for instruction in sorted(pattern_instructions, key=lambda i: portable_relpath(i.file_path, Path.cwd())):
+        for instruction in sorted(pattern_instructions, key=lambda i: portable_relpath(i.file_path, relpath_root)):
             content = instruction.content.strip()
             if content:
                 # Add source file comment before the content
                 try:
                     # Try to get relative path for cleaner display
                     if instruction.file_path.is_absolute():
-                        relative_path = portable_relpath(instruction.file_path, Path.cwd())
+                        relative_path = portable_relpath(instruction.file_path, relpath_root)
                     else:
                         relative_path = str(instruction.file_path)
                 except (ValueError, OSError):
                     # Fall back to absolute or given path if relative fails
                     relative_path = instruction.file_path.as_posix()
-                
+
                 sections.append(f"<!-- Source: {relative_path} -->")
                 sections.append(content)
                 sections.append(f"<!-- End source: {relative_path} -->")
                 sections.append("")
-    
+
     return "\n".join(sections)
 
 

@@ -244,6 +244,14 @@ def _resolve_compile_target(target):
     is_flag=True,
     help="Remove orphaned AGENTS.md files that are no longer generated",
 )
+@click.option(
+    "--root", "root", type=click.Path(file_okay=False, resolve_path=True),
+    default=None, metavar="DIR",
+    help=("Write AGENTS.md / CLAUDE.md outputs under DIR instead of $PWD; "
+          "sources (apm.yml, .apm/, project tree for placement scoring) "
+          "continue resolving from $PWD. Pairs with `apm install --root` "
+          "for scratch-dir verification."),
+)
 @click.pass_context
 def compile(
     ctx,
@@ -259,6 +267,7 @@ def compile(
     verbose,
     local_only,
     clean,
+    root,
 ):
     """Compile APM context into distributed AGENTS.md files.
 
@@ -280,11 +289,22 @@ def compile(
     """
     logger = CommandLogger("compile", verbose=verbose, dry_run=dry_run)
 
+    # --root: see apm_cli.install.root_redirect.compile_root_redirect.
+    # Bracket the handler so writes land under *root* while sources keep
+    # resolving from the captured original $PWD via the source-root
+    # override.
+    from ...install.root_redirect import compile_root_redirect
+    _root_redirect = compile_root_redirect(root)
+    _root_redirect.__enter__()
     try:
-        # Check if this is an APM project first
+        # Source root: where apm.yml, .apm/, and the project tree are
+        # read from.  Equals $PWD unless --root redirects writes.
+        from ...core.scope import InstallScope, get_source_root
         from pathlib import Path
+        source_root = get_source_root(InstallScope.PROJECT)
 
-        if not Path(APM_YML_FILENAME).exists():
+        # Check if this is an APM project first
+        if not (source_root / APM_YML_FILENAME).exists():
             logger.error("Not an APM project - no apm.yml found")
             logger.progress(" To initialize an APM project, run:")
             logger.progress("   apm init")
@@ -293,11 +313,11 @@ def compile(
         # Check if there are any instruction files to compile
         from ...compilation.constitution import find_constitution
 
-        apm_modules_exists = Path(APM_MODULES_DIR).exists()
-        constitution_exists = find_constitution(Path(".")).exists()
+        apm_modules_exists = (source_root / APM_MODULES_DIR).exists()
+        constitution_exists = find_constitution(source_root).exists()
 
         # Check if .apm directory has actual content
-        apm_dir = Path(APM_DIR)
+        apm_dir = source_root / APM_DIR
         local_apm_has_content = apm_dir.exists() and (
             any(apm_dir.rglob("*.instructions.md"))
             or any(apm_dir.rglob("*.chatmode.md"))
@@ -336,9 +356,9 @@ def compile(
         # Validation-only mode
         if validate:
             logger.start("Validating APM context...", symbol="gear")
-            compiler = AgentsCompiler(".")
+            compiler = AgentsCompiler(".", source_dir=str(source_root))
             try:
-                primitives = discover_primitives(".")
+                primitives = discover_primitives(str(source_root))
             except Exception as e:
                 logger.error(f"Failed to discover primitives: {e}")
                 logger.progress(f" Error details: {type(e).__name__}")
@@ -356,7 +376,7 @@ def compile(
             # Show MCP dependency validation count
             try:
                 from ...models.apm_package import APMPackage
-                apm_pkg = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
+                apm_pkg = APMPackage.from_apm_yml(source_root / APM_YML_FILENAME)
                 mcp_count = len(apm_pkg.get_mcp_dependencies())
                 if mcp_count > 0:
                     logger.progress(f"  * {mcp_count} MCP dependencies")
@@ -379,7 +399,7 @@ def compile(
         try:
             from ...models.apm_package import APMPackage
 
-            apm_pkg = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
+            apm_pkg = APMPackage.from_apm_yml(source_root / APM_YML_FILENAME)
             config_target = apm_pkg.target
         except Exception:
             # No apm.yml or parsing error - proceed with auto-detection
@@ -390,7 +410,7 @@ def compile(
         # Also handle config_target being a list (from apm.yml target: [claude, copilot])
         compile_config_target = _resolve_compile_target(config_target)
         detected_target, detection_reason = detect_target(
-            project_root=Path("."),
+            project_root=source_root,
             explicit_target=compile_target,
             config_target=compile_config_target,
         )
@@ -456,8 +476,11 @@ def compile(
         else:
             logger.progress("Using single-file compilation (legacy mode)", symbol="page")
 
-        # Perform compilation
-        compiler = AgentsCompiler(".")
+        # Perform compilation.  base_dir="." resolves against the active
+        # cwd -- the deploy root after compile_root_redirect's chdir, or
+        # plain $PWD otherwise.  source_dir keeps primitive discovery
+        # and project-tree scanning in the user's source tree.
+        compiler = AgentsCompiler(".", source_dir=str(source_root))
         result = compiler.compile(config, logger=logger)
         compile_has_critical = result.has_critical_security
 
@@ -620,3 +643,6 @@ def compile(
     except Exception as e:
         logger.error(f"Error during compilation: {e}")
         sys.exit(1)
+    finally:
+        # Exit --root context (chdir back, clear source-root pin).
+        _root_redirect.__exit__(None, None, None)

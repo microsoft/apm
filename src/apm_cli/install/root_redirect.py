@@ -1,4 +1,4 @@
-"""``--root`` (deploy-root redirection) support for ``apm install``.
+"""``--root`` (deploy-root redirection) support for ``apm install`` / ``compile``.
 
 The flag lets users install into an arbitrary directory while keeping
 sources in ``$PWD`` -- the precedent is ``pip install --target`` and
@@ -50,3 +50,8 @@ def install_root_redirect(root: Optional[str | os.PathLike]) -> Iterator[None]:
     finally:
         os.chdir(original)
         set_source_root_override(None)
+
+
+# Alias used by ``apm compile --root``; semantics are identical so the
+# two commands share a single implementation.
+compile_root_redirect = install_root_redirect
