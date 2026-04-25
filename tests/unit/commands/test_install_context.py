@@ -31,7 +31,7 @@ class TestInstallContextIsDataclass:
 
     def test_is_not_frozen(self):
         """The CLI context is mutable (snapshot fields are set after construction)."""
-        assert not dataclasses.fields(InstallContext)[0].metadata.get("frozen", False)
+        assert not InstallContext.__dataclass_params__.frozen
 
 
 class TestInstallContextFields:

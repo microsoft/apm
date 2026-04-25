@@ -118,12 +118,12 @@ class MCPIntegrator:
                     for dep in mcp:
                         if hasattr(dep, "is_self_defined") and dep.is_self_defined:
                             if is_direct:
-                                logger.verbose_detail(
+                                logger.progress(
                                     f"Trusting direct dependency MCP '{dep.name}' "
                                     f"from '{pkg.name}'"
                                 )
                             elif trust_private:
-                                logger.verbose_detail(
+                                logger.progress(
                                     f"Trusting self-defined MCP server '{dep.name}' "
                                     f"from transitive package '{pkg.name}' (--trust-transitive-mcp)"
                                 )
@@ -1283,6 +1283,10 @@ class MCPIntegrator:
                             f"[dim](already configured)[/dim]"
                         )
                 else:
+                    count = len(already_configured_self_defined)
+                    logger.success(
+                        f"{count} self-defined server(s) already configured"
+                    )
                     for name in already_configured_self_defined:
                         logger.verbose_detail(f"{name} already configured, skipping")
 
