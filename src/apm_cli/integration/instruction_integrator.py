@@ -28,6 +28,7 @@ class InstructionIntegrator(BaseIntegrator):
     * Copilot: ``.github/instructions/`` (verbatim, preserving applyTo:)
     * Cursor: ``.cursor/rules/`` (``.mdc`` format, applyTo: -> globs:)
     * Claude Code: ``.claude/rules/`` (``.md`` format, applyTo: -> paths:)
+    * Gemini CLI: compile-only (GEMINI.md) -- no per-file rule deployment
     """
 
     def find_instruction_files(self, package_path: Path) -> List[Path]:
@@ -382,3 +383,4 @@ class InstructionIntegrator(BaseIntegrator):
             KNOWN_TARGETS["claude"], apm_package, project_root,
             managed_files=managed_files,
         )
+

@@ -8,14 +8,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- PGS project board sync: `scripts/project/sync_item.py` and `.github/workflows/project-sync.yml` keep https://github.com/orgs/microsoft/projects/2304 in lockstep with `theme/*`, `area/*`, `type/*`, `priority/*` labels and milestones. Backfill helper at `scripts/project/backfill.sh`. (#919)
+
+- **Gemini CLI** as a supported APM target (`--target gemini`). APM auto-detects `.gemini/` directories and writes MCP server configuration to `.gemini/settings.json`. Includes `apm runtime setup gemini` / `apm runtime remove gemini` support. (#917)
+- New `pr-description-skill` skill bundle: enforces a 10-section PR body shape (TL;DR / Problem / Approach / Implementation / Diagrams / Trade-offs / Benefits / Validation / How to test, plus the `Co-authored-by` trailer) with a cite-or-omit rule for every WHY-claim, GFM-rendered output, ASCII-only template source, and validated mermaid diagrams. Captures the meta-pattern from PR #882 as a reusable scaffold so future PR bodies meet the same bar without per-PR specialist subagent intervention. (#884)
+- `apm experimental` command group -- a feature-flag registry with `list` / `enable` / `disable` / `reset` subcommands. Opt in to new behaviour before it graduates to default. Ships with one built-in flag (`verbose-version`) and a contributor recipe for proposing new flags. (#849)
+- `includes:` manifest field (auto | list) for explicit governance of local `.apm/` content. Closes audit-blindness gap (#887).
+- `apm audit --ci` now verifies hash integrity of locally deployed files, detecting hand-edits and config drift. (#887)
+- `policy.manifest.require_explicit_includes` policy field enforces explicit `includes` lists (rejects `auto` + undeclared). (#887)
+- `includes-consent` advisory appears in `apm audit` CLI/JSON output when local content is deployed without an explicit `includes:` declaration (#887)
+- `apm-primitives-architect` agent: reusable persona for designing and critiquing `.apm/` skill bundles. (#882)
+- `apm-triage-panel` skill: three-persona panel (DevX UX, Supply Chain Security, APM CEO; conditional OSS Growth Hacker) for issue triage producing single labelled-decision comment with structured JSON tail. Mirrors `apm-review-panel` orchestration model. (#915)
+- CI: add `APM Self-Check` to `ci.yml` for `apm audit --ci`, regeneration-drift validation, and `merge-gate.yml` `EXPECTED_CHECKS` coverage. (#885)
+
 ### Changed
 
+- `find_primitive_files()` now uses `os.walk` with early directory pruning so `compilation.exclude` patterns prevent traversal into excluded subtrees on large repos. (#870)
+- Lockfile in-memory shape: a synthesized self-entry now appears in `LockFile.dependencies` for local content. The on-disk YAML format is unchanged (data still serialized as flat `local_deployed_files`/`local_deployed_file_hashes` fields). (#887)
+- Hardened `apm-review-panel` skill: single CEO-synthesized verdict comment per run (no per-persona spam), restored in-context persona model per agentskills.io after the sub-agent dispatch experiment regressed coverage, plus the original one-comment contract, Hybrid E Auth Expert routing, verdict template extracted to `assets/`, and `python-architect` mandatory three-artifact review contract (classDiagram + flowchart + Design patterns). (#882, #905, #907, #908)
 - CI: smoke tests in `build-release.yml`'s `build-and-test` job (Linux x86_64, Linux arm64, Windows) are now gated to promotion boundaries (tag/schedule/dispatch) instead of running on every push to main. Push-time smoke duplicated the merge-time smoke gate in `ci-integration.yml` and burned ~15 redundant codex-binary downloads/day. Tag-cut releases still run smoke as a pre-ship gate; nightly catches upstream codex URL drift; merge-time still gates merges into main. (#878)
-- CI docs: clarify that branch-protection ruleset must store the check-run name (`gate`), not the workflow display string (`Merge Gate / gate`); document the merge-gate aggregator in `cicd.instructions.md` and mark the legacy stub workflow as deprecated.
+- CI docs: clarify that branch-protection ruleset must store the check-run name (`gate`), not the workflow display string (`Merge Gate / gate`); document the merge-gate aggregator in `cicd.instructions.md` and mark the legacy stub workflow as deprecated. (#874)
+- `shared/apm.md` bumped to `microsoft/apm-action@v1.4.2`, which fixes restore-mode workspace pollution that overwrote tracked `apm.lock.yaml` / `apm.yml` / `apm_modules` in caller workspaces. Closes #902. (#904)
+
+### Fixed
+
+- `apm install` (user scope): `init_link_resolver` now scopes `discover_primitives` to `~/.apm/` instead of `~/`, preventing recursive-glob across the entire home directory. Fixes #830 (#850)
+- Audit blindness for local `.apm/` content -- `apm audit --ci` now detects drift, missing files, and content tampering on locally-authored files (not just installed packages). (#887)
+- Packer leak risk: local-content fields (`local_deployed_files`, `local_deployed_file_hashes`) are now stripped from bundled lockfiles, preventing phantom self-entries on unpack. (#887)
+- `apm update` sanitises the subprocess environment before invoking the platform installer so the bundled PyInstaller `LD_LIBRARY_PATH` / `DYLD_*` no longer leak into system binaries (`curl`, `tar`, `sudo`) spawned by `install.sh`. Previously the installer's first `curl` call could abort with `libssl.so.3: version 'OPENSSL_3.2.0' not found` on distros whose system `libcurl` requires a newer OpenSSL ABI than the APM bundle ships (Debian trixie arm64 dev-containers, Fedora 43, and similar). Restoration uses PyInstaller's official `<VAR>_ORIG` protocol, preserving the user's own `LD_LIBRARY_PATH` exports. Closes #894 (#899)
+- Copilot adapter now validates remote `transport_type`, defaulting to `http` when missing/empty/whitespace and raising a clear `ValueError` for unrecognized transports, mirroring the VS Code adapter so both refuse bad registry data instead of silently writing garbage config. Closes #791 (#812)
+- `_get_cache_dir` resolves `project_root` before the path-traversal check, fixing a Windows-only false-positive `PathTraversalError` when the policy cache dir didn't yet exist (8.3 short-name expansion mismatched between an existing base and a non-existent candidate). (#895)
+- `load_policy()` wraps `is_file()` in try/except so YAML strings longer than ~1023 bytes no longer trip macOS `OSError [Errno 63] File name too long` and gracefully fall back to string-mode parsing. Closes #848 (#860)
+- CI: `merge-gate.yml` now also fires on `merge_group` events so the `gate` check actually reports inside the merge queue. Without this, PRs (e.g. #899) hung in the queue with `gate` stuck in "Expected -- Waiting for status to be reported" indefinitely. (#921)
 
 ### Removed
 
-- CI: deleted `ci-integration-pr-stub.yml`. The four stubs were a holdover from the pre-merge-gate model where branch protection required each Tier 2 check name directly. After #867, branch protection requires only `gate`, so the stubs are dead weight. Reduced `EXPECTED_CHECKS` in `merge-gate.yml` to just `Build & Test (Linux)`.
+- CI: deleted `ci-integration-pr-stub.yml`. The four stubs were a holdover from the pre-merge-gate model where branch protection required each Tier 2 check name directly. After #867, branch protection requires only `gate`, so the stubs are dead weight. Reduced `EXPECTED_CHECKS` in `merge-gate.yml` to just `Build & Test (Linux)`. (#875)
 
 ## [0.9.2] - 2026-04-23
 
@@ -43,7 +72,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `apm install` enforces org `apm-policy.yml` at install time (deps deny/allow/require, MCP deny/transport/trust-transitive, `compilation.target.allow`, `extends:` chains, `policy.fetch_failure` knob, `policy.hash` pin); `--no-policy` / `APM_POLICY_DISABLE=1` escape hatch; `--dry-run` previews verdicts; failed package installs roll back `apm.yml`. New `apm policy status` diagnostic (table / `--json`, exit-0 by default, `--check` for CI). `apm audit --ci` auto-discovers org policy. **Migration**: orgs publishing `enforcement: block` may see installs that previously succeeded now fail -- preview with `apm install --dry-run`. Closes #827, #829, #831, #834 (#832)
-- `apm experimental` command group - a feature-flag registry with `list` / `enable` / `disable` / `reset` subcommands. Opt in to new behaviour before it graduates to default. Ships with one built-in flag (`verbose-version`) and a contributor recipe for proposing new flags (#845)
 - `pr-review-panel` gh-aw workflow: runs the `apm-review-panel` skill on PRs labelled `panel-review` and posts a synthesized verdict (#824)
 
 ### Changed
@@ -54,9 +82,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `pr-review-panel` workflow now runs on PRs from forks: switched to `pull_request_target` with label-only triggering and a workflow-dispatch path (#826, #836, #837)
-
-### Fixed
-
 - Lowercase the host axis of the `_fallback_port_warned` dedup key so deps that differ only in hostname casing collapse to one cross-protocol fallback warning, matching the `AuthResolver._cache` convention (RFC 4343). Closes #800 (#815)
 
 ## [0.9.0] - 2026-04-21

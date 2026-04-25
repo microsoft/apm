@@ -13,8 +13,8 @@ Set up automated policy enforcement so every pull request is checked against you
 ## Prerequisites
 
 - An organization on GitHub with repositories using APM
-- `apm audit --ci` runs 6 baseline consistency checks with no configuration
-- `apm audit --ci --policy org` adds 16 policy checks defined in `apm-policy.yml`
+- `apm audit --ci` runs 7 baseline consistency checks with no configuration
+- `apm audit --ci --policy org` adds 17 policy checks defined in `apm-policy.yml`
 
 For the full policy schema, see the [Policy Reference](../../enterprise/policy-reference/).
 
@@ -84,7 +84,7 @@ This catches lockfile/manifest drift, missing files, and hidden Unicode — with
 
 ## Step 3: Enable policy enforcement
 
-Add `--policy org` to run the full 16 policy checks on top of baseline:
+Add `--policy org` to run the full 17 policy checks on top of baseline:
 
 :::note
 Since this release, `apm audit --ci` auto-discovers the org policy. `--policy org` remains valid as an explicit override; use `--no-policy` to skip discovery.

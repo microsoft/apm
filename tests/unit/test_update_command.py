@@ -95,6 +95,11 @@ class TestUpdateCommand(unittest.TestCase):
         self.assertEqual(run_command[:3], ["powershell.exe", "-ExecutionPolicy", "Bypass"])
         self.assertEqual(run_command[3], "-File")
         mock_chmod.assert_not_called()
+        # The installer is always spawned with an explicit sanitised env;
+        # see issue #894.  On Windows the helper is effectively a no-op, but
+        # passing env= unconditionally keeps one code path across platforms.
+        self.assertIn("env", mock_run.call_args.kwargs)
+        self.assertIsNotNone(mock_run.call_args.kwargs["env"])
 
     @patch("requests.get")
     @patch("subprocess.run")
@@ -129,6 +134,11 @@ class TestUpdateCommand(unittest.TestCase):
         self.assertEqual(run_command[0], "/bin/sh")
         self.assertEqual(run_command[1][-3:], ".sh")
         mock_chmod.assert_called_once()
+        # Regression guard for issue #894: the installer must be spawned with
+        # a sanitised env so system curl / tar do not inherit PyInstaller's
+        # LD_LIBRARY_PATH pointing at the bundle's _internal directory.
+        self.assertIn("env", mock_run.call_args.kwargs)
+        self.assertIsNotNone(mock_run.call_args.kwargs["env"])
 
 
 class TestUpdatePlatformHelpers(unittest.TestCase):

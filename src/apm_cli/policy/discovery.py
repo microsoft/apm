@@ -1025,6 +1025,10 @@ def _get_cache_dir(project_root: Path) -> Path:
     project root -- a configuration that, while unusual, would let
     cache reads/writes escape the project tree.
     """
+    # Resolve early so candidate inherits long-name form on Windows;
+    # without this, resolve() on a not-yet-existing candidate keeps
+    # 8.3 short names while the base resolves to long names (#886).
+    project_root = project_root.resolve()
     base = project_root / "apm_modules"
     candidate = base / POLICY_CACHE_DIR
     # Resolve both ends and assert containment under ``project_root``,
