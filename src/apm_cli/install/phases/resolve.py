@@ -224,7 +224,12 @@ def run(ctx: "InstallContext") -> None:
         download_callback=download_callback,
     )
 
-    dependency_graph = resolver.resolve_dependencies(ctx.apm_dir)
+    # Resolver reads ``project_root / "apm.yml"`` -- always the source
+    # root, never the deploy root, so ``apm install --root`` keeps
+    # finding the manifest in the user's working directory.
+    dependency_graph = resolver.resolve_dependencies(
+        ctx.source_root or ctx.apm_dir
+    )
     ctx.dependency_graph = dependency_graph
 
     # Verbose: show resolved tree summary
