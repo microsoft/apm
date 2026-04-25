@@ -51,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `_get_console()`: returns thread-safe singleton instead of creating new `Console()` per call.
 - Marketplace registry cache: `_load()`, `_save()`, `_invalidate_cache()` protected with `threading.Lock`.
 - Complexity audit -- decomposed god functions in `reference.py`, `audit.py`, `deps/cli.py`, and `script_runner.py` into focused single-responsibility helpers (largest: `audit()` 290 lines split into thin dispatcher + `_audit_ci_gate` + `_audit_content_scan` with shared `_AuditConfig` dataclass).
+- Decomposed `github_downloader.py` into three modules: `git_remote_ops.py` (ref parsing), `download_strategies.py` (backend downloads), and a slimmed orchestrator (#918)
+- Decomposed `install()` god function (555 lines) into focused helpers with `InstallContext` parameter bundle (#918)
 
 ### Fixed
 
