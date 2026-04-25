@@ -84,6 +84,14 @@ class TargetProfile:
     target itself is partially supported (e.g. Copilot CLI cannot deploy
     prompts at user scope)."""
 
+    generated_files: Tuple[str, ...] = ()
+    """Additional generated files associated with this target.
+
+    These are compile-time outputs that live at the target root but are not
+    deployed via primitive integrators, e.g. Copilot's root
+    ``copilot-instructions.md`` file.
+    """
+
     @property
     def prefix(self) -> str:
         """Return the path prefix for this target (e.g. ``".github/"``).
@@ -181,6 +189,7 @@ KNOWN_TARGETS: Dict[str, TargetProfile] = {
         user_supported="partial",
         user_root_dir=".copilot",
         unsupported_user_primitives=("prompts", "instructions"),
+        generated_files=("copilot-instructions.md",),
     ),
     # Claude Code -- ~/.claude/ is the documented user-level config directory.
     # All primitives are supported at user scope.

@@ -4,6 +4,7 @@ from apm_cli.core.target_detection import (
     detect_target,
     should_compile_agents_md,
     should_compile_claude_md,
+    should_compile_copilot_instructions_md,
     should_compile_gemini_md,
     get_target_description,
     TargetParamType,
@@ -242,6 +243,22 @@ class TestShouldCompileGeminiMd:
         assert should_compile_gemini_md("minimal") is False
 
 
+class TestShouldCompileCopilotInstructionsMd:
+    """Tests for Copilot root instruction compilation routing."""
+
+    def test_vscode_target(self):
+        assert should_compile_copilot_instructions_md("vscode") is True
+
+    def test_all_target(self):
+        assert should_compile_copilot_instructions_md("all") is True
+
+    def test_minimal_target(self):
+        assert should_compile_copilot_instructions_md("minimal") is False
+
+    def test_claude_target(self):
+        assert should_compile_copilot_instructions_md("claude") is False
+
+
 class TestGetTargetDescription:
     """Tests for get_target_description function."""
 
@@ -249,12 +266,14 @@ class TestGetTargetDescription:
         """Description for copilot target."""
         desc = get_target_description("copilot")
         assert "AGENTS.md" in desc
+        assert ".github/copilot-instructions.md" in desc
         assert ".github/" in desc
 
     def test_vscode_description(self):
         """Description for vscode target."""
         desc = get_target_description("vscode")
         assert "AGENTS.md" in desc
+        assert ".github/copilot-instructions.md" in desc
         assert ".github/" in desc
 
     def test_claude_description(self):
@@ -268,6 +287,7 @@ class TestGetTargetDescription:
         desc = get_target_description("all")
         assert "AGENTS.md" in desc
         assert "CLAUDE.md" in desc
+        assert ".github/copilot-instructions.md" in desc
 
     def test_minimal_description(self):
         """Description for minimal target."""

@@ -206,3 +206,7 @@ class TestActiveTargets:
     def test_explicit_list_codex_at_project_scope(self):
         targets = active_targets(self.root, explicit_target=["codex"])
         assert [t.name for t in targets] == ["codex"]
+
+    def test_copilot_profile_lists_root_generated_file(self):
+        profile = KNOWN_TARGETS["copilot"]
+        assert "copilot-instructions.md" in profile.generated_files

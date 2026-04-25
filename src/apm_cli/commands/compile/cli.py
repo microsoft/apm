@@ -400,8 +400,9 @@ def compile(
             config_target=compile_config_target,
         )
 
-        # Map 'minimal' to 'vscode' for the compiler (AGENTS.md only, no folder integration)
-        effective_target = detected_target if detected_target != "minimal" else "vscode"
+        # Keep the detected target intact so the compiler can preserve
+        # minimal-mode semantics (AGENTS.md only, no .github side outputs).
+        effective_target = detected_target
 
         # Build config with distributed compilation flags (Task 7)
         config = CompilationConfig.from_apm_yml(
