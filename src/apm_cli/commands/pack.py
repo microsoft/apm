@@ -17,25 +17,25 @@ from ..core.target_detection import TargetParamType
     "fmt",
     type=click.Choice(["apm", "plugin"]),
     default="apm",
-    help="Bundle format.",
+    help="Bundle format",
 )
 @click.option(
     "--target",
     "-t",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Auto-detects if not specified.",
+    help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Auto-detects if not specified",
 )
-@click.option("--archive", is_flag=True, default=False, help="Produce a .tar.gz archive.")
+@click.option("--archive", is_flag=True, default=False, help="Produce a .tar.gz archive")
 @click.option(
     "-o",
     "--output",
     type=click.Path(),
     default="./build",
-    help="Output directory (default: ./build).",
+    help="Output directory (default: ./build)",
 )
 @click.option("--dry-run", is_flag=True, default=False, help="Show what would be packed without writing")
-@click.option("--force", is_flag=True, default=False, help="On collision, last writer wins.")
+@click.option("--force", is_flag=True, default=False, help="On collision, last writer wins")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed packing information")
 @click.pass_context
 def pack_cmd(ctx, fmt, target, archive, output, dry_run, force, verbose):

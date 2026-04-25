@@ -1,5 +1,7 @@
 """Regression tests for CLI help and output consistency."""
 
+from unittest.mock import patch
+
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
@@ -37,6 +39,45 @@ def test_runtime_remove_help_includes_short_yes_alias():
     assert "-y, --yes" in result.output
 
 
+def test_mcp_install_forwards_unknown_options_before_double_dash():
+    runner = CliRunner()
+
+    with runner.isolated_filesystem(), patch(
+        "apm_cli.commands.install._get_invocation_argv",
+        return_value=[
+            "apm",
+            "mcp",
+            "install",
+            "myserver",
+            "--target",
+            "cursor",
+            "--dry-run",
+            "--",
+            "npx",
+            "-y",
+            "pkg",
+        ],
+    ):
+        result = runner.invoke(
+            cli,
+            [
+                "mcp",
+                "install",
+                "myserver",
+                "--target",
+                "cursor",
+                "--dry-run",
+                "--",
+                "npx",
+                "-y",
+                "pkg",
+            ],
+        )
+
+    assert result.exit_code == 0
+    assert "would add MCP server 'myserver'" in result.output
+
+
 def test_pack_unpack_dry_run_help_has_no_trailing_period():
     runner = CliRunner()
 
@@ -55,8 +96,8 @@ def test_outdated_top_level_help_description_has_no_trailing_period():
     result = CliRunner().invoke(cli, ["--help"])
 
     assert result.exit_code == 0
-    assert "outdated      Show outdated locked dependencies." not in result.output
-    assert "outdated      Show outdated locked dependencies" in result.output
+    assert "Show outdated locked dependencies." not in result.output
+    assert "Show outdated locked dependencies" in result.output
 
 
 def test_script_run_header_uses_running_status_symbol():
