@@ -284,6 +284,22 @@ class TestCachePathContainment:
         with pytest.raises(PathTraversalError):
             _get_cache_dir(project)
 
+    def test_unresolved_project_root_does_not_raise(self, tmp_path):
+        # Regression for #886: on Windows, tempfile.mkdtemp() may return
+        # an 8.3 short-name path (e.g. RUNNER~1). _get_cache_dir must
+        # resolve project_root before building the candidate path so
+        # both sides of ensure_path_within use consistent long names.
+        real = tmp_path / "real-project"
+        real.mkdir()
+        try:
+            link = tmp_path / "indirect"
+            os.symlink(real, link)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlink creation not supported on this platform")
+
+        cache_dir = _get_cache_dir(link)
+        assert cache_dir.parent.name == "apm_modules"
+
 
 # ──────────────────────────────────────────────────────────────────────
 # #8: discover_policy_with_chain has no ``no_policy`` parameter

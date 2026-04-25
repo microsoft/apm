@@ -74,6 +74,19 @@ def validate_path_segments(
             )
 
 
+def _strip_extended_prefix(p: Path) -> Path:
+    """Strip the ``\\\\?\\`` extended-length prefix that Windows' resolve() may add.
+
+    On Windows, ``Path.resolve()`` can inconsistently add the prefix to
+    one path but not another, making ``is_relative_to`` fail even when
+    both paths share the same physical root (#886).
+    """
+    s = str(p)
+    if s.startswith("\\\\?\\"):
+        return Path(s[4:])
+    return p
+
+
 def ensure_path_within(path: Path, base_dir: Path) -> Path:
     """Resolve *path* and assert it lives inside *base_dir*.
 
@@ -83,8 +96,8 @@ def ensure_path_within(path: Path, base_dir: Path) -> Path:
     This is intentionally strict: symlinks are resolved so that a link
     pointing outside the base is caught as well.
     """
-    resolved = path.resolve()
-    resolved_base = base_dir.resolve()
+    resolved = _strip_extended_prefix(path.resolve())
+    resolved_base = _strip_extended_prefix(base_dir.resolve())
     try:
         if not resolved.is_relative_to(resolved_base):
             raise PathTraversalError(
