@@ -164,10 +164,14 @@ def _get_validation_suggestion(error_msg):
 
 
 def _resolve_compile_target(target):
-    """Map CLI target input to compiler-understood target string.
+    """Map CLI target input to a compiler/detection target string.
 
-    The compiler only understands ``"vscode"``, ``"claude"``, and ``"all"``.
-    Multi-target lists are mapped to the narrowest equivalent.
+    Single targets are passed through unchanged. Multi-target lists are mapped
+    to the narrowest equivalent routing target:
+
+    - any AGENTS-family target only -> ``"vscode"``
+    - ``"claude"`` only -> ``"claude"``
+    - AGENTS-family target(s) plus ``"claude"`` -> ``"all"``
 
     Args:
         target: A single target string, a list of target strings, or ``None``.
