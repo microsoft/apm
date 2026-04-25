@@ -386,6 +386,7 @@ class BaseIntegrator:
         legacy_glob_dir: Optional[Path] = None,
         legacy_glob_pattern: Optional[str] = None,
         targets=None,
+        logger=None,
     ) -> Dict[str, int]:
         """Remove APM-managed files matching *prefix* from *managed_files*.
 
@@ -402,6 +403,7 @@ class BaseIntegrator:
             targets: Optional target profiles for path validation.
                      Passed through to ``validate_deploy_path()`` so
                      user-scope prefixes are recognised.
+            logger: Optional logger for diagnostic messages.
 
         Returns:
             ``{"files_removed": int, "errors": int}``
@@ -409,6 +411,11 @@ class BaseIntegrator:
         stats: Dict[str, int] = {"files_removed": 0, "errors": 0}
 
         if managed_files is not None:
+            # Lazy-resolve cowork root at most once per invocation.
+            _cowork_root_resolved: bool = False
+            _cowork_root_cached: Optional[Path] = None
+            _cowork_orphans_skipped: int = 0
+
             for rel_path in managed_files:
                 # managed_files is pre-normalized  -- no .replace() needed
                 if not rel_path.startswith(prefix):
@@ -419,14 +426,19 @@ class BaseIntegrator:
                 from apm_cli.integration.copilot_cowork_paths import COWORK_URI_SCHEME
                 if rel_path.startswith(COWORK_URI_SCHEME):
                     try:
+                        if not _cowork_root_resolved:
+                            from apm_cli.integration.copilot_cowork_paths import (
+                                resolve_copilot_cowork_skills_dir,
+                            )
+                            _cowork_root_cached = resolve_copilot_cowork_skills_dir()
+                            _cowork_root_resolved = True
+                        if _cowork_root_cached is None:
+                            _cowork_orphans_skipped += 1
+                            continue
                         from apm_cli.integration.copilot_cowork_paths import (
                             from_lockfile_path,
-                            resolve_copilot_cowork_skills_dir,
                         )
-                        cowork_root = resolve_copilot_cowork_skills_dir()
-                        if cowork_root is None:
-                            continue
-                        target = from_lockfile_path(rel_path, cowork_root)
+                        target = from_lockfile_path(rel_path, _cowork_root_cached)
                     except Exception:
                         continue
                 else:
@@ -437,6 +449,21 @@ class BaseIntegrator:
                         stats["files_removed"] += 1
                     except Exception:
                         stats["errors"] += 1
+
+            # Emit a one-time warning when cowork orphans were skipped.
+            if _cowork_orphans_skipped > 0:
+                _orphan_msg = (
+                    f"Cowork: skipping {_cowork_orphans_skipped} orphaned lockfile "
+                    f"{'entry' if _cowork_orphans_skipped == 1 else 'entries'}"
+                    " -- OneDrive path not detected.\n"
+                    "Run: apm config set copilot-cowork-skills-dir <path>  "
+                    "(or set APM_COPILOT_COWORK_SKILLS_DIR)\n"
+                    "to clean up these entries on the next install/uninstall."
+                )
+                if logger:
+                    logger.warning(_orphan_msg, symbol="warning")
+                else:
+                    _rich_warning(_orphan_msg, symbol="warning")
         elif legacy_glob_dir and legacy_glob_pattern and legacy_glob_dir.exists():
             for f in legacy_glob_dir.glob(legacy_glob_pattern):
                 try:

@@ -83,13 +83,21 @@ def run(ctx: "InstallContext") -> None:
                     )
             else:
                 # Fix 3: flag is ON but resolver returned None
-                if ctx.logger:
-                    ctx.logger.error(
+                import sys as _sys
+                if _sys.platform.startswith("linux"):
+                    _cowork_msg = (
+                        "Cowork has no auto-detection on Linux.\n"
+                        "Set APM_COPILOT_COWORK_SKILLS_DIR or run: "
+                        "apm config set copilot-cowork-skills-dir <path>"
+                    )
+                else:
+                    _cowork_msg = (
                         "Cowork: no OneDrive path detected.\n"
                         "Set APM_COPILOT_COWORK_SKILLS_DIR or run: "
-                        "apm config set copilot-cowork-skills-dir <path>",
-                        symbol="cross",
+                        "apm config set copilot-cowork-skills-dir <path>"
                     )
+                if ctx.logger:
+                    ctx.logger.error(_cowork_msg, symbol="cross")
                 raise SystemExit(1)
 
     # ------------------------------------------------------------------

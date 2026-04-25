@@ -868,3 +868,239 @@ class TestCleanupEmptyParentsCowork:
         )
         assert (tmp_path / "deep").exists(), "ancestors above stop_at must survive"
 
+
+# ---------------------------------------------------------------------------
+# P2: cowork resolver called at most once per sync_remove_files invocation
+# ---------------------------------------------------------------------------
+
+
+class TestSyncRemoveFilesCoworkResolverCalledOnce:
+    """P2: resolve_copilot_cowork_skills_dir must be invoked at most once
+    even when multiple cowork:// paths are processed."""
+
+    def test_resolver_called_once_for_five_cowork_paths(
+        self, tmp_path: Path
+    ) -> None:
+        """With 5 cowork:// entries the resolver is called exactly once
+        inside sync_remove_files' cowork branch (validate_deploy_path is
+        stubbed so it doesn't contribute extra calls)."""
+        cowork_root = tmp_path / "cowork-skills"
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        cowork_target = _make_cowork_target(cowork_root)
+
+        # Create 5 skill files so they exist on disk
+        paths = set()
+        for i in range(5):
+            skill_dir = cowork_root / f"skill-{i}"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(f"# Skill {i}")
+            paths.add(f"cowork://skills/skill-{i}/SKILL.md")
+
+        with patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=cowork_root,
+        ) as mock_resolve, patch.object(
+            BaseIntegrator, "validate_deploy_path", return_value=True,
+        ):
+            stats = BaseIntegrator.sync_remove_files(
+                project_root,
+                paths,
+                "cowork://",
+                targets=[cowork_target],
+            )
+
+        mock_resolve.assert_called_once()
+        assert stats["files_removed"] == 5
+
+    def test_resolver_called_once_when_returns_none(
+        self, tmp_path: Path
+    ) -> None:
+        """When resolver returns None the call still happens only once."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        cowork_target = _make_cowork_target(tmp_path)
+
+        paths = {
+            f"cowork://skills/skill-{i}/SKILL.md" for i in range(3)
+        }
+
+        with patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=None,
+        ) as mock_resolve, patch.object(
+            BaseIntegrator, "validate_deploy_path", return_value=True,
+        ):
+            BaseIntegrator.sync_remove_files(
+                project_root,
+                paths,
+                "cowork://",
+                targets=[cowork_target],
+            )
+
+        mock_resolve.assert_called_once()
+
+    def test_resolver_not_called_without_cowork_paths(
+        self, tmp_path: Path
+    ) -> None:
+        """No cowork:// paths means the resolver is never invoked."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        (project_root / ".github" / "prompts").mkdir(parents=True)
+        (project_root / ".github" / "prompts" / "a.prompt.md").write_text("x")
+
+        with patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+        ) as mock_resolve:
+            BaseIntegrator.sync_remove_files(
+                project_root,
+                {".github/prompts/a.prompt.md"},
+                ".github/prompts/",
+            )
+
+        mock_resolve.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# P4: orphan-visibility diagnostic in sync_remove_files
+# ---------------------------------------------------------------------------
+
+
+class TestSyncRemoveFilesOrphanWarning:
+    """P4: when cowork resolver returns None the function must emit a
+    one-time warning with the count of skipped orphan entries."""
+
+    def test_orphan_warning_emitted_with_logger(
+        self, tmp_path: Path
+    ) -> None:
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        cowork_target = _make_cowork_target(tmp_path)
+        logger = MagicMock()
+
+        paths = {
+            f"cowork://skills/skill-{i}/SKILL.md" for i in range(3)
+        }
+
+        with patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=None,
+        ), patch.object(
+            BaseIntegrator, "validate_deploy_path", return_value=True,
+        ):
+            BaseIntegrator.sync_remove_files(
+                project_root,
+                paths,
+                "cowork://",
+                targets=[cowork_target],
+                logger=logger,
+            )
+
+        logger.warning.assert_called_once()
+        msg = logger.warning.call_args[0][0]
+        assert "3" in msg
+        assert "orphaned lockfile" in msg
+        assert "APM_COPILOT_COWORK_SKILLS_DIR" in msg
+        assert "apm config set copilot-cowork-skills-dir" in msg
+
+    def test_orphan_warning_singular_for_one_entry(
+        self, tmp_path: Path
+    ) -> None:
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        cowork_target = _make_cowork_target(tmp_path)
+        logger = MagicMock()
+
+        with patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=None,
+        ), patch.object(
+            BaseIntegrator, "validate_deploy_path", return_value=True,
+        ):
+            BaseIntegrator.sync_remove_files(
+                project_root,
+                {"cowork://skills/only-one/SKILL.md"},
+                "cowork://",
+                targets=[cowork_target],
+                logger=logger,
+            )
+
+        logger.warning.assert_called_once()
+        msg = logger.warning.call_args[0][0]
+        assert "1 orphaned lockfile entry" in msg
+
+    def test_orphan_warning_fallback_to_rich_warning(
+        self, tmp_path: Path
+    ) -> None:
+        """Without a logger the warning routes through _rich_warning."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        cowork_target = _make_cowork_target(tmp_path)
+
+        with patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=None,
+        ), patch.object(
+            BaseIntegrator, "validate_deploy_path", return_value=True,
+        ), patch(
+            "apm_cli.integration.base_integrator._rich_warning",
+        ) as mock_warn:
+            BaseIntegrator.sync_remove_files(
+                project_root,
+                {"cowork://skills/a/SKILL.md", "cowork://skills/b/SKILL.md"},
+                "cowork://",
+                targets=[cowork_target],
+            )
+
+        mock_warn.assert_called_once()
+        msg = mock_warn.call_args[0][0]
+        assert "2" in msg
+        assert "orphaned lockfile" in msg
+
+    def test_no_orphan_warning_when_resolver_succeeds(
+        self, tmp_path: Path
+    ) -> None:
+        """No warning emitted when the cowork root resolves successfully."""
+        cowork_root = tmp_path / "cowork-skills"
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        cowork_target = _make_cowork_target(cowork_root)
+        logger = MagicMock()
+
+        skill_dir = cowork_root / "my-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# Skill")
+
+        with patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=cowork_root,
+        ):
+            BaseIntegrator.sync_remove_files(
+                project_root,
+                {"cowork://skills/my-skill/SKILL.md"},
+                "cowork://",
+                targets=[cowork_target],
+                logger=logger,
+            )
+
+        logger.warning.assert_not_called()
+
+    def test_no_orphan_warning_without_cowork_paths(
+        self, tmp_path: Path
+    ) -> None:
+        """No warning emitted when no cowork:// paths are present."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        (project_root / ".github" / "prompts").mkdir(parents=True)
+        (project_root / ".github" / "prompts" / "a.prompt.md").write_text("x")
+        logger = MagicMock()
+
+        BaseIntegrator.sync_remove_files(
+            project_root,
+            {".github/prompts/a.prompt.md"},
+            ".github/prompts/",
+            logger=logger,
+        )
+
+        logger.warning.assert_not_called()
+

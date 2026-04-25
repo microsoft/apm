@@ -283,3 +283,70 @@ class TestCoworkResolutionErrorHandling:
                 from apm_cli.install.phases.targets import run
                 run(ctx)
             assert exc_info.value.code == 1
+
+
+# ---------------------------------------------------------------------------
+# TestCoworkLinuxSpecificMessage (P3)
+# ---------------------------------------------------------------------------
+
+
+class TestCoworkLinuxSpecificMessage:
+    """P3: Linux users see a Linux-specific error; others see the generic one."""
+
+    def _run_cowork_no_onedrive(
+        self, tmp_path: Path, inject_config, platform_value: str
+    ) -> MagicMock:
+        """Run the targets phase with cowork flag ON but resolver returning None.
+
+        Returns the ctx mock so callers can inspect logger calls.
+        """
+        inject_config({"experimental": {"copilot_cowork": True}})
+        ctx = _make_ctx(
+            tmp_path,
+            scope=InstallScope.USER,
+            target_override="copilot-cowork",
+        )
+
+        # resolve_targets returns NO cowork target (resolver returned None
+        # during target resolution) -- this triggers the flag-ON-but-no-path branch.
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        non_cowork = [KNOWN_TARGETS["copilot"]]
+
+        with patch(
+            "apm_cli.integration.targets.resolve_targets",
+            return_value=non_cowork,
+        ), patch(
+            "apm_cli.core.target_detection.detect_target",
+        ), patch(
+            "sys.platform", platform_value
+        ):
+            with pytest.raises(SystemExit):
+                from apm_cli.install.phases.targets import run
+
+                run(ctx)
+        return ctx
+
+    def test_linux_message_contains_no_auto_detection(
+        self, tmp_path: Path, inject_config
+    ) -> None:
+        ctx = self._run_cowork_no_onedrive(tmp_path, inject_config, "linux")
+        msg = ctx.logger.error.call_args[0][0]
+        assert "no auto-detection on Linux" in msg
+        assert "APM_COPILOT_COWORK_SKILLS_DIR" in msg
+
+    def test_darwin_message_does_not_contain_linux_phrase(
+        self, tmp_path: Path, inject_config
+    ) -> None:
+        ctx = self._run_cowork_no_onedrive(tmp_path, inject_config, "darwin")
+        msg = ctx.logger.error.call_args[0][0]
+        assert "no auto-detection on Linux" not in msg
+        assert "no OneDrive path detected" in msg
+
+    def test_win32_message_does_not_contain_linux_phrase(
+        self, tmp_path: Path, inject_config
+    ) -> None:
+        ctx = self._run_cowork_no_onedrive(tmp_path, inject_config, "win32")
+        msg = ctx.logger.error.call_args[0][0]
+        assert "no auto-detection on Linux" not in msg
+        assert "no OneDrive path detected" in msg
