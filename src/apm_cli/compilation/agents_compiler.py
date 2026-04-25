@@ -645,7 +645,7 @@ class AgentsCompiler:
         stats = gemini_result.stats.copy()
         stats["gemini_files_written"] = files_written
 
-        self._log("progress", f"[+] Generated GEMINI.md (imports AGENTS.md)")
+        self._log("progress", "Generated GEMINI.md (imports AGENTS.md)")
 
         return CompilationResult(
             success=len(all_errors) == 0,

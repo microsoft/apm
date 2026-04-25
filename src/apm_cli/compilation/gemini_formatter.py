@@ -9,7 +9,7 @@ the AGENTS.md pipeline already produces.
 import builtins
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 
 from ..primitives.models import Instruction, PrimitiveCollection
 from ..version import get_version
@@ -26,8 +26,6 @@ class GeminiPlacement:
     """Result of GEMINI.md placement analysis."""
     gemini_path: Path
     instructions: List[Instruction]
-    coverage_patterns: Set[str] = field(default_factory=set)
-    source_attribution: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -81,8 +79,6 @@ class GeminiFormatter:
             placement = GeminiPlacement(
                 gemini_path=gemini_path,
                 instructions=[],
-                coverage_patterns=set(),
-                source_attribution={},
             )
 
             stats: Dict[str, float] = {

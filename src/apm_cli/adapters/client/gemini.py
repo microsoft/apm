@@ -30,7 +30,6 @@ from pathlib import Path
 
 from .copilot import CopilotClientAdapter
 from ...core.docker_args import DockerArgsProcessor
-from ...core.token_manager import GitHubTokenManager
 from ...utils.console import _rich_error, _rich_success
 
 logger = logging.getLogger(__name__)
@@ -140,19 +139,6 @@ class GeminiClientAdapter(CopilotClientAdapter):
                 config["url"] = url
             else:
                 config["httpUrl"] = url
-
-            # GitHub server auth
-            server_name = server_info.get("name", "")
-            is_github = self._is_github_server(
-                server_name, remote.get("url", "")
-            )
-            if is_github:
-                _tm = GitHubTokenManager()
-                token = _tm.get_token_for_purpose("gemini") or os.getenv(
-                    "GITHUB_PERSONAL_ACCESS_TOKEN"
-                )
-                if token:
-                    config["headers"] = {"Authorization": f"Bearer {token}"}
 
             # Registry-supplied headers
             for header in remote.get("headers", []):
