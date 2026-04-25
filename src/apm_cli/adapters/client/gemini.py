@@ -16,7 +16,7 @@ Gemini CLI uses ``.gemini/settings.json`` at the project root with an
    }
 
 APM only writes to ``.gemini/settings.json`` when the ``.gemini/``
-directory already exists — Gemini CLI support is opt-in.
+directory already exists -- Gemini CLI support is opt-in.
 
 Ref: https://geminicli.com/docs/reference/configuration/
 """
