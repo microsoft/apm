@@ -1653,6 +1653,24 @@ class TestInstallMcpFlag:
             data = yaml.safe_load((tmp / "apm.yml").read_text())
             assert data["dependencies"]["mcp"][0]["headers"] == {"X-A": "1", "X-B": "2"}
 
+    def test_mcp_registry_shorthand_no_overlays_persists_bare_string(self):
+        # Bare registry shorthand (no --transport, --url, --mcp-version,
+        # --registry, post-`--` argv) is a documented happy path; the
+        # builder returns ``str``, and the install path must not introspect
+        # the entry as a dict.
+        ref = "io.github.github/github-mcp-server"
+        with self._chdir_with_apm_yml() as tmp, \
+             patch("apm_cli.commands.install._get_invocation_argv",
+                   return_value=["apm", "install", "--mcp", ref]), \
+             patch("apm_cli.commands.install.MCPIntegrator"):
+            result = self.runner.invoke(cli, ["install", "--mcp", ref])
+            assert result.exit_code == 0, result.output
+            assert "'str' object has no attribute" not in result.output
+            data = yaml.safe_load((tmp / "apm.yml").read_text())
+            # Bare-string serialization is the apm.yml UX contract for
+            # shorthand-with-no-overlays; do not silently promote to a dict.
+            assert data["dependencies"]["mcp"] == [ref]
+
     # --- Conflict matrix E1-E14 ---
 
     def test_e1_mcp_with_positional_packages(self):

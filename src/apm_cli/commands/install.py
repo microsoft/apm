@@ -849,9 +849,13 @@ def _run_mcp_install(
     except ValueError as exc:
         raise click.UsageError(str(exc))
 
-    # F5 + F7 warnings -- do not block.
+    # F5 + F7 warnings -- do not block.  Source the stdio command from the
+    # CLI input rather than the built ``entry``: ``entry`` is ``str`` for
+    # bare-string registry shorthand and ``dict`` otherwise, so ``entry.get``
+    # is unsafe.
     _warn_ssrf_url(url, logger)
-    _warn_shell_metachars(env, logger, command=entry.get("command"))
+    stdio_command = command_argv[0] if command_argv else None
+    _warn_shell_metachars(env, logger, command=stdio_command)
 
     # Write to apm.yml.
     status, _diff = _add_mcp_to_apm_yml(
