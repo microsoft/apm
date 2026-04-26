@@ -60,7 +60,7 @@ from apm_cli.install.phases.local_content import (
     _has_local_apm_content,
     _project_has_root_primitives,
 )
-from apm_cli.install.errors import PolicyViolationError
+from apm_cli.install.errors import DirectDependencyError, PolicyViolationError
 from apm_cli.install.insecure_policy import (
     _InsecureDependencyInfo,
     _allow_insecure_host_callback,
@@ -1596,6 +1596,10 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
 
     except InsecureDependencyPolicyError:
         _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
+        sys.exit(1)
+    except DirectDependencyError as e:
+        _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
+        logger.error(str(e))
         sys.exit(1)
     except click.UsageError:
         # Conflict matrix / argv parser raises UsageError -- let Click

@@ -81,36 +81,39 @@ class PackageValidator:
                 result.add_error(".apm must be a directory")
                 return result
         
-        # Check for primitive content
-        primitive_types = ['instructions', 'chatmodes', 'contexts', 'prompts']
-        has_primitives = False
-        
-        for primitive_type in primitive_types:
-            primitive_dir = apm_dir / primitive_type
-            if primitive_dir.exists() and primitive_dir.is_dir():
-                md_files = list(primitive_dir.glob("*.md"))
-                if md_files:
-                    has_primitives = True
-                    # Validate each primitive file
-                    for md_file in md_files:
-                        self._validate_primitive_file(md_file, result)
+        # Check for primitive content -- only meaningful when .apm/ exists.
+        # HYBRID and CLAUDE_SKILL layouts may ship without .apm/, so the
+        # "no primitives" warning would be misleading for those shapes.
+        if apm_dir.exists() and apm_dir.is_dir():
+            primitive_types = ['instructions', 'chatmodes', 'contexts', 'prompts']
+            has_primitives = False
 
-        # Check for hooks (JSON files, not markdown)
-        hooks_dir = apm_dir / "hooks"
-        if hooks_dir.exists() and hooks_dir.is_dir():
-            json_files = list(hooks_dir.glob("*.json"))
-            if json_files:
-                has_primitives = True
-        
-        # Also check hooks/ at package root (Claude-native convention)
-        hooks_root_dir = package_path / "hooks"
-        if hooks_root_dir.exists() and hooks_root_dir.is_dir():
-            json_files = list(hooks_root_dir.glob("*.json"))
-            if json_files:
-                has_primitives = True
-        
-        if not has_primitives:
-            result.add_warning("No primitive files found in .apm/ directory")
+            for primitive_type in primitive_types:
+                primitive_dir = apm_dir / primitive_type
+                if primitive_dir.exists() and primitive_dir.is_dir():
+                    md_files = list(primitive_dir.glob("*.md"))
+                    if md_files:
+                        has_primitives = True
+                        # Validate each primitive file
+                        for md_file in md_files:
+                            self._validate_primitive_file(md_file, result)
+
+            # Check for hooks (JSON files, not markdown)
+            hooks_dir = apm_dir / "hooks"
+            if hooks_dir.exists() and hooks_dir.is_dir():
+                json_files = list(hooks_dir.glob("*.json"))
+                if json_files:
+                    has_primitives = True
+
+            # Also check hooks/ at package root (Claude-native convention)
+            hooks_root_dir = package_path / "hooks"
+            if hooks_root_dir.exists() and hooks_root_dir.is_dir():
+                json_files = list(hooks_root_dir.glob("*.json"))
+                if json_files:
+                    has_primitives = True
+
+            if not has_primitives:
+                result.add_warning("No primitive files found in .apm/ directory")
         
         return result
     
