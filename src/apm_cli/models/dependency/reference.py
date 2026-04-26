@@ -523,6 +523,19 @@ class DependencyReference:
         Raises:
             ValueError: If the entry is missing required fields or has invalid format
         """
+        # Object-form registry virtual package — design §3.2.
+        # Discriminated by the ``registry:`` key. Mutually exclusive with
+        # ``git:``. Required fields: registry, id, path, version. ``alias`` is
+        # optional. Used only for virtual packages because non-virtual entries
+        # compose cleanly in the ``owner/repo@<name>#<semver>`` shorthand.
+        if "registry" in entry:
+            if "git" in entry:
+                raise ValueError(
+                    "Object-style dependency cannot mix 'registry:' and 'git:' "
+                    "keys — choose one resolver."
+                )
+            return cls._parse_registry_object_entry(entry)
+
         # Support dict-form local path: { path: ./local/dir }
         if "path" in entry and "git" not in entry:
             local = entry["path"]
@@ -539,7 +552,8 @@ class DependencyReference:
 
         if "git" not in entry:
             raise ValueError(
-                "Object-style dependency must have a 'git' or 'path' field"
+                "Object-style dependency must have a 'git', 'path', or "
+                "'registry' field"
             )
 
         git_url = entry["git"]
@@ -589,6 +603,114 @@ class DependencyReference:
             dep.is_virtual = True
 
         return dep
+
+    @classmethod
+    def _parse_registry_object_entry(cls, entry: dict) -> "DependencyReference":
+        """Parse the object-form registry virtual-package entry per §3.2.
+
+        Required keys:
+            registry: <name>           # routes to apm.yml registries: block
+            id:       <owner>/<repo>   # package identity at the registry
+            path:     prompts/foo.md   # virtual sub-path inside the package
+            version:  <semver>         # strict semver, parse-time enforced
+
+        Optional:
+            alias:    <name>           # same meaning as in other object forms
+
+        Why object form for virtual only: a non-virtual registry entry composes
+        cleanly in the ``owner/repo@<name>#<semver>`` shorthand. Virtual
+        packages need four independent fields (id, registry, sub-path, version)
+        that don't combine into a readable string. Symmetric with how
+        ``- git:`` object form exists for the cases string shorthand can't
+        handle.
+        """
+        registry_name = entry.get("registry")
+        if not isinstance(registry_name, str) or not registry_name.strip():
+            raise ValueError(
+                "Object-form registry entry: 'registry' must be a non-empty "
+                "string (the name of an entry in the apm.yml registries: block)"
+            )
+        registry_name = registry_name.strip()
+
+        pkg_id = entry.get("id")
+        if not isinstance(pkg_id, str) or not pkg_id.strip():
+            raise ValueError(
+                "Object-form registry entry: 'id' is required and must be a "
+                "non-empty 'owner/repo' string"
+            )
+        pkg_id = pkg_id.strip()
+        if "/" not in pkg_id:
+            raise ValueError(
+                f"Object-form registry entry: 'id' must be 'owner/repo', "
+                f"got {pkg_id!r}"
+            )
+
+        sub_path = entry.get("path")
+        if not isinstance(sub_path, str) or not sub_path.strip():
+            raise ValueError(
+                "Object-form registry entry: 'path' is required (virtual "
+                "sub-path inside the package, e.g. 'prompts/review.prompt.md')"
+            )
+        sub_path = sub_path.strip().strip("/").replace("\\", "/").strip("/")
+        validate_path_segments(sub_path, context="path")
+
+        version = entry.get("version")
+        if not isinstance(version, str) or not version.strip():
+            raise ValueError(
+                "Object-form registry entry: 'version' is required (semver "
+                "version or range)"
+            )
+        version = version.strip()
+        # Local import to avoid a top-level cycle.
+        from ...deps.registry.semver import is_semver_range
+        if not is_semver_range(version):
+            raise ValueError(
+                f"Object-form registry entry: version {version!r} is not a "
+                f"semver version or range. Branches and commit SHAs are not "
+                f"valid for registry-routed packages."
+            )
+
+        alias = entry.get("alias")
+        if alias is not None:
+            if not isinstance(alias, str) or not alias.strip():
+                raise ValueError("'alias' field must be a non-empty string")
+            alias = alias.strip()
+            if not re.match(r"^[a-zA-Z0-9._-]+$", alias):
+                raise ValueError(
+                    f"Invalid alias: {alias}. Aliases can only contain "
+                    f"letters, numbers, dots, underscores, and hyphens"
+                )
+
+        # Reject any unknown keys to catch typos early.
+        known = {"registry", "id", "path", "version", "alias"}
+        unknown = set(entry.keys()) - known
+        if unknown:
+            raise ValueError(
+                f"Object-form registry entry has unknown fields: "
+                f"{sorted(unknown)}. Known fields: {sorted(known)}"
+            )
+
+        # Build the DependencyReference. Identity stays ``owner/repo``;
+        # virtual_path stores the sub-path; reference holds the version.
+        owner_segments = pkg_id.split("/")
+        validate_path_segments(pkg_id, context="registry id")
+        for seg in owner_segments:
+            if not re.match(r"^[a-zA-Z0-9._-]+$", seg):
+                raise ValueError(
+                    f"Invalid registry id segment: {seg!r} in {pkg_id!r}"
+                )
+
+        return cls(
+            repo_url=pkg_id,
+            host=default_host(),  # registry-side identity is host-blind, but
+                                  # downstream code expects a host for routing
+            reference=version,
+            virtual_path=sub_path,
+            is_virtual=True,
+            alias=alias,
+            source="registry",
+            registry_name=registry_name,
+        )
 
     @classmethod
     def _detect_virtual_package(cls, dependency_str: str):

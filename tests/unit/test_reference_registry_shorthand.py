@@ -161,6 +161,153 @@ class TestNoCollisionsWithExistingShapes:
         assert d.source is None
 
 
+class TestObjectFormRegistry:
+    """Object-form ``- registry: <name>`` entry per design §3.2.
+
+    Used for virtual packages — the four fields (id, registry, path, version)
+    don't compose cleanly in shorthand.
+    """
+
+    def test_happy_path(self):
+        d = DependencyReference.parse_from_dict(
+            {
+                "registry": "corp-main",
+                "id": "acme/prompt-pack",
+                "path": "prompts/review.prompt.md",
+                "version": "1.4.0",
+            }
+        )
+        assert d.repo_url == "acme/prompt-pack"
+        assert d.virtual_path == "prompts/review.prompt.md"
+        assert d.is_virtual is True
+        assert d.reference == "1.4.0"
+        assert d.source == "registry"
+        assert d.registry_name == "corp-main"
+
+    def test_with_alias(self):
+        d = DependencyReference.parse_from_dict(
+            {
+                "registry": "corp",
+                "id": "a/b",
+                "path": "x.prompt.md",
+                "version": "^1.0",
+                "alias": "my-x",
+            }
+        )
+        assert d.alias == "my-x"
+
+    def test_caret_range(self):
+        d = DependencyReference.parse_from_dict(
+            {"registry": "corp", "id": "a/b", "path": "x.prompt.md", "version": "^1.2"}
+        )
+        assert d.reference == "^1.2"
+
+    @pytest.mark.parametrize(
+        "missing_key",
+        ["registry", "id", "path", "version"],
+    )
+    def test_missing_required_field_rejected(self, missing_key):
+        full = {
+            "registry": "corp",
+            "id": "a/b",
+            "path": "x.prompt.md",
+            "version": "1.0.0",
+        }
+        full.pop(missing_key)
+        with pytest.raises(ValueError):
+            DependencyReference.parse_from_dict(full)
+
+    def test_mixing_registry_and_git_rejected(self):
+        with pytest.raises(ValueError, match="cannot mix"):
+            DependencyReference.parse_from_dict(
+                {
+                    "registry": "corp",
+                    "git": "https://github.com/a/b.git",
+                    "id": "a/b",
+                    "path": "x.prompt.md",
+                    "version": "1.0.0",
+                }
+            )
+
+    def test_invalid_id_shape_rejected(self):
+        with pytest.raises(ValueError, match="owner/repo"):
+            DependencyReference.parse_from_dict(
+                {"registry": "corp", "id": "noseparator", "path": "x", "version": "1.0.0"}
+            )
+
+    def test_branch_version_rejected(self):
+        with pytest.raises(ValueError, match="not a semver"):
+            DependencyReference.parse_from_dict(
+                {"registry": "corp", "id": "a/b", "path": "p", "version": "main"}
+            )
+
+    def test_commit_sha_version_rejected(self):
+        with pytest.raises(ValueError, match="not a semver"):
+            DependencyReference.parse_from_dict(
+                {"registry": "corp", "id": "a/b", "path": "p", "version": "abc123d"}
+            )
+
+    def test_unknown_field_rejected(self):
+        with pytest.raises(ValueError, match="unknown fields"):
+            DependencyReference.parse_from_dict(
+                {
+                    "registry": "corp",
+                    "id": "a/b",
+                    "path": "p",
+                    "version": "1.0.0",
+                    "typo": "oops",
+                }
+            )
+
+    def test_path_traversal_rejected(self):
+        with pytest.raises(ValueError):
+            DependencyReference.parse_from_dict(
+                {
+                    "registry": "corp",
+                    "id": "a/b",
+                    "path": "../escape",
+                    "version": "1.0.0",
+                }
+            )
+
+    def test_invalid_alias_rejected(self):
+        with pytest.raises(ValueError, match="Invalid alias"):
+            DependencyReference.parse_from_dict(
+                {
+                    "registry": "corp",
+                    "id": "a/b",
+                    "path": "p",
+                    "version": "1.0.0",
+                    "alias": "bad alias!",
+                }
+            )
+
+    def test_empty_strings_rejected(self):
+        for field in ("registry", "id", "path", "version"):
+            entry = {
+                "registry": "corp",
+                "id": "a/b",
+                "path": "x.prompt.md",
+                "version": "1.0.0",
+            }
+            entry[field] = "   "
+            with pytest.raises(ValueError):
+                DependencyReference.parse_from_dict(entry)
+
+    def test_existing_git_object_form_unchanged(self):
+        # Sanity check: this PR must not change existing object-form git parsing.
+        d = DependencyReference.parse_from_dict(
+            {"git": "https://github.com/owner/repo.git", "ref": "v1.0"}
+        )
+        assert d.source is None
+        assert d.registry_name is None
+
+    def test_existing_local_object_form_unchanged(self):
+        d = DependencyReference.parse_from_dict({"path": "./local/pkg"})
+        assert d.is_local
+        assert d.source is None
+
+
 class TestRegistryFieldsRoundTrip:
     """The parser sets ``source`` + ``registry_name`` consistently with the
     object-form path (Phase 4 will add a parallel parser for object form)."""
