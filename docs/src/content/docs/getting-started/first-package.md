@@ -267,6 +267,25 @@ audit while you author; pack produces the plugin bundle when you ship.
 For the full reference, see the [Pack & Distribute guide](/apm/guides/pack-distribute/)
 and the [Plugin authoring guide](/apm/guides/plugins/).
 
+## Choosing a package layout
+
+APM recognizes three layouts. Pick the one that matches what you are shipping:
+
+- **One skill** -- put `SKILL.md` at the repo root, with optional
+  `agents/`, `assets/`, or `scripts/` directories alongside it. Add
+  `apm.yml` if you need dependency management (this is a HYBRID package).
+  APM installs the whole directory as a single skill bundle.
+
+- **Multiple primitives** -- use the `.apm/` directory with `skills/`,
+  `agents/`, `instructions/` subdirectories (the layout used in this guide).
+  APM hoists each primitive into the consumer's runtime dirs individually.
+
+- **Claude plugin** -- if you already have a `plugin.json`, APM can consume
+  it directly without restructuring.
+
+For the full comparison and metadata precedence rules, see
+[Package Types](../../reference/package-types/).
+
 ## Next steps
 
 - [Anatomy of an APM Package](/apm/introduction/anatomy-of-an-apm-package/)

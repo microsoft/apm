@@ -80,11 +80,37 @@ def pack_bundle(
 
     # 2. Read apm.yml for name / version / config target
     apm_yml_path = project_root / "apm.yml"
+    skill_md_path = project_root / "SKILL.md"
+    is_hybrid_root = apm_yml_path.exists() and skill_md_path.exists()
     try:
         package = APMPackage.from_apm_yml(apm_yml_path)
         pkg_name = package.name
         pkg_version = package.version or "0.0.0"
         config_target = package.target
+
+        # HYBRID author guard: apm.yml.description and SKILL.md
+        # description serve different consumers (human-facing CLI/search
+        # vs. agent-runtime invocation matcher) and are NOT merged. If
+        # the author shipped a SKILL.md description but left
+        # apm.yml.description blank, the human-facing surfaces (apm view,
+        # apm search, marketplace listings) will degrade silently while
+        # Claude/Copilot still invoke the skill correctly. Warn loudly
+        # at pack time -- this is the publish gate for the AUTHOR.
+        if is_hybrid_root and not package.description and logger:
+            try:
+                import frontmatter as _frontmatter
+                with open(skill_md_path, "r", encoding="utf-8") as _f:
+                    _skill_post = _frontmatter.load(_f)
+                _skill_desc = _skill_post.metadata.get("description")
+            except Exception:
+                _skill_desc = None
+            if _skill_desc:
+                logger.warning(
+                    "apm.yml is missing 'description'. SKILL.md has its own "
+                    "description, but that is for agent invocation -- not "
+                    "for 'apm view' or search. Add a short tagline to "
+                    "apm.yml:  description: \"One-line human summary\""
+                )
 
         # Guard: reject local-path dependencies (non-portable)
         for dep_ref in package.get_apm_dependencies():

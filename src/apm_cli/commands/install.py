@@ -60,7 +60,7 @@ from apm_cli.install.phases.local_content import (
     _has_local_apm_content,
     _project_has_root_primitives,
 )
-from apm_cli.install.errors import PolicyViolationError
+from apm_cli.install.errors import DirectDependencyError, PolicyViolationError
 from apm_cli.install.insecure_policy import (
     _InsecureDependencyInfo,
     _allow_insecure_host_callback,
@@ -912,7 +912,7 @@ def _run_mcp_install(
 
 
 @click.command(
-    help="Install APM and MCP dependencies (auto-creates apm.yml; use --allow-insecure for http:// packages)"
+    help="Install APM and MCP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json); auto-creates apm.yml; use --allow-insecure for http:// packages)"
 )
 @click.argument("packages", nargs=-1)
 @click.option("--runtime", help="Target specific runtime only (copilot, codex, vscode)")
@@ -1596,6 +1596,10 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
 
     except InsecureDependencyPolicyError:
         _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
+        sys.exit(1)
+    except DirectDependencyError as e:
+        _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
+        logger.error(str(e))
         sys.exit(1)
     except click.UsageError:
         # Conflict matrix / argv parser raises UsageError -- let Click
