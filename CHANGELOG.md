@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **SKILL_BUNDLE package shape**: APM now recognises the `npx skills` / agentskills.io convention where packages carry `skills/<name>/SKILL.md` nested directories. Detection, validation, integration, and selective install (`--skill <name>`) are all supported. `apm.yml` is optional for SKILL_BUNDLE packages — metadata is synthesized from the directory name when absent. (#950)
+- **Day-0 install parity with `npx skills add`**: every public repo that installs cleanly with `npx skills add owner/repo` now installs cleanly with `apm install owner/repo`. APM recognises the `skills/<name>/SKILL.md` convention used by `vercel-labs/agent-skills`, `xixu-me/skills`, `larksuite/cli`, and the rest of the agentskills.io ecosystem as a first-class package shape (`SKILL_BUNDLE`). `apm.yml` is OPTIONAL for these packages -- adding it is strictly additive (lockfile + pinning) and never regresses installability. Multi-skill bundles install all skills by default; `--skill <NAME>` (repeatable) selects a subset for a single invocation. (#950)
 
 ### Fixed
 

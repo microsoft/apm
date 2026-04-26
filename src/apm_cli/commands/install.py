@@ -1050,7 +1050,7 @@ def _run_mcp_install(
         "or a stdio command (self-defined entries)."
     ),
 )
-@click.option("--skill", "skill_names", multiple=True, metavar="NAME", help="Install only named skill(s) from a SKILL_BUNDLE. Repeatable.")
+@click.option("--skill", "skill_names", multiple=True, metavar="NAME", help="Install only named skill(s) from a SKILL_BUNDLE. Repeatable. Filter applies to this invocation only and is NOT persisted in apm.yml or apm.lock; bare 'apm install' reinstalls all skills in the bundle.")
 @click.option("--no-policy", "no_policy", is_flag=True, default=False, help="Skip org policy enforcement for this invocation. Does NOT bypass apm audit --ci.")
 @click.pass_context
 def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, allow_insecure, allow_insecure_hosts, global_, use_ssh, use_https, allow_protocol_fallback, mcp_name, transport, url, env_pairs, header_pairs, mcp_version, registry_url, skill_names, no_policy):

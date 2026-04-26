@@ -179,10 +179,13 @@ def get_effective_type(package_info) -> "PackageContentType":
     from apm_cli.models.apm_package import PackageContentType, PackageType
     
     # Check if package has SKILL.md (via package_type field)
-    # PackageType.CLAUDE_SKILL = has SKILL.md only
-    # PackageType.HYBRID = has both apm.yml AND SKILL.md
+    # PackageType.CLAUDE_SKILL = has root SKILL.md only
+    # PackageType.HYBRID = has both apm.yml AND root SKILL.md
     # PackageType.SKILL_BUNDLE = has skills/<name>/SKILL.md (nested bundle)
-    # PackageType.MARKETPLACE_PLUGIN = plugin with skills
+    # PackageType.MARKETPLACE_PLUGIN = has plugin manifest (plugin.json or
+    #   .claude-plugin/); may or may not include skills/. The integrator
+    #   path gates on actual skills/ presence, so plugins without skills
+    #   are inert in the SKILL branch.
     if package_info.package_type in (
         PackageType.CLAUDE_SKILL,
         PackageType.HYBRID,
