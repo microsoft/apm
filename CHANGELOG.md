@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **SKILL_BUNDLE package shape**: APM now recognises the `npx skills` / agentskills.io convention where packages carry `skills/<name>/SKILL.md` nested directories. Detection, validation, integration, and selective install (`--skill <name>`) are all supported. `apm.yml` is optional for SKILL_BUNDLE packages — metadata is synthesized from the directory name when absent. (#950)
+
 ### Fixed
 
 - Fixed TLS validation failure behind corporate TLS-intercepting proxies and firewalls: `install/validation.py` now uses `requests` (honouring `REQUESTS_CA_BUNDLE`) instead of stdlib `urllib`, and surfaces a single CA-trust hint at default verbosity instead of a misleading auth error. (#911)
