@@ -3,8 +3,19 @@ name: Deploy Docs
 on:
   # Deploy docs only when a new APM version is released, so the published
   # site always matches the latest released binary (see microsoft/apm#641).
-  # PR runs build (no deploy) to catch breakage before merge. Manual
-  # workflow_dispatch is supported for re-publishing the current docs.
+  # Primary entrypoint is workflow_call from the CI/CD Pipeline release job
+  # (release: published does not fire when the release is created by
+  # GITHUB_TOKEN -- a documented Actions safeguard against recursion).
+  # The release: published trigger is kept as a safety net for human-cut
+  # releases. PR runs build (no deploy) to catch breakage before merge.
+  # Manual workflow_dispatch is supported for re-publishing the current docs.
+  workflow_call:
+    inputs:
+      is_prerelease:
+        description: 'Skip deploy when true (build-only). Defaults to false (deploy).'
+        required: false
+        type: boolean
+        default: false
   release:
     types: [published]
   pull_request:
@@ -45,7 +56,8 @@ jobs:
       - name: Upload build artifacts
         if: |
           github.event_name == 'workflow_dispatch' ||
-          (github.event_name == 'release' && github.event.release.prerelease == false)
+          (github.event_name == 'release' && github.event.release.prerelease == false) ||
+          (github.event_name == 'workflow_call' && inputs.is_prerelease == false)
         uses: actions/upload-pages-artifact@v3
         with:
           path: docs/dist
@@ -56,7 +68,8 @@ jobs:
     # so prerelease tags (vX.Y.Z-rc1, etc.) don't clobber published docs.
     if: |
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'release' && github.event.release.prerelease == false)
+      (github.event_name == 'release' && github.event.release.prerelease == false) ||
+      (github.event_name == 'workflow_call' && inputs.is_prerelease == false)
     runs-on: ubuntu-latest
     permissions:
       pages: write
