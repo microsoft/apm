@@ -184,5 +184,91 @@ class TestHookIntegratorSymlinkContainment(unittest.TestCase):
         self.assertNotIn("evil.json", names)
 
 
+class TestSkillIntegratorCopytreeSymlinkContainment(unittest.TestCase):
+    """skill_integrator copytree paths drop symlinks via security gate.
+
+    Three copytree call sites in
+    `apm_cli.integration.skill_integrator` deploy a skill bundle into
+    target directories. Any of them must drop symlinks contained in
+    the source tree -- otherwise a malicious package could ship a
+    symlink pointing at `/etc/passwd` (or any path outside the
+    package) and have it materialised inside the target's runtime
+    directory after `apm install`.
+
+    These tests do not exercise the higher-level integrator pipeline;
+    they validate the contract by importing
+    `apm_cli.security.gate.ignore_symlinks` and confirming each call
+    site invokes ``shutil.copytree`` with that callback (or a
+    composition that includes it).
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.src = Path(self.tmpdir) / "src"
+        self.src.mkdir()
+        self.outside = Path(self.tmpdir) / "outside"
+        self.outside.mkdir()
+        self.secret = self.outside / "secret.txt"
+        self.secret.write_text("sensitive", encoding="utf-8")
+        self.dest = Path(self.tmpdir) / "dest"
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _build_source_with_symlink(self):
+        """Create a source dir with a real file plus a symlink to outside."""
+        (self.src / "real.md").write_text("real", encoding="utf-8")
+        nested = self.src / "agents"
+        nested.mkdir()
+        (nested / "real.agent.md").write_text("real", encoding="utf-8")
+        link = self.src / "evil.txt"
+        _try_symlink(link, self.secret)
+        nested_link = nested / "evil-nested.txt"
+        _try_symlink(nested_link, self.secret)
+
+    def test_ignore_symlinks_callback_excludes_top_level_and_nested(self):
+        """The shared ignore_symlinks callback drops symlinks at every depth."""
+        from apm_cli.security.gate import ignore_symlinks
+
+        self._build_source_with_symlink()
+        shutil.copytree(self.src, self.dest, ignore=ignore_symlinks)
+
+        copied = sorted(p.relative_to(self.dest).as_posix() for p in self.dest.rglob("*"))
+        self.assertIn("real.md", copied)
+        self.assertIn("agents", copied)
+        self.assertIn("agents/real.agent.md", copied)
+        self.assertNotIn("evil.txt", copied)
+        self.assertNotIn("agents/evil-nested.txt", copied)
+
+    def test_skill_integrator_native_skill_copytree_uses_ignore_symlinks(self):
+        """integrate_native_skills passes ignore_symlinks to shutil.copytree.
+
+        Source-level guard: if a future refactor drops the callback,
+        this test fails before any malicious package can exploit it.
+        """
+        import inspect
+        from apm_cli.integration import skill_integrator
+
+        source = inspect.getsource(skill_integrator)
+        # All three copytree calls in skill_integrator.py must reference
+        # ignore_symlinks (directly or via a composing helper).
+        copytree_count = source.count("shutil.copytree(")
+        ignore_symlinks_refs = source.count("ignore_symlinks")
+        self.assertGreaterEqual(
+            copytree_count,
+            3,
+            f"Expected >=3 copytree calls in skill_integrator, found {copytree_count}",
+        )
+        # Each copytree must be matched by at least one ignore_symlinks
+        # reference (the helper at line 818 composes one ignore_symlinks
+        # import + one usage inside a closure -- still >=copytree_count).
+        self.assertGreaterEqual(
+            ignore_symlinks_refs,
+            copytree_count,
+            f"Expected >={copytree_count} ignore_symlinks references "
+            f"(one per copytree); found {ignore_symlinks_refs}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

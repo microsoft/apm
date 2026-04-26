@@ -60,6 +60,12 @@ class InstallContext:
     # ------------------------------------------------------------------
     # Resolve phase outputs
     # ------------------------------------------------------------------
+    # Direct dependencies declared in apm.yml (regular + dev), NOT the
+    # full transitive closure. Transitive deps are discovered later by
+    # the resolver and recorded on `deps_to_install` /
+    # `dependency_graph`. Treat `all_apm_deps` as "what the project
+    # author wrote" -- iterate `deps_to_install` for the full set of
+    # packages that will be installed.
     all_apm_deps: List[Any] = field(default_factory=list)  # resolve
     root_has_local_primitives: bool = False  # resolve
     deps_to_install: List[Any] = field(default_factory=list)  # resolve
@@ -109,6 +115,7 @@ class InstallContext:
     total_commands_integrated: int = 0  # integrate
     total_hooks_integrated: int = 0  # integrate
     total_links_resolved: int = 0  # integrate
+    direct_dep_failed: bool = False  # integrate -- set when any direct dep fails
 
     # ------------------------------------------------------------------
     # policy_gate
