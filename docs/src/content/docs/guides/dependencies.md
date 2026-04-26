@@ -96,7 +96,7 @@ dependencies:
     - gitlab.com/acme/repo/prompts/code-review.prompt.md
 
     # Local path (for development / monorepo workflows)
-    - ./packages/my-shared-skills          # relative to project root
+    - ./packages/my-shared-skills          # relative to this apm.yml's directory
     - /home/user/repos/my-ai-package       # absolute path
 
     # Object format: git URL + sub-path / ref / alias
@@ -286,7 +286,7 @@ Or declare them in `apm.yml`:
 ```yaml
 dependencies:
   apm:
-    - ./packages/my-shared-skills          # relative to project root
+    - ./packages/my-shared-skills          # relative to this apm.yml's directory
     - /home/user/repos/my-ai-package       # absolute path
     - microsoft/apm-sample-package         # remote (can be mixed)
 ```
@@ -296,6 +296,7 @@ dependencies:
 - Local packages are validated the same as remote packages (must have `apm.yml` or `SKILL.md`)
 - `apm compile` works identically regardless of dependency source
 - Transitive dependencies are resolved recursively (local packages can depend on remote packages)
+- **Relative paths anchor on the declaring `apm.yml`** -- a local dep listed inside a nested package (e.g. `../sibling-package` declared in `packages/foo/apm.yml`) resolves against that package's directory, not the root consumer. This matches every other package manager (npm, pip, cargo) and lets sibling packages compose. Use absolute paths if you want anchor-independent behavior.
 
 **Re-install behavior:** Local deps are always re-copied on `apm install` since there is no commit SHA to cache against. This ensures you always get the latest local changes.
 

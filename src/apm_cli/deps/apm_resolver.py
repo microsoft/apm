@@ -1,5 +1,6 @@
 """APM dependency resolution engine with recursive resolution and conflict detection."""
 
+import inspect
 from pathlib import Path
 from typing import List, Set, Optional, Protocol, Tuple, runtime_checkable
 from collections import deque
@@ -51,7 +52,33 @@ class APMDependencyResolver:
         self._apm_modules_dir: Optional[Path] = apm_modules_dir
         self._project_root: Optional[Path] = None
         self._download_callback = download_callback
+        # Whether ``download_callback`` accepts ``parent_pkg`` (added in #857).
+        # Detected once via signature inspection so legacy callbacks that
+        # predate the field still work without raising a silent TypeError
+        # that would mask the dependency.
+        self._callback_accepts_parent_pkg: bool = (
+            self._signature_accepts_parent_pkg(download_callback)
+            if download_callback is not None
+            else False
+        )
         self._downloaded_packages: Set[str] = set()  # Track what we downloaded during this resolution
+
+    @staticmethod
+    def _signature_accepts_parent_pkg(callback) -> bool:
+        """Return True if ``callback`` declares a ``parent_pkg`` parameter
+        (or accepts ``**kwargs``). Falls back to True if the signature can't
+        be introspected (e.g. C extensions) so the modern path is preferred.
+        """
+        try:
+            sig = inspect.signature(callback)
+        except (TypeError, ValueError):
+            return True
+        for param in sig.parameters.values():
+            if param.kind is inspect.Parameter.VAR_KEYWORD:
+                return True
+            if param.name == "parent_pkg":
+                return True
+        return False
     
     def resolve_dependencies(self, project_root: Path) -> DependencyGraph:
         """
@@ -406,16 +433,32 @@ class APMDependencyResolver:
         # If package doesn't exist locally, try to download it
         if not install_path.exists():
             if self._download_callback is not None:
-                unique_key = dep_ref.get_unique_key()
+                # For local deps, dedupe by the *resolved* on-disk path so that
+                # the same literal (e.g. ``../common``) declared by two
+                # different parents does not collapse onto a single graph
+                # node when each parent's source dir actually points to a
+                # different sibling (#857).
+                unique_key = self._download_dedup_key(dep_ref, parent_pkg)
                 # Avoid re-downloading the same package in a single resolution
                 if unique_key not in self._downloaded_packages:
                     try:
-                        downloaded_path = self._download_callback(
-                            dep_ref,
-                            self._apm_modules_dir,
-                            parent_chain,
-                            parent_pkg,
-                        )
+                        if self._callback_accepts_parent_pkg:
+                            downloaded_path = self._download_callback(
+                                dep_ref,
+                                self._apm_modules_dir,
+                                parent_chain,
+                                parent_pkg,
+                            )
+                        else:
+                            # Legacy callback predating #857 -- no parent_pkg.
+                            # Local deps from non-root parents will fall back
+                            # to project_root resolution; this matches behavior
+                            # before the fix, so no surprise regression.
+                            downloaded_path = self._download_callback(
+                                dep_ref,
+                                self._apm_modules_dir,
+                                parent_chain,
+                            )
                         if downloaded_path and downloaded_path.exists():
                             self._downloaded_packages.add(unique_key)
                             install_path = downloaded_path
@@ -466,6 +509,35 @@ class APMDependencyResolver:
             # Package has invalid apm.yml - log warning but continue
             # In production, we might want to surface this to the user
             return None
+
+    def _download_dedup_key(
+        self,
+        dep_ref: DependencyReference,
+        parent_pkg: Optional[APMPackage],
+    ) -> str:
+        """Return a context-aware key for the per-resolution download cache.
+
+        For remote deps this is just ``dep_ref.get_unique_key()``. For local
+        deps the literal ``local_path`` (e.g. ``../common``) is ambiguous
+        once #857 anchors it on the declaring package's directory: the same
+        string can refer to different on-disk packages depending on which
+        parent declared it. We therefore prefix the key with the resolved
+        absolute source path so the dedup matches the actual filesystem
+        identity, not the textual identity.
+        """
+        if dep_ref.is_local and dep_ref.local_path:
+            local = Path(dep_ref.local_path).expanduser()
+            if local.is_absolute():
+                resolved = local.resolve()
+            else:
+                base_dir = (
+                    parent_pkg.source_path
+                    if parent_pkg is not None and parent_pkg.source_path is not None
+                    else self._project_root
+                )
+                resolved = (base_dir / local).resolve() if base_dir else local.resolve()
+            return f"local::{resolved}"
+        return dep_ref.get_unique_key()
 
     def _compute_dep_source_path(
         self,

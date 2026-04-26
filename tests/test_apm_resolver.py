@@ -607,6 +607,146 @@ class TestDownloadCallbackReceivesParent(unittest.TestCase):
             _, parent_pkg = received_calls[0]
             assert parent_pkg is None  # direct dep from root
 
+    def test_callback_receives_parent_for_transitive_dep(self):
+        """Transitive deps invoke the callback with the *declaring* package
+        as ``parent_pkg`` so its ``source_path`` can anchor relative local
+        paths (#857)."""
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_modules = project_root / "apm_modules"
+            apm_modules.mkdir()
+
+            # Root depends on a local sibling that itself declares a
+            # transitive remote dep. We satisfy the local dep by hand so
+            # its apm.yml is loaded and its sub-deps get resolved (which
+            # is when the callback should fire with parent_pkg=mid-pkg).
+            mid_install = apm_modules / "_local" / "mid"
+            mid_install.mkdir(parents=True)
+            (mid_install / "apm.yml").write_text(
+                "name: mid-pkg\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n    - user/leaf-dep\n"
+            )
+
+            mid_src = project_root / "packages" / "mid"
+            mid_src.mkdir(parents=True)
+            (mid_src / "apm.yml").write_text(
+                "name: mid-pkg\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n    - user/leaf-dep\n"
+            )
+
+            (project_root / "apm.yml").write_text(
+                "name: root-pkg\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n    - ./packages/mid\n"
+            )
+
+            received_calls = []
+
+            def fake_download(dep_ref, apm_modules_dir, parent_chain="", parent_pkg=None):
+                received_calls.append(
+                    (dep_ref.get_unique_key(), parent_pkg, parent_chain)
+                )
+                return None
+
+            resolver = APMDependencyResolver(
+                apm_modules_dir=apm_modules,
+                download_callback=fake_download,
+            )
+            resolver.resolve_dependencies(project_root)
+
+            # The transitive ``user/leaf-dep`` invocation must carry the
+            # mid-pkg APMPackage as parent_pkg.
+            leaf_calls = [c for c in received_calls if "leaf-dep" in c[0]]
+            assert leaf_calls, (
+                f"expected a callback call for the transitive leaf-dep, "
+                f"got: {received_calls}"
+            )
+            _, parent_pkg, _ = leaf_calls[0]
+            assert parent_pkg is not None, "transitive dep should have parent_pkg"
+            assert parent_pkg.name == "mid-pkg"
+            # source_path must be set so future relative resolution would work.
+            assert parent_pkg.source_path is not None
+
+
+class TestLegacyDownloadCallbackCompatibility(unittest.TestCase):
+    """Callbacks that predate #857 (no ``parent_pkg`` parameter) still work."""
+
+    def test_legacy_callback_signature_is_called(self):
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_modules = project_root / "apm_modules"
+            apm_modules.mkdir()
+            (project_root / "apm.yml").write_text(
+                "name: root-pkg\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n    - user/dep1\n"
+            )
+
+            invocations = []
+
+            # Legacy 3-arg callback -- no ``parent_pkg``. Pre-#857 this is
+            # the only signature that exists; if the resolver tried to call
+            # with a 4th positional arg it would raise TypeError and the
+            # download would be silently skipped.
+            def legacy_download(dep_ref, apm_modules_dir, parent_chain=""):
+                invocations.append(dep_ref.get_unique_key())
+                return None
+
+            resolver = APMDependencyResolver(
+                apm_modules_dir=apm_modules,
+                download_callback=legacy_download,  # type: ignore[arg-type]
+            )
+            resolver.resolve_dependencies(project_root)
+
+            assert invocations, (
+                "legacy callback should still be invoked; resolver must "
+                "detect missing parent_pkg parameter via signature inspection"
+            )
+
+    def test_modern_callback_detected_as_parent_pkg_aware(self):
+        def modern(dep_ref, apm_modules_dir, parent_chain="", parent_pkg=None):
+            return None
+        assert APMDependencyResolver._signature_accepts_parent_pkg(modern) is True
+
+    def test_legacy_callback_detected_as_not_parent_pkg_aware(self):
+        def legacy(dep_ref, apm_modules_dir, parent_chain=""):
+            return None
+        assert APMDependencyResolver._signature_accepts_parent_pkg(legacy) is False
+
+    def test_kwargs_callback_detected_as_parent_pkg_aware(self):
+        def varargs(dep_ref, apm_modules_dir, parent_chain="", **kwargs):
+            return None
+        assert APMDependencyResolver._signature_accepts_parent_pkg(varargs) is True
+
+
+class TestDownloadDedupKey(unittest.TestCase):
+    """Per-resolution download dedup key disambiguates identical local_path
+    literals declared by different parents (#857)."""
+
+    def test_remote_dep_uses_get_unique_key(self):
+        resolver = APMDependencyResolver()
+        dep = DependencyReference(repo_url="user/repo")
+        assert resolver._download_dedup_key(dep, parent_pkg=None) == dep.get_unique_key()
+
+    def test_local_dep_keys_include_resolved_path(self):
+        resolver = APMDependencyResolver()
+        dep = DependencyReference(
+            repo_url="../common", is_local=True, local_path="../common"
+        )
+        parent_a = APMPackage(
+            name="a", version="1.0.0", source="local",
+            source_path=Path("/proj/packages/team-x/handbook").resolve(),
+        )
+        parent_b = APMPackage(
+            name="b", version="1.0.0", source="local",
+            source_path=Path("/proj/packages/team-y/handbook").resolve(),
+        )
+        key_a = resolver._download_dedup_key(dep, parent_pkg=parent_a)
+        key_b = resolver._download_dedup_key(dep, parent_pkg=parent_b)
+        assert key_a != key_b, (
+            "same local_path literal under different parents must dedup separately"
+        )
+        assert "team-x" in key_a
+        assert "team-y" in key_b
+
 
 if __name__ == '__main__':
     unittest.main()
