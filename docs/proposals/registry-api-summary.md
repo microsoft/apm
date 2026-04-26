@@ -93,25 +93,25 @@ Returns all published versions. Client picks one via existing semver logic.
 
 Cacheable (`Cache-Control: max-age=60` recommended) — versions are immutable.
 
-### `GET /v1/packages/{owner}/{repo}/versions/{version}/tarball` — fetch
+### `GET /v1/packages/{owner}/{repo}/versions/{version}/download` — fetch
 
-Downloads the immutable package tarball.
+Downloads the immutable package archive. Endpoint is format-neutral (same precedent as crates.io `/download` and the Docker Registry's `/blobs`); `Content-Type` tells the client which extractor to use.
 
 **Response 200:**
-- `Content-Type: application/gzip`
+- `Content-Type:` one of `application/gzip` (tar.gz) or `application/zip` (Anthropic skills format)
 - `Digest: sha256=<base64>` (RFC 3230)
-- Body: gzipped tar of the package tree (same shape as `apm pack` output)
+- Body: archive bytes
 
-Client MUST verify the sha256 digest against the entry from the list endpoint before extraction. After extraction, the client reads `apm.yml` from `apm_modules/{owner}/{repo}/apm.yml` and recurses for transitive deps — no separate metadata call.
+Client MUST verify the sha256 digest against the entry from the list endpoint before extraction. The hash check happens against the raw bytes regardless of archive format. After extraction, the client reads `apm.yml` from `apm_modules/{owner}/{repo}/apm.yml` and recurses for transitive deps — no separate metadata call.
 
 ### `PUT /v1/packages/{owner}/{repo}/versions/{version}` — publish
 
-Upload a packaged tarball. Versions are immutable.
+Upload a packaged archive. Versions are immutable.
 
 **Request:**
 - `Authorization: Bearer <publish-token>`
-- `Content-Type: application/gzip`
-- Body: the `apm pack` tarball
+- `Content-Type:` one of `application/gzip` (tar.gz) or `application/zip`
+- Body: the archive bytes
 
 **Response 201:**
 ```json

@@ -1,13 +1,23 @@
-"""Tarball extraction with sha256 verification.
+"""Archive extraction with sha256 verification.
 
 Per docs/proposals/registry-api.md §5.2 and §6.1: the client MUST verify the
-sha256 digest of the tarball against the value advertised by ``GET /versions``
+sha256 digest of the archive against the value advertised by ``GET /versions``
 or recorded in the lockfile *before* extracting. A mismatch fails closed —
 this is the only security-critical check on the install path.
 
-Layout: tarballs are extracted into ``apm_modules/{owner}/{repo}/`` (the same
-shape the Git resolver produces after ``git clone``). Path-traversal entries
-are rejected — see ``_safe_extract``.
+Two archive formats are supported, dispatched by Content-Type from
+``RegistryClient.download_archive``:
+
+- ``application/gzip`` — gzipped tar (default APM ``apm pack`` output)
+- ``application/zip``  — zip archive (Anthropic / open-claude-skills format)
+
+The ``extract_archive`` dispatcher picks the right path and applies the same
+security gates to both: no absolute paths, no path traversal, no symlinks or
+hardlinks. The hash is checked against the raw bytes regardless of format —
+a wrong-format guess produces a clean error, not a security issue.
+
+Layout: archives are extracted into ``apm_modules/{owner}/{repo}/`` (the same
+shape the Git resolver produces after ``git clone``).
 """
 
 from __future__ import annotations
@@ -15,16 +25,49 @@ from __future__ import annotations
 import hashlib
 import os
 import tarfile
+import zipfile
 from pathlib import Path
 from typing import Optional
 
 
 class HashMismatchError(Exception):
-    """Raised when a tarball's sha256 does not match the expected digest."""
+    """Raised when an archive's sha256 does not match the expected digest."""
 
 
 class UnsafeTarballError(Exception):
-    """Raised when a tarball entry would escape the extraction root."""
+    """Raised when an archive entry would escape the extraction root.
+
+    Name kept for backward compat; covers both tar and zip cases.
+    """
+
+
+class UnknownArchiveFormatError(Exception):
+    """Raised when the archive format can't be inferred from content type or magic bytes."""
+
+
+# Archive-format magic-byte sniffers — used as a fallback when Content-Type
+# isn't reliable. Both formats have unambiguous prefixes.
+_GZIP_MAGIC = b"\x1f\x8b"
+_ZIP_MAGIC = b"PK\x03\x04"
+
+
+def _detect_format(data: bytes, content_type: Optional[str]) -> str:
+    """Return ``"tar+gzip"`` or ``"zip"``. Content-Type wins; magic bytes are fallback."""
+    if content_type:
+        ct = content_type.lower().strip()
+        if ct in ("application/gzip", "application/x-gzip", "application/x-tar+gzip"):
+            return "tar+gzip"
+        if ct in ("application/zip", "application/x-zip-compressed"):
+            return "zip"
+    # Fallback to magic bytes
+    if data.startswith(_GZIP_MAGIC):
+        return "tar+gzip"
+    if data.startswith(_ZIP_MAGIC):
+        return "zip"
+    raise UnknownArchiveFormatError(
+        f"cannot determine archive format from content_type={content_type!r}; "
+        f"first bytes were {data[:8]!r}"
+    )
 
 
 def _normalize_digest(digest: str) -> str:
@@ -134,3 +177,84 @@ def extract_tarball(
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
         _safe_extract(tar, Path(dest_root))
     return actual
+
+
+def _safe_extract_zip(zf: zipfile.ZipFile, dest_root: Path) -> None:
+    """Extract *zf* into *dest_root* with the same gates as the tar path.
+
+    Reject absolute paths, path traversal, and any entry that would resolve
+    outside *dest_root*. Symlinks in zip files are encoded as a Unix mode bit
+    (S_IFLNK in ``external_attr``) — we reject those too.
+    """
+    dest_root.mkdir(parents=True, exist_ok=True)
+    for info in zf.infolist():
+        # Symlinks in zip: high 16 bits of external_attr carry Unix mode.
+        # 0xA000 == S_IFLNK. Refuse to extract any symlink-typed entry.
+        unix_mode = (info.external_attr >> 16) & 0xFFFF
+        if unix_mode and (unix_mode & 0xF000) == 0xA000:
+            raise UnsafeTarballError(
+                f"unsupported zip entry type (symlink): {info.filename!r}"
+            )
+        target = _safe_member_path(info.filename, dest_root)
+        if target is None:
+            continue
+        if info.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # Stream content explicitly so we never call zf.extract() with the
+        # raw filename (avoids any zip-slip surprises in older Pythons).
+        with zf.open(info, "r") as src, open(target, "wb") as fh:
+            while True:
+                chunk = src.read(64 * 1024)
+                if not chunk:
+                    break
+                fh.write(chunk)
+        # Preserve mode bits if present, dropping setuid/setgid/sticky.
+        if unix_mode:
+            os.chmod(target, unix_mode & 0o755)
+
+
+def extract_zip(
+    data: bytes,
+    expected_digest: str,
+    dest_root: Path,
+) -> str:
+    """Verify *data*'s sha256 then extract its zip contents into *dest_root*.
+
+    Returns the actual hex digest of *data* on success. Raises
+    ``HashMismatchError`` on mismatch, or ``UnsafeTarballError`` (name kept
+    for backward compat) if any member would escape *dest_root*.
+    """
+    actual = verify_sha256(data, expected_digest)
+    import io  # local import — only needed on the install path
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(data), mode="r") as zf:
+            _safe_extract_zip(zf, Path(dest_root))
+    except zipfile.BadZipFile as exc:
+        raise UnknownArchiveFormatError(f"malformed zip archive: {exc}") from exc
+    return actual
+
+
+def extract_archive(
+    data: bytes,
+    expected_digest: str,
+    dest_root: Path,
+    *,
+    content_type: Optional[str] = None,
+) -> str:
+    """Dispatcher: pick the right extractor based on Content-Type / magic bytes.
+
+    The hash check happens identically for both formats. A mismatch fails
+    before extraction even starts; format-detection errors fail before any
+    bytes are written.
+    """
+    fmt = _detect_format(data, content_type)
+    if fmt == "tar+gzip":
+        return extract_tarball(data, expected_digest, dest_root)
+    if fmt == "zip":
+        return extract_zip(data, expected_digest, dest_root)
+    # _detect_format raises UnknownArchiveFormatError otherwise; this is
+    # belt-and-braces.
+    raise UnknownArchiveFormatError(f"unsupported archive format: {fmt!r}")

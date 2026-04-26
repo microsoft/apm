@@ -184,9 +184,9 @@ def apm_install():
         elif dep.source == "registry":              # NEW
             versions = registry.list_versions(dep.id)       # GET /versions
             v = pick_version(versions, dep.range)           # existing semver logic
-            tarball = registry.download(dep.id, v.version)  # GET /tarball
-            verify_sha256(tarball, v.digest)
-            extract(tarball, f"apm_modules/{dep.owner}/{dep.repo}/")
+            archive = registry.download(dep.id, v.version)   # GET /download
+            verify_sha256(archive, v.digest)
+            extract_archive(archive, content_type, f"apm_modules/{dep.owner}/{dep.repo}/")
 
         # ─── from here: unchanged, source-agnostic ───
         recurse_into(dep.extracted_apm_yml)         # discover transitives
@@ -214,6 +214,15 @@ apm pack
 curl -X PUT --data-binary @bundle.tar.gz \
   -H "Authorization: Bearer $APM_REGISTRY_TOKEN_CORP_MAIN" \
   -H "Content-Type: application/gzip" \
+  "$REGISTRY/packages/acme/web-skills/versions/1.2.0"
+```
+
+For Anthropic skills published as zip, swap the body and content type:
+
+```
+curl -X PUT --data-binary @skill.zip \
+  -H "Authorization: Bearer $APM_REGISTRY_TOKEN_CORP_MAIN" \
+  -H "Content-Type: application/zip" \
   "$REGISTRY/packages/acme/web-skills/versions/1.2.0"
 ```
 
@@ -349,25 +358,31 @@ The response is cacheable (`Cache-Control: max-age=60` recommended) — publishe
 
 ---
 
-### 5.2 `GET /v1/packages/{owner}/{repo}/versions/{version}/tarball`
+### 5.2 `GET /v1/packages/{owner}/{repo}/versions/{version}/download`
 
-Download the immutable package tarball.
+Download the immutable package archive.
 
-**Request:** none.
+**Request:** none. Optional `Accept` negotiation deferred to v2 — v1 clients accept whatever the server returns and dispatch on `Content-Type`.
 
 **Response 200:**
-- `Content-Type: application/gzip`
+- `Content-Type:` one of:
+  - `application/gzip` — gzipped tar (same shape as `apm pack` output)
+  - `application/zip` — zip archive (Anthropic skills / open-claude-skills format)
 - `Digest: sha256=<base64>` (RFC 3230)
-- Body: gzipped tar of the package tree (same shape as `apm pack` output)
+- Body: the archive bytes
 
-Client MUST verify the sha256 digest against the entry from §5.1 before extraction.
+The endpoint is named `/download` (not `/tarball`) so the URL grammar doesn't lock the format. Same precedent as crates.io (`/api/v1/crates/{name}/{version}/download`) and the Docker Registry's `/blobs/{digest}` — content type is metadata, not URL syntax.
+
+Client MUST verify the sha256 digest against the entry from §5.1 before extraction. The hash check happens against the raw bytes regardless of archive format.
+
+**Format dispatch:** the client picks the extractor from the response's `Content-Type` (with magic-bytes fallback: `\x1f\x8b...` → gzip, `PK\x03\x04...` → zip). Both extractors enforce the same security gates (no absolute paths, no path traversal, no symlinks/hardlinks). A wrong-format guess fails cleanly because the hash has already gated extraction.
 
 **Transitive dep discovery:** after extraction, the client reads `apm.yml` from `apm_modules/{owner}/{repo}/apm.yml` and recurses — the exact same step the Git resolver performs after `git clone`. No separate metadata call is needed.
 
 **Effort (client):** **medium change**
-- New: `RegistryClient.download_tarball()` — streams to temp, verifies digest.
-- New: `src/apm_cli/deps/registry/extractor.py` — extracts into `apm_modules/{owner}/{repo}/` (parallel to current git-clone extraction path in `github_downloader.py`).
-- Touch: `apm_modules` layout is the same regardless of source, so integrators (`AgentIntegrator`, `SkillIntegrator`, etc.) need **no changes**.
+- New: `RegistryClient.download_archive()` — streams to temp, verifies digest, surfaces Content-Type to the caller.
+- New: `src/apm_cli/deps/registry/extractor.py` — exposes `extract_tarball()` and `extract_zip()` plus a single `extract_archive()` dispatcher; both extracts into `apm_modules/{owner}/{repo}/`.
+- Touch: `apm_modules` layout is the same regardless of source or archive format, so integrators (`AgentIntegrator`, `SkillIntegrator`, etc.) need **no changes**.
 
 ---
 
@@ -447,7 +462,7 @@ dependencies:
   - repo_url: acme/web-skills
     host: github.com                                                                 # existing — origin host if known
     source: registry                                                                 # NEW — "git" | "registry" | "local"
-    resolved_url: https://registry.corp/apm/acme/web-skills/versions/1.2.0/tarball   # NEW — URL actually fetched from
+    resolved_url: https://registry.corp/apm/acme/web-skills/versions/1.2.0/download  # NEW — URL actually fetched from
     version: "1.2.0"                                                                 # existing — authoritative for registry deps
     resolved_hash: sha256:abc123...                                                  # NEW — content hash of the tarball. THE trust anchor.
     resolved_commit: ""                                                              # existing — empty string for registry deps

@@ -210,30 +210,51 @@ class RegistryClient:
         return [VersionEntry.from_dict(row) for row in raw_versions]
 
     # ------------------------------------------------------------------ §5.2
-    def download_tarball(
+    def download_archive(
         self,
         owner: str,
         repo: str,
         version: str,
-    ) -> bytes:
-        """``GET /v1/packages/{owner}/{repo}/versions/{version}/tarball``.
+    ) -> tuple[bytes, str]:
+        """``GET /v1/packages/{owner}/{repo}/versions/{version}/download``.
 
-        Returns the raw response body. Caller is responsible for sha256
-        verification (use ``extractor.verify_sha256``).
+        Endpoint is format-neutral; the server replies with ``application/gzip``
+        (tar.gz) or ``application/zip`` (Anthropic skills format) and the
+        client dispatches on content type.
+
+        Returns ``(body_bytes, content_type)``. Caller is responsible for
+        sha256 verification (use ``extractor.verify_sha256``) and for picking
+        the right extractor (``extractor.extract_archive`` does this for you).
         """
         path = (
             f"/v1/packages/{_quote(owner)}/{_quote(repo)}"
-            f"/versions/{_quote(version)}/tarball"
+            f"/versions/{_quote(version)}/download"
         )
-        response = self._request("GET", path, accept="application/gzip")
-        return response.content
+        # Accept both archive types; v1 doesn't constrain via Accept (the
+        # publisher chose the format at upload time).
+        response = self._request(
+            "GET", path, accept="application/gzip, application/zip"
+        )
+        content_type = (response.headers.get("Content-Type") or "").split(";", 1)[0].strip()
+        return response.content, content_type
 
-    def tarball_url(self, owner: str, repo: str, version: str) -> str:
+    def archive_url(self, owner: str, repo: str, version: str) -> str:
         """The canonical ``resolved_url`` for a given (owner, repo, version)."""
         return self._url(
             f"/v1/packages/{_quote(owner)}/{_quote(repo)}"
-            f"/versions/{_quote(version)}/tarball"
+            f"/versions/{_quote(version)}/download"
         )
+
+    # Backwards-compat aliases for the early naming. Will be removed before
+    # the feature is released; kept here so any in-flight call sites in tests
+    # or experimental scripts don't break during the rename. New code should
+    # call ``download_archive`` / ``archive_url``.
+    def download_tarball(self, owner: str, repo: str, version: str) -> bytes:
+        body, _ = self.download_archive(owner, repo, version)
+        return body
+
+    def tarball_url(self, owner: str, repo: str, version: str) -> str:
+        return self.archive_url(owner, repo, version)
 
     # ------------------------------------------------------------------ §5.4
     def search(

@@ -28,7 +28,7 @@ from .auth import (
     resolve_registry_token,
 )
 from .client import RegistryClient, RegistryError, VersionEntry
-from .extractor import extract_tarball
+from .extractor import extract_archive
 from .semver import is_semver_range, pick_best
 
 
@@ -206,7 +206,9 @@ class RegistryPackageResolver:
         chosen = self._pick_version(dep_ref, versions)
 
         try:
-            tarball = client.download_tarball(owner, repo, chosen.version)
+            archive_bytes, content_type = client.download_archive(
+                owner, repo, chosen.version
+            )
         except RegistryError as exc:
             self._raise_for_http(exc, dep_ref, base_url)
             raise
@@ -222,7 +224,15 @@ class RegistryPackageResolver:
                 else:
                     child.unlink(missing_ok=True)
 
-        actual_hash = extract_tarball(tarball, chosen.digest, target_path)
+        # extract_archive dispatches on Content-Type (with magic-bytes
+        # fallback) — supports both tar.gz (default) and zip (Anthropic
+        # skills format). Hash check happens before any extraction.
+        actual_hash = extract_archive(
+            archive_bytes,
+            chosen.digest,
+            target_path,
+            content_type=content_type,
+        )
 
         # Subdirectory virtual packages: the registry serves the parent
         # tarball, the client extracts the requested sub-path. We extract the
@@ -250,12 +260,12 @@ class RegistryPackageResolver:
                 f"registry tarball for {dep_ref.repo_url!r} validated but "
                 f"produced no package metadata"
             )
-        package.source = client.tarball_url(owner, repo, chosen.version)
+        package.source = client.archive_url(owner, repo, chosen.version)
         # version on the apm.yml side is whatever the package declared. We do
         # NOT overwrite with the registry-declared version; if they disagree
         # that's a publisher bug we want visible, not silently smoothed over.
 
-        resolved_url = client.tarball_url(owner, repo, chosen.version)
+        resolved_url = client.archive_url(owner, repo, chosen.version)
         self.last_resolutions[dep_ref.get_unique_key()] = RegistryResolution(
             resolved_url=resolved_url,
             resolved_hash=f"sha256:{actual_hash}",

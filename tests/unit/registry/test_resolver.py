@@ -41,6 +41,19 @@ def _make_apm_tarball(name: str = "acme-web-skills", version: str = "1.2.0"):
     return data, hashlib.sha256(data).hexdigest()
 
 
+def _make_apm_zip(name: str = "acme-skill", version: str = "1.0.0"):
+    """Build a minimal valid APM package zip + return (bytes, sha256_hex)."""
+    import zipfile as _zip
+
+    buf = io.BytesIO()
+    apm_yml = f"name: {name}\nversion: {version}\ndescription: x\nauthor: a\n"
+    with _zip.ZipFile(buf, mode="w", compression=_zip.ZIP_DEFLATED) as zf:
+        zf.writestr("apm.yml", apm_yml)
+        zf.writestr(".apm/.keep", "")
+    data = buf.getvalue()
+    return data, hashlib.sha256(data).hexdigest()
+
+
 def _make_resolver(client_double):
     return RegistryPackageResolver(
         {"corp-main": "https://reg.example.com/apm"},
@@ -64,9 +77,9 @@ class TestHappyPath:
         fake.list_versions.return_value = [
             VersionEntry(version="1.2.0", digest=f"sha256:{digest}")
         ]
-        fake.download_tarball.return_value = raw
-        fake.tarball_url.return_value = (
-            "https://reg.example.com/apm/v1/packages/acme/web-skills/versions/1.2.0/tarball"
+        fake.download_archive.return_value = (raw, "application/gzip")
+        fake.archive_url.return_value = (
+            "https://reg.example.com/apm/v1/packages/acme/web-skills/versions/1.2.0/download"
         )
 
         resolver = _make_resolver(fake)
@@ -80,7 +93,34 @@ class TestHappyPath:
         res = resolver.last_resolutions[_make_dep().get_unique_key()]
         assert res.version == "1.2.0"
         assert res.resolved_hash == f"sha256:{digest}"
-        assert res.resolved_url.endswith("/versions/1.2.0/tarball")
+        assert res.resolved_url.endswith("/versions/1.2.0/download")
+
+    def test_install_zip_archive(self, tmp_path):
+        # Anthropic skill format: zip with the same package shape.
+        raw, digest = _make_apm_zip()
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.return_value = [
+            VersionEntry(version="1.0.0", digest=f"sha256:{digest}")
+        ]
+        fake.download_archive.return_value = (raw, "application/zip")
+        fake.archive_url.return_value = (
+            "https://reg.example.com/apm/v1/packages/acme/skill/versions/1.0.0/download"
+        )
+
+        resolver = _make_resolver(fake)
+        target = tmp_path / "apm_modules" / "acme" / "skill"
+        info = resolver.download_package(
+            DependencyReference(
+                repo_url="acme/skill",
+                reference="^1.0",
+                source="registry",
+                registry_name="corp-main",
+            ),
+            target,
+        )
+        assert (target / "apm.yml").exists()
+        assert (target / ".apm").is_dir()
+        assert info.install_path == target
 
     def test_picks_highest_matching_version(self, tmp_path):
         raw, digest = _make_apm_tarball(version="1.5.3")
@@ -90,15 +130,15 @@ class TestHappyPath:
             VersionEntry(version="1.5.3", digest=f"sha256:{digest}"),
             VersionEntry(version="2.0.0", digest=f"sha256:{digest}"),
         ]
-        fake.download_tarball.return_value = raw
-        fake.tarball_url.return_value = "https://x/tarball"
+        fake.download_archive.return_value = (raw, "application/gzip")
+        fake.archive_url.return_value = "https://x/download"
 
         resolver = _make_resolver(fake)
         target = tmp_path / "p"
         resolver.download_package(_make_dep("^1.0"), target)
 
-        # Confirm download_tarball was asked for the highest matching version.
-        fake.download_tarball.assert_called_once_with("acme", "web-skills", "1.5.3")
+        # Confirm download_archive was asked for the highest matching version.
+        fake.download_archive.assert_called_once_with("acme", "web-skills", "1.5.3")
 
 
 class TestFailurePaths:
@@ -108,8 +148,8 @@ class TestFailurePaths:
         fake.list_versions.return_value = [
             VersionEntry(version="1.2.0", digest="sha256:" + "0" * 64)
         ]
-        fake.download_tarball.return_value = raw
-        fake.tarball_url.return_value = "https://x"
+        fake.download_archive.return_value = (raw, "application/gzip")
+        fake.archive_url.return_value = "https://x"
 
         resolver = _make_resolver(fake)
         with pytest.raises(Exception) as excinfo:

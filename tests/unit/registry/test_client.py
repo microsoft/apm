@@ -65,17 +65,27 @@ class TestUrlConstruction:
             "https://r.example.com/apm/v1/packages/acme/web-skills/versions"
         ), call.kwargs
 
-    def test_tarball_url_helper(self):
+    def test_archive_url_helper(self):
         client = RegistryClient(
             "https://r.example.com/apm",
             RegistryAuthContext(registry_name="x", token=None),
             session=MagicMock(spec=requests.Session),
         )
-        url = client.tarball_url("acme", "web-skills", "1.2.0")
+        url = client.archive_url("acme", "web-skills", "1.2.0")
         assert url == (
             "https://r.example.com/apm/v1/packages/acme/web-skills"
-            "/versions/1.2.0/tarball"
+            "/versions/1.2.0/download"
         )
+
+    def test_legacy_tarball_url_alias(self):
+        # tarball_url is the deprecated alias kept for in-flight call sites
+        # during the rename. It MUST return the same URL as archive_url.
+        client = RegistryClient(
+            "https://r.example.com/apm",
+            RegistryAuthContext(registry_name="x", token=None),
+            session=MagicMock(spec=requests.Session),
+        )
+        assert client.tarball_url("a", "b", "1.0.0") == client.archive_url("a", "b", "1.0.0")
 
     def test_strips_trailing_slash_from_base(self):
         client = RegistryClient(
@@ -165,8 +175,8 @@ class TestListVersions:
             client.list_versions("a", "b")
 
 
-class TestDownloadTarball:
-    def test_returns_body_bytes(self):
+class TestDownloadArchive:
+    def test_returns_body_and_gzip_content_type(self):
         session = _make_session(
             _make_response(body=b"\x1f\x8b...", content_type="application/gzip")
         )
@@ -175,8 +185,50 @@ class TestDownloadTarball:
             RegistryAuthContext(registry_name="x", token=None),
             session=session,
         )
-        body = client.download_tarball("acme", "web-skills", "1.2.0")
+        body, ctype = client.download_archive("acme", "web-skills", "1.2.0")
         assert body == b"\x1f\x8b..."
+        assert ctype == "application/gzip"
+
+    def test_returns_body_and_zip_content_type(self):
+        session = _make_session(
+            _make_response(body=b"PK\x03\x04...", content_type="application/zip")
+        )
+        client = RegistryClient(
+            "https://r.example.com",
+            RegistryAuthContext(registry_name="x", token=None),
+            session=session,
+        )
+        body, ctype = client.download_archive("acme", "skill", "1.0.0")
+        assert body.startswith(b"PK")
+        assert ctype == "application/zip"
+
+    def test_strips_charset_param_from_content_type(self):
+        session = _make_session(
+            _make_response(
+                body=b"\x1f\x8b...",
+                content_type="application/gzip; charset=utf-8",
+            )
+        )
+        client = RegistryClient(
+            "https://r.example.com",
+            RegistryAuthContext(registry_name="x", token=None),
+            session=session,
+        )
+        _, ctype = client.download_archive("a", "b", "1.0.0")
+        assert ctype == "application/gzip"
+
+    def test_url_path_is_download_not_tarball(self):
+        session = _make_session(
+            _make_response(body=b"x", content_type="application/gzip")
+        )
+        client = RegistryClient(
+            "https://r.example.com",
+            RegistryAuthContext(registry_name="x", token=None),
+            session=session,
+        )
+        client.download_archive("acme", "web", "1.0.0")
+        url = session.request.call_args.kwargs["url"]
+        assert url.endswith("/versions/1.0.0/download")
 
     def test_404_raises_with_status(self):
         session = _make_session(
@@ -192,9 +244,22 @@ class TestDownloadTarball:
             session=session,
         )
         with pytest.raises(RegistryError) as excinfo:
-            client.download_tarball("a", "b", "9.9.9")
+            client.download_archive("a", "b", "9.9.9")
         assert excinfo.value.status == 404
         assert "Not Found" in str(excinfo.value)
+
+    def test_legacy_download_tarball_alias_returns_just_bytes(self):
+        # Backward-compat alias: returns only the bytes (no content type).
+        session = _make_session(
+            _make_response(body=b"x", content_type="application/gzip")
+        )
+        client = RegistryClient(
+            "https://r.example.com",
+            RegistryAuthContext(registry_name="x", token=None),
+            session=session,
+        )
+        body = client.download_tarball("a", "b", "1.0.0")
+        assert body == b"x"
 
 
 class TestSearch:

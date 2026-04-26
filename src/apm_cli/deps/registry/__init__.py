@@ -11,7 +11,12 @@ registry client) — the two address different concepts and must not be confused
 
 from .auth import RegistryAuthContext, resolve_registry_token
 from .client import RegistryClient, RegistryError, VersionEntry
-from .extractor import extract_tarball, verify_sha256
+from .extractor import (
+    extract_archive,
+    extract_tarball,
+    extract_zip,
+    verify_sha256,
+)
 from .resolver import RegistryPackageResolver
 from .semver import is_semver_range, match_version
 
@@ -21,7 +26,9 @@ __all__ = [
     "RegistryError",
     "RegistryPackageResolver",
     "VersionEntry",
+    "extract_archive",
     "extract_tarball",
+    "extract_zip",
     "is_semver_range",
     "match_version",
     "resolve_registry_token",
