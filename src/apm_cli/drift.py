@@ -95,8 +95,43 @@ def detect_ref_change(
         return False
     if locked_dep is None:
         return False  # new package — not drift, just a first install
-    # Direct comparison: handles None→value, value→None, and value→value.
-    # No truthiness guard on locked_dep.resolved_ref — None != "v1.0.0" is True.
+
+    # Source flip drift: manifest changed resolver between installs (e.g.
+    # was ``- git: ...``, now ``acme/foo@corp#^1.0``). The install path,
+    # auth chain, and trust anchor all change — force a re-resolve.
+    # Note: source=None and source="git" are equivalent (legacy default).
+    manifest_source = dep_ref.source or "git"
+    locked_source = (locked_dep.source if locked_dep.source else "git")
+    if manifest_source != locked_source:
+        return True
+
+    # Registry-sourced deps: the manifest carries a semver range
+    # (e.g. ``^1.2``) while the lockfile records an exact version
+    # (e.g. ``1.5.3``). Plain string comparison would be a false
+    # positive — instead, ask whether the locked version still
+    # satisfies the manifest range. If yes, no drift; if no, drift
+    # (the user expanded/contracted the range away from the locked
+    # version and we need to re-resolve).
+    if manifest_source == "registry":
+        from apm_cli.deps.registry.semver import is_semver_range, match_version
+        manifest_range = dep_ref.reference
+        locked_version = locked_dep.version
+        if not manifest_range:
+            # Registry dep with no #<ref>: should have been rejected at
+            # parse time. Treat as drift to fail loud.
+            return True
+        if not locked_version:
+            # Lockfile entry missing version (corrupted or v1->v2 mid-flight).
+            return True
+        if is_semver_range(manifest_range) and match_version(
+            manifest_range, locked_version
+        ):
+            return False
+        return True
+
+    # Git/local deps: direct ref comparison. Handles None→value, value→None,
+    # and value→value. No truthiness guard on locked_dep.resolved_ref —
+    # None != "v1.0.0" is True.
     if dep_ref.reference != locked_dep.resolved_ref:
         return True
 
@@ -262,8 +297,14 @@ def build_download_ref(
                     locked_dep, "allow_insecure", False
                 )
 
+            # Registry-sourced deps: replay the exact locked version (not
+            # the manifest range). The resolver still calls /versions and
+            # the hash check is the trust gate. design §6.1.
+            if locked_dep.source == "registry" and locked_dep.version:
+                overrides["reference"] = locked_dep.version
+                overrides["source"] = "registry"
             # Use locked commit SHA for byte-for-byte reproducibility.
-            if locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
+            elif locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
                 overrides["reference"] = locked_dep.resolved_commit
             # For proxy deps without a commit SHA (Artifactory zip archives),
             # preserve the locked ref so we download the same ref on replay.
