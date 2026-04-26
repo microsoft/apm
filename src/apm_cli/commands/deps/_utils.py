@@ -183,10 +183,25 @@ def _get_detailed_package_info(package_path: Path) -> Dict[str, Any]:
             package = APMPackage.from_apm_yml(apm_yml_path)
             context_count, workflow_count = _count_package_files(package_path)
             primitives = _count_primitives(package_path)
+            # HYBRID-aware description rendering: when apm.yml omits its
+            # tagline but a SKILL.md sits alongside, surface the empty
+            # apm.yml.description as `--` plus an inline annotation. The
+            # SKILL.md description is intentionally NOT borrowed -- it is
+            # an agent invocation matcher, not a human tagline.
+            is_hybrid = (package_path / "SKILL.md").exists()
+            if package.description:
+                desc = package.description
+            elif is_hybrid:
+                desc = (
+                    "--  (set 'description' in apm.yml; SKILL.md "
+                    "description is for agent runtime)"
+                )
+            else:
+                desc = 'No description'
             return {
                 'name': package.name,
                 'version': package.version or 'unknown',
-                'description': package.description or 'No description',
+                'description': desc,
                 'author': package.author or 'Unknown',
                 'source': package.source or 'local',
                 'install_path': str(package_path.resolve()),

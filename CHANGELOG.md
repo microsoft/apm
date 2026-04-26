@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- HYBRID packages (apm.yml + SKILL.md without `.apm/`) now install as skill bundles per agentskills.io semantics; previously `apm install` rejected this layout in the validator and emitted no inline error, producing a perceived hang. (#946)
+- CLAUDE_SKILL packages (SKILL.md only) that ship co-located resource directories (`agents/`, `assets/`, `scripts/`) now route through the skill-bundle install path. (#946)
+- Direct-dependency integration failures now print a `[x]` line immediately and exit 1 instead of failing silently. (#946)
+- HYBRID metadata model: `apm.yml` description and `SKILL.md` description are independent fields with different consumers and are no longer merged; `apm pack` warns when `apm.yml` is missing `description` on a HYBRID package. (#946)
+- Symlink hardening extended to all three `skill_integrator` copytree paths. (#946)
 - `apm install` (user scope): `init_link_resolver` now scopes `discover_primitives` to `~/.apm/` instead of `~/`, preventing recursive-glob across the entire home directory. Fixes #830 (#850)
 - Audit blindness for local `.apm/` content -- `apm audit --ci` now detects drift, missing files, and content tampering on locally-authored files (not just installed packages). (#887)
 - Packer leak risk: local-content fields (`local_deployed_files`, `local_deployed_file_hashes`) are now stripped from bundled lockfiles, preventing phantom self-entries on unpack. (#887)
