@@ -510,11 +510,10 @@ class AgentsCompiler:
         files_written = 0
         critical_security_found = False
         from ..security.gate import WARN_POLICY, SecurityGate
+        from .output_writer import CompiledOutputWriter
+        writer = CompiledOutputWriter()
         for claude_path, content in claude_result.content_map.items():
             try:
-                # Create directory if needed
-                claude_path.parent.mkdir(parents=True, exist_ok=True)
-                
                 # Handle constitution injection if enabled
                 final_content = content
                 if config.with_constitution:
@@ -528,7 +527,7 @@ class AgentsCompiler:
                         )
                     except Exception:
                         pass  # Use original content if injection fails
-                
+
                 # Defense-in-depth: scan compiled output before writing
                 verdict = SecurityGate.scan_text(
                     final_content, str(claude_path), policy=WARN_POLICY
@@ -542,7 +541,7 @@ class AgentsCompiler:
                         f"— run 'apm audit --file {claude_path}' to inspect"
                     )
 
-                claude_path.write_text(final_content, encoding='utf-8')
+                writer.write(claude_path, final_content)
                 files_written += 1
             except OSError as e:
                 all_errors.append(f"Failed to write {claude_path}: {str(e)}")
@@ -634,10 +633,11 @@ class AgentsCompiler:
             )
 
         files_written = 0
+        from .output_writer import CompiledOutputWriter
+        writer = CompiledOutputWriter()
         for gemini_path, content in gemini_result.content_map.items():
             try:
-                gemini_path.parent.mkdir(parents=True, exist_ok=True)
-                gemini_path.write_text(content, encoding="utf-8")
+                writer.write(gemini_path, content)
                 files_written += 1
             except OSError as e:
                 all_errors.append(f"Failed to write {gemini_path}: {str(e)}")
@@ -804,14 +804,14 @@ class AgentsCompiler:
     
     def _write_output_file(self, output_path: str, content: str) -> None:
         """Write the generated content to the output file.
-        
+
         Args:
             output_path (str): Path to write the output.
             content (str): Content to write.
         """
+        from .output_writer import CompiledOutputWriter
         try:
-            with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(content)
+            CompiledOutputWriter().write(Path(output_path), content)
         except OSError as e:
             self.errors.append(f"Failed to write output file {output_path}: {str(e)}")
     
@@ -862,13 +862,9 @@ class AgentsCompiler:
                     # If constitution injection fails, use original content
                     pass
             
-            # Create directory if it doesn't exist
-            agents_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Write the file
-            with open(agents_path, 'w', encoding='utf-8') as f:
-                f.write(final_content)
-                
+            from .output_writer import CompiledOutputWriter
+            CompiledOutputWriter().write(agents_path, final_content)
+
         except OSError as e:
             raise OSError(f"Failed to write distributed AGENTS.md file {agents_path}: {str(e)}")
     
