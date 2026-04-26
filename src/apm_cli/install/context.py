@@ -124,6 +124,7 @@ class InstallContext:
     policy_enforcement_active: bool = False
     no_policy: bool = False  # W2-escape-hatch will wire --no-policy here
     skill_subset: Optional[Tuple[str, ...]] = None  # --skill filter for SKILL_BUNDLE packages
+    skill_subset_from_cli: bool = False  # True when user passed --skill (even --skill '*')
     direct_mcp_deps: Optional[List[Any]] = None  # Direct MCP deps from apm.yml for policy gate
 
     # ------------------------------------------------------------------

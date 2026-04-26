@@ -1050,7 +1050,7 @@ def _run_mcp_install(
         "or a stdio command (self-defined entries)."
     ),
 )
-@click.option("--skill", "skill_names", multiple=True, metavar="NAME", help="Install only named skill(s) from a SKILL_BUNDLE. Repeatable. Filter applies to this invocation only and is NOT persisted in apm.yml or apm.lock; bare 'apm install' reinstalls all skills in the bundle.")
+@click.option("--skill", "skill_names", multiple=True, metavar="NAME", help="Install only named skill(s) from a SKILL_BUNDLE. Repeatable. Persisted in apm.yml and apm.lock so bare 'apm install' is deterministic. Use --skill '*' to reset to all skills.")
 @click.option("--no-policy", "no_policy", is_flag=True, default=False, help="Skip org policy enforcement for this invocation. Does NOT bypass apm audit --ci.")
 @click.pass_context
 def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, allow_insecure, allow_insecure_hosts, global_, use_ssh, use_https, allow_protocol_fallback, mcp_name, transport, url, env_pairs, header_pairs, mcp_version, registry_url, skill_names, no_policy):
@@ -1458,11 +1458,40 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                     allow_protocol_fallback=allow_protocol_fallback,
                     no_policy=no_policy,
                     skill_subset=_skill_subset,
+                    skill_subset_from_cli=bool(skill_names),
                 )
                 apm_count = install_result.installed_count
                 prompt_count = install_result.prompts_integrated
                 agent_count = install_result.agents_integrated
                 apm_diagnostics = install_result.diagnostics
+
+                # -- Skill subset write-back (Phase 11) --
+                # When CLI provided --skill on a SKILL_BUNDLE package, persist
+                # the subset selection in apm.yml so bare `apm install` is
+                # deterministic.
+                if skill_names and packages:
+                    from ._apm_yml_writer import set_skill_subset_for_entry
+
+                    _star_sentinel = any(s == "*" for s in skill_names)
+                    for dep_key, pkg_type in install_result.package_types.items():
+                        if pkg_type == "skill_bundle":
+                            if _star_sentinel:
+                                # Explicit-all: REMOVE any persisted skills:
+                                if set_skill_subset_for_entry(manifest_path, dep_key, None):
+                                    logger.success(f"Cleared skill subset for {dep_key}")
+                            else:
+                                subset_list = sorted(builtins.set(_skill_subset))
+                                if set_skill_subset_for_entry(manifest_path, dep_key, subset_list):
+                                    logger.success(
+                                        f"Persisted skill subset for {dep_key}: "
+                                        f"[{', '.join(subset_list)}]"
+                                    )
+                        elif pkg_type != "skill_bundle" and not _star_sentinel:
+                            # Non-bundle: warn but do NOT persist
+                            logger.warning(
+                                f"--skill ignored for {dep_key} "
+                                f"(package type: {pkg_type}, not a skill bundle)"
+                            )
             except InsecureDependencyPolicyError:
                 _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
                 sys.exit(1)
@@ -1660,6 +1689,7 @@ def _install_apm_dependencies(
     allow_protocol_fallback: "Optional[bool]" = None,
     no_policy: bool = False,
     skill_subset: "Optional[builtins.tuple]" = None,
+    skill_subset_from_cli: bool = False,
 ):
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.
@@ -1693,5 +1723,6 @@ def _install_apm_dependencies(
         allow_protocol_fallback=allow_protocol_fallback,
         no_policy=no_policy,
         skill_subset=skill_subset,
+        skill_subset_from_cli=skill_subset_from_cli,
     )
     return InstallService().run(request)

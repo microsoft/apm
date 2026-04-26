@@ -124,10 +124,31 @@ azure-skills/
 installing N separate CLAUDE_SKILL packages.
 
 **Selective install:** use `--skill <name>` to install only specific skills
-from the bundle (repeatable). Omit or use `--skill '*'` for all.
+from the bundle (repeatable). The selection is **persisted** in `apm.yml`
+(as a `skills:` field) and `apm.lock.yaml` (as `skill_subset`), so
+subsequent bare `apm install` commands are deterministic.
+Use `--skill '*'` to reset and install all skills.
 
 ```bash
+# Install only two skills (persisted to apm.yml):
 apm install microsoft/azure-skills --skill cosmos-db --skill functions
+
+# Bare reinstall respects the persisted selection:
+apm install
+
+# Reset to all skills:
+apm install microsoft/azure-skills --skill '*'
+```
+
+The `apm.yml` entry is promoted to dict form with a `skills:` list:
+
+```yaml
+dependencies:
+  apm:
+    - git: microsoft/azure-skills
+      skills:
+        - cosmos-db
+        - functions
 ```
 
 **Validation rules:**

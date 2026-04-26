@@ -78,4 +78,5 @@ class InstallService:
             allow_protocol_fallback=request.allow_protocol_fallback,
             no_policy=request.no_policy,
             skill_subset=request.skill_subset,
+            skill_subset_from_cli=request.skill_subset_from_cli,
         )
