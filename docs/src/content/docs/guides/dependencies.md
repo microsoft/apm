@@ -269,6 +269,8 @@ devDependencies:
 
 Dev dependencies install to `apm_modules/` like production deps but are excluded from `apm pack --format plugin` output. See [Pack & Distribute](../pack-distribute/) for details.
 
+**Important:** plain `apm install` (no flag) deploys both `dependencies` and `devDependencies` -- there is currently no `--omit=dev` flag. The dev/prod separation kicks in at `apm pack --format plugin`. Maintainer-only primitives that you author yourself MUST live outside `.apm/` to be excluded from plugin bundles, because the local-content scanner operates on `.apm/` regardless of the devDep marker. See [Dev-only Primitives](../dev-only-primitives/) for the canonical pattern.
+
 ## Local Path Dependencies
 
 Install packages from the local filesystem for fast iteration during development.
