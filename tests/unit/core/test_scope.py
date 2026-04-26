@@ -158,7 +158,7 @@ class TestTargetProfileUserScope:
     """Validate user-scope metadata on TargetProfile in KNOWN_TARGETS."""
 
     def test_all_known_targets_present(self):
-        expected = {"copilot", "claude", "cursor", "opencode", "codex"}
+        expected = {"copilot", "claude", "cursor", "opencode", "codex", "gemini"}
         assert set(KNOWN_TARGETS.keys()) == expected
 
     def test_each_target_has_user_supported(self):

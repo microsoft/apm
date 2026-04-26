@@ -117,6 +117,30 @@ class TestActiveTargets:
         assert len(targets) == 1
         assert targets[0].name == "copilot"  # fallback
 
+    # -- gemini detection --
+
+    def test_only_gemini_returns_gemini(self):
+        (self.root / ".gemini").mkdir()
+        targets = active_targets(self.root)
+        assert [t.name for t in targets] == ["gemini"]
+
+    def test_explicit_gemini(self):
+        targets = active_targets(self.root, explicit_target="gemini")
+        assert [t.name for t in targets] == ["gemini"]
+
+    def test_gemini_and_claude_returns_both(self):
+        (self.root / ".gemini").mkdir()
+        (self.root / ".claude").mkdir()
+        targets = active_targets(self.root)
+        names = {t.name for t in targets}
+        assert names == {"gemini", "claude"}
+
+    def test_all_six_dirs_returns_all_six(self):
+        for d in (".github", ".claude", ".cursor", ".opencode", ".codex", ".gemini"):
+            (self.root / d).mkdir()
+        targets = active_targets(self.root)
+        assert len(targets) == 6
+
     def test_all_five_dirs_returns_all_five(self):
         for d in (".github", ".claude", ".cursor", ".opencode", ".codex"):
             (self.root / d).mkdir()

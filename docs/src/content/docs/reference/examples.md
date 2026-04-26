@@ -1,7 +1,7 @@
 ---
 title: "Examples"
 sidebar:
-  order: 4
+  order: 5
 ---
 
 This guide showcases real-world APM workflows, from simple automation to enterprise-scale AI development patterns. Learn through practical examples that demonstrate the power of structured AI workflows.

@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, List, Optional
 from ..models.results import InstallResult
 from ..utils.console import _rich_error
 from ..utils.diagnostics import DiagnosticCollector
-from .errors import PolicyViolationError
+from .errors import DirectDependencyError, PolicyViolationError
 
 if TYPE_CHECKING:
     from ..core.auth import AuthResolver
@@ -320,6 +320,18 @@ def run_install_pipeline(
 
         _integrate_phase.run(ctx)
 
+        # Fail-loud: if any direct dependency failed validation or
+        # download, render the diagnostic summary and raise so the
+        # caller exits non-zero immediately.  Transitive failures
+        # are allowed to proceed (log + continue).
+        if ctx.direct_dep_failed:
+            if ctx.diagnostics and ctx.diagnostics.has_diagnostics:
+                ctx.diagnostics.render_summary()
+            raise DirectDependencyError(
+                "One or more direct dependencies failed validation. "
+                "Run with --verbose for details."
+            )
+
         # Update .gitignore
         from apm_cli.commands._helpers import _update_gitignore_for_apm_modules
 
@@ -364,6 +376,10 @@ def run_install_pipeline(
         # dependencies: Install blocked by org policy ..."``.  Re-raising
         # the typed exception lets the caller render the policy message
         # as-is.
+        raise
+    except DirectDependencyError:
+        # #946: same pattern -- surface the message as-is instead of
+        # double-wrapping it through the generic RuntimeError below.
         raise
     except Exception as e:
         raise RuntimeError(f"Failed to resolve APM dependencies: {e}")

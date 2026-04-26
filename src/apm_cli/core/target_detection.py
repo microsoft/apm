@@ -1,8 +1,8 @@
 """Target detection for auto-selecting compilation and integration targets.
 
 This module implements the auto-detection pattern for determining which agent
-targets (Copilot, Claude, Cursor, OpenCode, Codex) should be used based on
-existing project structure and configuration.
+targets (Copilot, Claude, Cursor, OpenCode, Codex, Gemini) should be used
+based on existing project structure and configuration.
 
 Detection priority (highest to lowest):
 1. Explicit --target flag (always wins)
@@ -13,6 +13,7 @@ Detection priority (highest to lowest):
    - .cursor/ only -> cursor
    - .opencode/ only -> opencode
    - .codex/ only -> codex
+   - .gemini/ only -> gemini
    - Multiple target folders -> all
    - None exist -> minimal (AGENTS.md only, no folder integration)
 
@@ -26,10 +27,10 @@ from typing import List, Literal, Optional, Tuple, Union
 import click
 
 # Valid target values (internal canonical form)
-TargetType = Literal["vscode", "claude", "cursor", "opencode", "codex", "all", "minimal"]
+TargetType = Literal["vscode", "claude", "cursor", "opencode", "codex", "gemini", "all", "minimal"]
 
 # User-facing target values (includes aliases accepted by CLI)
-UserTargetType = Literal["copilot", "vscode", "agents", "claude", "cursor", "opencode", "codex", "all", "minimal"]
+UserTargetType = Literal["copilot", "vscode", "agents", "claude", "cursor", "opencode", "codex", "gemini", "all", "minimal"]
 
 
 def detect_target(
@@ -61,9 +62,11 @@ def detect_target(
             return "opencode", "explicit --target flag"
         elif explicit_target == "codex":
             return "codex", "explicit --target flag"
+        elif explicit_target == "gemini":
+            return "gemini", "explicit --target flag"
         elif explicit_target == "all":
             return "all", "explicit --target flag"
-    
+
     # Priority 2: apm.yml target setting
     if config_target:
         if config_target in ("copilot", "vscode", "agents"):
@@ -76,6 +79,8 @@ def detect_target(
             return "opencode", "apm.yml target"
         elif config_target == "codex":
             return "codex", "apm.yml target"
+        elif config_target == "gemini":
+            return "gemini", "apm.yml target"
         elif config_target == "all":
             return "all", "apm.yml target"
     
@@ -85,6 +90,7 @@ def detect_target(
     cursor_exists = (project_root / ".cursor").is_dir()
     opencode_exists = (project_root / ".opencode").is_dir()
     codex_exists = (project_root / ".codex").is_dir()
+    gemini_exists = (project_root / ".gemini").is_dir()
     detected = []
     if github_exists:
         detected.append(".github/")
@@ -96,6 +102,8 @@ def detect_target(
         detected.append(".opencode/")
     if codex_exists:
         detected.append(".codex/")
+    if gemini_exists:
+        detected.append(".gemini/")
 
     if len(detected) >= 2:
         return "all", f"detected {' and '.join(detected)} folders"
@@ -109,76 +117,17 @@ def detect_target(
         return "opencode", "detected .opencode/ folder"
     elif codex_exists:
         return "codex", "detected .codex/ folder"
+    elif gemini_exists:
+        return "gemini", "detected .gemini/ folder"
     else:
-        # No known target folders exist - minimal output
-        return "minimal", "no .github/, .claude/, .cursor/, .opencode/, or .codex/ folder found"
-
-
-def should_integrate_vscode(target: TargetType) -> bool:
-    """Check if VSCode integration should be performed.
-    
-    Args:
-        target: The detected or configured target
-        
-    Returns:
-        bool: True if VSCode integration (prompts, agents) should run
-    """
-    return target in ("vscode", "all")
-
-
-def should_integrate_claude(target: TargetType) -> bool:
-    """Check if Claude integration should be performed.
-    
-    Args:
-        target: The detected or configured target
-        
-    Returns:
-        bool: True if Claude integration (commands, skills) should run
-    """
-    return target in ("claude", "all")
-
-
-def should_integrate_opencode(target: TargetType) -> bool:
-    """Check if OpenCode integration should be performed.
-
-    Args:
-        target: The detected or configured target
-
-    Returns:
-        bool: True if OpenCode integration (agents, commands, skills) should run
-    """
-    return target in ("opencode", "all")
-
-
-def should_integrate_cursor(target: TargetType) -> bool:
-    """Check if Cursor integration should be performed.
-
-    Args:
-        target: The detected or configured target
-
-    Returns:
-        bool: True if Cursor integration (agents, skills, rules) should run
-    """
-    return target in ("cursor", "all")
-
-
-def should_integrate_codex(target: TargetType) -> bool:
-    """Check if Codex CLI integration should be performed.
-
-    Args:
-        target: The detected or configured target
-
-    Returns:
-        bool: True if Codex integration (agents, skills, hooks) should run
-    """
-    return target in ("codex", "all")
+        return "minimal", "no target folder found"
 
 
 def should_compile_agents_md(target: TargetType) -> bool:
     """Check if AGENTS.md should be compiled.
-    
-    AGENTS.md is generated for vscode, codex, all, and minimal targets.
-    It's the universal format that works everywhere.
+
+    AGENTS.md is generated for vscode, codex, gemini, all, and minimal
+    targets.  Gemini needs it because GEMINI.md imports AGENTS.md.
     
     Args:
         target: The detected or configured target
@@ -186,19 +135,31 @@ def should_compile_agents_md(target: TargetType) -> bool:
     Returns:
         bool: True if AGENTS.md should be generated
     """
-    return target in ("vscode", "opencode", "codex", "all", "minimal")
+    return target in ("vscode", "opencode", "codex", "gemini", "all", "minimal")
 
 
 def should_compile_claude_md(target: TargetType) -> bool:
     """Check if CLAUDE.md should be compiled.
-    
+
     Args:
         target: The detected or configured target
-        
+
     Returns:
         bool: True if CLAUDE.md should be generated
     """
     return target in ("claude", "all")
+
+
+def should_compile_gemini_md(target: TargetType) -> bool:
+    """Check if GEMINI.md should be compiled.
+
+    Args:
+        target: The detected or configured target
+
+    Returns:
+        bool: True if GEMINI.md should be generated
+    """
+    return target in ("gemini", "all")
 
 
 def get_target_description(target: UserTargetType) -> str:
@@ -220,8 +181,9 @@ def get_target_description(target: UserTargetType) -> str:
         "cursor": ".cursor/agents/ + .cursor/skills/ + .cursor/rules/",
         "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .opencode/skills/",
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
-        "all": "AGENTS.md + CLAUDE.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .agents/",
-        "minimal": "AGENTS.md only (create .github/ or .claude/ for full integration)",
+        "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
+        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .agents/",
+        "minimal": "AGENTS.md only (create a target folder for full integration)",
     }
     return descriptions.get(normalized, "unknown target")
 
@@ -232,7 +194,7 @@ def get_target_description(target: UserTargetType) -> str:
 
 #: The complete set of real (non-pseudo) canonical targets.
 #: "minimal" is intentionally excluded -- it is a fallback pseudo-target.
-ALL_CANONICAL_TARGETS = frozenset({"vscode", "claude", "cursor", "opencode", "codex"})
+ALL_CANONICAL_TARGETS = frozenset({"vscode", "claude", "cursor", "opencode", "codex", "gemini"})
 
 #: Alias mapping: user-facing name -> canonical internal name.
 TARGET_ALIASES: dict[str, str] = {
@@ -251,7 +213,7 @@ def normalize_target_list(
     - ``None`` -> ``None`` (auto-detect)
     - ``"claude"`` -> ``["claude"]``
     - ``"copilot"`` -> ``["vscode"]``  (alias resolution)
-    - ``"all"`` -> ``["claude", "codex", "copilot", "cursor", "opencode"]``
+    - ``"all"`` -> ``["claude", "codex", "cursor", "gemini", "opencode", "vscode"]``
     - ``["claude", "copilot"]`` -> ``["claude", "vscode"]``
     - Deduplicates while preserving first-seen order.
 

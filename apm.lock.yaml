@@ -23,10 +23,12 @@ local_deployed_files:
 - .github/instructions/tests.instructions.md
 - .github/skills/apm-review-panel
 - .github/skills/apm-strategy
+- .github/skills/apm-triage-panel
 - .github/skills/auth
 - .github/skills/cli-logging-ux
 - .github/skills/devx-ux
 - .github/skills/oss-growth
+- .github/skills/pr-description-skill
 - .github/skills/python-architecture
 - .github/skills/supply-chain-security
 local_deployed_file_hashes:

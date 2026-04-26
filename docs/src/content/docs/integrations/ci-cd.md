@@ -28,7 +28,7 @@ jobs:
       - name: Install APM packages
         uses: microsoft/apm-action@v1
         # Optional: add compile: true if targeting Codex, Gemini,
-        # or other tools without native APM integration
+        # or other tools whose instructions require compilation
 ```
 
 ### Private Dependencies
@@ -44,13 +44,13 @@ For private repositories, pass a token via the workflow `env:` block. See the [A
 
 ### Verify Compiled Output (Optional)
 
-If your project uses `apm compile` to target tools like Cursor, Codex, or Gemini, add a check to ensure compiled output stays in sync:
+If your project uses `apm compile` to target tools like Codex or Gemini, add a check to ensure compiled output stays in sync:
 
 ```yaml
       - name: Check for drift
         run: |
           apm compile
-          if [ -n "$(git status --porcelain -- AGENTS.md CLAUDE.md)" ]; then
+          if [ -n "$(git status --porcelain -- AGENTS.md CLAUDE.md GEMINI.md)" ]; then
             echo "Compiled output is out of date. Run 'apm compile' locally and commit."
             exit 1
           fi
@@ -60,13 +60,13 @@ This step is not needed if your team only uses GitHub Copilot and Claude, which 
 
 ### Verify Deployed Primitives
 
-To ensure `.github/`, `.claude/`, `.cursor/`, and `.opencode/` integration files stay in sync with `apm.yml`, add a drift check:
+To ensure `.github/`, `.claude/`, `.cursor/`, `.opencode/`, and `.gemini/` integration files stay in sync with `apm.yml`, add a drift check:
 
 ```yaml
       - name: Check APM integration drift
         run: |
           apm install
-          if [ -n "$(git status --porcelain -- .github/ .claude/ .cursor/ .opencode/)" ]; then
+          if [ -n "$(git status --porcelain -- .github/ .claude/ .cursor/ .opencode/ .gemini/)" ]; then
             echo "APM integration files are out of date. Run 'apm install' and commit."
             exit 1
           fi
@@ -201,6 +201,6 @@ See the [Pack & Distribute guide](../../guides/pack-distribute/) for the full wo
 
 - **Pin APM version** in CI to avoid unexpected changes: `pip install apm-cli==0.7.7`
 - **Commit `apm.lock.yaml`** so CI resolves the same dependency versions as local development
-- **Commit `.github/`, `.claude/`, `.cursor/`, and `.opencode/` deployed files** so contributors and cloud-based Copilot get agent context without running `apm install`
-- **If using `apm compile`** (for Codex, Gemini), run it in CI and fail the build if the output differs from what's committed
+- **Commit `.github/`, `.claude/`, `.cursor/`, `.opencode/`, and `.gemini/` deployed files** so contributors and cloud-based Copilot get agent context without running `apm install`
+- **If using `apm compile`** (for Codex, Gemini instructions), run it in CI and fail the build if the output differs from what's committed
 - **Use `GITHUB_APM_PAT`** for private dependencies; never use the default `GITHUB_TOKEN` for cross-repo access
