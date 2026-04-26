@@ -193,6 +193,8 @@ includes: auto
 #   - .apm/skills/my-skill/
 ```
 
+**`includes:` is allow-list only.** There is no `exclude:` form. The field controls which `.apm/` content the project consents to publish; it cannot be used to fence off subdirectories of `.apm/` from the scanner. To keep maintainer-only primitives out of shipped artifacts, author them OUTSIDE `.apm/` and reference them via a local-path devDependency -- see [Dev-only Primitives](../../guides/dev-only-primitives/).
+
 When `policy.manifest.require_explicit_includes` is `true` (see [Governance guide](../../enterprise/governance-guide/)), only form 3 passes the policy check; `auto` and undeclared are rejected at install/audit time by the `explicit-includes` policy check (not at YAML parse time).
 
 ### 3.10. `policy`
@@ -443,6 +445,16 @@ Created automatically by `apm init --plugin`. Use [`apm install --dev`](../cli-c
 
 ```bash
 apm install --dev owner/test-helpers
+```
+
+Plain `apm install` (no flag) deploys both `dependencies` and `devDependencies`. There is currently no `--omit=dev` flag -- the dev/prod separation kicks in at `apm pack --format plugin` time. The local-content scanner that builds plugin bundles also operates on `.apm/` only and does not consult the devDep marker. To keep maintainer-only primitives out of shipped artifacts, author them outside `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../../guides/dev-only-primitives/).
+
+Local-path devDependency example:
+
+```yaml
+devDependencies:
+  apm:
+    - path: ./dev/skills/release-checklist
 ```
 
 ---
