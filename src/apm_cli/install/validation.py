@@ -49,26 +49,28 @@ def _is_tls_failure(exc: BaseException) -> bool:
         msg = str(cur)
         if _TLS_ERROR_PREFIX in msg or "CERTIFICATE_VERIFY_FAILED" in msg:
             return True
-        # requests.exceptions.SSLError is the canonical type once we stop
-        # using urllib; check by name to avoid importing requests at module
-        # import time.
-        if type(cur).__name__ == "SSLError":
+        if isinstance(cur, requests.exceptions.SSLError):
             return True
         cur = cur.__cause__ or cur.__context__
         seen += 1
     return False
 
 
-def _log_tls_failure(host_display: str, exc: BaseException, verbose_log) -> None:
-    """Log a TLS verification failure to the verbose stream with a CA-trust hint."""
-    if not verbose_log:
-        return
-    verbose_log(f"TLS verification failed for {host_display}: {exc}")
-    verbose_log(
-        "  hint: the CA bundle does not trust the certificate presented "
-        "(common behind a corporate TLS-intercepting proxy). "
-        "Set REQUESTS_CA_BUNDLE to your organisation's CA bundle and retry."
+def _log_tls_failure(host_display: str, exc: BaseException, verbose_log, logger) -> None:
+    """Surface a TLS verification failure with an actionable CA-trust hint.
+
+    Default verbosity: a single one-liner via ``logger.warning`` so users behind
+    a corporate proxy see the right next step without re-running with --verbose.
+    Verbose: also include the host name and the underlying exception text.
+    """
+    logger.warning(
+        "TLS verification failed -- if you're behind a corporate proxy or "
+        "firewall, set the REQUESTS_CA_BUNDLE environment variable to the "
+        "path of your organisation's CA bundle (a PEM file) and retry. "
+        "See: https://microsoft.github.io/apm/troubleshooting/ssl-issues/"
     )
+    if verbose_log:
+        verbose_log(f"underlying error from {host_display}: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -360,7 +362,6 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             try:
                 resp = requests.get(api_url, headers=headers, timeout=15)
             except requests.exceptions.SSLError as e:
-                _log_tls_failure(host_info.display_name, e, verbose_log)
                 raise RuntimeError(
                     f"TLS verification failed for {host_info.display_name}"
                 ) from e
@@ -388,8 +389,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             )
         except Exception as exc:
             if _is_tls_failure(exc):
-                # TLS failures are not auth issues -- skip the auth context render
-                # so the user sees the CA-trust hint, not a PAT troubleshooting wall.
+                _log_tls_failure(host_info.display_name, exc, verbose_log, logger)
                 return False
             if verbose_log:
                 try:
@@ -422,7 +422,6 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             try:
                 resp = requests.get(api_url, headers=headers, timeout=15)
             except requests.exceptions.SSLError as e:
-                _log_tls_failure(host_info.display_name, e, verbose_log)
                 raise RuntimeError(
                     f"TLS verification failed for {host_info.display_name}"
                 ) from e
@@ -446,6 +445,8 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             )
         except Exception as exc:
             if _is_tls_failure(exc):
+                # See note above: logged once here, skip auth context render.
+                _log_tls_failure(host, exc, verbose_log, logger)
                 return False
             if verbose_log:
                 try:
