@@ -225,7 +225,7 @@ def _check_one_dep(dep, downloader, verbose):
 @click.option("--parallel-checks", "-j", type=int, default=4,
               help="Max concurrent remote checks (default: 4, 0 = sequential)")
 def outdated(global_, verbose, parallel_checks):
-    """Show outdated locked dependencies.
+    """Show outdated locked dependencies
 
     Compares each locked dependency against the remote to detect staleness.
     Tag-pinned deps use semver comparison; branch-pinned deps compare commit SHAs.

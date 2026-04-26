@@ -83,9 +83,20 @@ def mcp():
         "  apm mcp install fetch -- npx -y @modelcontextprotocol/server-fetch\n\n"
         "  apm mcp install api --transport http --url https://example.com/mcp"
     ),
+    epilog=(
+        "Common options (see `apm install --mcp --help` for full list):\n"
+        "  --transport [stdio|http|sse|streamable-http]\n"
+        "  --url URL           Server URL for remote transports\n"
+        "  --env KEY=VALUE     Environment variable (repeatable)\n"
+        "  --header KEY=VALUE  HTTP header (repeatable)\n"
+        "  --registry URL      Custom registry URL\n"
+        "  --mcp-version VER    Pin registry entry to a specific version\n"
+        "  --dev / --dry-run / --force / --verbose / --no-policy\n"
+    ),
 )
+@click.argument("name", required=True)
 @click.pass_context
-def mcp_install(ctx):
+def mcp_install(ctx, name):
     """Forward all args to 'apm install --mcp ...'.
 
     Examples:
@@ -106,9 +117,9 @@ def mcp_install(ctx):
     _, post_dd = _split_argv_at_double_dash(_get_invocation_argv())
     if post_dd:
         pre_args = ctx.args[: len(ctx.args) - len(post_dd)]
-        forwarded = ["install", "--mcp", *pre_args, "--", *post_dd]
+        forwarded = ["install", "--mcp", name, *pre_args, "--", *post_dd]
     else:
-        forwarded = ["install", "--mcp", *ctx.args]
+        forwarded = ["install", "--mcp", name, *ctx.args]
 
     try:
         cli.main(args=forwarded, standalone_mode=False)
