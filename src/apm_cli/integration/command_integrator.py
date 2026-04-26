@@ -6,6 +6,7 @@ Integrates .prompt.md files as commands for any target that supports the
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List
 import frontmatter
@@ -164,9 +165,13 @@ class CommandIntegrator(BaseIntegrator):
                 files_skipped += 1
                 continue
 
-            links_resolved = self.integrate_command(
-                prompt_file, target_path, package_info, prompt_file,
-            )
+            if mapping.format_id == "gemini_command":
+                self._write_gemini_command(prompt_file, target_path)
+                links_resolved = 0
+            else:
+                links_resolved = self.integrate_command(
+                    prompt_file, target_path, package_info, prompt_file,
+                )
             files_integrated += 1
             total_links_resolved += links_resolved
             target_paths.append(target_path)
@@ -201,6 +206,38 @@ class CommandIntegrator(BaseIntegrator):
             legacy_glob_pattern="*-apm.md",
             targets=[target],
         )
+
+    # ------------------------------------------------------------------
+    # Gemini CLI Commands (.toml format)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _write_gemini_command(source: Path, target: Path) -> None:
+        """Transform a ``.prompt.md`` file to Gemini CLI ``.toml`` format.
+
+        Parses YAML frontmatter for ``description``, uses the markdown
+        body as the ``prompt`` field.  Replaces ``$ARGUMENTS`` with
+        ``{{args}}`` (Gemini CLI's argument interpolation syntax).
+
+        Ref: https://geminicli.com/docs/cli/gemini-md/
+        """
+        import toml as _toml
+
+        post = frontmatter.load(source)
+
+        description = post.metadata.get("description", "")
+        prompt_text = post.content.strip()
+        prompt_text = prompt_text.replace("$ARGUMENTS", "{{args}}")
+
+        if re.search(r'(?<!\d)\$\d+', prompt_text):
+            prompt_text = f"Arguments: {{{{args}}}}\n\n{prompt_text}"
+
+        doc = {"prompt": prompt_text}
+        if description:
+            doc = {"description": description, "prompt": prompt_text}
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(_toml.dumps(doc), encoding="utf-8")
 
     # ------------------------------------------------------------------
     # Legacy per-target API (DEPRECATED)

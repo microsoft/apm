@@ -20,14 +20,14 @@ from .template_builder import (
 )
 from .link_resolver import resolve_markdown_links, validate_link_targets
 from ..utils.paths import portable_relpath
-from ..core.target_detection import should_compile_agents_md, should_compile_claude_md
+from ..core.target_detection import should_compile_agents_md, should_compile_claude_md, should_compile_gemini_md
 
 
 # User-facing target aliases that map to the canonical "vscode" target.
 # Kept in sync with target_detection.detect_target().
 _VSCODE_TARGET_ALIASES = ("copilot", "agents")
 _KNOWN_TARGETS = (
-    "vscode", "claude", "cursor", "opencode", "codex", "all", "minimal",
+    "vscode", "claude", "cursor", "opencode", "codex", "gemini", "all", "minimal",
 ) + _VSCODE_TARGET_ALIASES
 
 
@@ -238,15 +238,14 @@ class AgentsCompiler:
             if should_compile_claude_md(routing_target):
                 results.append(self._compile_claude_md(config, primitives))
 
-            # Defensive: should never happen for a known target, but guards
-            # against future target_detection drift silently producing no-ops.
+            if should_compile_gemini_md(routing_target):
+                results.append(self._compile_gemini_md(config, primitives))
+
+            # Some targets (e.g. cursor) use the data-driven
+            # integration layer and don't need compilation.
             if not results:
-                self.errors.append(
-                    f"Target {config.target!r} did not route to any compiler. "
-                    "This is an internal bug in target routing."
-                )
                 return CompilationResult(
-                    success=False,
+                    success=True,
                     output_path="",
                     content="",
                     warnings=self.warnings.copy(),
@@ -600,7 +599,63 @@ class AgentsCompiler:
             stats=stats,
             has_critical_security=critical_security_found,
         )
-    
+
+    def _compile_gemini_md(self, config: CompilationConfig, primitives: PrimitiveCollection) -> CompilationResult:
+        """Compile GEMINI.md stub that imports AGENTS.md.
+
+        Gemini CLI supports ``@./path`` import syntax, so GEMINI.md is a
+        thin wrapper that pulls in AGENTS.md at load time.  The actual
+        instruction roll-up is handled by the AGENTS.md pipeline (which
+        is always compiled alongside via ``should_compile_agents_md``).
+
+        Args:
+            config: Compilation configuration.
+            primitives: Primitives to compile.
+
+        Returns:
+            CompilationResult for the GEMINI.md compilation.
+        """
+        from .gemini_formatter import GeminiFormatter
+
+        gemini_formatter = GeminiFormatter(str(self.base_dir))
+        gemini_result = gemini_formatter.format_distributed(primitives)
+
+        all_warnings = self.warnings + gemini_result.warnings
+        all_errors = self.errors + gemini_result.errors
+
+        if config.dry_run:
+            return CompilationResult(
+                success=len(all_errors) == 0,
+                output_path="Preview mode - GEMINI.md",
+                content="GEMINI.md Preview: Would generate stub importing AGENTS.md",
+                warnings=all_warnings,
+                errors=all_errors,
+                stats=gemini_result.stats,
+            )
+
+        files_written = 0
+        for gemini_path, content in gemini_result.content_map.items():
+            try:
+                gemini_path.parent.mkdir(parents=True, exist_ok=True)
+                gemini_path.write_text(content, encoding="utf-8")
+                files_written += 1
+            except OSError as e:
+                all_errors.append(f"Failed to write {gemini_path}: {str(e)}")
+
+        stats = gemini_result.stats.copy()
+        stats["gemini_files_written"] = files_written
+
+        self._log("progress", "Generated GEMINI.md (imports AGENTS.md)")
+
+        return CompilationResult(
+            success=len(all_errors) == 0,
+            output_path=f"GEMINI.md: {files_written} files",
+            content=f"Generated {files_written} GEMINI.md stub importing AGENTS.md",
+            warnings=all_warnings,
+            errors=all_errors,
+            stats=stats,
+        )
+
     def _merge_results(self, results: List[CompilationResult]) -> CompilationResult:
         """Merge multiple compilation results into a single result.
         

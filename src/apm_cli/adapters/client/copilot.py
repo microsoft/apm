@@ -186,17 +186,36 @@ class CopilotClientAdapter(MCPClientAdapter):
         # Check for remote endpoints first (registry-defined priority)
         remotes = server_info.get("remotes", [])
         if remotes:
-            # Use remote endpoint if available
-            remote = remotes[0]  # Take the first remote
-            
-            # All remote servers use http type for proper authentication support
+            # Select the first remote with a non-empty URL; fall back to the
+            # first entry so downstream code still emits the historical empty
+            # URL error path when no remote is usable.
+            remote = self._select_remote_with_url(remotes) or remotes[0]
+
+            # Validate transport_type from registry: default to "http" when
+            # missing/empty, raise ValueError for unsupported values. Mirrors
+            # the VS Code adapter check introduced in PR #656 so registry data
+            # with, e.g. transport_type="grpc" fails loudly instead of silently
+            # producing a garbage config.
+            transport = (remote.get("transport_type") or "").strip()
+            if not transport:
+                transport = "http"
+            elif transport not in ("sse", "http", "streamable-http"):
+                raise ValueError(
+                    f"Unsupported remote transport '{transport}' for Copilot. "
+                    f"Server: {server_info.get('name', 'unknown')}. "
+                    f"Supported transports: http, sse, streamable-http."
+                )
+
+            # Copilot CLI writes "type": "http" for all remote servers so
+            # authentication flows (headers) are consistent regardless of the
+            # underlying transport advertised by the registry.
             config = {
                 "type": "http",
-                "url": remote.get("url", ""),
+                "url": (remote.get("url") or "").strip(),
                 "tools": ["*"],  # Required by Copilot CLI specification
                 "id": server_info.get("id", "")  # Add registry UUID for conflict detection
             }
-            
+
             # Add authentication headers for GitHub MCP server
             server_name = server_info.get("name", "")
             is_github_server = self._is_github_server(server_name, remote.get("url", ""))
@@ -649,6 +668,22 @@ class CopilotClientAdapter(MCPClientAdapter):
         """Legacy method for backward compatibility. Use _resolve_variable_placeholders instead."""
         return self._resolve_variable_placeholders(value, resolved_env, {})
     
+    @staticmethod
+    def _select_remote_with_url(remotes):
+        """Return the first remote entry that has a non-empty URL.
+
+        Args:
+            remotes (list): Candidate remote entries from the registry.
+
+        Returns:
+            dict or None: The first usable remote, or None if none qualify.
+        """
+        for remote in remotes:
+            url = (remote.get("url") or "").strip()
+            if url:
+                return remote
+        return None
+
     def _select_best_package(self, packages):
         """Select the best package for installation from available packages.
         

@@ -162,6 +162,41 @@ dependencies:
 Lock files generated before this feature omit `content_hash`. APM handles this
 gracefully — verification is skipped and the hash is populated on the next install.
 
+### 4.5 Self-Entry Convention
+
+For uniform traversal, the in-memory `dependencies` map includes a synthesized
+entry representing the host project's own local `.apm/` content. This entry is
+materialized on read and stripped on write -- it is **never serialized** to disk.
+
+The on-disk YAML format is unchanged: the host project's local content lives in
+the flat top-level fields `local_deployed_files` and `local_deployed_file_hashes`
+(see [section 4.4](#44-content-integrity) for the hashing scheme used for
+verification). `LockFile.from_yaml()` synthesizes the self-entry from those
+fields; `LockFile.to_yaml()` removes it before serialization. Round-trip is
+byte-stable.
+
+The synthesized entry MUST follow this convention:
+
+| Field | Value |
+|-------|-------|
+| Map key | `"."` (single dot) |
+| `repo_url` | `"<self>"` |
+| `local_path` | `"."` |
+| `source` | `"local"` |
+| `is_dev` | `true` |
+| `depth` | `0` |
+| `deployed_files` | populated from `local_deployed_files` |
+| `deployed_file_hashes` | populated from `local_deployed_file_hashes` |
+
+`is_dev: true` is non-negotiable. Plugin bundle exporters (`apm pack --format
+plugin`) skip dev dependencies; this flag ensures the host project's own content
+is excluded from distributable bundles via the existing dev-dependency filter,
+without requiring exporters to special-case the self-entry.
+
+Consumers iterating `dependencies` SHOULD treat the `"."` key as the host
+project. Consumers reading the on-disk YAML directly will not see this entry --
+they MUST read `local_deployed_files` and `local_deployed_file_hashes` instead.
+
 ## 5. Path Conventions
 
 All paths in `deployed_files` MUST use forward slashes (POSIX format),

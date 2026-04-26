@@ -194,14 +194,15 @@ team-skills/
 
 `apm install` auto-detects which runtimes you have. The example above shows
 `.github/` because Copilot is the default fallback. If `.claude/`, `.cursor/`,
-or `.opencode/` exists in the project, they get populated too. To target
+`.opencode/`, or `.gemini/` exists in the project, they get populated too. To target
 explicitly, see the [Compilation guide](/apm/guides/compilation/).
 
 > **What about `apm compile`?** Compile is a different concern: it
-> generates merged `AGENTS.md` / `CLAUDE.md` files for tools that read a
-> single top-level context document (Codex, Gemini, plain `agents`-protocol
-> hosts). Copilot, Claude Code, and Cursor read the per-skill directories
-> directly -- no compile step needed.
+> generates merged `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` files for tools
+> that read a top-level context document for instructions (Codex, Gemini,
+> plain `agents`-protocol hosts). Gemini also receives commands, skills,
+> hooks, and MCP via `apm install`. Copilot, Claude Code, and Cursor read
+> the per-skill directories directly -- no compile step needed.
 
 Now open Copilot or Claude in this project. Ask "draft a PR description for
 my last commit". The `pr-description` skill activates on its own. To get the
@@ -265,6 +266,25 @@ audit while you author; pack produces the plugin bundle when you ship.
 
 For the full reference, see the [Pack & Distribute guide](/apm/guides/pack-distribute/)
 and the [Plugin authoring guide](/apm/guides/plugins/).
+
+## Choosing a package layout
+
+APM recognizes three layouts. Pick the one that matches what you are shipping:
+
+- **One skill** -- put `SKILL.md` at the repo root, with optional
+  `agents/`, `assets/`, or `scripts/` directories alongside it. Add
+  `apm.yml` if you need dependency management (this is a HYBRID package).
+  APM installs the whole directory as a single skill bundle.
+
+- **Multiple primitives** -- use the `.apm/` directory with `skills/`,
+  `agents/`, `instructions/` subdirectories (the layout used in this guide).
+  APM hoists each primitive into the consumer's runtime dirs individually.
+
+- **Claude plugin** -- if you already have a `plugin.json`, APM can consume
+  it directly without restructuring.
+
+For the full comparison and metadata precedence rules, see
+[Package Types](../../reference/package-types/).
 
 ## Next steps
 

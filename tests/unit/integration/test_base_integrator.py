@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
+from apm_cli.primitives.discovery import discover_primitives
 
 
 # ---------------------------------------------------------------------------
@@ -592,3 +593,41 @@ class TestShouldIntegrate:
     def test_always_returns_true(self):
         bi = BaseIntegrator()
         assert bi.should_integrate(Path("/any/path")) is True
+
+
+# ---------------------------------------------------------------------------
+# init_link_resolver — home-directory scoping (#830)
+# ---------------------------------------------------------------------------
+
+class TestInitLinkResolverHomeScoping:
+    """When install_path is $HOME, init_link_resolver must scope
+    discover_primitives to ~/.apm/ to avoid recursive-globbing the
+    entire home directory.  See issue #830."""
+
+    @patch("apm_cli.integration.base_integrator.discover_primitives")
+    @patch("apm_cli.integration.base_integrator.UnifiedLinkResolver")
+    def test_scopes_to_apm_subdir_when_install_path_is_home(
+        self, mock_resolver_cls, mock_discover
+    ):
+        mock_discover.return_value = []
+        bi = BaseIntegrator()
+        pkg_info = MagicMock()
+        pkg_info.install_path = Path.home()
+
+        bi.init_link_resolver(pkg_info, Path.home())
+
+        mock_discover.assert_called_once_with(Path.home() / ".apm")
+
+    @patch("apm_cli.integration.base_integrator.discover_primitives")
+    @patch("apm_cli.integration.base_integrator.UnifiedLinkResolver")
+    def test_uses_install_path_when_not_home(
+        self, mock_resolver_cls, mock_discover, tmp_path
+    ):
+        mock_discover.return_value = []
+        bi = BaseIntegrator()
+        pkg_info = MagicMock()
+        pkg_info.install_path = tmp_path
+
+        bi.init_link_resolver(pkg_info, tmp_path)
+
+        mock_discover.assert_called_once_with(tmp_path)

@@ -22,6 +22,16 @@ if TYPE_CHECKING:  # pragma: no cover - import for type hints only
     from apm_cli.policy.models import CIAuditResult
 
 
+class DirectDependencyError(RuntimeError):
+    """Raised when one or more direct dependencies fail validation or integration.
+
+    Bypasses the broad ``except Exception`` wrapper in ``pipeline.py`` so the
+    original message reaches ``commands/install.py`` without being double-wrapped
+    as ``"Failed to resolve APM dependencies: ..."`` (same pattern as
+    :class:`PolicyViolationError`).
+    """
+
+
 class PolicyViolationError(RuntimeError):
     """Raised when org-policy enforcement halts an install.
 

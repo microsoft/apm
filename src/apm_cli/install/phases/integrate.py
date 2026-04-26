@@ -303,6 +303,12 @@ def run(ctx: "InstallContext") -> None:
     deps_to_install = ctx.deps_to_install
     apm_modules_dir = ctx.apm_modules_dir
 
+    # Direct dep keys: used to distinguish direct vs transitive failures
+    # so direct failures can be surfaced immediately.
+    direct_dep_keys = builtins.set(
+        dep.get_unique_key() for dep in ctx.all_apm_deps
+    )
+
     # Int counters (written back to ctx at end of function)
     installed_count = ctx.installed_count
     unpinned_count = ctx.unpinned_count
@@ -367,6 +373,25 @@ def run(ctx: "InstallContext") -> None:
             deltas = run_integration_template(source)
 
             if deltas is None:
+                # Direct dependency failure: surface a single concise
+                # inline marker so the user sees `[x] <pkg>: integration
+                # failed` immediately (fixes "perceived hang" on HYBRID
+                # validation failures). The full diagnostic detail --
+                # resolved path and `--verbose` hint -- is rendered once
+                # by `render_summary()` to avoid double-output.
+                if dep_key in direct_dep_keys:
+                    if ctx.diagnostics:
+                        ctx.diagnostics.error(
+                            f"{dep_key}: integration failed",
+                            package=dep_key,
+                            detail=(
+                                f"Resolved at {install_path}. "
+                                f"Run with --verbose for details."
+                            ),
+                        )
+                    elif ctx.logger:
+                        ctx.logger.error(f"{dep_key}: integration failed")
+                    ctx.direct_dep_failed = True
                 continue
 
             # Accumulate counter deltas from this package

@@ -23,7 +23,7 @@ def runtime():
 
 
 @runtime.command(help="Set up a runtime")
-@click.argument("runtime_name", type=click.Choice(["copilot", "codex", "llm"]))
+@click.argument("runtime_name", type=click.Choice(["copilot", "codex", "llm", "gemini"]))
 @click.option("--version", help="Specific version to install")
 @click.option(
     "--vanilla",
