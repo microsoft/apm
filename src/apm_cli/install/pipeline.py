@@ -61,6 +61,7 @@ def run_install_pipeline(
     protocol_pref=None,
     allow_protocol_fallback: "Optional[bool]" = None,
     no_policy: bool = False,
+    skill_subset: "Optional[tuple]" = None,
 ):
     """Install APM package dependencies.
 
@@ -153,6 +154,7 @@ def run_install_pipeline(
         root_has_local_primitives=_root_has_local_primitives,
         old_local_deployed=_old_local_deployed,
         no_policy=no_policy,
+        skill_subset=skill_subset,
     )
 
     # ------------------------------------------------------------------

@@ -467,7 +467,7 @@ class SkillIntegrator(BaseIntegrator):
         return True
 
     @staticmethod
-    def _promote_sub_skills(sub_skills_dir: Path, target_skills_root: Path, parent_name: str, *, warn: bool = True, owned_by: dict[str, str] | None = None, diagnostics=None, managed_files=None, force: bool = False, project_root: Path | None = None, logger=None) -> tuple[int, list[Path]]:
+    def _promote_sub_skills(sub_skills_dir: Path, target_skills_root: Path, parent_name: str, *, warn: bool = True, owned_by: dict[str, str] | None = None, diagnostics=None, managed_files=None, force: bool = False, project_root: Path | None = None, logger=None, name_filter: "set | None" = None) -> tuple[int, list[Path]]:
         """Promote sub-skills from .apm/skills/ to top-level skill entries.
 
         Args:
@@ -503,6 +503,9 @@ class SkillIntegrator(BaseIntegrator):
             if not (sub_skill_path / "SKILL.md").exists():
                 continue
             raw_sub_name = sub_skill_path.name
+            # --skill filter: skip skills not in the requested subset
+            if name_filter is not None and raw_sub_name not in name_filter:
+                continue
             is_valid, _ = validate_skill_name(raw_sub_name)
             sub_name = raw_sub_name if is_valid else normalize_skill_name(raw_sub_name)
             target = target_skills_root / sub_name
@@ -875,7 +878,7 @@ class SkillIntegrator(BaseIntegrator):
     def _integrate_skill_bundle(
         self, package_info, project_root: Path, skills_dir: Path,
         diagnostics=None, managed_files=None, force: bool = False,
-        logger=None, targets=None,
+        logger=None, targets=None, skill_subset=None,
     ) -> SkillIntegrationResult:
         """Promote every skill in a SKILL_BUNDLE's top-level skills/ directory.
 
@@ -892,6 +895,7 @@ class SkillIntegrator(BaseIntegrator):
             force: Whether to overwrite locally-authored files.
             logger: Optional InstallLogger.
             targets: Optional explicit list of TargetProfile objects.
+            skill_subset: Optional tuple of skill names to install (None = all).
 
         Returns:
             SkillIntegrationResult with all promoted skills.
@@ -909,6 +913,9 @@ class SkillIntegrator(BaseIntegrator):
         total_promoted = 0
         all_deployed: list[Path] = []
         any_created = False
+
+        # Convert skill_subset tuple to a set for O(1) lookup
+        _name_filter = set(skill_subset) if skill_subset else None
 
         for idx, target in enumerate(targets):
             if not target.supports("skills"):
@@ -929,6 +936,7 @@ class SkillIntegrator(BaseIntegrator):
                 force=force,
                 project_root=project_root,
                 logger=logger if is_primary else None,
+                name_filter=_name_filter,
             )
             if is_primary:
                 total_promoted = n
@@ -947,7 +955,7 @@ class SkillIntegrator(BaseIntegrator):
             target_paths=all_deployed,
         )
 
-    def integrate_package_skill(self, package_info, project_root: Path, diagnostics=None, managed_files=None, force: bool = False, logger=None, targets=None) -> SkillIntegrationResult:
+    def integrate_package_skill(self, package_info, project_root: Path, diagnostics=None, managed_files=None, force: bool = False, logger=None, targets=None, skill_subset=None) -> SkillIntegrationResult:
         """Integrate a package's skill into all active target directories.
         
         Copies native skills (packages with SKILL.md at root) to every active
@@ -1008,6 +1016,12 @@ class SkillIntegrator(BaseIntegrator):
         # Check if this is a native Skill (already has SKILL.md at root)
         source_skill_md = package_path / "SKILL.md"
         if source_skill_md.exists():
+            if skill_subset:
+                from apm_cli.utils.console import _rich_warning
+                _rich_warning(
+                    f"--skill filter ignored for '{package_info.install_path.name}': "
+                    "package is a single CLAUDE_SKILL, not a SKILL_BUNDLE."
+                )
             return self._integrate_native_skill(package_info, project_root, source_skill_md, diagnostics=diagnostics, managed_files=managed_files, force=force, logger=logger, targets=targets)
 
         # SKILL_BUNDLE: promote skills from root-level skills/ directory.
@@ -1021,6 +1035,7 @@ class SkillIntegrator(BaseIntegrator):
                 package_info, project_root, root_skills_dir,
                 diagnostics=diagnostics, managed_files=managed_files,
                 force=force, logger=logger, targets=targets,
+                skill_subset=skill_subset,
             )
         
         # No SKILL.md at root  -- not a skill package.
