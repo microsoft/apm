@@ -6,9 +6,17 @@ description: Multi-persona expert panel review of labelled PRs, posting a single
 #
 # 1. pull_request_target: fires when a label is applied. We use _target
 #    (not plain pull_request) so that fork PRs run in the BASE repo
-#    context with full secrets (COPILOT_GITHUB_TOKEN etc.). The label
-#    name is filtered inside the prompt (Step 0) -- gh-aw does not
-#    expose `names:` on pull_request_target.
+#    context with full secrets (COPILOT_GITHUB_TOKEN etc.). gh-aw does
+#    not expose `names:` on `pull_request_target`, so the label-name
+#    filter is enforced via `on.steps:` -- a pre-activation step that
+#    exits non-zero for any label other than `panel-review`. This kills
+#    the entire downstream pipeline (activation, apm bundle restore,
+#    agent container) at the cheapest possible point. Previously the
+#    label check lived inside the agent prompt, which (a) cost a full
+#    runner cold-start + agent spin-up per label change on every PR in
+#    the repo, and (b) relied on the LLM honoring an "exit 0" prompt
+#    instruction -- not always reliable. The pre-activation step is a
+#    deterministic gate.
 #
 #    Why pull_request_target is safe here despite the well-known
 #    "pwn-request" pattern:
@@ -41,6 +49,23 @@ on:
         description: "Pull request number to review (works for fork PRs)"
         required: true
         type: string
+  steps:
+    - name: Filter on panel-review label
+      id: label_check
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        LABEL_NAME: ${{ github.event.label.name }}
+      run: |
+        if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+          echo "Manual workflow_dispatch -- proceeding."
+          exit 0
+        fi
+        if [ "$LABEL_NAME" = "panel-review" ]; then
+          echo "Triggering label is 'panel-review' -- proceeding."
+          exit 0
+        fi
+        echo "Triggering label is '$LABEL_NAME' (not 'panel-review'); skipping."
+        exit 1
   roles: [admin, maintainer, write]
 
 # Agent job runs READ-ONLY. Safe-output jobs are auto-granted scoped write.
@@ -85,20 +110,9 @@ timeout-minutes: 30
 You are orchestrating the **apm-review-panel** skill against pull request
 **#${{ github.event.pull_request.number || inputs.pr_number }}** in `${{ github.repository }}`.
 
-## Step 0: Label-name guard (skip when irrelevant)
-
-`pull_request_target: types: [labeled]` fires for ANY label change. Bail
-immediately unless the triggering label is `panel-review` (or this is a
-manual `workflow_dispatch`):
-
-```bash
-EVENT="${{ github.event_name }}"
-LABEL="$(jq -r '.label.name // ""' "$GITHUB_EVENT_PATH")"
-if [ "$EVENT" = "pull_request_target" ] && [ "$LABEL" != "panel-review" ]; then
-  echo "Triggering label is '$LABEL' (not 'panel-review'); exiting cleanly."
-  exit 0
-fi
-```
+> The label-name guard runs at the workflow level (`on.steps:` pre-activation
+> step `label_check`). If you are reading this prompt, the triggering label
+> is `panel-review` or this is a manual `workflow_dispatch` -- proceed.
 
 ## Step 1: Gather PR context (read-only)
 
