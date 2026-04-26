@@ -90,6 +90,7 @@ def mcp():
         "  --env KEY=VALUE     Environment variable (repeatable)\n"
         "  --header KEY=VALUE  HTTP header (repeatable)\n"
         "  --registry URL      Custom registry URL\n"
+        "  --mcp-version VER    Pin registry entry to a specific version\n"
         "  --dev / --dry-run / --force / --verbose / --no-policy\n"
     ),
 )
