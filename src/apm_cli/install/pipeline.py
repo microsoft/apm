@@ -320,6 +320,18 @@ def run_install_pipeline(
 
         _integrate_phase.run(ctx)
 
+        # Fail-loud: if any direct dependency failed validation or
+        # download, render the diagnostic summary and raise so the
+        # caller exits non-zero immediately.  Transitive failures
+        # are allowed to proceed (log + continue).
+        if ctx.direct_dep_failed:
+            if ctx.diagnostics and ctx.diagnostics.has_diagnostics:
+                ctx.diagnostics.render_summary()
+            raise RuntimeError(
+                "One or more direct dependencies failed validation. "
+                "Run with --verbose for details."
+            )
+
         # Update .gitignore
         from apm_cli.commands._helpers import _update_gitignore_for_apm_modules
 

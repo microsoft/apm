@@ -66,15 +66,20 @@ class PackageValidator:
             result.add_error(f"Invalid apm.yml: {e}")
             return result
         
-        # Check for .apm directory
+        # Check for .apm directory -- only mandatory for APM_PACKAGE layout.
+        # HYBRID and CLAUDE_SKILL packages may ship without .apm/.
+        from ..models.validation import detect_package_type, PackageType
+
+        pkg_type, _ = detect_package_type(package_path)
         apm_dir = package_path / ".apm"
-        if not apm_dir.exists():
-            result.add_error("Missing required directory: .apm/")
-            return result
-        
-        if not apm_dir.is_dir():
-            result.add_error(".apm must be a directory")
-            return result
+        if pkg_type in (PackageType.APM_PACKAGE, PackageType.INVALID) or pkg_type is None:
+            if not apm_dir.exists():
+                result.add_error("Missing required directory: .apm/")
+                return result
+            
+            if not apm_dir.is_dir():
+                result.add_error(".apm must be a directory")
+                return result
         
         # Check for primitive content
         primitive_types = ['instructions', 'chatmodes', 'contexts', 'prompts']

@@ -2,7 +2,7 @@
 title: "apm experimental"
 description: "Manage opt-in experimental feature flags. Evaluate new or changing behaviour without affecting APM defaults."
 sidebar:
-  order: 5
+  order: 6
   label: "Experimental Flags"
 ---
 

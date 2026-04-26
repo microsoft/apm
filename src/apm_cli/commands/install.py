@@ -912,7 +912,7 @@ def _run_mcp_install(
 
 
 @click.command(
-    help="Install APM and MCP dependencies (auto-creates apm.yml; use --allow-insecure for http:// packages)"
+    help="Install APM and MCP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json); auto-creates apm.yml; use --allow-insecure for http:// packages)"
 )
 @click.argument("packages", nargs=-1)
 @click.option("--runtime", help="Target specific runtime only (copilot, codex, vscode)")

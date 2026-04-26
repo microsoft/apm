@@ -1,6 +1,28 @@
 # Package Authoring
 
-## Package directory structure
+## Supported package layouts
+
+APM recognizes three layouts. The shape of the package root tells APM
+how to install it:
+
+| Root signal | Author intent | Install semantic |
+|---|---|---|
+| `.apm/` (with or without apm.yml) | Multiple independent primitives | Hoist each primitive into the consumer runtime dirs |
+| `SKILL.md` (alone, or with apm.yml = HYBRID) | One skill bundle | Copy whole tree to `<target>/skills/<name>/` |
+| `plugin.json` / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
+
+The HYBRID layout (apm.yml + SKILL.md) is a single skill bundle that
+also uses APM dependency resolution. APM installs it as a skill -- it
+does NOT dissect the bundle into top-level primitives. Co-located
+subdirectories like `agents/`, `assets/`, `scripts/` are bundle
+resources, not standalone primitives.
+
+When apm.yml and SKILL.md frontmatter both define a field:
+- apm.yml wins for `name`, `version`, `license`, `dependencies`, `scripts`.
+- SKILL.md frontmatter wins for `description`, `allowed-tools`.
+- Conflicts on shared fields go to apm.yml; verbose mode warns.
+
+## Package directory structure (APM layout)
 
 ```
 my-package/
