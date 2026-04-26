@@ -38,9 +38,14 @@ class RuntimeManager:
                 "binary": "codex"
             },
             "llm": {
-                "script": f"setup-llm{ext}", 
+                "script": f"setup-llm{ext}",
                 "description": "Simon Willison's LLM library with multiple providers",
                 "binary": "llm"
+            },
+            "gemini": {
+                "script": f"setup-gemini{ext}",
+                "description": "Google Gemini CLI with MCP integration",
+                "binary": "gemini"
             }
         }
     
@@ -290,11 +295,15 @@ class RuntimeManager:
             click.echo(f"{Fore.RED}[x] Unknown runtime: {runtime_name}{Style.RESET_ALL}", err=True)
             return False
         
-        # Handle copilot runtime (npm-based, global install)
-        if runtime_name == "copilot":
+        # Handle npm-based runtimes (copilot, gemini)
+        _npm_packages = {
+            "copilot": "@github/copilot",
+            "gemini": "@google/gemini-cli",
+        }
+        if runtime_name in _npm_packages:
             try:
                 result = subprocess.run(
-                    ["npm", "uninstall", "-g", "@github/copilot"],
+                    ["npm", "uninstall", "-g", _npm_packages[runtime_name]],
                     capture_output=True,
                     text=True,
                     encoding="utf-8",
@@ -338,7 +347,7 @@ class RuntimeManager:
     
     def get_runtime_preference(self) -> List[str]:
         """Get the runtime preference order."""
-        return ["copilot", "codex", "llm"]
+        return ["copilot", "codex", "gemini", "llm"]
     
     def get_available_runtime(self) -> Optional[str]:
         """Get the first available runtime based on preference."""

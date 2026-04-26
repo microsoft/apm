@@ -150,7 +150,7 @@ apm install microsoft/apm-sample-package
 
 ### Optional: Compiled Context with AGENTS.md
 
-For tools that do not support granular primitive discovery (such as Gemini), `apm compile` produces an `AGENTS.md` file that merges instructions into a single document. This is not needed for GitHub Copilot, Claude, or Cursor, which read per-file instructions natively. OpenCode and Codex also read `AGENTS.md`, so run `apm compile` to deploy instructions there.
+For tools that do not support granular primitive discovery, `apm compile` produces an `AGENTS.md` file that merges instructions into a single document. This is not needed for GitHub Copilot, Claude, or Cursor, which read per-file instructions natively. OpenCode and Codex also read `AGENTS.md`, so run `apm compile` to deploy instructions there.
 
 ```bash
 # Compile all local and dependency instructions into AGENTS.md
@@ -227,6 +227,18 @@ APM natively integrates with OpenCode when a `.opencode/` directory exists in yo
 
 > **Note**: Skills deploy to `.agents/skills/` (the cross-tool agent skills standard directory), not `.codex/skills/`. Agents are transformed from `.agent.md` Markdown to `.toml` format.
 
+#### Gemini CLI (`.gemini/`)
+
+| APM Primitive | Gemini Destination | Format |
+|---|---|---|
+| Commands (`.prompt.md`) | `.gemini/commands/*.toml` | Converted from Markdown to TOML |
+| Skills (`SKILL.md`) | `.gemini/skills/{name}/` | Verbatim copy |
+| Hooks (`.json`) | `.gemini/settings.json` | Merged into `hooks` key |
+| MCP servers | `.gemini/settings.json` | Merged into `mcpServers` key |
+| Instructions | Via `GEMINI.md` | Compile-only (`apm compile --target gemini`) |
+
+**Setup**: Create a `.gemini/` directory in your project root, then run `apm install`. APM detects the directory and deploys commands, skills, hooks, and MCP configuration automatically. For instructions, run `apm compile --target gemini` to generate `GEMINI.md` (a stub that imports `AGENTS.md`).
+
 ### Automatic Agent Integration
 
 APM automatically deploys agent files from installed packages into `.claude/agents/`:
@@ -286,7 +298,7 @@ apm install ComposioHQ/awesome-claude-skills/mcp-builder
 
 ### Automatic Hook Integration
 
-APM automatically integrates hooks from installed packages. Hooks define lifecycle event handlers (e.g., `PreToolUse`, `PostToolUse`, `Stop`) supported by VS Code Copilot, Claude Code, and Cursor.
+APM automatically integrates hooks from installed packages. Hooks define lifecycle event handlers (e.g., `PreToolUse`, `PostToolUse`, `Stop`) supported by VS Code Copilot, Claude Code, Cursor, and Gemini.
 
 > **Note:** Hook packages must be authored in the target platform's native format. APM handles path rewriting and file placement but does not translate between hook schema formats (e.g., Claude's `command` key vs GitHub Copilot's `bash`/`powershell` keys, or event name casing differences).
 
@@ -313,13 +325,14 @@ apm install anthropics/claude-plugins-official/plugins/hookify
 3. For Claude: merges hook definitions into `.claude/settings.json` under the `hooks` key
 4. For Cursor: merges hook definitions into `.cursor/hooks.json` under the `hooks` key (only when `.cursor/` exists)
 5. For Codex: merges hook definitions into `.codex/hooks.json` under the `hooks` key (only when `.codex/` exists)
-6. Copies referenced scripts to the target location
-7. Rewrites `${CLAUDE_PLUGIN_ROOT}` and relative script paths for the target platform
-8. `apm uninstall` removes hook files and cleans up merged settings
+6. For Gemini: merges hook definitions into `.gemini/settings.json` under the `hooks` key (only when `.gemini/` exists)
+7. Copies referenced scripts to the target location
+8. Rewrites `${CLAUDE_PLUGIN_ROOT}` and relative script paths for the target platform
+9. `apm uninstall` removes hook files and cleans up merged settings
 
 ### Optional: Target-Specific Compilation
 
-Compilation is optional for Copilot, Claude, and Cursor, which read per-file instructions natively. For OpenCode and Codex, run `apm compile` to generate `AGENTS.md` for instructions. Also use it when targeting Gemini:
+Compilation is optional for Copilot, Claude, and Cursor, which read per-file instructions natively. For OpenCode, Codex, and Gemini, run `apm compile` to generate instruction files:
 
 ```bash
 # Generate all formats (default)
@@ -332,6 +345,10 @@ apm compile --target claude
 # Generate only VS Code/Copilot formats  
 apm compile --target copilot
 # Creates: AGENTS.md (instructions only)
+
+# Generate only Gemini formats
+apm compile --target gemini
+# Creates: GEMINI.md (imports AGENTS.md)
 ```
 
 > **Remember**: `apm compile` generates instruction files only. Use `apm install` to integrate prompts, agents, instructions, commands, and skills from packages.
@@ -473,6 +490,9 @@ APM configures MCP servers in the native config format for each supported client
 | VS Code | `.vscode/mcp.json` | JSON `servers` object |
 | GitHub Copilot CLI | `~/.copilot/mcp-config.json` | JSON `mcpServers` object |
 | Codex CLI | `~/.codex/config.toml` | TOML `mcp_servers` section |
+| Claude | `.claude/settings.json` | JSON `mcpServers` object |
+| Cursor | `.cursor/mcp.json` | JSON `mcpServers` object |
+| Gemini CLI | `.gemini/settings.json` | JSON `mcpServers` object |
 
 **Runtime targeting**: APM detects which runtimes are installed and configures MCP servers for all of them. Use `--runtime <name>` or `--exclude <name>` to control which clients receive configuration.
 

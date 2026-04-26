@@ -462,7 +462,7 @@ class MCPIntegrator:
             return
 
         # Determine which runtimes to clean, mirroring install-time logic.
-        all_runtimes = {"vscode", "copilot", "codex", "cursor", "opencode"}
+        all_runtimes = {"vscode", "copilot", "codex", "cursor", "opencode", "gemini"}
         if runtime:
             target_runtimes = {runtime}
         else:
@@ -515,8 +515,9 @@ class MCPIntegrator:
                                     f"Removed stale MCP server '{name}' from .vscode/mcp.json"
                                 )
                             else:
-                                _rich_info(
-                                    f"+ Removed stale MCP server '{name}' from .vscode/mcp.json"
+                                _rich_success(
+                                    f"Removed stale MCP server '{name}' from .vscode/mcp.json",
+                                    symbol="check",
                                 )
                 except Exception:
                     _log.debug(
@@ -541,8 +542,9 @@ class MCPIntegrator:
                             _json.dumps(config, indent=2), encoding="utf-8"
                         )
                         for name in removed:
-                            _rich_info(
-                                f"+ Removed stale MCP server '{name}' from Copilot CLI config"
+                            _rich_success(
+                                f"Removed stale MCP server '{name}' from Copilot CLI config",
+                                symbol="check",
                             )
                 except Exception:
                     _log.debug(
@@ -565,8 +567,9 @@ class MCPIntegrator:
                     if removed:
                         codex_cfg.write_text(_toml.dumps(config), encoding="utf-8")
                         for name in removed:
-                            _rich_info(
-                                f"+ Removed stale MCP server '{name}' from Codex CLI config"
+                            _rich_success(
+                                f"Removed stale MCP server '{name}' from Codex CLI config",
+                                symbol="check",
                             )
                 except Exception:
                     _log.debug(
@@ -591,8 +594,9 @@ class MCPIntegrator:
                             _json.dumps(config, indent=2), encoding="utf-8"
                         )
                         for name in removed:
-                            _rich_info(
-                                f"+ Removed stale MCP server '{name}' from .cursor/mcp.json"
+                            _rich_success(
+                                f"Removed stale MCP server '{name}' from .cursor/mcp.json",
+                                symbol="check",
                             )
                 except Exception:
                     _log.debug(
@@ -622,12 +626,45 @@ class MCPIntegrator:
                                     f"Removed stale MCP server '{name}' from opencode.json"
                                 )
                             else:
-                                _rich_info(
-                                    f"+ Removed stale MCP server '{name}' from opencode.json"
+                                _rich_success(
+                                    f"Removed stale MCP server '{name}' from opencode.json",
+                                    symbol="check",
                                 )
                 except Exception:
                     _log.debug(
                         "Failed to clean stale MCP servers from opencode.json",
+                        exc_info=True,
+                    )
+
+        # Clean .gemini/settings.json (only if .gemini/ directory exists)
+        if "gemini" in target_runtimes:
+            gemini_cfg = Path.cwd() / ".gemini" / "settings.json"
+            if gemini_cfg.exists():
+                try:
+                    import json as _json
+
+                    config = _json.loads(gemini_cfg.read_text(encoding="utf-8"))
+                    servers = config.get("mcpServers", {})
+                    removed = [n for n in expanded_stale if n in servers]
+                    for name in removed:
+                        del servers[name]
+                    if removed:
+                        gemini_cfg.write_text(
+                            _json.dumps(config, indent=2), encoding="utf-8"
+                        )
+                        for name in removed:
+                            if logger:
+                                logger.progress(
+                                    f"Removed stale MCP server '{name}' from .gemini/settings.json"
+                                )
+                            else:
+                                _rich_success(
+                                    f"Removed stale MCP server '{name}' from .gemini/settings.json",
+                                    symbol="check",
+                                )
+                except Exception:
+                    _log.debug(
+                        "Failed to clean stale MCP servers from .gemini/settings.json",
                         exc_info=True,
                     )
 
@@ -687,6 +724,8 @@ class MCPIntegrator:
                 detected.add("copilot")
             if re.search(r"\bcodex\b", command):
                 detected.add("codex")
+            if re.search(r"\bgemini\b", command):
+                detected.add("gemini")
             if re.search(r"\bllm\b", command):
                 detected.add("llm")
 
@@ -722,7 +761,7 @@ class MCPIntegrator:
 
         except ImportError:
             mcp_compatible = [
-                rt for rt in detected_runtimes if rt in ["vscode", "copilot", "cursor", "opencode"]
+                rt for rt in detected_runtimes if rt in ["vscode", "copilot", "cursor", "opencode", "gemini"]
             ]
             return [rt for rt in mcp_compatible if shutil.which(rt)]
 
@@ -795,10 +834,10 @@ class MCPIntegrator:
         except ValueError as e:
             if logger:
                 logger.warning(f"Runtime {runtime} not supported: {e}")
-                logger.progress("Supported runtimes: vscode, copilot, codex, cursor, opencode, llm")
+                logger.progress("Supported runtimes: vscode, copilot, codex, cursor, opencode, gemini, llm")
             else:
                 _rich_warning(f"Runtime {runtime} not supported: {e}")
-                _rich_info("Supported runtimes: vscode, copilot, codex, cursor, opencode, llm")
+                _rich_info("Supported runtimes: vscode, copilot, codex, cursor, opencode, gemini, llm")
             return False
         except Exception as e:
             _log.debug(
@@ -930,7 +969,7 @@ class MCPIntegrator:
                 manager = RuntimeManager()
                 installed_runtimes = []
 
-                for runtime_name in ["copilot", "codex", "vscode", "cursor", "opencode"]:
+                for runtime_name in ["copilot", "codex", "vscode", "cursor", "opencode", "gemini"]:
                     try:
                         if runtime_name == "vscode":
                             if _is_vscode_available():
@@ -944,6 +983,11 @@ class MCPIntegrator:
                         elif runtime_name == "opencode":
                             # OpenCode is opt-in: only target when .opencode/ exists
                             if (Path.cwd() / ".opencode").is_dir():
+                                ClientFactory.create_client(runtime_name)
+                                installed_runtimes.append(runtime_name)
+                        elif runtime_name == "gemini":
+                            # Gemini CLI is opt-in: only target when .gemini/ exists
+                            if (Path.cwd() / ".gemini").is_dir():
                                 ClientFactory.create_client(runtime_name)
                                 installed_runtimes.append(runtime_name)
                         else:
@@ -967,6 +1011,9 @@ class MCPIntegrator:
                 # OpenCode is directory-presence based
                 if (Path.cwd() / ".opencode").is_dir():
                     installed_runtimes.append("opencode")
+                # Gemini CLI is directory-presence based
+                if (Path.cwd() / ".gemini").is_dir():
+                    installed_runtimes.append("gemini")
 
             # Step 2: Get runtimes referenced in apm.yml scripts
             script_runtimes = MCPIntegrator._detect_runtimes(

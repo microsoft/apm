@@ -93,21 +93,31 @@ class TestAdapterUserScopeSupport(unittest.TestCase):
 class TestMCPIntegratorScopeFiltering(unittest.TestCase):
     """Verify MCPIntegrator.install() filters runtimes by scope."""
 
+    @patch("apm_cli.registry.operations.MCPServerOperations")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.integration.mcp_integrator._is_vscode_available", return_value=False)
     @patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None)
     def test_user_scope_skips_workspace_runtimes(
-        self, mock_which, mock_vscode, mock_install_rt
+        self, mock_which, mock_vscode, mock_install_rt, mock_ops_cls
     ):
         """At USER scope, workspace-only runtimes are not targeted."""
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
         mock_install_rt.return_value = True
+        mock_ops = MagicMock()
+        mock_ops.validate_servers_exist.return_value = (["test/server"], [])
+        mock_ops.check_servers_needing_installation.return_value = ["test/server"]
+        mock_ops_cls.return_value = mock_ops
 
-        # Explicitly target copilot + vscode
         with patch.object(
             MCPIntegrator, "_detect_runtimes", return_value=set()
-        ):
+        ), patch(
+            "apm_cli.runtime.manager.RuntimeManager"
+        ) as mock_mgr_cls:
+            mock_mgr = MagicMock()
+            mock_mgr.is_runtime_available.return_value = True
+            mock_mgr_cls.return_value = mock_mgr
+
             MCPIntegrator.install(
                 mcp_deps=["test/server"],
                 runtime=None,

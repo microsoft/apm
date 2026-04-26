@@ -4,6 +4,7 @@ from .adapters.client.vscode import VSCodeClientAdapter
 from .adapters.client.codex import CodexClientAdapter
 from .adapters.client.copilot import CopilotClientAdapter
 from .adapters.client.cursor import CursorClientAdapter
+from .adapters.client.gemini import GeminiClientAdapter
 from .adapters.client.opencode import OpenCodeClientAdapter
 from .adapters.package_manager.default_manager import DefaultMCPPackageManager
 
@@ -29,6 +30,7 @@ class ClientFactory:
             "vscode": VSCodeClientAdapter,
             "codex": CodexClientAdapter,
             "cursor": CursorClientAdapter,
+            "gemini": GeminiClientAdapter,
             "opencode": OpenCodeClientAdapter,
             # Add more clients as needed
         }
