@@ -11,7 +11,7 @@ from pathlib import Path
 
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
-from .base import _INPUT_VAR_RE, MCPClientAdapter
+from .base import _ENV_VAR_RE, _INPUT_VAR_RE, MCPClientAdapter
 
 
 class VSCodeClientAdapter(MCPClientAdapter):
@@ -242,9 +242,13 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 "args": raw["args"],
             }
             if raw.get("env"):
-                server_config["env"] = raw["env"]
+                # Translate bare ${VAR} -> ${env:VAR} so VS Code's runtime env
+                # interpolation resolves them at server-start. ${input:...}
+                # references are preserved for input-variable extraction below.
+                env_translated = self._translate_env_vars_for_vscode(raw["env"])
+                server_config["env"] = env_translated
                 input_vars.extend(
-                    self._extract_input_variables(raw["env"], server_info.get("name", ""))
+                    self._extract_input_variables(env_translated, server_info.get("name", ""))
                 )
             return server_config, input_vars
 
@@ -361,6 +365,10 @@ class VSCodeClientAdapter(MCPClientAdapter):
                         headers = {
                             h["name"]: h["value"] for h in headers if "name" in h and "value" in h
                         }
+                    # Translate bare ${VAR} -> ${env:VAR} so VS Code resolves
+                    # them from the host environment at runtime, instead of
+                    # sending the literal placeholder as the header value.
+                    headers = self._translate_env_vars_for_vscode(headers)
                     server_config = {
                         "type": transport,
                         "url": remote["url"].strip(),
@@ -388,6 +396,31 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 )
 
         return server_config, input_vars
+
+    @staticmethod
+    def _translate_env_vars_for_vscode(mapping):
+        """Normalize ``${VAR}`` and ``${env:VAR}`` references to ``${env:VAR}``.
+
+        VS Code's mcp.json natively resolves ``${env:VAR}`` from the host
+        environment at server-start time. Bare ``${VAR}`` is *not* part of the
+        mcp.json grammar, so VS Code would otherwise pass the literal text
+        through (silently breaking auth headers, env vars, etc.).
+
+        This translation is purely textual and idempotent:
+        - ``${VAR}``      -> ``${env:VAR}``
+        - ``${env:VAR}``  -> ``${env:VAR}`` (no change)
+        - ``${input:X}``  -> ``${input:X}`` (no change; handled separately)
+        - non-string values pass through
+
+        A new dict is returned so callers may continue to use the original
+        for input-variable extraction without ordering concerns.
+        """
+        if not mapping:
+            return mapping
+        return {
+            k: (_ENV_VAR_RE.sub(r"${env:\1}", v) if isinstance(v, str) else v)
+            for k, v in mapping.items()
+        }
 
     def _extract_input_variables(self, mapping, server_name):
         """Scan dict values for ${input:...} references and return input variable definitions.

@@ -7,6 +7,13 @@ from pathlib import Path
 
 _INPUT_VAR_RE = re.compile(r"\$\{input:([^}]+)\}")
 
+# Matches ${VAR} and ${env:VAR}, capturing VAR. Intentionally does NOT match
+# ${input:VAR} (the optional ``env:`` group cannot also satisfy ``input:``),
+# nor GitHub Actions ``${{ ... }}`` templates (the second ``{`` fails the
+# identifier class). This keeps env-var handling fully disjoint from input
+# variable handling, so existing _INPUT_VAR_RE call sites are unaffected.
+_ENV_VAR_RE = re.compile(r"\$\{(?:env:)?([A-Za-z_][A-Za-z0-9_]*)\}")
+
 
 class MCPClientAdapter(ABC):
     """Base adapter for MCP clients."""
