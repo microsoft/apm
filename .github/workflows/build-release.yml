@@ -627,6 +627,24 @@ jobs:
             ./dist/apm-windows-x86_64.zip
             ./dist/apm-windows-x86_64.zip.sha256
 
+  # Deploy the docs site after the release is published.
+  # Invoked here (rather than via the docs workflow's `release: published`
+  # trigger) because release events created by GITHUB_TOKEN do not fire
+  # downstream workflow runs -- a documented Actions safeguard against
+  # recursion. Calling docs.yml directly preserves the standard release ->
+  # docs deploy chain without needing a PAT or GitHub App token.
+  deploy-docs:
+    name: Deploy Docs
+    needs: [create-release]
+    if: github.ref_type == 'tag' && needs.create-release.outputs.is_prerelease != 'true'
+    uses: ./.github/workflows/docs.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    with:
+      is_prerelease: false
+
   # GH-AW Compatibility — validates the released binary works in the
   # exact flow GitHub Agentic Workflows uses (isolated install + pack, no token).
   # Informational: runs as continue-on-error because it depends on external services
