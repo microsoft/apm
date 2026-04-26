@@ -369,3 +369,5 @@ class TestParseMarketplaceJson:
         data = {"name": "Test", "metadata": {"version": "1.0"}, "plugins": []}
         manifest = parse_marketplace_json(data)
         assert manifest.plugin_root == ""
+
+

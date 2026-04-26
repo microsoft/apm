@@ -48,6 +48,7 @@ license:       <string>
 target:        <enum>
 type:          <enum>
 scripts:       <map<string, string>>
+includes:      <enum | list<string>>
 dependencies:
   apm:         <list<ApmDependency>>
   mcp:         <list<McpDependency>>
@@ -55,6 +56,7 @@ devDependencies:
   apm:         <list<ApmDependency>>
   mcp:         <list<McpDependency>>
 compilation:   <CompilationConfig>
+policy:        <PolicyConfig>
 ```
 
 ---
@@ -106,21 +108,34 @@ compilation:   <CompilationConfig>
 
 | | |
 |---|---|
-| **Type** | `enum<string>` |
+| **Type** | `string \| list<string>` |
 | **Required** | OPTIONAL |
-| **Default** | Auto-detect: `vscode` if `.github/` exists, `claude` if `.claude/` exists, `codex` if `.codex/` exists, `all` if both `.github/` and `.claude/`, `minimal` if neither |
-| **Allowed values** | `vscode` · `agents` · `claude` · `codex` · `all` |
+| **Default** | Auto-detect: `vscode` if `.github/` exists, `claude` if `.claude/` exists, `codex` if `.codex/` exists, `all` if multiple target folders exist, `minimal` if none |
+| **Allowed values** | `vscode` · `agents` · `copilot` · `claude` · `cursor` · `opencode` · `codex` · `all` |
 
-Controls which output targets are generated during compilation. When unset, a conforming resolver SHOULD auto-detect based on `.github/`, `.claude/`, and `.codex/` folder presence. Unknown values MUST be silently ignored (auto-detection takes over).
+Controls which output targets are generated during compilation and installation. Accepts a single string or a list of strings. When unset, a conforming resolver SHOULD auto-detect based on folder presence. Unknown values MUST be silently ignored (auto-detection takes over).
+
+```yaml
+# Single target
+target: copilot
+
+# Multiple targets
+target: [claude, copilot]
+```
+
+When a list is specified, only those targets are compiled, installed, and packed -- no output is generated for unlisted targets. `all` cannot be combined with other values.
 
 | Value | Effect |
 |---|---|
 | `vscode` | Emits `AGENTS.md` at the project root (and per-directory files in distributed mode) |
 | `agents` | Alias for `vscode` |
+| `copilot` | Alias for `vscode` |
 | `claude` | Emits `CLAUDE.md` at the project root |
+| `cursor` | Emits to `.cursor/rules/`, `.cursor/agents/`, `.cursor/skills/` |
+| `opencode` | Emits to `.opencode/agents/`, `.opencode/commands/`, `.opencode/skills/` |
 | `codex` | Emits `AGENTS.md` and deploys skills to `.agents/skills/`, agents to `.codex/agents/` |
-| `all` | Both `vscode` and `claude` targets |
-| `minimal` | AGENTS.md only at project root. **Auto-detected only** — this value MUST NOT be set explicitly in manifests; it is an internal fallback when no `.github/` or `.claude/` folder is detected. |
+| `all` | All targets. Cannot be combined with other values in a list. |
+| `minimal` | AGENTS.md only at project root. **Auto-detected only** -- this value MUST NOT be set explicitly in manifests; it is an internal fallback when no target folder is detected. |
 
 ### 3.7. `type`
 
@@ -149,6 +164,59 @@ Declares how the package's content is processed during install and compile. Curr
 | **Key pattern** | Script name (free-form string) |
 | **Value** | Shell command string |
 | **Description** | Named commands executed via `apm run <name>`. MUST support `--param key=value` substitution. |
+
+### 3.9. `includes`
+
+| | |
+|---|---|
+| **Type** | `string` (literal `auto`) `\| list<string>` |
+| **Required** | OPTIONAL |
+| **Default** | Undeclared (legacy implicit auto-publish; flagged by `apm audit`) |
+| **Allowed values** | `auto` or a list of paths relative to the project root |
+
+Declares which local `.apm/` content the project consents to publish when packing or deploying. Three forms are supported:
+
+1. **Undeclared** -- field omitted. Legacy behaviour: all local `.apm/` content is published as if `auto` were set. `apm audit` emits an `includes-consent` advisory (the check itself passes; the message recommends declaring `includes: auto`) whenever local content is deployed under this form.
+2. **`includes: auto`** -- explicit consent to publish all local `.apm/` content via the file scanner. No path enumeration required. Default for newly initialised projects.
+3. **`includes: [<path>, ...]`** -- explicit allow-list of paths the project consents to publish. Strongest governance form; changes are reviewable in PR diffs.
+
+```yaml
+# Form 1: undeclared (legacy; audit advisory)
+# includes: <omitted>
+
+# Form 2: explicit auto-publish (default for new projects)
+includes: auto
+
+# Form 3: explicit path list (strongest governance)
+# includes:
+#   - .apm/instructions/
+#   - .apm/skills/my-skill/
+```
+
+**`includes:` is allow-list only.** There is no `exclude:` form. The field controls which `.apm/` content the project consents to publish; it cannot be used to fence off subdirectories of `.apm/` from the scanner. To keep maintainer-only primitives out of shipped artifacts, author them OUTSIDE `.apm/` and reference them via a local-path devDependency -- see [Dev-only Primitives](../../guides/dev-only-primitives/).
+
+When `policy.manifest.require_explicit_includes` is `true` (see [Governance guide](../../enterprise/governance-guide/)), only form 3 passes the policy check; `auto` and undeclared are rejected at install/audit time by the `explicit-includes` policy check (not at YAML parse time).
+
+### 3.10. `policy`
+
+| | |
+|---|---|
+| **Type** | `map<string, string>` |
+| **Required** | OPTIONAL |
+| **Description** | Consumer-side controls for org policy discovery and verification. All fields are optional; defaults preserve current fail-open install behaviour. |
+
+```yaml
+policy:
+  fetch_failure_default: warn      # warn | block, default warn (#829)
+  hash: "sha256:<hex>"             # optional consumer-side pin on the org policy bytes
+  hash_algorithm: sha256           # sha256 (default) | sha384 | sha512
+```
+
+| Sub-key | Type | Default | Allowed values | Semantic |
+|---|---|---|---|---|
+| `fetch_failure_default` | `string` | `warn` | `warn`, `block` | Posture when no policy is reachable AND none is cached. `warn` keeps installs unblocked when GitHub is unreachable; `block` opts into fail-closed semantics. See [Network failure semantics](../../enterprise/policy-reference/#95-network-failure-semantics). |
+| `hash` | `string` | unset | `<algo>:<hex-digest>` (e.g. `sha256:6a8c...e2f1`) | Pin on the raw bytes of the fetched leaf org policy. Verified before YAML parsing; mismatch is always fail-closed regardless of `fetch_failure_default`. See [Hash pin: `policy.hash`](../../enterprise/policy-reference/#96-hash-pin-policyhash-consumer-side-verification). |
+| `hash_algorithm` | `string` | `sha256` | `sha256`, `sha384`, `sha512` | Digest algorithm for `policy.hash`. Inferred from the `<algo>:` prefix when present; this field is the explicit override. MD5 and SHA-1 are rejected at parse time. |
 
 ---
 
@@ -179,9 +247,12 @@ shorthand_form = [host "/"] owner "/" repo ["/" virtual_path] ["#" ref]
 local_path_form = ("./" / "../" / "/" / "~/" / ".\\" / "..\\" / "~\\") path
 ```
 
+`clone-url` MAY include a `:port` segment on `https://`, `http://`, and `ssh://git@` forms (e.g. `ssh://git@host:7999/owner/repo.git`). The SCP shorthand `git@host:path` cannot carry a port — `:` is the path separator in that form. When a port is present, APM preserves it across all clone attempts: the SSH attempt uses `ssh://host:PORT/...` and the HTTPS fallback uses `https://host:PORT/...` (same port on both protocols).
+
 | Segment | Required | Pattern | Description |
 |---|---|---|---|
 | `host` | OPTIONAL | FQDN (e.g. `gitlab.com`) | Git host. Defaults to `github.com`. |
+| `port` | OPTIONAL | `1`–`65535` | Non-default port on `ssh://`, `https://`, `http://` clone URLs. Not expressible in SCP shorthand. |
 | `owner/repo` | REQUIRED | 2+ path segments of `[a-zA-Z0-9._-]+` | Repository path. GitHub uses exactly 2 segments (`owner/repo`). Non-GitHub hosts MAY use nested groups (e.g. `gitlab.com/group/sub/repo`). |
 | `virtual_path` | OPTIONAL | Path segments after repo | Subdirectory, file, or collection within the repo. See §4.1.3. |
 | `ref` | OPTIONAL | Branch, tag, or commit SHA | Git reference. Commit SHAs matched by `^[a-f0-9]{7,40}$`. Semver tags matched by `^v?\d+\.\d+\.\d+`. |
@@ -205,6 +276,10 @@ dependencies:
     - http://github.com/microsoft/apm-sample-package.git
     - git@github.com:microsoft/apm-sample-package.git
     - ssh://git@github.com/microsoft/apm-sample-package.git
+
+    # Custom ports (e.g. Bitbucket Datacenter, self-hosted GitLab)
+    - ssh://git@bitbucket.example.com:7999/project/repo.git
+    - https://git.internal:8443/team/repo.git
 
     # Virtual packages
     - ComposioHQ/awesome-claude-skills/brand-guidelines   # subdirectory
@@ -280,7 +355,7 @@ A plain registry reference: `io.github.github/github-mcp-server`
 | Field | Type | Required | Constraint | Description |
 |---|---|---|---|---|
 | `name` | `string` | REQUIRED | Non-empty | Server identifier (registry name or custom name). |
-| `transport` | `enum<string>` | Conditional | `stdio` · `sse` · `http` · `streamable-http` | Transport protocol. REQUIRED when `registry: false`. |
+| `transport` | `enum<string>` | Conditional | `stdio` · `sse` · `http` · `streamable-http` | Transport protocol. REQUIRED when `registry: false`. Values are MCP transport names, not URL schemes: remote variants connect over HTTPS. |
 | `env` | `map<string, string>` | OPTIONAL | | Environment variable overrides. Values may contain `${input:<id>}` references (VS Code only — see §4.2.4). |
 | `args` | `dict` or `list` | OPTIONAL | | Dict for overlay variable overrides (registry), list for positional args (self-defined). |
 | `version` | `string` | OPTIONAL | | Pin to a specific server version. |
@@ -289,7 +364,7 @@ A plain registry reference: `io.github.github/github-mcp-server`
 | `headers` | `map<string, string>` | OPTIONAL | | Custom HTTP headers for remote endpoints. Values may contain `${input:<id>}` references (VS Code only — see §4.2.4). |
 | `tools` | `list<string>` | OPTIONAL | Default: `["*"]` | Restrict which tools are exposed. |
 | `url` | `string` | Conditional | | Endpoint URL. REQUIRED when `registry: false` and `transport` is `http`, `sse`, or `streamable-http`. |
-| `command` | `string` | Conditional | | Binary path. REQUIRED when `registry: false` and `transport` is `stdio`. |
+| `command` | `string` | Conditional | Single binary path; no embedded whitespace unless `args` is also present | Binary path. REQUIRED when `registry: false` and `transport` is `stdio`. |
 
 #### 4.2.3. Validation Rules for Self-Defined Servers
 
@@ -298,6 +373,7 @@ When `registry` is `false`, the following constraints apply:
 1. `transport` MUST be present.
 2. If `transport` is `stdio`, `command` MUST be present.
 3. If `transport` is `http`, `sse`, or `streamable-http`, `url` MUST be present.
+4. If `transport` is `stdio`, `command` MUST be a single binary path with no embedded whitespace. APM does not split `command` on whitespace; use `args` for additional arguments. A path that legitimately contains spaces (e.g. `/opt/My App/server`) is allowed when `args` is also provided (including an explicit empty list `args: []`), signaling the author has taken responsibility for the shape.
 
 ```yaml
 dependencies:
@@ -371,6 +447,16 @@ Created automatically by `apm init --plugin`. Use [`apm install --dev`](../cli-c
 apm install --dev owner/test-helpers
 ```
 
+Plain `apm install` (no flag) deploys both `dependencies` and `devDependencies`. There is currently no `--omit=dev` flag -- the dev/prod separation kicks in at `apm pack --format plugin` time. The local-content scanner that builds plugin bundles also operates on `.apm/` only and does not consult the devDep marker. To keep maintainer-only primitives out of shipped artifacts, author them outside `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../../guides/dev-only-primitives/).
+
+Local-path devDependency example:
+
+```yaml
+devDependencies:
+  apm:
+    - path: ./dev/skills/release-checklist
+```
+
 ---
 
 ## 6. Compilation
@@ -422,6 +508,7 @@ apm_version:      <string>
 dependencies:                              # YAML list (not a map)
   - repo_url:        <string>              # Resolved clone URL
     host:            <string>              # Git host (OPTIONAL, e.g. "gitlab.com")
+    port:            <int>                 # Non-default git port (OPTIONAL, 1-65535; omitted when default)
     resolved_commit: <string>              # Full commit SHA
     resolved_ref:    <string>              # Branch/tag that was resolved
     version:         <string>              # Package version from its apm.yml

@@ -166,13 +166,84 @@ Use type hints in Python code.
             dry_run=True,
             single_agents=True  # Use single-file for AGENTS.md
         )
-        
+
         compiler = AgentsCompiler(str(temp_project))
         result = compiler.compile(config, sample_primitives)
-        
+
         assert result.success
         # Output path should mention both targets
         assert "AGENTS.md" in result.output_path or "CLAUDE" in result.output_path
+
+    def test_target_codex_generates_agents_md(self, temp_project, sample_primitives):
+        """Regression for issue #766: --target codex must produce AGENTS.md, not a silent no-op."""
+        config = CompilationConfig(
+            target="codex",
+            dry_run=True,
+            single_agents=True,
+        )
+
+        compiler = AgentsCompiler(str(temp_project))
+        result = compiler.compile(config, sample_primitives)
+
+        assert result.success
+        assert result.output_path, "codex target must route to a compiler, not return empty"
+        assert "AGENTS.md" in result.output_path
+
+    def test_target_opencode_generates_agents_md(self, temp_project, sample_primitives):
+        """target='opencode' must route to AGENTS.md (same universal format as codex)."""
+        config = CompilationConfig(
+            target="opencode",
+            dry_run=True,
+            single_agents=True,
+        )
+
+        compiler = AgentsCompiler(str(temp_project))
+        result = compiler.compile(config, sample_primitives)
+
+        assert result.success
+        assert "AGENTS.md" in result.output_path
+
+    def test_target_gemini_generates_gemini_md(self, temp_project, sample_primitives):
+        """target='gemini' must produce GEMINI.md, not a silent no-op."""
+        config = CompilationConfig(
+            target="gemini",
+            dry_run=True,
+        )
+
+        compiler = AgentsCompiler(str(temp_project))
+        result = compiler.compile(config, sample_primitives)
+
+        assert result.success
+        assert result.output_path, "gemini target must route to a compiler, not return empty"
+        assert "GEMINI" in result.output_path
+
+    def test_target_minimal_generates_agents_md(self, temp_project, sample_primitives):
+        """target='minimal' must route to AGENTS.md-only."""
+        config = CompilationConfig(
+            target="minimal",
+            dry_run=True,
+            single_agents=True,
+        )
+
+        compiler = AgentsCompiler(str(temp_project))
+        result = compiler.compile(config, sample_primitives)
+
+        assert result.success
+        assert "AGENTS.md" in result.output_path
+
+    def test_unknown_target_returns_failure(self, temp_project, sample_primitives):
+        """Unknown target must fail explicitly instead of silently succeeding."""
+        config = CompilationConfig(
+            target="not-a-real-target",
+            dry_run=True,
+            single_agents=True,
+        )
+
+        compiler = AgentsCompiler(str(temp_project))
+        result = compiler.compile(config, sample_primitives)
+
+        assert result.success is False
+        assert any("Unknown compilation target" in e for e in result.errors)
 
 
 class TestMergeResults:
@@ -907,3 +978,72 @@ class TestCompileWarningOnMissingApplyTo:
             )
         finally:
             os.chdir(original_dir)
+
+
+class TestResolveCompileTarget:
+    """Tests for _resolve_compile_target() multi-target list mapping."""
+
+    def test_none_returns_none(self):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+
+        assert _resolve_compile_target(None) is None
+
+    def test_single_string_passthrough(self):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+
+        assert _resolve_compile_target("claude") == "claude"
+        assert _resolve_compile_target("vscode") == "vscode"
+        assert _resolve_compile_target("all") == "all"
+        assert _resolve_compile_target("copilot") == "copilot"
+
+    def test_list_claude_and_copilot_returns_all(self):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+
+        assert _resolve_compile_target(["claude", "vscode"]) == "all"
+        assert _resolve_compile_target(["claude", "copilot"]) == "all"
+
+    def test_list_claude_only_returns_claude(self):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+
+        assert _resolve_compile_target(["claude"]) == "claude"
+
+    def test_list_copilot_only_returns_vscode(self):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+
+        assert _resolve_compile_target(["vscode"]) == "vscode"
+        assert _resolve_compile_target(["copilot"]) == "vscode"
+
+    def test_list_agents_family_without_claude_returns_vscode(self):
+        """Targets that produce AGENTS.md but not CLAUDE.md."""
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+
+        assert _resolve_compile_target(["cursor"]) == "vscode"
+        assert _resolve_compile_target(["opencode"]) == "vscode"
+        assert _resolve_compile_target(["codex"]) == "vscode"
+        assert _resolve_compile_target(["cursor", "opencode"]) == "vscode"
+
+    def test_list_cursor_and_claude_returns_all(self):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+
+        assert _resolve_compile_target(["cursor", "claude"]) == "all"
+        assert _resolve_compile_target(["codex", "claude"]) == "all"
+
+    def test_list_gemini_only_returns_gemini(self):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+
+        assert _resolve_compile_target(["gemini"]) == "gemini"
+
+    def test_list_gemini_and_claude_returns_all(self):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+
+        assert _resolve_compile_target(["gemini", "claude"]) == "all"
+
+    def test_list_gemini_and_copilot_returns_all(self):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+
+        assert _resolve_compile_target(["gemini", "vscode"]) == "all"
+
+    def test_list_all_targets_returns_all(self):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+
+        assert _resolve_compile_target(["claude", "vscode", "cursor"]) == "all"

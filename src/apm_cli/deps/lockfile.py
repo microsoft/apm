@@ -15,6 +15,8 @@ from ..models.apm_package import DependencyReference
 
 logger = logging.getLogger(__name__)
 
+_SELF_KEY = "."
+
 
 @dataclass
 class LockedDependency:
@@ -22,6 +24,7 @@ class LockedDependency:
 
     repo_url: str
     host: Optional[str] = None
+    port: Optional[int] = None  # Non-standard SSH/HTTPS port (e.g. 7999 for Bitbucket DC)
     registry_prefix: Optional[str] = None  # Registry path prefix, e.g. "artifactory/github"
     resolved_commit: Optional[str] = None
     resolved_ref: Optional[str] = None
@@ -39,6 +42,8 @@ class LockedDependency:
     is_dev: bool = False  # True for devDependencies
     discovered_via: Optional[str] = None  # Marketplace name (provenance)
     marketplace_plugin_name: Optional[str] = None  # Plugin name in marketplace
+    is_insecure: bool = False  # True when the locked source was http://
+    allow_insecure: bool = False  # True when the manifest explicitly allowed HTTP
 
     def get_unique_key(self) -> str:
         """Returns unique key for this dependency."""
@@ -53,6 +58,8 @@ class LockedDependency:
         result: Dict[str, Any] = {"repo_url": self.repo_url}
         if self.host:
             result["host"] = self.host
+        if self.port:
+            result["port"] = self.port
         if self.registry_prefix:
             result["registry_prefix"] = self.registry_prefix
         if self.resolved_commit:
@@ -89,6 +96,10 @@ class LockedDependency:
             result["discovered_via"] = self.discovered_via
         if self.marketplace_plugin_name:
             result["marketplace_plugin_name"] = self.marketplace_plugin_name
+        if self.is_insecure:
+            result["is_insecure"] = True
+        if self.allow_insecure:
+            result["allow_insecure"] = True
         return result
 
     @classmethod
@@ -108,9 +119,21 @@ class LockedDependency:
                 deployed_files.append(f".github/skills/{skill_name}/")
                 deployed_files.append(f".claude/skills/{skill_name}/")
 
+        # Defensive cast: reject non-numeric or out-of-range ports from tampered lockfiles.
+        _p_raw = data.get("port")
+        port: Optional[int] = None
+        if _p_raw is not None:
+            try:
+                _p_int = int(_p_raw)
+            except (TypeError, ValueError):
+                _p_int = None
+            if _p_int is not None and 1 <= _p_int <= 65535:
+                port = _p_int
+
         return cls(
             repo_url=data["repo_url"],
             host=data.get("host"),
+            port=port,
             registry_prefix=data.get("registry_prefix"),
             resolved_commit=data.get("resolved_commit"),
             resolved_ref=data.get("resolved_ref"),
@@ -128,6 +151,8 @@ class LockedDependency:
             is_dev=data.get("is_dev", False),
             discovered_via=data.get("discovered_via"),
             marketplace_plugin_name=data.get("marketplace_plugin_name"),
+            is_insecure=data.get("is_insecure", False),
+            allow_insecure=data.get("allow_insecure", False),
         )
 
     @classmethod
@@ -163,6 +188,7 @@ class LockedDependency:
         return cls(
             repo_url=dep_ref.repo_url,
             host=host,
+            port=dep_ref.port,
             registry_prefix=registry_prefix,
             resolved_commit=resolved_commit,
             resolved_ref=dep_ref.reference,
@@ -173,6 +199,24 @@ class LockedDependency:
             source="local" if dep_ref.is_local else None,
             local_path=dep_ref.local_path if dep_ref.is_local else None,
             is_dev=is_dev,
+            is_insecure=dep_ref.is_insecure,
+            allow_insecure=dep_ref.allow_insecure,
+        )
+
+    def to_dependency_ref(self) -> DependencyReference:
+        """Reconstruct a DependencyReference from this locked dependency."""
+        return DependencyReference(
+            repo_url=self.repo_url,
+            host=self.host,
+            port=self.port,
+            reference=self.resolved_ref,
+            virtual_path=self.virtual_path,
+            is_virtual=self.is_virtual,
+            artifactory_prefix=self.registry_prefix,
+            is_local=(self.source == "local"),
+            local_path=self.local_path,
+            is_insecure=self.is_insecure,
+            allow_insecure=self.allow_insecure,
         )
 
 
@@ -209,27 +253,40 @@ class LockFile:
             self.dependencies.values(), key=lambda d: (d.depth, d.repo_url)
         )
 
+    def get_package_dependencies(self) -> List[LockedDependency]:
+        """Get all dependencies excluding the virtual self-entry."""
+        return [d for d in self.get_all_dependencies() if d.local_path != "."]
+
     def to_yaml(self) -> str:
         """Serialize to YAML string."""
-        data: Dict[str, Any] = {
-            "lockfile_version": self.lockfile_version,
-            "generated_at": self.generated_at,
-        }
-        if self.apm_version:
-            data["apm_version"] = self.apm_version
-        data["dependencies"] = [dep.to_dict() for dep in self.get_all_dependencies()]
-        if self.mcp_servers:
-            data["mcp_servers"] = sorted(self.mcp_servers)
-        if self.mcp_configs:
-            data["mcp_configs"] = dict(sorted(self.mcp_configs.items()))
-        if self.local_deployed_files:
-            data["local_deployed_files"] = sorted(self.local_deployed_files)
-        if self.local_deployed_file_hashes:
-            data["local_deployed_file_hashes"] = dict(
-                sorted(self.local_deployed_file_hashes.items())
-            )
-        from ..utils.yaml_io import yaml_to_str
-        return yaml_to_str(data)
+        # The synthesized self-entry (key ".") is an in-memory normalization
+        # of the flat local_deployed_files / local_deployed_file_hashes
+        # fields. It must not be written back into the dependencies list,
+        # since the flat fields remain the source of truth in YAML.
+        _self_dep = self.dependencies.pop(_SELF_KEY, None)
+        try:
+            data: Dict[str, Any] = {
+                "lockfile_version": self.lockfile_version,
+                "generated_at": self.generated_at,
+            }
+            if self.apm_version:
+                data["apm_version"] = self.apm_version
+            data["dependencies"] = [dep.to_dict() for dep in self.get_all_dependencies()]
+            if self.mcp_servers:
+                data["mcp_servers"] = sorted(self.mcp_servers)
+            if self.mcp_configs:
+                data["mcp_configs"] = dict(sorted(self.mcp_configs.items()))
+            if self.local_deployed_files:
+                data["local_deployed_files"] = sorted(self.local_deployed_files)
+            if self.local_deployed_file_hashes:
+                data["local_deployed_file_hashes"] = dict(
+                    sorted(self.local_deployed_file_hashes.items())
+                )
+            from ..utils.yaml_io import yaml_to_str
+            return yaml_to_str(data)
+        finally:
+            if _self_dep is not None:
+                self.dependencies[_SELF_KEY] = _self_dep
 
     @classmethod
     def from_yaml(cls, yaml_str: str) -> "LockFile":
@@ -252,6 +309,19 @@ class LockFile:
         lock.local_deployed_file_hashes = dict(
             data.get("local_deployed_file_hashes") or {}
         )
+        # Synthesize a virtual self-entry representing the project's own
+        # local content. This unifies traversal across "real" dependencies
+        # and the local package, without changing the on-disk YAML shape.
+        if lock.local_deployed_files:
+            lock.dependencies[_SELF_KEY] = LockedDependency(
+                repo_url="<self>",
+                source="local",
+                local_path=".",
+                is_dev=True,
+                depth=0,
+                deployed_files=list(lock.local_deployed_files),
+                deployed_file_hashes=dict(lock.local_deployed_file_hashes),
+            )
         return lock
 
     def write(self, path: Path) -> None:
@@ -346,14 +416,9 @@ class LockFile:
         seen: set = set()
         paths: List[str] = []
         for dep in self.get_all_dependencies():
-            dep_ref = DependencyReference(
-                repo_url=dep.repo_url,
-                host=dep.host,
-                virtual_path=dep.virtual_path,
-                is_virtual=dep.is_virtual,
-                is_local=(dep.source == "local"),
-                local_path=dep.local_path,
-            )
+            if dep.local_path == _SELF_KEY:
+                continue
+            dep_ref = dep.to_dependency_ref()
             install_path = dep_ref.get_install_path(apm_modules_dir)
             try:
                 rel_path = install_path.relative_to(apm_modules_dir).as_posix()
@@ -387,6 +452,10 @@ class LockFile:
         if self.mcp_configs != other.mcp_configs:
             return False
         if sorted(self.local_deployed_files) != sorted(other.local_deployed_files):
+            return False
+        # Issue #887: include hash dict in equivalence so post-install
+        # hash updates persist even when the file list is unchanged.
+        if dict(self.local_deployed_file_hashes) != dict(other.local_deployed_file_hashes):
             return False
         return True
 

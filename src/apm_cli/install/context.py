@@ -46,16 +46,26 @@ class InstallContext:
     parallel_downloads: int = 4
     logger: Any = None  # InstallLogger
     target_override: Optional[str] = None  # CLI --target value
+    allow_insecure: bool = False
+    allow_insecure_hosts: Tuple[str, ...] = ()
 
     dry_run: bool = False
     force: bool = False
     verbose: bool = False
     dev: bool = False
     only_packages: Optional[List[str]] = None
+    protocol_pref: Any = None  # ProtocolPreference (NONE/SSH/HTTPS) for shorthand transport
+    allow_protocol_fallback: Optional[bool] = None  # None => read APM_ALLOW_PROTOCOL_FALLBACK env
 
     # ------------------------------------------------------------------
     # Resolve phase outputs
     # ------------------------------------------------------------------
+    # Direct dependencies declared in apm.yml (regular + dev), NOT the
+    # full transitive closure. Transitive deps are discovered later by
+    # the resolver and recorded on `deps_to_install` /
+    # `dependency_graph`. Treat `all_apm_deps` as "what the project
+    # author wrote" -- iterate `deps_to_install` for the full set of
+    # packages that will be installed.
     all_apm_deps: List[Any] = field(default_factory=list)  # resolve
     root_has_local_primitives: bool = False  # resolve
     deps_to_install: List[Any] = field(default_factory=list)  # resolve
@@ -105,6 +115,15 @@ class InstallContext:
     total_commands_integrated: int = 0  # integrate
     total_hooks_integrated: int = 0  # integrate
     total_links_resolved: int = 0  # integrate
+    direct_dep_failed: bool = False  # integrate -- set when any direct dep fails
+
+    # ------------------------------------------------------------------
+    # policy_gate
+    # ------------------------------------------------------------------
+    policy_fetch: Any = None  # Optional[PolicyFetchResult] from discovery
+    policy_enforcement_active: bool = False
+    no_policy: bool = False  # W2-escape-hatch will wire --no-policy here
+    direct_mcp_deps: Optional[List[Any]] = None  # Direct MCP deps from apm.yml for policy gate
 
     # ------------------------------------------------------------------
     # Post-deps local content tracking (F3)

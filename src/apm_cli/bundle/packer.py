@@ -5,7 +5,7 @@ import shutil
 import tarfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
 from ..models.apm_package import APMPackage
@@ -28,7 +28,7 @@ def pack_bundle(
     project_root: Path,
     output_dir: Path,
     fmt: str = "apm",
-    target: Optional[str] = None,
+    target: Optional[Union[str, List[str]]] = None,
     archive: bool = False,
     dry_run: bool = False,
     force: bool = False,
@@ -40,7 +40,8 @@ def pack_bundle(
         project_root: Root of the project containing ``apm.lock.yaml`` and ``apm.yml``.
         output_dir: Directory where the bundle will be created.
         fmt: Bundle format  -- ``"apm"`` (default) or ``"plugin"``.
-        target: Target filter  -- ``"copilot"``, ``"claude"``, ``"all"``, or *None*
+        target: Target filter  -- ``"copilot"``, ``"claude"``, ``"all"``, a list of
+            target strings (e.g. ``["claude", "vscode"]``), or *None*
             (auto-detect from apm.yml / project structure).
         archive: If *True*, produce a ``.tar.gz`` and remove the directory.
         dry_run: If *True*, resolve the file list but write nothing to disk.
@@ -79,11 +80,37 @@ def pack_bundle(
 
     # 2. Read apm.yml for name / version / config target
     apm_yml_path = project_root / "apm.yml"
+    skill_md_path = project_root / "SKILL.md"
+    is_hybrid_root = apm_yml_path.exists() and skill_md_path.exists()
     try:
         package = APMPackage.from_apm_yml(apm_yml_path)
         pkg_name = package.name
         pkg_version = package.version or "0.0.0"
         config_target = package.target
+
+        # HYBRID author guard: apm.yml.description and SKILL.md
+        # description serve different consumers (human-facing CLI/search
+        # vs. agent-runtime invocation matcher) and are NOT merged. If
+        # the author shipped a SKILL.md description but left
+        # apm.yml.description blank, the human-facing surfaces (apm view,
+        # apm search, marketplace listings) will degrade silently while
+        # Claude/Copilot still invoke the skill correctly. Warn loudly
+        # at pack time -- this is the publish gate for the AUTHOR.
+        if is_hybrid_root and not package.description and logger:
+            try:
+                import frontmatter as _frontmatter
+                with open(skill_md_path, "r", encoding="utf-8") as _f:
+                    _skill_post = _frontmatter.load(_f)
+                _skill_desc = _skill_post.metadata.get("description")
+            except Exception:
+                _skill_desc = None
+            if _skill_desc:
+                logger.warning(
+                    "apm.yml is missing 'description'. SKILL.md has its own "
+                    "description, but that is for agent invocation -- not "
+                    "for 'apm view' or search. Add a short tagline to "
+                    "apm.yml:  description: \"One-line human summary\""
+                )
 
         # Guard: reject local-path dependencies (non-portable)
         for dep_ref in package.get_apm_dependencies():
@@ -102,18 +129,31 @@ def pack_bundle(
         config_target = None
 
     # 3. Resolve effective target
-    effective_target, _reason = detect_target(
-        project_root,
-        explicit_target=target,
-        config_target=config_target,
-    )
-    # For packing purposes, "minimal" means nothing to pack  -- treat as "all"
-    if effective_target == "minimal":
-        effective_target = "all"
+    if isinstance(target, list):
+        # List from CLI (e.g. --target claude,copilot) passes through directly
+        effective_target = target
+    elif isinstance(config_target, list) and target is None:
+        # List from apm.yml target: [claude, copilot]
+        effective_target = config_target
+    else:
+        effective_target, _reason = detect_target(
+            project_root,
+            explicit_target=target,
+            config_target=config_target if isinstance(config_target, str) else None,
+        )
+        # For packing purposes, "minimal" means nothing to pack  -- treat as "all"
+        if effective_target == "minimal":
+            effective_target = "all"
 
-    # 4. Collect deployed_files from all dependencies, filtered by target
+    # 4. Collect deployed_files from all dependencies, filtered by target.
+    #    Skip local-source entries: these include the synthesized root self-entry
+    #    (local_path == ".") and any local-path manifest deps. Local content is
+    #    not portable and is bundled separately via the project's own files
+    #    (or rejected outright at L89-97 for manifest-declared local deps).
     all_deployed: List[str] = []
     for dep in lockfile.get_all_dependencies():
+        if dep.source == "local":
+            continue
         all_deployed.extend(dep.deployed_files)
 
     filtered_files, path_mappings = _filter_files_by_target(all_deployed, effective_target)

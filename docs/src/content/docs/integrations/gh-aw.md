@@ -18,11 +18,9 @@ APM defines **what** agents know. gh-aw defines **when** and **how** they act.
 
 ## Integration Approaches
 
-### Frontmatter Dependencies (Recommended)
+### Shared apm.md Import (Recommended)
 
-gh-aw natively supports APM through a [`dependencies:` frontmatter field](https://github.github.com/gh-aw/reference/frontmatter/#apm-dependencies-dependencies). Declare APM packages directly in your workflow's frontmatter and gh-aw handles the rest.
-
-**Simple array format:**
+gh-aw ships a [shared `apm.md` workflow component](https://github.github.com/gh-aw/reference/dependencies/) that turns APM packages into gh-aw dependencies. Import it in your workflow's frontmatter and pass the packages you want.
 
 ```yaml
 ---
@@ -31,9 +29,13 @@ on:
     types: [opened]
 engine: copilot
 
-dependencies:
-  - microsoft/apm-sample-package
-  - github/awesome-copilot/skills/review-and-refactor
+imports:
+  - uses: shared/apm.md
+    with:
+      packages:
+        - microsoft/apm-sample-package
+        - github/awesome-copilot/skills/review-and-refactor
+        - your-org/security-compliance#v1.4.0
 ---
 
 # Code Review
@@ -41,36 +43,33 @@ dependencies:
 Review the pull request using the installed coding standards and skills.
 ```
 
-**Object format with options:**
+**Package reference formats:**
 
-```yaml
----
-on:
-  issues:
-    types: [opened]
-engine: copilot
+| Format | Description |
+|---|---|
+| `owner/repo` | Full APM package (skills/agents/instructions under `.apm/`) |
+| `owner/repo/path/to/primitive` | Individual primitive (skill, instruction, plugin, etc.) from any repository, regardless of layout |
+| `owner/repo#ref` or `owner/repo/path/to/primitive#ref` | Pinned to a tag, branch, or commit SHA, for either a full package or a specific primitive |
 
-dependencies:
-  packages:
-    - microsoft/apm-sample-package
-    - your-org/security-compliance
-  isolated: true
----
-
-# Issue Triage
-
-Analyze the opened issue for security implications.
-```
-
-Each entry is a standard APM package reference -- either `owner/repo` for a full package or `owner/repo/path/to/skill` for an individual primitive.
+The per-primitive path form is what makes `github/awesome-copilot/skills/review-and-refactor` work -- the awesome-copilot repo lays skills out at `/skills/<name>/`, not under `.apm/`. Use this form to consume skills from existing repositories without restructuring them. See [Anatomy of an APM Package](../../introduction/anatomy-of-an-apm-package/) for the full source-vs-output model.
 
 **How it works:**
 
-1. The gh-aw compiler detects the `dependencies:` field in your workflow frontmatter.
-2. In the **activation job**, APM resolves the full dependency tree and packs the result.
-3. In the **agent job**, the bundle is unpacked into the workspace and the agent discovers the primitives.
+1. The gh-aw compiler detects the `shared/apm.md` import and adds a dedicated `apm` job to the compiled workflow.
+2. The `apm` job runs `microsoft/apm-action` to install packages and uploads a bundle archive as a GitHub Actions artifact.
+3. The agent job downloads and unpacks the bundle as pre-steps, making all primitives available at runtime.
 
 The APM compilation target is automatically inferred from the configured `engine:` field (`copilot`, `claude`, or `all` for other engines). No manual target configuration is needed.
+
+Packages are fetched using gh-aw's cascading token fallback: `GH_AW_PLUGINS_TOKEN` -> `GH_AW_GITHUB_TOKEN` -> `GITHUB_TOKEN`.
+
+:::note[Isolated install by default]
+`shared/apm.md` invokes `microsoft/apm-action` with `isolated: true`. Only the packages listed under `packages:` are installed -- any host-repo primitives under `.apm/` or `.github/` (instructions, prompts, skills, agents) are ignored and pre-existing primitive directories are cleared. To merge host-repo primitives with imported ones, use the [apm-action Pre-Step](#apm-action-pre-step) approach below, which leaves `isolated` at its default of `false`.
+:::
+
+:::caution[Deprecated: `dependencies:` frontmatter]
+Earlier gh-aw versions accepted a top-level `dependencies:` field on the workflow. That form is deprecated and no longer supported -- migrate to the `imports: - uses: shared/apm.md` pattern shown above.
+:::
 
 ### apm-action Pre-Step
 
@@ -112,47 +111,19 @@ For sandboxed environments where network access is restricted during workflow ex
 
 1. Run `apm pack` in your CI pipeline to produce a self-contained bundle.
 2. Distribute the bundle as a workflow artifact or commit it to the repository.
-3. Reference the bundled primitives in your workflow.
-
-```yaml
----
-on: pull_request
-engine: copilot
-imports:
-  - .github/agents/code-reviewer.md
-  - .github/agents/security-auditor.md
----
-
-# Code Review
-Review the PR using team standards.
-```
+3. Reference the bundled primitives directly from `.github/agents/` in your workflow.
 
 Bundles resolve full dependency trees ahead of time, so workflows need zero network access at runtime.
 
-See the [CI/CD Integration guide](../ci-cd/) for details on building and distributing bundles.
+See the [CI/CD Integration guide](../ci-cd/) and [Pack & Distribute](../../guides/pack-distribute/) for details on building and distributing bundles. For routing live install traffic through an enterprise proxy instead, see [Registry Proxy & Air-gapped](../../enterprise/registry-proxy/).
 
 ## Content Scanning
 
-APM automatically scans dependencies for hidden Unicode characters during installation. Critical findings block deployment. This applies to both direct `apm install` and when GitHub Agentic Workflows resolves frontmatter dependencies via apm-action.
+APM automatically scans dependencies for hidden Unicode characters during installation. Critical findings block deployment. This applies to both direct `apm install` and when gh-aw resolves packages via `shared/apm.md`.
 
 For CI visibility into scan results (SARIF reports, step summaries), see the [CI/CD Integration guide](../../integrations/ci-cd/#content-scanning-in-ci).
 
 For details on what APM detects, see [Content scanning](../../enterprise/security/#content-scanning).
-
-## Isolated Mode
-
-When a gh-aw workflow runs in a repository that already has developer-focused instructions (like "use 4-space tabs" or "prefer functional style"), those instructions become noise for an automated agent that should only follow its declared dependencies.
-
-The `isolated` flag addresses this. When set to `true` in the object format:
-
-```yaml
-dependencies:
-  packages:
-    - your-org/triage-rules
-  isolated: true
-```
-
-gh-aw clears existing `.github/` primitive directories (instructions, skills, agents) before unpacking the APM bundle. The agent sees only the context declared by the workflow, preventing instruction pollution from the host repository.
 
 ## Learn More
 

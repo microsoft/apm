@@ -180,6 +180,105 @@ class TestDepsListCommand(_DepsCmdBase):
         assert result.exit_code == 0
         assert "2.3.1" in result.output
 
+    def test_list_insecure_filters_to_http_locked_deps(self):
+        """--insecure only shows installed packages locked to HTTP sources."""
+        with self._chdir_tmp() as tmp:
+            self._make_package(tmp, "safeorg", "saferepo")
+            self._make_package(tmp, "insecureorg", "insecurerepo")
+
+            secure_dep = MagicMock()
+            secure_dep.get_unique_key.return_value = "safeorg/saferepo"
+            secure_dep.is_insecure = False
+            secure_dep.resolved_by = None
+
+            insecure_dep = MagicMock()
+            insecure_dep.get_unique_key.return_value = "insecureorg/insecurerepo"
+            insecure_dep.is_insecure = True
+            insecure_dep.resolved_by = None
+
+            mock_lockfile = MagicMock()
+            mock_lockfile.dependencies = {
+                "safeorg/saferepo": secure_dep,
+                "insecureorg/insecurerepo": insecure_dep,
+            }
+
+            mock_lf_path = MagicMock()
+            mock_lf_path.exists.return_value = True
+
+            with (
+                patch("apm_cli.core.scope.get_apm_dir", return_value=tmp),
+                patch("apm_cli.deps.lockfile.LockFile.read", return_value=mock_lockfile),
+                patch("apm_cli.deps.lockfile.get_lockfile_path", return_value=mock_lf_path),
+                _force_rich_fallback(),
+            ):
+                result = self.runner.invoke(cli, ["deps", "list", "--insecure"])
+
+        assert result.exit_code == 0
+        assert "insecureorg/insecurerepo" in result.output
+        assert "safeorg/saferepo" not in result.output
+        assert "Origin" in result.output
+        assert "direct" in result.output
+
+    def test_list_insecure_shows_transitive_provenance(self):
+        """--insecure shows which parent introduced a transitive HTTP dep."""
+        with self._chdir_tmp() as tmp:
+            self._make_package(tmp, "childorg", "childrepo")
+
+            insecure_dep = MagicMock()
+            insecure_dep.get_unique_key.return_value = "childorg/childrepo"
+            insecure_dep.is_insecure = True
+            insecure_dep.resolved_by = "parentorg/parentrepo"
+
+            mock_lockfile = MagicMock()
+            mock_lockfile.dependencies = {
+                "childorg/childrepo": insecure_dep,
+            }
+
+            mock_lf_path = MagicMock()
+            mock_lf_path.exists.return_value = True
+
+            with (
+                patch("apm_cli.core.scope.get_apm_dir", return_value=tmp),
+                patch("apm_cli.deps.lockfile.LockFile.read", return_value=mock_lockfile),
+                patch("apm_cli.deps.lockfile.get_lockfile_path", return_value=mock_lf_path),
+                _force_rich_fallback(),
+            ):
+                result = self.runner.invoke(cli, ["deps", "list", "--insecure"])
+
+        assert result.exit_code == 0
+        assert "childorg/childrepo" in result.output
+        assert "Origin" in result.output
+        assert "via parentorg/pa" in result.output
+
+    def test_list_insecure_reports_clean_when_no_http_locked_deps(self):
+        """--insecure reports a clean result when no installed dep is insecure."""
+        with self._chdir_tmp() as tmp:
+            self._make_package(tmp, "safeorg", "saferepo")
+
+            secure_dep = MagicMock()
+            secure_dep.get_unique_key.return_value = "safeorg/saferepo"
+            secure_dep.is_insecure = False
+            secure_dep.resolved_by = None
+
+            mock_lockfile = MagicMock()
+            mock_lockfile.dependencies = {
+                "safeorg/saferepo": secure_dep,
+            }
+
+            mock_lf_path = MagicMock()
+            mock_lf_path.exists.return_value = True
+
+            with (
+                patch("apm_cli.core.scope.get_apm_dir", return_value=tmp),
+                patch("apm_cli.deps.lockfile.LockFile.read", return_value=mock_lockfile),
+                patch("apm_cli.deps.lockfile.get_lockfile_path", return_value=mock_lf_path),
+                _force_rich_fallback(),
+            ):
+                result = self.runner.invoke(cli, ["deps", "list", "--insecure"])
+
+        assert result.exit_code == 0
+        assert "No insecure APM dependencies installed" in result.output
+
 
 class TestDepsTreeCommand(_DepsCmdBase):
     """Tests for apm deps tree."""
@@ -247,6 +346,7 @@ class TestDepsTreeCommand(_DepsCmdBase):
 
             mock_lockfile = MagicMock()
             mock_lockfile.get_all_dependencies.return_value = [mock_dep]
+            mock_lockfile.get_package_dependencies.return_value = [mock_dep]
 
             mock_lf_path = MagicMock()
             mock_lf_path.exists.return_value = True
@@ -270,6 +370,47 @@ class TestDepsTreeCommand(_DepsCmdBase):
                 result = self.runner.invoke(cli, ["deps", "tree"])
         assert result.exit_code == 0
         assert "awesomeproject" in result.output
+
+    def test_tree_does_not_show_self_entry(self):
+        """Lockfile self-entry must not surface as a dependency in the tree.
+
+        Regression for #887: the synthesized '.' entry (repo_url='<self>') is
+        an internal representation of the project's own local content, not a
+        dependency. apm deps tree must skip it.
+        """
+        from apm_cli.deps.lockfile import LockFile, LockedDependency
+
+        with self._chdir_tmp() as tmp:
+            self._make_package(tmp, "realorg", "realrepo")
+            (tmp / "apm.yml").write_text("name: myproj\n")
+
+            lock = LockFile(
+                lockfile_version="1",
+                generated_at="2025-01-01T00:00:00+00:00",
+                apm_version="0.0.0-test",
+            )
+            lock.add_dependency(
+                LockedDependency(
+                    repo_url="realorg/realrepo",
+                    resolved_commit="b" * 40,
+                    depth=1,
+                    version="1.0.0",
+                )
+            )
+            lock.local_deployed_files = [".github/skills/local/SKILL.md"]
+            lock.local_deployed_file_hashes = {
+                ".github/skills/local/SKILL.md": "abc",
+            }
+            lockfile_path = tmp / "apm.lock.yaml"
+            lockfile_path.write_text(lock.to_yaml())
+
+            with patch("apm_cli.core.scope.get_apm_dir", return_value=tmp), _force_rich_fallback():
+                result = self.runner.invoke(cli, ["deps", "tree"])
+
+        assert result.exit_code == 0
+        assert "realorg/realrepo" in result.output
+        # The self-entry must not appear under any of its representations.
+        assert "<self>" not in result.output
 
 
 class TestDepsInfoCommand(_DepsCmdBase):

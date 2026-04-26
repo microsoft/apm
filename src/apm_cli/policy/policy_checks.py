@@ -439,21 +439,27 @@ def _check_compilation_target(
             message="No compilation target set in manifest",
         )
 
+    # Normalize target to a list for uniform checking
+    target_list = target if isinstance(target, list) else [target]
+
     if enforce:
-        if target != enforce:
+        if enforce not in target_list:
             return CheckResult(
                 name="compilation-target",
                 passed=False,
-                message=f"Target '{target}' does not match enforced '{enforce}'",
+                message=f"Enforced target '{enforce}' not present in {target_list}",
                 details=[f"target: {target}, enforced: {enforce}"],
             )
-    elif allow is not None and target not in allow:
-        return CheckResult(
-            name="compilation-target",
-            passed=False,
-            message=f"Target '{target}' not in allowed list {allow}",
-            details=[f"target: {target}, allowed: {allow}"],
-        )
+    elif allow is not None:
+        allow_set = set(allow) if isinstance(allow, (list, tuple)) else {allow}
+        disallowed = [t for t in target_list if t not in allow_set]
+        if disallowed:
+            return CheckResult(
+                name="compilation-target",
+                passed=False,
+                message=f"Target(s) {disallowed} not in allowed list {sorted(allow_set)}",
+                details=[f"target: {target}, allowed: {sorted(allow_set)}"],
+            )
 
     return CheckResult(
         name="compilation-target",
@@ -560,6 +566,65 @@ def _check_required_manifest_fields(
         passed=False,
         message=f"{len(missing)} required manifest field(s) missing",
         details=missing,
+    )
+
+
+_INCLUDES_NOT_PROVIDED = object()
+
+
+def _check_includes_explicit(
+    manifest_includes,
+    policy: "ManifestPolicy",
+) -> CheckResult:
+    """Check: manifest declares an explicit ``includes:`` list when policy requires it.
+
+    ``manifest_includes`` is the parsed value of the manifest's ``includes:``
+    field as exposed by :class:`APMPackage` -- one of ``None`` (field
+    absent), the literal string ``"auto"``, or a list of repo-relative
+    path strings.
+
+    Violation when ``policy.require_explicit_includes`` is True and
+    ``manifest_includes`` is ``None`` or ``"auto"``.
+    """
+    if not policy.require_explicit_includes:
+        return CheckResult(
+            name="explicit-includes",
+            passed=True,
+            message="Explicit includes not required by policy",
+        )
+
+    if manifest_includes is None:
+        return CheckResult(
+            name="explicit-includes",
+            passed=False,
+            message=(
+                "Policy requires explicit 'includes:' paths but none are "
+                "declared. Add 'includes: [<path>, ...]' to apm.yml with "
+                "the paths you intend to publish."
+            ),
+            details=[
+                "includes: <absent>, require_explicit_includes: true",
+            ],
+        )
+
+    if manifest_includes == "auto":
+        return CheckResult(
+            name="explicit-includes",
+            passed=False,
+            message=(
+                "Policy requires explicit 'includes:' paths but manifest "
+                "uses 'includes: auto'. Replace with an explicit list of "
+                "paths."
+            ),
+            details=[
+                "includes: 'auto', require_explicit_includes: true",
+            ],
+        )
+
+    return CheckResult(
+        name="explicit-includes",
+        passed=True,
+        message="Manifest declares explicit includes paths",
     )
 
 
@@ -690,7 +755,150 @@ def _check_unmanaged_files(
     )
 
 
-# -- Aggregate runner ----------------------------------------------
+# -- Aggregate runners ---------------------------------------------
+
+
+def run_dependency_policy_checks(
+    deps_to_install,
+    *,
+    lockfile=None,
+    policy: "ApmPolicy",
+    mcp_deps=None,
+    effective_target: Optional[str] = None,
+    fetch_outcome: Optional[str] = None,
+    fail_fast: bool = True,
+    manifest_includes=_INCLUDES_NOT_PROVIDED,
+) -> CIAuditResult:
+    """Evaluate :class:`ApmPolicy` against an already-resolved dependency set.
+
+    Used by both ``apm audit --ci`` (after resolving from disk) and the
+    install pipeline ``policy_gate`` phase.  Reuses the private ``_check_*``
+    helpers -- no logic duplication.
+
+    Parameters
+    ----------
+    deps_to_install:
+        Iterable of ``DependencyReference`` (the resolved set, including
+        transitives).  This is what ``InstallContext.deps_to_install``
+        contains after the resolve phase.
+    lockfile:
+        An ``ApmLockfile`` / ``LockFile`` instance, or ``None``.  Needed
+        for deployed-files and version-pin checks.
+    policy:
+        The effective :class:`ApmPolicy` to enforce.
+    mcp_deps:
+        Iterable of ``MCPDependency`` objects, or ``None``.  When the
+        resolved set includes MCP entries they are checked against
+        ``policy.mcp``.
+    effective_target:
+        The post-targets-phase compilation target string, or ``None``.
+        When ``None`` target/compilation checks are **skipped** (they
+        belong to the separate W2-target-aware call).
+    fetch_outcome:
+        Human-readable label for diagnostic context (e.g.
+        ``"cached"``, ``"fetched"``).  Currently informational only.
+    fail_fast:
+        Stop after the first failing check (default ``True``).
+    manifest_includes:
+        The parsed value of the manifest's ``includes:`` field
+        (``None``, ``"auto"``, or a list of paths).  When omitted,
+        the ``explicit-includes`` check is skipped -- callers that
+        do not have manifest information available (e.g. dep-only
+        seams) can leave it unset.
+
+    Returns
+    -------
+    CIAuditResult
+        Contains individual :class:`CheckResult` entries.  The caller
+        decides how to map ``enforcement`` level (block vs warn) onto
+        these results.
+
+    Notes
+    -----
+    ``require_resolution: project-wins`` semantics (rubber-duck I7):
+    version-pin mismatches are downgraded to warnings; missing required
+    packages still block; inherited org deny still wins.  This is
+    handled inside ``_check_required_package_version`` which already
+    reads ``policy.dependencies.require_resolution``.
+
+    Does **not** load ``apm.yml`` from disk -- the caller supplies the
+    resolved dep set directly.
+    """
+    result = CIAuditResult()
+    deps_list = list(deps_to_install)
+    mcp_list = list(mcp_deps) if mcp_deps is not None else []
+
+    def _run(check: CheckResult) -> bool:
+        """Append check and return True if fail-fast should stop."""
+        result.checks.append(check)
+        return fail_fast and not check.passed
+
+    # -- Dependency checks (1-6) -----------------------------------
+    if _run(_check_dependency_allowlist(deps_list, policy.dependencies)):
+        return result
+    if _run(_check_dependency_denylist(deps_list, policy.dependencies)):
+        return result
+    if _run(_check_required_packages(deps_list, policy.dependencies)):
+        return result
+    if _run(
+        _check_required_packages_deployed(
+            deps_list, lockfile, policy.dependencies
+        )
+    ):
+        return result
+    if _run(
+        _check_required_package_version(
+            deps_list, lockfile, policy.dependencies
+        )
+    ):
+        return result
+    if _run(_check_transitive_depth(lockfile, policy.dependencies)):
+        return result
+
+    # -- MCP checks (7-10) ----------------------------------------
+    # When mcp_deps is None (not provided), skip MCP checks entirely.
+    # When mcp_deps is an empty list (provided but no MCP deps), still
+    # run MCP checks so they report "no X configured" for completeness.
+    if mcp_deps is not None:
+        if _run(_check_mcp_allowlist(mcp_list, policy.mcp)):
+            return result
+        if _run(_check_mcp_denylist(mcp_list, policy.mcp)):
+            return result
+        if _run(_check_mcp_transport(mcp_list, policy.mcp)):
+            return result
+        if _run(_check_mcp_self_defined(mcp_list, policy.mcp)):
+            return result
+
+    # -- Target / compilation checks (11-13) -----------------------
+    # Skipped when effective_target is None -- those run in a separate
+    # post-targets call (W2-target-aware).
+    if effective_target is not None:
+        # Build a minimal raw_yml dict so _check_compilation_target
+        # sees the effective (possibly CLI-overridden) target value
+        # rather than what is literally on disk.
+        synthetic_yml = {"target": effective_target}
+        if _run(
+            _check_compilation_target(synthetic_yml, policy.compilation)
+        ):
+            return result
+
+    # -- Manifest-level explicit-includes check --------------------
+    # Only run when the caller supplied the manifest includes value.
+    # Dep-only seams that lack manifest context (legacy callers) skip
+    # this check; the install pipeline and ``apm audit`` wrappers both
+    # supply it.
+    if manifest_includes is not _INCLUDES_NOT_PROVIDED:
+        if _run(_check_includes_explicit(manifest_includes, policy.manifest)):
+            return result
+
+    # NOTE: compilation strategy, source attribution, manifest fields,
+    # scripts policy, and unmanaged files are disk-level / manifest-level
+    # concerns.  They are NOT included in the resolved-dep seam because
+    # the install pipeline does not have the raw manifest at this point
+    # and they are already covered by the full ``run_policy_checks``
+    # wrapper that ``apm audit --ci`` calls.
+
+    return result
 
 
 def run_policy_checks(
@@ -699,7 +907,13 @@ def run_policy_checks(
     *,
     fail_fast: bool = True,
 ) -> CIAuditResult:
-    """Run policy checks against a project.
+    """Run the full set of policy checks against a project on disk.
+
+    Thin wrapper: loads manifest + lockfile from *project_root*, resolves
+    deps, and delegates dependency/MCP checks to
+    :func:`run_dependency_policy_checks`.  Then appends the disk-level
+    checks (compilation, manifest, unmanaged files) that require the raw
+    ``apm.yml``.
 
     These checks are ADDED to baseline checks -- caller runs both.
     When *fail_fast* is ``True`` (default), stops after the first
@@ -729,44 +943,40 @@ def run_policy_checks(
     # Load raw YAML for field-level checks
     raw_yml = _load_raw_apm_yml(project_root)
 
-    # Get dependencies
+    # Get dependencies from manifest (disk view)
     apm_deps = manifest.get_apm_dependencies()
     mcp_deps = manifest.get_mcp_dependencies()
+
+    # Read effective target from raw manifest for the full-project path
+    # NOTE: the wrapper does NOT pass effective_target to the dep seam.
+    # Target checks run as disk-level checks below (reading raw_yml),
+    # because the wrapper has the on-disk manifest.  The install pipeline
+    # will pass effective_target directly (W2-target-aware).
+
+    # -- Delegate dependency + MCP checks to shared seam ---------------
+    dep_result = run_dependency_policy_checks(
+        apm_deps,
+        lockfile=lock,
+        policy=policy,
+        mcp_deps=mcp_deps,
+        # effective_target=None: target checks handled below from raw_yml
+        fail_fast=fail_fast,
+        manifest_includes=manifest.includes,
+    )
+    result.checks.extend(dep_result.checks)
+
+    # Early exit if dep checks already failed in fail-fast mode
+    if fail_fast and not dep_result.passed:
+        return result
 
     def _run(check: CheckResult) -> bool:
         """Append check and return True if fail-fast should stop."""
         result.checks.append(check)
         return fail_fast and not check.passed
 
-    # Dependency checks (1-6)
-    if _run(_check_dependency_allowlist(apm_deps, policy.dependencies)):
-        return result
-    if _run(_check_dependency_denylist(apm_deps, policy.dependencies)):
-        return result
-    if _run(_check_required_packages(apm_deps, policy.dependencies)):
-        return result
-    if _run(
-        _check_required_packages_deployed(apm_deps, lock, policy.dependencies)
-    ):
-        return result
-    if _run(
-        _check_required_package_version(apm_deps, lock, policy.dependencies)
-    ):
-        return result
-    if _run(_check_transitive_depth(lock, policy.dependencies)):
-        return result
+    # -- Disk-level checks that only apply to full-project audits --
 
-    # MCP checks (7-10)
-    if _run(_check_mcp_allowlist(mcp_deps, policy.mcp)):
-        return result
-    if _run(_check_mcp_denylist(mcp_deps, policy.mcp)):
-        return result
-    if _run(_check_mcp_transport(mcp_deps, policy.mcp)):
-        return result
-    if _run(_check_mcp_self_defined(mcp_deps, policy.mcp)):
-        return result
-
-    # Compilation checks (11-13)
+    # Compilation checks (11-13) -- all run from raw_yml in wrapper
     if _run(_check_compilation_target(raw_yml, policy.compilation)):
         return result
     if _run(_check_compilation_strategy(raw_yml, policy.compilation)):

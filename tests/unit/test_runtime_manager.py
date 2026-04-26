@@ -24,7 +24,7 @@ class TestRuntimeManagerInit:
 
     def test_init_supported_runtimes_keys(self):
         manager = RuntimeManager()
-        assert set(manager.supported_runtimes.keys()) == {"copilot", "codex", "llm"}
+        assert set(manager.supported_runtimes.keys()) == {"copilot", "codex", "llm", "gemini"}
 
     def test_init_script_extension_unix(self):
         with patch("apm_cli.runtime.manager.sys") as mock_sys:
@@ -45,7 +45,7 @@ class TestRuntimeManagerGetRuntimePreference:
     def test_returns_expected_order(self):
         manager = RuntimeManager()
         pref = manager.get_runtime_preference()
-        assert pref == ["copilot", "codex", "llm"]
+        assert pref == ["copilot", "codex", "gemini", "llm"]
 
 
 class TestRuntimeManagerIsRuntimeAvailable:
@@ -110,7 +110,7 @@ class TestRuntimeManagerListRuntimes:
         manager.runtime_dir = tmp_path
         with patch("apm_cli.runtime.manager.shutil.which", return_value=None):
             result = manager.list_runtimes()
-        assert set(result.keys()) == {"copilot", "codex", "llm"}
+        assert set(result.keys()) == {"copilot", "codex", "llm", "gemini"}
         for name, info in result.items():
             assert info["installed"] is False
             assert info["path"] is None

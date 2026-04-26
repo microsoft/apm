@@ -327,7 +327,8 @@ def copy_skill_to_target(
         skill_dir.parent.mkdir(parents=True, exist_ok=True)
         if skill_dir.exists():
             shutil.rmtree(skill_dir)
-        shutil.copytree(source_path, skill_dir)
+        from apm_cli.security.gate import ignore_symlinks
+        shutil.copytree(source_path, skill_dir, ignore=ignore_symlinks)
         deployed.append(skill_dir)
     
     return deployed
@@ -565,7 +566,8 @@ class SkillIntegrator(BaseIntegrator):
                             pass
                 shutil.rmtree(target)
             target.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(sub_skill_path, target, dirs_exist_ok=True)
+            from apm_cli.security.gate import ignore_symlinks
+            shutil.copytree(sub_skill_path, target, dirs_exist_ok=True, ignore=ignore_symlinks)
             promoted += 1
             deployed.append(target)
         return promoted, deployed
@@ -587,7 +589,7 @@ class SkillIntegrator(BaseIntegrator):
         lockfile = LockFile.read(get_lockfile_path(project_root))
         if not lockfile:
             return owned_by, native_owners
-        for dep in lockfile.get_all_dependencies():
+        for dep in lockfile.get_package_dependencies():
             short_owner = (dep.virtual_path or dep.repo_url).rsplit("/", 1)[-1]
             unique_key = dep.get_unique_key()
             for deployed_path in dep.deployed_files:
@@ -815,8 +817,19 @@ class SkillIntegrator(BaseIntegrator):
                 shutil.rmtree(target_skill_dir)
 
             target_skill_dir.parent.mkdir(parents=True, exist_ok=True)
+            from apm_cli.security.gate import ignore_symlinks as _ignore_symlinks
+            _apm_filter = shutil.ignore_patterns('.apm')
+
+            def _ignore_symlinks_and_apm(directory, contents):
+                # Compose two ignore filters: drop symlinks (security gate)
+                # AND drop nested `.apm/` so consumers of the bundle do not
+                # see the author's primitive layout leak into the deployed
+                # skill tree.
+                return list(set(_ignore_symlinks(directory, contents))
+                            | set(_apm_filter(directory, contents)))
+
             shutil.copytree(package_path, target_skill_dir,
-                            ignore=shutil.ignore_patterns('.apm'))
+                            ignore=_ignore_symlinks_and_apm)
             all_target_paths.append(target_skill_dir)
 
             if is_primary:

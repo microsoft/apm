@@ -1,0 +1,17 @@
+# Fixture 13: MCP enforcement policy
+# Tests: mcp.allow, mcp.deny, mcp.transport.allow, mcp.self_defined,
+#         mcp.trust_transitive (rubber-duck C2)
+name: mcp-enforcement-policy
+version: "1.0.0"
+enforcement: block
+
+mcp:
+  allow:
+    - "io.github.github/*"
+    - "io.github.modelcontextprotocol/*"
+  deny:
+    - "io.github.untrusted/*"
+  transport:
+    allow: [stdio, http]
+  self_defined: warn
+  trust_transitive: false

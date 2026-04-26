@@ -16,7 +16,7 @@ A bundle removes all of that. You resolve once, pack the output, and distribute 
 Common motivations:
 
 - **CI cost reduction** — resolve once, fan out to many jobs
-- **Air-gapped environments** — no network access at deploy time
+- **Air-gapped environments** — no network access at deploy time (for environments where CI *can* reach an internal proxy, see [Registry Proxy & Air-gapped](../../enterprise/registry-proxy/) -- bundles are the offline-delivery story; the proxy is the online-routing story)
 - **Reproducibility** — the bundle is a snapshot of exactly what was resolved
 - **Faster onboarding** — new contributors get pre-built context without running install
 - **Audit trail** — attach the bundle to a release for traceability
@@ -42,7 +42,8 @@ apm pack
 # Filter by target
 apm pack --target copilot         # only .github/ files
 apm pack --target claude          # only .claude/ files
-apm pack --target all             # both targets
+apm pack --target all             # all targets
+apm pack -t claude,copilot        # multiple targets (comma-separated)
 
 # Bundle format
 apm pack --format plugin          # valid plugin directory structure
@@ -220,7 +221,9 @@ Dependencies listed under [`devDependencies`](../../reference/manifest-schema/#5
 apm install --dev owner/test-helpers
 ```
 
-This keeps development-only packages (test helpers, lint rules) out of distributed plugins.
+This keeps third-party development-only packages (test helpers, lint rules) out of distributed plugins.
+
+**Caveat for primitives you author yourself:** the dev/prod split is enforced via the lockfile's `is_dev` marker for resolved dependencies. The local-content scanner that ships your own `.apm/` content does NOT consult that marker -- it bundles everything under `.apm/`. To keep maintainer-only primitives (release-checklist skills, internal debugging agents) out of plugin bundles, author them OUTSIDE `.apm/` (e.g. under `dev/`) and reference them via a local-path devDependency. See [Dev-only Primitives](./dev-only-primitives/).
 
 ### Example output
 

@@ -127,6 +127,12 @@ class ValidationResult:
             return f"[x] Package is invalid with {len(self.errors)} error(s)"
 
 
+# Canonical order of the directories that mark a Claude Code marketplace
+# plugin.  Tests assert this ordering on ``DetectionEvidence.plugin_dirs_present``
+# so adding a new directory here is a public-API change.
+_PLUGIN_DIRS: Tuple[str, ...] = ("agents", "skills", "commands")
+
+
 def _has_hook_json(package_path: Path) -> bool:
     """Check if the package has hook JSON files in hooks/ or .apm/hooks/."""
     for hooks_dir in [package_path / "hooks", package_path / APM_DIR / "hooks"]:
@@ -135,41 +141,109 @@ def _has_hook_json(package_path: Path) -> bool:
     return False
 
 
+@dataclass(frozen=True)
+class DetectionEvidence:
+    """Snapshot of the file-system signals that drove classification.
+
+    Returned from :func:`gather_detection_evidence` and consumed by
+    install-time observability (verbose detection traces, near-miss
+    warnings, deploy-summary labelling).  Kept independent of
+    :func:`detect_package_type` so that the classification function can
+    keep its existing ``(PackageType, Optional[Path])`` return signature
+    while observability code can pull richer detail on demand.
+    """
+
+    has_apm_yml: bool
+    has_skill_md: bool
+    has_hook_json: bool
+    plugin_json_path: Optional[Path]
+    plugin_dirs_present: Tuple[str, ...]
+    has_claude_plugin_dir: bool = False
+
+    @property
+    def has_plugin_evidence(self) -> bool:
+        """True if any signal indicates this is a marketplace plugin.
+
+        ``.claude-plugin/`` is treated as first-class evidence so that a
+        Claude Code plugin without a ``plugin.json`` (name derived from
+        the directory) classifies as ``MARKETPLACE_PLUGIN`` instead of
+        falling through to ``HOOK_PACKAGE``.  ``normalize_plugin_directory``
+        handles the missing-manifest case gracefully.
+        """
+        return (
+            self.plugin_json_path is not None
+            or bool(self.plugin_dirs_present)
+            or self.has_claude_plugin_dir
+        )
+
+
+def gather_detection_evidence(package_path: Path) -> DetectionEvidence:
+    """Collect all package-type signals from a directory in one pass.
+
+    Pure: no side-effects, no file mutations.  Cheap (a handful of stat
+    calls).  See :class:`DetectionEvidence` for the shape of the return
+    value.
+    """
+    from ..utils.helpers import find_plugin_json
+
+    plugin_dirs_present = tuple(
+        name for name in _PLUGIN_DIRS if (package_path / name).is_dir()
+    )
+    return DetectionEvidence(
+        has_apm_yml=(package_path / APM_YML_FILENAME).exists(),
+        has_skill_md=(package_path / SKILL_MD_FILENAME).exists(),
+        has_hook_json=_has_hook_json(package_path),
+        plugin_json_path=find_plugin_json(package_path),
+        plugin_dirs_present=plugin_dirs_present,
+        has_claude_plugin_dir=(package_path / ".claude-plugin").is_dir(),
+    )
+
+
 def detect_package_type(
     package_path: Path,
 ) -> Tuple[PackageType, Optional[Path]]:
     """Classify a package directory into a ``PackageType``.
 
-    This is the **single source of truth** for the detection cascade.
-    The function is pure — no side-effects, no file mutations.
+    Single source of truth for the detection cascade.  Pure: no
+    side-effects, no file mutations.
+
+    Cascade order (first match wins):
+
+    1. ``HYBRID`` -- both ``apm.yml`` and ``SKILL.md`` present.
+    2. ``APM_PACKAGE`` -- ``apm.yml`` only.
+    3. ``CLAUDE_SKILL`` -- ``SKILL.md`` only.
+    4. ``MARKETPLACE_PLUGIN`` -- ``plugin.json``, a ``.claude-plugin/``
+       directory, *or* one of ``agents/``, ``skills/``, ``commands/``.
+       This must precede the hook-only branch because the
+       marketplace-plugin synthesizer (``_map_plugin_artifacts``) already
+       maps ``hooks/`` alongside agents/skills/commands -- so a Claude
+       Code plugin that ships both hooks and skills must classify as
+       ``MARKETPLACE_PLUGIN``, not ``HOOK_PACKAGE``, otherwise the
+       skills are silently dropped.  ``.claude-plugin/`` is treated as
+       first-class evidence so plugins without a ``plugin.json``
+       (manifest-less Claude Code plugins) still classify correctly;
+       ``normalize_plugin_directory`` handles missing manifests.
+       See microsoft/apm#780.
+    5. ``HOOK_PACKAGE`` -- ``hooks/*.json`` only, no plugin evidence.
+    6. ``INVALID`` -- nothing recognisable.
 
     Returns:
-        A ``(package_type, plugin_json_path)`` tuple.
-        *plugin_json_path* is non-None only for ``MARKETPLACE_PLUGIN``.
+        A ``(package_type, plugin_json_path)`` tuple.  *plugin_json_path*
+        is non-None only when ``MARKETPLACE_PLUGIN`` was matched via an
+        actual ``plugin.json`` file (not via directory evidence alone).
     """
-    from ..utils.helpers import find_plugin_json
+    evidence = gather_detection_evidence(package_path)
 
-    has_apm_yml = (package_path / APM_YML_FILENAME).exists()
-    has_skill_md = (package_path / SKILL_MD_FILENAME).exists()
-
-    if has_apm_yml and has_skill_md:
+    if evidence.has_apm_yml and evidence.has_skill_md:
         return PackageType.HYBRID, None
-    if has_apm_yml:
+    if evidence.has_apm_yml:
         return PackageType.APM_PACKAGE, None
-    if has_skill_md:
+    if evidence.has_skill_md:
         return PackageType.CLAUDE_SKILL, None
-    if _has_hook_json(package_path):
+    if evidence.has_plugin_evidence:
+        return PackageType.MARKETPLACE_PLUGIN, evidence.plugin_json_path
+    if evidence.has_hook_json:
         return PackageType.HOOK_PACKAGE, None
-
-    plugin_json_path = find_plugin_json(package_path)
-    has_plugin_evidence = (
-        plugin_json_path is not None
-        or (package_path / "agents").is_dir()
-        or (package_path / "skills").is_dir()
-        or (package_path / "commands").is_dir()
-    )
-    if has_plugin_evidence:
-        return PackageType.MARKETPLACE_PLUGIN, plugin_json_path
 
     return PackageType.INVALID, None
 
@@ -208,7 +282,10 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
     if pkg_type == PackageType.INVALID:
         result.add_error(
             f"Not a valid APM package: no apm.yml, SKILL.md, hooks, or "
-            f"plugin structure found in {package_path.name}"
+            f"plugin structure found in {package_path.name}. "
+            "Ensure the package has SKILL.md (skill bundle), "
+            "apm.yml + .apm/ (APM package), or plugin.json (Claude plugin) "
+            "at its root."
         )
         return result
     
@@ -225,8 +302,15 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
     if result.package_type == PackageType.MARKETPLACE_PLUGIN:
         return _validate_marketplace_plugin(package_path, plugin_json_path, result)
     
-    # Standard APM package validation (has apm.yml)
+    # Standard APM package or HYBRID validation (has apm.yml)
     apm_yml_path = package_path / APM_YML_FILENAME
+
+    # HYBRID packages: if .apm/ exists, fall through to standard validation
+    # (back-compat for packages that ship both .apm/ primitives AND SKILL.md).
+    # Otherwise validate as a skill bundle with apm.yml metadata.
+    if result.package_type == PackageType.HYBRID:
+        return _validate_hybrid_package(package_path, apm_yml_path, result)
+
     return _validate_apm_package_with_yml(package_path, apm_yml_path, result)
 
 
@@ -301,6 +385,81 @@ def _validate_claude_skill(package_path: Path, skill_md_path: Path, result: Vali
     return result
 
 
+def _validate_hybrid_package(
+    package_path: Path, apm_yml_path: Path, result: ValidationResult
+) -> ValidationResult:
+    """Validate a HYBRID package (apm.yml + SKILL.md).
+
+    Two sub-cases:
+
+    1. ``.apm/`` directory present -- fall through to the standard
+       ``_validate_apm_package_with_yml`` path for full back-compat.
+    2. No ``.apm/`` -- treat as a *skill bundle* whose metadata comes from
+       ``apm.yml`` (authoritative for name/version/license/deps) and whose
+       runtime behavior is driven by ``SKILL.md``.  This is the Genesis
+       layout: ``apm.yml`` + ``SKILL.md`` + optional sub-directories at
+       repo root, no ``.apm/``.
+
+    Args:
+        package_path: Path to the package directory
+        apm_yml_path: Path to apm.yml
+        result: ValidationResult to populate
+
+    Returns:
+        ValidationResult: Updated validation result
+    """
+    # Back-compat: if .apm/ exists, the author intends independent primitives.
+    apm_dir = package_path / APM_DIR
+    if apm_dir.exists() and apm_dir.is_dir():
+        return _validate_apm_package_with_yml(package_path, apm_yml_path, result)
+
+    # --- Skill-bundle path (no .apm/) ---
+    from .apm_package import APMPackage
+
+    # Parse apm.yml -- authoritative for APM-owned fields.
+    try:
+        package = APMPackage.from_apm_yml(apm_yml_path)
+    except (ValueError, FileNotFoundError) as e:
+        result.add_error(f"Invalid apm.yml: {e}")
+        return result
+
+    # Require SKILL.md present and minimally readable.
+    skill_md_path = package_path / SKILL_MD_FILENAME
+    if not skill_md_path.exists():
+        result.add_error(f"HYBRID package missing {SKILL_MD_FILENAME}")
+        return result
+
+    try:
+        import frontmatter
+
+        with open(skill_md_path, "r", encoding="utf-8") as f:
+            frontmatter.load(f)  # Parse only to surface malformed frontmatter.
+
+        # Metadata model for HYBRID packages: apm.yml.description and
+        # SKILL.md frontmatter description are INDEPENDENT fields with
+        # different consumers and MUST NOT be merged.
+        #
+        #   * apm.yml.description -> human tagline rendered by `apm view`,
+        #     `apm search`, `apm deps list`, marketplace/registry indexes.
+        #   * SKILL.md description -> agent-runtime invocation matcher
+        #     (per agentskills.io), consumed verbatim by Claude/Copilot/etc.
+        #     APM never reads or mutates this field; the file is copied
+        #     byte-for-byte into <target>/skills/<name>/ at integrate time.
+        #
+        # Authors who ship a HYBRID package are expected to populate both
+        # descriptions independently. The pack-time check in
+        # `apm_cli.bundle.packer` warns when apm.yml.description is missing
+        # so the human-facing surfaces (search/listings) do not degrade
+        # silently while the agent runtime keeps working.
+
+    except Exception as e:
+        result.add_warning(f"Could not parse {SKILL_MD_FILENAME} frontmatter: {e}")
+
+    result.package = package
+    # package_type already set to HYBRID by the caller
+    return result
+
+
 def _validate_marketplace_plugin(package_path: Path, plugin_json_path: Optional[Path], result: ValidationResult) -> ValidationResult:
     """Validate a Claude plugin and synthesize apm.yml.
 
@@ -359,7 +518,12 @@ def _validate_apm_package_with_yml(package_path: Path, apm_yml_path: Path, resul
     # Check for .apm directory
     apm_dir = package_path / APM_DIR
     if not apm_dir.exists():
-        result.add_error(f"Missing required directory: {APM_DIR}/")
+        result.add_error(
+            f"Missing required directory: {APM_DIR}/ -- "
+            "an APM package with apm.yml needs a .apm/ directory containing "
+            "primitives. Alternatively, add a SKILL.md to make this a skill "
+            "bundle or hybrid package."
+        )
         return result
     
     if not apm_dir.is_dir():

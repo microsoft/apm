@@ -253,6 +253,25 @@ my-package/
 
 On install, APM promotes each sub-skill to a top-level `.github/skills/` entry alongside the parent — see [Sub-skill Promotion](#sub-skill-promotion) below.
 
+### Option 5: Maintainer-only Skill (Dev-only)
+
+For skills you want during authoring but not shipped to consumers (release-checklist skills, internal debugging skills), author them OUTSIDE `.apm/` and reference them via a local-path devDependency:
+
+```
+your-package/
++-- apm.yml
++-- .apm/skills/...                          # public skills
++-- dev/skills/release-checklist/SKILL.md    # maintainer-only
+```
+
+```yaml
+devDependencies:
+  apm:
+    - path: ./dev/skills/release-checklist
+```
+
+`apm install --dev` deploys the skill locally; `apm pack --format plugin` excludes it. See [Dev-only Primitives](../dev-only-primitives/) for the full pattern.
+
 ### Sub-skill Promotion
 
 When a package contains sub-skills in `.apm/skills/*/` subdirectories, APM promotes each to a top-level entry under `.github/skills/`. This ensures Copilot can discover them independently, since it only scans direct children of `.github/skills/`.

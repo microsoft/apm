@@ -1,6 +1,40 @@
 # Package Authoring
 
-## Package directory structure
+## Supported package layouts
+
+APM recognizes three layouts. The shape of the package root tells APM
+how to install it:
+
+| Root signal | Author intent | Install semantic |
+|---|---|---|
+| `.apm/` (with or without apm.yml) | Multiple independent primitives | Hoist each primitive into the consumer runtime dirs |
+| `SKILL.md` (alone, or with apm.yml = HYBRID) | One skill bundle | Copy whole tree to `<target>/skills/<name>/` |
+| `plugin.json` / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
+
+The HYBRID layout (apm.yml + SKILL.md) is a single skill bundle that
+also uses APM dependency resolution. APM installs it as a skill -- it
+does NOT dissect the bundle into top-level primitives. Co-located
+subdirectories like `agents/`, `assets/`, `scripts/` are bundle
+resources, not standalone primitives.
+
+In a HYBRID package, `apm.yml` and `SKILL.md` each own their
+`description` field **independently** -- APM never merges or
+backfills one from the other:
+- `apm.yml.description` is a short human-facing tagline rendered by
+  `apm view`, `apm search`, `apm deps list`, and registry listings.
+- `SKILL.md` `description` (frontmatter) is the agent-runtime
+  invocation matcher (per agentskills.io). APM copies `SKILL.md`
+  byte-for-byte and never reads or mutates this field.
+- `allowed-tools` lives exclusively in `SKILL.md` frontmatter; there
+  is no apm.yml-side equivalent.
+- `name`, `version`, `license`, `dependencies`, `scripts` live
+  exclusively in `apm.yml`.
+
+Populate both descriptions when you ship a HYBRID package. `apm pack`
+warns when `apm.yml.description` is missing so listings do not
+degrade silently while the agent runtime keeps working.
+
+## Package directory structure (APM layout)
 
 ```
 my-package/

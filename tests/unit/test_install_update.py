@@ -11,6 +11,7 @@ Also tests the drift detection helpers in ``apm_cli/drift.py``:
 
 from unittest.mock import Mock
 
+from apm_cli.deps.lockfile import LockFile, LockedDependency
 from apm_cli.drift import build_download_ref, detect_config_drift, detect_orphans, detect_ref_change
 from apm_cli.models.apm_package import DependencyReference
 
@@ -96,6 +97,57 @@ class TestSkipDownloadWithUpdateFlag:
             already_resolved=True,
             lockfile_match=True,
         ) is False
+
+
+class TestDetectRefChange:
+    """Tests for detect_ref_change()."""
+
+    def test_insecure_transport_flip_from_https_to_http_is_drift(self):
+        """Switching to insecure HTTP must force a re-download."""
+        dep = DependencyReference(
+            repo_url="owner/repo",
+            host="gitlab.example.com",
+            is_insecure=True,
+        )
+        locked = LockedDependency(
+            repo_url="owner/repo",
+            host="gitlab.example.com",
+            is_insecure=False,
+        )
+
+        assert detect_ref_change(dep, locked) is True
+
+    def test_insecure_transport_flip_from_http_to_https_is_drift(self):
+        """Switching back to HTTPS must also force a re-download."""
+        dep = DependencyReference(
+            repo_url="owner/repo",
+            host="gitlab.example.com",
+            is_insecure=False,
+        )
+        locked = LockedDependency(
+            repo_url="owner/repo",
+            host="gitlab.example.com",
+            is_insecure=True,
+        )
+
+        assert detect_ref_change(dep, locked) is True
+
+    def test_same_transport_and_ref_is_not_drift(self):
+        """Matching ref + transport must remain a no-drift case."""
+        dep = DependencyReference(
+            repo_url="owner/repo",
+            host="gitlab.example.com",
+            reference="main",
+            is_insecure=False,
+        )
+        locked = LockedDependency(
+            repo_url="owner/repo",
+            host="gitlab.example.com",
+            resolved_ref="main",
+            is_insecure=False,
+        )
+
+        assert detect_ref_change(dep, locked) is False
 
 
 class TestDownloadRefLockfileOverride:
@@ -229,6 +281,64 @@ class TestDownloadRefLockfileOverride:
         assert ref.repo_url == "owner/repo"
         assert ref.reference == "abc123def456"
 
+    def test_http_lockfile_restores_insecure_scheme(self):
+        """HTTP deps should restore the locked insecure scheme on replay."""
+        dep = DependencyReference(
+            repo_url="acme/rules",
+            host="git.company.internal",
+            reference=None,
+        )
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="acme/rules",
+                host="git.company.internal",
+                resolved_commit="abc123def456",
+                is_insecure=True,
+                allow_insecure=True,
+            )
+        )
+
+        ref = build_download_ref(dep, lockfile, update_refs=False, ref_changed=False)
+        assert ref.host == "git.company.internal"
+        assert ref.reference == "abc123def456"
+        assert ref.is_insecure is True
+        assert ref.allow_insecure is True
+
+
+class TestLockedDependencyToDependencyRef:
+    """Tests for LockedDependency.to_dependency_ref()."""
+
+    def test_to_dependency_ref_preserves_install_path_fields(self):
+        """Reconstructed refs keep the fields used by install path resolution."""
+        locked = LockedDependency(
+            repo_url="team/repo",
+            host="gitlab.example.com",
+            port=8443,
+            registry_prefix="artifactory/github",
+            resolved_ref="main",
+            virtual_path="prompts/review.prompt.md",
+            is_virtual=True,
+            source="local",
+            local_path="./packages/repo",
+            is_insecure=True,
+            allow_insecure=True,
+        )
+
+        dep_ref = locked.to_dependency_ref()
+
+        assert dep_ref.repo_url == "team/repo"
+        assert dep_ref.host == "gitlab.example.com"
+        assert dep_ref.port == 8443
+        assert dep_ref.reference == "main"
+        assert dep_ref.virtual_path == "prompts/review.prompt.md"
+        assert dep_ref.is_virtual is True
+        assert dep_ref.artifactory_prefix == "artifactory/github"
+        assert dep_ref.is_local is True
+        assert dep_ref.local_path == "./packages/repo"
+        assert dep_ref.is_insecure is True
+        assert dep_ref.allow_insecure is True
+
 
 class TestPreDownloadRefLockfileOverride:
     """Same as TestDownloadRefLockfileOverride but for the parallel pre-download path.
@@ -268,6 +378,29 @@ class TestPreDownloadRefLockfileOverride:
 
         ref = build_download_ref(dep, lockfile, update_refs=False, ref_changed=False)
         assert ref.reference == "abc123def456"
+
+
+class TestLockedDependencyHttpRoundTrip:
+    """Tests for lockfile preservation of HTTP dependency metadata."""
+
+    def test_to_yaml_round_trip_preserves_http_fields(self):
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="acme/rules",
+                host="git.company.internal",
+                resolved_commit="abc123def456",
+                is_insecure=True,
+                allow_insecure=True,
+            )
+        )
+
+        parsed = LockFile.from_yaml(lockfile.to_yaml())
+        dep = parsed.get_dependency("acme/rules")
+
+        assert dep is not None
+        assert dep.is_insecure is True
+        assert dep.allow_insecure is True
 
 
 class TestRefChangedDetection:

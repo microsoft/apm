@@ -150,20 +150,37 @@ def build_raw_content_url(owner: str, repo: str, ref: str, file_path: str) -> st
     return f"https://raw.githubusercontent.com/{owner}/{repo}/{encoded_ref}/{file_path}"
 
 
-def build_ssh_url(host: str, repo_ref: str) -> str:
-    """Build an SSH clone URL for the given host and repo_ref (owner/repo)."""
+def build_ssh_url(host: str, repo_ref: str, port: Optional[int] = None) -> str:
+    """Build an SSH clone URL for the given host and repo_ref (owner/repo).
+
+    When ``port`` is set, emit the explicit ``ssh://`` form because SCP
+    shorthand (``git@host:path``) cannot carry a port — the ``:`` is the path
+    separator. Without a port, keep the compact SCP shorthand (no behavioural
+    change for the common case).
+    """
+    if port:
+        return f"ssh://git@{host}:{port}/{repo_ref}.git"
     return f"git@{host}:{repo_ref}.git"
 
 
-def build_https_clone_url(host: str, repo_ref: str, token: Optional[str] = None) -> str:
+def build_https_clone_url(
+    host: str,
+    repo_ref: str,
+    token: Optional[str] = None,
+    port: Optional[int] = None,
+) -> str:
     """Build an HTTPS clone URL. If token provided, use x-access-token format (no escaping done).
+
+    ``port`` is embedded in the netloc (``host:port``) when set so custom
+    HTTPS ports (e.g. self-hosted Git servers on 8443) are preserved.
 
     Note: callers must avoid logging raw token-bearing URLs.
     """
+    netloc = f"{host}:{port}" if port else host
     if token:
         # Use x-access-token format which is compatible with GitHub Enterprise and GH Actions
-        return f"https://x-access-token:{token}@{host}/{repo_ref}.git"
-    return f"https://{host}/{repo_ref}"
+        return f"https://x-access-token:{token}@{netloc}/{repo_ref}.git"
+    return f"https://{netloc}/{repo_ref}"
 
 
 # Azure DevOps URL builders
@@ -189,6 +206,55 @@ def build_ado_https_clone_url(org: str, project: str, repo: str, token: Optional
         # ADO uses PAT as password with empty username
         return f"https://{token}@{host}/{org}/{quoted_project}/_git/{repo}"
     return f"https://{host}/{org}/{quoted_project}/_git/{repo}"
+
+
+def build_authorization_header_git_env(scheme: str, credential: str) -> dict:
+    """Build env vars to inject an HTTP Authorization header into git operations.
+
+    Uses git's GIT_CONFIG_COUNT/KEY_N/VALUE_N mechanism to set
+    ``http.extraheader`` via the environment, NOT via a ``-c`` command-line
+    flag.  Command-line flags appear in the OS process table and may be
+    captured by host-level monitoring; environment variables are private
+    to the spawned process.
+
+    The returned dict is intended to be merged into a base env (e.g.
+    ``os.environ.copy()``) before being passed to ``Repo.clone_from(env=...)``
+    or ``subprocess.run(..., env=...)``.
+
+    Args:
+        scheme: HTTP auth scheme, e.g. ``"Bearer"`` or ``"Basic"``.
+        credential: The credential value (token or base64-encoded user:pass).
+
+    Returns:
+        dict: ``{GIT_CONFIG_COUNT, GIT_CONFIG_KEY_0, GIT_CONFIG_VALUE_0}``.
+
+    Note:
+        Callers MUST NOT log the returned dict.  ``GIT_CONFIG_VALUE_0``
+        contains the credential.
+    """
+    return {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.extraheader",
+        "GIT_CONFIG_VALUE_0": f"Authorization: {scheme} {credential}",
+    }
+
+
+def build_ado_bearer_git_env(bearer_token: str) -> dict:
+    """Build env vars to authenticate to Azure DevOps with an Entra ID bearer.
+
+    Azure DevOps accepts AAD bearer tokens anywhere a PAT is accepted.  AAD
+    JWTs are typically 1.5-2.5KB which exceeds safe URL-embedding limits
+    and would leak into git's own logs and the OS process table.  Header
+    injection avoids both issues.
+
+    Args:
+        bearer_token: An AAD JWT scoped to the ADO resource GUID
+            ``499b84ac-1321-427f-aa17-267ca6975798``.
+
+    Returns:
+        dict: env-var overlay for the spawned git subprocess.
+    """
+    return build_authorization_header_git_env("Bearer", bearer_token)
 
 
 def build_ado_ssh_url(org: str, project: str, repo: str, host: str = "ssh.dev.azure.com") -> str:

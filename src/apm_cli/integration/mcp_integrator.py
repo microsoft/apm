@@ -87,7 +87,7 @@ class MCPIntegrator:
             lockfile = LockFile.read(lock_path)
             if lockfile is not None:
                 locked_paths = builtins.set()
-                for dep in lockfile.get_all_dependencies():
+                for dep in lockfile.get_package_dependencies():
                     if dep.repo_url:
                         yml = (
                             apm_modules_dir / dep.repo_url / dep.virtual_path / "apm.yml"
@@ -444,6 +444,7 @@ class MCPIntegrator:
         runtime: str = None,
         exclude: str = None,
         logger=None,
+        scope=None,
     ) -> None:
         """Remove MCP server entries that are no longer required by any dependency.
 
@@ -452,18 +453,37 @@ class MCPIntegrator:
         dependency references (e.g. ``"io.github.github/github-mcp-server"``).
         For Copilot CLI and Codex, config keys are derived from the last path
         segment, so we match against both the full reference and the short name.
+
+        Args:
+            scope: InstallScope (PROJECT or USER).  When USER, only
+                global-capable runtimes are cleaned.
         """
         if not stale_names:
             return
 
         # Determine which runtimes to clean, mirroring install-time logic.
-        all_runtimes = {"vscode", "copilot", "codex", "cursor", "opencode"}
+        all_runtimes = {"vscode", "copilot", "codex", "cursor", "opencode", "gemini"}
         if runtime:
             target_runtimes = {runtime}
         else:
             target_runtimes = builtins.set(all_runtimes)
         if exclude:
             target_runtimes.discard(exclude)
+
+        # Scope filtering: at USER scope, only clean global-capable runtimes.
+        from apm_cli.core.scope import InstallScope
+
+        if scope is InstallScope.USER:
+            from apm_cli.factory import ClientFactory as _CF
+
+            supported = builtins.set()
+            for rt in target_runtimes:
+                try:
+                    if _CF.create_client(rt).supports_user_scope:
+                        supported.add(rt)
+                except ValueError:
+                    pass
+            target_runtimes = supported
 
         # Build an expanded set that includes both the full reference and the
         # last-segment short name so we match config keys in every runtime.
@@ -495,8 +515,9 @@ class MCPIntegrator:
                                     f"Removed stale MCP server '{name}' from .vscode/mcp.json"
                                 )
                             else:
-                                _rich_info(
-                                    f"+ Removed stale MCP server '{name}' from .vscode/mcp.json"
+                                _rich_success(
+                                    f"Removed stale MCP server '{name}' from .vscode/mcp.json",
+                                    symbol="check",
                                 )
                 except Exception:
                     _log.debug(
@@ -521,8 +542,9 @@ class MCPIntegrator:
                             _json.dumps(config, indent=2), encoding="utf-8"
                         )
                         for name in removed:
-                            _rich_info(
-                                f"+ Removed stale MCP server '{name}' from Copilot CLI config"
+                            _rich_success(
+                                f"Removed stale MCP server '{name}' from Copilot CLI config",
+                                symbol="check",
                             )
                 except Exception:
                     _log.debug(
@@ -545,8 +567,9 @@ class MCPIntegrator:
                     if removed:
                         codex_cfg.write_text(_toml.dumps(config), encoding="utf-8")
                         for name in removed:
-                            _rich_info(
-                                f"+ Removed stale MCP server '{name}' from Codex CLI config"
+                            _rich_success(
+                                f"Removed stale MCP server '{name}' from Codex CLI config",
+                                symbol="check",
                             )
                 except Exception:
                     _log.debug(
@@ -571,8 +594,9 @@ class MCPIntegrator:
                             _json.dumps(config, indent=2), encoding="utf-8"
                         )
                         for name in removed:
-                            _rich_info(
-                                f"+ Removed stale MCP server '{name}' from .cursor/mcp.json"
+                            _rich_success(
+                                f"Removed stale MCP server '{name}' from .cursor/mcp.json",
+                                symbol="check",
                             )
                 except Exception:
                     _log.debug(
@@ -602,12 +626,45 @@ class MCPIntegrator:
                                     f"Removed stale MCP server '{name}' from opencode.json"
                                 )
                             else:
-                                _rich_info(
-                                    f"+ Removed stale MCP server '{name}' from opencode.json"
+                                _rich_success(
+                                    f"Removed stale MCP server '{name}' from opencode.json",
+                                    symbol="check",
                                 )
                 except Exception:
                     _log.debug(
                         "Failed to clean stale MCP servers from opencode.json",
+                        exc_info=True,
+                    )
+
+        # Clean .gemini/settings.json (only if .gemini/ directory exists)
+        if "gemini" in target_runtimes:
+            gemini_cfg = Path.cwd() / ".gemini" / "settings.json"
+            if gemini_cfg.exists():
+                try:
+                    import json as _json
+
+                    config = _json.loads(gemini_cfg.read_text(encoding="utf-8"))
+                    servers = config.get("mcpServers", {})
+                    removed = [n for n in expanded_stale if n in servers]
+                    for name in removed:
+                        del servers[name]
+                    if removed:
+                        gemini_cfg.write_text(
+                            _json.dumps(config, indent=2), encoding="utf-8"
+                        )
+                        for name in removed:
+                            if logger:
+                                logger.progress(
+                                    f"Removed stale MCP server '{name}' from .gemini/settings.json"
+                                )
+                            else:
+                                _rich_success(
+                                    f"Removed stale MCP server '{name}' from .gemini/settings.json",
+                                    symbol="check",
+                                )
+                except Exception:
+                    _log.debug(
+                        "Failed to clean stale MCP servers from .gemini/settings.json",
                         exc_info=True,
                     )
 
@@ -667,6 +724,8 @@ class MCPIntegrator:
                 detected.add("copilot")
             if re.search(r"\bcodex\b", command):
                 detected.add("codex")
+            if re.search(r"\bgemini\b", command):
+                detected.add("gemini")
             if re.search(r"\bllm\b", command):
                 detected.add("llm")
 
@@ -702,7 +761,7 @@ class MCPIntegrator:
 
         except ImportError:
             mcp_compatible = [
-                rt for rt in detected_runtimes if rt in ["vscode", "copilot", "cursor", "opencode"]
+                rt for rt in detected_runtimes if rt in ["vscode", "copilot", "cursor", "opencode", "gemini"]
             ]
             return [rt for rt in mcp_compatible if shutil.which(rt)]
 
@@ -775,10 +834,10 @@ class MCPIntegrator:
         except ValueError as e:
             if logger:
                 logger.warning(f"Runtime {runtime} not supported: {e}")
-                logger.progress("Supported runtimes: vscode, copilot, codex, cursor, opencode, llm")
+                logger.progress("Supported runtimes: vscode, copilot, codex, cursor, opencode, gemini, llm")
             else:
                 _rich_warning(f"Runtime {runtime} not supported: {e}")
-                _rich_info("Supported runtimes: vscode, copilot, codex, cursor, opencode, llm")
+                _rich_info("Supported runtimes: vscode, copilot, codex, cursor, opencode, gemini, llm")
             return False
         except Exception as e:
             _log.debug(
@@ -804,6 +863,7 @@ class MCPIntegrator:
         stored_mcp_configs: dict = None,
         logger=None,
         diagnostics=None,
+        scope=None,
     ) -> int:
         """Install MCP dependencies.
 
@@ -818,6 +878,9 @@ class MCPIntegrator:
             stored_mcp_configs: Previously stored MCP configs from lockfile
                 for diff-aware installation.  When provided, servers whose
                 manifest config has changed are re-applied automatically.
+            scope: InstallScope (PROJECT or USER).  When USER, only
+                runtimes whose adapter declares ``supports_user_scope``
+                are targeted; workspace-only runtimes are skipped.
 
         Returns:
             Number of MCP servers newly configured or updated.
@@ -906,7 +969,7 @@ class MCPIntegrator:
                 manager = RuntimeManager()
                 installed_runtimes = []
 
-                for runtime_name in ["copilot", "codex", "vscode", "cursor", "opencode"]:
+                for runtime_name in ["copilot", "codex", "vscode", "cursor", "opencode", "gemini"]:
                     try:
                         if runtime_name == "vscode":
                             if _is_vscode_available():
@@ -920,6 +983,11 @@ class MCPIntegrator:
                         elif runtime_name == "opencode":
                             # OpenCode is opt-in: only target when .opencode/ exists
                             if (Path.cwd() / ".opencode").is_dir():
+                                ClientFactory.create_client(runtime_name)
+                                installed_runtimes.append(runtime_name)
+                        elif runtime_name == "gemini":
+                            # Gemini CLI is opt-in: only target when .gemini/ exists
+                            if (Path.cwd() / ".gemini").is_dir():
                                 ClientFactory.create_client(runtime_name)
                                 installed_runtimes.append(runtime_name)
                         else:
@@ -943,6 +1011,9 @@ class MCPIntegrator:
                 # OpenCode is directory-presence based
                 if (Path.cwd() / ".opencode").is_dir():
                     installed_runtimes.append("opencode")
+                # Gemini CLI is directory-presence based
+                if (Path.cwd() / ".gemini").is_dir():
+                    installed_runtimes.append("gemini")
 
             # Step 2: Get runtimes referenced in apm.yml scripts
             script_runtimes = MCPIntegrator._detect_runtimes(
@@ -1055,6 +1126,48 @@ class MCPIntegrator:
                     logger.progress("No runtimes installed, using VS Code as fallback")
                 else:
                     _rich_info("No runtimes installed, using VS Code as fallback")
+
+        # Scope filtering: at USER scope, keep only global-capable runtimes.
+        # Applied after both explicit --runtime and auto-discovery paths.
+        from apm_cli.core.scope import InstallScope
+
+        if scope is InstallScope.USER:
+            from apm_cli.factory import ClientFactory as _CF
+
+            pre_filter = list(target_runtimes)
+            filtered_runtimes = []
+            for rt in target_runtimes:
+                try:
+                    client = _CF.create_client(rt)
+                except ValueError:
+                    continue
+                if client.supports_user_scope:
+                    filtered_runtimes.append(rt)
+            target_runtimes = filtered_runtimes
+            skipped = set(pre_filter) - set(target_runtimes)
+            if skipped:
+                msg = (
+                    f"Skipped workspace-only runtimes at user scope: "
+                    f"{', '.join(sorted(skipped))}"
+                    f" -- omit --global to install these"
+                )
+                if logger:
+                    logger.warning(msg)
+                else:
+                    _rich_info(msg, symbol="info")
+            if not target_runtimes:
+                if logger:
+                    logger.warning(
+                        "No runtimes support user-scope MCP installation "
+                        "(supported: copilot, codex)"
+                    )
+                else:
+                    _rich_warning(
+                        "No runtimes support user-scope MCP installation "
+                        "(supported: copilot, codex)",
+                        symbol="warning",
+                    )
+                return 0
 
         # Use the new registry operations module for better server detection
         configured_count = 0

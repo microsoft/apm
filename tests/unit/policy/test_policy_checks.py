@@ -15,6 +15,7 @@ from apm_cli.policy.policy_checks import (
     _check_compilation_target,
     _check_dependency_allowlist,
     _check_dependency_denylist,
+    _check_includes_explicit,
     _check_mcp_allowlist,
     _check_mcp_denylist,
     _check_mcp_self_defined,
@@ -42,7 +43,7 @@ from apm_cli.policy.schema import (
 )
 
 
-# ── Helpers ────────────────────────────────────────────────────────
+# -- Helpers --------------------------------------------------------
 
 
 def _write_apm_yml(project: Path, data: dict) -> None:
@@ -89,7 +90,7 @@ def _make_lockfile(deps_data: list[dict]):
     return lock
 
 
-# ── Fixtures ───────────────────────────────────────────────────────
+# -- Fixtures -------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
@@ -100,7 +101,7 @@ def _clear_cache():
     clear_apm_yml_cache()
 
 
-# ── Check 1: dependency-allowlist ──────────────────────────────────
+# -- Check 1: dependency-allowlist ----------------------------------
 
 
 class TestDependencyAllowlist:
@@ -130,7 +131,7 @@ class TestDependencyAllowlist:
         assert result.passed
 
 
-# ── Check 2: dependency-denylist ───────────────────────────────────
+# -- Check 2: dependency-denylist -----------------------------------
 
 
 class TestDependencyDenylist:
@@ -154,7 +155,7 @@ class TestDependencyDenylist:
         assert "denied by pattern" in result.details[0]
 
 
-# ── Check 3: required-packages ─────────────────────────────────────
+# -- Check 3: required-packages -------------------------------------
 
 
 class TestRequiredPackages:
@@ -192,7 +193,7 @@ class TestRequiredPackages:
         assert "org/package" in result.details
 
 
-# ── Check 4: required-packages-deployed ────────────────────────────
+# -- Check 4: required-packages-deployed ----------------------------
 
 
 class TestRequiredPackagesDeployed:
@@ -220,7 +221,7 @@ class TestRequiredPackagesDeployed:
         assert "org/pkg" in result.details[0]
 
     def test_skip_if_not_in_manifest(self):
-        """Required package not in manifest — check 3 handles that."""
+        """Required package not in manifest -- check 3 handles that."""
         deps = _make_dep_refs(["other/pkg"])
         lock = _make_lockfile([{"repo_url": "other/pkg", "deployed_files": ["x.md"]}])
         policy = DependencyPolicy(require=["org/missing"])
@@ -228,7 +229,7 @@ class TestRequiredPackagesDeployed:
         assert result.passed
 
 
-# ── Check 5: required-package-version ──────────────────────────────
+# -- Check 5: required-package-version ------------------------------
 
 
 class TestRequiredPackageVersion:
@@ -284,7 +285,7 @@ class TestRequiredPackageVersion:
         assert len(result.details) > 0
 
 
-# ── Check 6: transitive-depth ──────────────────────────────────────
+# -- Check 6: transitive-depth --------------------------------------
 
 
 class TestTransitiveDepth:
@@ -315,7 +316,7 @@ class TestTransitiveDepth:
         assert "depth 5" in result.details[0]
 
 
-# ── Check 7: mcp-allowlist ─────────────────────────────────────────
+# -- Check 7: mcp-allowlist -----------------------------------------
 
 
 class TestMcpAllowlist:
@@ -338,7 +339,7 @@ class TestMcpAllowlist:
         assert not result.passed
 
 
-# ── Check 8: mcp-denylist ──────────────────────────────────────────
+# -- Check 8: mcp-denylist ------------------------------------------
 
 
 class TestMcpDenylist:
@@ -362,7 +363,7 @@ class TestMcpDenylist:
         assert "denied by pattern" in result.details[0]
 
 
-# ── Check 9: mcp-transport ─────────────────────────────────────────
+# -- Check 9: mcp-transport -----------------------------------------
 
 
 class TestMcpTransport:
@@ -392,7 +393,7 @@ class TestMcpTransport:
         assert result.passed
 
 
-# ── Check 10: mcp-self-defined ─────────────────────────────────────
+# -- Check 10: mcp-self-defined -------------------------------------
 
 
 class TestMcpSelfDefined:
@@ -428,7 +429,7 @@ class TestMcpSelfDefined:
         assert result.passed
 
 
-# ── Check 11: compilation-target ───────────────────────────────────
+# -- Check 11: compilation-target -----------------------------------
 
 
 class TestCompilationTarget:
@@ -474,8 +475,72 @@ class TestCompilationTarget:
         result = _check_compilation_target({}, policy)
         assert result.passed
 
+    # -- Multi-target (list) tests ----------------------------------
 
-# ── Check 12: compilation-strategy ─────────────────────────────────
+    def test_target_list_enforce_present(self):
+        """List target containing the enforced value passes."""
+        policy = CompilationPolicy(
+            target=CompilationTargetPolicy(enforce="claude")
+        )
+        result = _check_compilation_target(
+            {"target": ["claude", "copilot"]}, policy
+        )
+        assert result.passed
+
+    def test_target_list_enforce_missing(self):
+        """List target missing the enforced value fails."""
+        policy = CompilationPolicy(
+            target=CompilationTargetPolicy(enforce="claude")
+        )
+        result = _check_compilation_target(
+            {"target": ["cursor", "copilot"]}, policy
+        )
+        assert not result.passed
+        assert "enforced" in result.details[0]
+
+    def test_target_list_allow_all_in(self):
+        """All items in list target within allow set passes."""
+        policy = CompilationPolicy(
+            target=CompilationTargetPolicy(
+                allow=["claude", "copilot", "cursor"]
+            )
+        )
+        result = _check_compilation_target(
+            {"target": ["claude", "copilot"]}, policy
+        )
+        assert result.passed
+
+    def test_target_list_allow_some_disallowed(self):
+        """List target with items outside allow set fails."""
+        policy = CompilationPolicy(
+            target=CompilationTargetPolicy(allow=["claude"])
+        )
+        result = _check_compilation_target(
+            {"target": ["claude", "copilot"]}, policy
+        )
+        assert not result.passed
+        assert "copilot" in result.message
+
+    def test_target_string_still_works(self):
+        """Backward compat: single string target with enforce."""
+        policy = CompilationPolicy(
+            target=CompilationTargetPolicy(enforce="copilot")
+        )
+        result = _check_compilation_target({"target": "copilot"}, policy)
+        assert result.passed
+
+    def test_target_list_single_item(self):
+        """Single-element list target with matching enforce passes."""
+        policy = CompilationPolicy(
+            target=CompilationTargetPolicy(enforce="copilot")
+        )
+        result = _check_compilation_target(
+            {"target": ["copilot"]}, policy
+        )
+        assert result.passed
+
+
+# -- Check 12: compilation-strategy ---------------------------------
 
 
 class TestCompilationStrategy:
@@ -511,7 +576,7 @@ class TestCompilationStrategy:
         assert result.passed
 
 
-# ── Check 13: source-attribution ───────────────────────────────────
+# -- Check 13: source-attribution -----------------------------------
 
 
 class TestSourceAttribution:
@@ -532,7 +597,7 @@ class TestSourceAttribution:
         assert not result.passed
 
 
-# ── Check 14: required-manifest-fields ─────────────────────────────
+# -- Check 14: required-manifest-fields -----------------------------
 
 
 class TestRequiredManifestFields:
@@ -563,7 +628,7 @@ class TestRequiredManifestFields:
         assert not result.passed
 
 
-# ── Check 15: scripts-policy ───────────────────────────────────────
+# -- Check 15: scripts-policy ---------------------------------------
 
 
 class TestScriptsPolicy:
@@ -587,7 +652,7 @@ class TestScriptsPolicy:
         assert "build" in result.details
 
 
-# ── Check 16: unmanaged-files ──────────────────────────────────────
+# -- Check 16: unmanaged-files --------------------------------------
 
 
 class TestUnmanagedFiles:
@@ -685,12 +750,12 @@ class TestUnmanagedFiles:
         assert "capped" in result.message.lower()
 
 
-# ── Integration: run_policy_checks ─────────────────────────────────
+# -- Integration: run_policy_checks ---------------------------------
 
 
 class TestRunPolicyChecks:
-    def test_returns_all_16_checks(self, tmp_path):
-        """Full run should produce exactly 16 checks."""
+    def test_returns_all_17_checks(self, tmp_path):
+        """Full run should produce exactly 17 checks."""
         _write_apm_yml(
             tmp_path,
             {
@@ -714,7 +779,7 @@ class TestRunPolicyChecks:
 
         policy = ApmPolicy()
         result = run_policy_checks(tmp_path, policy)
-        assert len(result.checks) == 16
+        assert len(result.checks) == 17
         # Default policy = all checks pass
         assert result.passed
 

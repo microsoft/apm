@@ -23,11 +23,12 @@ from __future__ import annotations
 
 import builtins
 import sys
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional
 
 from ..models.results import InstallResult
 from ..utils.console import _rich_error
 from ..utils.diagnostics import DiagnosticCollector
+from .errors import DirectDependencyError, PolicyViolationError
 
 if TYPE_CHECKING:
     from ..core.auth import AuthResolver
@@ -53,7 +54,12 @@ def run_install_pipeline(
     scope=None,
     auth_resolver: "AuthResolver" = None,
     target: str = None,
+    allow_insecure: bool = False,
+    allow_insecure_hosts=(),
     marketplace_provenance: dict = None,
+    protocol_pref=None,
+    allow_protocol_fallback: "Optional[bool]" = None,
+    no_policy: bool = False,
 ):
     """Install APM package dependencies.
 
@@ -79,6 +85,8 @@ def run_install_pipeline(
         scope: InstallScope controlling project vs user deployment
         auth_resolver: Shared auth resolver for caching credentials
         target: Explicit target override from --target CLI flag
+        allow_insecure: Whether direct HTTP dependencies are approved
+        allow_insecure_hosts: Extra approved hosts for transitive HTTP dependencies
         marketplace_provenance: Marketplace provenance data for packages
     """
     # Late import: the ``APM_DEPS_AVAILABLE`` guard in commands/install.py
@@ -135,10 +143,15 @@ def run_install_pipeline(
         scope=scope,
         auth_resolver=auth_resolver,
         target_override=target,
+        allow_insecure=allow_insecure,
+        allow_insecure_hosts=allow_insecure_hosts,
         marketplace_provenance=marketplace_provenance,
+        protocol_pref=protocol_pref,
+        allow_protocol_fallback=allow_protocol_fallback,
         all_apm_deps=all_apm_deps,
         root_has_local_primitives=_root_has_local_primitives,
         old_local_deployed=_old_local_deployed,
+        no_policy=no_policy,
     )
 
     # ------------------------------------------------------------------
@@ -155,11 +168,45 @@ def run_install_pipeline(
 
     try:
         # --------------------------------------------------------------
+        # Phase 1.5: Policy enforcement gate (#827)
+        # Runs after resolve (deps_to_install populated) and before
+        # targets (denied deps never reach integration).
+        # PolicyViolationError halts the pipeline cleanly.
+        # --------------------------------------------------------------
+
+        # Populate direct MCP deps from the manifest so the policy gate
+        # can enforce MCP allow/deny rules on them (S2 fix).
+        ctx.direct_mcp_deps = apm_package.get_mcp_dependencies()
+
+        from .phases import policy_gate as _policy_gate_phase
+        from .phases.policy_gate import PolicyViolationError
+
+        try:
+            _policy_gate_phase.run(ctx)
+        except PolicyViolationError:
+            raise  # re-raise through the outer except -> RuntimeError wrapper
+
+        # --------------------------------------------------------------
         # Phase 2: Target detection + integrator initialization
         # --------------------------------------------------------------
         from .phases import targets as _targets_phase
 
         _targets_phase.run(ctx)
+
+        # --------------------------------------------------------------
+        # Phase 2.5: Post-targets target-aware policy check (#827)
+        # Target/compilation policy rules need the effective target
+        # which is only known after targets.run().  Dependency checks
+        # already ran in policy_gate; this phase filters to
+        # compilation-target checks only.
+        # PolicyViolationError halts the pipeline cleanly.
+        # --------------------------------------------------------------
+        from .phases import policy_target_check as _policy_target_check_phase
+
+        try:
+            _policy_target_check_phase.run(ctx)
+        except PolicyViolationError:
+            raise  # re-raise through the outer except -> RuntimeError wrapper
 
         # --------------------------------------------------------------
         # Seam: read phase outputs into locals for remaining code.
@@ -169,7 +216,17 @@ def run_install_pipeline(
         # --------------------------------------------------------------
         transitive_failures = ctx.transitive_failures
 
-        diagnostics = DiagnosticCollector(verbose=verbose)
+        # Reuse the logger's DiagnosticCollector when available so that
+        # diagnostics recorded earlier in the pipeline (e.g. warn-mode
+        # policy violations pushed by ``logger.policy_violation()`` from
+        # the policy_gate phase, which runs BEFORE this point) surface
+        # in the final install summary.  Block-mode violations also flow
+        # through here, but the pipeline aborts via PolicyViolationError
+        # before render_summary() runs, so the inline ``[x]`` print is
+        # what users see -- no duplication.
+        diagnostics = (
+            logger.diagnostics if logger is not None else DiagnosticCollector(verbose=verbose)
+        )
 
         # Drain transitive failures collected during resolution into diagnostics
         for dep_display, fail_msg in transitive_failures:
@@ -263,6 +320,18 @@ def run_install_pipeline(
 
         _integrate_phase.run(ctx)
 
+        # Fail-loud: if any direct dependency failed validation or
+        # download, render the diagnostic summary and raise so the
+        # caller exits non-zero immediately.  Transitive failures
+        # are allowed to proceed (log + continue).
+        if ctx.direct_dep_failed:
+            if ctx.diagnostics and ctx.diagnostics.has_diagnostics:
+                ctx.diagnostics.render_summary()
+            raise DirectDependencyError(
+                "One or more direct dependencies failed validation. "
+                "Run with --verbose for details."
+            )
+
         # Update .gitignore
         from apm_cli.commands._helpers import _update_gitignore_for_apm_modules
 
@@ -297,5 +366,20 @@ def run_install_pipeline(
 
         return _finalize_phase.run(ctx)
 
+    except PolicyViolationError:
+        # #832: surface policy violations cleanly to the user.  The
+        # outer ``except Exception`` below would otherwise wrap the
+        # message into ``RuntimeError("Failed to resolve APM dependencies:
+        # Install blocked by org policy ...")`` and the caller in
+        # ``commands/install.py`` would wrap it AGAIN as
+        # ``"Failed to install APM dependencies: Failed to resolve APM
+        # dependencies: Install blocked by org policy ..."``.  Re-raising
+        # the typed exception lets the caller render the policy message
+        # as-is.
+        raise
+    except DirectDependencyError:
+        # #946: same pattern -- surface the message as-is instead of
+        # double-wrapping it through the generic RuntimeError below.
+        raise
     except Exception as e:
         raise RuntimeError(f"Failed to resolve APM dependencies: {e}")

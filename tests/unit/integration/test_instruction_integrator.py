@@ -1095,3 +1095,5 @@ class TestClaudeRulesSyncIntegration:
 
         assert result["files_removed"] == 0
         assert result["errors"] == 0
+
+

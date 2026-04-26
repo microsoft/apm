@@ -4,11 +4,38 @@ Tests cover: search, show, list commands with rich console and fallback paths,
 error handling, edge cases.
 """
 
+import re
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
+import click
 from click.testing import CliRunner
 
 from apm_cli.commands.mcp import mcp
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+_URL_RE = re.compile(r"https?://[^\s\[\]<>'\"]+")
+
+
+def _printed_urls(printed: str) -> list:
+    """Parse all http(s) URLs out of console-printed text.
+
+    Returns a list of ``(scheme, hostname)`` tuples produced by
+    ``urllib.parse.urlparse``.  Tests that need to assert a specific URL
+    appears in CLI output should compare against this structured form
+    rather than substring-matching on the raw blob -- the substring form
+    is flagged by CodeQL's ``py/incomplete-url-substring-sanitization``
+    rule as an unsafe sanitiser pattern.
+    """
+    out = []
+    for match in _URL_RE.findall(printed):
+        parsed = urlparse(match)
+        out.append((parsed.scheme, parsed.hostname))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -439,3 +466,244 @@ class TestMcpGroup:
         assert "search" in result.output
         assert "show" in result.output
         assert "list" in result.output
+
+
+# ---------------------------------------------------------------------------
+# `apm mcp install` alias forwarding tests (T-alias)
+# ---------------------------------------------------------------------------
+
+
+class TestMcpInstallAlias:
+    """The `apm mcp install` subcommand is a thin alias that forwards to
+    `apm install --mcp ...`. These tests verify forwarding semantics and the
+    help surface; end-to-end install behaviour is owned by the install command
+    tests.
+    """
+
+    def test_help_shows_alias_message_and_example(self):
+        runner = make_runner()
+        result = runner.invoke(mcp, ["install", "--help"])
+        assert result.exit_code == 0
+        assert "Alias for 'apm install --mcp'" in result.output
+        assert "apm mcp install fetch" in result.output
+
+    def test_forwards_args_to_root_install_with_mcp_flag(self):
+        """Verify the alias invokes the root `cli` with `install --mcp <argv>`."""
+        runner = make_runner()
+        with patch("apm_cli.cli.cli.main") as mock_main:
+            mock_main.return_value = 0
+            result = runner.invoke(
+                mcp,
+                ["install", "fetch", "--", "npx", "-y", "@modelcontextprotocol/server-fetch"],
+            )
+            assert result.exit_code == 0
+            mock_main.assert_called_once()
+            kwargs = mock_main.call_args.kwargs
+            forwarded = kwargs.get("args") or mock_main.call_args.args[0]
+            assert forwarded[0] == "install"
+            assert forwarded[1] == "--mcp"
+            assert "fetch" in forwarded
+            assert "npx" in forwarded
+            assert "@modelcontextprotocol/server-fetch" in forwarded
+
+    def test_forwards_transport_options(self):
+        runner = make_runner()
+        with patch("apm_cli.cli.cli.main") as mock_main:
+            mock_main.return_value = 0
+            result = runner.invoke(
+                mcp,
+                ["install", "api", "--transport", "http", "--url", "https://example.com/mcp"],
+            )
+            assert result.exit_code == 0
+            forwarded = mock_main.call_args.kwargs.get("args") or mock_main.call_args.args[0]
+            assert forwarded[:3] == ["install", "--mcp", "api"]
+            assert "--transport" in forwarded
+            assert "http" in forwarded
+            assert "--url" in forwarded
+            assert "https://example.com/mcp" in forwarded
+
+    def test_propagates_systemexit_nonzero(self):
+        """Failures from the underlying install propagate as non-zero exit codes."""
+        runner = make_runner()
+        with patch("apm_cli.cli.cli.main", side_effect=SystemExit(2)):
+            result = runner.invoke(mcp, ["install", "foo", "--", "npx", "server"])
+            assert result.exit_code == 2
+
+    def test_propagates_click_exception(self):
+        """ClickException (e.g. conflict errors) propagates with its exit code."""
+        runner = make_runner()
+        err = click.UsageError("conflicting options")
+        with patch("apm_cli.cli.cli.main", side_effect=err):
+            result = runner.invoke(mcp, ["install", "foo", "--transport", "stdio"])
+            assert result.exit_code == err.exit_code
+            assert "conflicting options" in result.output
+
+    def test_success_exit_code_is_zero(self):
+        runner = make_runner()
+        with patch("apm_cli.cli.cli.main", return_value=0):
+            result = runner.invoke(mcp, ["install", "foo", "--", "npx", "server"])
+            assert result.exit_code == 0
+
+    def test_double_dash_preserved_in_forwarded_args(self):
+        """The ``--`` separator must appear in forwarded args so Click
+        does not re-parse post-``--`` tokens (e.g. ``-y``) as options.
+        Regression test for PR #810 item 3."""
+        runner = make_runner()
+        fake_argv = ["apm", "mcp", "install", "fetch", "--",
+                      "npx", "-y", "@mcp/server-fetch"]
+        with patch("apm_cli.commands.install._get_invocation_argv",
+                    return_value=fake_argv), \
+             patch("apm_cli.cli.cli.main", return_value=0) as mock_main:
+            result = runner.invoke(
+                mcp,
+                ["install", "fetch", "--", "npx", "-y", "@mcp/server-fetch"],
+            )
+        assert result.exit_code == 0
+        forwarded = mock_main.call_args.kwargs.get("args")
+        # The ``--`` must be present between pre- and post-dash tokens.
+        assert "--" in forwarded
+        dd_idx = forwarded.index("--")
+        assert forwarded[:dd_idx] == ["install", "--mcp", "fetch"]
+        assert list(forwarded[dd_idx + 1:]) == ["npx", "-y", "@mcp/server-fetch"]
+
+    def test_dry_run_with_post_dash_args_no_option_error(self):
+        """``apm mcp install fetch --dry-run -- npx -y @mcp/server-fetch``
+        must not raise ``No such option: -y``.
+        Regression test for PR #810 item 3."""
+        runner = make_runner()
+        fake_argv = ["apm", "mcp", "install", "fetch", "--dry-run", "--",
+                      "npx", "-y", "@mcp/server-fetch"]
+        with patch("apm_cli.commands.install._get_invocation_argv",
+                    return_value=fake_argv), \
+             patch("apm_cli.cli.cli.main", return_value=0) as mock_main:
+            result = runner.invoke(
+                mcp,
+                ["install", "fetch", "--dry-run", "--",
+                 "npx", "-y", "@mcp/server-fetch"],
+            )
+        assert result.exit_code == 0
+        assert "No such option" not in (result.output or "")
+        forwarded = mock_main.call_args.kwargs.get("args")
+        assert "--" in forwarded
+        dd_idx = forwarded.index("--")
+        # --dry-run must be before the separator
+        assert "--dry-run" in forwarded[:dd_idx]
+        assert forwarded[dd_idx + 1:] == ["npx", "-y", "@mcp/server-fetch"]
+
+    def test_forwards_registry_flag_to_root_install(self):
+        """``apm mcp install fetch --registry https://x.io ...`` must
+        propagate ``--registry`` through the alias forwarding so the
+        root ``apm install --mcp`` handler validates and persists it.
+        Regression for PR #810 follow-up item 4a."""
+        runner = make_runner()
+        fake_argv = ["apm", "mcp", "install", "fetch",
+                     "--registry", "https://r.example.com",
+                     "--transport", "stdio",
+                     "--", "npx", "fetch"]
+        with patch("apm_cli.commands.install._get_invocation_argv",
+                   return_value=fake_argv), \
+             patch("apm_cli.cli.cli.main", return_value=0) as mock_main:
+            result = runner.invoke(
+                mcp,
+                ["install", "fetch",
+                 "--registry", "https://r.example.com",
+                 "--transport", "stdio",
+                 "--", "npx", "fetch"],
+            )
+        assert result.exit_code == 0
+        forwarded = mock_main.call_args.kwargs.get("args")
+        assert forwarded[:3] == ["install", "--mcp", "fetch"]
+        assert "--registry" in forwarded
+        idx = forwarded.index("--registry")
+        assert forwarded[idx + 1] == "https://r.example.com"
+        # --- separator preserved so post-dash tokens are not re-parsed
+        assert "--" in forwarded
+        dd = forwarded.index("--")
+        assert forwarded[dd + 1:] == ["npx", "fetch"]
+
+
+# ---------------------------------------------------------------------------
+# Registry env-var honouring (regression for #813)
+# ---------------------------------------------------------------------------
+
+class TestMcpRegistryEnvVar:
+    """All apm mcp commands must pass `RegistryIntegration()` with no positional URL,
+    so the ``MCP_REGISTRY_URL`` fallback in ``SimpleRegistryClient`` actually fires.
+    Regression for issue #813.
+    """
+
+    def _assert_no_positional_url(self, mock_cls):
+        """Assert RegistryIntegration was constructed without a positional URL arg."""
+        assert mock_cls.called, "RegistryIntegration was not constructed"
+        for call in mock_cls.call_args_list:
+            args, kwargs = call
+            assert not args, (
+                f"RegistryIntegration() called with positional url={args!r}; "
+                "must be no-arg so MCP_REGISTRY_URL env var fallback fires"
+            )
+            url = kwargs.get("registry_url")
+            assert url is None, (
+                f"RegistryIntegration(registry_url={url!r}) hardcodes the URL; "
+                "must be None so MCP_REGISTRY_URL env var fallback fires"
+            )
+
+    def test_search_uses_no_arg_constructor(self):
+        runner = make_runner()
+        with patch_registry(search_result=FAKE_SERVERS) as mock_cls:
+            runner.invoke(mcp, ["search", "cool"])
+        self._assert_no_positional_url(mock_cls)
+
+    def test_show_uses_no_arg_constructor(self):
+        runner = make_runner()
+        with patch_registry(detail_result=FAKE_SERVER_DETAIL) as mock_cls:
+            runner.invoke(mcp, ["show", "io.github.acme/cool-server"])
+        self._assert_no_positional_url(mock_cls)
+
+    def test_list_uses_no_arg_constructor(self):
+        runner = make_runner()
+        with patch_registry(list_result=FAKE_SERVERS) as mock_cls:
+            runner.invoke(mcp, ["list"])
+        self._assert_no_positional_url(mock_cls)
+
+    def test_search_diag_line_when_env_var_set(self, monkeypatch):
+        """When MCP_REGISTRY_URL is set, search emits a one-line registry diagnostic."""
+        monkeypatch.setenv("MCP_REGISTRY_URL", "https://mcp.internal.example.com")
+        runner = make_runner()
+        mock_console = MagicMock()
+        # Make registry.client.registry_url reflect the env var (RegistryIntegration is mocked out).
+        with patch_registry(search_result=FAKE_SERVERS) as mock_cls:
+            mock_cls.return_value.client.registry_url = "https://mcp.internal.example.com"
+            with patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
+                runner.invoke(mcp, ["search", "x"])
+        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        assert "Registry:" in printed
+        assert ("https", "mcp.internal.example.com") in _printed_urls(printed)
+
+    def test_search_no_diag_when_env_var_unset(self, monkeypatch):
+        """When MCP_REGISTRY_URL is unset, search stays quiet about the registry URL."""
+        monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
+        runner = make_runner()
+        mock_console = MagicMock()
+        with patch_registry(search_result=FAKE_SERVERS) as mock_cls:
+            mock_cls.return_value.client.registry_url = "https://api.mcp.github.com"
+            with patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
+                runner.invoke(mcp, ["search", "x"])
+        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        assert "Registry:" not in printed
+
+    def test_search_request_exception_mentions_env_var_when_set(self, monkeypatch):
+        """RequestException error path names the URL and hints at MCP_REGISTRY_URL when set."""
+        import requests as _requests
+        monkeypatch.setenv("MCP_REGISTRY_URL", "https://busted.internal.example.com")
+        runner = make_runner()
+        mock_console = MagicMock()
+        with patch_registry() as mock_cls:
+            mock_cls.return_value.client.registry_url = "https://busted.internal.example.com"
+            mock_cls.return_value.search_packages.side_effect = _requests.ConnectionError("boom")
+            with patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
+                result = runner.invoke(mcp, ["search", "x"])
+        assert result.exit_code == 1
+        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        assert "Could not reach MCP registry" in printed
+        assert ("https", "busted.internal.example.com") in _printed_urls(printed)
+        assert "MCP_REGISTRY_URL" in printed

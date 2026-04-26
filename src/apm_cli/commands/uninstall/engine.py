@@ -92,7 +92,7 @@ def _dry_run_uninstall(packages_to_remove, apm_modules_dir, logger):
         potential_orphans = builtins.set()
         while queue:
             parent_url = queue.pop()
-            for dep in lockfile.get_all_dependencies():
+            for dep in lockfile.get_package_dependencies():
                 key = dep.get_unique_key()
                 if key in potential_orphans:
                     continue
@@ -165,7 +165,7 @@ def _cleanup_transitive_orphans(lockfile, packages_to_remove, apm_modules_dir, a
     queue = builtins.list(removed_repo_urls)
     while queue:
         parent_url = queue.pop()
-        for dep in lockfile.get_all_dependencies():
+        for dep in lockfile.get_package_dependencies():
             key = dep.get_unique_key()
             if key in orphans:
                 continue
@@ -190,7 +190,7 @@ def _cleanup_transitive_orphans(lockfile, packages_to_remove, apm_modules_dir, a
     except Exception:
         pass
 
-    for dep in lockfile.get_all_dependencies():
+    for dep in lockfile.get_package_dependencies():
         key = dep.get_unique_key()
         if key not in orphans and dep.repo_url not in removed_repo_urls:
             remaining_deps.add(key)
@@ -354,7 +354,7 @@ def _sync_integrations_after_uninstall(apm_package, project_root, all_deployed_f
     return counts
 
 
-def _cleanup_stale_mcp(apm_package, lockfile, lockfile_path, old_mcp_servers, modules_dir=None):
+def _cleanup_stale_mcp(apm_package, lockfile, lockfile_path, old_mcp_servers, modules_dir=None, scope=None):
     """Remove MCP servers that are no longer needed after uninstall."""
     if not old_mcp_servers:
         return
@@ -368,5 +368,5 @@ def _cleanup_stale_mcp(apm_package, lockfile, lockfile_path, old_mcp_servers, mo
     new_mcp_servers = MCPIntegrator.get_server_names(all_remaining_mcp)
     stale_servers = old_mcp_servers - new_mcp_servers
     if stale_servers:
-        MCPIntegrator.remove_stale(stale_servers)
+        MCPIntegrator.remove_stale(stale_servers, scope=scope)
     MCPIntegrator.update_lockfile(new_mcp_servers, lockfile_path)
