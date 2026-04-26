@@ -580,6 +580,10 @@ class DependencyReference:
         # Parse the git URL using the standard parser
         dep = cls.parse(git_url)
         dep.allow_insecure = allow_insecure
+        # Object-form ``- git:`` is an explicit Git resolver pin, even when
+        # a top-level ``registries.default`` is set. Mark source so the
+        # default-routing pass in apm_package.py leaves it alone.
+        dep.source = "git"
 
         # Apply overrides from the object fields
         if ref_override is not None:

@@ -59,6 +59,144 @@ def clear_apm_yml_cache() -> None:
     _apm_yml_cache.clear()
 
 
+def _parse_registries_block(data: dict, apm_yml_path: Path):
+    """Parse the top-level ``registries:`` block per design §3.1.
+
+    Schema::
+
+        registries:
+          corp-main:
+            url: https://registry.corp.example.com/apm
+          corp-other:
+            url: https://other.example.com/apm
+          default: corp-main           # optional; name of one of the entries
+
+    Returns ``(registries_map, default_name)`` where:
+    - ``registries_map`` is ``{name: url}`` excluding the special ``default`` key.
+    - ``default_name`` is either the ``default`` value (when it's a registered
+      name) OR ``None``.
+
+    Absent block returns ``(None, None)`` — the default-routing pass is a
+    no-op and a project sees zero behavior change (invariant §2.1.1).
+    """
+    raw = data.get('registries')
+    if raw is None:
+        return None, None
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"Top-level 'registries:' block in {apm_yml_path} must be a "
+            f"mapping (name -> {{url: ...}})"
+        )
+
+    default_value = raw.get('default')
+    registries_map: Dict[str, str] = {}
+    for name, body in raw.items():
+        if name == 'default':
+            continue
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(
+                f"Registry name in 'registries:' block must be a non-empty "
+                f"string (got {name!r})"
+            )
+        if not isinstance(body, dict):
+            raise ValueError(
+                f"Registry {name!r} must be a mapping with at least 'url:' "
+                f"(got {type(body).__name__})"
+            )
+        url = body.get('url')
+        if not isinstance(url, str) or not url.strip():
+            raise ValueError(
+                f"Registry {name!r} is missing required field 'url:'"
+            )
+        url = url.strip()
+        if not url.startswith(('https://', 'http://')):
+            raise ValueError(
+                f"Registry {name!r} URL must start with https:// or http:// "
+                f"(got {url!r})"
+            )
+        # Reject any unknown keys to catch typos early.
+        unknown = set(body.keys()) - {'url'}
+        if unknown:
+            raise ValueError(
+                f"Registry {name!r} has unknown fields: {sorted(unknown)} "
+                f"(known fields: ['url'])"
+            )
+        registries_map[name] = url
+
+    default_name: Optional[str] = None
+    if default_value is not None:
+        if not isinstance(default_value, str) or not default_value.strip():
+            raise ValueError(
+                f"'registries.default' in {apm_yml_path} must be a non-empty "
+                f"string naming one of the configured registries"
+            )
+        default_name = default_value.strip()
+        if default_name not in registries_map:
+            raise ValueError(
+                f"'registries.default: {default_name}' refers to an "
+                f"unconfigured registry. Configured: "
+                f"{sorted(registries_map.keys())}"
+            )
+
+    if not registries_map and default_name is None:
+        # An empty ``registries: {}`` block is harmless but suspicious.
+        return None, None
+
+    return registries_map, default_name
+
+
+def _route_unscoped_to_default_registry(
+    apm_dep_list: list,
+    default_name: str,
+    apm_yml_path: Path,
+) -> None:
+    """Flip the resolver of every still-unrouted shorthand APM dep to the default registry.
+
+    Per design §3.2: when ``registries.default`` is set, every shorthand
+    string entry that doesn't already specify a resolver routes through the
+    default registry. Object forms (``- git:`` / ``- path:`` / ``- registry:``)
+    and the ``@<name>`` shorthand have already set ``source`` explicitly and
+    are left alone here.
+
+    Modifies the list in place. Raises ``ValueError`` with a clear remediation
+    if any candidate has a non-semver ref or no version constraint at all.
+    """
+    from ..deps.registry.semver import is_semver_range
+    from .dependency.reference import DependencyReference
+
+    for dep in apm_dep_list:
+        if not isinstance(dep, DependencyReference):
+            continue
+        # Already routed (registry / local / explicit git via @<name> or
+        # object form). The only thing we change is "source unset, looks like
+        # plain shorthand" candidates.
+        if dep.source is not None:
+            continue
+        if dep.is_local or dep.is_virtual:
+            # Virtual packages MUST use object form to route through a
+            # registry; shorthand virtuals stay on Git.
+            continue
+        if dep.reference is None or not dep.reference.strip():
+            raise ValueError(
+                f"{apm_yml_path}: dep {dep.repo_url!r} has no version "
+                f"constraint, but 'registries.default' is set. A registry-"
+                f"routed entry must specify a #<semver>. Either add a version "
+                f"(e.g. '{dep.repo_url}#^1.0') or pin to Git with the "
+                f"'- git:' object form."
+            )
+        if not is_semver_range(dep.reference):
+            raise ValueError(
+                f"{apm_yml_path}: dep '{dep.repo_url}#{dep.reference}' "
+                f"routes through the default registry {default_name!r} but "
+                f"'{dep.reference}' is not a semver version or range. Use "
+                f"an explicit '- git:' entry for branch or commit-SHA "
+                f"pinning, or change the ref to a semver version/range "
+                f"(e.g. ^1.0, ~1.2.3, 1.x)."
+            )
+        dep.source = "registry"
+        dep.registry_name = default_name
+
+
 @dataclass
 class APMPackage:
     """Represents an APM package with metadata."""
@@ -76,6 +214,14 @@ class APMPackage:
     target: Optional[Union[str, List[str]]] = None  # Target agent(s): single string or list (applies to compile and install)
     type: Optional[PackageContentType] = None  # Package content type: instructions, skill, hybrid, or prompts
     includes: Optional[Union[str, List[str]]] = None  # Include-only manifest: 'auto' or list of repo paths
+
+    # Top-level ``registries:`` block per docs/proposals/registry-api.md §3.1.
+    # ``registries`` maps name -> base URL; ``default_registry`` is the name to
+    # which string-shorthand entries route when they don't specify a scope.
+    # Both default to None — a project without a ``registries:`` block sees
+    # zero behavior change (invariant §2.1.1).
+    registries: Optional[Dict[str, str]] = None
+    default_registry: Optional[str] = None
 
     @classmethod
     def from_apm_yml(cls, apm_yml_path: Path) -> "APMPackage":
@@ -115,7 +261,10 @@ class APMPackage:
             raise ValueError("Missing required field 'name' in apm.yml")
         if 'version' not in data:
             raise ValueError("Missing required field 'version' in apm.yml")
-        
+
+        # Top-level ``registries:`` block per design §3.1.
+        registries, default_registry = _parse_registries_block(data, apm_yml_path)
+
         # Parse dependencies
         dependencies = None
         if 'dependencies' in data and isinstance(data['dependencies'], dict):
@@ -212,6 +361,22 @@ class APMPackage:
             else:
                 raise ValueError("'includes' must be 'auto' or a list of strings")
 
+        # Default-registry routing (design §3.2): once the registries: block
+        # has been parsed, walk every still-unrouted shorthand APM dep and,
+        # if a default registry is set, flip its source to "registry". Object
+        # forms (``- git:`` / ``- path:`` / ``- registry:``) and the
+        # ``@<name>`` shorthand have already set source explicitly and are
+        # left alone here.
+        if default_registry is not None:
+            for bucket in (dependencies, dev_dependencies):
+                if not bucket:
+                    continue
+                apm_list = bucket.get('apm') if isinstance(bucket, dict) else None
+                if isinstance(apm_list, list):
+                    _route_unscoped_to_default_registry(
+                        apm_list, default_registry, apm_yml_path
+                    )
+
         result = cls(
             name=data['name'],
             version=data['version'],
@@ -225,6 +390,8 @@ class APMPackage:
             target=data.get('target'),
             type=pkg_type,
             includes=includes,
+            registries=registries,
+            default_registry=default_registry,
         )
         _apm_yml_cache[resolved] = result
         return result

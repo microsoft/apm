@@ -294,12 +294,15 @@ class TestObjectFormRegistry:
             with pytest.raises(ValueError):
                 DependencyReference.parse_from_dict(entry)
 
-    def test_existing_git_object_form_unchanged(self):
-        # Sanity check: this PR must not change existing object-form git parsing.
+    def test_existing_git_object_form_marks_source_git(self):
+        # Object-form ``- git:`` now explicitly sets source="git" so the
+        # default-registry routing pass leaves it alone. Per design,
+        # source=None and source="git" are equivalent (legacy default), so
+        # this is observable but functionally compatible.
         d = DependencyReference.parse_from_dict(
             {"git": "https://github.com/owner/repo.git", "ref": "v1.0"}
         )
-        assert d.source is None
+        assert d.source == "git"
         assert d.registry_name is None
 
     def test_existing_local_object_form_unchanged(self):
