@@ -167,7 +167,8 @@ def get_effective_type(package_info) -> "PackageContentType":
     
     Determines type by:
     1. Package has SKILL.md (PackageType.CLAUDE_SKILL or HYBRID) -> SKILL
-    2. Otherwise -> INSTRUCTIONS (compile to AGENTS.md only)
+    2. Package is a SKILL_BUNDLE or MARKETPLACE_PLUGIN (has skills/) -> SKILL
+    3. Otherwise -> INSTRUCTIONS (compile to AGENTS.md only)
     
     Args:
         package_info: PackageInfo object containing package metadata
@@ -180,7 +181,14 @@ def get_effective_type(package_info) -> "PackageContentType":
     # Check if package has SKILL.md (via package_type field)
     # PackageType.CLAUDE_SKILL = has SKILL.md only
     # PackageType.HYBRID = has both apm.yml AND SKILL.md
-    if package_info.package_type in (PackageType.CLAUDE_SKILL, PackageType.HYBRID):
+    # PackageType.SKILL_BUNDLE = has skills/<name>/SKILL.md (nested bundle)
+    # PackageType.MARKETPLACE_PLUGIN = plugin with skills
+    if package_info.package_type in (
+        PackageType.CLAUDE_SKILL,
+        PackageType.HYBRID,
+        PackageType.SKILL_BUNDLE,
+        PackageType.MARKETPLACE_PLUGIN,
+    ):
         return PackageContentType.SKILL
     
     # Default to INSTRUCTIONS for packages without SKILL.md

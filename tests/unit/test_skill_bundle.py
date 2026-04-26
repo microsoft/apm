@@ -193,8 +193,8 @@ class TestSkillBundleValidation:
         assert result.package.name == "my-awesome-bundle"
         assert result.package.version == "0.0.0"
 
-    def test_name_mismatch_error(self, tmp_path):
-        """Frontmatter name != dir name -> error."""
+    def test_name_mismatch_warning(self, tmp_path):
+        """Frontmatter name != dir name -> warning (not error)."""
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
         sd = skills_dir / "actual-name"
@@ -203,8 +203,8 @@ class TestSkillBundleValidation:
             "---\nname: wrong-name\ndescription: test\n---\n# x\n"
         )
         result = validate_apm_package(tmp_path)
-        assert not result.is_valid
-        assert any("does not match directory name" in e for e in result.errors)
+        assert result.is_valid  # warnings don't fail validation
+        assert any("does not match directory name" in w for w in result.warnings)
 
     def test_missing_description_warning(self, tmp_path):
         """No description in frontmatter -> warning (not error)."""
@@ -219,8 +219,8 @@ class TestSkillBundleValidation:
         assert result.is_valid  # warnings don't fail
         assert any("missing 'description'" in w for w in result.warnings)
 
-    def test_non_ascii_frontmatter_error(self, tmp_path):
-        """Non-ASCII in frontmatter -> error."""
+    def test_non_ascii_frontmatter_warning(self, tmp_path):
+        """Non-ASCII in frontmatter -> warning (not error)."""
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
         sd = skills_dir / "unicode-skill"
@@ -229,8 +229,8 @@ class TestSkillBundleValidation:
             "---\nname: unicode-skill\ndescription: Ünïcödé description\n---\n# x\n"
         )
         result = validate_apm_package(tmp_path)
-        assert not result.is_valid
-        assert any("non-ASCII" in e for e in result.errors)
+        assert result.is_valid  # warnings don't fail validation
+        assert any("non-ASCII" in w for w in result.warnings)
 
     def test_path_traversal_in_dir_name(self, tmp_path):
         """skills/../etc -> path traversal rejected."""
@@ -267,19 +267,20 @@ class TestSkillBundleValidation:
         assert result.is_valid
 
     def test_no_valid_skills_all_fail(self, tmp_path):
-        """All skill dirs fail validation -> invalid bundle."""
+        """All skill dirs fail validation (unparseable SKILL.md) -> invalid bundle."""
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
         sd = skills_dir / "bad-skill"
         sd.mkdir()
+        # Write invalid YAML frontmatter that will fail to parse
         (sd / "SKILL.md").write_text(
-            "---\nname: wrong-name\ndescription: Ünïcödé\n---\n# x\n"
+            "---\n  invalid:\n    yaml: [unclosed\n---\n# x\n"
         )
         result = validate_apm_package(tmp_path)
         assert not result.is_valid
 
     def test_mixed_valid_and_invalid_skills(self, tmp_path):
-        """Some skills valid, some invalid -> errors for invalid, package still created."""
+        """Some skills valid, some with name mismatch -> warnings for mismatch, package still created."""
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
         # Valid skill
@@ -288,16 +289,17 @@ class TestSkillBundleValidation:
         (sd1 / "SKILL.md").write_text(
             "---\nname: good-skill\ndescription: good\n---\n# Good\n"
         )
-        # Invalid skill (name mismatch)
+        # Mismatched skill (name mismatch -> warning)
         sd2 = skills_dir / "bad-skill"
         sd2.mkdir()
         (sd2 / "SKILL.md").write_text(
             "---\nname: wrong\ndescription: bad\n---\n# Bad\n"
         )
         result = validate_apm_package(tmp_path)
-        # Has errors for the bad skill but valid overall (good-skill passed)
+        # Valid overall -- name mismatch is a warning, not error
         assert result.package is not None
-        assert any("does not match" in e for e in result.errors)
+        assert result.is_valid
+        assert any("does not match" in w for w in result.warnings)
 
     def test_invalid_apm_yml_errors(self, tmp_path):
         """Invalid apm.yml in SKILL_BUNDLE -> error."""

@@ -508,9 +508,10 @@ def _validate_skill_bundle(package_path: Path, result: ValidationResult) -> Vali
         # Name field must equal directory name (if present)
         fm_name = post.metadata.get("name", "")
         if fm_name and fm_name != name:
-            result.add_error(
+            result.add_warning(
                 f"skills/{name}/SKILL.md: frontmatter name '{fm_name}' "
-                f"does not match directory name '{name}'"
+                f"does not match directory name '{name}' "
+                f"(APM will use directory name '{name}' for deployment)"
             )
 
         # Description must be present
@@ -520,10 +521,11 @@ def _validate_skill_bundle(package_path: Path, result: ValidationResult) -> Vali
                 f"skills/{name}/SKILL.md: missing 'description' in frontmatter"
             )
 
-        # ASCII-only check on frontmatter values
+        # ASCII-only check on frontmatter values (warn only -- many real-world
+        # packages use non-ASCII descriptions, e.g. i18n skill repos)
         for key, val in post.metadata.items():
             if isinstance(val, str) and not val.isascii():
-                result.add_error(
+                result.add_warning(
                     f"skills/{name}/SKILL.md: frontmatter field '{key}' "
                     f"contains non-ASCII characters"
                 )
