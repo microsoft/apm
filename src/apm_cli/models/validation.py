@@ -433,13 +433,24 @@ def _validate_hybrid_package(
         import frontmatter
 
         with open(skill_md_path, "r", encoding="utf-8") as f:
-            post = frontmatter.load(f)
+            frontmatter.load(f)  # Parse only to surface malformed frontmatter.
 
-        # Metadata precedence: SKILL.md frontmatter wins for agentskills.io
-        # fields (description, allowed-tools) when apm.yml does not set them.
-        skill_description = post.metadata.get("description")
-        if skill_description and not package.description:
-            package.description = skill_description
+        # Metadata model for HYBRID packages: apm.yml.description and
+        # SKILL.md frontmatter description are INDEPENDENT fields with
+        # different consumers and MUST NOT be merged.
+        #
+        #   * apm.yml.description -> human tagline rendered by `apm view`,
+        #     `apm search`, `apm deps list`, marketplace/registry indexes.
+        #   * SKILL.md description -> agent-runtime invocation matcher
+        #     (per agentskills.io), consumed verbatim by Claude/Copilot/etc.
+        #     APM never reads or mutates this field; the file is copied
+        #     byte-for-byte into <target>/skills/<name>/ at integrate time.
+        #
+        # Authors who ship a HYBRID package are expected to populate both
+        # descriptions independently. The pack-time check in
+        # `apm_cli.bundle.packer` warns when apm.yml.description is missing
+        # so the human-facing surfaces (search/listings) do not degrade
+        # silently while the agent runtime keeps working.
 
     except Exception as e:
         result.add_warning(f"Could not parse {SKILL_MD_FILENAME} frontmatter: {e}")

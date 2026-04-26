@@ -937,3 +937,92 @@ class TestPackBundleStripsLocalFields:
         # Original lockfile object is not mutated
         assert lock.local_deployed_files == [".github/agents/own.md"]
         assert lock.local_deployed_file_hashes == {".github/agents/own.md": "h"}
+
+
+class TestPackHybridDescriptionWarning:
+    """pack_bundle warns when a HYBRID package is missing apm.yml.description.
+
+    HYBRID layout = apm.yml + SKILL.md at project root (no `.apm/`).
+    apm.yml.description and SKILL.md description are independent fields
+    with different consumers (CLI/search vs. agent invocation matcher).
+    A package can pack and ship without apm.yml.description, but its
+    `apm view` / `apm search` / marketplace listing will degrade to
+    "(no description)" while Claude/Copilot still invoke the skill
+    correctly. The pack-time warning catches this for the AUTHOR -- the
+    only actor who can fix it -- without forcing every CONSUMER to see
+    noise on `apm install`.
+    """
+
+    def _build_hybrid(self, tmp_path: Path, *, apm_desc: str | None, skill_desc: str | None) -> Path:
+        project = tmp_path / "project"
+        project.mkdir()
+        apm_yml: dict = {"name": "genesis", "version": "1.0.0"}
+        if apm_desc is not None:
+            apm_yml["description"] = apm_desc
+        (project / "apm.yml").write_text(yaml.dump(apm_yml), encoding="utf-8")
+        skill_body = "---\n"
+        if skill_desc is not None:
+            skill_body += f"description: {skill_desc}\n"
+        skill_body += "---\n# Skill\n"
+        (project / "SKILL.md").write_text(skill_body, encoding="utf-8")
+
+        lockfile = LockFile()
+        dep = LockedDependency(repo_url="owner/repo", deployed_files=[])
+        lockfile.add_dependency(dep)
+        lockfile.write(project / "apm.lock.yaml")
+        return project
+
+    def test_warning_fires_when_apm_yml_missing_description(self, tmp_path):
+        """SKILL.md has description, apm.yml does not -- warn the author."""
+        project = self._build_hybrid(
+            tmp_path, apm_desc=None, skill_desc="Genesis architecture skill"
+        )
+        out = tmp_path / "build"
+
+        recorded: list[str] = []
+
+        class _Logger:
+            def warning(self, msg):
+                recorded.append(msg)
+
+        pack_bundle(project, out, dry_run=True, logger=_Logger())
+
+        assert any("apm.yml is missing 'description'" in m for m in recorded), (
+            f"Expected pack-time HYBRID warning, got: {recorded}"
+        )
+
+    def test_no_warning_when_apm_yml_has_description(self, tmp_path):
+        """apm.yml.description present -- silent regardless of SKILL.md."""
+        project = self._build_hybrid(
+            tmp_path, apm_desc="short tagline", skill_desc="long invocation matcher"
+        )
+        out = tmp_path / "build"
+
+        recorded: list[str] = []
+
+        class _Logger:
+            def warning(self, msg):
+                recorded.append(msg)
+
+        pack_bundle(project, out, dry_run=True, logger=_Logger())
+
+        assert not any("missing 'description'" in m for m in recorded), (
+            f"Did not expect HYBRID warning, got: {recorded}"
+        )
+
+    def test_no_warning_when_skill_md_also_missing_description(self, tmp_path):
+        """If neither has description, no warning -- nothing to nudge about."""
+        project = self._build_hybrid(tmp_path, apm_desc=None, skill_desc=None)
+        out = tmp_path / "build"
+
+        recorded: list[str] = []
+
+        class _Logger:
+            def warning(self, msg):
+                recorded.append(msg)
+
+        pack_bundle(project, out, dry_run=True, logger=_Logger())
+
+        assert not any("missing 'description'" in m for m in recorded), (
+            f"Did not expect HYBRID warning when SKILL.md also lacks description, got: {recorded}"
+        )

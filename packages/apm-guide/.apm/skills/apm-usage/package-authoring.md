@@ -17,10 +17,22 @@ does NOT dissect the bundle into top-level primitives. Co-located
 subdirectories like `agents/`, `assets/`, `scripts/` are bundle
 resources, not standalone primitives.
 
-When apm.yml and SKILL.md frontmatter both define a field:
-- apm.yml wins for `name`, `version`, `license`, `dependencies`, `scripts`.
-- SKILL.md frontmatter wins for `description`, `allowed-tools`.
-- Conflicts on shared fields go to apm.yml; verbose mode warns.
+In a HYBRID package, `apm.yml` and `SKILL.md` each own their
+`description` field **independently** -- APM never merges or
+backfills one from the other:
+- `apm.yml.description` is a short human-facing tagline rendered by
+  `apm view`, `apm search`, `apm deps list`, and registry listings.
+- `SKILL.md` `description` (frontmatter) is the agent-runtime
+  invocation matcher (per agentskills.io). APM copies `SKILL.md`
+  byte-for-byte and never reads or mutates this field.
+- `allowed-tools` lives exclusively in `SKILL.md` frontmatter; there
+  is no apm.yml-side equivalent.
+- `name`, `version`, `license`, `dependencies`, `scripts` live
+  exclusively in `apm.yml`.
+
+Populate both descriptions when you ship a HYBRID package. `apm pack`
+warns when `apm.yml.description` is missing so listings do not
+degrade silently while the agent runtime keeps working.
 
 ## Package directory structure (APM layout)
 

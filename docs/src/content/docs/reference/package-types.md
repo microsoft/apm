@@ -68,15 +68,33 @@ code-review-skill/
 agents, assets, or scripts. The skill's internal layout is part of its
 contract -- APM will not rearrange it.
 
-### Metadata precedence (HYBRID packages)
+### Metadata model (HYBRID packages)
 
-When both `apm.yml` and `SKILL.md` frontmatter are present, fields are
-merged with a clear precedence rule:
+`apm.yml` and `SKILL.md` each own their `description` field
+**independently** -- APM never merges or backfills one from the other.
+The two strings serve different consumers:
 
-- **apm.yml wins** for: `name`, `version`, `license`, `dependencies`, `scripts`.
-- **SKILL.md frontmatter wins** for: `description`, `allowed-tools`.
-- On any shared-field conflict, apm.yml takes precedence and APM emits a
-  verbose warning so the author can reconcile.
+- `apm.yml.description` is a short human-facing tagline rendered by
+  `apm view`, `apm search`, `apm deps list`, and registry/marketplace
+  listings.
+- `SKILL.md` `description` (frontmatter) is the agent-runtime
+  invocation matcher consumed by Claude, Copilot, and other runtimes
+  per the agentskills.io spec. APM copies `SKILL.md` byte-for-byte
+  into `<target>/skills/<name>/` and never reads or mutates this
+  field.
+
+Other apm.yml fields (`name`, `version`, `license`, `dependencies`,
+`scripts`) are owned exclusively by `apm.yml` -- there is no
+SKILL.md-side equivalent and nothing to merge. `allowed-tools` lives
+exclusively in `SKILL.md` frontmatter and is consumed by the agent
+runtime.
+
+When you ship a HYBRID package, populate both descriptions
+independently: keep `apm.yml.description` to a short tagline (under
+~80 characters) and write `SKILL.md` in whatever length and tone the
+agent runtime expects. `apm pack` warns when `apm.yml.description` is
+missing so the human-facing surfaces do not degrade silently while
+the agent runtime keeps working.
 
 ## Plugin collection (`plugin.json`)
 

@@ -1197,8 +1197,16 @@ class TestHybridPackageValidation:
         assert not result.is_valid
         assert any("Invalid apm.yml" in e for e in result.errors)
 
-    def test_hybrid_skill_md_description_used_as_fallback(self, tmp_path):
-        """SKILL.md description fills in when apm.yml omits it."""
+    def test_hybrid_skill_md_description_does_not_backfill_into_apm_yml(self, tmp_path):
+        """apm.yml.description and SKILL.md description are independent.
+
+        SKILL.md is consumed by the agent runtime (invocation matcher per
+        agentskills.io); apm.yml.description is consumed by APM tooling
+        (`apm view`, search, listings). They serve different consumers
+        and APM never merges them. When apm.yml omits its description,
+        ``APMPackage.description`` stays ``None`` -- the SKILL.md value
+        does NOT silently leak into the human-facing tagline slot.
+        """
         (tmp_path / "apm.yml").write_text(
             "name: genesis\nversion: 1.0.0\n"
         )
@@ -1208,10 +1216,14 @@ class TestHybridPackageValidation:
 
         result = validate_apm_package(tmp_path)
         assert result.is_valid
-        assert result.package.description == "from-skill-md"
+        assert result.package.description is None
 
     def test_hybrid_apm_yml_description_wins_over_skill_md(self, tmp_path):
-        """apm.yml description takes precedence over SKILL.md (CEO call)."""
+        """apm.yml.description is the only source for APMPackage.description.
+
+        When apm.yml provides a description, that value is used verbatim
+        regardless of SKILL.md frontmatter -- there is no merge.
+        """
         (tmp_path / "apm.yml").write_text(
             "name: genesis\nversion: 1.0.0\ndescription: from-apm-yml\n"
         )
@@ -1222,6 +1234,34 @@ class TestHybridPackageValidation:
         result = validate_apm_package(tmp_path)
         assert result.is_valid
         assert result.package.description == "from-apm-yml"
+
+    def test_hybrid_both_descriptions_independent(self, tmp_path):
+        """SKILL.md content is preserved on disk untouched after validation.
+
+        APM must never mutate the SKILL.md file; the agent runtime reads
+        it byte-for-byte from `<target>/skills/<name>/SKILL.md` after
+        integration. This test asserts (a) APMPackage.description comes
+        only from apm.yml and (b) SKILL.md is untouched on disk.
+        """
+        skill_md_content = (
+            "---\n"
+            "name: genesis\n"
+            "description: This skill should be invoked when the user asks "
+            "about Genesis architecture decisions.\n"
+            "allowed-tools: [bash, view]\n"
+            "---\n"
+            "# Genesis Skill\n"
+        )
+        (tmp_path / "apm.yml").write_text(
+            "name: genesis\nversion: 1.0.0\ndescription: short tagline\n"
+        )
+        (tmp_path / "SKILL.md").write_text(skill_md_content)
+
+        result = validate_apm_package(tmp_path)
+        assert result.is_valid
+        assert result.package.description == "short tagline"
+        # SKILL.md must be untouched -- the agent runtime reads it verbatim.
+        assert (tmp_path / "SKILL.md").read_text() == skill_md_content
 
 
 class TestClaudeSkillPackageValidation:
