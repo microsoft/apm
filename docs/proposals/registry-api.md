@@ -3,6 +3,9 @@
 **Status:** Draft — for APM maintainer review
 **Scope:** Plugins, skills, prompts, agents, instructions, hooks, commands, chatmodes
 **Explicitly out of scope:** MCP (continues to use the existing MCP registry client unchanged)
+**Companion docs:**
+- [registry-api-summary.md](./registry-api-summary.md) — short technical summary for client maintainers
+- [registry-http-api.md](./registry-http-api.md) — full HTTP API specification for server implementers
 
 > **Hard requirement — complete backwards compatibility.** This proposal MUST NOT break any existing flow. Every current `apm.yml`, `apm.lock`, CLI invocation, environment variable, and integration path must continue to work byte-for-byte on a client that has this feature shipped but sees no registry configuration. See §2.1 for the explicit invariants and §13 for the compatibility test matrix.
 
@@ -264,44 +267,47 @@ The two are **orthogonal** — a marketplace may list git-sourced packages, regi
 {
   "plugins": [
     {
-      "id": "review-skills",
-      "name": "Code Review Skills",
-      "repo": "acme/review-skills",
-      "ref": "v1.0.0",                                       // existing — used when source: git (default)
+      "name": "review-skills",
+      "repository": "acme/review-skills",
+      "ref": "v1.0.0",            // existing — Git ref/tag (default flow)
       "description": "..."
     },
     {
-      "id": "enterprise-skills",
-      "name": "Enterprise Skills",
-      "repo": "acme/enterprise-skills",
-      "source": "registry",                                  // NEW — optional, defaults to "git"
-      "version": "^3.0.0"                                    // NEW — used when source: registry
+      "name": "enterprise-skills",
+      "repository": "acme/enterprise-skills",
+      "registry": "corp-main",    // NEW — name of the dedicated APM registry
+      "version": "^3.0.0",        // EXISTING field; semver range when registry is set
+      "description": "..."
     }
   ]
 }
 ```
 
-The schema gains a single field: `source` (per entry, optional, defaults to `"git"`), plus `version` for entries with `source: registry`.
+The schema gains exactly **one new field: `registry`** (per entry, optional, default empty string). When set, the plugin resolves through the named APM registry and the existing `version` field is interpreted as a semver range.
+
+**Why a new field instead of `source: registry`?** The proposal's earlier draft used `source: registry` as the discriminator, but that collided with the existing `MarketplacePlugin.source` semantics — that field already accepts a string path or a `{type: github, repo: ...}` dict. Using a fresh `registry` field avoids the collision and matches the apm.yml object-form discriminator, where `- registry: <name>` plays the same role.
+
+**Permissive parser.** A non-string `registry` value, or a registry paired with a non-semver `version`, downgrades to "no registry routing" with a debug log instead of failing the whole marketplace fetch. One malformed plugin must not poison a multi-marketplace search.
 
 **No `registry_url` field exists in the marketplace.json.** Instead:
 
-- A marketplace served from a **registry** (fetched at `<registry_url>/marketplace.json`) implicitly resolves all `source: registry` entries against `<registry_url>` — the URL it was just fetched from. No duplication, no drift between an inside-the-file value and the actual fetch URL.
-- A marketplace served from a **Git repo** (today's flow) has no implicit registry, so its entries can only be `source: git`. To curate registry-sourced packages, host the marketplace on a registry.
+- A marketplace served from a **registry** (fetched at `<registry_url>/marketplace.json`) implicitly resolves all `registry: <name>` entries against the apm.yml-configured registry whose URL matches `<registry_url>` (URL-prefix lookup, same rule as §6.2). No duplication, no drift between an inside-the-file value and the actual fetch URL.
+- A marketplace served from a **Git repo** (today's flow) has no implicit registry; entries with no `registry` field route via Git. Curators who want to point at registry packages can either host the marketplace on a registry or set `registry: <name>` per entry.
 
 **`apm marketplace add` accepts both:**
 - `apm marketplace add OWNER/REPO` → Git-hosted marketplace (today, unchanged).
-- `apm marketplace add https://registry.example.com/apm` → registry-hosted marketplace; client fetches `<URL>/marketplace.json` and uses `<URL>` as the registry for any `source: registry` entries.
+- `apm marketplace add https://registry.example.com/apm` → registry-hosted marketplace; client fetches `<URL>/marketplace.json` and uses `<URL>` as the registry for any `registry`-routed entries.
 
-**Existing marketplace.json files are unchanged** — none carry `source: registry` entries, all implicitly `source: git`.
+**Existing marketplace.json files are unchanged** — none carry `registry` entries, all keep their existing Git semantics.
 
 **Install flow via marketplace:**
 
 ```
 apm install enterprise-skills@corp-marketplace
   ├─ read corp-marketplace's marketplace.json
-  ├─ find entry id=enterprise-skills
-  ├─ entry has source: registry → route to registry resolver (§5.1 + §5.2)
-  │   OR source: git (default) → route to git resolver (unchanged)
+  ├─ find entry name=enterprise-skills
+  ├─ entry has registry: <name> → route to registry resolver (§5.1 + §5.2)
+  │   OR no registry field → route to git resolver (unchanged)
   └─ install as if user had declared the dep directly in apm.yml
 ```
 
@@ -582,38 +588,71 @@ Today, search is **client-side**: `apm marketplace search` fetches each register
 
 Sized per file, using: **no change** / **small addition** (<50 LoC) / **medium change** (refactor of one module) / **large change** (cross-cutting refactor).
 
+> **Lessons learned during implementation.** The pre-flight estimate below was off by ~30% on file count (the original "7 touched files" missed `installed_package.py`, `context.py`, and `install/sources.py`) and missed the need for a vendored npm-semver matcher (it's NOT reusable from `parse_git_reference`). The corrected counts and rationale are at the bottom of this section under **"Post-implementation reality."**
+
 | File | Change size | What |
 |---|---|---|
-| `src/apm_cli/models/apm_package.py` | **small addition** | Parse top-level `registries:` block; route string shorthand to default registry with semver validation. |
-| `src/apm_cli/models/dependency/reference.py` | **small addition** | Carry `source` + `registry_name` on `DependencyReference`. Identity scheme unchanged. |
-| `src/apm_cli/deps/lockfile.py` | **medium change** | New fields (`source`, `resolved_hash`, `registry_name`), v1→v2 migration. |
-| `src/apm_cli/drift.py` | **medium change** | Source-aware drift: version-drift + hash-drift for registry deps; ref-drift stays for git deps. |
-| `src/apm_cli/deps/apm_resolver.py` | **small addition** | Accept multiple download callbacks keyed by `source`. No refactor needed. |
-| `src/apm_cli/deps/registry/client.py` | **NEW — small file** | HTTP client: `list_versions`, `download_tarball`, `publish`, `search`. |
-| `src/apm_cli/deps/registry/resolver.py` | **NEW — small file** | Implements `DownloadCallback` for `source: registry`. |
-| `src/apm_cli/deps/registry/extractor.py` | **NEW — small file** | Tarball → `apm_modules/{owner}/{repo}/`. |
-| `src/apm_cli/deps/registry/auth.py` | **NEW — small file** | Registry token resolution. |
-| `src/apm_cli/core/auth.py` | **small addition** | `resolve_for_registry(name)` method. |
-| `src/apm_cli/commands/install.py` | **small addition** | Route deps to registry vs git resolver based on `source`. |
-| `src/apm_cli/commands/publish.py` | **NEW — small file** | `apm publish` command: wraps `apm pack` + HTTP PUT. |
-| `src/apm_cli/commands/marketplace.py` | **small addition** | `search()` also queries configured registries. |
-| `src/apm_cli/bundle/packer.py` | **no change** | `apm pack` output is already the publish payload. |
+| `src/apm_cli/models/apm_package.py` | **small addition** | Parse top-level `registries:` block; route string shorthand to default registry with semver validation. Two new fields: `registries`, `default_registry`. |
+| `src/apm_cli/models/dependency/reference.py` | **small addition** | Carry `source` + `registry_name` on `DependencyReference`. New parser branches: `@<name>` shorthand, `- registry:` object form. |
+| `src/apm_cli/deps/lockfile.py` | **medium change** | New fields (`source`, `resolved_url`, `resolved_hash`), opportunistic v1→v2 emit, `from_dependency_ref(registry_resolution=...)`, `to_dependency_ref` source restoration. |
+| `src/apm_cli/drift.py` | **medium change** | Source-aware drift: range-vs-locked-version comparison for registry deps; source-flip drift; locked-version replay in `build_download_ref`. Git path unchanged. |
+| `src/apm_cli/install/phases/resolve.py` | **small addition** | Build `RegistryPackageResolver` once; dispatch in `download_callback`; URL-prefix lookup for lockfile re-installs. |
+| `src/apm_cli/install/sources.py` | **small addition** | `FreshDependencySource` and `CachedDependencySource` capture `RegistryResolution` into `InstalledPackage`. |
+| `src/apm_cli/install/context.py` | **small addition** | New field: `registry_resolver`. |
+| `src/apm_cli/deps/installed_package.py` | **small addition** | New field: `registry_resolution`. |
+| `src/apm_cli/deps/registry/client.py` | **NEW — small file** | HTTP client: `list_versions`, `download_archive`, `search`. (Publish kept as `curl`-only for v1.) |
+| `src/apm_cli/deps/registry/resolver.py` | **NEW — small file** | Implements `DownloadCallback` for `source: registry`; emits `RegistryResolution`. |
+| `src/apm_cli/deps/registry/extractor.py` | **NEW — small file** | sha256-verified extraction, tar.gz + zip + dispatcher; traversal/symlink/hardlink rejection. |
+| `src/apm_cli/deps/registry/auth.py` | **NEW — small file** | Env-var token + URL-prefix lookup for lockfile re-installs. |
+| `src/apm_cli/deps/registry/semver.py` | **NEW — small file** | Vendored npm-semver matcher. Required because `parse_git_reference` is a 12-line categorizer, not a range matcher. |
+| `src/apm_cli/marketplace/models.py` | **small addition** | `MarketplacePlugin.registry` field; permissive parse with semver gate. |
+| `src/apm_cli/marketplace/client.py` | **small addition** | New `search_all_registries()` helper that adapts `RegistryClient.search` to `MarketplacePlugin`. |
+| `src/apm_cli/commands/install.py` | **no change** | The actual install pipeline has been extracted to `install/phases/*` and `install/sources.py`; `install.py` is a thin wrapper. |
+| `src/apm_cli/commands/publish.py` | **deferred** | `apm publish` command not yet implemented — operators publish via `curl` for now. |
+| `src/apm_cli/commands/marketplace.py` | **deferred** | CLI-level merge of `search_all_registries()` into `apm marketplace search` deferred — public API is in place. |
+| `src/apm_cli/core/auth.py` | **no change** | Registry auth lives in `deps/registry/auth.py`; no integration with the existing `AuthResolver` chain (registries use a distinct namespace). |
+| `src/apm_cli/bundle/packer.py` | **no change** | `apm pack` already produces tar.gz — the publish payload (when `apm publish` lands). |
 | `src/apm_cli/integration/*.py` | **no change** | Integrators operate on `apm_modules/`, source-agnostic. |
 | `src/apm_cli/commands/uninstall/*.py` | **no change** | Operates on lockfile + deployed files, source-agnostic. |
 | `src/apm_cli/commands/prune.py` | **no change** | Same. |
-| Tests | **new tests + extend existing** | Registry client unit tests, install/publish integration tests against a fake server. |
 
-**Total net-new files:** 5 small.
-**Total touched existing files:** 7 (mostly small, two medium).
-**No file requires a complete refactor.**
+**Test files (all new):**
 
-The change is **additive by construction**: the Git resolver path is left alone, and every existing test continues to pass because deps without `source:` default to `git`.
+| File | What |
+|---|---|
+| `tests/unit/registry/test_semver.py` | npm-style range matching, parse-time gate |
+| `tests/unit/registry/test_auth.py` | env-var key derivation, URL-prefix lookup |
+| `tests/unit/registry/test_extractor.py` | sha256, tar.gz, zip, dispatcher, traversal/symlink rejection |
+| `tests/unit/registry/test_client.py` | URL construction, auth header, parse, error mapping |
+| `tests/unit/registry/test_resolver.py` | resolver orchestration with fake client |
+| `tests/unit/registry/test_resolver_e2e_http.py` | end-to-end against `http.server.HTTPServer` |
+| `tests/unit/registry/test_compat_matrix.py` | §2.1 invariant matrix |
+| `tests/unit/test_reference_registry_shorthand.py` | `@<name>` + object-form parsers |
+| `tests/unit/test_apm_yml_registries.py` | top-level `registries:` block + default routing |
+| `tests/unit/test_lockfile_v2_bump.py` | opportunistic v1→v2 |
+| `tests/unit/test_drift_registry.py` | source-aware drift |
+| `tests/unit/install/test_resolve_registry.py` | install pipeline wiring |
+| `tests/unit/marketplace/test_registry_integration.py` | marketplace.json schema + search merge |
+
+### Post-implementation reality
+
+- **Net-new files: 6** (the pre-flight count of 5 missed `semver.py`).
+- **Touched existing files: 11** (the pre-flight count of 7 missed `installed_package.py`, `context.py`, `install/sources.py`, `install/phases/resolve.py`, plus `marketplace/models.py` and `marketplace/client.py`).
+- **Test files: 13 new** (~3500 LoC of tests).
+- **Total LoC:** ~1500 production + ~3500 tests across ~30 files (counting tests).
+- **Deferred:** `apm publish` command, CLI-level marketplace search merge.
+
+The change is **still additive by construction** — every existing test stays green except one pre-existing unrelated failure in `tests/test_apm_package_models.py::TestGenericHostSubdirectoryRoundTrip::test_build_download_ref_preserves_virtual_path` that fails on clean `main` too. But the additive surface spans more files than the pre-flight estimate implied. Plan budgeting on the corrected counts.
 
 ---
 
 ## 11. Decisions
 
-- **Virtual packages are sliced client-side.** Virtual package identity includes a sub-path (`owner/repo/prompts/file.prompt.md`). The registry treats `owner/repo` as a single unit — the parent tarball. The client extracts only the requested sub-path, mirroring the current virtual-package handling on the Git side. Keeps the server contract flat.
+- **Endpoint name is `/download`, not `/tarball`.** The original draft used `/tarball` (npm-style URL), which baked a format assumption into the URL. Renamed to `/download` (same precedent as crates.io and the Docker Registry's `/blobs/{digest}`); `Content-Type` tells the client which extractor to invoke.
+- **Both tar.gz and zip are supported on the wire.** APM's `apm pack` produces tar.gz; Anthropic skills (open-claude-skills) ship as zip. Both formats carry the same security gates (sha256 verify before extract, traversal/symlink rejection). Format detection is `Content-Type` first, magic-bytes fallback (`\x1f\x8b...` → gzip, `PK\x03\x04...` → zip).
+- **Marketplace.json discriminator is `registry: <name>`, not `source: registry`.** The original draft would have collided with the existing `MarketplacePlugin.source` semantics (which already accepts a string path or a `{type, repo}` dict). The fresh `registry` field also matches the apm.yml object-form discriminator (`- registry: <name>`), giving consistent vocabulary across both shapes.
+- **Vendored npm-semver matcher.** The pre-flight estimate said range matching could reuse `parse_git_reference`. Reading the code disproves that — `parse_git_reference` is a 12-line categorizer (BRANCH/TAG/COMMIT). A small (~200 LoC) vendored matcher in `deps/registry/semver.py` covers the proposal's range shapes (`^`, `~`, `>=`, `<`, x-ranges, exact). PEP 440 (`packaging.specifiers`) was considered and rejected — its grammar differs subtly from npm-semver and the proposal's example ranges (`^1.2`, `~1.2.3`, `1.x`) are npm-style.
+- **Virtual packages are sliced client-side.** Virtual package identity includes a sub-path (`owner/repo/prompts/file.prompt.md`). The registry treats `owner/repo` as a single unit — the parent archive. The client extracts only the requested sub-path, mirroring the current virtual-package handling on the Git side. Keeps the server contract flat.
 - **No yank in v1.** There is no yank concept in the current Git-based flow (tag immutability is convention, not enforcement). Introducing yank would be new a capability beyond parity, so it is deferred; §5.1's response has no `yanked` field. Can be added in v2 without a compat break.
 - **Rate limiting reuses existing client retry.** The new `RegistryClient` calls the project's existing `resilient_get` helper, inheriting whatever retry / `Retry-After` semantics are already in place for HTTP. No new policy.
 - **No server-assisted transitive resolution in v1.** Embedding a version's declared `apm.yml` deps in `/versions` (or a separate per-version metadata endpoint) would let the client build the transitive graph without downloading every tarball. Deferred — it enlarges the server contract (publish must extract and index manifests) and adds a sync-with-tarball invariant. See §8 for the deferred note; future-compatible with v1.

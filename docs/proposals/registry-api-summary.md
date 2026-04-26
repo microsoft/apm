@@ -2,6 +2,7 @@
 
 **Status:** Draft — for APM maintainer review
 **Full proposal:** [registry-api.md](./registry-api.md)
+**HTTP API spec:** [registry-http-api.md](./registry-http-api.md) — for server implementers
 **Scope:** Plugins, skills, prompts, agents, instructions, hooks, commands, chatmodes (not MCP)
 
 An additive, opt-in REST resolver that sits alongside the existing Git resolver. Fully backwards compatible — a project without a `registries:` block sees no change.
