@@ -362,6 +362,68 @@ class TestCrossPlatformPaths:
 # ---------------------------------------------------------------------------
 
 
+class TestGlobalGeminiScope:
+    """Verify user-scope install/uninstall deploys to ~/.gemini/."""
+
+    def test_global_install_creates_gemini_dirs(
+        self, apm_command, fake_home, local_package
+    ):
+        """--global should deploy primitives to ~/.gemini/ when .gemini/ exists."""
+        gemini_dir = fake_home / ".gemini"
+        gemini_dir.mkdir()
+
+        result = _run_apm(
+            apm_command,
+            ["install", "--global", str(local_package)],
+            fake_home,
+            fake_home,
+        )
+        combined = result.stdout + result.stderr
+        assert "gemini" in combined.lower(), (
+            f"Gemini not mentioned in output: {combined}"
+        )
+
+    def test_global_install_mentions_gemini_full_support(
+        self, apm_command, fake_home
+    ):
+        """--global output should list gemini as fully supported."""
+        gemini_dir = fake_home / ".gemini"
+        gemini_dir.mkdir()
+
+        result = _run_apm(
+            apm_command, ["install", "--global"], fake_home, fake_home,
+        )
+        combined = result.stdout + result.stderr
+        assert "gemini" in combined.lower(), (
+            f"Gemini not in scope support message: {combined}"
+        )
+
+    def test_global_uninstall_runs_in_user_scope(
+        self, apm_command, fake_home, local_package
+    ):
+        """Uninstall --global with .gemini/ present operates in user scope."""
+        gemini_dir = fake_home / ".gemini"
+        gemini_dir.mkdir()
+
+        _run_apm(
+            apm_command,
+            ["install", "--global", str(local_package)],
+            fake_home,
+            fake_home,
+        )
+
+        result = _run_apm(
+            apm_command,
+            ["uninstall", "--global", "local-pkg"],
+            fake_home,
+            fake_home,
+        )
+        combined = result.stdout + result.stderr
+        assert "user scope" in combined.lower(), (
+            f"Uninstall did not run in user scope: {combined}"
+        )
+
+
 class TestGlobalUninstallLifecycle:
     """Test uninstall --global removes packages from user-scope metadata."""
 

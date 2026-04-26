@@ -2082,6 +2082,262 @@ class TestCodexHookIntegration:
         assert result.files_integrated == 0
 
 
+# --- Gemini hook integration tests -----------------------------------------------
+
+
+class TestGeminiHookIntegration:
+    """Tests for Gemini hook integration (.gemini/settings.json merge)."""
+
+    @pytest.fixture
+    def temp_project(self):
+        temp_dir = tempfile.mkdtemp()
+        project = Path(temp_dir)
+        (project / ".gemini").mkdir()
+        yield project
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def _setup_hook_package(self, project: Path, name: str = "test-hooks") -> PackageInfo:
+        pkg_dir = project / "apm_modules" / name
+        hooks_dir = pkg_dir / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        (hooks_dir / "hooks.json").write_text(json.dumps(RALPH_LOOP_HOOKS_JSON))
+        (hooks_dir / "stop-hook.sh").write_text("#!/bin/bash\nexit 0")
+        return _make_package_info(pkg_dir, name)
+
+    def test_integrate_hooks_gemini(self, temp_project):
+        """Test Gemini integration merges hooks into settings.json."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        pkg_info = self._setup_hook_package(temp_project, "ralph-loop")
+        target = KNOWN_TARGETS["gemini"]
+        integrator = HookIntegrator()
+
+        result = integrator.integrate_hooks_for_target(target, pkg_info, temp_project)
+
+        assert result.files_integrated == 1
+        settings = json.loads(
+            (temp_project / ".gemini" / "settings.json").read_text()
+        )
+        assert "hooks" in settings
+        # "Stop" is mapped to "SessionEnd" for Gemini
+        assert "SessionEnd" in settings["hooks"]
+        assert "Stop" not in settings["hooks"]
+        assert settings["hooks"]["SessionEnd"][0]["_apm_source"] == "ralph-loop"
+
+    def test_skips_when_no_gemini_dir(self, temp_project):
+        """Gemini hooks are not deployed when .gemini/ does not exist."""
+        shutil.rmtree(temp_project / ".gemini")
+
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        pkg_info = self._setup_hook_package(temp_project, "ralph-loop")
+        target = KNOWN_TARGETS["gemini"]
+        integrator = HookIntegrator()
+
+        result = integrator.integrate_hooks_for_target(target, pkg_info, temp_project)
+
+        assert result.files_integrated == 0
+        assert not (temp_project / ".gemini").exists()
+
+    def test_merge_preserves_existing_keys(self, temp_project):
+        """Hook merge preserves mcpServers and other top-level keys."""
+        settings_path = temp_project / ".gemini" / "settings.json"
+        settings_path.write_text(json.dumps({
+            "mcpServers": {"srv": {"command": "echo"}},
+            "theme": "dark",
+        }))
+
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        pkg_info = self._setup_hook_package(temp_project, "ralph-loop")
+        target = KNOWN_TARGETS["gemini"]
+        integrator = HookIntegrator()
+
+        integrator.integrate_hooks_for_target(target, pkg_info, temp_project)
+
+        settings = json.loads(settings_path.read_text())
+        assert settings["mcpServers"]["srv"]["command"] == "echo"
+        assert settings["theme"] == "dark"
+        assert "SessionEnd" in settings["hooks"]
+
+    def test_additive_merge_same_event(self, temp_project):
+        """Multiple packages can add hooks to the same event."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        target = KNOWN_TARGETS["gemini"]
+        integrator = HookIntegrator()
+
+        pkg1_info = self._setup_hook_package(temp_project, "ralph-loop")
+        integrator.integrate_hooks_for_target(target, pkg1_info, temp_project)
+
+        pkg2_dir = temp_project / "apm_modules" / "other-pkg"
+        hooks2_dir = pkg2_dir / "hooks"
+        hooks2_dir.mkdir(parents=True, exist_ok=True)
+        (hooks2_dir / "hooks.json").write_text(json.dumps({
+            "hooks": {"Stop": [{"hooks": [
+                {"type": "command", "command": "echo other-stop"}
+            ]}]}
+        }))
+        pkg2_info = _make_package_info(pkg2_dir, "other-pkg")
+        integrator.integrate_hooks_for_target(target, pkg2_info, temp_project)
+
+        settings = json.loads(
+            (temp_project / ".gemini" / "settings.json").read_text()
+        )
+        # Both "Stop" entries land under "SessionEnd" after mapping
+        assert len(settings["hooks"]["SessionEnd"]) == 2
+
+    def test_reinstall_is_idempotent(self, temp_project):
+        """Re-running integration does not duplicate hook entries."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        target = KNOWN_TARGETS["gemini"]
+        pkg_info = self._setup_hook_package(temp_project, "ralph-loop")
+        integrator = HookIntegrator()
+
+        integrator.integrate_hooks_for_target(target, pkg_info, temp_project)
+        first = (temp_project / ".gemini" / "settings.json").read_text()
+
+        for _ in range(2):
+            integrator.integrate_hooks_for_target(target, pkg_info, temp_project)
+
+        settings = json.loads(
+            (temp_project / ".gemini" / "settings.json").read_text()
+        )
+        assert len(settings["hooks"]["SessionEnd"]) == 1
+        assert (temp_project / ".gemini" / "settings.json").read_text() == first
+
+    def test_sync_removes_gemini_hook_entries(self, temp_project):
+        """Sync removes APM-managed entries from .gemini/settings.json."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        settings_path = temp_project / ".gemini" / "settings.json"
+        settings_path.write_text(json.dumps({
+            "mcpServers": {"srv": {"command": "echo"}},
+            "hooks": {
+                "SessionEnd": [
+                    {"_apm_source": "ralph-loop", "hooks": [
+                        {"type": "command", "command": "..."}
+                    ]},
+                    {"hooks": [{"type": "command", "command": "echo user-hook"}]},
+                ],
+            }
+        }))
+
+        target = KNOWN_TARGETS["gemini"]
+        integrator = HookIntegrator()
+        integrator.sync_integration(None, temp_project, targets=[target])
+
+        settings = json.loads(settings_path.read_text())
+        assert settings["mcpServers"]["srv"]["command"] == "echo"
+        assert "SessionEnd" in settings["hooks"]
+        assert len(settings["hooks"]["SessionEnd"]) == 1
+        assert "_apm_source" not in settings["hooks"]["SessionEnd"][0]
+
+    def test_sync_removes_empty_hooks_key(self, temp_project):
+        """Empty hooks key is removed after sync cleanup."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        settings_path = temp_project / ".gemini" / "settings.json"
+        settings_path.write_text(json.dumps({
+            "mcpServers": {"srv": {"command": "echo"}},
+            "hooks": {
+                "SessionEnd": [{"_apm_source": "test", "hooks": []}]
+            }
+        }))
+
+        target = KNOWN_TARGETS["gemini"]
+        integrator = HookIntegrator()
+        integrator.sync_integration(None, temp_project, targets=[target])
+
+        settings = json.loads(settings_path.read_text())
+        assert "hooks" not in settings
+        assert "mcpServers" in settings
+
+    def test_event_name_mapping_pretooluse_to_beforetool(self, temp_project):
+        """preToolUse (Copilot convention) maps to BeforeTool for Gemini."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        pkg_dir = temp_project / "apm_modules" / "lint-pkg"
+        hooks_dir = pkg_dir / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        (hooks_dir / "hooks.json").write_text(json.dumps({
+            "hooks": {
+                "preToolUse": [{"hooks": [
+                    {"type": "command", "command": "echo lint"}
+                ]}],
+                "postToolUse": [{"hooks": [
+                    {"type": "command", "command": "echo done"}
+                ]}],
+            }
+        }))
+        pkg_info = _make_package_info(pkg_dir, "lint-pkg")
+
+        target = KNOWN_TARGETS["gemini"]
+        integrator = HookIntegrator()
+        integrator.integrate_hooks_for_target(target, pkg_info, temp_project)
+
+        settings = json.loads(
+            (temp_project / ".gemini" / "settings.json").read_text()
+        )
+        assert "BeforeTool" in settings["hooks"]
+        assert "AfterTool" in settings["hooks"]
+        assert "preToolUse" not in settings["hooks"]
+        assert "postToolUse" not in settings["hooks"]
+
+    def test_unmapped_events_pass_through(self, temp_project):
+        """Gemini-native events (BeforeAgent etc.) pass through unchanged."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        pkg_dir = temp_project / "apm_modules" / "agent-pkg"
+        hooks_dir = pkg_dir / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        (hooks_dir / "hooks.json").write_text(json.dumps({
+            "hooks": {
+                "BeforeAgent": [{"hooks": [
+                    {"type": "command", "command": "echo agent"}
+                ]}],
+            }
+        }))
+        pkg_info = _make_package_info(pkg_dir, "agent-pkg")
+
+        target = KNOWN_TARGETS["gemini"]
+        integrator = HookIntegrator()
+        integrator.integrate_hooks_for_target(target, pkg_info, temp_project)
+
+        settings = json.loads(
+            (temp_project / ".gemini" / "settings.json").read_text()
+        )
+        assert "BeforeAgent" in settings["hooks"]
+
+    def test_flat_copilot_entries_become_nested_gemini(self, temp_project):
+        """Flat Copilot hook entries (bash, timeoutSec) are transformed to Gemini format."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        pkg_dir = temp_project / "apm_modules" / "flat-pkg"
+        hooks_dir = pkg_dir / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        (hooks_dir / "hooks.json").write_text(json.dumps({
+            "hooks": {
+                "preToolUse": [
+                    {"type": "command", "bash": "echo lint", "timeoutSec": 10}
+                ],
+            }
+        }))
+        pkg_info = _make_package_info(pkg_dir, "flat-pkg")
+
+        target = KNOWN_TARGETS["gemini"]
+        integrator = HookIntegrator()
+        integrator.integrate_hooks_for_target(target, pkg_info, temp_project)
+
+        settings = json.loads(
+            (temp_project / ".gemini" / "settings.json").read_text()
+        )
+        assert "BeforeTool" in settings["hooks"]
+        entry = settings["hooks"]["BeforeTool"][0]
+        # Must be nested: outer has "hooks" list, inner has "command" not "bash"
+        assert "hooks" in entry
+        inner = entry["hooks"][0]
+        assert inner["command"] == "echo lint"
+        assert "bash" not in inner
+        # timeoutSec converted to timeout in milliseconds
+        assert inner["timeout"] == 10000
+        assert "timeoutSec" not in inner
+
+
 # ─── Scope-resolved target tests (PR #566 rework) ────────────────────────────
 
 

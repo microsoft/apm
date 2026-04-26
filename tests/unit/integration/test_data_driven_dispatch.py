@@ -278,6 +278,7 @@ class TestExhaustivenessChecks:
             "agents_opencode",
             "agents_codex",
             "commands",            # was commands_claude, aliased
+            "commands_gemini",
             "commands_opencode",
             "instructions",        # was instructions_copilot, aliased
             "rules_cursor",        # was instructions_cursor, aliased

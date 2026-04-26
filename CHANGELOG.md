@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - PGS project board sync: `scripts/project/sync_item.py` and `.github/workflows/project-sync.yml` keep https://github.com/orgs/microsoft/projects/2304 in lockstep with `theme/*`, `area/*`, `type/*`, `priority/*` labels and milestones. Backfill helper at `scripts/project/backfill.sh`. (#919)
 
+- **Gemini CLI** as a supported APM target (`--target gemini`). APM auto-detects `.gemini/` directories and writes MCP server configuration to `.gemini/settings.json`. Includes `apm runtime setup gemini` / `apm runtime remove gemini` support. (#917)
 - New `pr-description-skill` skill bundle: enforces a 10-section PR body shape (TL;DR / Problem / Approach / Implementation / Diagrams / Trade-offs / Benefits / Validation / How to test, plus the `Co-authored-by` trailer) with a cite-or-omit rule for every WHY-claim, GFM-rendered output, ASCII-only template source, and validated mermaid diagrams. Captures the meta-pattern from PR #882 as a reusable scaffold so future PR bodies meet the same bar without per-PR specialist subagent intervention. (#884)
 - `apm experimental` command group -- a feature-flag registry with `list` / `enable` / `disable` / `reset` subcommands. Opt in to new behaviour before it graduates to default. Ships with one built-in flag (`verbose-version`) and a contributor recipe for proposing new flags. (#849)
 - `includes:` manifest field (auto | list) for explicit governance of local `.apm/` content. Closes audit-blindness gap (#887).
@@ -32,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- HYBRID packages (apm.yml + SKILL.md without `.apm/`) now install as skill bundles per agentskills.io semantics; previously `apm install` rejected this layout in the validator and emitted no inline error, producing a perceived hang. (#946)
+- CLAUDE_SKILL packages (SKILL.md only) that ship co-located resource directories (`agents/`, `assets/`, `scripts/`) now route through the skill-bundle install path. (#946)
+- Direct-dependency integration failures now print a `[x]` line immediately and exit 1 instead of failing silently. (#946)
+- HYBRID metadata model: `apm.yml` description and `SKILL.md` description are independent fields with different consumers and are no longer merged; `apm pack` warns when `apm.yml` is missing `description` on a HYBRID package. (#946)
+- Symlink hardening extended to all three `skill_integrator` copytree paths. (#946)
 - `apm install` (user scope): `init_link_resolver` now scopes `discover_primitives` to `~/.apm/` instead of `~/`, preventing recursive-glob across the entire home directory. Fixes #830 (#850)
 - Audit blindness for local `.apm/` content -- `apm audit --ci` now detects drift, missing files, and content tampering on locally-authored files (not just installed packages). (#887)
 - Packer leak risk: local-content fields (`local_deployed_files`, `local_deployed_file_hashes`) are now stripped from bundled lockfiles, preventing phantom self-entries on unpack. (#887)

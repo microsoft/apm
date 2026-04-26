@@ -85,6 +85,64 @@ class _MergeHookConfig:
     require_dir: bool       # True = skip if target dir doesn't exist
 
 
+# Per-target hook event name mapping.  Packages are authored with
+# Copilot (camelCase) or Claude (PascalCase) names; targets that use
+# different conventions get their events renamed during merge.
+_HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
+    "gemini": {
+        # Copilot / Claude -> Gemini
+        "PreToolUse": "BeforeTool",
+        "preToolUse": "BeforeTool",
+        "PostToolUse": "AfterTool",
+        "postToolUse": "AfterTool",
+        "Stop": "SessionEnd",
+    },
+}
+
+def _to_gemini_hook_entries(entries: list) -> list:
+    """Transform hook entries into Gemini CLI format.
+
+    Gemini requires ``{"hooks": [...]}`` nesting, uses ``command`` (not
+    ``bash``), and ``timeout`` in milliseconds (not ``timeoutSec`` in
+    seconds).  Entries already in Claude/Gemini nested format are left
+    unchanged.
+    """
+    result = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            result.append(entry)
+            continue
+        # Already nested (Claude / Gemini format) -- just fix inner keys
+        if "hooks" in entry and isinstance(entry["hooks"], list):
+            for hook in entry["hooks"]:
+                _copilot_keys_to_gemini(hook)
+            result.append(entry)
+            continue
+        # Flat Copilot entry -- wrap in nested format
+        inner = dict(entry)
+        _copilot_keys_to_gemini(inner)
+        # Pull _apm_source to outer level (set later, but keep if present)
+        apm_source = inner.pop("_apm_source", None)
+        outer: dict = {"hooks": [inner]}
+        if apm_source:
+            outer["_apm_source"] = apm_source
+        result.append(outer)
+    return result
+
+
+def _copilot_keys_to_gemini(hook: dict) -> None:
+    """Rename Copilot hook keys to Gemini equivalents in-place."""
+    # bash / powershell -> command
+    if "command" not in hook:
+        for key in ("bash", "powershell", "windows"):
+            if key in hook:
+                hook["command"] = hook.pop(key)
+                break
+    # timeoutSec (seconds) -> timeout (milliseconds)
+    if "timeoutSec" in hook:
+        hook["timeout"] = hook.pop("timeoutSec") * 1000
+
+
 _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
     "claude": _MergeHookConfig(
         config_filename="settings.json",
@@ -99,6 +157,11 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
     "codex": _MergeHookConfig(
         config_filename="hooks.json",
         target_key="codex",
+        require_dir=True,
+    ),
+    "gemini": _MergeHookConfig(
+        config_filename="settings.json",
+        target_key="gemini",
         require_dir=True,
     ),
 }
@@ -525,11 +588,17 @@ class HookIntegrator(BaseIntegrator):
 
             # Merge hooks into config (additive)
             hooks = rewritten.get("hooks", {})
-            for event_name, entries in hooks.items():
+            event_map = _HOOK_EVENT_MAP.get(config.target_key, {})
+            for raw_event_name, entries in hooks.items():
                 if not isinstance(entries, list):
                     continue
+                event_name = event_map.get(raw_event_name, raw_event_name)
                 if event_name not in json_config["hooks"]:
                     json_config["hooks"][event_name] = []
+
+                # Transform flat Copilot entries to Gemini nested format
+                if config.target_key == "gemini":
+                    entries = _to_gemini_hook_entries(entries)
 
                 # Mark each entry with APM source for sync/cleanup
                 for entry in entries:

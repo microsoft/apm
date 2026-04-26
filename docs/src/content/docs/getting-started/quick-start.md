@@ -92,12 +92,15 @@ my-project/
       design-reviewer.md
     commands/
       design-review.md
+  .gemini/
+    commands/
+      design-review.toml
 ```
 
 Three things happened:
 
 1. The package was downloaded into `apm_modules/` (like `node_modules/`).
-2. Instructions, agents, and skills were deployed to `.github/`, `.claude/`, `.cursor/`, and `.opencode/` (when present) -- the native directories that GitHub Copilot, Claude, Cursor, and OpenCode read from. If the project has its own `.apm/` content, that is deployed too (local content takes priority over dependencies on collision).
+2. Agents, commands, skills, and hooks were deployed to `.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.codex/`, and `.gemini/` (when present). If the project has its own `.apm/` content, that is deployed too (local content takes priority over dependencies on collision).
 3. A lockfile (`apm.lock.yaml`) was created, pinning the exact commit so every team member gets identical configuration.
 
 Your `apm.yml` now tracks the dependency:
@@ -138,15 +141,16 @@ apm install github/awesome-copilot/skills/review-and-refactor
 - `apm.yml` and `apm.lock.yaml` — version-controlled, shared with the team.
 - `.github/` deployed files (`prompts/`, `agents/`, `instructions/`, `skills/`, `hooks/`) — commit them so every contributor (and [Copilot on github.com](https://docs.github.com/en/copilot)) gets agent context immediately after cloning, before they run `apm install` to sync and regenerate files.
 - `.claude/` deployed files (`agents/`, `commands/`, `skills/`, `hooks/`) — same rationale for Claude Code users: committed files give instant context on clone, while `apm install` remains the way to refresh them from `apm.yml`.
-- `.cursor/` deployed files (`rules/`, `agents/`, `skills/`, `hooks/`) — same rationale for Cursor users.
-- `apm_modules/` — add to `.gitignore`. Rebuilt from the lockfile on install.
+- `.cursor/` deployed files (`rules/`, `agents/`, `skills/`, `hooks/`) -- same rationale for Cursor users.
+- `.gemini/` deployed files (`commands/`, `skills/`, `settings.json`) -- same rationale for Gemini CLI users.
+- `apm_modules/` -- add to `.gitignore`. Rebuilt from the lockfile on install.
 
 :::tip[Keeping deployed files in sync]
-When you update `apm.yml`, re-run `apm install` and commit the changed `.github/`, `.claude/`, and `.cursor/` files. A [CI drift check](../../integrations/ci-cd/#verify-deployed-primitives) catches stale files automatically.
+When you update `apm.yml`, re-run `apm install` and commit the changed `.github/`, `.claude/`, `.cursor/`, and `.gemini/` files. A [CI drift check](../../integrations/ci-cd/#verify-deployed-primitives) catches stale files automatically.
 :::
 
 :::note[Using Codex or Gemini?]
-These tools use different configuration formats. Run `apm compile` after installing to generate their native files. See the [Compilation guide](../../guides/compilation/) for details.
+Gemini and Codex need `apm compile` for instructions (`GEMINI.md` / `AGENTS.md`). Gemini receives commands, skills, hooks, and MCP via `apm install`. See the [Compilation guide](../../guides/compilation/) for details.
 :::
 
 ## Add MCP servers
@@ -157,7 +161,7 @@ APM also manages MCP servers -- the tools your AI agent calls at runtime.
 apm install --mcp io.github.github/github-mcp-server
 ```
 
-This wires the server into every detected client (Copilot, Claude, Cursor, Codex, OpenCode). See the [MCP Servers guide](../../guides/mcp-servers/) for stdio and remote shapes.
+This wires the server into every detected client (Copilot, Claude, Cursor, Codex, OpenCode, Gemini). See the [MCP Servers guide](../../guides/mcp-servers/) for stdio and remote shapes.
 
 ## Next steps
 
