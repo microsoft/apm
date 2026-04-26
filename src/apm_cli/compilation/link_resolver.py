@@ -47,7 +47,7 @@ class UnifiedLinkResolver:
     # Context file extensions we handle
     CONTEXT_EXTENSIONS = {'.context.md', '.memory.md'}
     
-    def __init__(self, base_dir: Path):
+    def __init__(self, base_dir: Path): None -> None:
         """Initialize link resolver.
         
         Args:
@@ -185,7 +185,7 @@ class UnifiedLinkResolver:
         Returns:
             Content with rewritten links
         """
-        def replace_link(match):
+        def replace_link(match): None -> None:
             link_text = match.group(1)
             link_path = match.group(2)
             
@@ -358,7 +358,7 @@ def resolve_markdown_links(content: str, base_path: Path) -> str:
     # Pattern to match markdown links: [text](path)
     link_pattern = r'\[([^\]]+)\]\(([^)]+)\)'
     
-    def replace_link(match):
+    def replace_link(match): None -> None:
         text = match.group(1)
         path = match.group(2)
         
