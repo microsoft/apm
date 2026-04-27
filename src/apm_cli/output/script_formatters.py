@@ -7,8 +7,6 @@ try:
     from rich.console import Console
     from rich.text import Text
     from rich.panel import Panel
-    from rich.tree import Tree
-    from rich import box
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
@@ -40,9 +38,9 @@ class ScriptExecutionFormatter:
         
         # Main header
         if self.use_color:
-            lines.append(self._styled(f" Running script: {script_name}", "cyan bold"))
+            lines.append(self._styled(f"[>] Running script: {script_name}", "cyan bold"))
         else:
-            lines.append(f" Running script: {script_name}")
+            lines.append(f"[>] Running script: {script_name}")
         
         # Parameters tree if any exist
         if params:
