@@ -17,7 +17,7 @@ from typing import Dict, List, Optional
 
 import requests
 
-from .errors import MarketplaceFetchError
+from .errors import MarketplaceError, MarketplaceFetchError
 from .models import MarketplaceManifest, MarketplacePlugin, MarketplaceSource, parse_marketplace_json
 from .registry import get_registered_marketplaces
 
@@ -138,13 +138,17 @@ def _clear_cache(name: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _try_proxy_fetch(
-    source: MarketplaceSource,
+def _try_proxy_fetch_raw(
+    owner: str,
+    repo: str,
     file_path: str,
-) -> Optional[Dict]:
-    """Try to fetch marketplace JSON via the registry proxy.
+    ref: str,
+) -> Optional[bytes]:
+    """Try to fetch a file as raw bytes via the registry proxy.
 
-    Returns parsed JSON dict on success, ``None`` when no proxy is
+    The proxy host is governed by ``PROXY_REGISTRY_URL``; the caller's git
+    host is intentionally ignored here -- the proxy is the single routing
+    endpoint.  Returns raw bytes on success, ``None`` when no proxy is
     configured or the entry download fails.
     """
     from ..deps.registry_proxy import RegistryConfig
@@ -155,36 +159,104 @@ def _try_proxy_fetch(
 
     from ..deps.artifactory_entry import fetch_entry_from_archive
 
-    content = fetch_entry_from_archive(
+    return fetch_entry_from_archive(
         host=cfg.host,
         prefix=cfg.prefix,
-        owner=source.owner,
-        repo=source.repo,
+        owner=owner,
+        repo=repo,
         file_path=file_path,
-        ref=source.branch,
+        ref=ref,
         scheme=cfg.scheme,
         headers=cfg.get_headers(),
     )
-    if content is None:
-        return None
 
-    try:
-        return json.loads(content)
-    except (json.JSONDecodeError, ValueError):
-        logger.debug(
-            "Proxy returned non-JSON for %s/%s %s",
-            source.owner, source.repo, file_path,
-        )
-        return None
+
+def _github_contents_url_generic(
+    host: str, owner: str, repo: str, file_path: str, ref: str
+) -> str:
+    """Build the GitHub Contents API URL for an arbitrary (host, owner, repo)."""
+    from ..core.auth import AuthResolver
+
+    host_info = AuthResolver.classify_host(host)
+    api_base = host_info.api_base
+    return f"{api_base}/repos/{owner}/{repo}/contents/{file_path}?ref={ref}"
 
 
 def _github_contents_url(source: MarketplaceSource, file_path: str) -> str:
-    """Build the GitHub Contents API URL for a file."""
-    from ..core.auth import AuthResolver
+    """Build the GitHub Contents API URL for a marketplace source."""
+    return _github_contents_url_generic(
+        source.host, source.owner, source.repo, file_path, source.branch
+    )
 
-    host_info = AuthResolver.classify_host(source.host)
-    api_base = host_info.api_base
-    return f"{api_base}/repos/{source.owner}/{source.repo}/contents/{file_path}?ref={source.branch}"
+
+def fetch_raw(
+    host: str,
+    owner: str,
+    repo: str,
+    file_path: str,
+    ref: str,
+    *,
+    auth_resolver: Optional[object] = None,
+) -> Optional[bytes]:
+    """Fetch a file as raw bytes from a GitHub-compatible host.
+
+    Low-level primitive used by ``marketplace doctor`` to fetch plugin
+    apm.yml content.  Honors the same proxy + auth semantics as
+    :func:`_fetch_file`.
+
+    Returns raw bytes on success, or ``None`` if the file does not exist
+    (HTTP 404).
+
+    Raises:
+        MarketplaceError: On unexpected failures (network, auth, 5xx).
+            Raised as the neutral base class so callers can wrap the
+            error with their own context (e.g. plugin-specific wording).
+    """
+    proxy_bytes = _try_proxy_fetch_raw(owner, repo, file_path, ref)
+    if proxy_bytes is not None:
+        return proxy_bytes
+
+    from ..deps.registry_proxy import RegistryConfig
+
+    cfg = RegistryConfig.from_env()
+    if cfg is not None and cfg.enforce_only:
+        logger.debug(
+            "PROXY_REGISTRY_ONLY blocks direct GitHub fetch for %s/%s %s",
+            owner, repo, file_path,
+        )
+        return None
+
+    url = _github_contents_url_generic(host, owner, repo, file_path, ref)
+
+    def _do_fetch(token, _git_env):
+        headers = {
+            "Accept": "application/vnd.github.v3.raw",
+            "User-Agent": "apm-cli",
+        }
+        if token:
+            headers["Authorization"] = f"token {token}"
+        resp = requests.get(url, headers=headers, timeout=30)
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.content
+
+    if auth_resolver is None:
+        from ..core.auth import AuthResolver
+
+        auth_resolver = AuthResolver()
+
+    try:
+        return auth_resolver.try_with_fallback(
+            host,
+            _do_fetch,
+            org=owner,
+            unauth_first=False,
+        )
+    except Exception as exc:
+        raise MarketplaceError(
+            f"fetching {owner}/{repo}/{file_path}@{ref}: {exc}"
+        ) from exc
 
 
 def _fetch_file(
@@ -196,17 +268,26 @@ def _fetch_file(
 
     When ``PROXY_REGISTRY_URL`` is set, tries the registry proxy first via
     Artifactory Archive Entry Download.  Falls back to the GitHub Contents
-    API unless ``PROXY_REGISTRY_ONLY=1`` blocks direct access.
+    API unless ``PROXY_REGISTRY_ONLY=1`` blocks direct access.  A proxy
+    response that is not valid JSON is treated as a miss and falls through
+    to the GitHub API, so a corrupt proxy entry cannot shadow a healthy
+    upstream manifest.
 
     Returns parsed JSON or ``None`` if the file does not exist (404).
     Raises ``MarketplaceFetchError`` on unexpected failures.
     """
-    # Proxy-first: try Artifactory Archive Entry Download
-    proxy_result = _try_proxy_fetch(source, file_path)
-    if proxy_result is not None:
-        return proxy_result
+    proxy_bytes = _try_proxy_fetch_raw(
+        source.owner, source.repo, file_path, source.branch
+    )
+    if proxy_bytes is not None:
+        try:
+            return json.loads(proxy_bytes)
+        except (json.JSONDecodeError, ValueError):
+            logger.debug(
+                "Proxy returned non-JSON for %s/%s %s; falling through to GitHub",
+                source.owner, source.repo, file_path,
+            )
 
-    # When registry-only mode is active, block direct GitHub API access
     from ..deps.registry_proxy import RegistryConfig
 
     cfg = RegistryConfig.from_env()
@@ -217,7 +298,6 @@ def _fetch_file(
         )
         return None
 
-    # Fallback: GitHub Contents API
     url = _github_contents_url(source, file_path)
 
     def _do_fetch(token, _git_env):
@@ -243,11 +323,6 @@ def _fetch_file(
             source.host,
             _do_fetch,
             org=source.owner,
-            # Auth-first: marketplace repos may be private/org-scoped and the
-            # GitHub API returns 404 (not 403) for unauthenticated requests to
-            # private repos.  Because _do_fetch returns None on 404 (no
-            # exception), unauth_first would swallow the error instead of
-            # retrying with a token.
             unauth_first=False,
         )
     except Exception as exc:
