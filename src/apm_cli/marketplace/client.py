@@ -250,7 +250,8 @@ def _fetch_file(
             # retrying with a token.
             unauth_first=False,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 -- wraps unknown auth/network errors into MarketplaceFetchError
+        logger.debug("Fetch failed for '%s'", source.name, exc_info=True)
         raise MarketplaceFetchError(source.name, str(exc)) from exc
 
 

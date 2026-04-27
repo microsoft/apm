@@ -37,6 +37,23 @@ class TestLoadRefPins:
         result = load_ref_pins(pins_dir=str(tmp_path))
         assert result == {}
 
+    def test_load_missing_no_warning_by_default(self, tmp_path, caplog):
+        """Missing file does NOT warn when expect_exists is False (default)."""
+        import logging
+        with caplog.at_level(logging.WARNING):
+            result = load_ref_pins(pins_dir=str(tmp_path))
+        assert result == {}
+        assert "expected but missing" not in caplog.text
+
+    def test_load_missing_warns_when_expected(self, tmp_path, caplog):
+        """Missing file warns when expect_exists=True."""
+        import logging
+        with caplog.at_level(logging.WARNING):
+            result = load_ref_pins(pins_dir=str(tmp_path), expect_exists=True)
+        assert result == {}
+        assert "expected but missing" in caplog.text
+        assert "ref-swap detection is disabled" in caplog.text
+
     def test_load_corrupt_json(self, tmp_path):
         """Corrupt JSON returns empty dict without raising."""
         path = tmp_path / "version-pins.json"
