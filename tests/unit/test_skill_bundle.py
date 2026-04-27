@@ -226,7 +226,8 @@ class TestSkillBundleValidation:
         sd = skills_dir / "unicode-skill"
         sd.mkdir()
         (sd / "SKILL.md").write_text(
-            "---\nname: unicode-skill\ndescription: Ünïcödé description\n---\n# x\n"
+            "---\nname: unicode-skill\ndescription: Ünïcödé description\n---\n# x\n",
+            encoding="utf-8",
         )
         result = validate_apm_package(tmp_path)
         assert result.is_valid  # warnings don't fail validation
