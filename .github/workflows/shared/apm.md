@@ -15,6 +15,17 @@
 #         packages:
 #           - microsoft/apm-sample-package
 #           - github/awesome-copilot/skills/review-and-refactor
+#
+# Cross-org private packages with GitHub App authentication:
+#   imports:
+#     - uses: shared/apm.md
+#       with:
+#         app-id: ${{ vars.APP_ID }}
+#         private-key: ${{ secrets.APP_PRIVATE_KEY }}
+#         owner: acme-platform-org
+#         repositories: acme-skills
+#         packages:
+#           - acme-platform-org/acme-skills/skills/code-review
 
 import-schema:
   packages:
@@ -26,6 +37,36 @@ import-schema:
       List of APM package references to install.
       Format: owner/repo or owner/repo/path/to/skill.
       Examples: microsoft/apm-sample-package, github/awesome-copilot/skills/review-and-refactor
+  app-id:
+    type: string
+    required: false
+    description: >
+      GitHub App ID used to mint an installation access token for fetching
+      cross-org private APM packages. When set, app-id and private-key together
+      override the default GH_AW_PLUGINS_TOKEN / GH_AW_GITHUB_TOKEN / GITHUB_TOKEN
+      cascading fallback.
+  private-key:
+    type: string
+    required: false
+    description: >
+      GitHub App private key (PEM) corresponding to app-id. Required when app-id
+      is set. Should be passed via a repository or organization secret.
+  owner:
+    type: string
+    required: false
+    description: >
+      GitHub App installation owner. Defaults to the current repository owner
+      when omitted. Only used when app-id is set.
+  repositories:
+    type: string
+    required: false
+    description: >
+      Repositories the minted installation token should be scoped to. Accepts a
+      single repo name, a comma-separated list, or a newline-separated block.
+      When omitted, the token defaults to the calling repository (per
+      actions/create-github-app-token). For org-wide access, configure the
+      GitHub App installation with all-repositories access and leave this
+      empty. Only used when app-id is set.
 
 jobs:
   apm:
@@ -33,6 +74,15 @@ jobs:
     needs: [activation]
     permissions: {}
     steps:
+      - name: Generate GitHub App token for APM packages
+        id: apm_token
+        if: ${{ github.aw.import-inputs.app-id != '' }}
+        uses: actions/create-github-app-token@v3.1.1
+        with:
+          app-id: ${{ github.aw.import-inputs.app-id }}
+          private-key: ${{ github.aw.import-inputs.private-key }}
+          owner: ${{ github.aw.import-inputs.owner || github.repository_owner }}
+          repositories: ${{ github.aw.import-inputs.repositories }}
       - name: Prepare APM package list
         id: apm_prep
         env:
@@ -48,7 +98,7 @@ jobs:
         id: apm_pack
         uses: microsoft/apm-action@v1.4.2
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_AW_PLUGINS_TOKEN || secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.apm_token.outputs.token || secrets.GH_AW_PLUGINS_TOKEN || secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
         with:
           dependencies: ${{ steps.apm_prep.outputs.deps }}
           isolated: 'true'
@@ -100,6 +150,11 @@ Packages use the format `owner/repo` or `owner/repo/path/to/skill`:
 
 ### Authentication
 
-Packages are fetched using the cascading token fallback:
-`GH_AW_PLUGINS_TOKEN || GH_AW_GITHUB_TOKEN || GITHUB_TOKEN`
+By default, packages are fetched using the cascading token fallback:
+`GH_AW_PLUGINS_TOKEN || GH_AW_GITHUB_TOKEN || GITHUB_TOKEN`.
+
+For cross-org private packages, supply GitHub App credentials via the
+`app-id`, `private-key`, `owner`, and `repositories` inputs. When `app-id`
+is set, an installation access token is minted with
+`actions/create-github-app-token` and used in place of the default cascade.
 -->
