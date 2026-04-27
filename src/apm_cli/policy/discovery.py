@@ -1008,7 +1008,7 @@ def _get_cache_dir(project_root: Path) -> Path:
     try:
         ensure_path_within(candidate, project_root)
     except PathTraversalError:
-        raise PathTraversalError(
+        raise PathTraversalError(  # noqa: B904
             f"Policy cache path '{candidate}' resolves outside "
             f"project root '{project_root}' -- refusing to read or "
             "write the cache here."

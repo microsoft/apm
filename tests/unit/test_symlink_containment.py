@@ -17,7 +17,7 @@ def _try_symlink(link: Path, target: Path):
     try:
         link.symlink_to(target)
     except OSError:
-        raise unittest.SkipTest("Symlinks not supported on this platform")
+        raise unittest.SkipTest("Symlinks not supported on this platform")  # noqa: B904
 
 
 class TestPromptCompilerSymlinkContainment(unittest.TestCase):

@@ -92,13 +92,13 @@ class CopilotRuntime(RuntimeAdapter):
         except subprocess.TimeoutExpired:
             if "process" in locals():
                 process.kill()
-            raise RuntimeError("Copilot CLI execution timed out after 10 minutes")
+            raise RuntimeError("Copilot CLI execution timed out after 10 minutes")  # noqa: B904
         except FileNotFoundError:
-            raise RuntimeError(
+            raise RuntimeError(  # noqa: B904
                 "Copilot CLI not found. Install with: npm install -g @github/copilot"
             )
         except Exception as e:
-            raise RuntimeError(f"Failed to execute prompt with Copilot CLI: {e}")
+            raise RuntimeError(f"Failed to execute prompt with Copilot CLI: {e}")  # noqa: B904
 
     def list_available_models(self) -> dict[str, Any]:
         """List all available models in the Copilot CLI runtime.

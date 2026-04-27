@@ -252,4 +252,4 @@ def validate_mcp_dry_run_entry(name, **kwargs) -> None:
     try:
         _build_mcp_entry(name, **kwargs)
     except ValueError as exc:
-        raise click.UsageError(str(exc))
+        raise click.UsageError(str(exc))  # noqa: B904

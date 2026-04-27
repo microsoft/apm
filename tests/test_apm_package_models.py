@@ -1109,7 +1109,7 @@ class TestHookPackageValidation:
             assert result.package_type == PackageType.INVALID
 
 
-from src.apm_cli.models.validation import detect_package_type
+from src.apm_cli.models.validation import detect_package_type  # noqa: E402
 
 
 class TestDetectPackageType:

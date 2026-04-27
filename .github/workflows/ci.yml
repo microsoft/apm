@@ -53,6 +53,19 @@ jobs:
           exit 1
         fi
 
+    - name: File length guardrail
+      run: |
+        # Ruff has no max-module-lines rule. This check prevents new files from
+        # exceeding the current worst case. Tighten the threshold over time.
+        MAX_LINES=2600   # current max: 2527 (github_downloader.py)
+        VIOLATIONS=$(find src/ -name '*.py' -print0 | xargs -0 -I{} awk -v max="$MAX_LINES" \
+          'END { if (NR > max) printf "%s: %d lines (max %d)\n", FILENAME, NR, max }' {})
+        if [ -n "$VIOLATIONS" ]; then
+          echo "::error::Source files exceed $MAX_LINES-line limit:"
+          echo "$VIOLATIONS"
+          exit 1
+        fi
+
     - name: Lint - no raw str(relative_to) patterns
       run: |
         # Fail if any code uses str(x.relative_to(y)) instead of portable_relpath()

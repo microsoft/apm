@@ -67,7 +67,7 @@ def _deployed_path_entry(
                     from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
 
                     return to_lockfile_path(target_path, _t.resolved_deploy_root)
-        raise RuntimeError(
+        raise RuntimeError(  # noqa: B904
             f"Cannot translate {target_path!r} to a lockfile path: "
             f"path is outside the project tree and no dynamic-root "
             f"target matched. This is a bug — please report it."

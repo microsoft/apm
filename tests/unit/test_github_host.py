@@ -56,9 +56,9 @@ def test_invalid_fqdns():
         assert not is_valid_fqdn(host), f"Expected '{host}' to be invalid FQDN"
 
 
-import os  # noqa: F401
+import os  # noqa: E402, F401
 
-from apm_cli.utils import github_host
+from apm_cli.utils import github_host  # noqa: E402
 
 
 def test_default_host_env_override(monkeypatch):

@@ -939,7 +939,7 @@ class AgentsCompiler:
                 f.write(final_content)
 
         except OSError as e:
-            raise OSError(f"Failed to write distributed AGENTS.md file {agents_path}: {e!s}")
+            raise OSError(f"Failed to write distributed AGENTS.md file {agents_path}: {e!s}")  # noqa: B904
 
     def _display_placement_preview(self, distributed_result) -> None:
         """Display placement preview for --show-placement mode.

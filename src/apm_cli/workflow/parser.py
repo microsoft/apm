@@ -59,7 +59,7 @@ def parse_workflow_file(file_path):
 
         return WorkflowDefinition(name, file_path, metadata, content)
     except Exception as e:
-        raise ValueError(f"Failed to parse workflow file: {e}")
+        raise ValueError(f"Failed to parse workflow file: {e}")  # noqa: B904
 
 
 def _extract_workflow_name(file_path):

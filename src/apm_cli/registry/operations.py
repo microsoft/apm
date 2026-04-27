@@ -197,7 +197,7 @@ class MCPServerOperations:
                     # this endpoint; unreachable means hard error, not a silent
                     # assumption of validity. Prevents silent misconfiguration
                     # from reaching production. (#814)
-                    raise RuntimeError(
+                    raise RuntimeError(  # noqa: B904
                         f"Could not reach MCP registry at "
                         f"{self.registry_client.registry_url} while validating "
                         f"server '{server_ref}'. MCP_REGISTRY_URL is set -- "

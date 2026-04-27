@@ -241,7 +241,7 @@ def _split_argv_at_double_dash(argv):
 # be imported unconditionally here -- NOT inside the APM_DEPS_AVAILABLE guard.
 # If it were gated, a missing optional dep (e.g. GitPython) would cause a
 # NameError in install() before the graceful APM_DEPS_AVAILABLE check fires.
-from ..core.auth import AuthResolver
+from ..core.auth import AuthResolver  # noqa: E402
 
 # APM Dependencies (conditional import for graceful degradation)
 APM_DEPS_AVAILABLE = False
@@ -617,26 +617,26 @@ def _validate_and_add_packages_to_apm_yml(
 # F7 / F5 install-time MCP warnings live in apm_cli/install/mcp_warnings.py
 # per LOC budget. Re-bind module-level names for back-compat with tests
 # that still patch ``apm_cli.commands.install._warn_*``.
-from ..install.mcp_registry import (
+from ..install.mcp_registry import (  # noqa: E402
     resolve_registry_url as _resolve_registry_url,
 )
-from ..install.mcp_registry import (
+from ..install.mcp_registry import (  # noqa: E402
     validate_mcp_dry_run_entry as _validate_mcp_dry_run_entry,
 )
 
 # --registry helpers live in apm_cli/install/mcp_registry.py per LOC budget.
-from ..install.mcp_registry import (
+from ..install.mcp_registry import (  # noqa: E402
     validate_registry_url as _validate_registry_url,
 )
-from ..install.mcp_warnings import (
+from ..install.mcp_warnings import (  # noqa: E402
     _METADATA_HOSTS,  # noqa: F401
     _SHELL_METACHAR_TOKENS,  # noqa: F401
     _is_internal_or_metadata_host,  # noqa: F401
 )
-from ..install.mcp_warnings import (
+from ..install.mcp_warnings import (  # noqa: E402
     warn_shell_metachars as _warn_shell_metachars,
 )
-from ..install.mcp_warnings import (
+from ..install.mcp_warnings import (  # noqa: E402
     warn_ssrf_url as _warn_ssrf_url,
 )
 
@@ -995,7 +995,7 @@ def _run_mcp_install(  # noqa: PLR0913
             registry_url=registry_url,
         )
     except ValueError as exc:
-        raise click.UsageError(str(exc))
+        raise click.UsageError(str(exc))  # noqa: B904
 
     # F5 + F7 warnings -- do not block.
     _warn_ssrf_url(url, logger)
@@ -2005,7 +2005,7 @@ def _post_install_summary(*, logger, apm_count, mcp_count, apm_diagnostics, forc
 # call-sites in this module would look it up.  Tests inside this codebase
 # now patch the canonical apm_cli.install.services._integrate_package_primitives
 # directly to avoid relying on transitive aliasing.
-from apm_cli.install.services import (
+from apm_cli.install.services import (  # noqa: E402
     _integrate_local_content,  # noqa: F401
     _integrate_package_primitives,  # noqa: F401
     integrate_local_content,  # noqa: F401

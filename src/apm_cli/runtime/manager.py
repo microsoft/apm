@@ -75,7 +75,7 @@ class RuntimeManager:
                 f"{Fore.RED}[x] Failed to load embedded script {script_name}: {e}{Style.RESET_ALL}",
                 err=True,
             )
-            raise RuntimeError(f"Could not load setup script: {script_name}")
+            raise RuntimeError(f"Could not load setup script: {script_name}")  # noqa: B904
 
     def get_common_script(self) -> str:
         """Get the common utilities script."""
@@ -110,7 +110,7 @@ class RuntimeManager:
                 f"{Fore.RED}[x] Failed to load github-token-helper.sh: {e}{Style.RESET_ALL}",
                 err=True,
             )
-            raise RuntimeError("Could not load token helper script")
+            raise RuntimeError("Could not load token helper script")  # noqa: B904
 
     def run_embedded_script(
         self, script_content: str, common_content: str, script_args: list[str] | None = None

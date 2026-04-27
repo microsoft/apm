@@ -120,7 +120,7 @@ def _allow_insecure_host_callback(ctx, param, value):
         try:
             normalized = _normalize_allow_insecure_host(raw_host)
         except ValueError as exc:
-            raise click.BadParameter(str(exc))
+            raise click.BadParameter(str(exc))  # noqa: B904
         if normalized not in seen_hosts:
             seen_hosts.add(normalized)
             normalized_hosts.append(normalized)

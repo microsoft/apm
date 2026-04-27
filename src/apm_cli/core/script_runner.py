@@ -203,7 +203,7 @@ class ScriptRunner:
             for line in error_lines:
                 print(line)
 
-            raise RuntimeError(f"Script execution failed with exit code {e.returncode}")
+            raise RuntimeError(f"Script execution failed with exit code {e.returncode}")  # noqa: B904
 
     def list_scripts(self) -> dict[str, str]:
         """List all available scripts from apm.yml.

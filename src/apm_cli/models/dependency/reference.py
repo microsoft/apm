@@ -589,7 +589,7 @@ class DependencyReference:
                 except (ValueError, AttributeError) as e:
                     if isinstance(e, ValueError) and "Invalid Git host" in str(e):
                         raise
-                    raise ValueError(unsupported_host_error(first_segment))
+                    raise ValueError(unsupported_host_error(first_segment))  # noqa: B904
             elif check_str.startswith("gh/"):
                 check_str = "/".join(check_str.split("/")[1:])
 

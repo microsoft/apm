@@ -53,13 +53,13 @@ def _assert_redirect_target_host(error: str, expected_host: str) -> None:
     assert parsed.hostname == expected_host
 
 
-from apm_cli.policy.discovery import (
+from apm_cli.policy.discovery import (  # noqa: E402
     PolicyFetchResult,
     _fetch_from_url,
     discover_policy_with_chain,
 )
-from apm_cli.policy.inheritance import PolicyInheritanceError
-from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
+from apm_cli.policy.inheritance import PolicyInheritanceError  # noqa: E402
+from apm_cli.policy.schema import ApmPolicy, DependencyPolicy  # noqa: E402
 
 _PATCH_DISCOVER = "apm_cli.policy.discovery.discover_policy"
 _PATCH_WRITE_CACHE = "apm_cli.policy.discovery._write_cache"

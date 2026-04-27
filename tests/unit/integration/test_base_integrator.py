@@ -627,9 +627,9 @@ class TestInitLinkResolverHomeScoping:
 # Cowork additive tests
 # ---------------------------------------------------------------------------
 
-from dataclasses import replace
+from dataclasses import replace  # noqa: E402
 
-from apm_cli.integration.targets import KNOWN_TARGETS
+from apm_cli.integration.targets import KNOWN_TARGETS  # noqa: E402
 
 
 def _make_cowork_target(cowork_root: Path) -> "TargetProfile":  # noqa: F821

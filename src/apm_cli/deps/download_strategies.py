@@ -530,7 +530,7 @@ class DownloadDelegate:
             if e.response.status_code == 404:
                 # Try fallback branches
                 if ref not in ["main", "master"]:
-                    raise RuntimeError(
+                    raise RuntimeError(  # noqa: B904
                         f"File not found: {file_path} at ref '{ref}' in {dep_ref.repo_url}"
                     )
 
@@ -549,7 +549,7 @@ class DownloadDelegate:
                     response.raise_for_status()
                     return response.content
                 except requests.exceptions.HTTPError:
-                    raise RuntimeError(
+                    raise RuntimeError(  # noqa: B904
                         f"File not found: {file_path} in {dep_ref.repo_url} "
                         f"(tried refs: {ref}, {fallback_ref})"
                     )
@@ -565,11 +565,11 @@ class DownloadDelegate:
                     )
                 else:
                     error_msg += "Please check your Azure DevOps PAT permissions."
-                raise RuntimeError(error_msg)
+                raise RuntimeError(error_msg)  # noqa: B904
             else:
-                raise RuntimeError(f"Failed to download {file_path}: HTTP {e.response.status_code}")
+                raise RuntimeError(f"Failed to download {file_path}: HTTP {e.response.status_code}")  # noqa: B904
         except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"Network error downloading {file_path}: {e}")
+            raise RuntimeError(f"Network error downloading {file_path}: {e}")  # noqa: B904
 
     # ------------------------------------------------------------------
     # GitHub file download
@@ -661,7 +661,7 @@ class DownloadDelegate:
             if e.response.status_code == 404:
                 # Try fallback branches if the specified ref fails
                 if ref not in ["main", "master"]:
-                    raise RuntimeError(
+                    raise RuntimeError(  # noqa: B904
                         f"File not found: {file_path} at ref '{ref}' in {dep_ref.repo_url}"
                     )
 
@@ -692,7 +692,7 @@ class DownloadDelegate:
                         verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
                     return response.content
                 except requests.exceptions.HTTPError:
-                    raise RuntimeError(
+                    raise RuntimeError(  # noqa: B904
                         f"File not found: {file_path} in {dep_ref.repo_url} "
                         f"(tried refs: {ref}, {fallback_ref})"
                     )
@@ -726,7 +726,7 @@ class DownloadDelegate:
                             "Wait a few minutes or check your token's "
                             "rate-limit quota."
                         )
-                    raise RuntimeError(error_msg)
+                    raise RuntimeError(error_msg)  # noqa: B904
 
                 # Token may lack SSO/SAML authorization for this org.
                 # Retry without auth -- the repo might be public.
@@ -766,8 +766,8 @@ class DownloadDelegate:
                     )
                 else:
                     error_msg += "Please check your GitHub token permissions."
-                raise RuntimeError(error_msg)
+                raise RuntimeError(error_msg)  # noqa: B904
             else:
-                raise RuntimeError(f"Failed to download {file_path}: HTTP {e.response.status_code}")
+                raise RuntimeError(f"Failed to download {file_path}: HTTP {e.response.status_code}")  # noqa: B904
         except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"Network error downloading {file_path}: {e}")
+            raise RuntimeError(f"Network error downloading {file_path}: {e}")  # noqa: B904

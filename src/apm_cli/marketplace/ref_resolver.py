@@ -220,13 +220,13 @@ class RefResolver:
                     env=env,
                 )
             except subprocess.TimeoutExpired:
-                raise GitLsRemoteError(
+                raise GitLsRemoteError(  # noqa: B904
                     package="",
                     summary=f"git ls-remote timed out after {self._timeout}s for '{owner_repo}'.",
                     hint="Increase --timeout or check your network connection.",
                 )
             except OSError as exc:
-                raise GitLsRemoteError(
+                raise GitLsRemoteError(  # noqa: B904
                     package="",
                     summary=f"Failed to run git ls-remote for '{owner_repo}'.",
                     hint=f"Ensure git is installed and on PATH. Error: {exc}",
@@ -297,13 +297,13 @@ class RefResolver:
                 env=env,
             )
         except subprocess.TimeoutExpired:
-            raise GitLsRemoteError(
+            raise GitLsRemoteError(  # noqa: B904
                 package="",
                 summary=f"git ls-remote timed out after {self._timeout}s for '{owner_repo}'.",
                 hint="Increase --timeout or check your network connection.",
             )
         except OSError as exc:
-            raise GitLsRemoteError(
+            raise GitLsRemoteError(  # noqa: B904
                 package="",
                 summary=f"Failed to run git ls-remote for '{owner_repo}'.",
                 hint=f"Ensure git is installed and on PATH. Error: {exc}",

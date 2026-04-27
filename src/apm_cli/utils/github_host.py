@@ -125,7 +125,7 @@ def unsupported_host_error(hostname: str, context: str | None = None) -> str:
     return msg
 
 
-from urllib.parse import quote as url_quote
+from urllib.parse import quote as url_quote  # noqa: E402
 
 
 def build_raw_content_url(owner: str, repo: str, ref: str, file_path: str) -> str:

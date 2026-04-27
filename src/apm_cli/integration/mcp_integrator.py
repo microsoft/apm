@@ -1248,7 +1248,7 @@ class MCPIntegrator:
             except ImportError:
                 logger.warning("Registry operations not available")
                 logger.error("Cannot validate MCP servers without registry operations")
-                raise RuntimeError("Registry operations module required for MCP installation")
+                raise RuntimeError("Registry operations module required for MCP installation")  # noqa: B904
 
         # --- Self-defined deps (registry: false) ---
         if self_defined_deps:

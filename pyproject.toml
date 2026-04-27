@@ -77,15 +77,14 @@ select = [
 ignore = [
     "PLR2004",  # magic-value-comparison -- too noisy, especially in tests
     "E501",     # line-too-long -- ruff format handles code; remaining are strings/URLs
+    # --- Permanently ignored: intentional patterns in a CLI tool ---
+    "SIM117",   # multiple-with-statements -- style preference, 65 violations
+    "S110",     # try-except-pass -- intentional graceful degradation in CLI error handling
+    "S602",     # subprocess-popen-with-shell -- intentional in CLI wrapping git/pip
     # --- Deferred rules: enable in dedicated future PRs ---
-    "B904",     # raise-without-from-inside-except -- 60 existing violations, needs careful migration
-    "SIM117",   # multiple-with-statements -- 44 violations, style preference
-    "S110",     # try-except-pass -- 37 violations, often intentional in CLI error handling
-    "SIM102",   # collapsible-if -- 19 violations, style preference
+    "SIM102",   # collapsible-if -- 28 violations, auto-fixable style improvement
     "RUF003",   # ambiguous-unicode-character-comment -- 14 violations, review against ASCII convention
     "RUF002",   # ambiguous-unicode-character-docstring -- 8 violations, same as above
-    "S602",     # subprocess-popen-with-shell -- 14 violations, intentional in CLI tool
-    "E402",     # module-import-not-at-top -- 6 violations, often intentional (lazy/conditional imports)
 ]
 
 [tool.ruff.lint.pylint]

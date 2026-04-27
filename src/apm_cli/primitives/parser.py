@@ -47,7 +47,7 @@ def parse_skill_file(file_path: str | Path, source: str = None) -> Skill:  # noq
         )
 
     except Exception as e:
-        raise ValueError(f"Failed to parse SKILL.md file {file_path}: {e}")
+        raise ValueError(f"Failed to parse SKILL.md file {file_path}: {e}")  # noqa: B904
 
 
 def parse_primitive_file(file_path: str | Path, source: str = None) -> Primitive:  # noqa: RUF013
@@ -91,7 +91,7 @@ def parse_primitive_file(file_path: str | Path, source: str = None) -> Primitive
             raise ValueError(f"Unknown primitive file type: {file_path}")
 
     except Exception as e:
-        raise ValueError(f"Failed to parse primitive file {file_path}: {e}")
+        raise ValueError(f"Failed to parse primitive file {file_path}: {e}")  # noqa: B904
 
 
 def _parse_chatmode(

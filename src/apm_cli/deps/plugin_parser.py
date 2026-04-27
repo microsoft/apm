@@ -88,7 +88,7 @@ def parse_plugin_manifest(plugin_json_path: Path) -> dict[str, Any]:
         with open(plugin_json_path, encoding="utf-8") as f:
             manifest = json.load(f)
     except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in plugin.json: {e}")
+        raise ValueError(f"Invalid JSON in plugin.json: {e}")  # noqa: B904
 
     if not manifest.get("name"):
         logging.getLogger("apm").warning(

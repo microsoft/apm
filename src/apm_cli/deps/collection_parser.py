@@ -122,4 +122,4 @@ def parse_collection_yml(content: bytes) -> CollectionManifest:
         )
 
     except yaml.YAMLError as e:
-        raise ValueError(f"Invalid YAML format: {e}")
+        raise ValueError(f"Invalid YAML format: {e}")  # noqa: B904

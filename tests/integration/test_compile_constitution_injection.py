@@ -33,7 +33,7 @@ def test_injects_block_when_constitution_present():
         try:
             blank_index = lines.index("")
         except ValueError:
-            raise AssertionError("Header separator blank line missing")
+            raise AssertionError("Header separator blank line missing")  # noqa: B904
         # Constitution begin should appear after that blank line
         begin_index = None
         for i, l in enumerate(lines):  # noqa: E741

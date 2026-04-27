@@ -100,7 +100,7 @@ def _lazy_yaml():
 
         return yaml
     except ImportError:
-        raise ImportError("PyYAML is required but not installed")
+        raise ImportError("PyYAML is required but not installed")  # noqa: B904
 
 
 def _lazy_prompt():

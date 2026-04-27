@@ -74,11 +74,11 @@ class CodexRuntime(RuntimeAdapter):
         except subprocess.TimeoutExpired:
             if "process" in locals():
                 process.kill()
-            raise RuntimeError("Codex execution timed out after 5 minutes")
+            raise RuntimeError("Codex execution timed out after 5 minutes")  # noqa: B904
         except FileNotFoundError:
-            raise RuntimeError("Codex CLI not found. Install with: npm i -g @openai/codex@native")
+            raise RuntimeError("Codex CLI not found. Install with: npm i -g @openai/codex@native")  # noqa: B904
         except Exception as e:
-            raise RuntimeError(f"Failed to execute prompt with Codex: {e}")
+            raise RuntimeError(f"Failed to execute prompt with Codex: {e}")  # noqa: B904
 
     def list_available_models(self) -> dict[str, Any]:
         """List all available models in the Codex runtime.

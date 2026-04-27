@@ -25,7 +25,7 @@ class LLMRuntime(RuntimeAdapter):
                 ["llm", "--version"], capture_output=True, text=True, encoding="utf-8", check=True
             )
         except (subprocess.CalledProcessError, FileNotFoundError):
-            raise RuntimeError("llm CLI not found. Please install: pip install llm")
+            raise RuntimeError("llm CLI not found. Please install: pip install llm")  # noqa: B904
 
     def execute_prompt(self, prompt_content: str, **kwargs) -> str:
         """Execute a single prompt using llm CLI and return the response.
@@ -77,9 +77,9 @@ class LLMRuntime(RuntimeAdapter):
 
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr.strip() if e.stderr else str(e)
-            raise RuntimeError(f"LLM execution failed: {error_msg}")
+            raise RuntimeError(f"LLM execution failed: {error_msg}")  # noqa: B904
         except Exception as e:
-            raise RuntimeError(f"Failed to execute prompt: {e}")
+            raise RuntimeError(f"Failed to execute prompt: {e}")  # noqa: B904
 
     def list_available_models(self) -> dict[str, Any]:
         """List all available models in the LLM runtime.

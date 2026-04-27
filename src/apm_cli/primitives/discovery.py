@@ -14,8 +14,8 @@ from .models import PrimitiveCollection
 from .parser import parse_primitive_file, parse_skill_file
 
 logger = logging.getLogger(__name__)
-from ..deps.lockfile import LockFile
-from ..models.apm_package import APMPackage
+from ..deps.lockfile import LockFile  # noqa: E402
+from ..models.apm_package import APMPackage  # noqa: E402
 
 # Common primitive patterns for local discovery (with recursive search)
 LOCAL_PRIMITIVE_PATTERNS: dict[str, list[str]] = {

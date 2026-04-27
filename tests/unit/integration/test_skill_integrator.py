@@ -3681,10 +3681,10 @@ class TestUninstallPhase2SkillTargets:
 # Cowork additive tests
 # ---------------------------------------------------------------------------
 
-from dataclasses import replace as _dc_replace
-from unittest.mock import MagicMock
+from dataclasses import replace as _dc_replace  # noqa: E402
+from unittest.mock import MagicMock  # noqa: E402
 
-from apm_cli.integration.targets import KNOWN_TARGETS
+from apm_cli.integration.targets import KNOWN_TARGETS  # noqa: E402
 
 
 def _make_resolved_cowork_target(cowork_root: Path) -> "TargetProfile":  # noqa: F821

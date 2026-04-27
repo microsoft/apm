@@ -1029,7 +1029,7 @@ class GitHubPackageDownloader:
             try:
                 dep_ref = DependencyReference.parse(repo_ref)
             except ValueError as e:
-                raise ValueError(f"Invalid repository reference '{repo_ref}': {e}")
+                raise ValueError(f"Invalid repository reference '{repo_ref}': {e}")  # noqa: B904
 
         # Use user-specified ref; None means "use the remote's default branch"
         ref = dep_ref.reference or None
@@ -1073,7 +1073,7 @@ class GitHubPackageDownloader:
                     ref_name = ref
                 except Exception as e:
                     sanitized_error = self._sanitize_git_error(str(e))
-                    raise ValueError(
+                    raise ValueError(  # noqa: B904
                         f"Could not resolve commit '{ref}' in repository {dep_ref.repo_url}: {sanitized_error}"
                     )
             else:
@@ -1117,13 +1117,13 @@ class GitHubPackageDownloader:
                                     resolved_commit = tag.commit.hexsha
                                     ref_name = ref
                                 except IndexError:
-                                    raise ValueError(
+                                    raise ValueError(  # noqa: B904
                                         f"Reference '{ref}' not found in repository {dep_ref.repo_url}"
                                     )
 
                         except Exception as e:
                             sanitized_error = self._sanitize_git_error(str(e))
-                            raise ValueError(
+                            raise ValueError(  # noqa: B904
                                 f"Could not resolve reference '{ref}' in repository {dep_ref.repo_url}: {sanitized_error}"
                             )
 
@@ -1142,10 +1142,10 @@ class GitHubPackageDownloader:
                                 port=dep_ref.port,
                                 dep_url=dep_ref.repo_url,
                             )
-                            raise RuntimeError(error_msg)
+                            raise RuntimeError(error_msg)  # noqa: B904
                         else:
                             sanitized_error = self._sanitize_git_error(str(e))
-                            raise RuntimeError(
+                            raise RuntimeError(  # noqa: B904
                                 f"Failed to clone repository {dep_ref.repo_url}: {sanitized_error}"
                             )
 
@@ -1367,7 +1367,7 @@ class GitHubPackageDownloader:
         try:
             file_content = self.download_raw_file(dep_ref, dep_ref.virtual_path, ref)
         except RuntimeError as e:
-            raise RuntimeError(f"Failed to download virtual package: {e}")
+            raise RuntimeError(f"Failed to download virtual package: {e}")  # noqa: B904
 
         # Update progress - processing
         if progress_obj and progress_task_id is not None:
@@ -1514,11 +1514,11 @@ class GitHubPackageDownloader:
                         dep_ref, collection_manifest_path, ref
                     )
                 except RuntimeError:
-                    raise RuntimeError(
+                    raise RuntimeError(  # noqa: B904
                         f"Collection manifest not found: {virtual_path_base}.collection.yml (also tried .yaml)"
                     )
             else:
-                raise RuntimeError(f"Failed to download collection manifest: {e}")
+                raise RuntimeError(f"Failed to download collection manifest: {e}")  # noqa: B904
 
         # Parse the collection manifest
         from .collection_parser import parse_collection_yml
@@ -1526,7 +1526,7 @@ class GitHubPackageDownloader:
         try:
             manifest = parse_collection_yml(manifest_content)
         except (ValueError, Exception) as e:
-            raise RuntimeError(f"Invalid collection manifest '{collection_name}': {e}")
+            raise RuntimeError(f"Invalid collection manifest '{collection_name}': {e}")  # noqa: B904
 
         # Create target directory structure
         target_path.mkdir(parents=True, exist_ok=True)
@@ -2104,7 +2104,7 @@ class GitHubPackageDownloader:
             try:
                 dep_ref = DependencyReference.parse(repo_ref)
             except ValueError as e:
-                raise ValueError(f"Invalid repository reference '{repo_ref}': {e}")
+                raise ValueError(f"Invalid repository reference '{repo_ref}': {e}")  # noqa: B904
 
         # Handle virtual packages differently
         if dep_ref.is_virtual:
@@ -2234,10 +2234,10 @@ class GitHubPackageDownloader:
                     port=dep_ref.port,
                     dep_url=dep_ref.repo_url,
                 )
-                raise RuntimeError(error_msg)
+                raise RuntimeError(error_msg)  # noqa: B904
             else:
                 sanitized_error = self._sanitize_git_error(str(e))
-                raise RuntimeError(
+                raise RuntimeError(  # noqa: B904
                     f"Failed to clone repository {dep_ref.repo_url}: {sanitized_error}"
                 )
         except RuntimeError:
