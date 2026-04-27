@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed `AttributeError: 'str' object has no attribute 'get'` crash when running `apm install --mcp <name>` without `--transport`, `--url`, `--mcp-version`, `--registry`, or a post-`--` stdio command. The bare-string registry shorthand now exits 0 and persists correctly to `apm.yml`. Closes #938 (#951)
 - Fixed TLS validation failure behind corporate TLS-intercepting proxies and firewalls: `install/validation.py` now uses `requests` (honouring `REQUESTS_CA_BUNDLE`) instead of stdlib `urllib`, and surfaces a single CA-trust hint at default verbosity instead of a misleading auth error. (#911)
 
 ## [0.9.3] - 2026-04-26
