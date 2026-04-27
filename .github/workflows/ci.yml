@@ -30,10 +30,10 @@ jobs:
     - uses: astral-sh/setup-uv@v6
 
     - name: Ruff lint
-      run: uv run ruff check src/ tests/
+      run: uv run --extra dev ruff check src/ tests/
 
     - name: Ruff format check
-      run: uv run ruff format --check src/ tests/
+      run: uv run --extra dev ruff format --check src/ tests/
 
     - name: Check YAML encoding safety
       run: |
