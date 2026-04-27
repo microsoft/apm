@@ -25,7 +25,13 @@ class LockedDependency:
     repo_url: str
     host: Optional[str] = None
     port: Optional[int] = None  # Non-standard SSH/HTTPS port (e.g. 7999 for Bitbucket DC)
+    source_type: Optional[str] = None  # e.g. "oci"
+    repository_name: Optional[str] = None  # logical repository chosen during resolution
     registry_prefix: Optional[str] = None  # Registry path prefix, e.g. "artifactory/github"
+    oci_registry: Optional[str] = None  # Registry alias used in apm.yml/config
+    oci_repository: Optional[str] = None  # OCI repository path, e.g. acme/security-pack
+    oci_tag: Optional[str] = None
+    oci_digest: Optional[str] = None
     resolved_commit: Optional[str] = None
     resolved_ref: Optional[str] = None
     version: Optional[str] = None
@@ -60,8 +66,20 @@ class LockedDependency:
             result["host"] = self.host
         if self.port:
             result["port"] = self.port
+        if self.source_type:
+            result["source_type"] = self.source_type
+        if self.repository_name:
+            result["repository_name"] = self.repository_name
         if self.registry_prefix:
             result["registry_prefix"] = self.registry_prefix
+        if self.oci_registry:
+            result["oci_registry"] = self.oci_registry
+        if self.oci_repository:
+            result["oci_repository"] = self.oci_repository
+        if self.oci_tag:
+            result["oci_tag"] = self.oci_tag
+        if self.oci_digest:
+            result["oci_digest"] = self.oci_digest
         if self.resolved_commit:
             result["resolved_commit"] = self.resolved_commit
         if self.resolved_ref:
@@ -133,8 +151,14 @@ class LockedDependency:
         return cls(
             repo_url=data["repo_url"],
             host=data.get("host"),
+            source_type=data.get("source_type"),
+            repository_name=data.get("repository_name"),
             port=port,
             registry_prefix=data.get("registry_prefix"),
+            oci_registry=data.get("oci_registry"),
+            oci_repository=data.get("oci_repository"),
+            oci_tag=data.get("oci_tag"),
+            oci_digest=data.get("oci_digest"),
             resolved_commit=data.get("resolved_commit"),
             resolved_ref=data.get("resolved_ref"),
             version=data.get("version"),
@@ -179,6 +203,24 @@ class LockedDependency:
                 is set to the URL path prefix (e.g. ``"artifactory/github"``),
                 ensuring correct auth routing on subsequent installs.
         """
+        if getattr(dep_ref, "dependency_kind", None) == "package_requirement":
+            return cls(
+                repo_url=dep_ref.repo_url,
+                host=getattr(dep_ref, "resolved_host", None),
+                source_type=getattr(dep_ref, "resolved_source_type", None),
+                repository_name=getattr(dep_ref, "resolved_repository", None),
+                resolved_commit=resolved_commit,
+                resolved_ref=getattr(dep_ref, "resolved_ref", None) or dep_ref.reference,
+                version=dep_ref.reference,
+                depth=depth,
+                resolved_by=resolved_by,
+                is_dev=is_dev,
+                oci_repository=dep_ref.repo_url if getattr(dep_ref, "resolved_source_type", None) == "oci" else None,
+                oci_registry=getattr(dep_ref, "resolved_repository", None) if getattr(dep_ref, "resolved_source_type", None) == "oci" else None,
+                oci_tag=dep_ref.reference if getattr(dep_ref, "resolved_source_type", None) == "oci" else None,
+                oci_digest=getattr(dep_ref, "resolved_digest", None) if getattr(dep_ref, "resolved_source_type", None) == "oci" else None,
+            )
+
         if registry_config is not None:
             host = registry_config.host
             registry_prefix = registry_config.prefix
@@ -218,7 +260,6 @@ class LockedDependency:
             is_insecure=self.is_insecure,
             allow_insecure=self.allow_insecure,
         )
-
 
 @dataclass
 class LockFile:

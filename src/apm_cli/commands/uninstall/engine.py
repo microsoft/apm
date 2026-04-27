@@ -9,19 +9,33 @@ from ...utils.path_security import PathTraversalError, safe_rmtree
 from ...utils.paths import portable_relpath
 
 from ...deps.lockfile import LockFile
-from ...models.apm_package import APMPackage, DependencyReference
+from ...models.apm_package import APMPackage, DependencyReference, PackageRequirement
 from ...integration.mcp_integrator import MCPIntegrator
 
 
 def _parse_dependency_entry(dep_entry):
     """Parse a dependency entry from apm.yml into a DependencyReference."""
-    if isinstance(dep_entry, DependencyReference):
+    if isinstance(dep_entry, (DependencyReference, PackageRequirement)):
         return dep_entry
     if isinstance(dep_entry, str):
-        return DependencyReference.parse(dep_entry)
+        try:
+            return PackageRequirement.parse(dep_entry)
+        except Exception:
+            return DependencyReference.parse(dep_entry)
     if isinstance(dep_entry, builtins.dict):
+        if "name" in dep_entry and "git" not in dep_entry:
+            return PackageRequirement.from_dict(dep_entry)
         return DependencyReference.parse_from_dict(dep_entry)
     raise ValueError(f"Unsupported dependency entry type: {type(dep_entry).__name__}")
+
+
+def _dependency_identity(dep) -> str:
+    """Return the stable identity used for matching and orphan detection."""
+    if getattr(dep, "source", None) == "local" and getattr(dep, "local_path", None):
+        return dep.local_path
+    if getattr(dep, "is_virtual", False) and getattr(dep, "virtual_path", None):
+        return f"{dep.repo_url}/{dep.virtual_path}"
+    return dep.repo_url
 
 
 def _validate_uninstall_packages(packages, current_deps, logger):
@@ -156,7 +170,7 @@ def _cleanup_transitive_orphans(lockfile, packages_to_remove, apm_modules_dir, a
     for pkg in packages_to_remove:
         try:
             ref = _parse_dependency_entry(pkg)
-            removed_repo_urls.add(ref.repo_url)
+            removed_repo_urls.add(_dependency_identity(ref))
         except (ValueError, TypeError, AttributeError, KeyError):
             removed_repo_urls.add(pkg)
 
@@ -184,15 +198,15 @@ def _cleanup_transitive_orphans(lockfile, packages_to_remove, apm_modules_dir, a
         for dep_str in updated_data.get("dependencies", {}).get("apm", []) or []:
             try:
                 ref = _parse_dependency_entry(dep_str)
-                remaining_deps.add(ref.get_unique_key())
+                remaining_deps.add(_dependency_identity(ref))
             except (ValueError, TypeError, AttributeError, KeyError):
-                remaining_deps.add(dep_str)
+                remaining_deps.add(str(dep_str))
     except Exception:
         pass
 
     for dep in lockfile.get_package_dependencies():
         key = dep.get_unique_key()
-        if key not in orphans and dep.repo_url not in removed_repo_urls:
+        if key not in orphans and _dependency_identity(dep) not in removed_repo_urls:
             remaining_deps.add(key)
 
     actual_orphans = orphans - remaining_deps

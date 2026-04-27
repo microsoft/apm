@@ -90,6 +90,18 @@ dependencies:
     package_type: apm_package
     deployed_files:
       - .github/instructions/common-guidelines.instructions.md
+
+  - repo_url: acme/security-pack
+    source_type: oci
+    repository_name: ghcr
+    oci_registry: ghcr
+    oci_repository: acme/security-pack
+    oci_tag: 1.2.0
+    resolved_ref: ghcr.io/apm/acme/security-pack:1.2.0
+    depth: 1
+    package_type: apm_package
+    deployed_files:
+      - .github/instructions/security.instructions.md
 ```
 
 ### 4.1 Top-Level Fields
@@ -113,8 +125,10 @@ fields:
 |-------|------|----------|-------------|
 | `repo_url` | string | MUST | Source repository URL, or `_local/<name>` for local path dependencies. |
 | `host` | string | MAY | Git host identifier (e.g., `github.com`). Omitted when inferrable from `repo_url`. |
+| `source_type` | string | MAY | Resolved transport type. Current prototype values: `git`, `oci`. |
+| `repository_name` | string | MAY | Name of the configured repository that satisfied a logical requirement. |
 | `resolved_commit` | string | MUST (remote) | Full 40-character commit SHA that was checked out. Required for remote (git) dependencies; MUST be omitted for local (`source: "local"`) dependencies. |
-| `resolved_ref` | string | MUST (remote) | Git ref (tag, branch, SHA) that resolved to `resolved_commit`. Required for remote (git) dependencies; MUST be omitted for local (`source: "local"`) dependencies. |
+| `resolved_ref` | string | MUST (remote) | Git ref (tag, branch, SHA) that resolved to `resolved_commit`, or the fully resolved OCI locator used for an OCI-backed dependency. Required for remote dependencies; MUST be omitted for local (`source: "local"`) dependencies. |
 | `version` | string | MAY | Semantic version of the package, if declared in its manifest. |
 | `virtual_path` | string | MAY | Sub-path within the repository for virtual (monorepo) packages. |
 | `is_virtual` | boolean | MAY | `true` if the package is a virtual sub-package. Omitted when `false`. |
@@ -126,6 +140,10 @@ fields:
 | `deployed_files` | array of strings | MUST | Every file path APM deployed for this dependency, relative to project root. |
 | `source` | string | MAY | Dependency source. `"local"` for local path dependencies. Omitted for remote (git) dependencies. |
 | `local_path` | string | MAY | Filesystem path (relative or absolute) to the local package. Present only when `source` is `"local"`. |
+| `oci_registry` | string | MAY | Logical OCI repository name used during resolution. |
+| `oci_repository` | string | MAY | OCI repository path that stored the package archive. |
+| `oci_tag` | string | MAY | OCI tag used when pulling the artifact. |
+| `oci_digest` | string | MAY | OCI digest, when available from the transport or lock refresh. |
 | `is_insecure` | boolean | MAY | `true` when the dep was fetched over HTTP (unencrypted). Omitted when `false`. Presence forces re-approval on the next install: the apm.yml entry MUST carry `allow_insecure: true` and the invocation MUST pass `--allow-insecure` (or `--allow-insecure-host` for transitive deps). Absent or `false` means HTTPS/SSH. |
 | `allow_insecure` | boolean | MAY | `true` when the user's manifest explicitly approved the HTTP fetch with `allow_insecure: true`. Persisted alongside `is_insecure` for replay safety: a legacy lockfile with `is_insecure: true` but no `allow_insecure` fail-closes to `allow_insecure: false`, forcing re-approval. Omitted when `false`. |
 
@@ -139,7 +157,9 @@ lists) SHOULD be omitted from the serialized output to keep the file concise.
 Each dependency is uniquely identified by its `repo_url`, or by the
 combination of `repo_url` and `virtual_path` for virtual packages.
 For local path dependencies (`source: "local"`), the unique key is the
-`local_path` value. A conforming lock file MUST NOT contain duplicate
+`local_path` value. In the current OCI prototype, implementations MAY use an
+OCI-specific internal key shape such as `oci:<registry>:<repository>` while
+still storing the logical package identity in `repo_url`. A conforming lock file MUST NOT contain duplicate
 entries for the same key.
 
 ### 4.4 Content Integrity

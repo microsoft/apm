@@ -251,7 +251,7 @@ local_path_form = ("./" / "../" / "/" / "~/" / ".\\" / "..\\" / "~\\") path
 
 | Segment | Required | Pattern | Description |
 |---|---|---|---|
-| `host` | OPTIONAL | FQDN (e.g. `gitlab.com`) | Git host. Defaults to `github.com`. |
+| `host` | OPTIONAL | FQDN (e.g. `gitlab.com`) | Explicit host qualifier. When omitted, the string is treated as a logical package requirement resolved through configured repositories. When present, the string is treated as a direct host-qualified source. |
 | `port` | OPTIONAL | `1`–`65535` | Non-default port on `ssh://`, `https://`, `http://` clone URLs. Not expressible in SCP shorthand. |
 | `owner/repo` | REQUIRED | 2+ path segments of `[a-zA-Z0-9._-]+` | Repository path. GitHub uses exactly 2 segments (`owner/repo`). Non-GitHub hosts MAY use nested groups (e.g. `gitlab.com/group/sub/repo`). |
 | `virtual_path` | OPTIONAL | Path segments after repo | Subdirectory, file, or collection within the repo. See §4.1.3. |
@@ -262,12 +262,12 @@ local_path_form = ("./" / "../" / "/" / "~/" / ".\\" / "..\\" / "~\\") path
 ```yaml
 dependencies:
   apm:
-    # GitHub shorthand (default host) — each line shows a syntax variant
+    # Logical package requirements
     - microsoft/apm-sample-package                # latest (lockfile pins commit SHA)
     - microsoft/apm-sample-package#v1.0.0         # pinned to tag (immutable)
     - microsoft/apm-sample-package#main           # branch ref (may change over time)
 
-    # Non-GitHub hosts (FQDN preserved)
+    # Direct host-qualified sources (FQDN preserved)
     - gitlab.com/acme/coding-standards
     - bitbucket.org/team/repo#main
 
@@ -295,6 +295,29 @@ dependencies:
 
 #### 4.1.2. Object Form
 
+APM supports two object-style forms for `dependencies.apm` entries:
+
+- a **logical requirement object**, resolved through configured repositories
+- a **direct git/local object**, which points at an explicit source
+
+Logical requirement object:
+
+| Field | Type | Required | Pattern / Constraint | Description |
+|---|---|---|---|---|
+| `name` | `string` | REQUIRED | package name with at least one `/` | Logical package identity, for example `acme/security-pack`. |
+| `version` | `string` | OPTIONAL | non-empty string | Version or ref-style selector used during resolution. |
+| `repository` | `string` | OPTIONAL | non-empty string | Name of a configured repository in `~/.apm/repositories.yml`. |
+| `alias` | `string` | OPTIONAL | `^[a-zA-Z0-9._-]+$` | Local display alias. |
+
+```yaml
+- name: acme/security-pack
+  version: 1.2.0
+  repository: corp-oci
+  alias: security-pack
+```
+
+Direct git/local object:
+
 REQUIRED when the shorthand is ambiguous (e.g. nested-group repos with virtual paths).
 
 | Field | Type | Required | Pattern / Constraint | Description |
@@ -318,6 +341,36 @@ Local path dependency (development only):
 ```yaml
 - path: ./packages/my-shared-skills
 ```
+
+#### 4.1.2.1. Repository Configuration
+
+Logical requirement resolution is driven by a client-side file at `~/.apm/repositories.yml`.
+
+```yaml
+repositories:
+  - name: github
+    type: git
+    base: https://github.com
+    priority: 100
+
+  - name: ghcr
+    type: oci
+    base: ghcr.io/apm
+    priority: 80
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | `string` | REQUIRED | Stable repository identifier used by `dependencies.apm[*].repository`. |
+| `type` | `string` | REQUIRED | Repository backend type. Current values: `git`, `oci`. |
+| `base` | `string` | REQUIRED | Base locator prefix for the repository. |
+| `priority` | `integer` | OPTIONAL | Higher values are tried first when a dependency does not pin `repository`. |
+
+Built-in defaults are used when the file is absent or invalid:
+
+- `github` → `git` → `https://github.com` → priority `100`
+- `gitlab` → `git` → `https://gitlab.com` → priority `90`
+- `ghcr` → `oci` → `ghcr.io/apm` → priority `80`
 
 #### 4.1.3. Virtual Packages
 
