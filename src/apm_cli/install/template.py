@@ -86,6 +86,18 @@ def _integrate_materialization(
             package_name=dep_key,
             logger=logger,
             scope=ctx.scope,
+            # Per-package effective subset: CLI --skill overrides per-entry
+            # apm.yml skills:. When CLI is absent (bare reinstall), fall back
+            # to the dep_ref's persisted skill_subset.
+            # When CLI explicitly provided (even --skill '*'), use ctx value
+            # (which is None for '*' = install all).
+            skill_subset=(
+                ctx.skill_subset
+                if ctx.skill_subset_from_cli
+                else (
+                    tuple(dep_ref.skill_subset) if dep_ref.skill_subset else None
+                )
+            ),
         )
         for k in (
             "prompts", "agents", "skills", "sub_skills",

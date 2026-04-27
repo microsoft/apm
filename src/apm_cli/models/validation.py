@@ -20,11 +20,12 @@ class PackageType(Enum):
     This enum is used internally to classify packages based on their content
     (presence of apm.yml, SKILL.md, hooks/, plugin.json, etc.).
     """
-    APM_PACKAGE = "apm_package"      # Has apm.yml
+    APM_PACKAGE = "apm_package"      # Has apm.yml + .apm/
     CLAUDE_SKILL = "claude_skill"    # Has SKILL.md, no apm.yml
     HOOK_PACKAGE = "hook_package"    # Has hooks/hooks.json, no apm.yml or SKILL.md
-    HYBRID = "hybrid"                # Has both apm.yml and SKILL.md
-    MARKETPLACE_PLUGIN = "marketplace_plugin"  # Has plugin.json, no apm.yml
+    HYBRID = "hybrid"                # Has both apm.yml and SKILL.md (root)
+    MARKETPLACE_PLUGIN = "marketplace_plugin"  # Has plugin.json or .claude-plugin/
+    SKILL_BUNDLE = "skill_bundle"    # Has skills/<name>/SKILL.md (nested), apm.yml optional
     INVALID = "invalid"              # None of the above
 
 
@@ -159,22 +160,19 @@ class DetectionEvidence:
     plugin_json_path: Optional[Path]
     plugin_dirs_present: Tuple[str, ...]
     has_claude_plugin_dir: bool = False
+    nested_skill_dirs: Tuple[str, ...] = ()
+    has_plugin_manifest: bool = False
 
     @property
     def has_plugin_evidence(self) -> bool:
-        """True if any signal indicates this is a marketplace plugin.
+        """True if a real plugin manifest is present.
 
-        ``.claude-plugin/`` is treated as first-class evidence so that a
-        Claude Code plugin without a ``plugin.json`` (name derived from
-        the directory) classifies as ``MARKETPLACE_PLUGIN`` instead of
-        falling through to ``HOOK_PACKAGE``.  ``normalize_plugin_directory``
-        handles the missing-manifest case gracefully.
+        Only ``plugin.json`` or ``.claude-plugin/`` directory count as
+        plugin evidence.  Bare ``skills/``, ``agents/``, ``commands/``
+        directories do NOT -- those are handled by the SKILL_BUNDLE
+        classification path instead.
         """
-        return (
-            self.plugin_json_path is not None
-            or bool(self.plugin_dirs_present)
-            or self.has_claude_plugin_dir
-        )
+        return self.has_plugin_manifest
 
 
 def gather_detection_evidence(package_path: Path) -> DetectionEvidence:
@@ -189,13 +187,33 @@ def gather_detection_evidence(package_path: Path) -> DetectionEvidence:
     plugin_dirs_present = tuple(
         name for name in _PLUGIN_DIRS if (package_path / name).is_dir()
     )
+    plugin_json_path = find_plugin_json(package_path)
+    has_claude_plugin_dir = (package_path / ".claude-plugin").is_dir()
+
+    # Plugin manifest = plugin.json OR .claude-plugin/ directory.
+    has_plugin_manifest = (
+        plugin_json_path is not None or has_claude_plugin_dir
+    )
+
+    # Nested skill dirs: directories under skills/ that contain a SKILL.md.
+    nested_skill_dirs: Tuple[str, ...] = ()
+    skills_dir = package_path / "skills"
+    if skills_dir.is_dir():
+        nested_skill_dirs = tuple(
+            d.name
+            for d in sorted(skills_dir.iterdir())
+            if d.is_dir() and (d / SKILL_MD_FILENAME).exists()
+        )
+
     return DetectionEvidence(
         has_apm_yml=(package_path / APM_YML_FILENAME).exists(),
         has_skill_md=(package_path / SKILL_MD_FILENAME).exists(),
         has_hook_json=_has_hook_json(package_path),
-        plugin_json_path=find_plugin_json(package_path),
+        plugin_json_path=plugin_json_path,
         plugin_dirs_present=plugin_dirs_present,
-        has_claude_plugin_dir=(package_path / ".claude-plugin").is_dir(),
+        has_claude_plugin_dir=has_claude_plugin_dir,
+        nested_skill_dirs=nested_skill_dirs,
+        has_plugin_manifest=has_plugin_manifest,
     )
 
 
@@ -209,23 +227,18 @@ def detect_package_type(
 
     Cascade order (first match wins):
 
-    1. ``HYBRID`` -- both ``apm.yml`` and ``SKILL.md`` present.
-    2. ``APM_PACKAGE`` -- ``apm.yml`` only.
-    3. ``CLAUDE_SKILL`` -- ``SKILL.md`` only.
-    4. ``MARKETPLACE_PLUGIN`` -- ``plugin.json``, a ``.claude-plugin/``
-       directory, *or* one of ``agents/``, ``skills/``, ``commands/``.
-       This must precede the hook-only branch because the
-       marketplace-plugin synthesizer (``_map_plugin_artifacts``) already
-       maps ``hooks/`` alongside agents/skills/commands -- so a Claude
-       Code plugin that ships both hooks and skills must classify as
-       ``MARKETPLACE_PLUGIN``, not ``HOOK_PACKAGE``, otherwise the
-       skills are silently dropped.  ``.claude-plugin/`` is treated as
-       first-class evidence so plugins without a ``plugin.json``
-       (manifest-less Claude Code plugins) still classify correctly;
-       ``normalize_plugin_directory`` handles missing manifests.
-       See microsoft/apm#780.
-    5. ``HOOK_PACKAGE`` -- ``hooks/*.json`` only, no plugin evidence.
-    6. ``INVALID`` -- nothing recognisable.
+    1. ``MARKETPLACE_PLUGIN`` -- plugin manifest present: ``plugin.json``
+       OR ``.claude-plugin/`` directory.  This is the strictest signal
+       (explicit plugin packaging intent).
+    2. ``HYBRID`` -- root ``SKILL.md`` AND ``apm.yml`` present.
+    3. ``CLAUDE_SKILL`` -- root ``SKILL.md`` only (no ``apm.yml``).
+    4. ``SKILL_BUNDLE`` -- nested ``skills/<x>/SKILL.md`` detected;
+       ``apm.yml`` optional; no ``.apm/`` required.
+    5. ``APM_PACKAGE`` -- ``apm.yml`` AND ``.apm/`` directory present.
+    6. ``INVALID`` -- ``apm.yml`` present but no ``.apm/`` and no nested
+       skills (helpful error: author likely needs to add .apm/).
+    7. ``HOOK_PACKAGE`` -- ``hooks/*.json`` only, no other signals.
+    8. ``INVALID`` -- nothing recognisable.
 
     Returns:
         A ``(package_type, plugin_json_path)`` tuple.  *plugin_json_path*
@@ -234,29 +247,48 @@ def detect_package_type(
     """
     evidence = gather_detection_evidence(package_path)
 
+    # 1. Plugin manifest present -> MARKETPLACE_PLUGIN
+    if evidence.has_plugin_manifest:
+        return PackageType.MARKETPLACE_PLUGIN, evidence.plugin_json_path
+
+    # 2. Root SKILL.md + apm.yml -> HYBRID
     if evidence.has_apm_yml and evidence.has_skill_md:
         return PackageType.HYBRID, None
-    if evidence.has_apm_yml:
-        return PackageType.APM_PACKAGE, None
+
+    # 3. Root SKILL.md only -> CLAUDE_SKILL
     if evidence.has_skill_md:
         return PackageType.CLAUDE_SKILL, None
-    if evidence.has_plugin_evidence:
-        return PackageType.MARKETPLACE_PLUGIN, evidence.plugin_json_path
+
+    # 4. Nested skills/<x>/SKILL.md -> SKILL_BUNDLE (apm.yml optional)
+    if evidence.nested_skill_dirs:
+        return PackageType.SKILL_BUNDLE, None
+
+    # 5. apm.yml + .apm/ -> APM_PACKAGE
+    if evidence.has_apm_yml:
+        apm_dir = package_path / APM_DIR
+        if apm_dir.is_dir():
+            return PackageType.APM_PACKAGE, None
+        # 6. apm.yml only (no .apm/, no nested skills) -> INVALID
+        return PackageType.INVALID, None
+
+    # 7. hooks/*.json only -> HOOK_PACKAGE
     if evidence.has_hook_json:
         return PackageType.HOOK_PACKAGE, None
 
+    # 8. Nothing recognisable -> INVALID
     return PackageType.INVALID, None
 
 
 def validate_apm_package(package_path: Path) -> ValidationResult:
     """Validate that a directory contains a valid APM package or Claude Skill.
     
-    Supports four package types:
+    Supports six package types:
     - APM_PACKAGE: Has apm.yml and .apm/ directory
     - CLAUDE_SKILL: Has SKILL.md but no apm.yml (auto-generates apm.yml)
     - HOOK_PACKAGE: Has hooks/*.json but no apm.yml or SKILL.md
-    - MARKETPLACE_PLUGIN: Has plugin.json but no apm.yml (synthesizes apm.yml)
-    - HYBRID: Has both apm.yml and SKILL.md
+    - MARKETPLACE_PLUGIN: Has plugin.json or .claude-plugin/ (synthesizes apm.yml)
+    - HYBRID: Has both apm.yml and root SKILL.md
+    - SKILL_BUNDLE: Has skills/<name>/SKILL.md, apm.yml optional
     
     Args:
         package_path: Path to the directory to validate
@@ -280,13 +312,29 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
     result.package_type = pkg_type
 
     if pkg_type == PackageType.INVALID:
-        result.add_error(
-            f"Not a valid APM package: no apm.yml, SKILL.md, hooks, or "
-            f"plugin structure found in {package_path.name}. "
-            "Ensure the package has SKILL.md (skill bundle), "
-            "apm.yml + .apm/ (APM package), or plugin.json (Claude plugin) "
-            "at its root."
-        )
+        # Two sub-cases of INVALID:
+        # 1. apm.yml present but no .apm/ directory (or .apm is a file)
+        # 2. Nothing recognizable at all
+        apm_yml_path = package_path / APM_YML_FILENAME
+        if apm_yml_path.exists():
+            apm_path = package_path / APM_DIR
+            if apm_path.exists() and not apm_path.is_dir():
+                result.add_error(".apm must be a directory")
+            else:
+                result.add_error(
+                    f"Not a valid APM package: {package_path.name} has apm.yml but "
+                    "is missing the required .apm/ directory. "
+                    "Add .apm/ with primitives (instructions, skills, etc.) "
+                    "or add skills/<name>/SKILL.md for a skill bundle."
+                )
+        else:
+            result.add_error(
+                f"Not a valid APM package: no apm.yml, SKILL.md, hooks, or "
+                f"plugin structure found in {package_path.name}. "
+                "Ensure the package has SKILL.md (skill bundle), "
+                "apm.yml + .apm/ (APM package), or plugin.json (Claude plugin) "
+                "at its root."
+            )
         return result
     
     # Handle hook-only packages (no apm.yml or SKILL.md)
@@ -301,6 +349,10 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
     # Handle Marketplace Plugins (no apm.yml) - synthesize apm.yml from plugin.json
     if result.package_type == PackageType.MARKETPLACE_PLUGIN:
         return _validate_marketplace_plugin(package_path, plugin_json_path, result)
+
+    # Handle Skill Bundles (nested skills/<name>/SKILL.md)
+    if result.package_type == PackageType.SKILL_BUNDLE:
+        return _validate_skill_bundle(package_path, result)
     
     # Standard APM package or HYBRID validation (has apm.yml)
     apm_yml_path = package_path / APM_YML_FILENAME
@@ -382,6 +434,127 @@ def _validate_claude_skill(package_path: Path, skill_md_path: Path, result: Vali
         result.add_error(f"Failed to process {SKILL_MD_FILENAME}: {e}")
         return result
     
+    return result
+
+
+def _validate_skill_bundle(package_path: Path, result: ValidationResult) -> ValidationResult:
+    """Validate a SKILL_BUNDLE package (nested skills/<name>/SKILL.md).
+
+    For each ``skills/<name>/`` with a SKILL.md:
+    - Validate path segments (no traversal).
+    - Ensure resolved path is within package_path/skills.
+    - Validate frontmatter: name field equals ``<name>``, description present,
+      ASCII-only content.
+    - Collect errors with the ``skills/<name>/SKILL.md`` path.
+
+    apm.yml is OPTIONAL: if present, parse + merge metadata; if absent,
+    synthesize APMPackage from the bundle (name from directory, version 0.0.0).
+
+    Args:
+        package_path: Path to the package directory
+        result: ValidationResult to populate
+
+    Returns:
+        ValidationResult: Updated validation result
+    """
+    from .apm_package import APMPackage
+    from ..utils.path_security import validate_path_segments, ensure_path_within
+
+    import frontmatter as _frontmatter
+
+    skills_dir = package_path / "skills"
+    apm_yml_path = package_path / APM_YML_FILENAME
+
+    # Enumerate nested skill dirs
+    nested_dirs = [
+        d for d in sorted(skills_dir.iterdir())
+        if d.is_dir() and (d / SKILL_MD_FILENAME).exists()
+    ]
+
+    if not nested_dirs:
+        result.add_error(
+            f"SKILL_BUNDLE detected but no valid skills/<name>/SKILL.md found "
+            f"in {package_path.name}/skills/"
+        )
+        return result
+
+    skill_names: List[str] = []
+    for skill_dir in nested_dirs:
+        name = skill_dir.name
+
+        # Path safety: reject traversal in directory name
+        try:
+            validate_path_segments(name, context=f"skills/{name}")
+        except ValueError as e:
+            result.add_error(str(e))
+            continue
+
+        # Path safety: ensure resolved SKILL.md is within skills/
+        skill_md_path = skill_dir / SKILL_MD_FILENAME
+        try:
+            ensure_path_within(skill_md_path, skills_dir)
+        except ValueError as e:
+            result.add_error(str(e))
+            continue
+
+        # Validate frontmatter
+        try:
+            with open(skill_md_path, "r", encoding="utf-8") as f:
+                post = _frontmatter.load(f)
+        except Exception as e:
+            result.add_error(f"skills/{name}/SKILL.md: failed to parse frontmatter: {e}")
+            continue
+
+        # Name field must equal directory name (if present)
+        fm_name = post.metadata.get("name", "")
+        if fm_name and fm_name != name:
+            result.add_warning(
+                f"skills/{name}/SKILL.md: frontmatter name '{fm_name}' "
+                f"does not match directory name '{name}' "
+                f"(APM will use directory name '{name}' for deployment)"
+            )
+
+        # Description must be present
+        fm_desc = post.metadata.get("description", "")
+        if not fm_desc:
+            result.add_warning(
+                f"skills/{name}/SKILL.md: missing 'description' in frontmatter"
+            )
+
+        # ASCII-only check on frontmatter values (warn only -- many real-world
+        # packages use non-ASCII descriptions, e.g. i18n skill repos)
+        for key, val in post.metadata.items():
+            if isinstance(val, str) and not val.isascii():
+                result.add_warning(
+                    f"skills/{name}/SKILL.md: frontmatter field '{key}' "
+                    f"contains non-ASCII characters"
+                )
+                break
+
+        skill_names.append(name)
+
+    if not skill_names and result.errors:
+        # All skills failed validation
+        return result
+
+    # Build APMPackage: use apm.yml if present, otherwise synthesize
+    if apm_yml_path.exists():
+        try:
+            package = APMPackage.from_apm_yml(apm_yml_path)
+        except (ValueError, FileNotFoundError) as e:
+            result.add_error(f"Invalid apm.yml: {e}")
+            return result
+    else:
+        # Synthesize minimal APMPackage from bundle directory
+        package = APMPackage(
+            name=package_path.name,
+            version="0.0.0",
+            description=f"Skill bundle: {package_path.name}",
+            package_path=package_path,
+            type=PackageContentType.SKILL,
+        )
+
+    result.package = package
     return result
 
 
