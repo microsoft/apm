@@ -12,20 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Day-0 install parity with `npx skills add`**: every public repo that installs cleanly with `npx skills add owner/repo` now installs cleanly with `apm install owner/repo`. APM recognises the `skills/<name>/SKILL.md` convention used by `vercel-labs/agent-skills`, `xixu-me/skills`, `larksuite/cli`, and the rest of the agentskills.io ecosystem as a first-class package shape (`SKILL_BUNDLE`). `apm.yml` is OPTIONAL for these packages -- adding it is strictly additive (lockfile + pinning) and never regresses installability. Multi-skill bundles install all skills by default; `--skill <NAME>` (repeatable) selects a subset. The selection is **persisted** in `apm.yml` (`skills:` field) and `apm.lock.yaml` (`skill_subset`), so bare `apm install` is deterministic. Use `--skill '*'` to reset to all skills. `apm audit --ci` detects drift between manifest and lockfile skill subsets. (#974)
-- Automated `apm-triage-panel` workflow: runs the triage panel skill on a daily fuzzy schedule (oldest-first, max 10 issues per sweep) and on demand via the `status/needs-triage` label, treating every decision as an agentic proposal pending maintainer ratification. Recompiles all gh-aw workflows on v0.68.3. (#954)
-
-### Changed
-
-- `python-architect` agent: documents the GitHub-render trap where `classDiagram` rejects inline `:::cssClass` shorthand on relationship lines (only valid as standalone `class Name:::cssClass`), preventing future panel reviews from emitting unrenderable mermaid. (#970)
+- **Day-0 install parity with `npx skills add`**: every public repo that installs cleanly with `npx skills add owner/repo` now installs with `apm install owner/repo`. APM recognises bare `skills/<name>/SKILL.md` (vercel-labs/agent-skills, xixu-me/skills, larksuite/cli, the agentskills.io ecosystem) as a first-class shape (`SKILL_BUNDLE`); `apm.yml` is optional. `--skill <NAME>` (repeatable) selects a subset and **persists** it to `apm.yml` + `apm.lock.yaml`, so bare `apm install` is reproducible across machines. `--skill '*'` resets; `apm audit --ci` flags drift. (#974)
 
 ### Fixed
 
-- Fixed TLS validation failure behind corporate TLS-intercepting proxies and firewalls: `install/validation.py` now uses `requests` (honouring `REQUESTS_CA_BUNDLE`) instead of stdlib `urllib`, and surfaces a single CA-trust hint at default verbosity instead of a misleading auth error. (#911)
-- Triage Panel themed issues now reach the PGS project board: the workflow dispatches `project-sync` per themed issue via the new `safe-outputs.dispatch-workflow` channel, working around GitHub's rule that `GITHUB_TOKEN`-driven label changes never fire downstream `issues: labeled` workflows. Without this, sweeps applied `theme/*` labels but the project-sync trigger silently no-op'd, leaving the board empty. (#971)
-- CLI consistency cleanup from the 2026-04-24 audit (#903): `apm experimental <subcommand> --help` now shows subcommand-specific help; help text and short flags aligned across commands. (#910)
-- Issue templates use the canonical APM label taxonomy instead of deprecated/wrong labels; the daily Triage Panel sweep handles classification from there. (#958)
-- Docs site auto-deploys after bot-cut releases: `docs.yml` is now a reusable workflow invoked from the release job, working around GitHub's rule that `release: published` events from `GITHUB_TOKEN`-created releases never fire downstream workflows. Restores docs auto-deploy that has been silently broken since v0.9.3. (#953)
+- `apm install` no longer fails behind corporate TLS-intercepting proxies: validation now honours `REQUESTS_CA_BUNDLE` instead of misreporting CA failures as auth errors. (#911)
+- `apm experimental <subcommand> --help` now shows the subcommand's own help; CLI help text and short flags aligned from the 2026-04-24 audit. (#910, #903)
+
+### Maintainer tooling
+
+- Untriaged issues are auto-triaged by the `apm-triage-panel` skill on a daily oldest-first sweep (max 10/run) plus `status/needs-triage` for on-demand. Decisions are agentic proposals; any maintainer label edit wins. (#954)
+- Docs site auto-deploys again after bot-cut releases (workaround for GitHub's `GITHUB_TOKEN`-suppressed `release: published` event). Silently broken since v0.9.3. (#953)
+- Triage-panel themed issues now reach the PGS project board (dispatches `project-sync` directly; same `GITHUB_TOKEN` event-suppression class as #953). (#971)
+- Issue templates use canonical APM labels; `python-architect` agent documents the mermaid `classDiagram :::cssClass` GitHub-render trap. (#958, #970)
 
 ## [0.9.3] - 2026-04-26
 
