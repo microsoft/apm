@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Docs site auto-deploys again after bot-cut releases by correctly detecting tag-push context in `docs.yml`. (#953)
 
+### Maintainer tooling
+
+- `pr-description-skill` mermaid guidance hardened: new asset `assets/mermaid-conventions.md` defines diagram-type-by-intent (sequenceDiagram for execution flow with `rect rgb(...)` boxing, flowchart for pipelines/architecture with `classDef new`, stateDiagram-v2 for state machines) and captures GitHub-renderer gotchas that `mmdc` does not always catch (notably: square brackets in flowchart edge labels MUST be quoted -- `|"[label]"|` not `|[label]|`).
+
 ## [0.9.4] - 2026-04-27
 
 ### Added
