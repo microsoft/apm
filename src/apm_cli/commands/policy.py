@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 import click
 
 from ..core.command_logger import CommandLogger
+from ..policy._help_text import POLICY_SOURCE_FORMS_HELP
 from ..policy.discovery import (
     DEFAULT_CACHE_TTL,
     MAX_STALE_TTL,
@@ -284,10 +285,7 @@ def policy():
     "--policy-source",
     "policy_source",
     default=None,
-    help=(
-        "Override discovery: 'org', a local file path, owner/repo, "
-        "or an https URL."
-    ),
+    help=f"Override discovery. {POLICY_SOURCE_FORMS_HELP}",
 )
 @click.option(
     "--no-cache",

@@ -17,10 +17,11 @@ from typing import Dict, List, Optional, Tuple
 
 import click
 
+from ..core.command_logger import CommandLogger
 from ..deps.lockfile import LockFile, get_lockfile_path
+from ..policy._help_text import POLICY_SOURCE_FORMS_HELP
 from ..security.content_scanner import ContentScanner, ScanFinding
 from ..security.file_scanner import scan_lockfile_packages
-from ..core.command_logger import CommandLogger
 from ..utils.console import (
     _get_console,
     _rich_echo,
@@ -437,7 +438,7 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
     "policy_source",
     default=None,
     help=(
-        "Policy source: 'org' (auto-discover), file path, or URL. "
+        f"Policy source. {POLICY_SOURCE_FORMS_HELP} "
         "Used with --ci for policy checks. [experimental]"
     ),
 )
