@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Gemini CLI** as a supported APM target (`--target gemini`): auto-detects `.gemini/`, writes MCP config to `.gemini/settings.json`, and adds `apm runtime setup|remove gemini`. (#917)
+- Experimental `cowork` target for Microsoft 365 Copilot Cowork custom-skill deployment via OneDrive (`apm experimental enable cowork`; `apm install --target cowork --global`; persisted via `apm config set cowork-skills-dir`). (#913)
 - `apm experimental` command group (`list` / `enable` / `disable` / `reset`) lets you opt into new behaviour before it graduates to default. Ships with the `verbose-version` flag. (#849)
 - `apm audit --ci` now verifies hash integrity of locally deployed `.apm/` files so hand-edits and config drift fail CI instead of slipping through. (#887)
 - `includes:` manifest field (`auto` or list) gives you explicit control over which local `.apm/` files are deployed; pair with `policy.manifest.require_explicit_includes` to block silent expansion. Audit raises an `includes-consent` advisory while you migrate. (#887)
