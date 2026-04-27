@@ -135,6 +135,14 @@ network:
 #     humans apply, only humans remove.
 #   - assign-milestone: lets the panel set the milestone when the
 #     issue has none. The prompt forbids overwriting an existing one.
+#   - dispatch-workflow `project-sync`: triggers the PGS project board
+#     sync per themed issue. Required because gh-aw safe-output label
+#     writes run under GITHUB_TOKEN, and GitHub does NOT fan out
+#     downstream workflow events from GITHUB_TOKEN-driven label changes.
+#     Without this dispatch, themed issues silently miss the project
+#     board (Theme/Area/Kind/Priority columns stay blank). max:10 mirrors
+#     the SCHEDULED_SWEEP issue cap; gh-aw enforces a 5s delay between
+#     dispatches so the worst-case latency add is ~50s per sweep.
 safe-outputs:
   add-comment:
     max: 12
@@ -193,6 +201,16 @@ safe-outputs:
     target: "*"
   assign-milestone:
     max: 12
+  # Same-repo only; compile-time validated (project-sync.yml must exist
+  # and declare workflow_dispatch). The agent passes `content_id` (the
+  # issue's GraphQL node ID, e.g. I_kwDO...) as the dispatch input.
+  # max:10 matches SCHEDULED_SWEEP issue ceiling (one dispatch per
+  # themed issue, worst case). gh-aw enforces a 5s delay between
+  # consecutive dispatches.
+  dispatch-workflow:
+    workflows:
+      - project-sync
+    max: 10
 
 timeout-minutes: 30
 ---
@@ -269,7 +287,7 @@ gh issue list \
   --repo "${{ github.repository }}" \
   --state open \
   --limit 200 \
-  --json number,title,author,labels,locked,createdAt,body
+  --json number,title,author,labels,locked,createdAt,body,id
 ```
 
 In your reasoning step (no shell required), filter the result:
@@ -320,7 +338,7 @@ The triggering issue is `#${{ github.event.issue.number }}`. Read it:
 ```bash
 gh issue view "${{ github.event.issue.number }}" \
   --repo "${{ github.repository }}" \
-  --json number,title,author,labels,locked,state,body,milestone,createdAt
+  --json number,title,author,labels,locked,state,body,milestone,createdAt,id
 gh issue view "${{ github.event.issue.number }}" \
   --repo "${{ github.repository }}" --comments
 ```
@@ -438,6 +456,22 @@ safe-output tools. Required label-set hygiene per issue:
   MUST emit a corresponding `assign_milestone` call -- the verdict
   text and the applied state must agree.** Only skip emission if you
   explicitly omitted milestone from the verdict.
+- **`dispatch_workflow` (project-sync)**: For every issue where you
+  added at least one `theme/*` label in this run, you MUST also call
+  `dispatch_workflow` with `workflow_name: "project-sync"` and inputs
+  `{"content_id": "<issue node id>"}` -- where `<issue node id>` is
+  the `id` field returned by `gh issue list --json id` / `gh issue
+  view --json id` (it looks like `I_kwDO...`, NOT the integer issue
+  number). This triggers the PGS project board sync for that issue.
+  It is required because gh-aw applies `add-labels` under
+  `GITHUB_TOKEN`, and GitHub does NOT fire downstream workflow events
+  from `GITHUB_TOKEN`-driven label changes -- so without this dispatch
+  the issue gets the right labels but never lands on the project
+  board. If you did NOT add any `theme/*` label (for example a
+  re-triage that only touches `status/*`), do NOT dispatch -- the
+  project-sync workflow only acts on themed items, so the dispatch
+  would be a no-op. Cap is 10 dispatches per run (matches sweep
+  ceiling); gh-aw enforces a 5s delay between consecutive dispatches.
 
 If the panel decides on a label that does not exist in APM's
 taxonomy (the `add-labels` allow-list, which is enumerated literally

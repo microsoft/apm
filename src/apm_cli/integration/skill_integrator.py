@@ -167,7 +167,8 @@ def get_effective_type(package_info) -> "PackageContentType":
     
     Determines type by:
     1. Package has SKILL.md (PackageType.CLAUDE_SKILL or HYBRID) -> SKILL
-    2. Otherwise -> INSTRUCTIONS (compile to AGENTS.md only)
+    2. Package is a SKILL_BUNDLE or MARKETPLACE_PLUGIN (has skills/) -> SKILL
+    3. Otherwise -> INSTRUCTIONS (compile to AGENTS.md only)
     
     Args:
         package_info: PackageInfo object containing package metadata
@@ -178,9 +179,19 @@ def get_effective_type(package_info) -> "PackageContentType":
     from apm_cli.models.apm_package import PackageContentType, PackageType
     
     # Check if package has SKILL.md (via package_type field)
-    # PackageType.CLAUDE_SKILL = has SKILL.md only
-    # PackageType.HYBRID = has both apm.yml AND SKILL.md
-    if package_info.package_type in (PackageType.CLAUDE_SKILL, PackageType.HYBRID):
+    # PackageType.CLAUDE_SKILL = has root SKILL.md only
+    # PackageType.HYBRID = has both apm.yml AND root SKILL.md
+    # PackageType.SKILL_BUNDLE = has skills/<name>/SKILL.md (nested bundle)
+    # PackageType.MARKETPLACE_PLUGIN = has plugin manifest (plugin.json or
+    #   .claude-plugin/); may or may not include skills/. The integrator
+    #   path gates on actual skills/ presence, so plugins without skills
+    #   are inert in the SKILL branch.
+    if package_info.package_type in (
+        PackageType.CLAUDE_SKILL,
+        PackageType.HYBRID,
+        PackageType.SKILL_BUNDLE,
+        PackageType.MARKETPLACE_PLUGIN,
+    ):
         return PackageContentType.SKILL
     
     # Default to INSTRUCTIONS for packages without SKILL.md
@@ -467,7 +478,7 @@ class SkillIntegrator(BaseIntegrator):
         return True
 
     @staticmethod
-    def _promote_sub_skills(sub_skills_dir: Path, target_skills_root: Path, parent_name: str, *, warn: bool = True, owned_by: dict[str, str] | None = None, diagnostics=None, managed_files=None, force: bool = False, project_root: Path | None = None, logger=None) -> tuple[int, list[Path]]:
+    def _promote_sub_skills(sub_skills_dir: Path, target_skills_root: Path, parent_name: str, *, warn: bool = True, owned_by: dict[str, str] | None = None, diagnostics=None, managed_files=None, force: bool = False, project_root: Path | None = None, logger=None, name_filter: "set | None" = None) -> tuple[int, list[Path]]:
         """Promote sub-skills from .apm/skills/ to top-level skill entries.
 
         Args:
@@ -503,6 +514,9 @@ class SkillIntegrator(BaseIntegrator):
             if not (sub_skill_path / "SKILL.md").exists():
                 continue
             raw_sub_name = sub_skill_path.name
+            # --skill filter: skip skills not in the requested subset
+            if name_filter is not None and raw_sub_name not in name_filter:
+                continue
             is_valid, _ = validate_skill_name(raw_sub_name)
             sub_name = raw_sub_name if is_valid else normalize_skill_name(raw_sub_name)
             target = target_skills_root / sub_name
@@ -872,7 +886,87 @@ class SkillIntegrator(BaseIntegrator):
             target_paths=all_target_paths
         )
 
-    def integrate_package_skill(self, package_info, project_root: Path, diagnostics=None, managed_files=None, force: bool = False, logger=None, targets=None) -> SkillIntegrationResult:
+    def _integrate_skill_bundle(
+        self, package_info, project_root: Path, skills_dir: Path,
+        diagnostics=None, managed_files=None, force: bool = False,
+        logger=None, targets=None, skill_subset=None,
+    ) -> SkillIntegrationResult:
+        """Promote every skill in a SKILL_BUNDLE's top-level skills/ directory.
+
+        Reuses the same promotion logic as _promote_sub_skills but sources
+        from package_root/skills/ instead of .apm/skills/.  Each nested
+        skill directory becomes a top-level skill in every target.
+
+        Args:
+            package_info: PackageInfo with package metadata.
+            project_root: Root directory of the project.
+            skills_dir: The package's skills/ directory.
+            diagnostics: Optional DiagnosticCollector.
+            managed_files: Set of managed file paths.
+            force: Whether to overwrite locally-authored files.
+            logger: Optional InstallLogger.
+            targets: Optional explicit list of TargetProfile objects.
+            skill_subset: Optional tuple of skill names to install (None = all).
+
+        Returns:
+            SkillIntegrationResult with all promoted skills.
+        """
+        from apm_cli.utils.path_security import validate_path_segments, ensure_path_within
+        from apm_cli.security.gate import ignore_symlinks as _ignore_symlinks
+
+        if targets is None:
+            from apm_cli.integration.targets import active_targets
+            targets = active_targets(project_root)
+
+        parent_name = package_info.install_path.name
+        owned_by, lockfile_native_owners = self._build_ownership_maps(project_root)
+
+        total_promoted = 0
+        all_deployed: list[Path] = []
+        any_created = False
+
+        # Convert skill_subset tuple to a set for O(1) lookup
+        _name_filter = set(skill_subset) if skill_subset else None
+
+        for idx, target in enumerate(targets):
+            if not target.supports("skills"):
+                continue
+
+            is_primary = (idx == 0)
+            skills_mapping = target.primitives["skills"]
+            effective_root = skills_mapping.deploy_root or target.root_dir
+            target_skills_root = project_root / effective_root / "skills"
+            target_skills_root.mkdir(parents=True, exist_ok=True)
+
+            n, deployed = self._promote_sub_skills(
+                skills_dir, target_skills_root, parent_name,
+                warn=is_primary,
+                owned_by=owned_by if is_primary else None,
+                diagnostics=diagnostics if is_primary else None,
+                managed_files=managed_files if is_primary else None,
+                force=force,
+                project_root=project_root,
+                logger=logger if is_primary else None,
+                name_filter=_name_filter,
+            )
+            if is_primary:
+                total_promoted = n
+                if n > 0:
+                    any_created = True
+            all_deployed.extend(deployed)
+
+        return SkillIntegrationResult(
+            skill_created=any_created,
+            skill_updated=False,
+            skill_skipped=False,
+            skill_path=None,
+            references_copied=0,
+            links_resolved=0,
+            sub_skills_promoted=total_promoted,
+            target_paths=all_deployed,
+        )
+
+    def integrate_package_skill(self, package_info, project_root: Path, diagnostics=None, managed_files=None, force: bool = False, logger=None, targets=None, skill_subset=None) -> SkillIntegrationResult:
         """Integrate a package's skill into all active target directories.
         
         Copies native skills (packages with SKILL.md at root) to every active
@@ -933,7 +1027,27 @@ class SkillIntegrator(BaseIntegrator):
         # Check if this is a native Skill (already has SKILL.md at root)
         source_skill_md = package_path / "SKILL.md"
         if source_skill_md.exists():
+            if skill_subset:
+                from apm_cli.utils.console import _rich_warning
+                _rich_warning(
+                    f"--skill filter ignored for '{package_info.install_path.name}': "
+                    "package is a single CLAUDE_SKILL, not a SKILL_BUNDLE."
+                )
             return self._integrate_native_skill(package_info, project_root, source_skill_md, diagnostics=diagnostics, managed_files=managed_files, force=force, logger=logger, targets=targets)
+
+        # SKILL_BUNDLE: promote skills from root-level skills/ directory.
+        root_skills_dir = package_path / "skills"
+        if root_skills_dir.is_dir() and any(
+            (d / "SKILL.md").exists()
+            for d in root_skills_dir.iterdir()
+            if d.is_dir()
+        ):
+            return self._integrate_skill_bundle(
+                package_info, project_root, root_skills_dir,
+                diagnostics=diagnostics, managed_files=managed_files,
+                force=force, logger=logger, targets=targets,
+                skill_subset=skill_subset,
+            )
         
         # No SKILL.md at root  -- not a skill package.
         # Still promote any sub-skills shipped under .apm/skills/.

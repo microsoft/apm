@@ -74,6 +74,7 @@ warn_unused_configs = true
 addopts = "-m 'not benchmark'"
 markers = [
     "integration: marks tests as integration tests that may require network access",
+    "live: marks tests that hit real GitHub repos (requires network + optional GITHUB_TOKEN)",
     "slow: marks tests as slow running tests",
     "benchmark: marks performance benchmark tests (deselected by default, run with -m benchmark)",
 ]

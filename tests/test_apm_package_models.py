@@ -716,17 +716,18 @@ class TestPackageValidation:
             assert result.package_type == PackageType.INVALID
 
     def test_validate_invalid_apm_yml(self):
-        """Test validating directory with invalid apm.yml."""
+        """Test validating directory with apm.yml but no .apm/ directory."""
         with tempfile.TemporaryDirectory() as tmpdir:
             apm_yml = Path(tmpdir) / "apm.yml"
             apm_yml.write_text("invalid: [yaml")
 
             result = validate_apm_package(Path(tmpdir))
             assert not result.is_valid
-            assert any("Invalid apm.yml" in error for error in result.errors)
+            # apm.yml exists but .apm/ is missing -> INVALID with helpful message
+            assert any("missing the required .apm/ directory" in error for error in result.errors)
 
     def test_validate_missing_apm_directory(self):
-        """Test validating package without .apm directory."""
+        """Test validating package with apm.yml but no .apm directory."""
         with tempfile.TemporaryDirectory() as tmpdir:
             apm_yml = Path(tmpdir) / "apm.yml"
             apm_yml.write_text("name: test\nversion: 1.0.0")
@@ -734,7 +735,7 @@ class TestPackageValidation:
             result = validate_apm_package(Path(tmpdir))
             assert not result.is_valid
             assert any(
-                "Missing required directory: .apm/" in error for error in result.errors
+                "missing the required .apm/ directory" in error for error in result.errors
             )
 
     def test_validate_apm_file_instead_of_directory(self):
@@ -1025,7 +1026,17 @@ class TestDetectPackageType:
         assert pj_path is None
 
     def test_apm_package_when_only_apm_yml(self, tmp_path):
+        """apm.yml without .apm/ is now INVALID (needs .apm/ for APM_PACKAGE)."""
         (tmp_path / "apm.yml").write_text("name: test")
+        pkg_type, pj_path = detect_package_type(tmp_path)
+        assert pkg_type == PackageType.INVALID
+        assert pj_path is None
+
+    def test_apm_package_when_apm_yml_and_apm_dir(self, tmp_path):
+        """apm.yml + .apm/ directory -> APM_PACKAGE."""
+        (tmp_path / "apm.yml").write_text("name: test")
+        (tmp_path / ".apm").mkdir()
+        (tmp_path / ".apm" / "instructions").mkdir()
         pkg_type, pj_path = detect_package_type(tmp_path)
         assert pkg_type == PackageType.APM_PACKAGE
         assert pj_path is None
@@ -1052,19 +1063,30 @@ class TestDetectPackageType:
         assert pj_path.name == "plugin.json"
 
     def test_marketplace_plugin_with_agents_dir(self, tmp_path):
+        """Bare agents/ without plugin manifest is no longer MARKETPLACE_PLUGIN."""
         (tmp_path / "agents").mkdir()
         pkg_type, pj_path = detect_package_type(tmp_path)
-        assert pkg_type == PackageType.MARKETPLACE_PLUGIN
+        # Bare dirs without plugin manifest are INVALID (tightened in SKILL_BUNDLE work)
+        assert pkg_type == PackageType.INVALID
         assert pj_path is None
 
     def test_marketplace_plugin_with_skills_dir(self, tmp_path):
+        """Bare skills/ without SKILL.md or plugin manifest is INVALID."""
         (tmp_path / "skills").mkdir()
         pkg_type, pj_path = detect_package_type(tmp_path)
-        assert pkg_type == PackageType.MARKETPLACE_PLUGIN
+        assert pkg_type == PackageType.INVALID
         assert pj_path is None
 
     def test_marketplace_plugin_with_commands_dir(self, tmp_path):
+        """Bare commands/ without plugin manifest is INVALID."""
         (tmp_path / "commands").mkdir()
+        pkg_type, pj_path = detect_package_type(tmp_path)
+        assert pkg_type == PackageType.INVALID
+        assert pj_path is None
+
+    def test_marketplace_plugin_with_claude_plugin_dir(self, tmp_path):
+        """.claude-plugin/ directory alone -> MARKETPLACE_PLUGIN."""
+        (tmp_path / ".claude-plugin").mkdir()
         pkg_type, pj_path = detect_package_type(tmp_path)
         assert pkg_type == PackageType.MARKETPLACE_PLUGIN
         assert pj_path is None
@@ -1075,14 +1097,27 @@ class TestDetectPackageType:
         assert pj_path is None
 
     def test_apm_yml_takes_precedence_over_plugin_json(self, tmp_path):
+        """plugin.json (manifest) now takes priority over apm.yml."""
         (tmp_path / "apm.yml").write_text("name: test")
         (tmp_path / "plugin.json").write_text('{"name": "test"}')
         pkg_type, _ = detect_package_type(tmp_path)
-        assert pkg_type == PackageType.APM_PACKAGE
+        # In the new cascade, plugin manifest wins (step 1)
+        assert pkg_type == PackageType.MARKETPLACE_PLUGIN
 
     def test_hook_package_apm_yml_precedence(self, tmp_path):
-        """apm.yml takes precedence even when hooks exist."""
+        """apm.yml + hooks/ but no .apm/ -> INVALID (needs .apm/ for APM_PACKAGE)."""
         (tmp_path / "apm.yml").write_text("name: test")
+        hooks_dir = tmp_path / "hooks"
+        hooks_dir.mkdir()
+        (hooks_dir / "pre-commit.json").write_text("{}")
+        pkg_type, _ = detect_package_type(tmp_path)
+        # apm.yml without .apm/ dir is now INVALID
+        assert pkg_type == PackageType.INVALID
+
+    def test_apm_package_with_hooks_and_apm_dir(self, tmp_path):
+        """apm.yml + .apm/ + hooks/ -> APM_PACKAGE."""
+        (tmp_path / "apm.yml").write_text("name: test")
+        (tmp_path / ".apm").mkdir()
         hooks_dir = tmp_path / "hooks"
         hooks_dir.mkdir()
         (hooks_dir / "pre-commit.json").write_text("{}")
@@ -1090,14 +1125,26 @@ class TestDetectPackageType:
         assert pkg_type == PackageType.APM_PACKAGE
 
     def test_marketplace_plugin_wins_over_hooks_via_agents_dir(self, tmp_path):
-        """Regression: a Claude plugin that ships hooks AND agents/ must
-        classify as MARKETPLACE_PLUGIN so the plugin synthesizer maps
-        agents alongside hooks. See microsoft/apm#780.
+        """A plugin that ships hooks AND agents/ needs a manifest (plugin.json
+        or .claude-plugin/) to classify as MARKETPLACE_PLUGIN.  Bare agents/
+        alone no longer triggers plugin classification.
         """
         hooks_dir = tmp_path / "hooks"
         hooks_dir.mkdir()
         (hooks_dir / "hooks.json").write_text("{}")
         (tmp_path / "agents").mkdir()
+        # Without a plugin manifest, this is a HOOK_PACKAGE
+        pkg_type, pj_path = detect_package_type(tmp_path)
+        assert pkg_type == PackageType.HOOK_PACKAGE
+        assert pj_path is None
+
+    def test_marketplace_plugin_wins_over_hooks_with_manifest(self, tmp_path):
+        """With .claude-plugin/ manifest, hooks + agents -> MARKETPLACE_PLUGIN."""
+        hooks_dir = tmp_path / "hooks"
+        hooks_dir.mkdir()
+        (hooks_dir / "hooks.json").write_text("{}")
+        (tmp_path / "agents").mkdir()
+        (tmp_path / ".claude-plugin").mkdir()
         pkg_type, pj_path = detect_package_type(tmp_path)
         assert pkg_type == PackageType.MARKETPLACE_PLUGIN
         assert pj_path is None
@@ -1339,7 +1386,8 @@ class TestGatherDetectionEvidence:
         (tmp_path / "skills").mkdir()
         evidence = gather_detection_evidence(tmp_path)
         assert evidence.plugin_dirs_present == ("agents", "skills", "commands")
-        assert evidence.has_plugin_evidence is True
+        # Bare dirs without plugin.json or .claude-plugin/ are NOT plugin evidence.
+        assert evidence.has_plugin_evidence is False
 
     def test_obra_superpowers_evidence(self, tmp_path):
         """Evidence on the #780 repro should expose every signal the
@@ -1854,6 +1902,8 @@ class TestGenericHostSubdirectoryRoundTrip:
         lockfile = Mock()
         locked_dep = Mock()
         locked_dep.resolved_commit = "abc123"
+        locked_dep.registry_prefix = None  # no proxy
+        locked_dep.host = None
         lockfile.get_dependency = Mock(return_value=locked_dep)
 
         result = build_download_ref(dep, lockfile, update_refs=False, ref_changed=False)

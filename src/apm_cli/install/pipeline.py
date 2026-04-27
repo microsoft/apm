@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, List, Optional
 from ..models.results import InstallResult
 from ..utils.console import _rich_error
 from ..utils.diagnostics import DiagnosticCollector
+from ..utils.path_security import PathTraversalError
 from .errors import DirectDependencyError, PolicyViolationError
 
 if TYPE_CHECKING:
@@ -60,6 +61,8 @@ def run_install_pipeline(
     protocol_pref=None,
     allow_protocol_fallback: "Optional[bool]" = None,
     no_policy: bool = False,
+    skill_subset: "Optional[tuple]" = None,
+    skill_subset_from_cli: bool = False,
 ):
     """Install APM package dependencies.
 
@@ -152,6 +155,8 @@ def run_install_pipeline(
         root_has_local_primitives=_root_has_local_primitives,
         old_local_deployed=_old_local_deployed,
         no_policy=no_policy,
+        skill_subset=skill_subset,
+        skill_subset_from_cli=skill_subset_from_cli,
     )
 
     # ------------------------------------------------------------------
@@ -380,6 +385,10 @@ def run_install_pipeline(
     except DirectDependencyError:
         # #946: same pattern -- surface the message as-is instead of
         # double-wrapping it through the generic RuntimeError below.
+        raise
+    except PathTraversalError:
+        # Path-safety violation in SKILL_BUNDLE or other nested
+        # resolution -- surface as-is for actionable user guidance.
         raise
     except Exception as e:
         raise RuntimeError(f"Failed to resolve APM dependencies: {e}")

@@ -110,6 +110,7 @@ apm install [PACKAGES...] [OPTIONS]
 - `--allow-protocol-fallback` - Restore the legacy permissive cross-protocol fallback chain (HTTPS-then-SSH or vice-versa). Strict-by-default otherwise. Each retry emits a `[!]` warning naming both protocols. When the dependency URL carries a custom port, APM also emits a one-shot `[!]` warning before the first clone attempt noting that the same port will be reused across schemes (wrong on servers like Bitbucket Datacenter that serve SSH and HTTPS on different ports) -- to avoid the mismatch, omit this flag and pin the dependency with an explicit `ssh://` or `https://` URL.
 - `--no-policy` -- Skip org policy enforcement for this invocation. Loudly logged. Does NOT bypass `apm audit --ci`. Available on `apm install`, `apm install <pkg>`, and `apm install --mcp <name>`.
   - Equivalent env var: `APM_POLICY_DISABLE=1` (applies to the entire shell session). Note: `apm deps update` runs the install pipeline and is gated by policy but does not currently expose a `--no-policy` flag -- use `APM_POLICY_DISABLE=1` as the only escape hatch there.
+- `--skill NAME` - Install only named skill(s) from a `SKILL_BUNDLE` package. Repeatable. The selection is **persisted** in `apm.yml` (as a `skills:` list in dict-form entries) and in `apm.lock.yaml` (as `skill_subset`), so subsequent bare `apm install` commands are deterministic. Use `--skill '*'` to reset and install all skills from the bundle.
 
 **Transport env vars:**
 

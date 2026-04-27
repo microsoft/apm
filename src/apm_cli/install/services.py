@@ -54,6 +54,7 @@ def integrate_package_primitives(
     package_name: str = "",
     logger: Optional["InstallLogger"] = None,
     scope: Optional["InstallScope"] = None,
+    skill_subset: "Optional[tuple]" = None,
 ) -> dict:
     """Run the full integration pipeline for a single package.
 
@@ -141,7 +142,7 @@ def integrate_package_primitives(
     skill_result = skill_integrator.integrate_package_skill(
         package_info, project_root,
         diagnostics=diagnostics, managed_files=managed_files, force=force,
-        targets=targets,
+        targets=targets, skill_subset=skill_subset,
     )
     _skill_target_dirs: set = builtins.set()
     for tp in skill_result.target_paths:
