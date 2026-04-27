@@ -6,6 +6,7 @@ import os
 import subprocess
 import textwrap
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -36,6 +37,30 @@ _BASIC_YML = textwrap.dedent("""\
 """)
 
 
+# Token env vars that AuthResolver inspects.  Cleared in the autouse
+# fixture below so doctor tests are deterministic regardless of CI env.
+_TOKEN_ENV_VARS = ("GITHUB_APM_PAT", "GITHUB_TOKEN", "GH_TOKEN")
+
+
+@pytest.fixture(autouse=True)
+def _mock_auth_resolver(monkeypatch):
+    """Make the auth check deterministic by mocking AuthResolver.
+
+    Without this, the number of ``subprocess.run`` calls inside
+    ``doctor()`` varies depending on whether an env-var token exists
+    (AuthResolver skips ``git credential fill`` when one is found),
+    which causes positional mock side-effects to shift on CI where
+    ``GITHUB_APM_PAT`` is set.
+    """
+    for var in _TOKEN_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+
+    auth_ctx = SimpleNamespace(token="mock-doctor-token")
+    mock_cls = MagicMock()
+    mock_cls.return_value.resolve.return_value = auth_ctx
+    monkeypatch.setattr("apm_cli.core.auth.AuthResolver", mock_cls)
+
+
 @pytest.fixture
 def runner():
     return CliRunner()
@@ -49,7 +74,6 @@ def _make_run_result(returncode=0, stdout="", stderr=""):
 
 
 _GH_OK = _make_run_result(0, stdout="gh version 2.50.0 (2024-06-01)\nhttps://github.com/cli/cli/releases/tag/v2.50.0")
-_GIT_CRED_OK = _make_run_result(0, stdout="")
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +91,6 @@ class TestDoctorAllPass:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0, stdout="abc123\tHEAD"),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
 
@@ -80,7 +103,6 @@ class TestDoctorAllPass:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0, stdout="abc123\tHEAD"),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
 
@@ -93,7 +115,6 @@ class TestDoctorAllPass:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
 
@@ -131,7 +152,6 @@ class TestDoctorGitCheck:
         mock_run.side_effect = [
             _make_run_result(returncode=1, stderr="error"),
             _make_run_result(0),  # network check may still run
-            _GIT_CRED_OK,
             _GH_OK,
         ]
 
@@ -151,7 +171,6 @@ class TestDoctorNetworkCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(128, stderr="fatal: could not resolve host"),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
 
@@ -164,7 +183,6 @@ class TestDoctorNetworkCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             subprocess.TimeoutExpired(cmd="git", timeout=5),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
 
@@ -178,7 +196,6 @@ class TestDoctorNetworkCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(128, stderr="fatal: authentication failed"),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
 
@@ -199,7 +216,6 @@ class TestDoctorAuthCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
 
@@ -216,7 +232,6 @@ class TestDoctorAuthCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
 
@@ -227,12 +242,15 @@ class TestDoctorAuthCheck:
     @patch("apm_cli.commands.marketplace.subprocess.run")
     def test_no_token_informational(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
-        monkeypatch.delenv("GH_TOKEN", raising=False)
+        # Override the autouse mock so AuthResolver reports no token.
+        no_token_ctx = SimpleNamespace(token=None)
+        mock_cls = MagicMock()
+        mock_cls.return_value.resolve.return_value = no_token_ctx
+        monkeypatch.setattr("apm_cli.core.auth.AuthResolver", mock_cls)
+
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
 
@@ -253,7 +271,6 @@ class TestDoctorGhCliCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _GIT_CRED_OK,
             _make_run_result(0, stdout="gh version 2.50.0 (2024-06-01)\nhttps://github.com/cli/cli/releases/tag/v2.50.0"),
         ]
 
@@ -267,7 +284,6 @@ class TestDoctorGhCliCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _GIT_CRED_OK,
             FileNotFoundError("gh not found"),
         ]
 
@@ -282,7 +298,6 @@ class TestDoctorGhCliCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _GIT_CRED_OK,
             _make_run_result(returncode=1, stderr="error"),
         ]
 
@@ -296,7 +311,6 @@ class TestDoctorGhCliCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _GIT_CRED_OK,
             subprocess.TimeoutExpired(cmd="gh", timeout=10),
         ]
 
@@ -310,7 +324,6 @@ class TestDoctorGhCliCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _GIT_CRED_OK,
             OSError("Permission denied"),
         ]
 
@@ -324,7 +337,6 @@ class TestDoctorGhCliCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
 
@@ -345,7 +357,6 @@ class TestDoctorYmlCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
 
@@ -360,7 +371,6 @@ class TestDoctorYmlCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
 
@@ -375,7 +385,6 @@ class TestDoctorYmlCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
 
@@ -398,7 +407,6 @@ class TestDoctorExitCodes:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
 
@@ -427,7 +435,6 @@ class TestDoctorVerbose:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
 
@@ -447,7 +454,6 @@ class TestDoctorTable:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
 
@@ -465,7 +471,6 @@ class TestDoctorTable:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
 
@@ -478,7 +483,6 @@ class TestDoctorTable:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
 
@@ -516,7 +520,6 @@ class TestDoctorEdgeCases:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             FileNotFoundError("git not found"),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
 
@@ -542,7 +545,6 @@ class TestDoctorDuplicateNames:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
         mock_load.return_value = MarketplaceYml(
@@ -576,7 +578,6 @@ class TestDoctorDuplicateNames:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
         mock_load.return_value = MarketplaceYml(
@@ -607,7 +608,6 @@ class TestDoctorDuplicateNames:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _GIT_CRED_OK,
             _GH_OK,
         ]
 
