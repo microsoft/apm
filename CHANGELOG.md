@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm marketplace build` now respects `GITHUB_HOST` for GitHub Enterprise repos -- ref resolution, token lookup, and metadata fetch all use the configured host instead of hardcoded `github.com`. (#1008)
+
 ## [0.10.0] - 2026-04-27
 
 ### Added

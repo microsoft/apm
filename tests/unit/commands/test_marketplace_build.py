@@ -427,3 +427,23 @@ class TestBuildVerboseTraceback:
         assert result.exit_code == 1
         assert "Traceback" not in result.output
         assert "Build failed" in result.output
+
+
+# ---------------------------------------------------------------------------
+# GHE host support
+# ---------------------------------------------------------------------------
+
+
+class TestBuildGHEHost:
+    """build command -- GHE / custom host scenarios."""
+
+    def test_build_ghe_host_env(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """MarketplaceBuilder respects GITHUB_HOST for token resolution."""
+        monkeypatch.setenv("GITHUB_HOST", "corp.ghe.com")
+        from apm_cli.marketplace.builder import MarketplaceBuilder, BuildOptions
+        yml_path = tmp_path / "marketplace.yml"
+        yml_path.write_text("name: test\noutput: marketplace.json\npackages: []\n")
+        builder = MarketplaceBuilder(yml_path)
+        assert builder._host == "corp.ghe.com"

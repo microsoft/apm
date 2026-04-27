@@ -269,6 +269,17 @@ Run it first when `build` or `publish` fails in an unfamiliar environment.
 | `No cached refs (offline)` | First-ever `--offline` build. | Run once online to populate the cache, then retry offline. |
 | `git ls-remote` auth failure | Private source without credentials. | Ensure your git credentials (SSH agent or `gh auth login`) can reach the source repo. |
 
+### GitHub Enterprise Server
+
+`apm marketplace build` respects the `GITHUB_HOST` environment variable. Set it before building to resolve packages from a GHES instance:
+
+```bash
+export GITHUB_HOST=github.company.com
+apm marketplace build
+```
+
+Token resolution and metadata fetch use the same host, so existing auth configuration (see [Authentication](../../getting-started/authentication/)) works automatically.
+
 ## Discovering upgrades
 
 `apm marketplace outdated` compares the currently resolved version of each package (as captured in `marketplace.json`) against the latest tag available in the source repo.

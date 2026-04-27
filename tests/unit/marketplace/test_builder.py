@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import textwrap
+import urllib.parse
 from collections import OrderedDict
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 from unittest.mock import patch
 
@@ -1785,3 +1787,89 @@ class TestResolveGitHubToken:
         assert req.get_header("Authorization") is None
         # Result was still populated (public repo)
         assert "public-pkg" in results
+
+
+# ---------------------------------------------------------------------------
+# _fetch_remote_metadata: GHE / custom host branching
+# ---------------------------------------------------------------------------
+
+
+class TestFetchRemoteMetadataGHEHost:
+    """Tests for _fetch_remote_metadata host-routing logic (GHES, GHE Cloud, generic)."""
+
+    def _make_pkg(
+        self,
+        *,
+        name: str = "test-pkg",
+        source_repo: str = "acme/tools",
+        subdir: Optional[str] = None,
+        sha: str = _SHA_A,
+    ) -> ResolvedPackage:
+        return ResolvedPackage(
+            name=name,
+            source_repo=source_repo,
+            subdir=subdir,
+            ref="v1.0.0",
+            sha=sha,
+            requested_version="^1.0.0",
+            tags=(),
+            is_prerelease=False,
+        )
+
+    def _make_builder(self, tmp_path: Path) -> MarketplaceBuilder:
+        return MarketplaceBuilder(_write_yml(tmp_path, _BASIC_YML))
+
+    def test_metadata_fetch_ghes_uses_rest_api(self, tmp_path: Path) -> None:
+        """GHES host triggers REST API URL and sets Accept: application/vnd.github.raw."""
+        pkg = self._make_pkg()
+        builder = self._make_builder(tmp_path)
+        builder._host = "corp.ghe.com"
+        builder._github_token = "test-token"
+        builder._host_info = SimpleNamespace(
+            kind="ghes",
+            api_base="https://corp.ghe.com/api/v3",
+        )
+        yaml_body = b"description: GHES tool\nversion: 1.2.3\n"
+        mock_resp = _FakeHTTPResponse(yaml_body)
+        with patch(
+            "apm_cli.marketplace.builder.urllib.request.urlopen",
+            return_value=mock_resp,
+        ) as mock_open:
+            result = builder._fetch_remote_metadata(pkg)
+        assert result is not None
+        assert result["description"] == "GHES tool"
+        req = mock_open.call_args[0][0]
+        parsed = urllib.parse.urlparse(req.full_url)
+        assert parsed.hostname == "corp.ghe.com"
+        assert parsed.path.startswith("/api/v3/repos/")
+        assert req.get_header("Accept") == "application/vnd.github.raw"
+
+    def test_metadata_fetch_non_github_skipped(self, tmp_path: Path) -> None:
+        """Non-GitHub host (kind='generic') returns None without any HTTP request."""
+        pkg = self._make_pkg()
+        builder = self._make_builder(tmp_path)
+        builder._host = "gitlab.example.com"
+        builder._host_info = SimpleNamespace(kind="generic", api_base=None)
+        with patch(
+            "apm_cli.marketplace.builder.urllib.request.urlopen",
+        ) as mock_open:
+            result = builder._fetch_remote_metadata(pkg)
+        assert result is None
+        mock_open.assert_not_called()
+
+    def test_metadata_fetch_ghe_cloud_no_token_skipped(self, tmp_path: Path) -> None:
+        """GHE Cloud host without a token returns None without any HTTP request."""
+        pkg = self._make_pkg()
+        builder = self._make_builder(tmp_path)
+        builder._host = "mycompany.ghe.com"
+        builder._github_token = None
+        builder._host_info = SimpleNamespace(
+            kind="ghe_cloud",
+            api_base="https://mycompany.ghe.com/api/v3",
+        )
+        with patch(
+            "apm_cli.marketplace.builder.urllib.request.urlopen",
+        ) as mock_open:
+            result = builder._fetch_remote_metadata(pkg)
+        assert result is None
+        mock_open.assert_not_called()
