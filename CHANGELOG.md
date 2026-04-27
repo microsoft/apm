@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Docs site auto-deploys again after bot-cut releases (round 2): #953 fixed the trigger but the deploy step inside `docs.yml` still skipped because in a reusable workflow `github.event_name` reflects the caller's event (`push` of a tag), not `'workflow_call'`. v0.9.4 built clean but never published. Detect the tag-push context directly. (#TBD)
+
 ## [0.9.4] - 2026-04-27
 
 ### Added
