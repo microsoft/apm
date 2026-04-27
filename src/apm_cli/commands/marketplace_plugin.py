@@ -136,7 +136,12 @@ def _resolve_ref(
     try:
         remote_refs = resolver.list_remote_refs(source)
     except (GitLsRemoteError, OfflineMissError):
-        # Cannot verify — store as-is.
+        # Cannot verify — store as-is but warn the user.
+        logger.warning(
+            f"Could not verify ref '{ref}' for '{source}' (network unavailable). "
+            "Storing unresolved -- run with network access to pin a concrete SHA.",
+            symbol="warning",
+        )
         return ref
 
     for remote_ref in remote_refs:
@@ -369,7 +374,7 @@ def remove(name, yes, verbose):
         if not _is_interactive():
             logger.error(
                 "Use --yes to skip confirmation in non-interactive mode",
-                symbol="cross",
+                symbol="error",
             )
             sys.exit(1)
         try:

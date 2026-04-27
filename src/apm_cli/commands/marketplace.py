@@ -259,7 +259,7 @@ def _check_gitignore_for_marketplace_json(logger):
     except OSError:
         return
 
-    patterns = {"marketplace.json", "**/marketplace.json", "/marketplace.json"}
+    patterns = {"marketplace.json", "**/marketplace.json", "/marketplace.json", "*.json"}
     for line in lines:
         stripped = line.strip()
         # Skip blank and commented lines
@@ -619,7 +619,7 @@ def remove(name, yes, verbose):
             if not _is_interactive():
                 logger.error(
                     "Use --yes to skip confirmation in non-interactive mode",
-                    symbol="cross",
+                    symbol="error",
                 )
                 sys.exit(1)
             confirmed = click.confirm(
