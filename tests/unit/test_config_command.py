@@ -548,10 +548,12 @@ class TestCoworkSkillsDirFunctions:
         """set_copilot_cowork_skills_dir persists the absolute path via update_config."""
         import apm_cli.config as cfg_module
 
+        raw = "/absolute/skills"
+        expected = os.path.normpath(raw)
         with patch.object(cfg_module, "update_config") as mock_update:
-            cfg_module.set_copilot_cowork_skills_dir("/absolute/skills")
+            cfg_module.set_copilot_cowork_skills_dir(raw)
             mock_update.assert_called_once_with(
-                {"copilot_cowork_skills_dir": "/absolute/skills"}
+                {"copilot_cowork_skills_dir": expected}
             )
 
     def test_set_copilot_cowork_skills_dir_expands_tilde_before_storing(self):
@@ -597,8 +599,10 @@ class TestCoworkSkillsDirFunctions:
         """unset_copilot_cowork_skills_dir removes the key; subsequent get returns None."""
         import apm_cli.config as cfg_module
 
-        cfg_module.set_copilot_cowork_skills_dir("/absolute/skills/path")
-        assert cfg_module.get_copilot_cowork_skills_dir() == "/absolute/skills/path"
+        raw = "/absolute/skills/path"
+        expected = os.path.normpath(raw)
+        cfg_module.set_copilot_cowork_skills_dir(raw)
+        assert cfg_module.get_copilot_cowork_skills_dir() == expected
 
         cfg_module.unset_copilot_cowork_skills_dir()
         assert cfg_module.get_copilot_cowork_skills_dir() is None
