@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Rename `DownloadStrategyManager` to `DownloadDelegate` to better reflect Facade/Delegate pattern (#918)
+- Fix incorrect double-checked locking in marketplace registry `_load()` -- hold lock across full check+read+set (#918)
+
+### Fixed
+
+- Remove redundant `seen` set from `_scan_patterns()` discovery walk (#918)
+
 ## [0.10.0] - 2026-04-27
 
 ### Added
@@ -23,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Docs site auto-deploys again after bot-cut releases (now triggered on tag push). (#981)
+
+### Documentation
+
+- Clarify `NullCommandLogger` partial interface and visible-output semantics in docstring (#918)
 
 ### Maintainer tooling
 

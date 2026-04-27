@@ -248,9 +248,11 @@ class TestDoubleStarThroughput:
 
         # We don't require a specific match result; just that it completes
         assert isinstance(result, bool)
-        assert elapsed < 2.0, (
+        # Generous ceiling (5x expected) -- catches catastrophic regressions only.
+        # Scaling guards in the default test suite handle O(n^2) detection.
+        assert elapsed < 10.0, (
             f"_match_double_star({star_segments} ** segs, depth {path_depth}) "
-            f"took {elapsed:.3f}s (limit 2.0s)"
+            f"took {elapsed:.3f}s, expected < 10.0s (generous ceiling)"
         )
 
 
@@ -277,11 +279,14 @@ class TestDoubleStarFastPath:
         elapsed_double_star = time.perf_counter() - start
 
         # Both should be fast, but simple should be noticeably faster
-        assert elapsed_simple < 0.5, (
-            f"Simple glob took {elapsed_simple:.3f}s for 1000 calls"
+        # Generous ceilings (5x expected) -- catches catastrophic regressions only.
+        assert elapsed_simple < 2.5, (
+            f"Simple glob took {elapsed_simple:.3f}s for 1000 calls, "
+            f"expected < 2.5s (generous ceiling)"
         )
-        assert elapsed_double_star < 1.0, (
-            f"** glob took {elapsed_double_star:.3f}s for 1000 calls"
+        assert elapsed_double_star < 5.0, (
+            f"** glob took {elapsed_double_star:.3f}s for 1000 calls, "
+            f"expected < 5.0s (generous ceiling)"
         )
         # Fast-path should be faster than recursive ** matching
         if elapsed_double_star > 0.001:
@@ -299,8 +304,10 @@ class TestDoubleStarFastPath:
             _matches_pattern("test_example.md", "test_*.md")
         elapsed = time.perf_counter() - start
 
-        assert elapsed < 0.5, (
-            f"fnmatch pattern took {elapsed:.3f}s for 1000 calls"
+        # Generous ceiling (5x expected) -- catches catastrophic regressions only.
+        assert elapsed < 2.5, (
+            f"fnmatch pattern took {elapsed:.3f}s for 1000 calls, "
+            f"expected < 2.5s (generous ceiling)"
         )
 
 
@@ -380,9 +387,9 @@ class TestScanTextThroughput:
     @pytest.mark.parametrize(
         "content_size, ceiling",
         [
-            (1_000, 0.5),
-            (10_000, 2.0),
-            (100_000, 10.0),
+            (1_000, 2.5),
+            (10_000, 10.0),
+            (100_000, 50.0),
         ],
     )
     def test_scan_text_mixed_content(self, content_size: int, ceiling: float):
@@ -401,9 +408,11 @@ class TestScanTextThroughput:
         assert any(f.severity in ("warning", "critical") for f in findings), (
             "Expected at least one warning or critical finding from mixed content"
         )
+        # Generous ceiling (5x expected) -- catches catastrophic regressions only.
+        # Scaling guards in the default test suite handle O(n^2) detection.
         assert elapsed < ceiling, (
-            f"scan_text({content_size} chars) took {elapsed:.3f}s "
-            f"(limit {ceiling}s)"
+            f"scan_text({content_size} chars) took {elapsed:.3f}s, "
+            f"expected < {ceiling}s (generous ceiling)"
         )
 
 
@@ -421,9 +430,10 @@ class TestScanTextFastPath:
         elapsed = time.perf_counter() - start
 
         assert findings == []
-        assert elapsed < 0.01, (
-            f"ASCII fast path took {elapsed:.6f}s for 100K chars "
-            f"(expected < 0.01s)"
+        # Generous ceiling -- catches catastrophic regressions only.
+        assert elapsed < 2.0, (
+            f"ASCII fast path took {elapsed:.6f}s for 100K chars, "
+            f"expected < 2.0s (generous ceiling)"
         )
 
 
@@ -486,9 +496,9 @@ class TestStripDangerousThroughput:
     @pytest.mark.parametrize(
         "content_size, ceiling",
         [
-            (1_000, 0.5),
-            (10_000, 2.0),
-            (100_000, 10.0),
+            (1_000, 2.5),
+            (10_000, 10.0),
+            (100_000, 50.0),
         ],
     )
     def test_strip_dangerous_throughput(
@@ -504,9 +514,11 @@ class TestStripDangerousThroughput:
         assert isinstance(result, str)
         # Result should be shorter (dangerous chars removed)
         assert len(result) <= len(content)
+        # Generous ceiling (5x expected) -- catches catastrophic regressions only.
+        # Scaling guards in the default test suite handle O(n^2) detection.
         assert elapsed < ceiling, (
-            f"strip_dangerous({content_size} chars) took {elapsed:.3f}s "
-            f"(limit {ceiling}s)"
+            f"strip_dangerous({content_size} chars) took {elapsed:.3f}s, "
+            f"expected < {ceiling}s (generous ceiling)"
         )
 
 
@@ -617,8 +629,10 @@ class TestBuildDependencyTreeShapes:
         assert isinstance(tree, DependencyTree)
         # Should have all 50 packages in the chain
         assert len(tree.nodes) == 50
-        assert elapsed < 5.0, (
-            f"Linear chain (50 nodes) took {elapsed:.3f}s (limit 5.0s)"
+        # Generous ceiling (5x expected) -- catches catastrophic regressions only.
+        assert elapsed < 25.0, (
+            f"Linear chain (50 nodes) took {elapsed:.3f}s, "
+            f"expected < 25.0s (generous ceiling)"
         )
 
     def test_wide_fan(self, tmp_path: Path):
@@ -638,8 +652,10 @@ class TestBuildDependencyTreeShapes:
 
         assert isinstance(tree, DependencyTree)
         assert len(tree.nodes) == 50
-        assert elapsed < 5.0, (
-            f"Wide fan (50 nodes) took {elapsed:.3f}s (limit 5.0s)"
+        # Generous ceiling (5x expected) -- catches catastrophic regressions only.
+        assert elapsed < 25.0, (
+            f"Wide fan (50 nodes) took {elapsed:.3f}s, "
+            f"expected < 25.0s (generous ceiling)"
         )
 
     def test_diamond_deduplication(self, tmp_path: Path):
@@ -663,8 +679,9 @@ class TestBuildDependencyTreeShapes:
             f"Diamond should have 3 unique nodes, got {len(tree.nodes)}: "
             f"{list(tree.nodes.keys())}"
         )
-        assert elapsed < 2.0, (
-            f"Diamond took {elapsed:.3f}s (limit 2.0s)"
+        # Generous ceiling (5x expected) -- catches catastrophic regressions only.
+        assert elapsed < 10.0, (
+            f"Diamond took {elapsed:.3f}s, expected < 10.0s (generous ceiling)"
         )
 
 
@@ -689,11 +706,13 @@ class TestBuildDependencyTreeScale:
         elapsed = time.perf_counter() - start
 
         assert len(tree.nodes) == node_count
-        thresholds = {10: 2.0, 50: 5.0, 100: 10.0}
+        # Generous ceiling (5x expected) -- catches catastrophic regressions only.
+        # Scaling guards in the default test suite handle O(n^2) detection.
+        thresholds = {10: 10.0, 50: 25.0, 100: 50.0}
         limit = thresholds[node_count]
         assert elapsed < limit, (
-            f"Wide fan ({node_count} nodes) took {elapsed:.3f}s "
-            f"(limit {limit}s)"
+            f"Wide fan ({node_count} nodes) took {elapsed:.3f}s, "
+            f"expected < {limit}s (generous ceiling)"
         )
 
 

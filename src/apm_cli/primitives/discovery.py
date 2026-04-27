@@ -367,17 +367,13 @@ def _scan_patterns(base_dir: Path, patterns: Dict[str, List[str]], collection: P
     for _primitive_type, type_patterns in patterns.items():
         all_patterns.extend(type_patterns)
 
-    seen: set = set()
     base_str = str(base_dir)
     for dirpath, _dirnames, filenames in os.walk(base_str, followlinks=False):
         for filename in filenames:
             full_path = os.path.join(dirpath, filename)
-            if full_path in seen:
-                continue
             rel_path = os.path.relpath(full_path, base_str).replace(os.sep, "/")
             if not _matches_any_pattern(rel_path, all_patterns):
                 continue
-            seen.add(full_path)
             file_path = Path(full_path)
             if file_path.is_file() and _is_readable(file_path):
                 try:

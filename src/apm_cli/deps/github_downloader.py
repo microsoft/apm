@@ -59,7 +59,7 @@ from .git_remote_ops import (
     semver_sort_key,
     sort_remote_refs,
 )
-from .download_strategies import DownloadStrategyManager
+from .download_strategies import DownloadDelegate
 
 # Public docs anchor for the cross-protocol fallback caveat surfaced by the
 # #786 warning. Lives under the dependencies guide, next to the canonical
@@ -221,8 +221,8 @@ class GitHubPackageDownloader:
         # per (host, repo, port) identity across all those calls.
         self._fallback_port_warned: set = set()
 
-        # Delegate backend-specific download logic to the strategy manager.
-        self._strategies = DownloadStrategyManager(host=self)
+        # Delegate backend-specific download logic to the download delegate.
+        self._strategies = DownloadDelegate(host=self)
 
     def _setup_git_environment(self) -> Dict[str, Any]:
         """Set up Git environment with authentication using centralized token manager.

@@ -1,10 +1,10 @@
-"""Backend-specific download strategies for APM packages.
+"""Backend-specific download delegates for APM packages.
 
 Encapsulates HTTP resilient-get, GitHub API file download, Azure DevOps
 file download, and Artifactory archive download logic.  The owning
 :class:`~apm_cli.deps.github_downloader.GitHubPackageDownloader` creates
-a single :class:`DownloadStrategyManager` instance and delegates
-download operations to it via backward-compatible method stubs.
+a single :class:`DownloadDelegate` instance and delegates download
+operations to it (Facade/Delegate pattern).
 """
 
 import os
@@ -43,24 +43,21 @@ def _debug(message: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# DownloadStrategyManager
+# DownloadDelegate
 # ---------------------------------------------------------------------------
 
-class DownloadStrategyManager:
-    """Encapsulates backend-specific download logic for APM packages.
+class DownloadDelegate:
+    """Facade/Delegate that encapsulates backend-specific download logic.
 
     Holds the real implementations of HTTP resilient-get, URL building,
     and file download methods for GitHub, Azure DevOps, and Artifactory
     backends.
 
     A back-reference to the owning ``GitHubPackageDownloader`` (*host*)
-    is kept so that:
-
-    * Shared state (``auth_resolver``, tokens, ``registry_config``) is
-      read from the single source of truth rather than copied.
-    * Internal calls to ``_resilient_get`` route through the host stub,
-      preserving existing test ``patch.object`` points on the
-      orchestrator.
+    is kept as a known trade-off: it creates a circular reference
+    between the delegate and its owner, but avoids duplicating shared
+    state (``auth_resolver``, tokens, ``registry_config``) and
+    preserves existing test ``patch.object`` points on the orchestrator.
     """
 
     def __init__(self, host):
@@ -68,7 +65,7 @@ class DownloadStrategyManager:
 
         Args:
             host: The :class:`GitHubPackageDownloader` instance that owns
-                this manager.
+                this delegate.
         """
         self._host = host
 

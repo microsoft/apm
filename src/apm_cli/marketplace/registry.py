@@ -49,25 +49,21 @@ def _load() -> List[MarketplaceSource]:
     with _registry_lock:
         if _registry_cache is not None:
             return list(_registry_cache)
-
-    path = _ensure_file()
-    try:
-        with open(path, "r") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Failed to read %s: %s", path, exc)
-        data = {"marketplaces": []}
-
-    sources: List[MarketplaceSource] = []
-    for entry in data.get("marketplaces", []):
+        path = _ensure_file()
         try:
-            sources.append(MarketplaceSource.from_dict(entry))
-        except (KeyError, TypeError) as exc:
-            logger.debug("Skipping invalid marketplace entry: %s", exc)
-
-    with _registry_lock:
+            with open(path, "r") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Failed to read %s: %s", path, exc)
+            data = {"marketplaces": []}
+        sources: List[MarketplaceSource] = []
+        for entry in data.get("marketplaces", []):
+            try:
+                sources.append(MarketplaceSource.from_dict(entry))
+            except (KeyError, TypeError) as exc:
+                logger.debug("Skipping invalid marketplace entry: %s", exc)
         _registry_cache = sources
-    return list(sources)
+        return list(sources)
 
 
 def _save(sources: List[MarketplaceSource]) -> None:

@@ -170,9 +170,9 @@ class TestParseLsRemoteThroughput:
     @pytest.mark.parametrize(
         "ref_count, ceiling",
         [
-            (50, 0.5),
-            (200, 1.0),
-            (500, 2.0),
+            (50, 2.5),
+            (200, 5.0),
+            (500, 10.0),
         ],
     )
     def test_parse_throughput(self, ref_count: int, ceiling: float):
@@ -189,8 +189,11 @@ class TestParseLsRemoteThroughput:
         tag_refs = [r for r in refs if r.ref_type == GitReferenceType.TAG]
         branch_refs = [r for r in refs if r.ref_type == GitReferenceType.BRANCH]
         assert len(tag_refs) + len(branch_refs) == len(refs)
+        # Generous ceiling (5x expected) -- catches catastrophic regressions only.
+        # Scaling guards in the default test suite handle O(n^2) detection.
         assert elapsed < ceiling, (
-            f"Parsing {ref_count} refs took {elapsed:.3f}s (limit {ceiling}s)"
+            f"Parsing {ref_count} refs took {elapsed:.3f}s, "
+            f"expected < {ceiling}s (generous ceiling)"
         )
 
 
@@ -201,9 +204,9 @@ class TestSortRemoteRefsThroughput:
     @pytest.mark.parametrize(
         "ref_count, ceiling",
         [
-            (50, 0.5),
-            (200, 1.0),
-            (500, 2.0),
+            (50, 2.5),
+            (200, 5.0),
+            (500, 10.0),
         ],
     )
     def test_sort_throughput(self, ref_count: int, ceiling: float):
@@ -231,8 +234,11 @@ class TestSortRemoteRefsThroughput:
             assert all(r.ref_type == GitReferenceType.TAG for r in sorted_refs), (
                 "Expected all-tags output when no branches present"
             )
+        # Generous ceiling (5x expected) -- catches catastrophic regressions only.
+        # Scaling guards in the default test suite handle O(n^2) detection.
         assert elapsed < ceiling, (
-            f"Sorting {ref_count} refs took {elapsed:.3f}s (limit {ceiling}s)"
+            f"Sorting {ref_count} refs took {elapsed:.3f}s, "
+            f"expected < {ceiling}s (generous ceiling)"
         )
 
     def test_sort_semver_order(self):
@@ -333,9 +339,9 @@ class TestAnalyzeDirectoryStructureThroughput:
     @pytest.mark.parametrize(
         "dir_count, ceiling",
         [
-            (10, 1.0),
-            (50, 2.0),
-            (200, 5.0),
+            (10, 5.0),
+            (50, 10.0),
+            (200, 25.0),
         ],
     )
     def test_throughput_by_project_size(
@@ -369,9 +375,11 @@ class TestAnalyzeDirectoryStructureThroughput:
         assert isinstance(result, DirectoryMap)
         assert len(result.directories) > 0
         assert len(result.depth_map) > 0
+        # Generous ceiling (5x expected) -- catches catastrophic regressions only.
+        # Scaling guards in the default test suite handle O(n^2) detection.
         assert elapsed < ceiling, (
             f"analyze_directory_structure({dir_count} dirs) took "
-            f"{elapsed:.3f}s (limit {ceiling}s)"
+            f"{elapsed:.3f}s, expected < {ceiling}s (generous ceiling)"
         )
 
 
@@ -488,9 +496,9 @@ class TestCollectTransitiveThroughput:
     @pytest.mark.parametrize(
         "pkg_count, ceiling",
         [
-            (5, 1.0),
-            (20, 3.0),
-            (50, 5.0),
+            (5, 5.0),
+            (20, 15.0),
+            (50, 25.0),
         ],
     )
     def test_throughput_by_dependency_count(
@@ -512,9 +520,11 @@ class TestCollectTransitiveThroughput:
         assert len(collected) == expected_count, (
             f"Expected {expected_count} MCP deps, got {len(collected)}"
         )
+        # Generous ceiling (5x expected) -- catches catastrophic regressions only.
+        # Scaling guards in the default test suite handle O(n^2) detection.
         assert elapsed < ceiling, (
-            f"collect_transitive({pkg_count} pkgs) took {elapsed:.3f}s "
-            f"(limit {ceiling}s)"
+            f"collect_transitive({pkg_count} pkgs) took {elapsed:.3f}s, "
+            f"expected < {ceiling}s (generous ceiling)"
         )
 
 

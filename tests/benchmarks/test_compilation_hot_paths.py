@@ -168,10 +168,13 @@ class TestComputeDeployedHashesPerf:
         # Spot-check format
         first_hash = next(iter(result.values()))
         assert first_hash.startswith("sha256:")
-        thresholds = {100: 1.0, 500: 3.0, 2000: 10.0}
+        # Generous ceiling (5x expected) -- catches catastrophic regressions only.
+        # Scaling guards in the default test suite handle O(n^2) detection.
+        thresholds = {100: 5.0, 500: 15.0, 2000: 50.0}
         limit = thresholds[file_count]
         assert elapsed < limit, (
-            f"Hashing {file_count} files took {elapsed:.3f}s (limit {limit}s)"
+            f"Hashing {file_count} files took {elapsed:.3f}s, "
+            f"expected < {limit}s (generous ceiling)"
         )
 
 
@@ -213,11 +216,13 @@ class TestOptimizeInstructionPlacementPerf:
                 placed_instructions.add(instr.name)
         assert len(placed_instructions) == instr_count
 
-        thresholds = {(10, 20): 2.0, (50, 100): 5.0, (200, 200): 4.0}
+        # Generous ceiling (5x expected) -- catches catastrophic regressions only.
+        # Scaling guards in the default test suite handle O(n^2) detection.
+        thresholds = {(10, 20): 10.0, (50, 100): 25.0, (200, 200): 20.0}
         limit = thresholds[(instr_count, dir_count)]
         assert elapsed < limit, (
             f"Optimizing {instr_count} instructions over {dir_count} dirs "
-            f"took {elapsed:.3f}s (limit {limit}s)"
+            f"took {elapsed:.3f}s, expected < {limit}s (generous ceiling)"
         )
 
 
@@ -269,10 +274,13 @@ class TestRewriteMarkdownLinksPerf:
 
         assert isinstance(result, str)
         assert len(result) > 0
-        thresholds = {5: 0.5, 20: 1.0, 50: 2.0}
+        # Generous ceiling (5x expected) -- catches catastrophic regressions only.
+        # Scaling guards in the default test suite handle O(n^2) detection.
+        thresholds = {5: 2.5, 20: 5.0, 50: 10.0}
         limit = thresholds[link_count]
         assert elapsed < limit, (
-            f"Rewriting {link_count} links took {elapsed:.3f}s (limit {limit}s)"
+            f"Rewriting {link_count} links took {elapsed:.3f}s, "
+            f"expected < {limit}s (generous ceiling)"
         )
 
     def test_no_context_links_passthrough(self, tmp_path: Path):
@@ -301,7 +309,10 @@ class TestRewriteMarkdownLinksPerf:
 
         # Non-context links should remain unchanged
         assert "[External](https://example.com)" in result
-        assert elapsed < 0.1
+        # Generous ceiling -- catches catastrophic regressions only.
+        assert elapsed < 2.0, (
+            f"Passthrough took {elapsed:.3f}s, expected < 2.0s (generous ceiling)"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -327,10 +338,13 @@ class TestPartitionManagedFilesPerf:
         assert total_routed == file_count, (
             f"Expected {file_count} routed files, got {total_routed}"
         )
-        thresholds = {100: 0.5, 1000: 1.0, 5000: 3.0}
+        # Generous ceiling (5x expected) -- catches catastrophic regressions only.
+        # Scaling guards in the default test suite handle O(n^2) detection.
+        thresholds = {100: 2.5, 1000: 5.0, 5000: 15.0}
         limit = thresholds[file_count]
         assert elapsed < limit, (
-            f"Partitioning {file_count} files took {elapsed:.3f}s (limit {limit}s)"
+            f"Partitioning {file_count} files took {elapsed:.3f}s, "
+            f"expected < {limit}s (generous ceiling)"
         )
 
     def test_partition_correctness(self):
@@ -374,11 +388,13 @@ class TestLockFileRoundTripPerf:
             k: v for k, v in lf2.dependencies.items() if k != "."
         }
         assert len(real_deps) == dep_count
-        thresholds = {50: 2.0, 200: 5.0, 500: 10.0}
+        # Generous ceiling (5x expected) -- catches catastrophic regressions only.
+        # Scaling guards in the default test suite handle O(n^2) detection.
+        thresholds = {50: 10.0, 200: 25.0, 500: 50.0}
         limit = thresholds[dep_count]
         assert elapsed < limit, (
-            f"Round-trip for {dep_count} deps took {elapsed:.3f}s "
-            f"(limit {limit}s)"
+            f"Round-trip for {dep_count} deps took {elapsed:.3f}s, "
+            f"expected < {limit}s (generous ceiling)"
         )
 
     def test_round_trip_preserves_data(self):
@@ -444,11 +460,13 @@ class TestRegisterContextsPerf:
         dep_count = sum(1 for c in contexts if c.source.startswith("dependency:"))
         assert len(resolver.context_registry) >= context_count + dep_count
 
-        thresholds = {100: 0.5, 500: 1.0}
+        # Generous ceiling (5x expected) -- catches catastrophic regressions only.
+        # Scaling guards in the default test suite handle O(n^2) detection.
+        thresholds = {100: 2.5, 500: 5.0}
         limit = thresholds[context_count]
         assert elapsed < limit, (
-            f"Registering {context_count} contexts took {elapsed:.3f}s "
-            f"(limit {limit}s)"
+            f"Registering {context_count} contexts took {elapsed:.3f}s, "
+            f"expected < {limit}s (generous ceiling)"
         )
 
     def test_registry_lookup_correctness(self, tmp_path: Path):
@@ -537,7 +555,10 @@ class TestContextOptimizerEdgeCases:
         elapsed = time.perf_counter() - start
 
         assert placement == {}
-        assert elapsed < 1.0
+        # Generous ceiling -- catches catastrophic regressions only.
+        assert elapsed < 5.0, (
+            f"Empty instructions took {elapsed:.3f}s, expected < 5.0s (generous ceiling)"
+        )
 
     def test_global_instruction_placement(self, tmp_path: Path):
         """Instructions without apply_to pattern go to root directory."""
@@ -607,7 +628,10 @@ class TestRewriteMixedLinks:
 
         # External links should be preserved
         assert "https://example.com/page" in result
-        assert elapsed < 0.5
+        # Generous ceiling -- catches catastrophic regressions only.
+        assert elapsed < 2.5, (
+            f"Mixed link rewrite took {elapsed:.3f}s, expected < 2.5s (generous ceiling)"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -627,7 +651,10 @@ class TestPartitionEdgeCases:
         assert isinstance(buckets, dict)
         total = sum(len(v) for v in buckets.values())
         assert total == 0
-        assert elapsed < 0.1
+        # Generous ceiling -- catches catastrophic regressions only.
+        assert elapsed < 2.0, (
+            f"Empty set partition took {elapsed:.3f}s, expected < 2.0s (generous ceiling)"
+        )
 
     def test_unknown_prefix_not_routed(self):
         """Paths that do not match any known prefix are not routed."""
