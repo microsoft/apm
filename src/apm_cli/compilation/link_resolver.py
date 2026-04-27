@@ -431,6 +431,8 @@ def _resolve_path(path: str, base_path: Path) -> Path | None:
     Returns:
         Optional[Path]: Resolved path or None if invalid.
     """
+    if not path or not path.strip():
+        return None
     try:
         if Path(path).is_absolute():
             return Path(path)

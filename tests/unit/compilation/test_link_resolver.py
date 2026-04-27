@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 import pytest
 
-from apm_cli.compilation.link_resolver import LinkResolutionContext, UnifiedLinkResolver
+from apm_cli.compilation.link_resolver import LinkResolutionContext, UnifiedLinkResolver, _resolve_path
 from apm_cli.primitives.models import Context, PrimitiveCollection
 
 
@@ -455,3 +455,46 @@ class TestEdgeCases:
 
         # Should be rewritten to actual source location
         assert ".apm/context/project.memory.md" in result
+
+
+class TestResolvePathInputGuards:
+    """Containment tests for _resolve_path: empty / whitespace / NUL / traversal."""
+
+    def test_empty_string_returns_none(self, base_dir):
+        """Empty link should resolve to None, not the base directory."""
+        assert _resolve_path("", base_dir) is None
+
+    def test_whitespace_only_returns_none(self, base_dir):
+        """Whitespace-only link should resolve to None."""
+        assert _resolve_path("   ", base_dir) is None
+        assert _resolve_path("\t", base_dir) is None
+        assert _resolve_path("\n", base_dir) is None
+
+    def test_embedded_nul_byte_does_not_crash(self, base_dir):
+        """An embedded NUL byte must not crash _resolve_path itself.
+
+        The current containment relies on the caller's `.exists()` check to
+        reject the resulting path -- this lock-in is documented in the issue
+        ("Current containment code handles these correctly").
+        """
+        # Either return value is acceptable; what matters is no exception.
+        result = _resolve_path("foo\x00bar", base_dir)
+        assert result is None or isinstance(result, Path)
+
+    def test_posix_backslash_traversal_stays_relative(self, base_dir):
+        """Backslashes are literal characters on POSIX, so the path stays under base_dir."""
+        result = _resolve_path("foo\\..\\..\\etc\\passwd", base_dir)
+        assert result is not None
+        # The literal backslash filename is interpreted as a single segment under base_dir.
+        assert result == base_dir / "foo\\..\\..\\etc\\passwd"
+
+    def test_file_uri_on_posix_is_treated_as_relative(self, base_dir):
+        """`file://...` is not absolute on POSIX, so it joins under base_dir rather than escaping it."""
+        result = _resolve_path("file:///etc/passwd", base_dir)
+        assert result is not None
+        assert str(result).startswith(str(base_dir))
+
+    def test_nonexistent_relative_target_resolves_normally(self, base_dir):
+        """The happy path: a syntactically-valid relative target resolves even if the target file is missing."""
+        result = _resolve_path("does/not/exist.md", base_dir)
+        assert result == base_dir / "does/not/exist.md"
