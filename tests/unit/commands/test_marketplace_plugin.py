@@ -251,17 +251,16 @@ class TestPackageRemove:
     def test_without_yes_non_interactive_cancels(
         self, runner, tmp_path, monkeypatch
     ):
-        """Non-interactive mode (CliRunner has no TTY) cancels gracefully."""
+        """Non-interactive mode exits with error asking for --yes."""
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
         result = runner.invoke(
             marketplace,
             ["package", "remove", "existing-package"],
         )
-        # click.confirm raises Abort when stdin is not a TTY;
-        # the command catches it and prints "Cancelled.".
-        assert result.exit_code == 0
-        assert "Cancelled." in result.output
+        # Non-interactive guard fires: exit 1 with guidance to use --yes.
+        assert result.exit_code == 1
+        assert "--yes" in result.output
 
     def test_package_not_found_exits_2(
         self, runner, tmp_path, monkeypatch

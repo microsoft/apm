@@ -70,14 +70,30 @@ def _pin_key(marketplace_name: str, plugin_name: str, version: str = "") -> str:
 # ------------------------------------------------------------------
 
 
-def load_ref_pins(pins_dir: Optional[str] = None) -> dict:
+def load_ref_pins(
+    pins_dir: Optional[str] = None,
+    *,
+    expect_exists: bool = False,
+) -> dict:
     """Load the ref-pins file from disk.
 
     Returns an empty dict when the file is missing or contains invalid
     JSON.  Never raises.
+
+    Args:
+        pins_dir: Override directory for the pins file.
+        expect_exists: When ``True`` and the file is missing, a warning
+            is logged.  Use this when the caller previously wrote the
+            file and its absence is unexpected (possible deletion).
     """
     path = _pins_path(pins_dir)
     if not os.path.exists(path):
+        if expect_exists:
+            logger.warning(
+                "Version-pins file expected but missing: %s "
+                "-- ref-swap detection is disabled until pins are rebuilt",
+                path,
+            )
         return {}
     try:
         with open(path, "r") as fh:

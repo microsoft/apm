@@ -21,6 +21,7 @@ from ..marketplace.errors import (
     BuildError,
     GitLsRemoteError,
     HeadNotAllowedError,
+    MarketplaceNotFoundError,
     MarketplaceYmlError,
     NoMatchingVersionError,
     OfflineMissError,
@@ -61,7 +62,7 @@ class MarketplaceGroup(click.Group):
             from ..core.experimental import is_enabled
 
             return is_enabled("marketplace_authoring")
-        except Exception:
+        except Exception:  # noqa: BLE001 -- fail-open UI visibility check
             return True  # fail open — show commands if flag check fails
 
     def format_commands(self, ctx, formatter):
@@ -244,7 +245,7 @@ def init(force, no_gitignore_check, name, owner, verbose):
     except (ImportError, NameError):
         logger.progress("Next steps:")
         for i, step in enumerate(next_steps, 1):
-            click.echo(f"  {i}. {step}")
+            logger.tree_item(f"  {i}. {step}")
 
 
 def _check_gitignore_for_marketplace_json(logger):
@@ -398,8 +399,10 @@ def add(repo, name, branch, host, verbose):
         if manifest.description:
             logger.verbose_detail(f"    {manifest.description}")
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- top-level command catch-all
         logger.error(f"Failed to register marketplace: {e}")
+        if verbose:
+            logger.progress(traceback.format_exc(), symbol="info")
         sys.exit(1)
 
 
@@ -433,7 +436,7 @@ def list_cmd(verbose):
                 f"{len(sources)} marketplace(s) registered:", symbol="info"
             )
             for s in sources:
-                click.echo(f"  {s.name}  ({s.owner}/{s.repo})")
+                logger.tree_item(f"  {s.name}  ({s.owner}/{s.repo})")
             return
 
         from rich.table import Table
@@ -454,12 +457,15 @@ def list_cmd(verbose):
 
         console.print()
         console.print(table)
-        console.print(
-            f"\n[dim]Use 'apm marketplace browse <name>' to see plugins[/dim]"
+        logger.progress(
+            "Use 'apm marketplace browse <name>' to see plugins",
+            symbol="info",
         )
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- top-level command catch-all
         logger.error(f"Failed to list marketplaces: {e}")
+        if verbose:
+            logger.progress(traceback.format_exc(), symbol="info")
         sys.exit(1)
 
 
@@ -495,9 +501,9 @@ def browse(name, verbose):
             )
             for p in manifest.plugins:
                 desc = f" -- {p.description}" if p.description else ""
-                click.echo(f"  {p.name}{desc}")
-            click.echo(
-                f"\n  Install: apm install <plugin-name>@{name}"
+                logger.tree_item(f"  {p.name}{desc}")
+            logger.progress(
+                f"Install: apm install <plugin-name>@{name}", symbol="info"
             )
             return
 
@@ -521,12 +527,15 @@ def browse(name, verbose):
 
         console.print()
         console.print(table)
-        console.print(
-            f"\n[dim]Install a plugin: apm install <plugin-name>@{name}[/dim]"
+        logger.progress(
+            f"Install a plugin: apm install <plugin-name>@{name}",
+            symbol="info",
         )
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- top-level command catch-all
         logger.error(f"Failed to browse marketplace: {e}")
+        if verbose:
+            logger.progress(traceback.format_exc(), symbol="info")
         sys.exit(1)
 
 
@@ -574,12 +583,16 @@ def update(name, verbose):
                     logger.tree_item(
                         f"  {s.name} ({len(manifest.plugins)} plugins)"
                     )
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 -- per-marketplace best-effort
                     logger.warning(f"  {s.name}: {exc}")
+                    if verbose:
+                        logger.progress(traceback.format_exc(), symbol="info")
             logger.success("Marketplace cache refreshed", symbol="check")
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- top-level command catch-all
         logger.error(f"Failed to update marketplace: {e}")
+        if verbose:
+            logger.progress(traceback.format_exc(), symbol="info")
         sys.exit(1)
 
 
@@ -603,6 +616,12 @@ def remove(name, yes, verbose):
         source = get_marketplace_by_name(name)
 
         if not yes:
+            if not _is_interactive():
+                logger.error(
+                    "Use --yes to skip confirmation in non-interactive mode",
+                    symbol="cross",
+                )
+                sys.exit(1)
             confirmed = click.confirm(
                 f"Remove marketplace '{source.name}' ({source.owner}/{source.repo})?",
                 default=False,
@@ -615,8 +634,10 @@ def remove(name, yes, verbose):
         clear_marketplace_cache(name, host=source.host)
         logger.success(f"Marketplace '{name}' removed", symbol="check")
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- top-level command catch-all
         logger.error(f"Failed to remove marketplace: {e}")
+        if verbose:
+            logger.progress(traceback.format_exc(), symbol="info")
         sys.exit(1)
 
 
@@ -702,10 +723,9 @@ def validate(name, check_refs, verbose):
         if error_count > 0:
             sys.exit(1)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- top-level command catch-all
         logger.error(f"Failed to validate marketplace: {e}")
-        if verbose:
-            click.echo(traceback.format_exc(), err=True)
+        logger.verbose_detail(traceback.format_exc())
         sys.exit(1)
 
 
@@ -743,13 +763,11 @@ def build(dry_run, offline, include_prerelease, verbose):
         sys.exit(2)
     except BuildError as exc:
         _render_build_error(logger, exc)
-        if verbose:
-            click.echo(traceback.format_exc(), err=True)
+        logger.verbose_detail(traceback.format_exc())
         sys.exit(1)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- top-level command catch-all
         logger.error(f"Build failed: {e}", symbol="error")
-        if verbose:
-            click.echo(traceback.format_exc(), err=True)
+        logger.verbose_detail(traceback.format_exc())
         sys.exit(1)
 
     # Render results table
@@ -965,23 +983,29 @@ def outdated(offline, include_prerelease, verbose):
 
         _render_outdated_table(logger, rows)
 
-        logger.progress(
-            f"{upgradable} outdated, {up_to_date} up to date",
-            symbol="info",
-        )
+        if upgradable > 0:
+            logger.progress(
+                f"{upgradable} package(s) can be updated",
+                symbol="info",
+            )
+        else:
+            logger.progress(
+                "All packages are up to date",
+                symbol="info",
+            )
 
         if verbose:
             logger.verbose_detail(f"    {upgradable} upgradable entries")
 
         if upgradable > 0:
             sys.exit(1)
+        sys.exit(0)
 
     except SystemExit:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- top-level command catch-all
         logger.error(f"Failed to check outdated packages: {e}", symbol="error")
-        if verbose:
-            click.echo(traceback.format_exc(), err=True)
+        logger.verbose_detail(traceback.format_exc())
         sys.exit(1)
     finally:
         resolver.close()
@@ -1191,15 +1215,14 @@ def check(offline, verbose):
                     error=exc.summary_text[:60],
                 ))
                 failure_count += 1
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 -- per-entry diagnostic catch-all
                 results.append(_CheckResult(
                     name=entry.name, reachable=False,
                     version_found=False, ref_ok=False,
                     error=str(exc)[:60],
                 ))
                 failure_count += 1
-                if verbose:
-                    click.echo(traceback.format_exc(), err=True)
+                logger.verbose_detail(traceback.format_exc())
 
         _render_check_table(logger, results)
 
@@ -1305,7 +1328,7 @@ def doctor(verbose):
         git_detail = "git not found on PATH"
     except subprocess.TimeoutExpired:
         git_detail = "git --version timed out"
-    except Exception as exc:
+    except (subprocess.SubprocessError, OSError) as exc:
         git_detail = str(exc)[:60]
 
     checks.append(_DoctorCheck(
@@ -1337,7 +1360,7 @@ def doctor(verbose):
         net_detail = "Network check timed out (5s)"
     except FileNotFoundError:
         net_detail = "git not found; cannot test network"
-    except Exception as exc:
+    except (subprocess.SubprocessError, OSError) as exc:
         net_detail = str(exc)[:60]
 
     checks.append(_DoctorCheck(
@@ -1346,8 +1369,15 @@ def doctor(verbose):
         detail=net_detail,
     ))
 
-    # Check 3: auth tokens
-    has_token = bool(os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN"))
+    # Check 3: auth tokens (delegate to AuthResolver for full coverage)
+    try:
+        from ..core.auth import AuthResolver
+        resolver = AuthResolver()
+        # Try to get a token for github.com as a representative check
+        token = resolver.resolve("github.com").token
+        has_token = bool(token)
+    except Exception:  # noqa: BLE001 -- best-effort auth probe
+        has_token = False
     auth_detail = "Token detected" if has_token else "No token; unauthenticated rate limits apply"
     checks.append(_DoctorCheck(
         name="auth",
@@ -1356,7 +1386,34 @@ def doctor(verbose):
         informational=True,
     ))
 
-    # Check 4: marketplace.yml presence + parsability
+    # Check 4: gh CLI availability (informational; only needed for publish)
+    gh_ok = False
+    gh_detail = ""
+    try:
+        result = subprocess.run(
+            ["gh", "--version"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            gh_ok = True
+            gh_detail = result.stdout.strip().split("\n")[0]
+        else:
+            gh_detail = "gh CLI returned non-zero exit code"
+    except FileNotFoundError:
+        gh_detail = "gh CLI not found (install: https://cli.github.com/)"
+    except subprocess.TimeoutExpired:
+        gh_detail = "gh --version timed out"
+    except (subprocess.SubprocessError, OSError) as exc:
+        gh_detail = str(exc)[:60]
+
+    checks.append(_DoctorCheck(
+        name="gh CLI",
+        passed=gh_ok,
+        detail=gh_detail,
+        informational=True,
+    ))
+
+    # Check 5: marketplace.yml presence + parsability
     yml_path = Path.cwd() / "marketplace.yml"
     yml_found = yml_path.exists()
     yml_detail = ""
@@ -1379,7 +1436,7 @@ def doctor(verbose):
         informational=True,
     ))
 
-    # Check 5: duplicate package names (defence-in-depth)
+    # Check 6: duplicate package names (defence-in-depth)
     if yml_obj is not None:
         dup_detail = _find_duplicate_names(yml_obj)
         if dup_detail:
@@ -1399,7 +1456,7 @@ def doctor(verbose):
 
     _render_doctor_table(logger, checks)
 
-    # Exit: 0 if checks 1-3 pass; check 4 is informational
+    # Exit: 0 if checks 1-2 pass; checks 3-6 are informational
     critical_checks = [c for c in checks if not c.informational]
     if any(not c.passed for c in critical_checks):
         sys.exit(1)
@@ -1729,9 +1786,9 @@ def publish(
                 soft_wrap=True,
             )
         else:
-            click.echo(f"[i] State file: {state_path}")
-    except Exception:
-        click.echo(f"[i] State file: {state_path}")
+            logger.progress(f"State file: {state_path}", symbol="info")
+    except Exception:  # noqa: BLE001 -- best-effort Rich rendering fallback
+        logger.progress(f"State file: {state_path}", symbol="info")
 
     # Exit code
     failed_count = sum(
@@ -1756,7 +1813,7 @@ def _render_publish_plan(logger, plan):
     if not console:
         logger.progress("Publish plan:", symbol="info")
         for line in plan_text.splitlines():
-            click.echo(f"  {line}")
+            logger.tree_item(f"  {line}")
         click.echo()
         for t in plan.targets:
             logger.tree_item(
@@ -1941,7 +1998,7 @@ def search(expression, limit, verbose):
 
         try:
             source = get_marketplace_by_name(marketplace_name)
-        except Exception:
+        except MarketplaceNotFoundError:
             logger.error(
                 f"Marketplace '{marketplace_name}' is not registered. "
                 "Use 'apm marketplace list' to see registered marketplaces."
@@ -1966,9 +2023,10 @@ def search(expression, limit, verbose):
             logger.success(f"Found {len(results)} plugin(s):", symbol="check")
             for p in results:
                 desc = f" -- {p.description}" if p.description else ""
-                click.echo(f"  {p.name}@{marketplace_name}{desc}")
-            click.echo(
-                f"\n  Install: apm install <plugin-name>@{marketplace_name}"
+                logger.tree_item(f"  {p.name}@{marketplace_name}{desc}")
+            logger.progress(
+                f"Install: apm install <plugin-name>@{marketplace_name}",
+                symbol="info",
             )
             return
 
@@ -1992,15 +2050,15 @@ def search(expression, limit, verbose):
 
         console.print()
         console.print(table)
-        console.print(
-            f"\n[dim]Install: apm install <plugin-name>@{marketplace_name}[/dim]"
+        logger.progress(
+            f"Install: apm install <plugin-name>@{marketplace_name}",
+            symbol="info",
         )
 
     except SystemExit:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- top-level command catch-all
         logger.error(f"Search failed: {e}")
-        if verbose:
-            click.echo(traceback.format_exc(), err=True)
+        logger.verbose_detail(traceback.format_exc())
         sys.exit(1)
 

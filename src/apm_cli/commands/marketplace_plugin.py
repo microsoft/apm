@@ -18,6 +18,7 @@ from ..marketplace.errors import (
     MarketplaceYmlError,
     OfflineMissError,
 )
+from ._helpers import _is_interactive
 
 
 # -------------------------------------------------------------------
@@ -365,6 +366,12 @@ def remove(name, yes, verbose):
 
     # Confirmation gate.
     if not yes:
+        if not _is_interactive():
+            logger.error(
+                "Use --yes to skip confirmation in non-interactive mode",
+                symbol="cross",
+            )
+            sys.exit(1)
         try:
             click.confirm(
                 f"Remove package '{name}' from marketplace.yml?",

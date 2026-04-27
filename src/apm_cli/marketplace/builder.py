@@ -48,6 +48,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "ResolvedPackage",
+    "ResolveResult",
     "BuildReport",
     "BuildOptions",
     "MarketplaceBuilder",
@@ -70,6 +71,19 @@ class ResolvedPackage:
     requested_version: Optional[str]  # original APM-only range (for diagnostics)
     tags: Tuple[str, ...]
     is_prerelease: bool       # True if the resolved ref was a prerelease semver
+
+
+@dataclass(frozen=True)
+class ResolveResult:
+    """Result of resolving package refs in a marketplace build."""
+
+    entries: Tuple[ResolvedPackage, ...]
+    errors: Tuple[Tuple[str, str], ...]  # (package name, error message) pairs
+
+    @property
+    def ok(self) -> bool:
+        """True when every package resolved without error."""
+        return len(self.errors) == 0
 
 
 @dataclass(frozen=True)
@@ -330,13 +344,13 @@ class MarketplaceBuilder:
 
     # -- concurrent resolution ----------------------------------------------
 
-    def resolve(self) -> List[ResolvedPackage]:
+    def resolve(self) -> ResolveResult:
         """Resolve every entry concurrently.
 
         Returns
         -------
-        list[ResolvedPackage]
-            One per package, in yml order.
+        ResolveResult
+            Contains resolved entries and any errors encountered.
 
         Raises
         ------
@@ -346,7 +360,7 @@ class MarketplaceBuilder:
         yml = self._load_yml()
         entries = yml.packages
         if not entries:
-            return []
+            return ResolveResult(entries=(), errors=())
 
         results: Dict[int, ResolvedPackage] = {}
         errors: List[Tuple[str, str]] = []
@@ -369,7 +383,8 @@ class MarketplaceBuilder:
                         errors.append((entry.name, str(exc)))
                     else:
                         raise
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 -- thread-pool catch-all wraps to BuildError
+                    logger.debug("Unexpected error resolving '%s'", entry.name, exc_info=True)
                     if self._options.continue_on_error:
                         errors.append((entry.name, str(exc)))
                     else:
@@ -378,15 +393,12 @@ class MarketplaceBuilder:
                             package=entry.name,
                         ) from exc
 
-        # Store errors for the report
-        self._resolve_errors = tuple(errors)
-
         # Return in yml order
         ordered: List[ResolvedPackage] = []
         for idx in range(len(entries)):
             if idx in results:
                 ordered.append(results[idx])
-        return ordered
+        return ResolveResult(entries=tuple(ordered), errors=tuple(errors))
 
     # -- remote description fetcher -----------------------------------------
 
@@ -669,8 +681,9 @@ class MarketplaceBuilder:
         BuildReport
             Summary including diff statistics.
         """
-        resolved = self.resolve()
-        errors = getattr(self, "_resolve_errors", ())
+        result = self.resolve()
+        resolved = list(result.entries)
+        errors = result.errors
 
         new_json = self.compose_marketplace_json(resolved)
         build_warnings = getattr(self, "_compose_warnings", ())

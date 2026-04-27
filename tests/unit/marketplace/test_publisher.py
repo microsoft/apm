@@ -489,28 +489,20 @@ class TestPublishPlan:
     def test_plan_rejects_path_traversal(
         self, tmp_path: Path
     ) -> None:
-        pub, _ = _make_publisher(tmp_path)
-        targets = [
+        with pytest.raises(PathTraversalError):
             ConsumerTarget(
                 repo="acme-org/svc-a",
                 path_in_repo="../etc/passwd",
             )
-        ]
-        with pytest.raises(PathTraversalError):
-            pub.plan(targets)
 
     def test_plan_rejects_dot_dot_path(
         self, tmp_path: Path
     ) -> None:
-        pub, _ = _make_publisher(tmp_path)
-        targets = [
+        with pytest.raises(PathTraversalError):
             ConsumerTarget(
                 repo="acme-org/svc-a",
                 path_in_repo="../../secrets.yml",
             )
-        ]
-        with pytest.raises(PathTraversalError):
-            pub.plan(targets)
 
     def test_plan_stores_flags(self, tmp_path: Path) -> None:
         pub, _ = _make_publisher(tmp_path)
@@ -1184,31 +1176,12 @@ class TestExecutePathSecurity:
     def test_path_traversal_in_repo_rejected_at_execute(
         self, tmp_path: Path
     ) -> None:
-        """Even if plan() is bypassed, execute() checks path containment."""
-        runner = FakeRunner()
-        runner.clone_files["acme-org/svc-a"] = {
-            "apm.yml": _CONSUMER_APM_YML_V1,
-        }
-        pub, _ = _make_publisher(tmp_path, runner=runner)
-        # Build a plan manually with a traversal path (bypassing plan()
-        # validation)
-        plan = PublishPlan(
-            marketplace_name="acme-tools",
-            marketplace_version="2.0.0",
-            targets=(
-                ConsumerTarget(
-                    repo="acme-org/svc-a",
-                    path_in_repo="../../../etc/passwd",
-                ),
-            ),
-            commit_message="test",
-            branch_name="test-branch",
-            new_ref="v2.0.0",
-            tag_pattern_used="v{version}",
-        )
-        results = pub.execute(plan)
-        assert results[0].outcome == PublishOutcome.FAILED
-        assert "traversal" in results[0].message.lower()
+        """ConsumerTarget rejects traversal paths at construction time."""
+        with pytest.raises(PathTraversalError, match="traversal"):
+            ConsumerTarget(
+                repo="acme-org/svc-a",
+                path_in_repo="../../../etc/passwd",
+            )
 
 
 class TestTokenRedaction:
@@ -1572,58 +1545,36 @@ class TestConsumerTargetValidation:
     """Branch and repo fields on ConsumerTarget must be validated."""
 
     def test_branch_with_dotdot_rejected(self, tmp_path: Path) -> None:
-        pub, _ = _make_publisher(tmp_path)
-        targets = [
+        with pytest.raises(ValueError, match="disallowed characters"):
             ConsumerTarget(
                 repo="acme-org/svc-a",
                 branch="../malicious",
             )
-        ]
-        with pytest.raises(PathTraversalError, match="traversal"):
-            pub.plan(targets)
 
     def test_branch_with_shell_metachar_rejected(
         self, tmp_path: Path
     ) -> None:
-        from apm_cli.marketplace.errors import MarketplaceError
-
-        pub, _ = _make_publisher(tmp_path)
-        targets = [
+        with pytest.raises(ValueError, match="disallowed characters"):
             ConsumerTarget(
                 repo="acme-org/svc-a",
                 branch="main;rm -rf /",
             )
-        ]
-        with pytest.raises(MarketplaceError, match="shell metacharacters"):
-            pub.plan(targets)
 
     def test_repo_with_shell_metachar_rejected(
         self, tmp_path: Path
     ) -> None:
-        from apm_cli.marketplace.errors import MarketplaceError
-
-        pub, _ = _make_publisher(tmp_path)
-        targets = [
+        with pytest.raises(ValueError, match="owner/name"):
             ConsumerTarget(
                 repo="acme-org/svc-a;echo pwned",
             )
-        ]
-        with pytest.raises(MarketplaceError, match="shell metacharacters"):
-            pub.plan(targets)
 
     def test_repo_invalid_format_rejected(
         self, tmp_path: Path
     ) -> None:
-        from apm_cli.marketplace.errors import MarketplaceError
-
-        pub, _ = _make_publisher(tmp_path)
-        targets = [
+        with pytest.raises(ValueError, match="owner/name"):
             ConsumerTarget(
                 repo="not a valid repo",
             )
-        ]
-        with pytest.raises(MarketplaceError, match="owner/repo"):
-            pub.plan(targets)
 
     def test_valid_target_passes(self, tmp_path: Path) -> None:
         pub, _ = _make_publisher(tmp_path)

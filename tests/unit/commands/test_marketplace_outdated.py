@@ -350,8 +350,7 @@ class TestOutdatedSummaryLine:
         mock_inst.close = MagicMock()
 
         result = runner.invoke(marketplace, ["outdated"])
-        assert "outdated" in result.output
-        assert "up to date" in result.output
+        assert "package(s) can be updated" in result.output
 
     @patch("apm_cli.commands.marketplace.RefResolver")
     def test_exit_code_zero_when_up_to_date(self, MockResolver, runner, yml_cwd):
@@ -371,7 +370,7 @@ class TestOutdatedSummaryLine:
 
         result = runner.invoke(marketplace, ["outdated"])
         assert result.exit_code == 0
-        assert "0 outdated" in result.output
+        assert "All packages are up to date" in result.output
 
     @patch("apm_cli.commands.marketplace.RefResolver")
     def test_exit_code_one_when_outdated(self, MockResolver, runner, yml_cwd):
@@ -401,4 +400,4 @@ class TestOutdatedSummaryLine:
 
         result = runner.invoke(marketplace, ["outdated"])
         assert result.exit_code == 0
-        assert "2 up to date" in result.output
+        assert "All packages are up to date" in result.output

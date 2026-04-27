@@ -48,6 +48,10 @@ def _make_run_result(returncode=0, stdout="", stderr=""):
     )
 
 
+_GH_OK = _make_run_result(0, stdout="gh version 2.50.0 (2024-06-01)\nhttps://github.com/cli/cli/releases/tag/v2.50.0")
+_GIT_CRED_OK = _make_run_result(0, stdout="")
+
+
 # ---------------------------------------------------------------------------
 # All checks pass
 # ---------------------------------------------------------------------------
@@ -63,6 +67,8 @@ class TestDoctorAllPass:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0, stdout="abc123\tHEAD"),
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
 
         result = runner.invoke(marketplace, ["doctor"])
@@ -74,6 +80,8 @@ class TestDoctorAllPass:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0, stdout="abc123\tHEAD"),
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
 
         result = runner.invoke(marketplace, ["doctor"])
@@ -85,6 +93,8 @@ class TestDoctorAllPass:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
 
         result = runner.invoke(marketplace, ["doctor"])
@@ -121,6 +131,8 @@ class TestDoctorGitCheck:
         mock_run.side_effect = [
             _make_run_result(returncode=1, stderr="error"),
             _make_run_result(0),  # network check may still run
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
 
         result = runner.invoke(marketplace, ["doctor"])
@@ -139,6 +151,8 @@ class TestDoctorNetworkCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(128, stderr="fatal: could not resolve host"),
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
 
         result = runner.invoke(marketplace, ["doctor"])
@@ -150,6 +164,8 @@ class TestDoctorNetworkCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             subprocess.TimeoutExpired(cmd="git", timeout=5),
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
 
         result = runner.invoke(marketplace, ["doctor"])
@@ -162,6 +178,8 @@ class TestDoctorNetworkCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(128, stderr="fatal: authentication failed"),
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
 
         result = runner.invoke(marketplace, ["doctor"])
@@ -181,6 +199,8 @@ class TestDoctorAuthCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
 
         result = runner.invoke(marketplace, ["doctor"])
@@ -196,6 +216,8 @@ class TestDoctorAuthCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
 
         result = runner.invoke(marketplace, ["doctor"])
@@ -210,6 +232,8 @@ class TestDoctorAuthCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
 
         result = runner.invoke(marketplace, ["doctor"])
@@ -218,7 +242,98 @@ class TestDoctorAuthCheck:
 
 
 # ---------------------------------------------------------------------------
-# Check 4: marketplace.yml
+# Check 4: gh CLI
+# ---------------------------------------------------------------------------
+
+
+class TestDoctorGhCliCheck:
+    @patch("apm_cli.commands.marketplace.subprocess.run")
+    def test_gh_found_shows_version(self, mock_run, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+            _GIT_CRED_OK,
+            _make_run_result(0, stdout="gh version 2.50.0 (2024-06-01)\nhttps://github.com/cli/cli/releases/tag/v2.50.0"),
+        ]
+
+        result = runner.invoke(marketplace, ["doctor"])
+        assert result.exit_code == 0
+        assert "gh version" in result.output
+
+    @patch("apm_cli.commands.marketplace.subprocess.run")
+    def test_gh_missing_is_warning_not_error(self, mock_run, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+            _GIT_CRED_OK,
+            FileNotFoundError("gh not found"),
+        ]
+
+        result = runner.invoke(marketplace, ["doctor"])
+        assert result.exit_code == 0  # gh is informational; missing does not fail
+        assert "not found" in result.output.lower()
+        assert "cli.github.com" in result.output
+
+    @patch("apm_cli.commands.marketplace.subprocess.run")
+    def test_gh_nonzero_exit(self, mock_run, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+            _GIT_CRED_OK,
+            _make_run_result(returncode=1, stderr="error"),
+        ]
+
+        result = runner.invoke(marketplace, ["doctor"])
+        assert result.exit_code == 0  # informational
+        assert "non-zero" in result.output.lower()
+
+    @patch("apm_cli.commands.marketplace.subprocess.run")
+    def test_gh_timeout(self, mock_run, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+            _GIT_CRED_OK,
+            subprocess.TimeoutExpired(cmd="gh", timeout=10),
+        ]
+
+        result = runner.invoke(marketplace, ["doctor"])
+        assert result.exit_code == 0  # informational
+        assert "timed out" in result.output.lower()
+
+    @patch("apm_cli.commands.marketplace.subprocess.run")
+    def test_gh_general_exception(self, mock_run, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+            _GIT_CRED_OK,
+            OSError("Permission denied"),
+        ]
+
+        result = runner.invoke(marketplace, ["doctor"])
+        assert result.exit_code == 0  # informational
+        assert "Permission denied" in result.output
+
+    @patch("apm_cli.commands.marketplace.subprocess.run")
+    def test_gh_shown_in_table(self, mock_run, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+            _GIT_CRED_OK,
+            _GH_OK,
+        ]
+
+        result = runner.invoke(marketplace, ["doctor"])
+        assert "gh cli" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# Check 5: marketplace.yml
 # ---------------------------------------------------------------------------
 
 
@@ -230,6 +345,8 @@ class TestDoctorYmlCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
 
         result = runner.invoke(marketplace, ["doctor"])
@@ -243,6 +360,8 @@ class TestDoctorYmlCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
 
         result = runner.invoke(marketplace, ["doctor"])
@@ -256,6 +375,8 @@ class TestDoctorYmlCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
 
         result = runner.invoke(marketplace, ["doctor"])
@@ -271,12 +392,14 @@ class TestDoctorYmlCheck:
 class TestDoctorExitCodes:
     @patch("apm_cli.commands.marketplace.subprocess.run")
     def test_yml_invalid_does_not_cause_exit_1(self, mock_run, runner, tmp_path, monkeypatch):
-        """Check 4 is informational; invalid yml alone should not exit 1."""
+        """Check 5 is informational; invalid yml alone should not exit 1."""
         monkeypatch.chdir(tmp_path)
         (tmp_path / "marketplace.yml").write_text("bad: x\n", encoding="utf-8")
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
 
         result = runner.invoke(marketplace, ["doctor"])
@@ -304,6 +427,8 @@ class TestDoctorVerbose:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
 
         result = runner.invoke(marketplace, ["doctor", "--verbose"])
@@ -322,6 +447,8 @@ class TestDoctorTable:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
 
         result = runner.invoke(marketplace, ["doctor"])
@@ -338,6 +465,8 @@ class TestDoctorTable:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
 
         result = runner.invoke(marketplace, ["doctor"])
@@ -349,6 +478,8 @@ class TestDoctorTable:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
 
         result = runner.invoke(marketplace, ["doctor"])
@@ -385,6 +516,8 @@ class TestDoctorEdgeCases:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             FileNotFoundError("git not found"),
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
 
         result = runner.invoke(marketplace, ["doctor"])
@@ -392,7 +525,7 @@ class TestDoctorEdgeCases:
 
 
 # ---------------------------------------------------------------------------
-# Check 5: duplicate package names
+# Check 6: duplicate package names
 # ---------------------------------------------------------------------------
 
 
@@ -409,6 +542,8 @@ class TestDoctorDuplicateNames:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
         mock_load.return_value = MarketplaceYml(
             name="test",
@@ -441,6 +576,8 @@ class TestDoctorDuplicateNames:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
         mock_load.return_value = MarketplaceYml(
             name="test",
@@ -470,6 +607,8 @@ class TestDoctorDuplicateNames:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
+            _GIT_CRED_OK,
+            _GH_OK,
         ]
 
         result = runner.invoke(marketplace, ["doctor"])

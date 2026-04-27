@@ -63,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [Experimental] Grouped `apm marketplace --help` output into "Consumer commands" and "Authoring commands" sections (#722)
 - [Experimental] `apm marketplace init` now accepts `--name` and `--owner` flags for non-interactive scaffolding (#722)
 
+
 ### Fixed
 
 - HYBRID packages (apm.yml + SKILL.md, no `.apm/`) and CLAUDE_SKILL packages with sibling `agents/`/`assets/`/`scripts/` dirs now install correctly via the skill-bundle path; previously `apm install` rejected them silently and looked like a hang. Direct-dependency integration failures now print `[x]` and exit 1 instead of failing silently. (#946)
@@ -76,6 +77,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm-review-panel` workflow only runs on PRs labelled `panel-review`, eliminating spurious panel runs on every PR. (#948)
 - [Experimental] Hidden unimplemented `--check-refs` flag on `validate` command (#722)
 - [Experimental] Fixed `includePrerelease` camelCase typo in init template comment (#722)
+- [Experimental] `apm marketplace doctor` now uses `AuthResolver` for GitHub token detection instead of raw env-var lookup (#790)
+- [Experimental] `apm marketplace doctor` checks `gh` CLI availability as an informational diagnostic (#790)
+- [Experimental] `apm marketplace outdated` summary line simplified; exit code 1 when upgradable packages exist (#790)
+- [Experimental] `Builder.resolve()` returns a `ResolveResult` dataclass instead of smuggling errors via instance state (#790)
+- [Experimental] `ConsumerTarget` validates repo format, branch safety, and path traversal at construction time (shift-left) (#790)
+- [Experimental] `apm marketplace` confirmation prompts now fail loudly in non-interactive/CI mode without `--yes` (#790)
+- [Experimental] `apm marketplace` exception handlers log verbose tracebacks via `logger.debug(exc_info=True)` and three handlers narrowed from bare `Exception` (#790)
+- [Experimental] Replaced 15 bare `click.echo()` calls and 3 Rich markup literals with `CommandLogger` methods (#790)
+- [Experimental] `version_pins.load_ref_pins()` warns when an expected pin file is missing instead of silently returning empty (#790)
 
 ### Removed
 

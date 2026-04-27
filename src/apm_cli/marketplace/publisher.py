@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import subprocess
@@ -53,6 +54,8 @@ from .resolver import parse_marketplace_ref
 from .semver import parse_semver
 from .tag_pattern import render_tag
 from .yml_schema import load_marketplace_yml
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "ConsumerTarget",
@@ -91,6 +94,10 @@ def _sanitise_branch_segment(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+_REPO_RE = re.compile(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$")
+_BRANCH_SAFE_RE = re.compile(r"^[a-zA-Z0-9._/-]+$")
+
+
 @dataclass(frozen=True)
 class ConsumerTarget:
     """A consumer repository whose ``apm.yml`` should be updated."""
@@ -98,6 +105,26 @@ class ConsumerTarget:
     repo: str  # e.g. "acme-org/service-a"
     branch: str = "main"  # base branch on the consumer to PR into
     path_in_repo: str = "apm.yml"  # location of the consumer's apm.yml
+
+    def __post_init__(self) -> None:
+        if not _REPO_RE.match(self.repo):
+            raise ValueError(
+                f"ConsumerTarget.repo must be in 'owner/name' format "
+                f"using only alphanumerics, dots, hyphens, and underscores. "
+                f"Got: {self.repo!r}"
+            )
+        if not _BRANCH_SAFE_RE.match(self.branch) or ".." in self.branch:
+            raise ValueError(
+                f"ConsumerTarget.branch contains disallowed characters. "
+                f"Only alphanumerics, dots, hyphens, underscores, and "
+                f"forward slashes are permitted (no '..' sequences). "
+                f"Got: {self.branch!r}"
+            )
+        from ..utils.path_security import validate_path_segments
+
+        validate_path_segments(
+            self.path_in_repo, context="consumer-targets path_in_repo"
+        )
 
 
 @dataclass(frozen=True)
@@ -452,9 +479,9 @@ class MarketplacePublisher:
                 return self._process_single_target(
                     target, plan, dry_run=dry_run
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 -- per-target error isolation
+                logger.debug("Target processing failed for %s", target.repo, exc_info=True)
                 return TargetResult(
-                    target=target,
                     outcome=PublishOutcome.FAILED,
                     message=_redact_token(str(exc)),
                 )
@@ -470,7 +497,8 @@ class MarketplacePublisher:
                 idx = future_to_idx[future]
                 try:
                     result = future.result()
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 -- thread-pool future catch-all
+                    logger.debug("Future result failed for target %d", idx, exc_info=True)
                     result = TargetResult(
                         target=plan.targets[idx],
                         outcome=PublishOutcome.FAILED,
