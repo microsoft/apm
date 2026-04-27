@@ -643,6 +643,152 @@ class TestAPMPackage:
         pkg3 = APMPackage(name="test", version="1.0.0", dependencies={"apm": apm_deps})
         assert pkg3.has_apm_dependencies()
 
+    # ------------------------------------------------------------------
+    # target field parsing -- shared with --target via parse_target_field
+    # (regression suite for #820)
+    # ------------------------------------------------------------------
+
+    def test_csv_string_in_apm_yml_parses_like_cli(self):
+        """CSV string in apm.yml resolves identically to ``--target``.
+
+        The exact value from issue #820 -- previously this returned a raw
+        CSV string and downstream silently produced ``[]``, leaving
+        ``apm install`` and ``apm compile`` to exit 0 with nothing
+        deployed.  Now the value parses through the same validator as the
+        CLI flag and yields the canonical multi-target list.
+        """
+        apm_content = {
+            "name": "x",
+            "version": "0.1.0",
+            "target": "opencode,claude,copilot,agents",
+        }
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yml", delete=False
+        ) as f:
+            yaml.dump(apm_content, f)
+            f.flush()
+
+            package = APMPackage.from_apm_yml(Path(f.name))
+            assert package.target == ["opencode", "claude", "vscode"]
+
+        Path(f.name).unlink()
+
+    def test_unknown_target_in_apm_yml_raises_with_pointer(self):
+        """An unknown token in ``target:`` raises a ValueError that names
+        the offending token AND the apm.yml path, so users can jump to
+        the file directly.  Replaces the previous silently-ignored
+        contract from manifest-schema.md (see #820 spec revision)."""
+        apm_content = {
+            "name": "x",
+            "version": "0.1.0",
+            "target": "claude,bogus,copilot",
+        }
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yml", delete=False
+        ) as f:
+            yaml.dump(apm_content, f)
+            f.flush()
+            yml_path = f.name
+
+            with pytest.raises(ValueError) as excinfo:
+                APMPackage.from_apm_yml(Path(yml_path))
+            msg = str(excinfo.value)
+            assert "'bogus'" in msg
+            assert "not a valid target" in msg
+            assert yml_path in msg  # apm.yml path is part of the error
+
+        Path(yml_path).unlink()
+
+    def test_yaml_list_target_still_parses(self):
+        """Native YAML list form (``target: [claude, copilot]``) keeps
+        working through the shared parser.  Smoke test ensuring the
+        change didn't break the supported list shape."""
+        apm_content = {
+            "name": "x",
+            "version": "0.1.0",
+            "target": ["claude", "copilot"],
+        }
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yml", delete=False
+        ) as f:
+            yaml.dump(apm_content, f)
+            f.flush()
+
+            package = APMPackage.from_apm_yml(Path(f.name))
+            assert package.target == ["claude", "vscode"]
+
+        Path(f.name).unlink()
+
+    def test_target_unset_remains_none(self):
+        """Omitting ``target:`` yields ``None`` -- auto-detection takes
+        over at consumption time (active_targets / detect_target)."""
+        apm_content = {"name": "x", "version": "0.1.0"}
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yml", delete=False
+        ) as f:
+            yaml.dump(apm_content, f)
+            f.flush()
+
+            package = APMPackage.from_apm_yml(Path(f.name))
+            assert package.target is None
+
+        Path(f.name).unlink()
+
+    def test_target_empty_string_raises(self):
+        """``target: ""`` is user error and now raises (was: silently
+        auto-detected before #820).  See CHANGELOG migration note."""
+        apm_content = {"name": "x", "version": "0.1.0", "target": ""}
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yml", delete=False
+        ) as f:
+            yaml.dump(apm_content, f)
+            f.flush()
+            yml_path = f.name
+
+            with pytest.raises(ValueError, match="must not be empty"):
+                APMPackage.from_apm_yml(Path(yml_path))
+
+        Path(yml_path).unlink()
+
+    def test_target_empty_list_raises(self):
+        """``target: []`` is user error and now raises (was: silently
+        auto-detected before #820).  Empty list is "set to nothing",
+        which is not the same as "unset" -- to opt into auto-detection
+        the field must be omitted entirely."""
+        apm_content = {"name": "x", "version": "0.1.0", "target": []}
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yml", delete=False
+        ) as f:
+            yaml.dump(apm_content, f)
+            f.flush()
+            yml_path = f.name
+
+            with pytest.raises(ValueError, match="must not be empty"):
+                APMPackage.from_apm_yml(Path(yml_path))
+
+        Path(yml_path).unlink()
+
+    def test_target_all_combined_with_other_raises(self):
+        """``all`` is exclusive -- mixing it with other targets is now
+        rejected at parse time, matching the existing ``--target`` flag
+        contract (TargetParamType test_target_combined_with_all_rejected)."""
+        apm_content = {
+            "name": "x",
+            "version": "0.1.0",
+            "target": ["all", "claude"],
+        }
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yml", delete=False
+        ) as f:
+            yaml.dump(apm_content, f)
+            f.flush()
+            yml_path = f.name
+
+            with pytest.raises(ValueError, match="cannot be combined"):
+                APMPackage.from_apm_yml(Path(yml_path))
+
+        Path(yml_path).unlink()
+
 
 class TestValidationResult:
     """Test ValidationResult functionality."""

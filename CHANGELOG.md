@@ -10,11 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Manifest contract: invalid `target:` values now raise a parse error.** Previously, an unknown token (or a CSV string like `target: opencode,claude,copilot,agents` instead of the YAML list `target: [opencode, claude, copilot, agents]`) was silently ignored, leaving `apm install` and `apm compile` to exit 0 while deploying nothing. The shared parser used by `--target` now also validates `apm.yml`'s `target:`, so the same input resolves the same way at every entry point. **Migration:** three previously-silent inputs now fail loud -- (1) unknown tokens (`target: bogus` -> fix the typo), (2) empty values (`target: ""`, `target: []` -> remove the line if you meant auto-detect), (3) `all` mixed with other targets (`target: [all, claude]` -> use `all` alone). Omitting `target:` entirely still triggers auto-detection. (#820)
 - Rename `DownloadStrategyManager` to `DownloadDelegate` to better reflect Facade/Delegate pattern (#918)
 - Fix incorrect double-checked locking in marketplace registry `_load()` -- hold lock across full check+read+set (#918)
 
 ### Fixed
 
+- `apm install` and `apm compile` no longer exit 0 with success messages when `target:` in `apm.yml` is a CSV string -- the value now parses identically to the same input on `--target`, and zero-target resolution surfaces a warning instead of a silent no-op. (#820)
 - Remove redundant `seen` set from `_scan_patterns()` discovery walk (#918)
 
 ## [0.10.0] - 2026-04-27

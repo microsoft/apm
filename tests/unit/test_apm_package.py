@@ -225,7 +225,9 @@ class TestTargetField:
         assert isinstance(pkg.target, str)
 
     def test_target_list(self, tmp_path):
-        """target: [claude, copilot] → stored as list."""
+        """``target: [claude, copilot]`` is now alias-resolved through the
+        shared parser -- ``copilot`` collapses to its canonical name
+        ``vscode`` (#820).  Multi-target lists stay as lists."""
         yml = _write_apm_yml(tmp_path, {
             "name": "test-pkg",
             "version": "1.0.0",
@@ -234,7 +236,7 @@ class TestTargetField:
 
         pkg = APMPackage.from_apm_yml(yml)
 
-        assert pkg.target == ["claude", "copilot"]
+        assert pkg.target == ["claude", "vscode"]
         assert isinstance(pkg.target, list)
 
     def test_target_missing(self, tmp_path):
@@ -249,7 +251,10 @@ class TestTargetField:
         assert pkg.target is None
 
     def test_target_single_item_list(self, tmp_path):
-        """target: [copilot] → stored as single-element list."""
+        """A single-element list (``target: [copilot]``) collapses to a
+        plain string -- the shared parser canonicalizes ``str`` and
+        ``[str]`` to the same shape so downstream code only ever sees one
+        ``Union[str, List[str]]`` form per cardinality (#820)."""
         yml = _write_apm_yml(tmp_path, {
             "name": "test-pkg",
             "version": "1.0.0",
@@ -258,8 +263,8 @@ class TestTargetField:
 
         pkg = APMPackage.from_apm_yml(yml)
 
-        assert pkg.target == ["copilot"]
-        assert isinstance(pkg.target, list)
+        assert pkg.target == "copilot"
+        assert isinstance(pkg.target, str)
 
     def test_target_direct_construction_string(self):
         """APMPackage can be constructed with target as string."""
