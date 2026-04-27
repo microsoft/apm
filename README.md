@@ -51,7 +51,7 @@ apm install vercel-labs/agent-skills                            # whole bundle, 
 apm install vercel-labs/agent-skills --skill deploy-to-vercel   # one skill, persisted to apm.yml
 ```
 
-Same install gesture. You also get a [manifest, lockfile, and reproducibility](https://microsoft.github.io/apm/reference/package-types/).
+Same install gesture. You also get a [manifest, lockfile, and reproducibility](https://microsoft.github.io/apm/reference/package-types/#skill-collection-skillsnameskillmd).
 
 ## The three promises
 
