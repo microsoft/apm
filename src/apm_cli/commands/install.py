@@ -954,7 +954,7 @@ def _validate_mcp_conflicts(
         )
 
 
-def _run_mcp_install(  # noqa: PLR0913
+def _run_mcp_install(
     *,
     mcp_name,
     transport,
@@ -2019,7 +2019,7 @@ from apm_cli.install.services import (  # noqa: E402
 #
 # The real implementation lives in ``apm_cli.install.pipeline`` (F2).
 # ---------------------------------------------------------------------------
-def _install_apm_dependencies(  # noqa: PLR0913
+def _install_apm_dependencies(
     apm_package: "APMPackage",
     update_refs: bool = False,
     verbose: bool = False,

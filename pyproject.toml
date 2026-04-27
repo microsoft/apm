@@ -91,13 +91,13 @@ ignore = [
 # High initial thresholds set just above current codebase maximums.
 # Prevents new code from exceeding the worst existing violations.
 # Tighten these over time via dedicated refactoring PRs.
-max-statements = 300   # current max: 285 (mcp_integrator.py::install)
-max-args = 16          # current max: 15  (install/services.py)
-max-branches = 130     # current max: 128 (mcp_integrator.py::install)
-max-returns = 20       # current max: 19  (target_detection.py)
+max-statements = 275   # current max: 269 (mcp_integrator.py::install)
+max-args = 18          # current max: 16  (commands/install.py)
+max-branches = 115     # current max: 108 (mcp_integrator.py::install)
+max-returns = 18       # current max: 16  (marketplace/publisher.py)
 
 [tool.ruff.lint.mccabe]
-max-complexity = 110   # current max: 104 (mcp_integrator.py::install)
+max-complexity = 100   # current max: 97  (mcp_integrator.py::install)
 
 [tool.ruff.lint.per-file-ignores]
 # Subprocess calls are intentional in a CLI tool
