@@ -1050,43 +1050,29 @@ def _run_mcp_install(
         "or a stdio command (self-defined entries)."
     ),
 )
-@click.option(
-    "--no-policy",
-    "no_policy",
-    is_flag=True,
-    default=False,
-    help="Skip org policy enforcement for this invocation. Loudly logged. Does NOT bypass apm audit --ci.",
-)
+@click.option("--skill", "skill_names", multiple=True, metavar="NAME", help="Install only named skill(s) from a SKILL_BUNDLE. Repeatable. Persisted in apm.yml and apm.lock so bare 'apm install' is deterministic. Use --skill '*' to reset to all skills.")
+@click.option("--no-policy", "no_policy", is_flag=True, default=False, help="Skip org policy enforcement for this invocation. Does NOT bypass apm audit --ci.")
 @click.pass_context
-def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, allow_insecure, allow_insecure_hosts, global_, use_ssh, use_https, allow_protocol_fallback, mcp_name, transport, url, env_pairs, header_pairs, mcp_version, registry_url, no_policy):
+def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbose, trust_transitive_mcp, parallel_downloads, dev, target, allow_insecure, allow_insecure_hosts, global_, use_ssh, use_https, allow_protocol_fallback, mcp_name, transport, url, env_pairs, header_pairs, mcp_version, registry_url, skill_names, no_policy):
     """Install APM and MCP dependencies from apm.yml (like npm install).
 
     Detects AI runtimes from your apm.yml scripts and installs MCP servers for
     all detected runtimes; also installs APM package dependencies from GitHub.
     --only filters by type (apm or mcp).
 
-    HTTP dependencies require `allow_insecure: true` in apm.yml and
-    `--allow-insecure` on the install command. Transitive HTTP dependencies are
-    allowed automatically when they stay on the same host as a direct HTTP
-    dependency, or explicitly with `--allow-insecure-host <hostname>`.
-
     Examples:
         apm install                             # Install existing deps from apm.yml
         apm install org/pkg1                    # Add package to apm.yml and install
-        apm install org/pkg1 org/pkg2           # Add multiple packages and install
         apm install --exclude codex             # Install for all except Codex CLI
         apm install --only=apm                  # Install only APM dependencies
-        apm install --only=mcp                  # Install only MCP dependencies
         apm install --update                    # Update dependencies to latest Git refs
         apm install --dry-run                   # Show what would be installed
         apm install -g org/pkg1                 # Install to user scope (~/.apm/)
-        apm install --allow-insecure http://my-server.example.com/owner/repo  # Install from HTTP URL with allow_insecure
-        apm install --allow-insecure-host mirror.example.com                  # Allow transitive HTTP dependencies from mirror.example.com
-
-    MCP servers (also: 'apm mcp install'):
-        apm install --mcp io.github.github/github-mcp-server                  # registry shorthand
-        apm install --mcp api --url https://example.com/mcp                   # remote http/sse
-        apm install --mcp fetch -- npx -y @modelcontextprotocol/server-fetch  # stdio (post-- argv)
+        apm install --allow-insecure http://...  # HTTP URL (needs allow_insecure)
+        apm install --skill my-skill org/bundle  # Install one skill from bundle
+        apm install --mcp io.github.github/github-mcp-server   # MCP registry
+        apm install --mcp api --url https://example.com/mcp    # MCP remote
+        apm install --mcp fetch -- npx -y @mcp/server-fetch    # MCP stdio
     """
     # C1 #856: defaults BEFORE try so the finally clause never sees an
     # UnboundLocalError if InstallLogger(...) raises during construction.
@@ -1148,6 +1134,14 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
             allow_protocol_fallback=allow_protocol_fallback,
             registry_url=validated_registry_url,
         )
+
+        # Normalize --skill: '*' means all (same as absent). Reject with --mcp.
+        _skill_subset = None
+        if skill_names:
+            if mcp_name is not None:
+                raise click.UsageError("--skill cannot be combined with --mcp.")
+            if not any(s == "*" for s in skill_names):
+                _skill_subset = builtins.tuple(skill_names)
 
         if mcp_name is not None:
             # MCP install routing block. This branch has accreted
@@ -1463,11 +1457,41 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                     protocol_pref=protocol_pref,
                     allow_protocol_fallback=allow_protocol_fallback,
                     no_policy=no_policy,
+                    skill_subset=_skill_subset,
+                    skill_subset_from_cli=bool(skill_names),
                 )
                 apm_count = install_result.installed_count
                 prompt_count = install_result.prompts_integrated
                 agent_count = install_result.agents_integrated
                 apm_diagnostics = install_result.diagnostics
+
+                # -- Skill subset write-back (Phase 11) --
+                # When CLI provided --skill on a SKILL_BUNDLE package, persist
+                # the subset selection in apm.yml so bare `apm install` is
+                # deterministic.
+                if skill_names and packages:
+                    from ._apm_yml_writer import set_skill_subset_for_entry
+
+                    _star_sentinel = any(s == "*" for s in skill_names)
+                    for dep_key, pkg_type in install_result.package_types.items():
+                        if pkg_type == "skill_bundle":
+                            if _star_sentinel:
+                                # Explicit-all: REMOVE any persisted skills:
+                                if set_skill_subset_for_entry(manifest_path, dep_key, None):
+                                    logger.success(f"Cleared skill subset for {dep_key}")
+                            else:
+                                subset_list = sorted(builtins.set(_skill_subset))
+                                if set_skill_subset_for_entry(manifest_path, dep_key, subset_list):
+                                    logger.success(
+                                        f"Persisted skill subset for {dep_key}: "
+                                        f"[{', '.join(subset_list)}]"
+                                    )
+                        elif pkg_type != "skill_bundle" and not _star_sentinel:
+                            # Non-bundle: warn but do NOT persist
+                            logger.warning(
+                                f"--skill ignored for {dep_key} "
+                                f"(package type: {pkg_type}, not a skill bundle)"
+                            )
             except InsecureDependencyPolicyError:
                 _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
                 sys.exit(1)
@@ -1664,6 +1688,8 @@ def _install_apm_dependencies(
     protocol_pref=None,
     allow_protocol_fallback: "Optional[bool]" = None,
     no_policy: bool = False,
+    skill_subset: "Optional[builtins.tuple]" = None,
+    skill_subset_from_cli: bool = False,
 ):
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.
@@ -1696,5 +1722,7 @@ def _install_apm_dependencies(
         protocol_pref=protocol_pref,
         allow_protocol_fallback=allow_protocol_fallback,
         no_policy=no_policy,
+        skill_subset=skill_subset,
+        skill_subset_from_cli=skill_subset_from_cli,
     )
     return InstallService().run(request)

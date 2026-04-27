@@ -140,7 +140,6 @@ def _handle_unknown_flag(name: str, logger: CommandLogger) -> None:
 @click.group(
     help="Manage experimental feature flags",
     invoke_without_command=True,
-    context_settings={"allow_interspersed_args": True, "ignore_unknown_options": True},
 )
 @click.option("--verbose", "-v", is_flag=True, default=False, help="Show verbose output")
 @click.pass_context

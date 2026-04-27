@@ -238,5 +238,5 @@ class TestCiWithoutPolicy:
         )
         assert result.exit_code == 0
         data = json.loads(result.output)
-        # Only baseline checks (max 7 incl. includes-consent)
-        assert data["summary"]["total"] <= 7
+        # Only baseline checks (max 8 incl. skill-subset + includes-consent)
+        assert data["summary"]["total"] <= 8

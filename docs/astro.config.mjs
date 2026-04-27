@@ -81,6 +81,12 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Troubleshooting',
+					items: [
+						{ label: 'SSL / TLS issues', slug: 'troubleshooting/ssl-issues' },
+					],
+				},
+				{
 					label: 'Enterprise',
 					items: [
 						{ label: 'Enterprise', slug: 'enterprise' },

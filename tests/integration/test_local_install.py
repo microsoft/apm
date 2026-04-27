@@ -194,11 +194,14 @@ class TestLocalInstall:
             text=True,
             timeout=60,
         )
-        # Should report the package as not accessible (validation fails)
+        # Should report the package as not recognizable (validation fails)
         combined = result.stdout + result.stderr
-        assert "not accessible" in combined.lower() or "doesn't exist" in combined.lower(), (
-            f"Expected failure message. stdout: {result.stdout}, stderr: {result.stderr}"
-        )
+        assert (
+            "not accessible" in combined.lower()
+            or "doesn't exist" in combined.lower()
+            or "no apm.yml" in combined.lower()
+            or "failed validation" in combined.lower()
+        ), f"Expected failure message. stdout: {result.stdout}, stderr: {result.stderr}"
 
     def test_install_nonexistent_local_path_fails(self, temp_workspace, apm_command):
         """Installing a non-existent path should fail."""
@@ -211,7 +214,12 @@ class TestLocalInstall:
             timeout=60,
         )
         combined = result.stdout + result.stderr
-        assert "not accessible" in combined.lower() or "doesn't exist" in combined.lower()
+        assert (
+            "not accessible" in combined.lower()
+            or "doesn't exist" in combined.lower()
+            or "no apm.yml" in combined.lower()
+            or "failed validation" in combined.lower()
+        )
 
     def test_install_local_from_apm_yml(self, temp_workspace, apm_command):
         """Install local deps declared in apm.yml (bare `apm install`)."""

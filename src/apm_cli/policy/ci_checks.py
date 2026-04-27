@@ -185,6 +185,45 @@ def _check_no_orphans(
     )
 
 
+def _check_skill_subset_consistency(
+    manifest: "APMPackage",
+    lock: "LockFile",
+) -> CheckResult:
+    """Verify lockfile skill_subset matches manifest skills: for each entry."""
+    mismatches: List[str] = []
+    for dep_ref in manifest.get_apm_dependencies():
+        key = dep_ref.get_unique_key()
+        locked_dep = lock.get_dependency(key)
+        if locked_dep is None:
+            continue
+        # Only check skill_bundle packages
+        if locked_dep.package_type != "skill_bundle":
+            continue
+        manifest_subset = sorted(dep_ref.skill_subset) if dep_ref.skill_subset else []
+        lock_subset = sorted(locked_dep.skill_subset) if locked_dep.skill_subset else []
+        if manifest_subset != lock_subset:
+            mismatches.append(
+                f"{key}: manifest skills {manifest_subset} != "
+                f"lockfile skill_subset {lock_subset}"
+            )
+
+    if not mismatches:
+        return CheckResult(
+            name="skill-subset-consistency",
+            passed=True,
+            message="Skill subset selections match lockfile",
+        )
+    return CheckResult(
+        name="skill-subset-consistency",
+        passed=False,
+        message=(
+            f"{len(mismatches)} skill subset mismatch(es) -- "
+            "regenerate lockfile (apm install)"
+        ),
+        details=mismatches,
+    )
+
+
 def _check_config_consistency(
     manifest: "APMPackage",
     lock: "LockFile",
@@ -433,6 +472,10 @@ def run_baseline_checks(
 
     # Check 4: No orphaned packages
     if _run(_check_no_orphans(manifest, lock)):
+        return result
+
+    # Check 4.5: Skill subset consistency (manifest vs lockfile)
+    if _run(_check_skill_subset_consistency(manifest, lock)):
         return result
 
     # Check 5: Config consistency (MCP)
