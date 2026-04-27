@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `shared/apm.md` gh-aw workflow gains an `apps:` array input for cross-org private packages: each entry mints its own GitHub App installation token via `actions/create-github-app-token` and packs only its declared packages, with a matrix fan-out one replica per credential group. The single-app top-level form (`app-id`, `private-key`, `owner`, `repositories`) shipped earlier in this cycle is preserved as the canonical shorthand for one-org users; `apps[]` is purely additive. NOTE: full multi-bundle restore is blocked on an upstream `microsoft/apm-action` `bundles-file:` input (tracked in microsoft/apm#983); the matrix-restore block in `shared/apm.md` is currently emitted in commented-out form so the workflow does not silently regress.
 - `shared/apm.md` gh-aw workflow now accepts `app-id`, `private-key`, `owner`, and `repositories` inputs to mint a GitHub App installation token for fetching cross-org private APM packages, restoring parity with the deprecated `dependencies.github-app` form. The default `GH_AW_PLUGINS_TOKEN || GH_AW_GITHUB_TOKEN || GITHUB_TOKEN` cascade still applies when no app-id is supplied.
 
 ## [0.9.4] - 2026-04-27
