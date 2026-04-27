@@ -169,7 +169,7 @@ def set_copilot_cowork_skills_dir(path: str) -> None:
     """
     if not path or not path.strip():
         raise ValueError("Path cannot be empty")
-    expanded = os.path.expanduser(path)
+    expanded = os.path.normpath(os.path.expanduser(path))
     if not os.path.isabs(expanded):
         raise ValueError(f"Path must be absolute: {expanded}")
     update_config({"copilot_cowork_skills_dir": expanded})
