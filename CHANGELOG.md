@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install https://...` no longer silently falls back to SSH on port 22 for generic Git hosts (Bitbucket Data Center, on-prem GitLab, internal mirrors). Validation is now strict-by-default for explicit `http://`, `https://`, and `ssh://` URLs -- mirroring `_clone_with_fallback` -- so users see the actual HTTPS failure (auth/redirect) instead of a misleading 30s SSH timeout. Verbose mode now logs each ls-remote attempt with its scheme and sanitized stderr. The legacy permissive chain stays available behind `APM_ALLOW_PROTOCOL_FALLBACK=1`. (#992)
 - Docs site auto-deploys again after bot-cut releases by correctly detecting tag-push context in `docs.yml`. (#953)
 
 ### Maintainer tooling
