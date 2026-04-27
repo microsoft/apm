@@ -219,8 +219,13 @@ class TestCoworkParserE2E:
         )
 
         # The resolver error message from phases/targets.py must appear.
-        assert "no OneDrive path detected" in combined, (
-            "Expected 'no OneDrive path detected' in output.\n"
+        # Linux emits "Cowork has no auto-detection on Linux." while macOS
+        # emits "no OneDrive path detected" — accept either variant.
+        assert (
+            "no OneDrive path detected" in combined
+            or "Cowork has no auto-detection on Linux" in combined
+        ), (
+            "Expected cowork resolver error in output.\n"
             f"Output:\n{combined}"
         )
 

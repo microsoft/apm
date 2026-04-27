@@ -483,7 +483,12 @@ class TestExplicitCoworkUnresolvable:
             assert exc_info.value.code == 1
 
         error_msg = ctx.logger.error.call_args[0][0]
-        assert "no OneDrive path detected" in error_msg
+        # Linux emits "Cowork has no auto-detection on Linux." while macOS
+        # emits "no OneDrive path detected" — accept either variant.
+        assert (
+            "no OneDrive path detected" in error_msg
+            or "Cowork has no auto-detection on Linux" in error_msg
+        ), f"Expected cowork resolver error in output. Got: {error_msg}"
         assert "APM_COPILOT_COWORK_SKILLS_DIR" in error_msg
 
     def test_linux_flag_on_explicit_cowork_env_set_succeeds(
