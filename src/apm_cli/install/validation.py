@@ -25,8 +25,52 @@ _local_path_no_markers_hint
 
 from pathlib import Path
 
+import requests
+
 from ..utils.console import _rich_echo, _rich_info
 from ..utils.github_host import default_host
+
+# ---------------------------------------------------------------------------
+# TLS failure helpers
+# ---------------------------------------------------------------------------
+
+# Marker prefix used on RuntimeError messages raised when the underlying
+# network probe fails TLS verification. Lets the caller distinguish trust
+# failures from auth / 404 / network errors so the user is not pushed down
+# the PAT troubleshooting path for a CA-trust problem.
+_TLS_ERROR_PREFIX = "TLS verification failed"
+
+
+def _is_tls_failure(exc: BaseException) -> bool:
+    """Return True if exc (or any cause in its chain) is a TLS verification failure."""
+    cur: BaseException | None = exc
+    seen = 0
+    while cur is not None and seen < 8:
+        msg = str(cur)
+        if _TLS_ERROR_PREFIX in msg or "CERTIFICATE_VERIFY_FAILED" in msg:
+            return True
+        if isinstance(cur, requests.exceptions.SSLError):
+            return True
+        cur = cur.__cause__ or cur.__context__
+        seen += 1
+    return False
+
+
+def _log_tls_failure(host_display: str, exc: BaseException, verbose_log, logger) -> None:
+    """Surface a TLS verification failure with an actionable CA-trust hint.
+
+    Default verbosity: a single one-liner via ``logger.warning`` so users behind
+    a corporate proxy see the right next step without re-running with --verbose.
+    Verbose: also include the host name and the underlying exception text.
+    """
+    logger.warning(
+        "TLS verification failed -- if you're behind a corporate proxy or "
+        "firewall, set the REQUESTS_CA_BUNDLE environment variable to the "
+        "path of your organisation's CA bundle (a PEM file) and retry. "
+        "See: https://microsoft.github.io/apm/troubleshooting/ssl-issues/"
+    )
+    if verbose_log:
+        verbose_log(f"underlying error from {host_display}: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -306,9 +350,6 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
 
         def _check_repo(token, git_env):
             """Check repo accessibility via GitHub API (or git ls-remote for non-GitHub)."""
-            import urllib.request
-            import urllib.error
-
             api_base = host_info.api_base
             api_url = f"{api_base}/repos/{dep_ref.repo_url}"
             headers = {
@@ -318,23 +359,25 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             if token:
                 headers["Authorization"] = f"Bearer {token}"
 
-            req = urllib.request.Request(api_url, headers=headers)
             try:
-                resp = urllib.request.urlopen(req, timeout=15)
-                if verbose_log:
-                    verbose_log(f"API {api_url} -> {resp.status}")
-                return True
-            except urllib.error.HTTPError as e:
-                if verbose_log:
-                    verbose_log(f"API {api_url} -> {e.code} {e.reason}")
-                if e.code == 404 and token:
-                    # 404 with token could mean no access -- raise to trigger fallback
-                    raise RuntimeError(f"API returned {e.code}")
-                raise RuntimeError(f"API returned {e.code}: {e.reason}")
-            except Exception as e:
+                resp = requests.get(api_url, headers=headers, timeout=15)
+            except requests.exceptions.SSLError as e:
+                raise RuntimeError(
+                    f"TLS verification failed for {host_info.display_name}"
+                ) from e
+            except requests.exceptions.RequestException as e:
                 if verbose_log:
                     verbose_log(f"API request failed: {e}")
                 raise
+
+            if verbose_log:
+                verbose_log(f"API {api_url} -> {resp.status_code}")
+            if resp.ok:
+                return True
+            if resp.status_code == 404 and token:
+                # 404 with token could mean no access -- raise to trigger fallback
+                raise RuntimeError(f"API returned {resp.status_code}")
+            raise RuntimeError(f"API returned {resp.status_code}: {resp.reason}")
 
         try:
             return auth_resolver.try_with_fallback(
@@ -344,7 +387,10 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                 unauth_first=True,
                 verbose_callback=verbose_log,
             )
-        except Exception:
+        except Exception as exc:
+            if _is_tls_failure(exc):
+                _log_tls_failure(host_info.display_name, exc, verbose_log, logger)
+                return False
             if verbose_log:
                 try:
                     ctx = auth_resolver.build_error_context(
@@ -364,9 +410,6 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
         repo_path = package  # owner/repo format
 
         def _check_repo_fallback(token, git_env):
-            import urllib.request
-            import urllib.error
-
             host_info = auth_resolver.classify_host(host)
             api_url = f"{host_info.api_base}/repos/{repo_path}"
             headers = {
@@ -376,18 +419,22 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             if token:
                 headers["Authorization"] = f"Bearer {token}"
 
-            req = urllib.request.Request(api_url, headers=headers)
             try:
-                resp = urllib.request.urlopen(req, timeout=15)
-                return True
-            except urllib.error.HTTPError as e:
-                if verbose_log:
-                    verbose_log(f"API fallback -> {e.code} {e.reason}")
-                raise RuntimeError(f"API returned {e.code}")
-            except Exception as e:
+                resp = requests.get(api_url, headers=headers, timeout=15)
+            except requests.exceptions.SSLError as e:
+                raise RuntimeError(
+                    f"TLS verification failed for {host_info.display_name}"
+                ) from e
+            except requests.exceptions.RequestException as e:
                 if verbose_log:
                     verbose_log(f"API fallback failed: {e}")
                 raise
+
+            if resp.ok:
+                return True
+            if verbose_log:
+                verbose_log(f"API fallback -> {resp.status_code} {resp.reason}")
+            raise RuntimeError(f"API returned {resp.status_code}")
 
         try:
             return auth_resolver.try_with_fallback(
@@ -396,7 +443,11 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                 unauth_first=True,
                 verbose_callback=verbose_log,
             )
-        except Exception:
+        except Exception as exc:
+            if _is_tls_failure(exc):
+                # See note above: logged once here, skip auth context render.
+                _log_tls_failure(host, exc, verbose_log, logger)
+                return False
             if verbose_log:
                 try:
                     ctx = auth_resolver.build_error_context(host, f"accessing {package}", org=org, dep_url=package)

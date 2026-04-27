@@ -44,6 +44,7 @@ class LockedDependency:
     marketplace_plugin_name: Optional[str] = None  # Plugin name in marketplace
     is_insecure: bool = False  # True when the locked source was http://
     allow_insecure: bool = False  # True when the manifest explicitly allowed HTTP
+    skill_subset: List[str] = field(default_factory=list)  # Sorted skill names for SKILL_BUNDLE
 
     def get_unique_key(self) -> str:
         """Returns unique key for this dependency."""
@@ -100,6 +101,8 @@ class LockedDependency:
             result["is_insecure"] = True
         if self.allow_insecure:
             result["allow_insecure"] = True
+        if self.skill_subset:
+            result["skill_subset"] = sorted(self.skill_subset)
         return result
 
     @classmethod
@@ -153,6 +156,7 @@ class LockedDependency:
             marketplace_plugin_name=data.get("marketplace_plugin_name"),
             is_insecure=data.get("is_insecure", False),
             allow_insecure=data.get("allow_insecure", False),
+            skill_subset=list(data.get("skill_subset") or []),
         )
 
     @classmethod
@@ -201,6 +205,7 @@ class LockedDependency:
             is_dev=is_dev,
             is_insecure=dep_ref.is_insecure,
             allow_insecure=dep_ref.allow_insecure,
+            skill_subset=sorted(dep_ref.skill_subset) if isinstance(getattr(dep_ref, "skill_subset", None), list) else [],
         )
 
     def to_dependency_ref(self) -> DependencyReference:

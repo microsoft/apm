@@ -64,6 +64,9 @@ class DependencyReference:
     is_insecure: bool = False  # True when the dependency URL uses http://
     allow_insecure: bool = False  # True if this HTTP dep is explicitly allowed
 
+    # SKILL_BUNDLE subset selection (persisted in apm.yml `skills:` field)
+    skill_subset: Optional[List[str]] = None  # Sorted skill names, or None = all
+
     # Supported file extensions for virtual packages
     VIRTUAL_FILE_EXTENSIONS = (
         ".prompt.md",
@@ -538,6 +541,33 @@ class DependencyReference:
         if sub_path:
             dep.virtual_path = sub_path
             dep.is_virtual = True
+
+        # Parse skills: field (SKILL_BUNDLE subset selection)
+        skills_raw = entry.get("skills")
+        if skills_raw is not None:
+            if not isinstance(skills_raw, (list,)):
+                raise ValueError(
+                    "'skills' field must be a list of skill names"
+                )
+            if len(skills_raw) == 0:
+                raise ValueError(
+                    "skills: must contain at least one name; "
+                    "remove the field to install all skills in the bundle."
+                )
+            seen: set = set()
+            validated: list = []
+            for name in skills_raw:
+                if not isinstance(name, str) or not name.strip():
+                    raise ValueError(
+                        "Each entry in 'skills' must be a non-empty string"
+                    )
+                name = name.strip()
+                # Path safety: reject traversal sequences
+                validate_path_segments(name, context="skills/<name>")
+                if name not in seen:
+                    seen.add(name)
+                    validated.append(name)
+            dep.skill_subset = sorted(validated)
 
         return dep
 
@@ -1078,10 +1108,11 @@ class DependencyReference:
         """Return the entry to store in apm.yml.
 
         For HTTP (insecure) deps, returns a dict with 'git' and 'allow_insecure' keys.
+        For deps with skill_subset, returns a dict with 'git' and 'skills' keys.
         For all other deps, returns the canonical string (same as to_canonical()).
 
         Returns:
-            str or dict: String for HTTPS/SSH/local deps; dict for HTTP deps.
+            str or dict: String for simple deps; dict for HTTP or skill-subset deps.
         """
         if self.is_insecure:
             host = self.host or default_host()
@@ -1091,6 +1122,16 @@ class DependencyReference:
             if self.alias:
                 entry["alias"] = self.alias
             entry["allow_insecure"] = self.allow_insecure
+            if self.skill_subset:
+                entry["skills"] = sorted(self.skill_subset)
+            return entry
+        if self.skill_subset:
+            entry = {"git": self.get_identity()}
+            if self.reference:
+                entry["ref"] = self.reference
+            if self.alias:
+                entry["alias"] = self.alias
+            entry["skills"] = sorted(self.skill_subset)
             return entry
         return self.to_canonical()
 

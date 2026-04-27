@@ -8,8 +8,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Docs site auto-deploys again after bot-cut releases by correctly detecting tag-push context in `docs.yml`. (#953)
+
+### Maintainer tooling
+
+- `pr-description-skill` mermaid guidance hardened: new asset `assets/mermaid-conventions.md` defines diagram-type-by-intent (sequenceDiagram for execution flow with `rect rgb(...)` boxing, flowchart for pipelines/architecture with `classDef new`, stateDiagram-v2 for state machines) and captures GitHub-renderer gotchas that `mmdc` does not always catch (notably: square brackets in flowchart edge labels MUST be quoted -- `|"[label]"|` not `|[label]|`).
+
+## [0.9.4] - 2026-04-27
+
 ### Added
-- PGS project board sync: `scripts/project/sync_item.py` and `.github/workflows/project-sync.yml` keep https://github.com/orgs/microsoft/projects/2304 in lockstep with `theme/*`, `area/*`, `type/*`, `priority/*` labels and milestones. Backfill helper at `scripts/project/backfill.sh`. (#919)
+
+- **Day-0 install parity with `npx skills add`**: every public repo that installs cleanly with `npx skills add owner/repo` now installs with `apm install owner/repo`. APM recognises bare `skills/<name>/SKILL.md` (vercel-labs/agent-skills, xixu-me/skills, larksuite/cli, the agentskills.io ecosystem) as a first-class shape (`SKILL_BUNDLE`); `apm.yml` is optional. `--skill <NAME>` (repeatable) selects a subset and **persists** it to `apm.yml` + `apm.lock.yaml`, so bare `apm install` is reproducible across machines. `--skill '*'` resets; `apm audit --ci` flags drift. (#974)
+- `curl | sh` install works in air-gapped, GHE, and internal-mirror setups: `install.sh` now reads `APM_INSTALL_DIR`, `GITHUB_URL`, `APM_REPO`, and `VERSION` (or `@vX.Y.Z` arg) -- pinning a version skips the GitHub API entirely, so corporate runners without api.github.com egress can bootstrap APM. (#660)
+
+### Fixed
+
+- `apm install` no longer fails behind corporate TLS-intercepting proxies: validation now honours `REQUESTS_CA_BUNDLE` instead of misreporting CA failures as auth errors. (#911)
+- `apm experimental <subcommand> --help` now shows the subcommand's own help; CLI help text and short flags aligned from the 2026-04-24 audit. (#910, #903)
+
+### Maintainer tooling
+
+- Untriaged issues are auto-triaged by the `apm-triage-panel` skill on a daily oldest-first sweep (max 10/run) plus `status/needs-triage` for on-demand. Decisions are agentic proposals; any maintainer label edit wins. (#954)
+- Docs site auto-deploys again after bot-cut releases (workaround for GitHub's `GITHUB_TOKEN`-suppressed `release: published` event). Silently broken since v0.9.3. (#953)
+- Triage-panel themed issues now reach the PGS project board (dispatches `project-sync` directly; same `GITHUB_TOKEN` event-suppression class as #953). (#971)
+- Issue templates use canonical APM labels; `python-architect` agent documents the mermaid `classDiagram :::cssClass` GitHub-render trap. (#958, #970)
+
+## [0.9.3] - 2026-04-26
+
+### Added
 
 - **Gemini CLI** as a supported APM target (`--target gemini`). APM auto-detects `.gemini/` directories and writes MCP server configuration to `.gemini/settings.json`. Includes `apm runtime setup gemini` / `apm runtime remove gemini` support. (#917)
 - New `pr-description-skill` skill bundle: enforces a 10-section PR body shape (TL;DR / Problem / Approach / Implementation / Diagrams / Trade-offs / Benefits / Validation / How to test, plus the `Co-authored-by` trailer) with a cite-or-omit rule for every WHY-claim, GFM-rendered output, ASCII-only template source, and validated mermaid diagrams. Captures the meta-pattern from PR #882 as a reusable scaffold so future PR bodies meet the same bar without per-PR specialist subagent intervention. (#884)
@@ -22,35 +50,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm-triage-panel` skill: three-persona panel (DevX UX, Supply Chain Security, APM CEO; conditional OSS Growth Hacker) for issue triage producing single labelled-decision comment with structured JSON tail. Mirrors `apm-review-panel` orchestration model. (#915)
 - CI: add `APM Self-Check` to `ci.yml` for `apm audit --ci`, regeneration-drift validation, and `merge-gate.yml` `EXPECTED_CHECKS` coverage. (#885)
 - Virtual package support for self-hosted Git services (Gitea, Gogs): `apm install` now resolves subdirectory packages and raw file downloads from generic Git hosts via raw URL and API version negotiation (v1/v3). GitLab nested-group paths (`group/subgroup/repo`) are treated as full repo URLs (dict form required for virtual packages). -- by @ganesanviji (#587)
+- **Gemini CLI** as a supported APM target (`--target gemini`): auto-detects `.gemini/`, writes MCP config to `.gemini/settings.json`, and adds `apm runtime setup|remove gemini`. (#917)
+- Experimental `cowork` target for Microsoft 365 Copilot Cowork custom-skill deployment via OneDrive (`apm experimental enable cowork`; `apm install --target cowork --global`; persisted via `apm config set cowork-skills-dir`). (#913)
+- `apm experimental` command group (`list` / `enable` / `disable` / `reset`) lets you opt into new behaviour before it graduates to default. Ships with the `verbose-version` flag. (#849)
+- `apm audit --ci` now verifies hash integrity of locally deployed `.apm/` files so hand-edits and config drift fail CI instead of slipping through. (#887)
+- `includes:` manifest field (`auto` or list) gives you explicit control over which local `.apm/` files are deployed; pair with `policy.manifest.require_explicit_includes` to block silent expansion. Audit raises an `includes-consent` advisory while you migrate. (#887)
+- `apm-triage-panel` skill: three-persona issue triage panel (DevX UX, Supply Chain Security, APM CEO) emitting a single labelled-decision comment, mirroring `apm-review-panel`. (#915)
+- `apm-primitives-architect` persona for designing and critiquing `.apm/` skill bundles, plus a `pr-description-skill` that enforces self-sufficient PR bodies (TL;DR/Problem/Approach/Implementation/Diagrams/Trade-offs/Benefits/Validation/How-to-test) with anchored citations and validated mermaid. (#882, #884)
+- New docs guide [`dev-only-primitives`](https://danielmeppiel.github.io/awd-cli/guides/dev-only-primitives/): canonical pattern for maintainer-only primitives that must not ride into your published bundle. (#949)
+- Maintainer tooling: PGS project-board sync workflow keeps issues in lockstep with labels/milestones; `APM Self-Check` CI job dogfoods `apm audit --ci` and regeneration-drift gates. (#919, #885)
 
 ### Changed
 
-- `find_primitive_files()` now uses `os.walk` with early directory pruning so `compilation.exclude` patterns prevent traversal into excluded subtrees on large repos. (#870)
-- Lockfile in-memory shape: a synthesized self-entry now appears in `LockFile.dependencies` for local content. The on-disk YAML format is unchanged (data still serialized as flat `local_deployed_files`/`local_deployed_file_hashes` fields). (#887)
-- Hardened `apm-review-panel` skill: single CEO-synthesized verdict comment per run (no per-persona spam), restored in-context persona model per agentskills.io after the sub-agent dispatch experiment regressed coverage, plus the original one-comment contract, Hybrid E Auth Expert routing, verdict template extracted to `assets/`, and `python-architect` mandatory three-artifact review contract (classDiagram + flowchart + Design patterns). (#882, #905, #907, #908)
-- CI: smoke tests in `build-release.yml`'s `build-and-test` job (Linux x86_64, Linux arm64, Windows) are now gated to promotion boundaries (tag/schedule/dispatch) instead of running on every push to main. Push-time smoke duplicated the merge-time smoke gate in `ci-integration.yml` and burned ~15 redundant codex-binary downloads/day. Tag-cut releases still run smoke as a pre-ship gate; nightly catches upstream codex URL drift; merge-time still gates merges into main. (#878)
-- CI docs: clarify that branch-protection ruleset must store the check-run name (`gate`), not the workflow display string (`Merge Gate / gate`); document the merge-gate aggregator in `cicd.instructions.md` and mark the legacy stub workflow as deprecated. (#874)
-- `shared/apm.md` bumped to `microsoft/apm-action@v1.4.2`, which fixes restore-mode workspace pollution that overwrote tracked `apm.lock.yaml` / `apm.yml` / `apm_modules` in caller workspaces. Closes #902. (#904)
+- HYBRID-skill review pipeline: `apm-review-panel` now produces a single CEO-synthesized verdict per run (no per-persona spam), with Hybrid E auth-expert routing and `python-architect`'s mandatory three-artifact contract. PRs get one high-signal comment. (#882, #905, #907, #908)
+- Faster primitive discovery on large repos: `compilation.exclude` patterns now prune traversal at the directory level instead of post-filtering. (#870)
+- `apm-action` bumped to `v1.4.2` (used by `shared/apm.md` workflows): fixes restore-mode workspace pollution that was overwriting your tracked `apm.lock.yaml` / `apm.yml` / `apm_modules`. (#904)
+- CI release-binary smoke (Linux x64/arm64, Windows) only runs on tag/schedule/dispatch instead of every push, cutting ~15 redundant codex downloads/day; release-time gating unchanged. (#878)
+- Branch-protection docs: clarify the required check-run name is `gate` (not the workflow display string `Merge Gate / gate`). (#874)
 
 ### Fixed
 
-- HYBRID packages (apm.yml + SKILL.md without `.apm/`) now install as skill bundles per agentskills.io semantics; previously `apm install` rejected this layout in the validator and emitted no inline error, producing a perceived hang. (#946)
-- CLAUDE_SKILL packages (SKILL.md only) that ship co-located resource directories (`agents/`, `assets/`, `scripts/`) now route through the skill-bundle install path. (#946)
-- Direct-dependency integration failures now print a `[x]` line immediately and exit 1 instead of failing silently. (#946)
-- HYBRID metadata model: `apm.yml` description and `SKILL.md` description are independent fields with different consumers and are no longer merged; `apm pack` warns when `apm.yml` is missing `description` on a HYBRID package. (#946)
-- Symlink hardening extended to all three `skill_integrator` copytree paths. (#946)
-- `apm install` (user scope): `init_link_resolver` now scopes `discover_primitives` to `~/.apm/` instead of `~/`, preventing recursive-glob across the entire home directory. Fixes #830 (#850)
-- Audit blindness for local `.apm/` content -- `apm audit --ci` now detects drift, missing files, and content tampering on locally-authored files (not just installed packages). (#887)
-- Packer leak risk: local-content fields (`local_deployed_files`, `local_deployed_file_hashes`) are now stripped from bundled lockfiles, preventing phantom self-entries on unpack. (#887)
-- `apm update` sanitises the subprocess environment before invoking the platform installer so the bundled PyInstaller `LD_LIBRARY_PATH` / `DYLD_*` no longer leak into system binaries (`curl`, `tar`, `sudo`) spawned by `install.sh`. Previously the installer's first `curl` call could abort with `libssl.so.3: version 'OPENSSL_3.2.0' not found` on distros whose system `libcurl` requires a newer OpenSSL ABI than the APM bundle ships (Debian trixie arm64 dev-containers, Fedora 43, and similar). Restoration uses PyInstaller's official `<VAR>_ORIG` protocol, preserving the user's own `LD_LIBRARY_PATH` exports. Closes #894 (#899)
-- Copilot adapter now validates remote `transport_type`, defaulting to `http` when missing/empty/whitespace and raising a clear `ValueError` for unrecognized transports, mirroring the VS Code adapter so both refuse bad registry data instead of silently writing garbage config. Closes #791 (#812)
-- `_get_cache_dir` resolves `project_root` before the path-traversal check, fixing a Windows-only false-positive `PathTraversalError` when the policy cache dir didn't yet exist (8.3 short-name expansion mismatched between an existing base and a non-existent candidate). (#895)
-- `load_policy()` wraps `is_file()` in try/except so YAML strings longer than ~1023 bytes no longer trip macOS `OSError [Errno 63] File name too long` and gracefully fall back to string-mode parsing. Closes #848 (#860)
-- CI: `merge-gate.yml` now also fires on `merge_group` events so the `gate` check actually reports inside the merge queue. Without this, PRs (e.g. #899) hung in the queue with `gate` stuck in "Expected -- Waiting for status to be reported" indefinitely. (#921)
+- HYBRID packages (apm.yml + SKILL.md, no `.apm/`) and CLAUDE_SKILL packages with sibling `agents/`/`assets/`/`scripts/` dirs now install correctly via the skill-bundle path; previously `apm install` rejected them silently and looked like a hang. Direct-dependency integration failures now print `[x]` and exit 1 instead of failing silently. (#946)
+- `apm update` no longer breaks on Debian trixie arm64, Fedora 43, and similar distros where the bundled PyInstaller `LD_LIBRARY_PATH` was leaking into system `curl`/`tar` and triggering `libssl.so.3: version 'OPENSSL_3.2.0' not found`. Closes #894 (#899)
+- `apm install` at user scope no longer recursive-globs your entire home directory: scan is scoped to `~/.apm/`. Fixes #830 (#850)
+- `apm audit --ci` now also catches drift / missing / tampered files for locally-authored `.apm/` content (not just installed packages); `apm pack` strips local-content fields so they can't leak into bundled lockfiles. (#887)
+- `apm install` for ADO orgs that disable PAT creation: error messages on generic git hosts now surface the custom port too. Custom transport types in MCP-server config are validated up front (defaulting to `http` when missing) instead of writing garbage. Closes #791 (#812)
+- Windows: `apm install` no longer false-positives `PathTraversalError` on policy cache dirs that don't yet exist (8.3 short-name resolution mismatch). (#895)
+- macOS: long inline policy YAML strings (>1023 bytes) no longer crash with `OSError [Errno 63] File name too long`; they fall back to string-mode parsing. Closes #848 (#860)
+- Merge queue: `gate` check now reports inside the queue (added `merge_group` trigger), unblocking PRs that were stuck on "Expected -- Waiting for status to be reported". (#921)
+- `apm-review-panel` workflow only runs on PRs labelled `panel-review`, eliminating spurious panel runs on every PR. (#948)
 
 ### Removed
 
-- CI: deleted `ci-integration-pr-stub.yml`. The four stubs were a holdover from the pre-merge-gate model where branch protection required each Tier 2 check name directly. After #867, branch protection requires only `gate`, so the stubs are dead weight. Reduced `EXPECTED_CHECKS` in `merge-gate.yml` to just `Build & Test (Linux)`. (#875)
+- Deleted dead `ci-integration-pr-stub.yml` workflow stubs left over from the pre-merge-gate model. No user impact; reduces CI noise. (#875)
 
 ## [0.9.2] - 2026-04-23
 
