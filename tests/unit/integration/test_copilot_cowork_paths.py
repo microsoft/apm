@@ -72,9 +72,12 @@ class TestResolveCoworkSkillsDir:
         cloud_dir = tmp_path / "Library" / "CloudStorage"
         tenant_dir = cloud_dir / "OneDrive - Tenant"
         tenant_dir.mkdir(parents=True)
-        with patch(
-            "apm_cli.integration.copilot_cowork_paths.Path.home",
-            return_value=tmp_path,
+        with (
+            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "darwin"),
+            patch(
+                "apm_cli.integration.copilot_cowork_paths.Path.home",
+                return_value=tmp_path,
+            ),
         ):
             result = resolve_copilot_cowork_skills_dir()
         expected = tenant_dir / "Documents" / "Cowork" / "skills"
@@ -87,9 +90,12 @@ class TestResolveCoworkSkillsDir:
         cloud_dir = tmp_path / "Library" / "CloudStorage"
         cloud_dir.mkdir(parents=True)
         # No OneDrive dirs
-        with patch(
-            "apm_cli.integration.copilot_cowork_paths.Path.home",
-            return_value=tmp_path,
+        with (
+            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "darwin"),
+            patch(
+                "apm_cli.integration.copilot_cowork_paths.Path.home",
+                return_value=tmp_path,
+            ),
         ):
             result = resolve_copilot_cowork_skills_dir()
         assert result is None
@@ -99,9 +105,12 @@ class TestResolveCoworkSkillsDir:
     ) -> None:
         monkeypatch.delenv("APM_COPILOT_COWORK_SKILLS_DIR", raising=False)
         # No Library/CloudStorage at all
-        with patch(
-            "apm_cli.integration.copilot_cowork_paths.Path.home",
-            return_value=tmp_path,
+        with (
+            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "darwin"),
+            patch(
+                "apm_cli.integration.copilot_cowork_paths.Path.home",
+                return_value=tmp_path,
+            ),
         ):
             result = resolve_copilot_cowork_skills_dir()
         assert result is None
@@ -113,9 +122,12 @@ class TestResolveCoworkSkillsDir:
         cloud_dir = tmp_path / "Library" / "CloudStorage"
         (cloud_dir / "OneDrive - TenantA").mkdir(parents=True)
         (cloud_dir / "OneDrive - TenantB").mkdir(parents=True)
-        with patch(
-            "apm_cli.integration.copilot_cowork_paths.Path.home",
-            return_value=tmp_path,
+        with (
+            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "darwin"),
+            patch(
+                "apm_cli.integration.copilot_cowork_paths.Path.home",
+                return_value=tmp_path,
+            ),
         ):
             with pytest.raises(CoworkResolutionError):
                 resolve_copilot_cowork_skills_dir()
@@ -127,9 +139,12 @@ class TestResolveCoworkSkillsDir:
         cloud_dir = tmp_path / "Library" / "CloudStorage"
         (cloud_dir / "OneDrive - TenantA").mkdir(parents=True)
         (cloud_dir / "OneDrive - TenantB").mkdir(parents=True)
-        with patch(
-            "apm_cli.integration.copilot_cowork_paths.Path.home",
-            return_value=tmp_path,
+        with (
+            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "darwin"),
+            patch(
+                "apm_cli.integration.copilot_cowork_paths.Path.home",
+                return_value=tmp_path,
+            ),
         ):
             with pytest.raises(CoworkResolutionError) as exc_info:
                 resolve_copilot_cowork_skills_dir()
@@ -144,9 +159,12 @@ class TestResolveCoworkSkillsDir:
         cloud_dir = tmp_path / "Library" / "CloudStorage"
         (cloud_dir / "OneDrive - TenantA").mkdir(parents=True)
         (cloud_dir / "OneDrive - TenantB").mkdir(parents=True)
-        with patch(
-            "apm_cli.integration.copilot_cowork_paths.Path.home",
-            return_value=tmp_path,
+        with (
+            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "darwin"),
+            patch(
+                "apm_cli.integration.copilot_cowork_paths.Path.home",
+                return_value=tmp_path,
+            ),
         ):
             with pytest.raises(CoworkResolutionError) as exc_info:
                 resolve_copilot_cowork_skills_dir()
@@ -165,9 +183,12 @@ class TestResolveCoworkSkillsDir:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("APM_COPILOT_COWORK_SKILLS_DIR", raising=False)
-        with patch(
-            "apm_cli.integration.copilot_cowork_paths.Path.home",
-            return_value=tmp_path,
+        with (
+            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "linux"),
+            patch(
+                "apm_cli.integration.copilot_cowork_paths.Path.home",
+                return_value=tmp_path,
+            ),
         ):
             result = resolve_copilot_cowork_skills_dir()
         assert result is None
@@ -186,6 +207,7 @@ class TestResolveCoworkSkillsDir:
         (cloud / "OneDrive - Tenant").mkdir(parents=True)
         with (
             patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value="/config/skills"),
+            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "darwin"),
             patch(
                 "apm_cli.integration.copilot_cowork_paths.Path.home",
                 return_value=tmp_path,
@@ -215,6 +237,7 @@ class TestResolveCoworkSkillsDir:
         tenant.mkdir(parents=True)
         with (
             patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value=None),
+            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "darwin"),
             patch(
                 "apm_cli.integration.copilot_cowork_paths.Path.home",
                 return_value=tmp_path,
@@ -243,6 +266,7 @@ class TestResolveCoworkSkillsDir:
         # No CloudStorage directory -- auto-detect returns None.
         with (
             patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value=None),
+            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "darwin"),
             patch(
                 "apm_cli.integration.copilot_cowork_paths.Path.home",
                 return_value=tmp_path,
