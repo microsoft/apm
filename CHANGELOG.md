@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Docs site auto-deploys again after bot-cut releases by correctly detecting tag-push context in `docs.yml`. (#953)
+
 ## [0.9.4] - 2026-04-27
 
 ### Added
