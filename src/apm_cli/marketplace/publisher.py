@@ -721,7 +721,9 @@ class MarketplacePublisher:
                 updated_count += 1
 
             # 9. Write apm.yml atomically
-            new_text = yaml.safe_dump(data, default_flow_style=False, sort_keys=False)
+            new_text = yaml.safe_dump(
+                data, default_flow_style=False, sort_keys=False
+            )  # yaml-io-exempt
             tmp_yml = apm_yml_path.with_suffix(".yml.tmp")
             try:
                 with open(tmp_yml, "w", encoding="utf-8") as fh:

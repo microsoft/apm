@@ -1073,7 +1073,9 @@ def _policy_to_dict(policy: ApmPolicy) -> dict:
 
 def _serialize_policy(policy: ApmPolicy) -> str:
     """Serialize an ApmPolicy to deterministic YAML for caching."""
-    return yaml.dump(_policy_to_dict(policy), default_flow_style=False, sort_keys=True)
+    return yaml.dump(
+        _policy_to_dict(policy), default_flow_style=False, sort_keys=True
+    )  # yaml-io-exempt
 
 
 def _policy_fingerprint(serialized: str) -> str:
