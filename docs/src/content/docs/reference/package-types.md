@@ -4,7 +4,7 @@ sidebar:
   order: 4
 ---
 
-APM supports three package layouts, each with distinct install semantics.
+APM supports four package layouts, each with distinct install semantics.
 Pick the layout that matches the author's intent -- APM preserves it.
 
 ## Layout summary
@@ -13,6 +13,7 @@ Pick the layout that matches the author's intent -- APM preserves it.
 |---|---|---|
 | `.apm/` (with or without apm.yml) | "I have N independent primitives" | Hoist each primitive into the target's runtime dirs |
 | `SKILL.md` (alone or with apm.yml -- HYBRID) | "I am one skill bundle" | Copy the whole bundle to `<target>/skills/<name>/` |
+| `skills/<name>/SKILL.md` (nested) | "I ship many skills in one repo" | Promote each nested skill to `<target>/skills/<name>/` |
 | `plugin.json` / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
 
 ## APM package (`.apm/` directory)
@@ -95,6 +96,70 @@ independently: keep `apm.yml.description` to a short tagline (under
 agent runtime expects. `apm pack` warns when `apm.yml.description` is
 missing so the human-facing surfaces do not degrade silently while
 the agent runtime keeps working.
+
+## Skill collection (`skills/<name>/SKILL.md`)
+
+A multi-skill package following the [agentskills.io](https://agentskills.io) /
+`npx skills` convention. Each skill lives in its own subdirectory under
+`skills/` with its own `SKILL.md`.
+
+An optional `apm.yml` at the root provides version metadata and dependencies.
+If absent, APM synthesizes minimal metadata from the directory name.
+
+```
+azure-skills/
++-- skills/
+|   +-- cosmos-db/
+|   |   +-- SKILL.md
+|   |   +-- examples/
+|   +-- functions/
+|   |   +-- SKILL.md
+|   +-- aks/
+|       +-- SKILL.md
++-- apm.yml            # optional
+```
+
+**What gets installed:** each `skills/<name>/` directory is promoted to
+`<target>/skills/<name>/`, preserving internal structure. Equivalent to
+installing N separate CLAUDE_SKILL packages.
+
+**Selective install:** use `--skill <name>` to install only specific skills
+from the bundle (repeatable). The selection is **persisted** in `apm.yml`
+(as a `skills:` field) and `apm.lock.yaml` (as `skill_subset`), so
+subsequent bare `apm install` commands are deterministic.
+Use `--skill '*'` to reset and install all skills.
+
+```bash
+# Install only two skills (persisted to apm.yml):
+apm install microsoft/azure-skills --skill cosmos-db --skill functions
+
+# Bare reinstall respects the persisted selection:
+apm install
+
+# Reset to all skills:
+apm install microsoft/azure-skills --skill '*'
+```
+
+The `apm.yml` entry is promoted to dict form with a `skills:` list:
+
+```yaml
+dependencies:
+  apm:
+    - git: microsoft/azure-skills
+      skills:
+        - cosmos-db
+        - functions
+```
+
+**Validation rules:**
+- Frontmatter `name` field (if present) must match the directory name.
+- Frontmatter `description` should be present (warning if absent).
+- All frontmatter values must be ASCII-only.
+- Directory names must pass path-traversal checks.
+
+**When to choose:** you maintain a curated collection of independent skills
+in one repository (e.g. all Azure skills, all Firebase skills). Consumers
+can install the full set or cherry-pick with `--skill`.
 
 ## Plugin collection (`plugin.json`)
 

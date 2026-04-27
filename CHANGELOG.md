@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Day-0 install parity with `npx skills add`**: every public repo that installs cleanly with `npx skills add owner/repo` now installs cleanly with `apm install owner/repo`. APM recognises the `skills/<name>/SKILL.md` convention used by `vercel-labs/agent-skills`, `xixu-me/skills`, `larksuite/cli`, and the rest of the agentskills.io ecosystem as a first-class package shape (`SKILL_BUNDLE`). `apm.yml` is OPTIONAL for these packages -- adding it is strictly additive (lockfile + pinning) and never regresses installability. Multi-skill bundles install all skills by default; `--skill <NAME>` (repeatable) selects a subset. The selection is **persisted** in `apm.yml` (`skills:` field) and `apm.lock.yaml` (`skill_subset`), so bare `apm install` is deterministic. Use `--skill '*'` to reset to all skills. `apm audit --ci` detects drift between manifest and lockfile skill subsets.
+
+### Fixed
+
+- Fixed TLS validation failure behind corporate TLS-intercepting proxies and firewalls: `install/validation.py` now uses `requests` (honouring `REQUESTS_CA_BUNDLE`) instead of stdlib `urllib`, and surfaces a single CA-trust hint at default verbosity instead of a misleading auth error. (#911)
+- Triage Panel themed issues now reach the PGS project board: the workflow dispatches `project-sync` per themed issue via the new `safe-outputs.dispatch-workflow` channel, working around GitHub's rule that `GITHUB_TOKEN`-driven label changes never fire downstream `issues: labeled` workflows. Without this, sweeps applied `theme/*` labels but the project-sync trigger silently no-op'd, leaving the board empty.
+
 ## [0.9.3] - 2026-04-26
 
 ### Added

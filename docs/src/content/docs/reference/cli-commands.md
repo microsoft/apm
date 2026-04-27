@@ -110,6 +110,7 @@ apm install [PACKAGES...] [OPTIONS]
 - `--allow-protocol-fallback` - Restore the legacy permissive cross-protocol fallback chain (HTTPS-then-SSH or vice-versa). Strict-by-default otherwise. Each retry emits a `[!]` warning naming both protocols. When the dependency URL carries a custom port, APM also emits a one-shot `[!]` warning before the first clone attempt noting that the same port will be reused across schemes (wrong on servers like Bitbucket Datacenter that serve SSH and HTTPS on different ports) -- to avoid the mismatch, omit this flag and pin the dependency with an explicit `ssh://` or `https://` URL.
 - `--no-policy` -- Skip org policy enforcement for this invocation. Loudly logged. Does NOT bypass `apm audit --ci`. Available on `apm install`, `apm install <pkg>`, and `apm install --mcp <name>`.
   - Equivalent env var: `APM_POLICY_DISABLE=1` (applies to the entire shell session). Note: `apm deps update` runs the install pipeline and is gated by policy but does not currently expose a `--no-policy` flag -- use `APM_POLICY_DISABLE=1` as the only escape hatch there.
+- `--skill NAME` - Install only named skill(s) from a `SKILL_BUNDLE` package. Repeatable. The selection is **persisted** in `apm.yml` (as a `skills:` list in dict-form entries) and in `apm.lock.yaml` (as `skill_subset`), so subsequent bare `apm install` commands are deterministic. Use `--skill '*'` to reset and install all skills from the bundle.
 
 **Transport env vars:**
 
@@ -1003,6 +1004,22 @@ Alias for [`apm install --mcp`](#apm-install---install-dependencies-and-deploy-l
 apm mcp install NAME [OPTIONS] [-- COMMAND ARGV...]
 ```
 
+**Arguments:**
+- `NAME` - MCP server name. Use a registry name for registry installs, or a local name for self-defined stdio and remote servers.
+
+**Options:**
+- `--transport [stdio|http|sse|streamable-http]` - MCP transport. Inferred from `--url` or post-`--` argv when omitted.
+- `--url URL` - MCP server URL for `http`, `sse`, or `streamable-http` transports.
+- `--env KEY=VALUE` - Environment variable for stdio MCP servers. Repeatable.
+- `--header KEY=VALUE` - HTTP header for remote MCP servers. Repeatable.
+- `--mcp-version VER` - Pin a registry MCP entry to a specific version.
+- `--registry URL` - Custom MCP registry URL for resolving `NAME`.
+- `--dev` - Add the server to `devDependencies`.
+- `--dry-run` - Show what would be added without writing.
+- `--force` - Replace an existing MCP entry.
+- `-v, --verbose` - Show detailed output.
+- `--no-policy` - Skip org policy enforcement for this invocation.
+
 **Examples:**
 ```bash
 # stdio (post-`--` argv)
@@ -1709,7 +1726,7 @@ apm runtime remove [OPTIONS] {copilot|codex|llm|gemini}
 - `{copilot|codex|llm|gemini}` - Runtime to remove
 
 **Options:**
-- `--yes` - Confirm the action without prompting
+- `-y, --yes` - Confirm the action without prompting
 
 #### `apm runtime status` - Show active runtime and preference order
 
@@ -1726,4 +1743,73 @@ apm runtime status
 
 ## Experimental Features
 
-`apm experimental` manages opt-in flags that gate new or changing behaviour. Subcommands: `list`, `enable`, `disable`, `reset`. `apm experimental list` also supports `--json`, and `-v` / `--verbose` works on each subcommand. See the full reference in [Experimental Flags](../experimental/).
+### `apm experimental` - Manage experimental feature flags
+
+Manage opt-in flags that gate new or changing behaviour. Running `apm experimental` with no subcommand lists the available flags.
+
+```bash
+apm experimental [OPTIONS] COMMAND [ARGS]...
+```
+
+**Options:**
+- `-v, --verbose` - Show verbose output
+
+**Subcommands:**
+
+| Command | Description |
+|---------|-------------|
+| `list` | List all experimental features |
+| `enable NAME` | Enable an experimental feature |
+| `disable NAME` | Disable an experimental feature |
+| `reset [NAME]` | Reset one feature, or all features, to defaults |
+
+#### `apm experimental list`
+
+```bash
+apm experimental list [OPTIONS]
+```
+
+**Options:**
+- `--enabled` - Show only enabled features
+- `--disabled` - Show only disabled features
+- `--json` - Output as a JSON array
+- `-v, --verbose` - Show detailed output
+
+#### `apm experimental enable`
+
+```bash
+apm experimental enable NAME [OPTIONS]
+```
+
+**Arguments:**
+- `NAME` - Experimental feature name
+
+**Options:**
+- `-v, --verbose` - Show verbose output
+
+#### `apm experimental disable`
+
+```bash
+apm experimental disable NAME [OPTIONS]
+```
+
+**Arguments:**
+- `NAME` - Experimental feature name
+
+**Options:**
+- `-v, --verbose` - Show verbose output
+
+#### `apm experimental reset`
+
+```bash
+apm experimental reset [NAME] [OPTIONS]
+```
+
+**Arguments:**
+- `NAME` - Optional experimental feature name. Omit to reset all feature overrides.
+
+**Options:**
+- `-y, --yes` - Skip the confirmation prompt when resetting all features
+- `-v, --verbose` - Show verbose output
+
+See the full reference in [Experimental Flags](../experimental/).

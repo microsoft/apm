@@ -77,6 +77,8 @@ class LockfileBuilder:
             # Attach deployed_files and package_type to each LockedDependency
             self._attach_deployed_files(lockfile)
             self._attach_package_types(lockfile)
+            # Apply CLI --skill override to lockfile entries (skill_bundle only)
+            self._attach_skill_subset_override(lockfile)
             # Attach content hashes captured at download/verify time
             self._attach_content_hashes(lockfile)
             # Attach marketplace provenance if available
@@ -123,6 +125,20 @@ class LockfileBuilder:
         for dep_key, pkg_type in self.ctx.package_types.items():
             if dep_key in lockfile.dependencies:
                 lockfile.dependencies[dep_key].package_type = pkg_type
+
+    def _attach_skill_subset_override(self, lockfile: LockFile) -> None:
+        """Apply CLI --skill override to lockfile skill_bundle entries.
+
+        When the user runs `apm install bundle --skill foo`, the CLI
+        skill_subset takes precedence over the per-entry skill_subset
+        from the manifest for this invocation's lockfile.
+        """
+        if not self.ctx.skill_subset:
+            return  # No CLI override; dep_ref.skill_subset already flows through
+        effective = sorted(set(self.ctx.skill_subset))
+        for dep_key, locked_dep in lockfile.dependencies.items():
+            if locked_dep.package_type == "skill_bundle":
+                locked_dep.skill_subset = effective
 
     def _attach_content_hashes(self, lockfile: LockFile) -> None:
         for dep_key, locked_dep in lockfile.dependencies.items():

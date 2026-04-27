@@ -52,4 +52,4 @@ def run(ctx: "InstallContext") -> "InstallResult":
             f"-- pin with #tag or #sha to prevent drift"
         )
 
-    return InstallResult(ctx.installed_count, ctx.total_prompts_integrated, ctx.total_agents_integrated, ctx.diagnostics)
+    return InstallResult(ctx.installed_count, ctx.total_prompts_integrated, ctx.total_agents_integrated, ctx.diagnostics, package_types=dict(ctx.package_types))

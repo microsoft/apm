@@ -143,6 +143,16 @@ classDiagram
 Read the PR's diff and surrounding code, then draw the actual
 problem-space classes.)
 
+**Mermaid `classDiagram` GitHub-render gotcha**: the `:::cssClass`
+shorthand is ONLY valid as a standalone `class Name:::cssClass`
+declaration (or inside a `class Name:::cssClass { ... }` block).
+GitHub's mermaid parser rejects `:::cssClass` appended to a
+relationship line (`A *-- B:::touched`) with `Expecting 'NEWLINE',
+'EOF', 'LABEL', got 'STYLE_SEPARATOR'`. Always declare the styled
+classes on their own lines BEFORE the `classDef` block. This trap
+does not apply to `flowchart` diagrams, where the inline form is
+valid.
+
 If the PR is purely procedural (no class changes anywhere in scope),
 state that explicitly and substitute a `classDiagram` showing the
 module boundaries and the function entry points -- still annotated
