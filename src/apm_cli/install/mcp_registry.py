@@ -241,16 +241,13 @@ def validate_mcp_dry_run_entry(name, **kwargs) -> None:
     """C1: validate the MCP entry that ``apm install --mcp ... --dry-run``
     would persist, raising :class:`click.UsageError` on rejection.
 
-    Mirrors the validation that real install runs via ``_build_mcp_entry``,
+    Mirrors the validation that real install runs via ``build_mcp_entry``,
     so dry-run never previews "success" for an entry the real install
     would reject. Lives here (not in commands/install.py) per the LOC-budget
     invariant on that module.
     """
-    # Local import: ``_build_mcp_entry`` lives in commands/install.py and
-    # imports from this module, so the import must be deferred to call time
-    # to avoid a circular import.
-    from ..commands.install import _build_mcp_entry
+    from .mcp_entry import build_mcp_entry
     try:
-        _build_mcp_entry(name, **kwargs)
+        build_mcp_entry(name, **kwargs)
     except ValueError as exc:
         raise click.UsageError(str(exc))
