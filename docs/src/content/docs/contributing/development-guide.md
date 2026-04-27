@@ -122,7 +122,7 @@ For instant feedback before pushing, install the pre-commit hooks:
 uv run pre-commit install
 ```
 
-This is optional -- CI will catch any issues regardless.
+This is optional -- CI is the authoritative gate. The pre-commit hook rev may lag behind the CI version; check `.pre-commit-config.yaml` against `uv.lock` if you see discrepancies.
 
 ## Documentation
 
