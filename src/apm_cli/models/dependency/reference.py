@@ -836,7 +836,7 @@ class DependencyReference:
                         user_repo = "/".join(parts[1:])
                 else:
                     user_repo = "/".join(parts[1:3])
-            elif len(parts) >= 2 and "." not in parts[0]:
+            elif len(parts) >= 2 and ("." not in parts[0] or validated_host is not None):
                 if not host:
                     host = default_host()
                 if is_azure_devops_hostname(host) and len(parts) >= 3:

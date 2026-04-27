@@ -39,6 +39,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Gemini CLI** as a supported APM target (`--target gemini`). APM auto-detects `.gemini/` directories and writes MCP server configuration to `.gemini/settings.json`. Includes `apm runtime setup gemini` / `apm runtime remove gemini` support. (#917)
+- New `pr-description-skill` skill bundle: enforces a 10-section PR body shape (TL;DR / Problem / Approach / Implementation / Diagrams / Trade-offs / Benefits / Validation / How to test, plus the `Co-authored-by` trailer) with a cite-or-omit rule for every WHY-claim, GFM-rendered output, ASCII-only template source, and validated mermaid diagrams. Captures the meta-pattern from PR #882 as a reusable scaffold so future PR bodies meet the same bar without per-PR specialist subagent intervention. (#884)
+- `apm experimental` command group -- a feature-flag registry with `list` / `enable` / `disable` / `reset` subcommands. Opt in to new behaviour before it graduates to default. Ships with one built-in flag (`verbose-version`) and a contributor recipe for proposing new flags. (#849)
+- `includes:` manifest field (auto | list) for explicit governance of local `.apm/` content. Closes audit-blindness gap (#887).
+- `apm audit --ci` now verifies hash integrity of locally deployed files, detecting hand-edits and config drift. (#887)
+- `policy.manifest.require_explicit_includes` policy field enforces explicit `includes` lists (rejects `auto` + undeclared). (#887)
+- `includes-consent` advisory appears in `apm audit` CLI/JSON output when local content is deployed without an explicit `includes:` declaration (#887)
+- `apm-primitives-architect` agent: reusable persona for designing and critiquing `.apm/` skill bundles. (#882)
+- `apm-triage-panel` skill: three-persona panel (DevX UX, Supply Chain Security, APM CEO; conditional OSS Growth Hacker) for issue triage producing single labelled-decision comment with structured JSON tail. Mirrors `apm-review-panel` orchestration model. (#915)
+- CI: add `APM Self-Check` to `ci.yml` for `apm audit --ci`, regeneration-drift validation, and `merge-gate.yml` `EXPECTED_CHECKS` coverage. (#885)
+- Virtual package support for self-hosted Git services (Gitea, Gogs): `apm install` now resolves subdirectory packages and raw file downloads from generic Git hosts via raw URL and API version negotiation (v1/v3). GitLab nested-group paths (`group/subgroup/repo`) are treated as full repo URLs (dict form required for virtual packages). -- by @ganesanviji (#587)
 - **Gemini CLI** as a supported APM target (`--target gemini`): auto-detects `.gemini/`, writes MCP config to `.gemini/settings.json`, and adds `apm runtime setup|remove gemini`. (#917)
 - Experimental `cowork` target for Microsoft 365 Copilot Cowork custom-skill deployment via OneDrive (`apm experimental enable cowork`; `apm install --target cowork --global`; persisted via `apm config set cowork-skills-dir`). (#913)
 - `apm experimental` command group (`list` / `enable` / `disable` / `reset`) lets you opt into new behaviour before it graduates to default. Ships with the `verbose-version` flag. (#849)

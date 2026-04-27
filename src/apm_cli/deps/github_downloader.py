@@ -1591,15 +1591,39 @@ class GitHubPackageDownloader:
                     return content
             # All raw attempts failed — fall through to API path which
             # handles private repos, rate-limit messaging, and SAML errors.
-
+        
+        # Try raw URL for generic hosts (Gitea, GitLab, etc.)
+        if host.lower() not in ("github.com",) and not host.lower().endswith(".ghe.com"):
+            raw_url = f"https://{host}/{owner}/{repo}/raw/{ref}/{file_path}"
+            raw_headers = {}
+            if token:
+                raw_headers['Authorization'] = f'token {token}'
+            try:
+                response = self._resilient_get(raw_url, headers=raw_headers, timeout=30)
+                if response.status_code == 200:
+                    if verbose_callback:
+                        verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
+                    return response.content
+            except (requests.RequestException, OSError):
+                pass
+        
         # --- Contents API path (authenticated, enterprise, or raw fallback) ---
-        # Build GitHub API URL - format differs by host type
+        # Build API URL candidates - format differs by host type
         if host == "github.com":
-            api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}?ref={ref}"
+            api_url_candidates = [
+                f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}?ref={ref}"
+            ]
         elif host.lower().endswith(".ghe.com"):
-            api_url = f"https://api.{host}/repos/{owner}/{repo}/contents/{file_path}?ref={ref}"
+            api_url_candidates = [
+                f"https://api.{host}/repos/{owner}/{repo}/contents/{file_path}?ref={ref}"
+            ]
         else:
-            api_url = f"https://{host}/api/v3/repos/{owner}/{repo}/contents/{file_path}?ref={ref}"
+            # Generic host: negotiate Gitea/Gogs-style contents API versions.
+            api_url_candidates = [
+                f"https://{host}/api/v1/repos/{owner}/{repo}/contents/{file_path}?ref={ref}",
+                f"https://{host}/api/v3/repos/{owner}/{repo}/contents/{file_path}?ref={ref}",
+            ]
+        api_url = api_url_candidates[0]
 
         # Set up authentication headers
         headers = {
@@ -1617,7 +1641,22 @@ class GitHubPackageDownloader:
             return response.content
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 404:
-                # Try fallback branches if the specified ref fails
+                # For generic hosts, try remaining API version candidates before ref fallback
+                for candidate_url in api_url_candidates[1:]:
+                    try:
+                        candidate_resp = self._resilient_get(candidate_url, headers=headers, timeout=30)
+                        candidate_resp.raise_for_status()
+                        if verbose_callback:
+                            verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
+                        return candidate_resp.content
+                    except requests.exceptions.HTTPError as ce:
+                        if ce.response.status_code != 404:
+                            raise RuntimeError(
+                                f"Failed to download {file_path}: HTTP {ce.response.status_code}"
+                            )
+                        # 404 on this version too -- try next
+
+                # All API versions returned 404 -- try fallback ref
                 if ref not in ["main", "master"]:
                     # If original ref failed, don't try fallbacks - it might be a specific version
                     raise RuntimeError(f"File not found: {file_path} at ref '{ref}' in {dep_ref.repo_url}")
@@ -1625,25 +1664,35 @@ class GitHubPackageDownloader:
                 # Try the other default branch
                 fallback_ref = "master" if ref == "main" else "main"
 
-                # Build fallback API URL
+                # Build fallback URL candidates
                 if host == "github.com":
-                    fallback_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}?ref={fallback_ref}"
+                    fallback_url_candidates = [
+                        f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}?ref={fallback_ref}"
+                    ]
                 elif host.lower().endswith(".ghe.com"):
-                    fallback_url = f"https://api.{host}/repos/{owner}/{repo}/contents/{file_path}?ref={fallback_ref}"
+                    fallback_url_candidates = [
+                        f"https://api.{host}/repos/{owner}/{repo}/contents/{file_path}?ref={fallback_ref}"
+                    ]
                 else:
-                    fallback_url = f"https://{host}/api/v3/repos/{owner}/{repo}/contents/{file_path}?ref={fallback_ref}"
+                    fallback_url_candidates = [
+                        f"https://{host}/api/v1/repos/{owner}/{repo}/contents/{file_path}?ref={fallback_ref}",
+                        f"https://{host}/api/v3/repos/{owner}/{repo}/contents/{file_path}?ref={fallback_ref}",                        
+                    ]
 
-                try:
-                    response = self._resilient_get(fallback_url, headers=headers, timeout=30)
-                    response.raise_for_status()
-                    if verbose_callback:
-                        verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
-                    return response.content
-                except requests.exceptions.HTTPError:
-                    raise RuntimeError(
-                        f"File not found: {file_path} in {dep_ref.repo_url} "
-                        f"(tried refs: {ref}, {fallback_ref})"
-                    )
+                for fallback_url in fallback_url_candidates:
+                    try:
+                        response = self._resilient_get(fallback_url, headers=headers, timeout=30)
+                        response.raise_for_status()
+                        if verbose_callback:
+                            verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
+                        return response.content
+                    except requests.exceptions.HTTPError:
+                        pass  # Try next version or ref
+
+                raise RuntimeError(
+                    f"File not found: {file_path} in {dep_ref.repo_url} "
+                    f"(tried refs: {ref}, {fallback_ref})"
+                )
             elif e.response.status_code == 401 or e.response.status_code == 403:
                 # Distinguish rate limiting from auth failure.
                 # GitHub returns 403 with X-RateLimit-Remaining: 0 when the

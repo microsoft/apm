@@ -1711,7 +1711,7 @@ class TestVirtualFilePackageYamlGeneration:
         assert apm_yml_path.exists(), "apm.yml was not created"
 
         content = apm_yml_path.read_text(encoding="utf-8")
-        parsed = yaml.safe_load(content)   # must not raise
+        parsed = yaml.safe_load(content)  # must not raise
 
         expected = (
             "Senior software engineer subagent for implementation tasks:"
@@ -1765,7 +1765,6 @@ class TestVirtualFilePackageYamlGeneration:
         """apm.yml for collection packages must be valid when description contains a colon."""
         import yaml
 
-        # A minimal .collection.yml whose description contains ":"
         collection_manifest = (
             b"id: my-collection\n"
             b"name: My Collection\n"
@@ -1791,7 +1790,7 @@ class TestVirtualFilePackageYamlGeneration:
                 downloader.download_collection_package(dep_ref, target_path)
 
         content = (target_path / "apm.yml").read_text(encoding="utf-8")
-        parsed = yaml.safe_load(content)   # must not raise
+        parsed = yaml.safe_load(content)  # must not raise
 
         assert parsed["description"] == "A collection for tasks: feature development, debugging."
 
@@ -1830,6 +1829,153 @@ class TestVirtualFilePackageYamlGeneration:
         parsed = yaml.safe_load(content)
 
         assert parsed["tags"] == ["scope: engineering", "plain-tag"]
+
+
+# ---------------------------------------------------------------------------
+# Generic host (Gitea / GitLab) download tests
+# ---------------------------------------------------------------------------
+
+def _make_resp(status_code: int, content: bytes = b"") -> Mock:
+    """Build a minimal mock requests.Response."""
+    resp = Mock()
+    resp.status_code = status_code
+    resp.content = content
+    if status_code >= 400:
+        resp.raise_for_status = Mock(
+            side_effect=requests_lib.exceptions.HTTPError(response=resp)
+        )
+    else:
+        resp.raise_for_status = Mock()
+    return resp
+
+
+class TestGiteaRawUrlDownload:
+    """Gitea raw URL path: /{owner}/{repo}/raw/{ref}/{file}."""
+
+    def setup_method(self):
+        with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
+            self.downloader = GitHubPackageDownloader()
+
+    def test_raw_url_succeeds_on_first_attempt(self):
+        """Raw URL returns 200 -- content returned without calling the API."""
+        dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
+        expected = b"# README content"
+        raw_ok = _make_resp(200, expected)
+
+        with patch.object(self.downloader, "_resilient_get", return_value=raw_ok) as mock_get:
+            result = self.downloader.download_raw_file(dep_ref, "README.md", "main")
+
+        assert result == expected
+        first_url = mock_get.call_args_list[0][0][0]
+        assert first_url == "https://gitea.myorg.com/owner/repo/raw/main/README.md"
+        assert mock_get.call_count == 1
+
+    def test_raw_url_with_token_adds_auth_header(self):
+        """Token is forwarded as Authorization header in the raw URL request.
+
+        Token resolution is lazy, so the env patch must stay active for the
+        duration of the download call.
+        """
+        dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
+        raw_ok = _make_resp(200, b"data")
+
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "gta-tok"}, clear=True):
+            with _CRED_FILL_PATCH:
+                downloader = GitHubPackageDownloader()
+            with patch.object(downloader, "_resilient_get", return_value=raw_ok) as mock_get:
+                downloader.download_raw_file(dep_ref, "README.md", "main")
+
+        raw_headers = mock_get.call_args_list[0][1].get("headers", {})
+        assert "Authorization" in raw_headers
+
+    def test_falls_back_to_api_v1_when_raw_returns_non_200(self):
+        """When the raw URL returns 404, the API v1 path is tried next."""
+        dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
+        expected = b"file via API"
+
+        with patch.object(
+            self.downloader, "_resilient_get",
+            side_effect=[_make_resp(404), _make_resp(200, expected)]
+        ) as mock_get:
+            result = self.downloader.download_raw_file(dep_ref, "README.md", "main")
+
+        assert result == expected
+        urls = [c[0][0] for c in mock_get.call_args_list]
+        assert urls[0] == "https://gitea.myorg.com/owner/repo/raw/main/README.md"
+        assert "/api/v1/" in urls[1]
+
+
+class TestGiteaGogsApiVersionNegotiation:
+    """API version negotiation: raw URL -> v1 -> v3 for Gitea/Gogs generic hosts.
+
+    The implementation intentionally stops at v3.  GitLab uses a completely
+    different API shape (/api/v4/projects/:id/repository/files/...) that is
+    not compatible with the GitHub Contents-style endpoint negotiated here;
+    GitLab support is limited to git-clone operations only.
+    """
+
+    def setup_method(self):
+        with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
+            self.downloader = GitHubPackageDownloader()
+
+    def test_v1_falls_back_to_v3_for_generic_hosts(self):
+        """When Gitea raw URL and v1 both return 404, v3 is tried and succeeds."""
+        dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
+        expected = b"gitea v3 file content"
+
+        side_effects = [
+            _make_resp(404),           # raw URL
+            _make_resp(404),           # v1
+            _make_resp(200, expected), # v3
+        ]
+        with patch.object(self.downloader, "_resilient_get", side_effect=side_effects) as mock_get:
+            result = self.downloader.download_raw_file(dep_ref, "skill.md", "main")
+
+        assert result == expected
+        urls = [c[0][0] for c in mock_get.call_args_list]
+        assert "/api/v1/" in urls[1]
+        assert "/api/v3/" in urls[2]
+        assert len(mock_get.call_args_list) == 3
+
+    def test_gitea_v1_succeeds_without_trying_v3(self):
+        """When v1 returns 200, v3 must never be called."""
+        dep_ref = DependencyReference.parse("gitea.example.com/owner/repo")
+        expected = b"gitea content"
+
+        with patch.object(
+            self.downloader, "_resilient_get",
+            side_effect=[_make_resp(404), _make_resp(200, expected)]
+        ) as mock_get:
+            result = self.downloader.download_raw_file(dep_ref, "file.md", "main")
+
+        assert result == expected
+        urls = [c[0][0] for c in mock_get.call_args_list]
+        assert all("/api/v3/" not in u for u in urls)
+
+    def test_all_api_versions_404_raises_runtime_error(self):
+        """When every API version returns 404 for both refs, a clear error is raised."""
+        dep_ref = DependencyReference.parse("git.example.com/owner/repo")
+        # raw(main) + v1(main) + v3(main) = 3 calls, then v1(master) + v3(master) = 2 calls
+        side_effects = [_make_resp(404)] * 5
+
+        with patch.object(self.downloader, "_resilient_get", side_effect=side_effects):
+            with pytest.raises(RuntimeError, match="File not found"):
+                self.downloader.download_raw_file(dep_ref, "missing.md", "main")
+
+    def test_github_com_uses_api_github_com_not_api_v4(self):
+        """github.com must still use api.github.com, never /api/v4/."""
+        dep_ref = DependencyReference.parse("owner/repo")
+        expected = b"github content"
+        api_ok = _make_resp(200, expected)
+
+        with patch.object(self.downloader, "_try_raw_download", return_value=None):
+            with patch.object(self.downloader, "_resilient_get", return_value=api_ok) as mock_get:
+                result = self.downloader.download_raw_file(dep_ref, "README.md", "main")
+
+        assert result == expected
+        url_called = mock_get.call_args_list[0][0][0]
+        assert url_called.startswith("https://api.github.com/")
+        assert "/api/v4/" not in url_called
 
 
 if __name__ == '__main__':
