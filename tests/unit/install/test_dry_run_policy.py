@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional  # noqa: F401
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -34,10 +34,9 @@ from apm_cli.policy.install_preflight import (
     PolicyBlockError,
     run_policy_preflight,
 )
-from apm_cli.policy.models import CIAuditResult, CheckResult
+from apm_cli.policy.models import CheckResult, CIAuditResult
 from apm_cli.policy.parser import load_policy
 from apm_cli.policy.schema import ApmPolicy
-
 
 # -- Fixtures / helpers ---------------------------------------------------
 
@@ -51,7 +50,7 @@ def _load_fixture_policy(name: str) -> ApmPolicy:
 
 
 def _make_fetch_result(
-    policy: Optional[ApmPolicy] = None,
+    policy: ApmPolicy | None = None,
     outcome: str = "found",
     source: str = "org:test-org/.github",
 ) -> PolicyFetchResult:
@@ -78,7 +77,7 @@ def _make_dep(repo_url: str, reference: str = "main"):
     return dep
 
 
-def _make_mcp_dep(name: str, transport: Optional[str] = None, url: Optional[str] = None):
+def _make_mcp_dep(name: str, transport: str | None = None, url: str | None = None):
     """Build a minimal MCPDependency for policy checks."""
     from apm_cli.models.dependency.mcp import MCPDependency
 
@@ -162,18 +161,20 @@ class TestDryRunDeniedDepBlock:
         logger = _mock_logger()
         denied_dep = _make_dep("test-blocked/foo")
 
-        with patch(
-            "apm_cli.policy.install_preflight.discover_policy_with_chain",
-            return_value=fetch_result,
+        with (
+            patch(
+                "apm_cli.policy.install_preflight.discover_policy_with_chain",
+                return_value=fetch_result,
+            ),
+            pytest.raises(PolicyBlockError),
         ):
-            with pytest.raises(PolicyBlockError):
-                run_policy_preflight(
-                    project_root=Path("/fake"),
-                    apm_deps=[denied_dep],
-                    no_policy=False,
-                    logger=logger,
-                    dry_run=False,
-                )
+            run_policy_preflight(
+                project_root=Path("/fake"),
+                apm_deps=[denied_dep],
+                no_policy=False,
+                logger=logger,
+                dry_run=False,
+            )
 
     def test_exit_zero_contract(self):
         """Dry-run NEVER produces non-zero exit -- no exception path."""
@@ -219,7 +220,7 @@ class TestDryRunRequiredMissingBlock:
             "apm_cli.policy.install_preflight.discover_policy_with_chain",
             return_value=fetch_result,
         ):
-            result_fetch, result_active = run_policy_preflight(
+            result_fetch, result_active = run_policy_preflight(  # noqa: RUF059
                 project_root=Path("/fake"),
                 apm_deps=[some_dep],
                 no_policy=False,
@@ -259,7 +260,7 @@ class TestDryRunAllowedDeps:
             "apm_cli.policy.install_preflight.discover_policy_with_chain",
             return_value=fetch_result,
         ):
-            result_fetch, result_active = run_policy_preflight(
+            result_fetch, result_active = run_policy_preflight(  # noqa: RUF059
                 project_root=Path("/fake"),
                 apm_deps=[allowed_dep],
                 no_policy=False,
@@ -334,9 +335,12 @@ class TestDryRunNoPolicy:
         """APM_POLICY_DISABLE=1 also skips discovery in dry-run."""
         logger = _mock_logger()
 
-        with patch(
-            "apm_cli.policy.install_preflight.discover_policy_with_chain",
-        ) as mock_discover, patch.dict(os.environ, {"APM_POLICY_DISABLE": "1"}):
+        with (
+            patch(
+                "apm_cli.policy.install_preflight.discover_policy_with_chain",
+            ) as mock_discover,
+            patch.dict(os.environ, {"APM_POLICY_DISABLE": "1"}),
+        ):
             result_fetch, result_active = run_policy_preflight(
                 project_root=Path("/fake"),
                 apm_deps=[_make_dep("anything/dep")],
@@ -462,7 +466,7 @@ class TestDryRunMcpDenied:
             "apm_cli.policy.install_preflight.discover_policy_with_chain",
             return_value=fetch_result,
         ):
-            result_fetch, result_active = run_policy_preflight(
+            result_fetch, result_active = run_policy_preflight(  # noqa: RUF059
                 project_root=Path("/fake"),
                 mcp_deps=[denied_mcp],
                 no_policy=False,
@@ -490,18 +494,20 @@ class TestDryRunMcpDenied:
             transport="stdio",
         )
 
-        with patch(
-            "apm_cli.policy.install_preflight.discover_policy_with_chain",
-            return_value=fetch_result,
+        with (
+            patch(
+                "apm_cli.policy.install_preflight.discover_policy_with_chain",
+                return_value=fetch_result,
+            ),
+            pytest.raises(PolicyBlockError),
         ):
-            with pytest.raises(PolicyBlockError):
-                run_policy_preflight(
-                    project_root=Path("/fake"),
-                    mcp_deps=[denied_mcp],
-                    no_policy=False,
-                    logger=logger,
-                    dry_run=False,
-                )
+            run_policy_preflight(
+                project_root=Path("/fake"),
+                mcp_deps=[denied_mcp],
+                no_policy=False,
+                logger=logger,
+                dry_run=False,
+            )
 
 
 # ==========================================================================
@@ -526,7 +532,7 @@ class TestDryRunWarnSeverity:
             "apm_cli.policy.install_preflight.discover_policy_with_chain",
             return_value=fetch_result,
         ):
-            result_fetch, result_active = run_policy_preflight(
+            result_fetch, result_active = run_policy_preflight(  # noqa: RUF059
                 project_root=Path("/fake"),
                 apm_deps=[outside_dep],
                 no_policy=False,
@@ -561,18 +567,20 @@ class TestDryRunBackwardCompat:
         logger = _mock_logger()
         denied_dep = _make_dep("test-blocked/foo")
 
-        with patch(
-            "apm_cli.policy.install_preflight.discover_policy_with_chain",
-            return_value=fetch_result,
+        with (
+            patch(
+                "apm_cli.policy.install_preflight.discover_policy_with_chain",
+                return_value=fetch_result,
+            ),
+            pytest.raises(PolicyBlockError),
         ):
-            with pytest.raises(PolicyBlockError):
-                # No dry_run argument -> defaults to False -> raises
-                run_policy_preflight(
-                    project_root=Path("/fake"),
-                    apm_deps=[denied_dep],
-                    no_policy=False,
-                    logger=logger,
-                )
+            # No dry_run argument -> defaults to False -> raises
+            run_policy_preflight(
+                project_root=Path("/fake"),
+                apm_deps=[denied_dep],
+                no_policy=False,
+                logger=logger,
+            )
 
 
 # ==========================================================================
@@ -585,9 +593,7 @@ class TestDryRunNoiseCap:
 
     def _make_check_result(self, n_details: int, check_name: str = "deny-list"):
         """Build a CheckResult with *n_details* detail lines."""
-        details = [
-            f"pkg-{i}: denied by policy" for i in range(1, n_details + 1)
-        ]
+        details = [f"pkg-{i}: denied by policy" for i in range(1, n_details + 1)]
         return CheckResult(
             name=check_name,
             passed=False,
@@ -611,12 +617,15 @@ class TestDryRunNoiseCap:
         logger = _mock_logger()
         audit = self._make_failing_audit(6)
 
-        with patch(
-            "apm_cli.policy.install_preflight.discover_policy_with_chain",
-            return_value=fetch_result,
-        ), patch(
-            "apm_cli.policy.install_preflight.run_dependency_policy_checks",
-            return_value=audit,
+        with (
+            patch(
+                "apm_cli.policy.install_preflight.discover_policy_with_chain",
+                return_value=fetch_result,
+            ),
+            patch(
+                "apm_cli.policy.install_preflight.run_dependency_policy_checks",
+                return_value=audit,
+            ),
         ):
             run_policy_preflight(
                 project_root=Path("/fake"),
@@ -626,23 +635,17 @@ class TestDryRunNoiseCap:
                 dry_run=True,
             )
 
-        warning_msgs = [
-            str(c) for c in logger.warning.call_args_list
-        ]
+        warning_msgs = [str(c) for c in logger.warning.call_args_list]
 
         # 5 "Would be blocked" lines
-        blocked_lines = [
-            m for m in warning_msgs if "Would be blocked by policy" in m
-        ]
+        blocked_lines = [m for m in warning_msgs if "Would be blocked by policy" in m]
         assert len(blocked_lines) == 5, (
             f"Expected 5 blocked lines, got {len(blocked_lines)}: {blocked_lines}"
         )
 
         # 1 tail line
         tail_lines = [m for m in warning_msgs if "and 1 more would be blocked" in m]
-        assert len(tail_lines) == 1, (
-            f"Expected 1 tail line, got {len(tail_lines)}: {tail_lines}"
-        )
+        assert len(tail_lines) == 1, f"Expected 1 tail line, got {len(tail_lines)}: {tail_lines}"
 
         # Tail mentions apm audit
         assert any("apm audit" in m for m in tail_lines)
@@ -654,12 +657,15 @@ class TestDryRunNoiseCap:
         logger = _mock_logger()
         audit = self._make_failing_audit(5)
 
-        with patch(
-            "apm_cli.policy.install_preflight.discover_policy_with_chain",
-            return_value=fetch_result,
-        ), patch(
-            "apm_cli.policy.install_preflight.run_dependency_policy_checks",
-            return_value=audit,
+        with (
+            patch(
+                "apm_cli.policy.install_preflight.discover_policy_with_chain",
+                return_value=fetch_result,
+            ),
+            patch(
+                "apm_cli.policy.install_preflight.run_dependency_policy_checks",
+                return_value=audit,
+            ),
         ):
             run_policy_preflight(
                 project_root=Path("/fake"),
@@ -669,20 +675,14 @@ class TestDryRunNoiseCap:
                 dry_run=True,
             )
 
-        warning_msgs = [
-            str(c) for c in logger.warning.call_args_list
-        ]
+        warning_msgs = [str(c) for c in logger.warning.call_args_list]
 
-        blocked_lines = [
-            m for m in warning_msgs if "Would be blocked by policy" in m
-        ]
+        blocked_lines = [m for m in warning_msgs if "Would be blocked by policy" in m]
         assert len(blocked_lines) == 5
 
         # No tail
         tail_lines = [m for m in warning_msgs if "more would be blocked" in m]
-        assert len(tail_lines) == 0, (
-            f"Should be no tail for exactly 5, got: {tail_lines}"
-        )
+        assert len(tail_lines) == 0, f"Should be no tail for exactly 5, got: {tail_lines}"
 
     def test_ten_denied_ten_warn_separate_buckets(self):
         """10 deny + 10 warn -> 5 deny + 1 deny-tail + 5 warn + 1 warn-tail.
@@ -696,12 +696,15 @@ class TestDryRunNoiseCap:
         block_logger = _mock_logger()
         block_audit = self._make_failing_audit(10)
 
-        with patch(
-            "apm_cli.policy.install_preflight.discover_policy_with_chain",
-            return_value=block_fetch,
-        ), patch(
-            "apm_cli.policy.install_preflight.run_dependency_policy_checks",
-            return_value=block_audit,
+        with (
+            patch(
+                "apm_cli.policy.install_preflight.discover_policy_with_chain",
+                return_value=block_fetch,
+            ),
+            patch(
+                "apm_cli.policy.install_preflight.run_dependency_policy_checks",
+                return_value=block_audit,
+            ),
         ):
             run_policy_preflight(
                 project_root=Path("/fake"),
@@ -721,12 +724,15 @@ class TestDryRunNoiseCap:
         warn_logger = _mock_logger()
         warn_audit = self._make_failing_audit(10)
 
-        with patch(
-            "apm_cli.policy.install_preflight.discover_policy_with_chain",
-            return_value=warn_fetch,
-        ), patch(
-            "apm_cli.policy.install_preflight.run_dependency_policy_checks",
-            return_value=warn_audit,
+        with (
+            patch(
+                "apm_cli.policy.install_preflight.discover_policy_with_chain",
+                return_value=warn_fetch,
+            ),
+            patch(
+                "apm_cli.policy.install_preflight.run_dependency_policy_checks",
+                return_value=warn_audit,
+            ),
         ):
             run_policy_preflight(
                 project_root=Path("/fake"),
@@ -737,7 +743,10 @@ class TestDryRunNoiseCap:
             )
 
         warn_msgs = [str(c) for c in warn_logger.warning.call_args_list]
-        assert len([m for m in warn_msgs if "Policy warning" in m and "more policy warnings" not in m]) == 5
+        assert (
+            len([m for m in warn_msgs if "Policy warning" in m and "more policy warnings" not in m])
+            == 5
+        )
         assert len([m for m in warn_msgs if "and 5 more policy warnings" in m]) == 1
 
     def test_tail_wording_is_ascii_and_mentions_apm_audit(self):
@@ -747,12 +756,15 @@ class TestDryRunNoiseCap:
         logger = _mock_logger()
         audit = self._make_failing_audit(8)
 
-        with patch(
-            "apm_cli.policy.install_preflight.discover_policy_with_chain",
-            return_value=fetch_result,
-        ), patch(
-            "apm_cli.policy.install_preflight.run_dependency_policy_checks",
-            return_value=audit,
+        with (
+            patch(
+                "apm_cli.policy.install_preflight.discover_policy_with_chain",
+                return_value=fetch_result,
+            ),
+            patch(
+                "apm_cli.policy.install_preflight.run_dependency_policy_checks",
+                return_value=audit,
+            ),
         ):
             run_policy_preflight(
                 project_root=Path("/fake"),
@@ -768,9 +780,7 @@ class TestDryRunNoiseCap:
 
         tail = tail_lines[0]
         # ASCII only
-        assert all(ord(ch) < 128 for ch in tail), (
-            f"Tail line contains non-ASCII: {tail!r}"
-        )
+        assert all(ord(ch) < 128 for ch in tail), f"Tail line contains non-ASCII: {tail!r}"
         # Mentions apm audit
         assert "apm audit" in tail
         # Correct overflow count (8 - 5 = 3)

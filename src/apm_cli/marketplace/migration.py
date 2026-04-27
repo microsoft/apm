@@ -23,7 +23,7 @@ import enum
 import logging
 from io import StringIO
 from pathlib import Path
-from typing import Optional
+from typing import Optional  # noqa: F401
 
 import yaml
 
@@ -35,11 +35,11 @@ from .yml_schema import (
 )
 
 __all__ = [
+    "DEPRECATION_MESSAGE",
     "ConfigSource",
     "detect_config_source",
     "load_marketplace_config",
     "migrate_marketplace_yml",
-    "DEPRECATION_MESSAGE",
 ]
 
 
@@ -69,8 +69,7 @@ def _has_marketplace_block(apm_yml_path: Path) -> bool:
         data = yaml.safe_load(text)
     except (OSError, yaml.YAMLError):
         return False
-    return isinstance(data, dict) and "marketplace" in data and \
-        data["marketplace"] is not None
+    return isinstance(data, dict) and "marketplace" in data and data["marketplace"] is not None
 
 
 def detect_config_source(project_root: Path) -> ConfigSource:
@@ -129,9 +128,7 @@ def load_marketplace_config(
             warn_callback(msg)
         else:
             logger.warning(msg)
-        return load_marketplace_from_legacy_yml(
-            project_root / "marketplace.yml"
-        )
+        return load_marketplace_from_legacy_yml(project_root / "marketplace.yml")
     raise MarketplaceYmlError(
         "No marketplace config found. Add a 'marketplace:' block to "
         "apm.yml or run 'apm marketplace init' to scaffold one."
@@ -210,13 +207,9 @@ def migrate_marketplace_yml(
     apm_path = project_root / "apm.yml"
 
     if not legacy_path.exists():
-        raise MarketplaceYmlError(
-            "marketplace.yml not found -- nothing to migrate."
-        )
+        raise MarketplaceYmlError("marketplace.yml not found -- nothing to migrate.")
     if not apm_path.exists():
-        raise MarketplaceYmlError(
-            "apm.yml not found. Run 'apm init' first."
-        )
+        raise MarketplaceYmlError("apm.yml not found. Run 'apm init' first.")
 
     # Validate legacy file before doing anything destructive.
     load_marketplace_from_legacy_yml(legacy_path)
@@ -234,8 +227,7 @@ def migrate_marketplace_yml(
     if "marketplace" in apm_data and apm_data["marketplace"] is not None:
         if not force:
             raise MarketplaceYmlError(
-                "apm.yml already has a 'marketplace:' block. "
-                "Re-run with --force to overwrite."
+                "apm.yml already has a 'marketplace:' block. Re-run with --force to overwrite."
             )
 
     block = _build_marketplace_block(legacy_data, apm_data)
@@ -249,13 +241,15 @@ def migrate_marketplace_yml(
     # Build a unified diff for the caller to display.
     import difflib
 
-    diff_lines = list(difflib.unified_diff(
-        apm_text.splitlines(keepends=True),
-        new_apm_text.splitlines(keepends=True),
-        fromfile="apm.yml (current)",
-        tofile="apm.yml (after migrate)",
-        n=3,
-    ))
+    diff_lines = list(
+        difflib.unified_diff(
+            apm_text.splitlines(keepends=True),
+            new_apm_text.splitlines(keepends=True),
+            fromfile="apm.yml (current)",
+            tofile="apm.yml (after migrate)",
+            n=3,
+        )
+    )
     diff = "".join(diff_lines)
 
     if not dry_run:
@@ -265,9 +259,7 @@ def migrate_marketplace_yml(
     return diff
 
 
-def detect_inheritance_conflicts(
-    legacy_data: dict, apm_data: dict
-) -> list:
+def detect_inheritance_conflicts(legacy_data: dict, apm_data: dict) -> list:
     """Return human-readable conflict descriptions.
 
     Compares the inheritable scalars between legacy and apm.yml.

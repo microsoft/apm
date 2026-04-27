@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import textwrap
-from pathlib import Path
+from pathlib import Path  # noqa: F401
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,7 +12,7 @@ from click.testing import CliRunner
 from apm_cli.commands.marketplace import marketplace
 from apm_cli.marketplace.errors import (
     GitLsRemoteError,
-    MarketplaceYmlError,
+    MarketplaceYmlError,  # noqa: F401
     OfflineMissError,
 )
 from apm_cli.marketplace.ref_resolver import RemoteRef
@@ -21,7 +21,6 @@ from apm_cli.marketplace.yml_schema import (
     MarketplaceYml,
     PackageEntry,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -179,9 +178,7 @@ class TestCheckFailures:
         # First package OK, second fails
         mock_inst.list_remote_refs.side_effect = [
             _REFS_GOOD,
-            GitLsRemoteError(
-                package="pkg-beta", summary="Auth failed", hint="Check token"
-            ),
+            GitLsRemoteError(package="pkg-beta", summary="Auth failed", hint="Check token"),
         ]
         mock_inst.close = MagicMock()
 
@@ -358,7 +355,12 @@ class TestCheckDuplicateNames:
     @patch("apm_cli.commands.marketplace.RefResolver")
     @patch("apm_cli.commands.marketplace.load_marketplace_config")
     def test_duplicate_names_warned(
-        self, mock_load, MockResolver, runner, tmp_path, monkeypatch,
+        self,
+        mock_load,
+        MockResolver,
+        runner,
+        tmp_path,
+        monkeypatch,
     ):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "marketplace.yml").write_text("---\n", encoding="utf-8")
@@ -371,11 +373,15 @@ class TestCheckDuplicateNames:
             owner=MarketplaceOwner(name="Owner"),
             packages=(
                 PackageEntry(
-                    name="learning", source="acme/repo", subdir="general",
+                    name="learning",
+                    source="acme/repo",
+                    subdir="general",
                     version="^1.0.0",
                 ),
                 PackageEntry(
-                    name="learning", source="acme/repo", subdir="special",
+                    name="learning",
+                    source="acme/repo",
+                    subdir="special",
                     version="^1.0.0",
                 ),
             ),
@@ -393,7 +399,12 @@ class TestCheckDuplicateNames:
     @patch("apm_cli.commands.marketplace.RefResolver")
     @patch("apm_cli.commands.marketplace.load_marketplace_config")
     def test_no_warning_when_unique(
-        self, mock_load, MockResolver, runner, tmp_path, monkeypatch,
+        self,
+        mock_load,
+        MockResolver,
+        runner,
+        tmp_path,
+        monkeypatch,
     ):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "marketplace.yml").write_text("---\n", encoding="utf-8")
@@ -405,10 +416,14 @@ class TestCheckDuplicateNames:
             owner=MarketplaceOwner(name="Owner"),
             packages=(
                 PackageEntry(
-                    name="alpha", source="acme/alpha", version="^1.0.0",
+                    name="alpha",
+                    source="acme/alpha",
+                    version="^1.0.0",
                 ),
                 PackageEntry(
-                    name="beta", source="acme/beta", version="^1.0.0",
+                    name="beta",
+                    source="acme/beta",
+                    version="^1.0.0",
                 ),
             ),
         )

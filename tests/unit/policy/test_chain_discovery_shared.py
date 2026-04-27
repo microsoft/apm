@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, call, patch  # noqa: F401
 
 import pytest
 
@@ -86,8 +86,9 @@ class TestEscapeHatches:
         """
         # Patch the inner discovery to fail loudly so we know the early
         # short-circuit fired without doing any I/O.
-        with patch.dict(os.environ, {"APM_POLICY_DISABLE": "1"}), patch(
-            _PATCH_DISCOVER, side_effect=AssertionError("must not be called")
+        with (
+            patch.dict(os.environ, {"APM_POLICY_DISABLE": "1"}),
+            patch(_PATCH_DISCOVER, side_effect=AssertionError("must not be called")),
         ):
             result = discover_policy_with_chain(Path("/fake"))
         assert result.outcome == "disabled"
@@ -113,21 +114,13 @@ class TestChainResolution:
 
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
-    def test_extends_triggers_chain_resolution(
-        self, mock_discover, mock_write_cache
-    ):
+    def test_extends_triggers_chain_resolution(self, mock_discover, mock_write_cache):
         """A leaf with extends: triggers parent fetch + merge + cache write."""
         leaf = _make_policy(enforcement="warn", extends="parent-org/.github")
-        leaf_fetch = _make_fetch(
-            policy=leaf, source="org:contoso/.github", cached=False
-        )
+        leaf_fetch = _make_fetch(policy=leaf, source="org:contoso/.github", cached=False)
 
-        parent = _make_policy(
-            enforcement="block", deny=("evil/*",)
-        )
-        parent_fetch = _make_fetch(
-            policy=parent, source="org:parent-org/.github"
-        )
+        parent = _make_policy(enforcement="block", deny=("evil/*",))
+        parent_fetch = _make_fetch(policy=parent, source="org:parent-org/.github")
 
         mock_discover.side_effect = [leaf_fetch, parent_fetch]
 
@@ -149,9 +142,7 @@ class TestChainResolution:
 
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
-    def test_no_extends_no_chain_resolution(
-        self, mock_discover, mock_write_cache
-    ):
+    def test_no_extends_no_chain_resolution(self, mock_discover, mock_write_cache):
         """Without extends:, no chain resolution or re-caching happens."""
         policy = _make_policy(enforcement="warn")
         fetch = _make_fetch(policy=policy, cached=False)
@@ -163,15 +154,13 @@ class TestChainResolution:
 
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
-    def test_cached_result_skips_chain_resolution(
-        self, mock_discover, mock_write_cache
-    ):
+    def test_cached_result_skips_chain_resolution(self, mock_discover, mock_write_cache):
         """When result is from cache, skip re-resolution even with extends:."""
         policy = _make_policy(enforcement="warn", extends="org")
         fetch = _make_fetch(policy=policy, cached=True)
         mock_discover.return_value = fetch
 
-        result = discover_policy_with_chain(Path("/fake"))
+        result = discover_policy_with_chain(Path("/fake"))  # noqa: F841
         mock_write_cache.assert_not_called()
         # discover_policy called only once (no parent fetch)
         assert mock_discover.call_count == 1
@@ -189,9 +178,7 @@ class TestCachePaths:
     def test_cache_hit_returns_merged_policy(self, mock_discover):
         """Cached result (no extends) returns immediately."""
         policy = _make_policy(enforcement="block", deny=("bad/*",))
-        fetch = _make_fetch(
-            policy=policy, cached=True, cache_age_seconds=300
-        )
+        fetch = _make_fetch(policy=policy, cached=True, cache_age_seconds=300)
         mock_discover.return_value = fetch
 
         result = discover_policy_with_chain(Path("/fake"))
@@ -201,21 +188,15 @@ class TestCachePaths:
 
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
-    def test_cache_miss_fetches_and_writes(
-        self, mock_discover, mock_write_cache
-    ):
+    def test_cache_miss_fetches_and_writes(self, mock_discover, mock_write_cache):
         """Fresh fetch with extends: merges and writes cache atomically."""
         leaf = _make_policy(enforcement="warn", extends="hub/.github")
-        leaf_fetch = _make_fetch(
-            policy=leaf, source="org:team/.github", cached=False
-        )
+        leaf_fetch = _make_fetch(policy=leaf, source="org:team/.github", cached=False)
         parent = _make_policy(enforcement="block")
-        parent_fetch = _make_fetch(
-            policy=parent, source="org:hub/.github"
-        )
+        parent_fetch = _make_fetch(policy=parent, source="org:hub/.github")
         mock_discover.side_effect = [leaf_fetch, parent_fetch]
 
-        result = discover_policy_with_chain(Path("/fake"))
+        result = discover_policy_with_chain(Path("/fake"))  # noqa: F841
 
         # Cache writer called with merged policy
         assert mock_write_cache.called
@@ -233,12 +214,10 @@ class TestGatePhaseDelegate:
 
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
-    def test_gate_discover_returns_same_as_shared(
-        self, mock_discover, mock_write_cache
-    ):
+    def test_gate_discover_returns_same_as_shared(self, mock_discover, mock_write_cache):
         """Gate-phase _discover_with_chain produces identical results."""
         from dataclasses import dataclass, field
-        from typing import Any, List
+        from typing import Any, List  # noqa: F401, UP035
 
         @dataclass
         class _FakeCtx:
@@ -247,13 +226,9 @@ class TestGatePhaseDelegate:
             no_policy: bool = False
 
         leaf = _make_policy(enforcement="warn", extends="parent/.github")
-        leaf_fetch = _make_fetch(
-            policy=leaf, source="org:child/.github", cached=False
-        )
+        leaf_fetch = _make_fetch(policy=leaf, source="org:child/.github", cached=False)
         parent = _make_policy(enforcement="block")
-        parent_fetch = _make_fetch(
-            policy=parent, source="org:parent/.github"
-        )
+        parent_fetch = _make_fetch(policy=parent, source="org:parent/.github")
         mock_discover.side_effect = [leaf_fetch, parent_fetch]
 
         from apm_cli.install.phases.policy_gate import _discover_with_chain
@@ -310,9 +285,7 @@ class TestMultiLevelExtendsChain:
 
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
-    def test_three_level_chain_resolves_all(
-        self, mock_discover, mock_write_cache
-    ):
+    def test_three_level_chain_resolves_all(self, mock_discover, mock_write_cache):
         """leaf -> mid -> root: all three policies merged, chain_refs has 3 entries."""
         leaf = _make_policy(enforcement="warn", extends="org-mid/.github")
         mid = _make_policy(enforcement="warn", extends="enterprise-root/.github")
@@ -376,17 +349,14 @@ class TestMultiLevelExtendsChain:
         leaf = _make_policy(enforcement="warn", extends=levels[0])
         ancestors = []
         for i in range(5):
-            ancestors.append(
-                _make_policy(enforcement="warn", extends=levels[i + 1])
-            )
+            ancestors.append(_make_policy(enforcement="warn", extends=levels[i + 1]))
         # Enough policies to overflow.
 
         leaf_fetch = _make_fetch(policy=leaf, source="org:leaf/.github")
         anc_fetches = [
-            _make_fetch(policy=a, source=f"org:{levels[i]}")
-            for i, a in enumerate(ancestors)
+            _make_fetch(policy=a, source=f"org:{levels[i]}") for i, a in enumerate(ancestors)
         ]
-        mock_discover.side_effect = [leaf_fetch] + anc_fetches
+        mock_discover.side_effect = [leaf_fetch] + anc_fetches  # noqa: RUF005
 
         with pytest.raises(PolicyInheritanceError) as exc_info:
             discover_policy_with_chain(Path("/fake"))
@@ -441,9 +411,7 @@ class TestMultiLevelExtendsChain:
 
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
-    def test_single_level_chain_still_works(
-        self, mock_discover, mock_write_cache
-    ):
+    def test_single_level_chain_still_works(self, mock_discover, mock_write_cache):
         """Existing single-level extends behavior is preserved."""
         leaf = _make_policy(enforcement="warn", extends="hub/.github")
         parent = _make_policy(enforcement="block")

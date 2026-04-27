@@ -7,24 +7,24 @@ No dependency on cache-clearing functions (those only exist post-optimization).
 Usage: uv run python tests/benchmarks/run_baseline.py
 """
 
-import importlib
+import importlib  # noqa: F401
+import statistics
 import sys
 import time
-import statistics
 from pathlib import Path
 
 # Ensure the project is importable
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from apm_cli.primitives.models import PrimitiveCollection, Instruction
-from apm_cli.deps.dependency_graph import DependencyTree, DependencyNode
 from apm_cli.deps.apm_resolver import APMDependencyResolver
+from apm_cli.deps.dependency_graph import DependencyNode, DependencyTree
 from apm_cli.models.apm_package import APMPackage, DependencyReference
-
+from apm_cli.primitives.models import Instruction, PrimitiveCollection
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_instruction(name: str, source: str = "local") -> Instruction:
     return Instruction(
@@ -70,35 +70,42 @@ def bench(fn, *, runs: int = 5, label: str = ""):
 # Benchmarks
 # ---------------------------------------------------------------------------
 
+
 def bench_primitive_conflict_detection(count: int):
     """Add `count` unique primitives — measures conflict-check cost."""
+
     def run():
         coll = PrimitiveCollection()
         for i in range(count):
             coll.add_primitive(_make_instruction(f"instr-{i}"))
         assert coll.count() == count
+
     return bench(run, label=f"primitive_add_{count}")
 
 
 def bench_primitive_conflict_50pct(count: int):
     """Add `count` primitives with 50% name collisions."""
     half = count // 2
+
     def run():
         coll = PrimitiveCollection()
         for i in range(count):
             coll.add_primitive(_make_instruction(f"instr-{i % half}", source="dep:pkg"))
         assert coll.count() == half
+
     return bench(run, label=f"primitive_conflict_50pct_{count}")
 
 
 def bench_depth_lookup(n_packages: int, max_depth: int):
     """Build tree then query every depth level."""
     tree = _build_tree(n_packages, max_depth)
+
     def run():
         total = 0
         for d in range(1, max_depth + 1):
             total += len(tree.get_nodes_at_depth(d))
         assert total == n_packages
+
     return bench(run, runs=20, label=f"depth_lookup_{n_packages}x{max_depth}")
 
 
@@ -114,9 +121,11 @@ def bench_cycle_detection_chain(length: int):
             prev.children.append(node)
         prev = node
     resolver = APMDependencyResolver()
+
     def run():
         cycles = resolver.detect_circular_dependencies(tree)
         assert len(cycles) == 0
+
     return bench(run, label=f"cycle_detect_chain_{length}")
 
 
@@ -124,9 +133,11 @@ def bench_flatten(n_packages: int, max_depth: int):
     """Flatten a tree of n packages across max_depth levels."""
     tree = _build_tree(n_packages, max_depth)
     resolver = APMDependencyResolver()
+
     def run():
         flat = resolver.flatten_dependencies(tree)
         assert flat.total_dependencies() == n_packages
+
     return bench(run, label=f"flatten_{n_packages}x{max_depth}")
 
 
@@ -134,17 +145,20 @@ def bench_from_apm_yml_repeated(tmp_dir: Path, repeats: int):
     """Parse the same apm.yml file `repeats` times."""
     apm_yml = tmp_dir / "apm.yml"
     apm_yml.write_text("name: bench-pkg\nversion: 1.0.0\n")
+
     def run():
         for _ in range(repeats):
             # Reload module-level cache state differs between baseline/optimized,
             # but we just measure wall-clock for `repeats` calls.
             APMPackage.from_apm_yml(apm_yml)
+
     return bench(run, runs=3, label=f"from_apm_yml_x{repeats}")
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main():
     import tempfile
@@ -199,8 +213,8 @@ def main():
             print(f"  {key:45s}  median={med:8.2f}ms  min={lo:8.2f}ms  max={hi:8.2f}ms")
 
     # 6. Phase 4: Parallel execution overhead (ThreadPoolExecutor vs sequential)
-    from concurrent.futures import ThreadPoolExecutor, as_completed
     import time as _time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     def _simulated_work(ms: float):
         """Simulate I/O-bound work by sleeping."""
@@ -211,6 +225,7 @@ def main():
     def _seq_10():
         for _ in range(10):
             _simulated_work(50)
+
     med, lo, hi = bench(_seq_10, runs=3, label="sequential_10x50ms")
     key = "sequential_10x50ms"
     results[key] = (med, lo, hi)
@@ -222,6 +237,7 @@ def main():
             futs = [executor.submit(_simulated_work, 50) for _ in range(10)]
             for f in as_completed(futs):
                 f.result()
+
     med, lo, hi = bench(_par_10, runs=3, label="parallel_4w_10x50ms")
     key = "parallel_4w_10x50ms"
     results[key] = (med, lo, hi)

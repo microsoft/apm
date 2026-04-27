@@ -18,11 +18,15 @@ class TestAPMPackageMCPParsing:
     def test_parse_string_mcp_deps(self, tmp_path):
         """String-only MCP deps parse correctly."""
         yml = tmp_path / "apm.yml"
-        yml.write_text(yaml.dump({
-            "name": "pkg",
-            "version": "1.0.0",
-            "dependencies": {"mcp": ["ghcr.io/some/server"]},
-        }))
+        yml.write_text(
+            yaml.dump(
+                {
+                    "name": "pkg",
+                    "version": "1.0.0",
+                    "dependencies": {"mcp": ["ghcr.io/some/server"]},
+                }
+            )
+        )
         pkg = APMPackage.from_apm_yml(yml)
         deps = pkg.get_mcp_dependencies()
 
@@ -35,11 +39,15 @@ class TestAPMPackageMCPParsing:
         """Inline dict MCP deps are preserved."""
         inline = {"name": "my-srv", "type": "sse", "url": "https://example.com"}
         yml = tmp_path / "apm.yml"
-        yml.write_text(yaml.dump({
-            "name": "pkg",
-            "version": "1.0.0",
-            "dependencies": {"mcp": [inline]},
-        }))
+        yml.write_text(
+            yaml.dump(
+                {
+                    "name": "pkg",
+                    "version": "1.0.0",
+                    "dependencies": {"mcp": [inline]},
+                }
+            )
+        )
         pkg = APMPackage.from_apm_yml(yml)
         deps = pkg.get_mcp_dependencies()
 
@@ -52,11 +60,15 @@ class TestAPMPackageMCPParsing:
         """A mix of string and dict entries is preserved in order."""
         inline = {"name": "inline-srv", "type": "http", "url": "https://x"}
         yml = tmp_path / "apm.yml"
-        yml.write_text(yaml.dump({
-            "name": "pkg",
-            "version": "1.0.0",
-            "dependencies": {"mcp": ["registry-srv", inline]},
-        }))
+        yml.write_text(
+            yaml.dump(
+                {
+                    "name": "pkg",
+                    "version": "1.0.0",
+                    "dependencies": {"mcp": ["registry-srv", inline]},
+                }
+            )
+        )
         pkg = APMPackage.from_apm_yml(yml)
         deps = pkg.get_mcp_dependencies()
 
@@ -69,32 +81,44 @@ class TestAPMPackageMCPParsing:
     def test_no_mcp_section(self, tmp_path):
         """Missing MCP section returns empty list."""
         yml = tmp_path / "apm.yml"
-        yml.write_text(yaml.dump({
-            "name": "pkg",
-            "version": "1.0.0",
-        }))
+        yml.write_text(
+            yaml.dump(
+                {
+                    "name": "pkg",
+                    "version": "1.0.0",
+                }
+            )
+        )
         pkg = APMPackage.from_apm_yml(yml)
         assert pkg.get_mcp_dependencies() == []
 
     def test_mcp_null_returns_empty(self, tmp_path):
         """mcp: null should return empty list, not raise TypeError."""
         yml = tmp_path / "apm.yml"
-        yml.write_text(yaml.dump({
-            "name": "pkg",
-            "version": "1.0.0",
-            "dependencies": {"mcp": None},
-        }))
+        yml.write_text(
+            yaml.dump(
+                {
+                    "name": "pkg",
+                    "version": "1.0.0",
+                    "dependencies": {"mcp": None},
+                }
+            )
+        )
         pkg = APMPackage.from_apm_yml(yml)
         assert pkg.get_mcp_dependencies() == []
 
     def test_mcp_empty_list_returns_empty(self, tmp_path):
         """mcp: [] should return empty list."""
         yml = tmp_path / "apm.yml"
-        yml.write_text(yaml.dump({
-            "name": "pkg",
-            "version": "1.0.0",
-            "dependencies": {"mcp": []},
-        }))
+        yml.write_text(
+            yaml.dump(
+                {
+                    "name": "pkg",
+                    "version": "1.0.0",
+                    "dependencies": {"mcp": []},
+                }
+            )
+        )
         pkg = APMPackage.from_apm_yml(yml)
         assert pkg.get_mcp_dependencies() == []
 
@@ -112,11 +136,15 @@ class TestCollectTransitiveMCPDeps:
     def test_collects_string_deps(self, tmp_path):
         pkg_dir = tmp_path / "org" / "pkg-a"
         pkg_dir.mkdir(parents=True)
-        (pkg_dir / "apm.yml").write_text(yaml.dump({
-            "name": "pkg-a",
-            "version": "1.0.0",
-            "dependencies": {"mcp": ["ghcr.io/a/server"]},
-        }))
+        (pkg_dir / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "pkg-a",
+                    "version": "1.0.0",
+                    "dependencies": {"mcp": ["ghcr.io/a/server"]},
+                }
+            )
+        )
         result = MCPIntegrator.collect_transitive(tmp_path)
         assert len(result) == 1
         assert isinstance(result[0], MCPDependency)
@@ -126,11 +154,15 @@ class TestCollectTransitiveMCPDeps:
         inline = {"name": "kb", "type": "sse", "url": "https://kb.example.com"}
         pkg_dir = tmp_path / "org" / "pkg-b"
         pkg_dir.mkdir(parents=True)
-        (pkg_dir / "apm.yml").write_text(yaml.dump({
-            "name": "pkg-b",
-            "version": "1.0.0",
-            "dependencies": {"mcp": [inline]},
-        }))
+        (pkg_dir / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "pkg-b",
+                    "version": "1.0.0",
+                    "dependencies": {"mcp": [inline]},
+                }
+            )
+        )
         result = MCPIntegrator.collect_transitive(tmp_path)
         assert len(result) == 1
         assert isinstance(result[0], MCPDependency)
@@ -140,11 +172,15 @@ class TestCollectTransitiveMCPDeps:
         for i, dep in enumerate(["ghcr.io/a/s1", "ghcr.io/b/s2"]):
             d = tmp_path / "org" / f"pkg-{i}"
             d.mkdir(parents=True)
-            (d / "apm.yml").write_text(yaml.dump({
-                "name": f"pkg-{i}",
-                "version": "1.0.0",
-                "dependencies": {"mcp": [dep]},
-            }))
+            (d / "apm.yml").write_text(
+                yaml.dump(
+                    {
+                        "name": f"pkg-{i}",
+                        "version": "1.0.0",
+                        "dependencies": {"mcp": [dep]},
+                    }
+                )
+            )
         result = MCPIntegrator.collect_transitive(tmp_path)
         assert len(result) == 2
 
@@ -162,27 +198,39 @@ class TestCollectTransitiveMCPDeps:
         # Package that IS in the lock file
         locked_dir = apm_modules / "org" / "locked-pkg"
         locked_dir.mkdir(parents=True)
-        (locked_dir / "apm.yml").write_text(yaml.dump({
-            "name": "locked-pkg",
-            "version": "1.0.0",
-            "dependencies": {"mcp": ["ghcr.io/locked/server"]},
-        }))
+        (locked_dir / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "locked-pkg",
+                    "version": "1.0.0",
+                    "dependencies": {"mcp": ["ghcr.io/locked/server"]},
+                }
+            )
+        )
         # Package that is NOT in the lock file (orphan)
         orphan_dir = apm_modules / "org" / "orphan-pkg"
         orphan_dir.mkdir(parents=True)
-        (orphan_dir / "apm.yml").write_text(yaml.dump({
-            "name": "orphan-pkg",
-            "version": "1.0.0",
-            "dependencies": {"mcp": ["ghcr.io/orphan/server"]},
-        }))
+        (orphan_dir / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "orphan-pkg",
+                    "version": "1.0.0",
+                    "dependencies": {"mcp": ["ghcr.io/orphan/server"]},
+                }
+            )
+        )
         # Write lock file referencing only the locked package
         lock_path = tmp_path / "apm.lock.yaml"
-        lock_path.write_text(yaml.dump({
-            "lockfile_version": "1",
-            "dependencies": [
-                {"repo_url": "org/locked-pkg", "host": "github.com"},
-            ],
-        }))
+        lock_path.write_text(
+            yaml.dump(
+                {
+                    "lockfile_version": "1",
+                    "dependencies": [
+                        {"repo_url": "org/locked-pkg", "host": "github.com"},
+                    ],
+                }
+            )
+        )
         result = MCPIntegrator.collect_transitive(apm_modules, lock_path)
         assert len(result) == 1
         assert isinstance(result[0], MCPDependency)
@@ -194,26 +242,46 @@ class TestCollectTransitiveMCPDeps:
         # Subdirectory package matching lock entry
         sub_dir = apm_modules / "org" / "monorepo" / "skills" / "azure"
         sub_dir.mkdir(parents=True)
-        (sub_dir / "apm.yml").write_text(yaml.dump({
-            "name": "azure-skill",
-            "version": "1.0.0",
-            "dependencies": {"mcp": [{"name": "learn", "type": "http", "url": "https://learn.example.com"}]},
-        }))
+        (sub_dir / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "azure-skill",
+                    "version": "1.0.0",
+                    "dependencies": {
+                        "mcp": [
+                            {"name": "learn", "type": "http", "url": "https://learn.example.com"}
+                        ]
+                    },
+                }
+            )
+        )
         # Another subdirectory NOT in the lock
         other_dir = apm_modules / "org" / "monorepo" / "skills" / "other"
         other_dir.mkdir(parents=True)
-        (other_dir / "apm.yml").write_text(yaml.dump({
-            "name": "other-skill",
-            "version": "1.0.0",
-            "dependencies": {"mcp": ["ghcr.io/other/server"]},
-        }))
+        (other_dir / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "other-skill",
+                    "version": "1.0.0",
+                    "dependencies": {"mcp": ["ghcr.io/other/server"]},
+                }
+            )
+        )
         lock_path = tmp_path / "apm.lock.yaml"
-        lock_path.write_text(yaml.dump({
-            "lockfile_version": "1",
-            "dependencies": [
-                {"repo_url": "org/monorepo", "host": "github.com", "virtual_path": "skills/azure"},
-            ],
-        }))
+        lock_path.write_text(
+            yaml.dump(
+                {
+                    "lockfile_version": "1",
+                    "dependencies": [
+                        {
+                            "repo_url": "org/monorepo",
+                            "host": "github.com",
+                            "virtual_path": "skills/azure",
+                        },
+                    ],
+                }
+            )
+        )
         result = MCPIntegrator.collect_transitive(apm_modules, lock_path)
         assert len(result) == 1
         assert isinstance(result[0], MCPDependency)
@@ -224,19 +292,27 @@ class TestCollectTransitiveMCPDeps:
         apm_modules = tmp_path / "apm_modules"
         locked_dir = apm_modules / "org" / "locked-pkg"
         locked_dir.mkdir(parents=True)
-        (locked_dir / "apm.yml").write_text(yaml.dump({
-            "name": "locked-pkg",
-            "version": "1.0.0",
-            "dependencies": {"mcp": ["ghcr.io/locked/server"]},
-        }))
+        (locked_dir / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "locked-pkg",
+                    "version": "1.0.0",
+                    "dependencies": {"mcp": ["ghcr.io/locked/server"]},
+                }
+            )
+        )
 
         lock_path = tmp_path / "apm.lock.yaml"
-        lock_path.write_text(yaml.dump({
-            "lockfile_version": "1",
-            "dependencies": [
-                {"repo_url": "org/locked-pkg", "host": "github.com"},
-            ],
-        }))
+        lock_path.write_text(
+            yaml.dump(
+                {
+                    "lockfile_version": "1",
+                    "dependencies": [
+                        {"repo_url": "org/locked-pkg", "host": "github.com"},
+                    ],
+                }
+            )
+        )
 
         with patch("pathlib.Path.rglob", side_effect=AssertionError("rglob should not be called")):
             result = MCPIntegrator.collect_transitive(apm_modules, lock_path)
@@ -249,11 +325,15 @@ class TestCollectTransitiveMCPDeps:
         apm_modules = tmp_path / "apm_modules"
         pkg_dir = apm_modules / "org" / "pkg-a"
         pkg_dir.mkdir(parents=True)
-        (pkg_dir / "apm.yml").write_text(yaml.dump({
-            "name": "pkg-a",
-            "version": "1.0.0",
-            "dependencies": {"mcp": ["ghcr.io/a/server"]},
-        }))
+        (pkg_dir / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "pkg-a",
+                    "version": "1.0.0",
+                    "dependencies": {"mcp": ["ghcr.io/a/server"]},
+                }
+            )
+        )
 
         lock_path = tmp_path / "apm.lock.yaml"
         lock_path.write_text("dependencies: [")
@@ -266,14 +346,25 @@ class TestCollectTransitiveMCPDeps:
         """Self-defined servers from transitive packages are skipped without the flag."""
         pkg_dir = tmp_path / "org" / "pkg-a"
         pkg_dir.mkdir(parents=True)
-        (pkg_dir / "apm.yml").write_text(yaml.dump({
-            "name": "pkg-a",
-            "version": "1.0.0",
-            "dependencies": {"mcp": [
-                "ghcr.io/registry/server",
-                {"name": "private-srv", "registry": False, "transport": "http", "url": "https://private.example.com"},
-            ]},
-        }))
+        (pkg_dir / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "pkg-a",
+                    "version": "1.0.0",
+                    "dependencies": {
+                        "mcp": [
+                            "ghcr.io/registry/server",
+                            {
+                                "name": "private-srv",
+                                "registry": False,
+                                "transport": "http",
+                                "url": "https://private.example.com",
+                            },
+                        ]
+                    },
+                }
+            )
+        )
         result = MCPIntegrator.collect_transitive(tmp_path)
         assert len(result) == 1
         assert result[0].name == "ghcr.io/registry/server"
@@ -282,14 +373,25 @@ class TestCollectTransitiveMCPDeps:
         """With trust_private=True, self-defined servers are collected."""
         pkg_dir = tmp_path / "org" / "pkg-a"
         pkg_dir.mkdir(parents=True)
-        (pkg_dir / "apm.yml").write_text(yaml.dump({
-            "name": "pkg-a",
-            "version": "1.0.0",
-            "dependencies": {"mcp": [
-                "ghcr.io/registry/server",
-                {"name": "private-srv", "registry": False, "transport": "http", "url": "https://private.example.com"},
-            ]},
-        }))
+        (pkg_dir / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "pkg-a",
+                    "version": "1.0.0",
+                    "dependencies": {
+                        "mcp": [
+                            "ghcr.io/registry/server",
+                            {
+                                "name": "private-srv",
+                                "registry": False,
+                                "transport": "http",
+                                "url": "https://private.example.com",
+                            },
+                        ]
+                    },
+                }
+            )
+        )
         result = MCPIntegrator.collect_transitive(tmp_path, trust_private=True)
         assert len(result) == 2
         names = [d.name for d in result]
@@ -300,13 +402,24 @@ class TestCollectTransitiveMCPDeps:
         """Explicitly passing trust_private=False behaves same as default."""
         pkg_dir = tmp_path / "org" / "pkg-a"
         pkg_dir.mkdir(parents=True)
-        (pkg_dir / "apm.yml").write_text(yaml.dump({
-            "name": "pkg-a",
-            "version": "1.0.0",
-            "dependencies": {"mcp": [
-                {"name": "private-srv", "registry": False, "transport": "http", "url": "https://private.example.com"},
-            ]},
-        }))
+        (pkg_dir / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "pkg-a",
+                    "version": "1.0.0",
+                    "dependencies": {
+                        "mcp": [
+                            {
+                                "name": "private-srv",
+                                "registry": False,
+                                "transport": "http",
+                                "url": "https://private.example.com",
+                            },
+                        ]
+                    },
+                }
+            )
+        )
         result = MCPIntegrator.collect_transitive(tmp_path, trust_private=False)
         assert len(result) == 0
 
@@ -315,21 +428,35 @@ class TestCollectTransitiveMCPDeps:
         apm_modules = tmp_path / "apm_modules"
         pkg_dir = apm_modules / "org" / "direct-pkg"
         pkg_dir.mkdir(parents=True)
-        (pkg_dir / "apm.yml").write_text(yaml.dump({
-            "name": "direct-pkg",
-            "version": "1.0.0",
-            "dependencies": {"mcp": [
-                {"name": "private-srv", "registry": False,
-                 "transport": "http", "url": "https://private.example.com"},
-            ]},
-        }))
+        (pkg_dir / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "direct-pkg",
+                    "version": "1.0.0",
+                    "dependencies": {
+                        "mcp": [
+                            {
+                                "name": "private-srv",
+                                "registry": False,
+                                "transport": "http",
+                                "url": "https://private.example.com",
+                            },
+                        ]
+                    },
+                }
+            )
+        )
         lock_path = tmp_path / "apm.lock.yaml"
-        lock_path.write_text(yaml.dump({
-            "lockfile_version": "1",
-            "dependencies": [
-                {"repo_url": "org/direct-pkg", "host": "github.com", "depth": 1},
-            ],
-        }))
+        lock_path.write_text(
+            yaml.dump(
+                {
+                    "lockfile_version": "1",
+                    "dependencies": [
+                        {"repo_url": "org/direct-pkg", "host": "github.com", "depth": 1},
+                    ],
+                }
+            )
+        )
         result = MCPIntegrator.collect_transitive(apm_modules, lock_path)
         assert len(result) == 1
         assert result[0].name == "private-srv"
@@ -339,21 +466,35 @@ class TestCollectTransitiveMCPDeps:
         apm_modules = tmp_path / "apm_modules"
         pkg_dir = apm_modules / "org" / "transitive-pkg"
         pkg_dir.mkdir(parents=True)
-        (pkg_dir / "apm.yml").write_text(yaml.dump({
-            "name": "transitive-pkg",
-            "version": "1.0.0",
-            "dependencies": {"mcp": [
-                {"name": "private-srv", "registry": False,
-                 "transport": "http", "url": "https://private.example.com"},
-            ]},
-        }))
+        (pkg_dir / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "transitive-pkg",
+                    "version": "1.0.0",
+                    "dependencies": {
+                        "mcp": [
+                            {
+                                "name": "private-srv",
+                                "registry": False,
+                                "transport": "http",
+                                "url": "https://private.example.com",
+                            },
+                        ]
+                    },
+                }
+            )
+        )
         lock_path = tmp_path / "apm.lock.yaml"
-        lock_path.write_text(yaml.dump({
-            "lockfile_version": "1",
-            "dependencies": [
-                {"repo_url": "org/transitive-pkg", "host": "github.com", "depth": 2},
-            ],
-        }))
+        lock_path.write_text(
+            yaml.dump(
+                {
+                    "lockfile_version": "1",
+                    "dependencies": [
+                        {"repo_url": "org/transitive-pkg", "host": "github.com", "depth": 2},
+                    ],
+                }
+            )
+        )
         result = MCPIntegrator.collect_transitive(apm_modules, lock_path)
         assert len(result) == 0
 
@@ -362,21 +503,35 @@ class TestCollectTransitiveMCPDeps:
         apm_modules = tmp_path / "apm_modules"
         pkg_dir = apm_modules / "org" / "transitive-pkg"
         pkg_dir.mkdir(parents=True)
-        (pkg_dir / "apm.yml").write_text(yaml.dump({
-            "name": "transitive-pkg",
-            "version": "1.0.0",
-            "dependencies": {"mcp": [
-                {"name": "private-srv", "registry": False,
-                 "transport": "http", "url": "https://private.example.com"},
-            ]},
-        }))
+        (pkg_dir / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "transitive-pkg",
+                    "version": "1.0.0",
+                    "dependencies": {
+                        "mcp": [
+                            {
+                                "name": "private-srv",
+                                "registry": False,
+                                "transport": "http",
+                                "url": "https://private.example.com",
+                            },
+                        ]
+                    },
+                }
+            )
+        )
         lock_path = tmp_path / "apm.lock.yaml"
-        lock_path.write_text(yaml.dump({
-            "lockfile_version": "1",
-            "dependencies": [
-                {"repo_url": "org/transitive-pkg", "host": "github.com", "depth": 2},
-            ],
-        }))
+        lock_path.write_text(
+            yaml.dump(
+                {
+                    "lockfile_version": "1",
+                    "dependencies": [
+                        {"repo_url": "org/transitive-pkg", "host": "github.com", "depth": 2},
+                    ],
+                }
+            )
+        )
         result = MCPIntegrator.collect_transitive(apm_modules, lock_path, trust_private=True)
         assert len(result) == 1
         assert result[0].name == "private-srv"
@@ -385,15 +540,25 @@ class TestCollectTransitiveMCPDeps:
         """No lockfile → all self-defined skipped (conservative)."""
         pkg_dir = tmp_path / "org" / "pkg-a"
         pkg_dir.mkdir(parents=True)
-        (pkg_dir / "apm.yml").write_text(yaml.dump({
-            "name": "pkg-a",
-            "version": "1.0.0",
-            "dependencies": {"mcp": [
-                "ghcr.io/registry/server",
-                {"name": "private-srv", "registry": False,
-                 "transport": "http", "url": "https://private.example.com"},
-            ]},
-        }))
+        (pkg_dir / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "pkg-a",
+                    "version": "1.0.0",
+                    "dependencies": {
+                        "mcp": [
+                            "ghcr.io/registry/server",
+                            {
+                                "name": "private-srv",
+                                "registry": False,
+                                "transport": "http",
+                                "url": "https://private.example.com",
+                            },
+                        ]
+                    },
+                }
+            )
+        )
         # No lock_path provided
         result = MCPIntegrator.collect_transitive(tmp_path)
         assert len(result) == 1
@@ -404,7 +569,6 @@ class TestCollectTransitiveMCPDeps:
 # _deduplicate_mcp_deps
 # ---------------------------------------------------------------------------
 class TestDeduplicateMCPDeps:
-
     def test_deduplicates_strings(self):
         deps = ["a", "b", "a", "c", "b"]
         assert MCPIntegrator.deduplicate(deps) == ["a", "b", "c"]
@@ -445,17 +609,13 @@ class TestDeduplicateMCPDeps:
         assert result[0]["url"] == "https://root-url"
 
 
-
 # ---------------------------------------------------------------------------
 # _install_mcp_dependencies
 # ---------------------------------------------------------------------------
 class TestInstallMCPDependencies:
-
     @patch("apm_cli.integration.mcp_integrator._get_console", return_value=None)
     @patch("apm_cli.registry.operations.MCPServerOperations")
-    def test_already_configured_registry_servers_not_counted_as_new(
-        self, mock_ops_cls, _console
-    ):
+    def test_already_configured_registry_servers_not_counted_as_new(self, mock_ops_cls, _console):
         mock_ops = mock_ops_cls.return_value
         mock_ops.validate_servers_exist.return_value = (["ghcr.io/org/server"], [])
         mock_ops.check_servers_needing_installation.return_value = []
@@ -480,9 +640,7 @@ class TestInstallMCPDependencies:
         mock_ops.collect_environment_variables.return_value = {}
         mock_ops.collect_runtime_variables.return_value = {}
 
-        count = MCPIntegrator.install(
-            ["ghcr.io/org/already", "ghcr.io/org/new"], runtime="vscode"
-        )
+        count = MCPIntegrator.install(["ghcr.io/org/already", "ghcr.io/org/new"], runtime="vscode")
 
         assert count == 1
         mock_install_runtime.assert_called_once()
@@ -521,7 +679,6 @@ class TestInstallMCPDependencies:
 # _check_self_defined_servers_needing_installation
 # ---------------------------------------------------------------------------
 class TestCheckSelfDefinedServersNeeding:
-
     @patch("apm_cli.core.conflict_detector.MCPConflictDetector")
     @patch("apm_cli.factory.ClientFactory")
     def test_all_servers_need_installation_when_none_configured(
@@ -574,7 +731,8 @@ class TestCheckSelfDefinedServersNeeding:
 
         mock_detector = MagicMock()
         mock_detector.get_existing_server_configs.side_effect = [
-            copilot_config, vscode_config,
+            copilot_config,
+            vscode_config,
         ]
         mock_detector_cls.return_value = mock_detector
 
@@ -584,9 +742,7 @@ class TestCheckSelfDefinedServersNeeding:
         assert result == ["atlassian"]
 
     @patch("apm_cli.factory.ClientFactory")
-    def test_config_read_failure_assumes_needs_installation(
-        self, mock_factory_cls
-    ):
+    def test_config_read_failure_assumes_needs_installation(self, mock_factory_cls):
         """If config read fails, assume server needs installation."""
         mock_factory_cls.create_client.side_effect = Exception("config error")
 
@@ -597,9 +753,7 @@ class TestCheckSelfDefinedServersNeeding:
 
     def test_empty_runtimes_returns_empty(self):
         """With no target runtimes, no server is found missing."""
-        result = MCPIntegrator._check_self_defined_servers_needing_installation(
-            ["a", "b"], []
-        )
+        result = MCPIntegrator._check_self_defined_servers_needing_installation(["a", "b"], [])
         # With no runtimes to check, no server is found missing → none need install
         assert result == []
 
@@ -622,9 +776,10 @@ class TestCheckSelfDefinedServersNeeding:
         )
 
         assert sorted(result) == ["atlassian", "zephyr"]
-        assert [
-            call.args[0] for call in mock_factory_cls.create_client.call_args_list
-        ] == ["copilot", "vscode"]
+        assert [call.args[0] for call in mock_factory_cls.create_client.call_args_list] == [
+            "copilot",
+            "vscode",
+        ]
         assert mock_copilot_detector.get_existing_server_configs.call_count == 1
         assert mock_vscode_detector.get_existing_server_configs.call_count == 1
 
@@ -633,18 +788,24 @@ class TestCheckSelfDefinedServersNeeding:
 # _install_mcp_dependencies – self-defined skip logic
 # ---------------------------------------------------------------------------
 class TestInstallSelfDefinedSkipLogic:
-
-    @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation")
+    @patch(
+        "apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation"
+    )
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.integration.mcp_integrator._get_console", return_value=None)
     def test_already_configured_self_defined_servers_skipped(
-        self, _console, mock_install_runtime, mock_check,
+        self,
+        _console,
+        mock_install_runtime,
+        mock_check,
     ):
         """Self-defined servers already configured should not trigger _install_for_runtime."""
         mock_check.return_value = []  # none need installation
 
         dep = MCPDependency(
-            name="atlassian", transport="http", url="https://atlassian.example.com",
+            name="atlassian",
+            transport="http",
+            url="https://atlassian.example.com",
             registry=False,
         )
         count = MCPIntegrator.install([dep], runtime="vscode")
@@ -652,18 +813,20 @@ class TestInstallSelfDefinedSkipLogic:
         assert count == 0
         mock_install_runtime.assert_not_called()
 
-    @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation")
+    @patch(
+        "apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation"
+    )
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.integration.mcp_integrator._get_console", return_value=None)
-    def test_new_self_defined_server_installed(
-        self, _console, mock_install_runtime, mock_check
-    ):
+    def test_new_self_defined_server_installed(self, _console, mock_install_runtime, mock_check):
         """Self-defined servers NOT already configured should be installed."""
         mock_check.return_value = ["atlassian"]
         mock_install_runtime.return_value = True
 
         dep = MCPDependency(
-            name="atlassian", transport="http", url="https://atlassian.example.com",
+            name="atlassian",
+            transport="http",
+            url="https://atlassian.example.com",
             registry=False,
         )
         count = MCPIntegrator.install([dep], runtime="vscode")
@@ -671,11 +834,11 @@ class TestInstallSelfDefinedSkipLogic:
         assert count == 1
         assert mock_install_runtime.call_count == 1
 
-    @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation")
+    @patch(
+        "apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation"
+    )
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
-    def test_mixed_self_defined_shows_already_configured(
-        self, mock_install_runtime, mock_check
-    ):
+    def test_mixed_self_defined_shows_already_configured(self, mock_install_runtime, mock_check):
         """Mix of new and existing self-defined servers: only new ones installed, existing shown as configured."""
         mock_check.return_value = ["new-srv"]
         mock_install_runtime.return_value = True
@@ -683,12 +846,16 @@ class TestInstallSelfDefinedSkipLogic:
 
         deps = [
             MCPDependency(
-                name="existing-srv", transport="http",
-                url="https://existing.example.com", registry=False,
+                name="existing-srv",
+                transport="http",
+                url="https://existing.example.com",
+                registry=False,
             ),
             MCPDependency(
-                name="new-srv", transport="http",
-                url="https://new.example.com", registry=False,
+                name="new-srv",
+                transport="http",
+                url="https://new.example.com",
+                registry=False,
             ),
         ]
 
@@ -723,25 +890,25 @@ class TestDetectMCPConfigDrift:
 
     def test_drift_detected_when_env_changes(self):
         """Drift detected when env vars change."""
-        dep = MCPDependency(
-            name="github", transport="stdio", env={"TOKEN": "new-value"}
-        )
-        stored = {
-            "github": {"name": "github", "transport": "stdio", "env": {"TOKEN": "old-value"}}
-        }
+        dep = MCPDependency(name="github", transport="stdio", env={"TOKEN": "new-value"})
+        stored = {"github": {"name": "github", "transport": "stdio", "env": {"TOKEN": "old-value"}}}
         result = MCPIntegrator._detect_mcp_config_drift([dep], stored)
         assert result == {"github"}
 
     def test_drift_detected_when_url_changes(self):
         """Drift detected when URL changes for self-defined server."""
         dep = MCPDependency(
-            name="internal-kb", registry=False, transport="http",
+            name="internal-kb",
+            registry=False,
+            transport="http",
             url="https://new-kb.example.com",
         )
         stored = {
             "internal-kb": {
-                "name": "internal-kb", "registry": False,
-                "transport": "http", "url": "https://old-kb.example.com",
+                "name": "internal-kb",
+                "registry": False,
+                "transport": "http",
+                "url": "https://old-kb.example.com",
             }
         }
         result = MCPIntegrator._detect_mcp_config_drift([dep], stored)
@@ -756,9 +923,7 @@ class TestDetectMCPConfigDrift:
 
     def test_drift_detected_when_args_change(self):
         """Drift detected when args change."""
-        dep = MCPDependency(
-            name="github", transport="stdio", args=["--new-flag"]
-        )
+        dep = MCPDependency(name="github", transport="stdio", args=["--new-flag"])
         stored = {"github": {"name": "github", "transport": "stdio", "args": ["--old-flag"]}}
         result = MCPIntegrator._detect_mcp_config_drift([dep], stored)
         assert result == {"github"}
@@ -792,7 +957,8 @@ class TestDetectMCPConfigDrift:
         stored = {
             "unchanged": {"name": "unchanged", "transport": "stdio"},
             "changed": {
-                "name": "changed", "transport": "http",
+                "name": "changed",
+                "transport": "http",
                 "url": "https://old.example.com",
             },
         }
@@ -808,9 +974,7 @@ class TestDetectMCPConfigDrift:
 
     def test_drift_when_headers_added(self):
         """Drift detected when headers are added to existing server."""
-        dep = MCPDependency(
-            name="github", headers={"Authorization": "Bearer token"}
-        )
+        dep = MCPDependency(name="github", headers={"Authorization": "Bearer token"})
         stored = {"github": {"name": "github"}}
         result = MCPIntegrator._detect_mcp_config_drift([dep], stored)
         assert result == {"github"}
@@ -833,7 +997,9 @@ class TestGetServerConfigs:
         deps = [
             MCPDependency(name="github", transport="stdio"),
             MCPDependency(
-                name="internal-kb", registry=False, transport="http",
+                name="internal-kb",
+                registry=False,
+                transport="http",
                 url="https://kb.example.com",
             ),
         ]
@@ -841,8 +1007,10 @@ class TestGetServerConfigs:
         assert configs == {
             "github": {"name": "github", "transport": "stdio"},
             "internal-kb": {
-                "name": "internal-kb", "registry": False,
-                "transport": "http", "url": "https://kb.example.com",
+                "name": "internal-kb",
+                "registry": False,
+                "transport": "http",
+                "url": "https://kb.example.com",
             },
         }
 
@@ -858,83 +1026,96 @@ class TestGetServerConfigs:
 # Diff-aware install — self-defined servers with config drift
 # ---------------------------------------------------------------------------
 class TestDiffAwareSelfDefinedInstall:
-
-    @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation")
+    @patch(
+        "apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation"
+    )
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.integration.mcp_integrator._get_console", return_value=None)
-    def test_config_drift_triggers_reinstall(
-        self, _console, mock_install_runtime, mock_check
-    ):
+    def test_config_drift_triggers_reinstall(self, _console, mock_install_runtime, mock_check):
         """Self-defined server with config drift should be re-installed."""
         # Server is already configured (check returns empty)
         mock_check.return_value = []
         mock_install_runtime.return_value = True
 
         dep = MCPDependency(
-            name="internal-kb", transport="http",
-            url="https://new-kb.example.com", registry=False,
+            name="internal-kb",
+            transport="http",
+            url="https://new-kb.example.com",
+            registry=False,
         )
         stored_configs = {
             "internal-kb": {
-                "name": "internal-kb", "transport": "http",
-                "url": "https://old-kb.example.com", "registry": False,
+                "name": "internal-kb",
+                "transport": "http",
+                "url": "https://old-kb.example.com",
+                "registry": False,
             }
         }
 
         count = MCPIntegrator.install(
-            [dep], runtime="vscode",
+            [dep],
+            runtime="vscode",
             stored_mcp_configs=stored_configs,
         )
 
         assert count == 1
         mock_install_runtime.assert_called_once()
 
-    @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation")
+    @patch(
+        "apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation"
+    )
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.integration.mcp_integrator._get_console", return_value=None)
-    def test_no_drift_keeps_skip(
-        self, _console, mock_install_runtime, mock_check
-    ):
+    def test_no_drift_keeps_skip(self, _console, mock_install_runtime, mock_check):
         """Self-defined server with no config drift should still be skipped."""
         mock_check.return_value = []
 
         dep = MCPDependency(
-            name="internal-kb", transport="http",
-            url="https://kb.example.com", registry=False,
+            name="internal-kb",
+            transport="http",
+            url="https://kb.example.com",
+            registry=False,
         )
         stored_configs = {
             "internal-kb": {
-                "name": "internal-kb", "transport": "http",
-                "url": "https://kb.example.com", "registry": False,
+                "name": "internal-kb",
+                "transport": "http",
+                "url": "https://kb.example.com",
+                "registry": False,
             }
         }
 
         count = MCPIntegrator.install(
-            [dep], runtime="vscode",
+            [dep],
+            runtime="vscode",
             stored_mcp_configs=stored_configs,
         )
 
         assert count == 0
         mock_install_runtime.assert_not_called()
 
-    @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation")
+    @patch(
+        "apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation"
+    )
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
-    def test_drift_shows_updated_label(
-        self, mock_install_runtime, mock_check
-    ):
+    def test_drift_shows_updated_label(self, mock_install_runtime, mock_check):
         """Config-drifted server should show 'updated' in CLI output."""
         mock_check.return_value = []
         mock_install_runtime.return_value = True
         mock_console = MagicMock()
 
         dep = MCPDependency(
-            name="internal-kb", transport="http",
-            url="https://new-kb.example.com", registry=False,
+            name="internal-kb",
+            transport="http",
+            url="https://new-kb.example.com",
+            registry=False,
         )
         stored_configs = {
             "internal-kb": {
-                "name": "internal-kb", "transport": "http",
-                "url": "https://old-kb.example.com", "registry": False,
+                "name": "internal-kb",
+                "transport": "http",
+                "url": "https://old-kb.example.com",
+                "registry": False,
             }
         }
 
@@ -943,7 +1124,8 @@ class TestDiffAwareSelfDefinedInstall:
             return_value=mock_console,
         ):
             count = MCPIntegrator.install(
-                [dep], runtime="vscode",
+                [dep],
+                runtime="vscode",
                 stored_mcp_configs=stored_configs,
             )
 
@@ -954,18 +1136,26 @@ class TestDiffAwareSelfDefinedInstall:
         assert "updated" in printed_lines
 
     @patch("apm_cli.core.null_logger._rich_success")
-    @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation")
+    @patch(
+        "apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation"
+    )
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.integration.mcp_integrator._get_console", return_value=None)
     def test_no_stored_configs_preserves_existing_behavior(
-        self, _console, mock_install_runtime, mock_check, mock_rich_success,
+        self,
+        _console,
+        mock_install_runtime,
+        mock_check,
+        mock_rich_success,
     ):
         """Without stored configs (first install), behavior unchanged."""
         mock_check.return_value = []
 
         dep = MCPDependency(
-            name="internal-kb", transport="http",
-            url="https://kb.example.com", registry=False,
+            name="internal-kb",
+            transport="http",
+            url="https://kb.example.com",
+            registry=False,
         )
 
         count = MCPIntegrator.install([dep], runtime="vscode")

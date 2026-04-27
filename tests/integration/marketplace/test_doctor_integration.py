@@ -20,11 +20,10 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
+import pytest  # noqa: F401
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import doctor
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -89,6 +88,7 @@ def _run_doctor(extra_args=(), env_overrides=None, yml_content=None, tmp_path=No
     with runner.isolated_filesystem() as cwd:
         if tmp_path is not None and yml_content is not None:
             import shutil
+
             shutil.copy(str(tmp_path / "marketplace.yml"), cwd + "/marketplace.yml")
         with patch("subprocess.run", side_effect=_fake_git_ok):
             with patch.dict(os.environ, env, clear=True):
@@ -181,10 +181,7 @@ class TestDoctorAuthCheck:
         """When no token is set, doctor notes unauthenticated rate limits."""
         runner = CliRunner()
         # Remove all token env vars
-        clean_env = {
-            k: v for k, v in os.environ.items()
-            if k not in ("GITHUB_TOKEN", "GH_TOKEN")
-        }
+        clean_env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_TOKEN", "GH_TOKEN")}
         with runner.isolated_filesystem():
             with patch("subprocess.run", side_effect=_fake_git_ok):
                 with patch.dict(os.environ, clean_env, clear=True):
@@ -214,6 +211,7 @@ packages:
         (tmp_path / "marketplace.yml").write_text(yml_content, encoding="utf-8")
         with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
             import shutil
+
             shutil.copy(str(tmp_path / "marketplace.yml"), cwd + "/marketplace.yml")
             with patch("subprocess.run", side_effect=_fake_git_ok):
                 result = runner.invoke(doctor, [], catch_exceptions=False)

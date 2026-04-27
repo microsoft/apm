@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path  # noqa: F401
 
-from ..utils.constitution_fixtures import temp_project_with_constitution, DEFAULT_CONSTITUTION
+from ..utils.constitution_fixtures import DEFAULT_CONSTITUTION, temp_project_with_constitution
 
 CLI = [sys.executable, "-m", "apm_cli.cli", "compile", "--single-agents"]
 

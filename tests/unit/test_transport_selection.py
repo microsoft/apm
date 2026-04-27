@@ -17,7 +17,7 @@ Covers the selection matrix from issue microsoft/apm#778:
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional  # noqa: F401, UP035
 from unittest.mock import patch
 
 import pytest
@@ -27,17 +27,16 @@ from apm_cli.deps.transport_selection import (
     ENV_PROTOCOL,
     FALLBACK_HINT,
     GitConfigInsteadOfResolver,
-    InsteadOfResolver,
-    NoOpInsteadOfResolver,
+    InsteadOfResolver,  # noqa: F401
+    NoOpInsteadOfResolver,  # noqa: F401
     ProtocolPreference,
-    TransportAttempt,
+    TransportAttempt,  # noqa: F401
     TransportPlan,
     TransportSelector,
     is_fallback_allowed,
     protocol_pref_from_env,
 )
 from apm_cli.models.dependency.reference import DependencyReference
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -52,15 +51,15 @@ class FakeInsteadOfResolver:
     git's ``url.<base>.insteadof`` semantics.
     """
 
-    def __init__(self, rewrites: Optional[Dict[str, str]] = None):
+    def __init__(self, rewrites: dict[str, str] | None = None):
         self._rewrites = rewrites or {}
-        self.calls: List[str] = []
+        self.calls: list[str] = []
 
-    def resolve(self, candidate_url: str) -> Optional[str]:
+    def resolve(self, candidate_url: str) -> str | None:
         self.calls.append(candidate_url)
         for prefix, replacement in self._rewrites.items():
             if candidate_url.startswith(prefix):
-                return replacement + candidate_url[len(prefix):]
+                return replacement + candidate_url[len(prefix) :]
         return None
 
 
@@ -68,7 +67,7 @@ def _dep(spec: str) -> DependencyReference:
     return DependencyReference.parse(spec)
 
 
-def _scheme_labels(plan: TransportPlan) -> List[str]:
+def _scheme_labels(plan: TransportPlan) -> list[str]:
     return [a.scheme for a in plan.attempts]
 
 

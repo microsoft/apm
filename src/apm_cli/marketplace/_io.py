@@ -23,7 +23,7 @@ def atomic_write(path: Path, content: str) -> None:
         os.replace(str(tmp_path), str(path))
     except BaseException:
         # Clean up tmp file on failure.
-        try:
+        try:  # noqa: SIM105
             tmp_path.unlink(missing_ok=True)
         except OSError:
             pass

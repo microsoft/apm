@@ -1,19 +1,19 @@
 """Unit tests for SKILL_BUNDLE detection, validation, and integration."""
 
-import pytest
 from pathlib import Path
 
+import pytest  # noqa: F401
+
 from src.apm_cli.models.apm_package import (
-    APMPackage,
+    APMPackage,  # noqa: F401
     PackageType,
-    ValidationResult,
+    ValidationResult,  # noqa: F401
     validate_apm_package,
 )
 from src.apm_cli.models.validation import (
     detect_package_type,
     gather_detection_evidence,
 )
-
 
 # ============================================================================
 # Detection: covers all 8 shapes from the plan's test matrix
@@ -199,9 +199,7 @@ class TestSkillBundleValidation:
         skills_dir.mkdir()
         sd = skills_dir / "actual-name"
         sd.mkdir()
-        (sd / "SKILL.md").write_text(
-            "---\nname: wrong-name\ndescription: test\n---\n# x\n"
-        )
+        (sd / "SKILL.md").write_text("---\nname: wrong-name\ndescription: test\n---\n# x\n")
         result = validate_apm_package(tmp_path)
         assert result.is_valid  # warnings don't fail validation
         assert any("does not match directory name" in w for w in result.warnings)
@@ -212,9 +210,7 @@ class TestSkillBundleValidation:
         skills_dir.mkdir()
         sd = skills_dir / "no-desc"
         sd.mkdir()
-        (sd / "SKILL.md").write_text(
-            "---\nname: no-desc\n---\n# No desc skill\n"
-        )
+        (sd / "SKILL.md").write_text("---\nname: no-desc\n---\n# No desc skill\n")
         result = validate_apm_package(tmp_path)
         assert result.is_valid  # warnings don't fail
         assert any("missing 'description'" in w for w in result.warnings)
@@ -241,10 +237,8 @@ class TestSkillBundleValidation:
         # by creating a skill dir with traversal-like name
         sd = skills_dir / "..%2f..%2fetc"
         sd.mkdir()
-        (sd / "SKILL.md").write_text(
-            "---\nname: ..%2f..%2fetc\ndescription: hack\n---\n# x\n"
-        )
-        result = validate_apm_package(tmp_path)
+        (sd / "SKILL.md").write_text("---\nname: ..%2f..%2fetc\ndescription: hack\n---\n# x\n")
+        result = validate_apm_package(tmp_path)  # noqa: F841
         # The percent-encoded dots aren't traversal themselves, but let's test
         # real traversal with a symlink (if possible):
         # Actually validate_path_segments checks for literal ".." and "/" in the name
@@ -260,9 +254,7 @@ class TestSkillBundleValidation:
         # embedded: path_segments validator rejects this
         sd = skills_dir / "legit-skill"
         sd.mkdir()
-        (sd / "SKILL.md").write_text(
-            "---\nname: legit-skill\ndescription: ok\n---\n# x\n"
-        )
+        (sd / "SKILL.md").write_text("---\nname: legit-skill\ndescription: ok\n---\n# x\n")
         # This one is valid to ensure the path for valid names works
         result = validate_apm_package(tmp_path)
         assert result.is_valid
@@ -274,9 +266,7 @@ class TestSkillBundleValidation:
         sd = skills_dir / "bad-skill"
         sd.mkdir()
         # Write invalid YAML frontmatter that will fail to parse
-        (sd / "SKILL.md").write_text(
-            "---\n  invalid:\n    yaml: [unclosed\n---\n# x\n"
-        )
+        (sd / "SKILL.md").write_text("---\n  invalid:\n    yaml: [unclosed\n---\n# x\n")
         result = validate_apm_package(tmp_path)
         assert not result.is_valid
 
@@ -287,15 +277,11 @@ class TestSkillBundleValidation:
         # Valid skill
         sd1 = skills_dir / "good-skill"
         sd1.mkdir()
-        (sd1 / "SKILL.md").write_text(
-            "---\nname: good-skill\ndescription: good\n---\n# Good\n"
-        )
+        (sd1 / "SKILL.md").write_text("---\nname: good-skill\ndescription: good\n---\n# Good\n")
         # Mismatched skill (name mismatch -> warning)
         sd2 = skills_dir / "bad-skill"
         sd2.mkdir()
-        (sd2 / "SKILL.md").write_text(
-            "---\nname: wrong\ndescription: bad\n---\n# Bad\n"
-        )
+        (sd2 / "SKILL.md").write_text("---\nname: wrong\ndescription: bad\n---\n# Bad\n")
         result = validate_apm_package(tmp_path)
         # Valid overall -- name mismatch is a warning, not error
         assert result.package is not None
@@ -308,9 +294,7 @@ class TestSkillBundleValidation:
         skills_dir.mkdir()
         sd = skills_dir / "my-skill"
         sd.mkdir()
-        (sd / "SKILL.md").write_text(
-            "---\nname: my-skill\ndescription: test\n---\n# x\n"
-        )
+        (sd / "SKILL.md").write_text("---\nname: my-skill\ndescription: test\n---\n# x\n")
         (tmp_path / "apm.yml").write_text("not: valid: yaml: {{{{")
         result = validate_apm_package(tmp_path)
         assert not result.is_valid
@@ -327,7 +311,8 @@ class TestSkillSubsetNormalization:
 
     def test_skill_names_empty_gives_none(self):
         """No --skill -> None (install all)."""
-        from apm_cli.commands.install import install
+        from apm_cli.commands.install import install  # noqa: F401
+
         # This is implicitly tested by the Click default (multiple=True -> empty tuple)
         # The normalization: empty tuple is falsy, so _skill_subset stays None.
         assert not ()  # confirms empty tuple is falsy
@@ -381,9 +366,7 @@ class TestPromoteSubSkillsNameFilter:
         for name in ("alpha", "beta", "gamma"):
             sd = skills_dir / name
             sd.mkdir()
-            (sd / "SKILL.md").write_text(
-                f"---\nname: {name}\ndescription: test\n---\n# {name}\n"
-            )
+            (sd / "SKILL.md").write_text(f"---\nname: {name}\ndescription: test\n---\n# {name}\n")
 
         # Target dir
         target_skills = tmp_path / "target" / "skills"
@@ -414,9 +397,7 @@ class TestPromoteSubSkillsNameFilter:
         for name in ("alpha", "beta"):
             sd = skills_dir / name
             sd.mkdir()
-            (sd / "SKILL.md").write_text(
-                f"---\nname: {name}\ndescription: test\n---\n# {name}\n"
-            )
+            (sd / "SKILL.md").write_text(f"---\nname: {name}\ndescription: test\n---\n# {name}\n")
 
         target_skills = tmp_path / "target" / "skills"
         target_skills.mkdir(parents=True)

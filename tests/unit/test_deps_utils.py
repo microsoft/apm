@@ -5,7 +5,7 @@ Covers the pure helpers that scan, count, and describe installed packages.
 
 from pathlib import Path
 
-import pytest
+import pytest  # noqa: F401
 
 from apm_cli.commands.deps._utils import (
     _count_package_files,
@@ -18,7 +18,6 @@ from apm_cli.commands.deps._utils import (
     _scan_installed_packages,
 )
 from apm_cli.constants import APM_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
-
 
 # ------------------------------------------------------------------
 # Helpers to build fixture package directories
@@ -378,7 +377,8 @@ class TestGetDetailedPackageInfo:
     def test_full_apm_yml(self, tmp_path):
         """All metadata fields are extracted from apm.yml."""
         _make_apm_yml(
-            tmp_path, "fullpkg",
+            tmp_path,
+            "fullpkg",
             version="3.0.0",
             description="Full package",
             author="Alice",

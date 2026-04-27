@@ -42,21 +42,24 @@ def test_runtime_remove_help_includes_short_yes_alias():
 def test_mcp_install_forwards_unknown_options_before_double_dash():
     runner = CliRunner()
 
-    with runner.isolated_filesystem(), patch(
-        "apm_cli.commands.install._get_invocation_argv",
-        return_value=[
-            "apm",
-            "mcp",
-            "install",
-            "myserver",
-            "--target",
-            "cursor",
-            "--dry-run",
-            "--",
-            "npx",
-            "-y",
-            "pkg",
-        ],
+    with (
+        runner.isolated_filesystem(),
+        patch(
+            "apm_cli.commands.install._get_invocation_argv",
+            return_value=[
+                "apm",
+                "mcp",
+                "install",
+                "myserver",
+                "--target",
+                "cursor",
+                "--dry-run",
+                "--",
+                "npx",
+                "-y",
+                "pkg",
+            ],
+        ),
     ):
         result = runner.invoke(
             cli,

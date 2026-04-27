@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 import textwrap
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -18,7 +16,6 @@ from apm_cli.marketplace.yml_schema import (
     MarketplaceYml,
     PackageEntry,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -69,11 +66,16 @@ def runner():
 def _make_run_result(returncode=0, stdout="", stderr=""):
     """Build a fake subprocess.CompletedProcess."""
     return subprocess.CompletedProcess(
-        args=["git"], returncode=returncode, stdout=stdout, stderr=stderr,
+        args=["git"],
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
     )
 
 
-_GH_OK = _make_run_result(0, stdout="gh version 2.50.0 (2024-06-01)\nhttps://github.com/cli/cli/releases/tag/v2.50.0")
+_GH_OK = _make_run_result(
+    0, stdout="gh version 2.50.0 (2024-06-01)\nhttps://github.com/cli/cli/releases/tag/v2.50.0"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +273,10 @@ class TestDoctorGhCliCheck:
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _make_run_result(0, stdout="gh version 2.50.0 (2024-06-01)\nhttps://github.com/cli/cli/releases/tag/v2.50.0"),
+            _make_run_result(
+                0,
+                stdout="gh version 2.50.0 (2024-06-01)\nhttps://github.com/cli/cli/releases/tag/v2.50.0",
+            ),
         ]
 
         result = runner.invoke(marketplace, ["doctor"])
@@ -538,7 +543,12 @@ class TestDoctorDuplicateNames:
     @patch("apm_cli.commands.marketplace.subprocess.run")
     @patch("apm_cli.commands.marketplace.load_marketplace_yml")
     def test_duplicate_names_flagged(
-        self, mock_load, mock_run, runner, tmp_path, monkeypatch,
+        self,
+        mock_load,
+        mock_run,
+        runner,
+        tmp_path,
+        monkeypatch,
     ):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "marketplace.yml").write_text("---\n", encoding="utf-8")
@@ -554,11 +564,15 @@ class TestDoctorDuplicateNames:
             owner=MarketplaceOwner(name="Owner"),
             packages=(
                 PackageEntry(
-                    name="learning", source="acme/repo", subdir="general",
+                    name="learning",
+                    source="acme/repo",
+                    subdir="general",
                     version="^1.0.0",
                 ),
                 PackageEntry(
-                    name="learning", source="acme/repo", subdir="special",
+                    name="learning",
+                    source="acme/repo",
+                    subdir="special",
                     version="^1.0.0",
                 ),
             ),
@@ -571,7 +585,12 @@ class TestDoctorDuplicateNames:
     @patch("apm_cli.commands.marketplace.subprocess.run")
     @patch("apm_cli.commands.marketplace.load_marketplace_yml")
     def test_no_duplicate_names_shows_pass(
-        self, mock_load, mock_run, runner, tmp_path, monkeypatch,
+        self,
+        mock_load,
+        mock_run,
+        runner,
+        tmp_path,
+        monkeypatch,
     ):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "marketplace.yml").write_text("---\n", encoding="utf-8")
@@ -587,10 +606,14 @@ class TestDoctorDuplicateNames:
             owner=MarketplaceOwner(name="Owner"),
             packages=(
                 PackageEntry(
-                    name="alpha", source="acme/alpha", version="^1.0.0",
+                    name="alpha",
+                    source="acme/alpha",
+                    version="^1.0.0",
                 ),
                 PackageEntry(
-                    name="beta", source="acme/beta", version="^1.0.0",
+                    name="beta",
+                    source="acme/beta",
+                    version="^1.0.0",
                 ),
             ),
         )
@@ -601,7 +624,11 @@ class TestDoctorDuplicateNames:
 
     @patch("apm_cli.commands.marketplace.subprocess.run")
     def test_no_duplicate_check_when_yml_absent(
-        self, mock_run, runner, tmp_path, monkeypatch,
+        self,
+        mock_run,
+        runner,
+        tmp_path,
+        monkeypatch,
     ):
         """When marketplace.yml is missing, duplicate check is skipped."""
         monkeypatch.chdir(tmp_path)

@@ -43,7 +43,10 @@ class TestInitHappyPath:
         assert not (tmp_path / "marketplace.yml").exists()
 
     def test_injects_marketplace_block_into_existing_apm_yml(
-        self, runner, tmp_path, monkeypatch,
+        self,
+        runner,
+        tmp_path,
+        monkeypatch,
     ):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "apm.yml").write_text(
@@ -111,7 +114,11 @@ class TestInitGitignoreCheck:
         ["marketplace.json\n", "**/marketplace.json\n", "/marketplace.json\n"],
     )
     def test_warns_when_gitignore_ignores_marketplace_json(
-        self, runner, tmp_path, monkeypatch, pattern,
+        self,
+        runner,
+        tmp_path,
+        monkeypatch,
+        pattern,
     ):
         monkeypatch.chdir(tmp_path)
         (tmp_path / ".gitignore").write_text(pattern, encoding="utf-8")
@@ -122,18 +129,23 @@ class TestInitGitignoreCheck:
     def test_no_warning_for_commented_line(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         (tmp_path / ".gitignore").write_text(
-            "# marketplace.json\n", encoding="utf-8",
+            "# marketplace.json\n",
+            encoding="utf-8",
         )
         result = runner.invoke(marketplace, ["init"])
         assert result.exit_code == 0
         assert ".gitignore ignores marketplace.json" not in result.output
 
     def test_no_gitignore_check_suppresses_warning(
-        self, runner, tmp_path, monkeypatch,
+        self,
+        runner,
+        tmp_path,
+        monkeypatch,
     ):
         monkeypatch.chdir(tmp_path)
         (tmp_path / ".gitignore").write_text(
-            "marketplace.json\n", encoding="utf-8",
+            "marketplace.json\n",
+            encoding="utf-8",
         )
         result = runner.invoke(marketplace, ["init", "--no-gitignore-check"])
         assert result.exit_code == 0
@@ -186,7 +198,10 @@ class TestInitContentSafety:
 
 class TestInitNameOwnerFlags:
     def test_custom_name_used_for_scaffolded_apm_yml(
-        self, runner, tmp_path, monkeypatch,
+        self,
+        runner,
+        tmp_path,
+        monkeypatch,
     ):
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(marketplace, ["init", "--name", "cool-tools"])

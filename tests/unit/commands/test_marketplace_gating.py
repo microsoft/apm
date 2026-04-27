@@ -16,14 +16,13 @@ explicit ``patch`` context manager that overrides the conftest mock.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any  # noqa: F401
 from unittest.mock import patch
-
-from apm_cli.core.experimental import is_enabled as _real_is_enabled
 
 import pytest
 from click.testing import CliRunner
 
+from apm_cli.core.experimental import is_enabled as _real_is_enabled
 
 # ---------------------------------------------------------------------------
 # Flag registration (uses the real FLAGS dict -- unaffected by is_enabled mock)
@@ -122,7 +121,9 @@ class TestConsumerCommandsUngated:
         assert result.exit_code == 0
         assert "Authoring commands" not in result.output
 
-    @pytest.mark.parametrize("subcmd", ["init", "build", "check", "outdated", "doctor", "publish", "package"])
+    @pytest.mark.parametrize(
+        "subcmd", ["init", "build", "check", "outdated", "doctor", "publish", "package"]
+    )
     def test_authoring_commands_hidden_from_help_when_flag_disabled(self, subcmd: str) -> None:
         """Individual authoring command names are absent from --help when flag is off."""
         from apm_cli.commands.marketplace import marketplace
@@ -138,10 +139,7 @@ class TestConsumerCommandsUngated:
         # Each authoring command name should not appear as a listed subcommand
         # (it may appear in the group description; check the commands section)
         lines = result.output.split("\n")
-        command_lines = [
-            line for line in lines
-            if line.strip().startswith(subcmd)
-        ]
+        command_lines = [line for line in lines if line.strip().startswith(subcmd)]
         assert not command_lines, (
             f"Authoring command '{subcmd}' should be hidden from --help "
             f"when flag is disabled, but found: {command_lines}"
@@ -215,7 +213,9 @@ class TestAuthoringCommandsEnabled:
         """Enable marketplace_authoring for this class's tests."""
         with patch(
             "apm_cli.core.experimental.is_enabled",
-            side_effect=lambda name: True if name == "marketplace_authoring" else _real_is_enabled(name),
+            side_effect=lambda name: (
+                True if name == "marketplace_authoring" else _real_is_enabled(name)
+            ),
         ):
             yield
 
@@ -251,7 +251,9 @@ class TestAuthoringCommandsEnabled:
         assert "Consumer commands" in result.output
         assert "Authoring commands" in result.output
 
-    @pytest.mark.parametrize("subcmd", ["init", "build", "check", "outdated", "doctor", "publish", "package"])
+    @pytest.mark.parametrize(
+        "subcmd", ["init", "build", "check", "outdated", "doctor", "publish", "package"]
+    )
     def test_authoring_commands_listed_in_help_when_enabled(self, subcmd: str) -> None:
         """Authoring command names appear in --help when flag is on."""
         from apm_cli.commands.marketplace import marketplace
@@ -261,11 +263,7 @@ class TestAuthoringCommandsEnabled:
 
         assert result.exit_code == 0
         lines = result.output.split("\n")
-        command_lines = [
-            line for line in lines
-            if line.strip().startswith(subcmd)
-        ]
+        command_lines = [line for line in lines if line.strip().startswith(subcmd)]
         assert command_lines, (
-            f"Authoring command '{subcmd}' should be visible in --help "
-            f"when flag is enabled"
+            f"Authoring command '{subcmd}' should be visible in --help when flag is enabled"
         )

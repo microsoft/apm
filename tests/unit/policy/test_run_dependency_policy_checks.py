@@ -13,11 +13,11 @@ Covers:
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Optional  # noqa: F401, UP035
 
-import pytest
+import pytest  # noqa: F401
 
-from apm_cli.policy.models import CIAuditResult, CheckResult
+from apm_cli.policy.models import CheckResult, CIAuditResult  # noqa: F401
 from apm_cli.policy.policy_checks import run_dependency_policy_checks
 from apm_cli.policy.schema import (
     ApmPolicy,
@@ -27,7 +27,6 @@ from apm_cli.policy.schema import (
     McpPolicy,
     McpTransportPolicy,
 )
-
 
 # -- Helpers --------------------------------------------------------
 
@@ -54,7 +53,7 @@ def _make_mcp_deps(mcp_list: list):
 
 def _make_lockfile(deps_data: list[dict]):
     """Create a LockFile from a list of dependency dicts."""
-    from apm_cli.deps.lockfile import LockFile, LockedDependency
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
 
     lock = LockFile()
     for d in deps_data:
@@ -86,9 +85,7 @@ class TestDependencyAllowDeny:
     def test_allow_list_pass(self):
         """Deps matching allow list pass."""
         deps = _make_dep_refs(["owner/repo"])
-        policy = ApmPolicy(
-            dependencies=DependencyPolicy(allow=("owner/*",))
-        )
+        policy = ApmPolicy(dependencies=DependencyPolicy(allow=("owner/*",)))
         result = run_dependency_policy_checks(deps, policy=policy)
         assert result.passed
         assert "dependency-allowlist" in _check_names(result)
@@ -96,9 +93,7 @@ class TestDependencyAllowDeny:
     def test_allow_list_fail(self):
         """Deps NOT matching allow list fail."""
         deps = _make_dep_refs(["evil/pkg"])
-        policy = ApmPolicy(
-            dependencies=DependencyPolicy(allow=("owner/*",))
-        )
+        policy = ApmPolicy(dependencies=DependencyPolicy(allow=("owner/*",)))
         result = run_dependency_policy_checks(deps, policy=policy)
         assert not result.passed
         assert "dependency-allowlist" in _failed_names(result)
@@ -106,9 +101,7 @@ class TestDependencyAllowDeny:
     def test_deny_list_blocks(self):
         """Deps matching deny list fail."""
         deps = _make_dep_refs(["evil/malware"])
-        policy = ApmPolicy(
-            dependencies=DependencyPolicy(deny=("evil/*",))
-        )
+        policy = ApmPolicy(dependencies=DependencyPolicy(deny=("evil/*",)))
         result = run_dependency_policy_checks(deps, policy=policy)
         assert not result.passed
         assert "dependency-denylist" in _failed_names(result)
@@ -116,9 +109,7 @@ class TestDependencyAllowDeny:
     def test_deny_list_pass(self):
         """Deps NOT matching deny list pass."""
         deps = _make_dep_refs(["good/pkg"])
-        policy = ApmPolicy(
-            dependencies=DependencyPolicy(deny=("evil/*",))
-        )
+        policy = ApmPolicy(dependencies=DependencyPolicy(deny=("evil/*",)))
         result = run_dependency_policy_checks(deps, policy=policy)
         assert result.passed
 
@@ -131,7 +122,7 @@ class TestDependencyAllowDeny:
         policy = ApmPolicy(
             dependencies=DependencyPolicy(
                 allow=("evil/*",),  # repo-local might allow
-                deny=("evil/*",),   # but org deny wins
+                deny=("evil/*",),  # but org deny wins
             )
         )
         result = run_dependency_policy_checks(deps, policy=policy)
@@ -140,11 +131,7 @@ class TestDependencyAllowDeny:
 
     def test_empty_deps_passes(self):
         """Empty dep list always passes dependency checks."""
-        policy = ApmPolicy(
-            dependencies=DependencyPolicy(
-                allow=("owner/*",), deny=("evil/*",)
-            )
-        )
+        policy = ApmPolicy(dependencies=DependencyPolicy(allow=("owner/*",), deny=("evil/*",)))
         result = run_dependency_policy_checks([], policy=policy)
         assert result.passed
 
@@ -156,9 +143,7 @@ class TestRequiredPackages:
     def test_required_present(self):
         """Required package in resolved set passes."""
         deps = _make_dep_refs(["org/required-pkg"])
-        policy = ApmPolicy(
-            dependencies=DependencyPolicy(require=("org/required-pkg",))
-        )
+        policy = ApmPolicy(dependencies=DependencyPolicy(require=("org/required-pkg",)))
         result = run_dependency_policy_checks(deps, policy=policy)
         # required-packages check should pass
         req_check = [c for c in result.checks if c.name == "required-packages"]
@@ -191,9 +176,7 @@ class TestRequiredPackages:
                 )
             )
             result = run_dependency_policy_checks(deps, policy=policy)
-            assert not result.passed, (
-                f"Expected block for missing required with {strategy}"
-            )
+            assert not result.passed, f"Expected block for missing required with {strategy}"
 
 
 # -- Required version + project-wins semantics ---------------------
@@ -205,9 +188,7 @@ class TestRequiredVersionProjectWins:
     """
 
     def _make_lock_with_ref(self, pkg: str, ref: str):
-        return _make_lockfile(
-            [{"repo_url": pkg, "resolved_ref": ref, "deployed_files": ["f"]}]
-        )
+        return _make_lockfile([{"repo_url": pkg, "resolved_ref": ref, "deployed_files": ["f"]}])
 
     def test_project_wins_version_mismatch_is_warning(self):
         """project-wins: version mismatch is a warning, not a failure."""
@@ -219,16 +200,10 @@ class TestRequiredVersionProjectWins:
                 require_resolution="project-wins",
             )
         )
-        result = run_dependency_policy_checks(
-            deps, lockfile=lock, policy=policy
-        )
-        ver_check = [
-            c for c in result.checks if c.name == "required-package-version"
-        ]
+        result = run_dependency_policy_checks(deps, lockfile=lock, policy=policy)
+        ver_check = [c for c in result.checks if c.name == "required-package-version"]
         assert ver_check, "expected required-package-version check"
-        assert ver_check[0].passed, (
-            "project-wins should downgrade version mismatch to warning"
-        )
+        assert ver_check[0].passed, "project-wins should downgrade version mismatch to warning"
         # But it should have warning details
         assert ver_check[0].details, "should carry warning details"
 
@@ -242,9 +217,7 @@ class TestRequiredVersionProjectWins:
                 require_resolution="policy-wins",
             )
         )
-        result = run_dependency_policy_checks(
-            deps, lockfile=lock, policy=policy
-        )
+        result = run_dependency_policy_checks(deps, lockfile=lock, policy=policy)
         assert not result.passed
         assert "required-package-version" in _failed_names(result)
 
@@ -258,9 +231,7 @@ class TestRequiredVersionProjectWins:
                 require_resolution="block",
             )
         )
-        result = run_dependency_policy_checks(
-            deps, lockfile=lock, policy=policy
-        )
+        result = run_dependency_policy_checks(deps, lockfile=lock, policy=policy)
         assert not result.passed
         assert "required-package-version" in _failed_names(result)
 
@@ -274,12 +245,8 @@ class TestRequiredVersionProjectWins:
                 require_resolution="project-wins",
             )
         )
-        result = run_dependency_policy_checks(
-            deps, lockfile=lock, policy=policy
-        )
-        ver_check = [
-            c for c in result.checks if c.name == "required-package-version"
-        ]
+        result = run_dependency_policy_checks(deps, lockfile=lock, policy=policy)
+        ver_check = [c for c in result.checks if c.name == "required-package-version"]
         assert ver_check and ver_check[0].passed
         assert not ver_check[0].details  # no warnings
 
@@ -292,12 +259,8 @@ class TestMcpChecksInResolvedSet:
         """MCP server in allow list passes."""
         deps = _make_dep_refs(["owner/repo"])
         mcps = _make_mcp_deps(["io.github.good/server"])
-        policy = ApmPolicy(
-            mcp=McpPolicy(allow=("io.github.good/*",))
-        )
-        result = run_dependency_policy_checks(
-            deps, policy=policy, mcp_deps=mcps
-        )
+        policy = ApmPolicy(mcp=McpPolicy(allow=("io.github.good/*",)))
+        result = run_dependency_policy_checks(deps, policy=policy, mcp_deps=mcps)
         assert result.passed
         assert "mcp-allowlist" in _check_names(result)
 
@@ -305,12 +268,8 @@ class TestMcpChecksInResolvedSet:
         """MCP server NOT in allow list fails."""
         deps = _make_dep_refs(["owner/repo"])
         mcps = _make_mcp_deps(["io.github.evil/server"])
-        policy = ApmPolicy(
-            mcp=McpPolicy(allow=("io.github.good/*",))
-        )
-        result = run_dependency_policy_checks(
-            deps, policy=policy, mcp_deps=mcps
-        )
+        policy = ApmPolicy(mcp=McpPolicy(allow=("io.github.good/*",)))
+        result = run_dependency_policy_checks(deps, policy=policy, mcp_deps=mcps)
         assert not result.passed
         assert "mcp-allowlist" in _failed_names(result)
 
@@ -318,27 +277,17 @@ class TestMcpChecksInResolvedSet:
         """MCP server matching deny list fails."""
         deps = _make_dep_refs(["owner/repo"])
         mcps = _make_mcp_deps(["io.github.evil/malware"])
-        policy = ApmPolicy(
-            mcp=McpPolicy(deny=("io.github.evil/*",))
-        )
-        result = run_dependency_policy_checks(
-            deps, policy=policy, mcp_deps=mcps
-        )
+        policy = ApmPolicy(mcp=McpPolicy(deny=("io.github.evil/*",)))
+        result = run_dependency_policy_checks(deps, policy=policy, mcp_deps=mcps)
         assert not result.passed
         assert "mcp-denylist" in _failed_names(result)
 
     def test_mcp_transport_restriction(self):
         """MCP transport not in allowed list fails."""
         deps = _make_dep_refs(["owner/repo"])
-        mcps = _make_mcp_deps(
-            [{"name": "evil-server", "transport": "http"}]
-        )
-        policy = ApmPolicy(
-            mcp=McpPolicy(transport=McpTransportPolicy(allow=("stdio",)))
-        )
-        result = run_dependency_policy_checks(
-            deps, policy=policy, mcp_deps=mcps
-        )
+        mcps = _make_mcp_deps([{"name": "evil-server", "transport": "http"}])
+        policy = ApmPolicy(mcp=McpPolicy(transport=McpTransportPolicy(allow=("stdio",))))
+        result = run_dependency_policy_checks(deps, policy=policy, mcp_deps=mcps)
         assert not result.passed
         assert "mcp-transport" in _failed_names(result)
 
@@ -348,43 +297,29 @@ class TestMcpChecksInResolvedSet:
         mcps = _make_mcp_deps(
             [{"name": "my-server", "registry": False, "transport": "stdio", "command": "node"}]
         )
-        policy = ApmPolicy(
-            mcp=McpPolicy(self_defined="deny")
-        )
-        result = run_dependency_policy_checks(
-            deps, policy=policy, mcp_deps=mcps
-        )
+        policy = ApmPolicy(mcp=McpPolicy(self_defined="deny"))
+        result = run_dependency_policy_checks(deps, policy=policy, mcp_deps=mcps)
         assert not result.passed
         assert "mcp-self-defined" in _failed_names(result)
 
     def test_no_mcp_deps_skips_mcp_checks(self):
         """When mcp_deps is None (default), MCP checks are skipped entirely."""
         deps = _make_dep_refs(["owner/repo"])
-        policy = ApmPolicy(
-            mcp=McpPolicy(allow=("strict/*",), deny=("evil/*",))
-        )
+        policy = ApmPolicy(mcp=McpPolicy(allow=("strict/*",), deny=("evil/*",)))
         # mcp_deps not passed (default None)
         result = run_dependency_policy_checks(deps, policy=policy)
         assert result.passed
-        mcp_check_names = [
-            c.name for c in result.checks if c.name.startswith("mcp-")
-        ]
+        mcp_check_names = [c.name for c in result.checks if c.name.startswith("mcp-")]
         assert mcp_check_names == [], "MCP checks should be skipped when mcp_deps is None"
 
     def test_empty_mcp_deps_runs_mcp_checks(self):
         """When mcp_deps is [] (explicitly empty), MCP checks still run."""
         deps = _make_dep_refs(["owner/repo"])
-        policy = ApmPolicy(
-            mcp=McpPolicy(allow=("strict/*",))
-        )
+        policy = ApmPolicy(mcp=McpPolicy(allow=("strict/*",)))
         # Explicitly pass empty list
-        result = run_dependency_policy_checks(
-            deps, policy=policy, mcp_deps=[]
-        )
+        result = run_dependency_policy_checks(deps, policy=policy, mcp_deps=[])
         assert result.passed
-        mcp_check_names = [
-            c.name for c in result.checks if c.name.startswith("mcp-")
-        ]
+        mcp_check_names = [c.name for c in result.checks if c.name.startswith("mcp-")]
         assert len(mcp_check_names) == 4, (
             "MCP checks should run when mcp_deps=[] (explicitly provided)"
         )
@@ -398,13 +333,9 @@ class TestTargetChecks:
         """effective_target=None skips compilation-target check."""
         deps = _make_dep_refs(["owner/repo"])
         policy = ApmPolicy(
-            compilation=CompilationPolicy(
-                target=CompilationTargetPolicy(allow=("vscode",))
-            )
+            compilation=CompilationPolicy(target=CompilationTargetPolicy(allow=("vscode",)))
         )
-        result = run_dependency_policy_checks(
-            deps, policy=policy, effective_target=None
-        )
+        result = run_dependency_policy_checks(deps, policy=policy, effective_target=None)
         assert result.passed
         assert "compilation-target" not in _check_names(result)
 
@@ -412,13 +343,9 @@ class TestTargetChecks:
         """effective_target='claude' with allow=[vscode] fails."""
         deps = _make_dep_refs(["owner/repo"])
         policy = ApmPolicy(
-            compilation=CompilationPolicy(
-                target=CompilationTargetPolicy(allow=("vscode",))
-            )
+            compilation=CompilationPolicy(target=CompilationTargetPolicy(allow=("vscode",)))
         )
-        result = run_dependency_policy_checks(
-            deps, policy=policy, effective_target="claude"
-        )
+        result = run_dependency_policy_checks(deps, policy=policy, effective_target="claude")
         assert not result.passed
         assert "compilation-target" in _failed_names(result)
 
@@ -426,13 +353,9 @@ class TestTargetChecks:
         """effective_target='vscode' with allow=[vscode] passes."""
         deps = _make_dep_refs(["owner/repo"])
         policy = ApmPolicy(
-            compilation=CompilationPolicy(
-                target=CompilationTargetPolicy(allow=("vscode",))
-            )
+            compilation=CompilationPolicy(target=CompilationTargetPolicy(allow=("vscode",)))
         )
-        result = run_dependency_policy_checks(
-            deps, policy=policy, effective_target="vscode"
-        )
+        result = run_dependency_policy_checks(deps, policy=policy, effective_target="vscode")
         assert result.passed
         assert "compilation-target" in _check_names(result)
 
@@ -450,9 +373,7 @@ class TestFailFast:
                 require=("org/must-have",),
             )
         )
-        result = run_dependency_policy_checks(
-            deps, policy=policy, fail_fast=True
-        )
+        result = run_dependency_policy_checks(deps, policy=policy, fail_fast=True)
         assert not result.passed
         # Should stop at the first failure (denylist), not reach required
         failed = _failed_names(result)
@@ -468,9 +389,7 @@ class TestFailFast:
                 require=("org/must-have",),
             )
         )
-        result = run_dependency_policy_checks(
-            deps, policy=policy, fail_fast=False
-        )
+        result = run_dependency_policy_checks(deps, policy=policy, fail_fast=False)
         assert not result.passed
         # Both denylist and required-packages checks should run
         names = _check_names(result)
@@ -531,9 +450,7 @@ class TestCombinedProjectWinsScenario:
                 require_resolution="project-wins",
             )
         )
-        result = run_dependency_policy_checks(
-            deps, lockfile=lock, policy=policy, fail_fast=False
-        )
+        result = run_dependency_policy_checks(deps, lockfile=lock, policy=policy, fail_fast=False)
         assert not result.passed
         failed = _failed_names(result)
         assert "dependency-denylist" in failed
@@ -558,15 +475,11 @@ class TestCombinedProjectWinsScenario:
                 require_resolution="project-wins",
             )
         )
-        result = run_dependency_policy_checks(
-            deps, lockfile=lock, policy=policy, fail_fast=False
-        )
+        result = run_dependency_policy_checks(deps, lockfile=lock, policy=policy, fail_fast=False)
         # Overall should pass (version mismatch is warning only)
         assert result.passed
         # But the version check should carry warning details
-        ver_check = [
-            c for c in result.checks if c.name == "required-package-version"
-        ]
+        ver_check = [c for c in result.checks if c.name == "required-package-version"]
         assert ver_check and ver_check[0].details
 
 
@@ -587,9 +500,7 @@ class TestExplicitIncludesSeam:
     def test_skipped_when_manifest_includes_not_provided(self):
         # Default: no manifest_includes kwarg -> no explicit-includes
         # CheckResult appears in the result.
-        result = run_dependency_policy_checks(
-            [], policy=self._policy(require=True)
-        )
+        result = run_dependency_policy_checks([], policy=self._policy(require=True))
         assert "explicit-includes" not in _check_names(result)
 
     def test_violation_when_required_and_includes_none(self):

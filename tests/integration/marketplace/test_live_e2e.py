@@ -19,16 +19,16 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
+from pathlib import Path  # noqa: F401
 
 import pytest
 
 from .conftest import run_cli
 
-
 # ---------------------------------------------------------------------------
 # Shared live YAML template
 # ---------------------------------------------------------------------------
+
 
 def _live_yml(owner_repo: str) -> str:
     """Minimal marketplace.yml that references the live repo.
@@ -68,8 +68,7 @@ class TestLiveBuild:
         result = run_cli(["marketplace", "build"], cwd=tmp_path, timeout=120)
 
         assert result.returncode == 0, (
-            f"build exited {result.returncode}\n"
-            f"stdout={result.stdout}\nstderr={result.stderr}"
+            f"build exited {result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
         )
 
         out_path = tmp_path / "marketplace.json"
@@ -93,9 +92,7 @@ class TestLiveBuild:
         sha_re = re.compile(r"^[0-9a-f]{40}$")
         for plugin in data.get("plugins", []):
             sha = plugin.get("source", {}).get("commit", "")
-            assert sha_re.match(sha), (
-                f"Plugin {plugin.get('name')} has invalid SHA: {sha!r}"
-            )
+            assert sha_re.match(sha), f"Plugin {plugin.get('name')} has invalid SHA: {sha!r}"
 
 
 class TestLiveOutdated:
@@ -109,13 +106,10 @@ class TestLiveOutdated:
         result = run_cli(["marketplace", "outdated"], cwd=tmp_path, timeout=120)
 
         assert result.returncode == 0, (
-            f"outdated exited {result.returncode}\n"
-            f"stdout={result.stdout}\nstderr={result.stderr}"
+            f"outdated exited {result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
         )
 
-    def test_live_outdated_output_contains_package_name(
-        self, live_marketplace_repo, tmp_path
-    ):
+    def test_live_outdated_output_contains_package_name(self, live_marketplace_repo, tmp_path):
         """Output must contain the package name from the yml."""
         yml_path = tmp_path / "marketplace.yml"
         yml_path.write_text(_live_yml(live_marketplace_repo), encoding="utf-8")
@@ -163,8 +157,7 @@ class TestLiveDoctor:
         result = run_cli(["marketplace", "doctor"], cwd=tmp_path, timeout=30)
 
         assert result.returncode == 0, (
-            f"doctor exited {result.returncode}\n"
-            f"stdout={result.stdout}\nstderr={result.stderr}"
+            f"doctor exited {result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
         )
 
     def test_live_doctor_mentions_git(self, live_marketplace_repo, tmp_path):

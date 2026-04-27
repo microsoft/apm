@@ -16,7 +16,7 @@ import hashlib
 import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List  # noqa: F401, UP035
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -32,7 +32,6 @@ from apm_cli.policy.project_config import (
     parse_project_policy_hash_pin,
     read_project_policy_hash_pin,
 )
-
 
 _VALID_POLICY_YAML = "name: org-policy\nversion: '1.0'\nenforcement: warn\n"
 
@@ -56,16 +55,12 @@ class TestVerifyHashPin:
 
     def test_match_returns_none(self):
         digest = _sha256(_VALID_POLICY_YAML)
-        result = _verify_hash_pin(
-            _VALID_POLICY_YAML, f"sha256:{digest}", "file:x"
-        )
+        result = _verify_hash_pin(_VALID_POLICY_YAML, f"sha256:{digest}", "file:x")
         assert result is None
 
     def test_mismatch_returns_hash_mismatch_outcome(self):
         wrong = "0" * 64
-        result = _verify_hash_pin(
-            _VALID_POLICY_YAML, f"sha256:{wrong}", "file:x"
-        )
+        result = _verify_hash_pin(_VALID_POLICY_YAML, f"sha256:{wrong}", "file:x")
         assert result is not None
         assert result.outcome == "hash_mismatch"
         assert result.policy is None
@@ -74,10 +69,7 @@ class TestVerifyHashPin:
 
     def test_bytes_input_accepted(self):
         digest = hashlib.sha256(b"raw bytes").hexdigest()
-        assert (
-            _verify_hash_pin(b"raw bytes", f"sha256:{digest}", "file:x")
-            is None
-        )
+        assert _verify_hash_pin(b"raw bytes", f"sha256:{digest}", "file:x") is None
 
     def test_invalid_pin_treated_as_mismatch(self):
         result = _verify_hash_pin("x", "sha256:not-hex", "file:x")
@@ -86,9 +78,7 @@ class TestVerifyHashPin:
 
     def test_sha384_supported(self):
         digest = _sha384(_VALID_POLICY_YAML)
-        result = _verify_hash_pin(
-            _VALID_POLICY_YAML, f"sha384:{digest}", "file:x"
-        )
+        result = _verify_hash_pin(_VALID_POLICY_YAML, f"sha384:{digest}", "file:x")
         assert result is None
 
     def test_hash_computed_on_raw_bytes_not_parsed(self):
@@ -139,9 +129,7 @@ class TestParsePolicyHashPin:
 
     def test_md5_rejected(self):
         with pytest.raises(ProjectPolicyConfigError):
-            parse_project_policy_hash_pin(
-                {"hash_algorithm": "md5", "hash": "x" * 32}
-            )
+            parse_project_policy_hash_pin({"hash_algorithm": "md5", "hash": "x" * 32})
 
     def test_wrong_length_rejected(self):
         with pytest.raises(ProjectPolicyConfigError):
@@ -154,9 +142,7 @@ class TestParsePolicyHashPin:
     def test_prefix_mismatch_rejected(self):
         digest = _sha256("payload")
         with pytest.raises(ProjectPolicyConfigError):
-            parse_project_policy_hash_pin(
-                {"hash_algorithm": "sha256", "hash": f"sha384:{digest}"}
-            )
+            parse_project_policy_hash_pin({"hash_algorithm": "sha256", "hash": f"sha384:{digest}"})
 
     def test_non_string_rejected(self):
         with pytest.raises(ProjectPolicyConfigError):
@@ -170,9 +156,7 @@ class TestParsePolicyHashPin:
 
 def _write_apm_yml(root: Path, *, pin: str | None) -> None:
     if pin is None:
-        (root / "apm.yml").write_text(
-            "name: proj\nversion: '1.0'\n", encoding="utf-8"
-        )
+        (root / "apm.yml").write_text("name: proj\nversion: '1.0'\n", encoding="utf-8")
     else:
         (root / "apm.yml").write_text(
             textwrap.dedent(f"""\
@@ -201,12 +185,8 @@ class TestDiscoverPolicyWithChainHashPin:
     def test_no_pin_no_apm_yml_passes_through(self, tmp_path: Path):
         # Sanity: without apm.yml or pin, discover_policy_with_chain runs
         # auto-discovery normally (returns whatever _auto_discover yields).
-        with patch(
-            "apm_cli.policy.discovery.discover_policy"
-        ) as mock_disc:
-            mock_disc.return_value = PolicyFetchResult(
-                policy=None, outcome="absent"
-            )
+        with patch("apm_cli.policy.discovery.discover_policy") as mock_disc:
+            mock_disc.return_value = PolicyFetchResult(policy=None, outcome="absent")
             result = discover_policy_with_chain(tmp_path)
             assert result.outcome == "absent"
             _, kwargs = mock_disc.call_args
@@ -221,12 +201,8 @@ class TestDiscoverPolicyWithChainHashPin:
     def test_pin_threads_through_to_discover_policy(self, tmp_path: Path):
         digest = _sha256("anything")
         _write_apm_yml(tmp_path, pin=f"sha256:{digest}")
-        with patch(
-            "apm_cli.policy.discovery.discover_policy"
-        ) as mock_disc:
-            mock_disc.return_value = PolicyFetchResult(
-                policy=None, outcome="absent"
-            )
+        with patch("apm_cli.policy.discovery.discover_policy") as mock_disc:
+            mock_disc.return_value = PolicyFetchResult(policy=None, outcome="absent")
             discover_policy_with_chain(tmp_path)
             _, kwargs = mock_disc.call_args
             assert kwargs.get("expected_hash") == f"sha256:{digest}"
@@ -248,9 +224,7 @@ class TestDiscoverPolicyWithChainHashPin:
         assert result.policy is not None
         assert result.raw_bytes_hash == f"sha256:{digest}"
 
-    def test_pin_mismatch_on_file_source_returns_hash_mismatch(
-        self, tmp_path: Path
-    ):
+    def test_pin_mismatch_on_file_source_returns_hash_mismatch(self, tmp_path: Path):
         policy_file = tmp_path / "apm-policy.yml"
         policy_file.write_text(_VALID_POLICY_YAML, encoding="utf-8")
         wrong = "0" * 64
@@ -277,7 +251,7 @@ class _FakeCtx:
     apm_dir: Path = field(default_factory=lambda: Path("/tmp/fake/.apm"))
     verbose: bool = False
     logger: Any = None
-    deps_to_install: List[Any] = field(default_factory=list)
+    deps_to_install: list[Any] = field(default_factory=list)
     existing_lockfile: Any = None
     policy_fetch: Any = None
     policy_enforcement_active: bool = False
@@ -341,9 +315,7 @@ class TestPolicyGateHashMismatch:
 
 class TestPreflightHashMismatch:
     @patch("apm_cli.policy.install_preflight.discover_policy_with_chain")
-    def test_hash_mismatch_raises_block_error(
-        self, mock_discover, tmp_path: Path
-    ):
+    def test_hash_mismatch_raises_block_error(self, mock_discover, tmp_path: Path):
         from apm_cli.policy.install_preflight import (
             PolicyBlockError,
             run_policy_preflight,
@@ -364,9 +336,7 @@ class TestPreflightHashMismatch:
         assert "hash mismatch" in str(exc.value).lower()
 
     @patch("apm_cli.policy.install_preflight.discover_policy_with_chain")
-    def test_hash_mismatch_dry_run_does_not_raise(
-        self, mock_discover, tmp_path: Path
-    ):
+    def test_hash_mismatch_dry_run_does_not_raise(self, mock_discover, tmp_path: Path):
         from apm_cli.policy.install_preflight import run_policy_preflight
 
         mock_discover.return_value = PolicyFetchResult(
@@ -395,9 +365,7 @@ class TestReadProjectPolicyHashPin:
         assert read_project_policy_hash_pin(tmp_path) is None
 
     def test_no_policy_block_returns_none(self, tmp_path: Path):
-        (tmp_path / "apm.yml").write_text(
-            "name: x\nversion: '1.0'\n", encoding="utf-8"
-        )
+        (tmp_path / "apm.yml").write_text("name: x\nversion: '1.0'\n", encoding="utf-8")
         assert read_project_policy_hash_pin(tmp_path) is None
 
     def test_valid_pin_returns_object(self, tmp_path: Path):

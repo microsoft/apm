@@ -1,7 +1,7 @@
 """Unit tests for SecurityGate — centralized scan→classify→decide→report."""
 
-import os
-import textwrap
+import os  # noqa: F401
+import textwrap  # noqa: F401
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -16,15 +16,14 @@ from apm_cli.security.gate import (
     SecurityGate,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 # U+E0100 is a VS17 variation selector — always "critical"
-CRITICAL_CHAR = "\U000E0100"
+CRITICAL_CHAR = "\U000e0100"
 # U+200B is a zero-width space — "warning"
-WARNING_CHAR = "\u200B"
+WARNING_CHAR = "\u200b"
 
 
 def _write_file(path: Path, content: str) -> None:
@@ -175,7 +174,7 @@ class TestReport:
         )
         SecurityGate.report(v, diag, package="pkg")
         diag.security.assert_called_once()
-        call_args = diag.security.call_args
+        call_args = diag.security.call_args  # noqa: F841
 
     def test_warn_policy_critical_reports(self):
         """WARN_POLICY with critical findings must still record a diagnostic."""

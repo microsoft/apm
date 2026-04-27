@@ -121,8 +121,10 @@ class TestUpdateCommand(unittest.TestCase):
         mock_get.return_value = mock_response
         mock_run.return_value = Mock(returncode=0)
 
-        with patch.object(update_module.sys, "platform", "darwin"), \
-             patch("apm_cli.commands.update.os.path.exists", return_value=True):
+        with (
+            patch.object(update_module.sys, "platform", "darwin"),
+            patch("apm_cli.commands.update.os.path.exists", return_value=True),
+        ):
             result = self.runner.invoke(cli, ["update"])
 
         self.assertEqual(result.exit_code, 0)
@@ -183,20 +185,26 @@ class TestUpdatePlatformHelpers(unittest.TestCase):
         self.assertIn("curl", command)
 
     def test_installer_run_command_unix_bin_sh_exists(self):
-        with patch.object(update_module.sys, "platform", "linux"), \
-                patch.object(update_module.os.path, "exists", return_value=True):
+        with (
+            patch.object(update_module.sys, "platform", "linux"),
+            patch.object(update_module.os.path, "exists", return_value=True),
+        ):
             cmd = update_module._get_installer_run_command("/tmp/install.sh")
         self.assertEqual(cmd, ["/bin/sh", "/tmp/install.sh"])
 
     def test_installer_run_command_unix_fallback_to_sh(self):
-        with patch.object(update_module.sys, "platform", "linux"), \
-                patch.object(update_module.os.path, "exists", return_value=False):
+        with (
+            patch.object(update_module.sys, "platform", "linux"),
+            patch.object(update_module.os.path, "exists", return_value=False),
+        ):
             cmd = update_module._get_installer_run_command("/tmp/install.sh")
         self.assertEqual(cmd, ["sh", "/tmp/install.sh"])
 
     def test_installer_run_command_windows_powershell_not_found(self):
-        with patch.object(update_module.sys, "platform", "win32"), \
-                patch.object(update_module.shutil, "which", return_value=None):
+        with (
+            patch.object(update_module.sys, "platform", "win32"),
+            patch.object(update_module.shutil, "which", return_value=None),
+        ):
             with self.assertRaises(FileNotFoundError):
                 update_module._get_installer_run_command("/tmp/install.ps1")
 
@@ -204,8 +212,10 @@ class TestUpdatePlatformHelpers(unittest.TestCase):
         def _which(name):
             return "pwsh.exe" if name == "pwsh" else None
 
-        with patch.object(update_module.sys, "platform", "win32"), \
-                patch.object(update_module.shutil, "which", side_effect=_which):
+        with (
+            patch.object(update_module.sys, "platform", "win32"),
+            patch.object(update_module.shutil, "which", side_effect=_which),
+        ):
             cmd = update_module._get_installer_run_command("/tmp/install.ps1")
         self.assertEqual(cmd[0], "pwsh.exe")
         self.assertIn("-File", cmd)
@@ -280,8 +290,10 @@ class TestUpdateCommandLogic(unittest.TestCase):
         mock_get.return_value = mock_response
         mock_run.return_value = Mock(returncode=1)
 
-        with patch.object(update_module.sys, "platform", "linux"), \
-                patch("apm_cli.commands.update.os.path.exists", return_value=True):
+        with (
+            patch.object(update_module.sys, "platform", "linux"),
+            patch("apm_cli.commands.update.os.path.exists", return_value=True),
+        ):
             result = self.runner.invoke(cli, ["update"])
 
         self.assertEqual(result.exit_code, 1)
@@ -292,6 +304,7 @@ class TestUpdateCommandLogic(unittest.TestCase):
     def test_update_requests_not_available_exits_1(self, mock_latest, mock_version):
         """When requests library is missing, exit with clear message."""
         import builtins
+
         real_import = builtins.__import__
 
         def mock_import(name, *args, **kwargs):
@@ -299,8 +312,10 @@ class TestUpdateCommandLogic(unittest.TestCase):
                 raise ImportError("No module named 'requests'")
             return real_import(name, *args, **kwargs)
 
-        with patch("builtins.__import__", side_effect=mock_import), \
-                patch.object(update_module.sys, "platform", "linux"):
+        with (
+            patch("builtins.__import__", side_effect=mock_import),
+            patch.object(update_module.sys, "platform", "linux"),
+        ):
             result = self.runner.invoke(cli, ["update"])
 
         self.assertEqual(result.exit_code, 1)
@@ -341,9 +356,11 @@ class TestUpdateCommandLogic(unittest.TestCase):
         mock_get.return_value = mock_response
         mock_run.return_value = Mock(returncode=0)
 
-        with patch.object(update_module.sys, "platform", "linux"), \
-                patch("apm_cli.commands.update.os.path.exists", return_value=True), \
-                patch.object(update_module.os, "unlink", side_effect=tracking_unlink):
+        with (
+            patch.object(update_module.sys, "platform", "linux"),
+            patch("apm_cli.commands.update.os.path.exists", return_value=True),
+            patch.object(update_module.os, "unlink", side_effect=tracking_unlink),
+        ):
             result = self.runner.invoke(cli, ["update"])
 
         self.assertEqual(result.exit_code, 0)

@@ -139,18 +139,14 @@ class TestOpenCodeClientAdapter(unittest.TestCase):
     # -- update_config --
 
     def test_update_config_creates_file(self):
-        self.adapter.update_config(
-            {"my-server": {"command": "npx", "args": ["-y", "pkg"]}}
-        )
+        self.adapter.update_config({"my-server": {"command": "npx", "args": ["-y", "pkg"]}})
         data = json.loads(self.opencode_json.read_text(encoding="utf-8"))
         self.assertEqual(data["mcp"]["my-server"]["type"], "local")
         self.assertEqual(data["mcp"]["my-server"]["command"], ["npx", "-y", "pkg"])
 
     def test_update_config_merges_existing(self):
         self.opencode_json.write_text(
-            json.dumps(
-                {"mcp": {"old-server": {"type": "local", "command": ["old-cmd"]}}}
-            ),
+            json.dumps({"mcp": {"old-server": {"type": "local", "command": ["old-cmd"]}}}),
             encoding="utf-8",
         )
         self.adapter.update_config({"new-server": {"command": "new-cmd", "args": []}})
@@ -347,9 +343,7 @@ class TestMCPIntegratorOpenCodeStaleCleanup(unittest.TestCase):
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
         self.opencode_json.write_text(
-            json.dumps(
-                {"mcp": {"keep": {"type": "local"}, "stale": {"type": "remote"}}}
-            ),
+            json.dumps({"mcp": {"keep": {"type": "local"}, "stale": {"type": "remote"}}}),
             encoding="utf-8",
         )
         MCPIntegrator.remove_stale({"stale"}, runtime="opencode")
@@ -370,9 +364,7 @@ class TestMCPIntegratorOpenCodeStaleCleanup(unittest.TestCase):
         (other_root / ".opencode").mkdir(parents=True)
         opencode_json = other_root / "opencode.json"
         opencode_json.write_text(
-            json.dumps(
-                {"mcp": {"keep": {"type": "local"}, "stale": {"type": "remote"}}}
-            ),
+            json.dumps({"mcp": {"keep": {"type": "local"}, "stale": {"type": "remote"}}}),
             encoding="utf-8",
         )
 

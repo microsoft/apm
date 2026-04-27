@@ -34,7 +34,9 @@ from ..core.target_detection import TargetParamType
     default="./build",
     help="Output directory (default: ./build)",
 )
-@click.option("--dry-run", is_flag=True, default=False, help="Show what would be packed without writing")
+@click.option(
+    "--dry-run", is_flag=True, default=False, help="Show what would be packed without writing"
+)
 @click.option("--force", is_flag=True, default=False, help="On collision, last writer wins")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed packing information")
 @click.pass_context
@@ -57,9 +59,7 @@ def pack_cmd(ctx, fmt, target, archive, output, dry_run, force, verbose):
 
         if dry_run:
             if result.mapped_count:
-                logger.dry_run_notice(
-                    f"Would remap {result.mapped_count} file(s){mapping_summary}"
-                )
+                logger.dry_run_notice(f"Would remap {result.mapped_count} file(s){mapping_summary}")
                 for mapped, original in result.path_mappings.items():
                     logger.verbose_detail(f"    {original} -> {mapped}")
             if result.files:
@@ -73,9 +73,7 @@ def pack_cmd(ctx, fmt, target, archive, output, dry_run, force, verbose):
             return
 
         if result.mapped_count:
-            logger.progress(
-                f"Mapped {result.mapped_count} file(s){mapping_summary}"
-            )
+            logger.progress(f"Mapped {result.mapped_count} file(s){mapping_summary}")
             for mapped, original in result.path_mappings.items():
                 logger.verbose_detail(f"    {original} -> {mapped}")
 
@@ -107,8 +105,15 @@ def pack_cmd(ctx, fmt, target, archive, output, dry_run, force, verbose):
     help="Target directory (default: current directory).",
 )
 @click.option("--skip-verify", is_flag=True, default=False, help="Skip bundle completeness check.")
-@click.option("--dry-run", is_flag=True, default=False, help="Show what would be unpacked without writing")
-@click.option("--force", is_flag=True, default=False, help="Deploy despite critical hidden-character findings.")
+@click.option(
+    "--dry-run", is_flag=True, default=False, help="Show what would be unpacked without writing"
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Deploy despite critical hidden-character findings.",
+)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed unpacking information")
 @click.pass_context
 def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
@@ -142,9 +147,7 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
         else:
             _log_unpack_file_list(result, logger)
             if result.skipped_count > 0:
-                logger.warning(
-                    f"  {result.skipped_count} file(s) skipped (missing from bundle)"
-                )
+                logger.warning(f"  {result.skipped_count} file(s) skipped (missing from bundle)")
             if result.security_critical > 0:
                 logger.warning(
                     f"  Deployed with --force despite {result.security_critical} "
@@ -197,9 +200,7 @@ def _warn_empty(logger, target, result):
             logger.warning(f"No files to pack for target '{target}'")
         else:
             logger.warning(f"No files to pack for target '{target}'")
-            logger.verbose_detail(
-                f"    Hint: use '--target all' to include all platforms"
-            )
+            logger.verbose_detail(f"    Hint: use '--target all' to include all platforms")  # noqa: F541
     else:
         logger.warning("No deployed files found -- empty bundle created")
 
@@ -218,14 +219,12 @@ def _log_bundle_meta(result, output_dir, logger):
     _DISPLAY = {"vscode": "copilot", "agents": "copilot"}
     display_bundle = _DISPLAY.get(bundle_target, bundle_target)
 
-    logger.progress(
-        f"Bundle target: {display_bundle} "
-        f"({dep_count} dep(s), {file_count} file(s))"
-    )
+    logger.progress(f"Bundle target: {display_bundle} ({dep_count} dep(s), {file_count} file(s))")
 
     # Detect project target from output directory
     try:
         from ..core.target_detection import detect_target
+
         project_target, _reason = detect_target(output_dir.resolve())
     except Exception:
         return  # can't detect -- skip mismatch check
@@ -242,11 +241,9 @@ def _log_bundle_meta(result, output_dir, logger):
 
     if norm_bundle != norm_project:
         logger.warning(
-            f"Bundle target '{display_bundle}' differs from project "
-            f"target '{display_project}'"
+            f"Bundle target '{display_bundle}' differs from project target '{display_project}'"
         )
         logger.verbose_detail(
             f"    To get a {display_project}-targeted bundle, "
             f"ask the publisher to run: apm pack --target {display_project}"
         )
-

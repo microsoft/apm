@@ -13,7 +13,6 @@ from click.testing import CliRunner
 from apm_cli.commands.audit import audit
 from apm_cli.models.apm_package import clear_apm_yml_cache
 
-
 # -- Fixtures -------------------------------------------------------
 
 
@@ -172,9 +171,7 @@ class TestCIOutputFormats:
         _setup_clean_project(tmp_path)
         outfile = tmp_path / "report.json"
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
-            result = runner.invoke(
-                audit, ["--ci", "-f", "json", "-o", str(outfile)]
-            )
+            result = runner.invoke(audit, ["--ci", "-f", "json", "-o", str(outfile)])
         assert result.exit_code == 0
         assert outfile.exists()
         data = json.loads(outfile.read_text(encoding="utf-8"))

@@ -17,13 +17,12 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
+import pytest  # noqa: F401
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import check
 from apm_cli.marketplace.errors import GitLsRemoteError, OfflineMissError
 from apm_cli.marketplace.ref_resolver import RemoteRef
-
 
 # ---------------------------------------------------------------------------
 # YAML fixtures
@@ -95,6 +94,7 @@ def _run_check(tmp_path: Path, yml_content, extra_args=(), side_effect=None):
 
     with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
         import shutil
+
         shutil.copy(str(tmp_path / "marketplace.yml"), cwd + "/marketplace.yml")
         with patch(
             "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
@@ -140,30 +140,22 @@ class TestCheckOneUnreachable:
         return _refs_ok(owner_repo)
 
     def test_exit_code_one_on_unreachable(self, tmp_path: Path):
-        result = _run_check(
-            tmp_path, _CHECK_YML, side_effect=self._side_effect_raise
-        )
+        result = _run_check(tmp_path, _CHECK_YML, side_effect=self._side_effect_raise)
         assert result.exit_code == 1
 
     def test_error_summary_in_output(self, tmp_path: Path):
-        result = _run_check(
-            tmp_path, _CHECK_YML, side_effect=self._side_effect_raise
-        )
+        result = _run_check(tmp_path, _CHECK_YML, side_effect=self._side_effect_raise)
         combined = result.output
         # Either [x] marker or "issues" text should appear
         assert "[x]" in combined or "issue" in combined.lower() or "error" in combined.lower()
 
     def test_error_entry_named_in_output(self, tmp_path: Path):
-        result = _run_check(
-            tmp_path, _CHECK_YML, side_effect=self._side_effect_raise
-        )
+        result = _run_check(tmp_path, _CHECK_YML, side_effect=self._side_effect_raise)
         assert "plugin-a" in result.output
 
     def test_other_entries_still_reported(self, tmp_path: Path):
         """Entries that succeed must still appear in the output."""
-        result = _run_check(
-            tmp_path, _CHECK_YML, side_effect=self._side_effect_raise
-        )
+        result = _run_check(tmp_path, _CHECK_YML, side_effect=self._side_effect_raise)
         assert "plugin-b" in result.output
 
 

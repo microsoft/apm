@@ -71,9 +71,7 @@ class TestDirectDepFailLoud:
 
     @patch("apm_cli.install.phases.integrate.run_integration_template", return_value=None)
     @patch("apm_cli.install.phases.integrate.make_dependency_source")
-    def test_integrate_pushes_error_to_diagnostics(
-        self, _mock_source, _mock_template, tmp_path
-    ):
+    def test_integrate_pushes_error_to_diagnostics(self, _mock_source, _mock_template, tmp_path):
         """The diagnostic collector must record the failure."""
         from apm_cli.install.phases.integrate import run
 
@@ -101,19 +99,17 @@ class TestDirectDepFailLoud:
             patch("apm_cli.install.phases.resolve.run"),
             patch("apm_cli.install.phases.targets.run"),
             patch("apm_cli.install.phases.download.run"),
+            pytest.raises(DirectDependencyError),
         ):
-            with pytest.raises(DirectDependencyError):
-                run_install_pipeline(
-                    apm_package=pkg,
-                    verbose=False,
-                    logger=MagicMock(),
-                )
+            run_install_pipeline(
+                apm_package=pkg,
+                verbose=False,
+                logger=MagicMock(),
+            )
 
     @patch("apm_cli.install.phases.integrate.run_integration_template")
     @patch("apm_cli.install.phases.integrate.make_dependency_source")
-    def test_transitive_failure_does_not_set_flag(
-        self, _mock_source, mock_template, tmp_path
-    ):
+    def test_transitive_failure_does_not_set_flag(self, _mock_source, mock_template, tmp_path):
         """When a transitive (non-direct) dep returns None, direct_dep_failed
         must stay False -- only direct deps trigger the fail-loud path."""
         from apm_cli.install.phases.integrate import run

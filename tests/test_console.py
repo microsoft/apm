@@ -1,15 +1,14 @@
 """Test module for console commands."""
 
-import os
-import tempfile
+import os  # noqa: F401
 import shutil
-from unittest import TestCase
+import tempfile
+from unittest import TestCase  # noqa: F401
 
-import pytest
+import pytest  # noqa: F401
 from click.testing import CliRunner
 
 from apm_cli.cli import cli as app
-
 
 runner = CliRunner()
 
@@ -19,7 +18,7 @@ def test_read_url():
     url = "https://www.example.com"
     temp_dir = tempfile.mkdtemp()
     try:
-        result = runner.invoke(app, ["read-url", url, "--output-dir", temp_dir])
+        result = runner.invoke(app, ["read-url", url, "--output-dir", temp_dir])  # noqa: F841
         # Add appropriate assertions based on expected behavior
         # assert result.exit_code == 0
     finally:

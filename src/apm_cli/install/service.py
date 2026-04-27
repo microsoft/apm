@@ -43,7 +43,7 @@ class InstallService:
     integrator factory) when programmatic callers need to swap them.
     """
 
-    def run(self, request: InstallRequest) -> "InstallResult":
+    def run(self, request: InstallRequest) -> InstallResult:
         """Execute the install pipeline and return the structured result.
 
         Raises:
@@ -56,9 +56,7 @@ class InstallService:
         try:
             from apm_cli.install.pipeline import run_install_pipeline
         except ImportError as e:  # pragma: no cover -- defensive
-            raise InstallNotAvailableError(
-                f"APM dependency system not available: {e}"
-            ) from e
+            raise InstallNotAvailableError(f"APM dependency system not available: {e}") from e
 
         return run_install_pipeline(
             request.apm_package,

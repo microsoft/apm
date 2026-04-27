@@ -6,7 +6,6 @@ from unittest.mock import patch
 
 import pytest
 
-
 # Cache the *real* is_enabled so we can delegate non-marketplace flags.
 from apm_cli.core.experimental import is_enabled as _real_is_enabled
 

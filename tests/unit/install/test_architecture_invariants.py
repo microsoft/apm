@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
+import pytest  # noqa: F401
 
 ENGINE_ROOT = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "install"
 
@@ -33,9 +33,7 @@ def test_install_context_importable():
     """InstallContext is the contract carrying state between phases."""
     from apm_cli.install.context import InstallContext
 
-    assert hasattr(InstallContext, "__dataclass_fields__"), (
-        "InstallContext must be a dataclass"
-    )
+    assert hasattr(InstallContext, "__dataclass_fields__"), "InstallContext must be a dataclass"
 
 
 MAX_MODULE_LOC = 1000
@@ -66,10 +64,7 @@ def test_no_install_module_exceeds_loc_budget():
         n = _line_count(path)
         if n > budget:
             offenders.append((rel, n, budget))
-    assert not offenders, (
-        "Modules exceeding LOC budget (file, actual, budget): "
-        f"{offenders}"
-    )
+    assert not offenders, f"Modules exceeding LOC budget (file, actual, budget): {offenders}"
 
 
 def test_install_py_under_legacy_budget():

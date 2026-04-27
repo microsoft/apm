@@ -72,8 +72,7 @@ class NoMatchingVersionError(BuildError):
         self.version_range = version_range
         extra = f" ({detail})" if detail else ""
         super().__init__(
-            f"No tag matching version '{version_range}' found for "
-            f"package '{package}'{extra}",
+            f"No tag matching version '{version_range}' found for package '{package}'{extra}",
             package=package,
         )
 
@@ -85,8 +84,7 @@ class RefNotFoundError(BuildError):
         self.ref = ref
         self.remote = remote
         super().__init__(
-            f"Ref '{ref}' not found on remote '{remote}' "
-            f"for package '{package}'",
+            f"Ref '{ref}' not found on remote '{remote}' for package '{package}'",
             package=package,
         )
 

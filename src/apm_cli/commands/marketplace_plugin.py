@@ -20,7 +20,6 @@ from ..marketplace.errors import (
 )
 from ._helpers import _is_interactive
 
-
 # -------------------------------------------------------------------
 # Constants
 # -------------------------------------------------------------------
@@ -49,10 +48,10 @@ def _yml_path() -> Path:
     if apm_path.exists():
         try:
             import yaml
+
             text = apm_path.read_text(encoding="utf-8")
             data = yaml.safe_load(text)
-            if isinstance(data, dict) and "marketplace" in data \
-                    and data["marketplace"] is not None:
+            if isinstance(data, dict) and "marketplace" in data and data["marketplace"] is not None:
                 return apm_path
         except (OSError, yaml.YAMLError):
             pass
@@ -71,9 +70,11 @@ def _ensure_yml_exists(logger: CommandLogger) -> Path:
     if apm_path.exists():
         try:
             import yaml
+
             data = yaml.safe_load(apm_path.read_text(encoding="utf-8"))
-            has_block = isinstance(data, dict) and "marketplace" in data \
-                and data["marketplace"] is not None
+            has_block = (
+                isinstance(data, dict) and "marketplace" in data and data["marketplace"] is not None
+            )
         except (OSError, yaml.YAMLError):
             has_block = False
         if has_block and legacy_path.exists():
@@ -90,8 +91,7 @@ def _ensure_yml_exists(logger: CommandLogger) -> Path:
         path == apm_path and path.exists() and not _has_marketplace_block(path)
     ):
         logger.error(
-            "No marketplace authoring config found. "
-            "Run 'apm marketplace init' to scaffold one.",
+            "No marketplace authoring config found. Run 'apm marketplace init' to scaffold one.",
             symbol="error",
         )
         sys.exit(1)
@@ -102,11 +102,11 @@ def _has_marketplace_block(apm_path: Path) -> bool:
     """Return True when *apm_path* has a populated ``marketplace:`` block."""
     try:
         import yaml
+
         data = yaml.safe_load(apm_path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError):
         return False
-    return isinstance(data, dict) and "marketplace" in data and \
-        data["marketplace"] is not None
+    return isinstance(data, dict) and "marketplace" in data and data["marketplace"] is not None
 
 
 def _parse_tags(raw: str | None) -> list[str] | None:
@@ -164,8 +164,7 @@ def _resolve_ref(
     if is_head:
         if no_verify:
             logger.error(
-                "Cannot resolve HEAD ref without network access. "
-                "Provide an explicit --ref SHA.",
+                "Cannot resolve HEAD ref without network access. Provide an explicit --ref SHA.",
                 symbol="error",
             )
             sys.exit(2)
@@ -212,8 +211,7 @@ def _resolve_ref(
                 )
                 sys.exit(2)
             logger.warning(
-                f"'{ref}' is a branch (mutable ref). "
-                "Resolving to current SHA for safety.",
+                f"'{ref}' is a branch (mutable ref). Resolving to current SHA for safety.",
                 symbol="warning",
             )
             logger.progress(
@@ -256,9 +254,7 @@ def package():
 @click.option("-s", "--subdir", default=None, help="Subdirectory inside source repo")
 @click.option("--tag-pattern", default=None, help="Tag pattern (e.g. 'v{version}')")
 @click.option("--tags", default=None, help="Comma-separated tags")
-@click.option(
-    "--include-prerelease", is_flag=True, help="Include prerelease versions"
-)
+@click.option("--include-prerelease", is_flag=True, help="Include prerelease versions")
 @click.option("--no-verify", is_flag=True, help="Skip remote reachability check")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def add(
@@ -396,8 +392,7 @@ def set_cmd(
 
     if not fields:
         logger.error(
-            "No fields specified. Pass at least one option "
-            "(e.g. --version, --ref, --subdir).",
+            "No fields specified. Pass at least one option (e.g. --version, --ref, --subdir).",
             symbol="error",
         )
         sys.exit(1)

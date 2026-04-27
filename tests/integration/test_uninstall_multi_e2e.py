@@ -13,11 +13,10 @@ Uses two real public APM packages from GitHub:
 import os
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 import yaml
-from pathlib import Path
-
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("GITHUB_APM_PAT") and not os.environ.get("GITHUB_TOKEN"),
@@ -50,7 +49,7 @@ def temp_project(tmp_path):
 
 def _run_apm(apm_command, args, cwd, timeout=180):
     return subprocess.run(
-        [apm_command] + args,
+        [apm_command] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -115,11 +114,13 @@ class TestUninstallMultiplePackages:
 
         lockfile_before = _read_yaml(temp_project / "apm.lock.yaml")
         files_a_before = [
-            f for f in _deployed_files_for(lockfile_before, "apm-sample-package")
+            f
+            for f in _deployed_files_for(lockfile_before, "apm-sample-package")
             if (temp_project / f).exists()
         ]
         files_b_before = [
-            f for f in _deployed_files_for(lockfile_before, "awesome-copilot")
+            f
+            for f in _deployed_files_for(lockfile_before, "awesome-copilot")
             if (temp_project / f).exists()
         ]
         if not files_a_before or not files_b_before:

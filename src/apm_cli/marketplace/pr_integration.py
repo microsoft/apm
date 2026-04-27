@@ -27,16 +27,16 @@ import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Optional  # noqa: F401
 
 from ._git_utils import redact_token as _redact_token
 from .git_stderr import translate_git_stderr
 from .publisher import ConsumerTarget, PublishOutcome, PublishPlan, TargetResult
 
 __all__ = [
-    "PrState",
-    "PrResult",
     "PrIntegrator",
+    "PrResult",
+    "PrState",
 ]
 
 # ---------------------------------------------------------------------------
@@ -99,10 +99,7 @@ def _extract_short_hash(plan: PublishPlan) -> str:
 
 def _build_title(plan: PublishPlan) -> str:
     """Build the PR title."""
-    return (
-        f"chore(apm): bump {plan.marketplace_name} "
-        f"to {plan.marketplace_version}"
-    )
+    return f"chore(apm): bump {plan.marketplace_name} to {plan.marketplace_version}"
 
 
 def _build_body(plan: PublishPlan, target: ConsumerTarget) -> str:
@@ -182,8 +179,7 @@ class PrIntegrator:
         except (OSError, FileNotFoundError):
             return (
                 False,
-                "gh CLI not found on PATH. Install from "
-                "https://cli.github.com/ or pass --no-pr.",
+                "gh CLI not found on PATH. Install from https://cli.github.com/ or pass --no-pr.",
             )
 
         # 2. Check gh is authenticated
@@ -197,14 +193,12 @@ class PrIntegrator:
             if auth_result.returncode != 0:
                 return (
                     False,
-                    "gh CLI is not authenticated. Run "
-                    "'gh auth login' or pass --no-pr.",
+                    "gh CLI is not authenticated. Run 'gh auth login' or pass --no-pr.",
                 )
         except (OSError, FileNotFoundError):
             return (
                 False,
-                "gh CLI is not authenticated. Run "
-                "'gh auth login' or pass --no-pr.",
+                "gh CLI is not authenticated. Run 'gh auth login' or pass --no-pr.",
             )
 
         return (True, version)
@@ -263,7 +257,10 @@ class PrIntegrator:
 
         try:
             return self._open_or_update_inner(
-                plan, target, draft=draft, dry_run=dry_run,
+                plan,
+                target,
+                draft=draft,
+                dry_run=dry_run,
             )
         except subprocess.CalledProcessError as exc:
             stderr = _redact_token(exc.stderr or "")
@@ -350,7 +347,11 @@ class PrIntegrator:
             )
 
         pr_url, pr_number = self._create_pr(
-            plan, target, title, body, draft=draft,
+            plan,
+            target,
+            title,
+            body,
+            draft=draft,
         )
 
         return PrResult(
@@ -365,16 +366,23 @@ class PrIntegrator:
         self,
         plan: PublishPlan,
         target: ConsumerTarget,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Return the first open PR for *plan.branch_name*, or ``None``."""
         result = self._runner(
             [
-                self._gh_bin, "pr", "list",
-                "--repo", target.repo,
-                "--head", plan.branch_name,
-                "--state", "open",
-                "--json", "number,url,body,headRefOid",
-                "--limit", "1",
+                self._gh_bin,
+                "pr",
+                "list",
+                "--repo",
+                target.repo,
+                "--head",
+                plan.branch_name,
+                "--state",
+                "open",
+                "--json",
+                "number,url,body,headRefOid",
+                "--limit",
+                "1",
             ],
             capture_output=True,
             text=True,
@@ -385,9 +393,7 @@ class PrIntegrator:
         try:
             prs = json.loads(result.stdout)
         except (json.JSONDecodeError, TypeError) as exc:
-            raise OSError(
-                f"Failed to parse gh pr list output: {exc}"
-            ) from exc
+            raise OSError(f"Failed to parse gh pr list output: {exc}") from exc
 
         if not prs:
             return None
@@ -412,10 +418,14 @@ class PrIntegrator:
         try:
             self._runner(
                 [
-                    self._gh_bin, "pr", "edit",
+                    self._gh_bin,
+                    "pr",
+                    "edit",
                     str(pr_number),
-                    "--repo", target.repo,
-                    "--body-file", tmp_path,
+                    "--repo",
+                    target.repo,
+                    "--body-file",
+                    tmp_path,
                 ],
                 capture_output=True,
                 text=True,
@@ -423,7 +433,7 @@ class PrIntegrator:
                 check=True,
             )
         finally:
-            try:
+            try:  # noqa: SIM105
                 os.unlink(tmp_path)
             except OSError:
                 pass
@@ -449,12 +459,19 @@ class PrIntegrator:
 
         try:
             cmd = [
-                self._gh_bin, "pr", "create",
-                "--repo", target.repo,
-                "--base", target.branch,
-                "--head", plan.branch_name,
-                "--title", title,
-                "--body-file", tmp_path,
+                self._gh_bin,
+                "pr",
+                "create",
+                "--repo",
+                target.repo,
+                "--base",
+                target.branch,
+                "--head",
+                plan.branch_name,
+                "--title",
+                title,
+                "--body-file",
+                tmp_path,
             ]
             if draft:
                 cmd.append("--draft")
@@ -467,7 +484,7 @@ class PrIntegrator:
                 check=True,
             )
         finally:
-            try:
+            try:  # noqa: SIM105
                 os.unlink(tmp_path)
             except OSError:
                 pass

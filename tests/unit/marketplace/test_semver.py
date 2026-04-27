@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
+import pytest  # noqa: F401
 
-from apm_cli.marketplace.semver import SemVer, parse_semver, satisfies_range
-
+from apm_cli.marketplace.semver import SemVer, parse_semver, satisfies_range  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # parse_semver

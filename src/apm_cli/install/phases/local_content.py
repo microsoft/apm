@@ -33,7 +33,6 @@ from pathlib import Path
 from apm_cli.utils.console import _rich_error
 from apm_cli.utils.path_security import safe_rmtree
 
-
 # ---------------------------------------------------------------------------
 # Root primitive detection helpers
 # ---------------------------------------------------------------------------
@@ -48,6 +47,7 @@ def _project_has_root_primitives(project_root) -> bool:
     anything actionable, so we only check for the directory's existence.
     """
     from pathlib import Path as _Path
+
     root = _Path(project_root)
     return (root / ".apm").is_dir()
 
@@ -62,7 +62,15 @@ def _has_local_apm_content(project_root):
     apm_dir = project_root / ".apm"
     if not apm_dir.is_dir():
         return False
-    _PRIMITIVE_DIRS = ("skills", "instructions", "chatmodes", "agents", "prompts", "hooks", "commands")
+    _PRIMITIVE_DIRS = (
+        "skills",
+        "instructions",
+        "chatmodes",
+        "agents",
+        "prompts",
+        "hooks",
+        "commands",
+    )
     for subdir_name in _PRIMITIVE_DIRS:
         subdir = apm_dir / subdir_name
         if subdir.is_dir() and any(p.is_file() for p in subdir.rglob("*")):
@@ -90,7 +98,7 @@ def _copy_local_package(dep_ref, install_path, project_root, logger=None):
     import shutil
 
     local = Path(dep_ref.local_path).expanduser()
-    if not local.is_absolute():
+    if not local.is_absolute():  # noqa: SIM108
         local = (project_root / local).resolve()
     else:
         local = local.resolve()
@@ -103,6 +111,7 @@ def _copy_local_package(dep_ref, install_path, project_root, logger=None):
             _rich_error(msg)
         return None
     from apm_cli.utils.helpers import find_plugin_json
+
     if (
         not (local / "apm.yml").exists()
         and not (local / "SKILL.md").exists()

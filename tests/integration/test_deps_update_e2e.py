@@ -22,7 +22,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-
 pytestmark = pytest.mark.skipif(
     not os.environ.get("GITHUB_APM_PAT") and not os.environ.get("GITHUB_TOKEN"),
     reason="GITHUB_APM_PAT or GITHUB_TOKEN required for GitHub API access",
@@ -68,6 +67,7 @@ def fake_home(tmp_path):
 def _env_with_home(fake_home):
     """Return an env dict with HOME/USERPROFILE pointing to *fake_home*."""
     import sys
+
     env = os.environ.copy()
     env["HOME"] = str(fake_home)
     if sys.platform == "win32":
@@ -78,7 +78,7 @@ def _env_with_home(fake_home):
 def _run_apm(apm_command, args, cwd, env=None, timeout=180):
     """Run an apm CLI command and return the result."""
     return subprocess.run(
-        [apm_command] + args,
+        [apm_command] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -128,9 +128,7 @@ def _get_locked_dep(lockfile, repo_url):
 def test_deps_update_all_packages_bumps_lockfile_sha(temp_project, apm_command):
     """`apm deps update` (no args) re-resolves refs and bumps the lockfile SHA."""
     # Step 1: install pinned to an older commit SHA.
-    _write_apm_yml(temp_project, [
-        {"git": SAMPLE_GIT_URL, "ref": OLD_SHA}
-    ])
+    _write_apm_yml(temp_project, [{"git": SAMPLE_GIT_URL, "ref": OLD_SHA}])
     result1 = _run_apm(apm_command, ["install"], temp_project)
     assert result1.returncode == 0, (
         f"Initial install failed:\nSTDOUT: {result1.stdout}\nSTDERR: {result1.stderr}"
@@ -144,9 +142,7 @@ def test_deps_update_all_packages_bumps_lockfile_sha(temp_project, apm_command):
     assert deployed_before, "No deployed files recorded -- cannot verify update"
 
     # Step 2: bump apm.yml to point at main.
-    _write_apm_yml(temp_project, [
-        {"git": SAMPLE_GIT_URL, "ref": NEWER_REF}
-    ])
+    _write_apm_yml(temp_project, [{"git": SAMPLE_GIT_URL, "ref": NEWER_REF}])
 
     # Step 3: run `apm deps update` with no positional args.
     result2 = _run_apm(apm_command, ["deps", "update"], temp_project)
@@ -182,10 +178,13 @@ def test_deps_update_single_package_selective(temp_project, apm_command):
     With two packages installed, requesting an update for one must succeed and
     must not error on the unrelated package.
     """
-    _write_apm_yml(temp_project, [
-        {"git": SAMPLE_GIT_URL, "ref": OLD_SHA},
-        "github/awesome-copilot/skills/aspire",
-    ])
+    _write_apm_yml(
+        temp_project,
+        [
+            {"git": SAMPLE_GIT_URL, "ref": OLD_SHA},
+            "github/awesome-copilot/skills/aspire",
+        ],
+    )
     result1 = _run_apm(apm_command, ["install"], temp_project)
     assert result1.returncode == 0, (
         f"Initial install failed:\nSTDOUT: {result1.stdout}\nSTDERR: {result1.stderr}"
@@ -196,10 +195,13 @@ def test_deps_update_single_package_selective(temp_project, apm_command):
     sample_old_sha = dep_sample_before.get("resolved_commit")
 
     # Bump the sample package ref so a real update is possible.
-    _write_apm_yml(temp_project, [
-        {"git": SAMPLE_GIT_URL, "ref": NEWER_REF},
-        "github/awesome-copilot/skills/aspire",
-    ])
+    _write_apm_yml(
+        temp_project,
+        [
+            {"git": SAMPLE_GIT_URL, "ref": NEWER_REF},
+            "github/awesome-copilot/skills/aspire",
+        ],
+    )
 
     result2 = _run_apm(
         apm_command,
@@ -237,14 +239,19 @@ def test_deps_update_global_user_scope(tmp_path, fake_home, apm_command):
     user_manifest = apm_dir / "apm.yml"
 
     def _write_user_manifest(ref):
-        user_manifest.write_text(yaml.dump({
-            "name": "global-deps-update-test",
-            "version": "1.0.0",
-            "dependencies": {
-                "apm": [{"git": SAMPLE_GIT_URL, "ref": ref}],
-                "mcp": [],
-            },
-        }), encoding="utf-8")
+        user_manifest.write_text(
+            yaml.dump(
+                {
+                    "name": "global-deps-update-test",
+                    "version": "1.0.0",
+                    "dependencies": {
+                        "apm": [{"git": SAMPLE_GIT_URL, "ref": ref}],
+                        "mcp": [],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
 
     _write_user_manifest(OLD_SHA)
 
@@ -293,9 +300,7 @@ def test_deps_update_global_user_scope(tmp_path, fake_home, apm_command):
     assert not (work_dir / "apm.lock").exists(), (
         "Legacy apm.lock leaked into cwd -- scope=USER not honored"
     )
-    assert not (work_dir / "apm.yml").exists(), (
-        "apm.yml leaked into cwd -- scope=USER not honored"
-    )
+    assert not (work_dir / "apm.yml").exists(), "apm.yml leaked into cwd -- scope=USER not honored"
 
 
 # ---------------------------------------------------------------------------
@@ -308,8 +313,7 @@ def test_deps_update_unknown_package_errors(temp_project, apm_command):
     _write_apm_yml(temp_project, [SAMPLE_REPO_URL])
     result_install = _run_apm(apm_command, ["install"], temp_project)
     assert result_install.returncode == 0, (
-        f"Initial install failed:\nSTDOUT: {result_install.stdout}\n"
-        f"STDERR: {result_install.stderr}"
+        f"Initial install failed:\nSTDOUT: {result_install.stdout}\nSTDERR: {result_install.stderr}"
     )
 
     result = _run_apm(

@@ -12,45 +12,45 @@ Run with: uv run pytest tests/benchmarks/test_security_and_resolver_benchmarks.p
 
 import time
 from pathlib import Path
-from typing import List
+from typing import List  # noqa: F401, UP035
 
 import pytest
 
+from apm_cli.deps.apm_resolver import APMDependencyResolver
+from apm_cli.deps.dependency_graph import (
+    DependencyNode,  # noqa: F401
+    DependencyTree,
+    FlatDependencyMap,
+)
+from apm_cli.models.apm_package import APMPackage  # noqa: F401
+from apm_cli.models.dependency.reference import DependencyReference  # noqa: F401
+from apm_cli.security.content_scanner import ContentScanner, ScanFinding
 from apm_cli.utils.exclude import (
     _match_double_star,
     should_exclude,
     validate_exclude_patterns,
 )
-from apm_cli.security.content_scanner import ContentScanner, ScanFinding
-from apm_cli.deps.apm_resolver import APMDependencyResolver
-from apm_cli.deps.dependency_graph import (
-    DependencyTree,
-    DependencyNode,
-    FlatDependencyMap,
-)
-from apm_cli.models.apm_package import APMPackage
-from apm_cli.models.dependency.reference import DependencyReference
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_path_parts(depth: int) -> List[str]:
+
+def _make_path_parts(depth: int) -> list[str]:
     """Build path parts like ['a', 'b', 'c', ..., 'test.py'] of given depth."""
     segments = [chr(ord("a") + (i % 26)) for i in range(depth - 1)]
     segments.append("test.py")
     return segments
 
 
-def _make_double_star_pattern(star_segments: int) -> List[str]:
+def _make_double_star_pattern(star_segments: int) -> list[str]:
     """Build pattern parts with N ** segments.
 
     1 segment:  ['**', 'a', '*.py']
     2 segments: ['**', 'a', '**', 'b', '*.py']
     3 segments: ['**', 'a', '**', 'b', '**', 'c', '*.py']
     """
-    parts: List[str] = []
+    parts: list[str] = []
     labels = ["a", "b", "c", "d", "e"]
     for i in range(star_segments):
         parts.append("**")
@@ -98,16 +98,16 @@ def _generate_dangerous_content(size: int) -> str:
     """
     # Mix of tag characters, bidi overrides, zero-width chars, and ASCII text
     dangerous_chars = [
-        "\U000E0041",  # tag character 'A' (critical)
-        "\U000E0042",  # tag character 'B' (critical)
-        "\u202A",      # LRE bidi override (critical)
-        "\u202E",      # RLO bidi override (critical)
-        "\u200B",      # zero-width space (warning)
-        "\u200D",      # zero-width joiner (warning -- not in emoji context)
-        "\u2060",      # word joiner (warning)
+        "\U000e0041",  # tag character 'A' (critical)
+        "\U000e0042",  # tag character 'B' (critical)
+        "\u202a",  # LRE bidi override (critical)
+        "\u202e",  # RLO bidi override (critical)
+        "\u200b",  # zero-width space (warning)
+        "\u200d",  # zero-width joiner (warning -- not in emoji context)
+        "\u2060",  # word joiner (warning)
     ]
     block = "Normal text here. "
-    parts: List[str] = []
+    parts: list[str] = []
     idx = 0
     while len("".join(parts)) < size:
         parts.append(block)
@@ -116,7 +116,7 @@ def _generate_dangerous_content(size: int) -> str:
     return "".join(parts)[:size]
 
 
-def _write_fake_apm_yml(path: Path, deps: List[str]) -> Path:
+def _write_fake_apm_yml(path: Path, deps: list[str]) -> Path:
     """Write an apm.yml with the given dependency list and return its path."""
     lines = [
         "name: bench-root",
@@ -132,9 +132,7 @@ def _write_fake_apm_yml(path: Path, deps: List[str]) -> Path:
     return apm_yml
 
 
-def _setup_linear_chain(
-    tmp_path: Path, length: int
-) -> Path:
+def _setup_linear_chain(tmp_path: Path, length: int) -> Path:
     """Create a linear dependency chain: root -> pkg-0 -> pkg-1 -> ... -> pkg-(length-1).
 
     Each package has an apm.yml pointing to the next package in the chain.
@@ -149,7 +147,7 @@ def _setup_linear_chain(
         owner_dir.mkdir(exist_ok=True)
         pkg_dir = owner_dir / f"pkg-{i}"
         pkg_dir.mkdir(parents=True, exist_ok=True)
-        if i < length - 1:
+        if i < length - 1:  # noqa: SIM108
             next_dep = [f"org/pkg-{i + 1}"]
         else:
             next_dep = []
@@ -160,9 +158,7 @@ def _setup_linear_chain(
     return _write_fake_apm_yml(tmp_path, root_deps)
 
 
-def _setup_wide_fan(
-    tmp_path: Path, breadth: int
-) -> Path:
+def _setup_wide_fan(tmp_path: Path, breadth: int) -> Path:
     """Create a wide fan: root -> [pkg-0, pkg-1, ..., pkg-(breadth-1)].
 
     Each leaf package has no further dependencies.
@@ -217,6 +213,7 @@ def _setup_diamond(tmp_path: Path) -> Path:
 # P0 #1: _match_double_star() / should_exclude()
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.benchmark
 class TestDoubleStarThroughput:
     """Benchmark _match_double_star() with varying ** segments and path depth."""
@@ -235,9 +232,7 @@ class TestDoubleStarThroughput:
             (3, 20),
         ],
     )
-    def test_double_star_throughput(
-        self, star_segments: int, path_depth: int
-    ):
+    def test_double_star_throughput(self, star_segments: int, path_depth: int):
         """_match_double_star with N ** segments on depth-D path stays under 2s."""
         path_parts = _make_path_parts(path_depth)
         pattern_parts = _make_double_star_pattern(star_segments)
@@ -318,47 +313,43 @@ class TestDoubleStarCorrectness:
     def test_one_double_star_segment_matches(self):
         """'**' + 'a' + '*.py' should match paths containing 'a' before .py."""
         # Should match: path has 'a' segment followed by a .py file
-        assert _match_double_star(
-            ["src", "a", "test.py"], ["**", "a", "*.py"]
-        ) is True
+        assert _match_double_star(["src", "a", "test.py"], ["**", "a", "*.py"]) is True
 
     def test_one_double_star_segment_no_match(self):
         """Pattern should NOT match when required segment is absent."""
-        assert _match_double_star(
-            ["src", "b", "test.py"], ["**", "a", "*.py"]
-        ) is False
+        assert _match_double_star(["src", "b", "test.py"], ["**", "a", "*.py"]) is False
 
     def test_double_star_matches_zero_dirs(self):
         """** can match zero directories."""
-        assert _match_double_star(
-            ["a", "test.py"], ["**", "a", "*.py"]
-        ) is True
+        assert _match_double_star(["a", "test.py"], ["**", "a", "*.py"]) is True
 
     def test_double_star_matches_multiple_dirs(self):
         """** can match multiple directories."""
-        assert _match_double_star(
-            ["x", "y", "z", "a", "test.py"], ["**", "a", "*.py"]
-        ) is True
+        assert _match_double_star(["x", "y", "z", "a", "test.py"], ["**", "a", "*.py"]) is True
 
     def test_two_star_segments(self):
         """Pattern with 2 ** segments matches nested structure."""
-        assert _match_double_star(
-            ["x", "a", "y", "z", "b", "test.py"],
-            ["**", "a", "**", "b", "*.py"],
-        ) is True
+        assert (
+            _match_double_star(
+                ["x", "a", "y", "z", "b", "test.py"],
+                ["**", "a", "**", "b", "*.py"],
+            )
+            is True
+        )
 
     def test_two_star_segments_no_match(self):
         """Two ** segments fail when second anchor is missing."""
-        assert _match_double_star(
-            ["x", "a", "y", "z", "test.py"],
-            ["**", "a", "**", "b", "*.py"],
-        ) is False
+        assert (
+            _match_double_star(
+                ["x", "a", "y", "z", "test.py"],
+                ["**", "a", "**", "b", "*.py"],
+            )
+            is False
+        )
 
     def test_wrong_extension_no_match(self):
         """*.py pattern should not match .txt files."""
-        assert _match_double_star(
-            ["a", "test.txt"], ["**", "a", "*.py"]
-        ) is False
+        assert _match_double_star(["a", "test.txt"], ["**", "a", "*.py"]) is False
 
     def test_should_exclude_integration(self, tmp_path: Path):
         """should_exclude() correctly uses _match_double_star via _matches_pattern."""
@@ -379,6 +370,7 @@ class TestDoubleStarCorrectness:
 # ---------------------------------------------------------------------------
 # P0 #2: ContentScanner.scan_text()
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.benchmark
 class TestScanTextThroughput:
@@ -454,7 +446,7 @@ class TestScanTextCorrectness:
 
     def test_tag_character_detected_as_critical(self):
         """Tag characters (U+E0041) should be detected as critical."""
-        content = "Normal\U000E0041text"
+        content = "Normal\U000e0041text"
         findings = ContentScanner.scan_text(content, filename="test.md")
 
         critical = [f for f in findings if f.severity == "critical"]
@@ -463,7 +455,7 @@ class TestScanTextCorrectness:
 
     def test_bidi_override_detected(self):
         """Bidi override (U+202E RLO) should be critical."""
-        content = "Hello\u202Eworld"
+        content = "Hello\u202eworld"
         findings = ContentScanner.scan_text(content, filename="test.md")
 
         critical = [f for f in findings if f.severity == "critical"]
@@ -489,6 +481,7 @@ class TestScanTextCorrectness:
 # P0 #3: ContentScanner.strip_dangerous()
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.benchmark
 class TestStripDangerousThroughput:
     """Benchmark ContentScanner.strip_dangerous() across content sizes."""
@@ -501,9 +494,7 @@ class TestStripDangerousThroughput:
             (100_000, 50.0),
         ],
     )
-    def test_strip_dangerous_throughput(
-        self, content_size: int, ceiling: float
-    ):
+    def test_strip_dangerous_throughput(self, content_size: int, ceiling: float):
         """strip_dangerous() on dangerous content of size N within ceiling."""
         content = _generate_dangerous_content(content_size)
 
@@ -528,13 +519,13 @@ class TestStripDangerousCorrectness:
 
     def test_critical_chars_removed(self):
         """Tag characters and bidi overrides should be stripped."""
-        content = "Hello\U000E0041\U000E0042\u202EWorld"
+        content = "Hello\U000e0041\U000e0042\u202eWorld"
         result = ContentScanner.strip_dangerous(content)
 
         # Verify dangerous chars are gone
-        assert "\U000E0041" not in result
-        assert "\U000E0042" not in result
-        assert "\u202E" not in result
+        assert "\U000e0041" not in result
+        assert "\U000e0042" not in result
+        assert "\u202e" not in result
         # ASCII text should be preserved
         assert "Hello" in result
         assert "World" in result
@@ -568,9 +559,7 @@ class TestStripDangerousCorrectness:
         result = ContentScanner.strip_dangerous(content)
 
         findings = ContentScanner.scan_text(result, filename="stripped.md")
-        dangerous = [
-            f for f in findings if f.severity in ("critical", "warning")
-        ]
+        dangerous = [f for f in findings if f.severity in ("critical", "warning")]
         assert len(dangerous) == 0, (
             f"Stripped content still has {len(dangerous)} dangerous findings"
         )
@@ -594,8 +583,8 @@ class TestStripDangerousIdempotency:
         """Idempotency holds even with mixed critical/warning/info content."""
         # Include info-level chars that should be preserved
         content = (
-            "Hello\U000E0041World\u200b"  # critical + warning
-            "\u00a0normal\u202E"           # info + critical
+            "Hello\U000e0041World\u200b"  # critical + warning
+            "\u00a0normal\u202e"  # info + critical
             "end"
         )
         first_pass = ContentScanner.strip_dangerous(content)
@@ -606,6 +595,7 @@ class TestStripDangerousIdempotency:
 # ---------------------------------------------------------------------------
 # P0 #4: APMDependencyResolver.build_dependency_tree()
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.benchmark
 class TestBuildDependencyTreeShapes:
@@ -631,8 +621,7 @@ class TestBuildDependencyTreeShapes:
         assert len(tree.nodes) == 50
         # Generous ceiling (5x expected) -- catches catastrophic regressions only.
         assert elapsed < 25.0, (
-            f"Linear chain (50 nodes) took {elapsed:.3f}s, "
-            f"expected < 25.0s (generous ceiling)"
+            f"Linear chain (50 nodes) took {elapsed:.3f}s, expected < 25.0s (generous ceiling)"
         )
 
     def test_wide_fan(self, tmp_path: Path):
@@ -654,8 +643,7 @@ class TestBuildDependencyTreeShapes:
         assert len(tree.nodes) == 50
         # Generous ceiling (5x expected) -- catches catastrophic regressions only.
         assert elapsed < 25.0, (
-            f"Wide fan (50 nodes) took {elapsed:.3f}s, "
-            f"expected < 25.0s (generous ceiling)"
+            f"Wide fan (50 nodes) took {elapsed:.3f}s, expected < 25.0s (generous ceiling)"
         )
 
     def test_diamond_deduplication(self, tmp_path: Path):
@@ -676,13 +664,10 @@ class TestBuildDependencyTreeShapes:
         assert isinstance(tree, DependencyTree)
         # Diamond: A, B, C = 3 unique nodes (C is shared, not duplicated)
         assert len(tree.nodes) == 3, (
-            f"Diamond should have 3 unique nodes, got {len(tree.nodes)}: "
-            f"{list(tree.nodes.keys())}"
+            f"Diamond should have 3 unique nodes, got {len(tree.nodes)}: {list(tree.nodes.keys())}"
         )
         # Generous ceiling (5x expected) -- catches catastrophic regressions only.
-        assert elapsed < 10.0, (
-            f"Diamond took {elapsed:.3f}s, expected < 10.0s (generous ceiling)"
-        )
+        assert elapsed < 10.0, f"Diamond took {elapsed:.3f}s, expected < 10.0s (generous ceiling)"
 
 
 @pytest.mark.benchmark

@@ -13,7 +13,7 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import MagicMock, patch
 
-import pytest
+import pytest  # noqa: F401
 
 from apm_cli.install import validation
 
@@ -35,7 +35,10 @@ def _make_resolver():
 
 def _failed_run(stderr: str = "ssh: connect to host port 22: Connection timed out"):
     return subprocess.CompletedProcess(
-        args=[], returncode=128, stdout="", stderr=stderr,
+        args=[],
+        returncode=128,
+        stdout="",
+        stderr=stderr,
     )
 
 
@@ -148,9 +151,7 @@ class TestPerAttemptVerboseLogging:
     the last one. Previously, only the final probe's stderr was logged, which
     masked the real HTTPS failure behind the SSH-fallback timeout."""
 
-    def test_verbose_logs_each_attempt_with_scheme_and_sanitized_stderr(
-        self, monkeypatch
-    ):
+    def test_verbose_logs_each_attempt_with_scheme_and_sanitized_stderr(self, monkeypatch):
         monkeypatch.setenv("APM_ALLOW_PROTOCOL_FALLBACK", "1")  # force 2 attempts
         resolver = _make_resolver()
         verbose_msgs: list[str] = []

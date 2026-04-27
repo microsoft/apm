@@ -14,14 +14,13 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
+import pytest  # noqa: F401
 import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.models.results import InstallResult
 from apm_cli.utils.console import STATUS_SYMBOLS
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -120,9 +119,7 @@ class TestI1SinglePublicPackageHappyPath(_InstallAcceptanceBase):
         mock_validate.return_value = True
 
         pkg = MagicMock()
-        pkg.get_apm_dependencies.return_value = [
-            MagicMock(repo_url="owner/repo", reference="main")
-        ]
+        pkg.get_apm_dependencies.return_value = [MagicMock(repo_url="owner/repo", reference="main")]
         pkg.get_mcp_dependencies.return_value = []
         pkg.get_dev_apm_dependencies.return_value = []
         mock_apm_pkg.from_apm_yml.return_value = pkg
@@ -187,13 +184,11 @@ class TestI4PackageFailsValidation(_InstallAcceptanceBase):
 
         with self._chdir_tmp() as tmp:
             self._write_apm_yml(tmp)
-            result = self.runner.invoke(
-                cli, ["install", "--verbose", "owner/nonexistent"]
-            )
+            result = self.runner.invoke(cli, ["install", "--verbose", "owner/nonexistent"])
 
         # The validation failure reason should NOT contain the verbose hint
         # when already in verbose mode.
-        lines_with_cross = [l for l in result.output.splitlines() if "[x]" in l]
+        lines_with_cross = [l for l in result.output.splitlines() if "[x]" in l]  # noqa: E741
         for line in lines_with_cross:
             assert "run with --verbose" not in line.lower(), (
                 f"Redundant --verbose hint found in verbose mode: {line}"
@@ -208,7 +203,10 @@ class TestI4PackageFailsValidation(_InstallAcceptanceBase):
             self._write_apm_yml(tmp)
             result = self.runner.invoke(cli, ["install", "owner/nonexistent"])
 
-        assert "All packages failed validation" in result.output or "Nothing to install" in result.output
+        assert (
+            "All packages failed validation" in result.output
+            or "Nothing to install" in result.output
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -238,9 +236,7 @@ class TestI5PackageAlreadyInstalled(_InstallAcceptanceBase):
         mock_validate.return_value = True
 
         pkg = MagicMock()
-        pkg.get_apm_dependencies.return_value = [
-            MagicMock(repo_url="owner/repo", reference="main")
-        ]
+        pkg.get_apm_dependencies.return_value = [MagicMock(repo_url="owner/repo", reference="main")]
         pkg.get_mcp_dependencies.return_value = []
         pkg.get_dev_apm_dependencies.return_value = []
         mock_apm_pkg.from_apm_yml.return_value = pkg
@@ -285,9 +281,7 @@ class TestI6MixedValidInvalid(_InstallAcceptanceBase):
         mock_validate.side_effect = [True, False]
 
         pkg = MagicMock()
-        pkg.get_apm_dependencies.return_value = [
-            MagicMock(repo_url="good/pkg", reference="main")
-        ]
+        pkg.get_apm_dependencies.return_value = [MagicMock(repo_url="good/pkg", reference="main")]
         pkg.get_mcp_dependencies.return_value = []
         pkg.get_dev_apm_dependencies.return_value = []
         mock_apm_pkg.from_apm_yml.return_value = pkg
@@ -297,9 +291,7 @@ class TestI6MixedValidInvalid(_InstallAcceptanceBase):
 
         with self._chdir_tmp() as tmp:
             self._write_apm_yml(tmp)
-            result = self.runner.invoke(
-                cli, ["install", "good/pkg", "bad/missing"]
-            )
+            result = self.runner.invoke(cli, ["install", "good/pkg", "bad/missing"])
 
         out = result.output
         assert result.exit_code == 0, f"Exit {result.exit_code}: {out}"
@@ -407,9 +399,7 @@ class TestLoggingRules(_InstallAcceptanceBase):
         mock_validate.return_value = True
 
         pkg = MagicMock()
-        pkg.get_apm_dependencies.return_value = [
-            MagicMock(repo_url="owner/repo", reference="main")
-        ]
+        pkg.get_apm_dependencies.return_value = [MagicMock(repo_url="owner/repo", reference="main")]
         pkg.get_mcp_dependencies.return_value = []
         pkg.get_dev_apm_dependencies.return_value = []
         mock_apm_pkg.from_apm_yml.return_value = pkg
@@ -418,9 +408,7 @@ class TestLoggingRules(_InstallAcceptanceBase):
 
         with self._chdir_tmp() as tmp:
             self._write_apm_yml(tmp)
-            result = self.runner.invoke(
-                cli, ["install", "--dry-run", "owner/repo"]
-            )
+            result = self.runner.invoke(cli, ["install", "--dry-run", "owner/repo"])
 
         out = result.output.lower()
         assert "dry run" in out or "dry-run" in out, (
@@ -445,9 +433,7 @@ class TestLoggingRules(_InstallAcceptanceBase):
         mock_validate.return_value = True
 
         pkg = MagicMock()
-        pkg.get_apm_dependencies.return_value = [
-            MagicMock(repo_url="owner/repo", reference="main")
-        ]
+        pkg.get_apm_dependencies.return_value = [MagicMock(repo_url="owner/repo", reference="main")]
         pkg.get_mcp_dependencies.return_value = []
         pkg.get_dev_apm_dependencies.return_value = []
         mock_apm_pkg.from_apm_yml.return_value = pkg
@@ -458,9 +444,7 @@ class TestLoggingRules(_InstallAcceptanceBase):
             self._write_apm_yml(tmp)
             original = (tmp / "apm.yml").read_text()
 
-            result = self.runner.invoke(
-                cli, ["install", "--dry-run", "owner/repo"]
-            )
+            result = self.runner.invoke(cli, ["install", "--dry-run", "owner/repo"])  # noqa: F841
 
             # apm.yml should be unchanged (dry-run skips writing)
             final = (tmp / "apm.yml").read_text()
@@ -505,9 +489,7 @@ class TestErrorPaths(_InstallAcceptanceBase):
         mock_validate.return_value = True
 
         pkg = MagicMock()
-        pkg.get_apm_dependencies.return_value = [
-            MagicMock(repo_url="owner/repo", reference="main")
-        ]
+        pkg.get_apm_dependencies.return_value = [MagicMock(repo_url="owner/repo", reference="main")]
         pkg.get_mcp_dependencies.return_value = []
         pkg.get_dev_apm_dependencies.return_value = []
         mock_apm_pkg.from_apm_yml.return_value = pkg
@@ -544,9 +526,7 @@ class TestErrorPaths(_InstallAcceptanceBase):
         mock_validate.return_value = True
 
         pkg = MagicMock()
-        pkg.get_apm_dependencies.return_value = [
-            MagicMock(repo_url="owner/repo", reference="main")
-        ]
+        pkg.get_apm_dependencies.return_value = [MagicMock(repo_url="owner/repo", reference="main")]
         pkg.get_mcp_dependencies.return_value = []
         pkg.get_dev_apm_dependencies.return_value = []
         mock_apm_pkg.from_apm_yml.return_value = pkg
@@ -557,9 +537,7 @@ class TestErrorPaths(_InstallAcceptanceBase):
 
         with self._chdir_tmp() as tmp:
             self._write_apm_yml(tmp)
-            result = self.runner.invoke(
-                cli, ["install", "--verbose", "owner/repo"]
-            )
+            result = self.runner.invoke(cli, ["install", "--verbose", "owner/repo"])
 
         out = result.output
         assert result.exit_code == 1
@@ -585,9 +563,7 @@ class TestErrorPaths(_InstallAcceptanceBase):
         mock_validate.return_value = True
 
         pkg = MagicMock()
-        pkg.get_apm_dependencies.return_value = [
-            MagicMock(repo_url="owner/repo", reference="main")
-        ]
+        pkg.get_apm_dependencies.return_value = [MagicMock(repo_url="owner/repo", reference="main")]
         pkg.get_mcp_dependencies.return_value = []
         pkg.get_dev_apm_dependencies.return_value = []
         mock_apm_pkg.from_apm_yml.return_value = pkg
@@ -616,6 +592,4 @@ class TestErrorPaths(_InstallAcceptanceBase):
         diag_pos = out.find("Diagnostics")
         summary_pos = out.find("Installed")
         if diag_pos != -1 and summary_pos != -1:
-            assert diag_pos < summary_pos, (
-                "Diagnostics should render BEFORE the install summary"
-            )
+            assert diag_pos < summary_pos, "Diagnostics should render BEFORE the install summary"

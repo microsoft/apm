@@ -1,12 +1,12 @@
 """APM compile command CLI."""
 
 import sys
-from pathlib import Path
+from pathlib import Path  # noqa: F401
 
 import click
 
-from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME
 from ...compilation import AgentsCompiler, CompilationConfig
+from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
 from ...core.target_detection import TargetParamType
 from ...primitives.discovery import discover_primitives
@@ -36,6 +36,7 @@ def _display_single_file_summary(stats, c_status, c_hash, output_path, dry_run):
             return
 
         import os
+
         from rich.table import Table
 
         table = Table(
@@ -68,7 +69,7 @@ def _display_single_file_summary(stats, c_status, c_hash, output_path, dry_run):
 
         try:
             file_size = os.path.getsize(output_path) if not dry_run else 0
-            size_str = f"{file_size/1024:.1f}KB" if file_size > 0 else "Preview"
+            size_str = f"{file_size / 1024:.1f}KB" if file_size > 0 else "Preview"
             output_details = f"{output_path.name} ({size_str})"
         except Exception:
             output_details = f"{output_path.name}"
@@ -95,9 +96,7 @@ def _display_next_steps(output):
             from rich.panel import Panel
 
             steps_content = "\n".join(f"* {step}" for step in next_steps)
-            console.print(
-                Panel(steps_content, title=" Next Steps", border_style="blue")
-            )
+            console.print(Panel(steps_content, title=" Next Steps", border_style="blue"))
         else:
             _rich_info("Next steps:")
             for step in next_steps:
@@ -315,16 +314,11 @@ def compile(
         # Check if .apm directory has actual content
         apm_dir = Path(APM_DIR)
         local_apm_has_content = apm_dir.exists() and (
-            any(apm_dir.rglob("*.instructions.md"))
-            or any(apm_dir.rglob("*.chatmode.md"))
+            any(apm_dir.rglob("*.instructions.md")) or any(apm_dir.rglob("*.chatmode.md"))
         )
 
         # If no primitive sources exist, check deeper to provide better feedback
-        if (
-            not apm_modules_exists
-            and not local_apm_has_content
-            and not constitution_exists
-        ):
+        if not apm_modules_exists and not local_apm_has_content and not constitution_exists:
             # Check if .apm directories exist but are empty
             has_empty_apm = (
                 apm_dir.exists()
@@ -341,9 +335,7 @@ def compile(
                 logger.error("No APM content found to compile")
                 logger.progress(" To get started:")
                 logger.progress("   1. Install APM dependencies: apm install <owner>/<repo>")
-                logger.progress(
-                    "   2. Or create local instructions: mkdir -p .apm/instructions"
-                )
+                logger.progress("   2. Or create local instructions: mkdir -p .apm/instructions")
                 logger.progress("   3. Then create .instructions.md or .chatmode.md files")
 
             if not dry_run:  # Don't exit on dry-run to allow testing
@@ -372,6 +364,7 @@ def compile(
             # Show MCP dependency validation count
             try:
                 from ...models.apm_package import APMPackage
+
                 apm_pkg = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
                 mcp_count = len(apm_pkg.get_mcp_dependencies())
                 if mcp_count > 0:
@@ -428,7 +421,9 @@ def compile(
             detected_target, detection_reason = detect_target(
                 project_root=Path("."),
                 explicit_target=compile_target,
-                config_target=compile_config_target if isinstance(compile_config_target, str) else None,
+                config_target=compile_config_target
+                if isinstance(compile_config_target, str)
+                else None,
             )
             # Map 'minimal' to 'vscode' for the compiler (AGENTS.md only, no folder integration)
             effective_target = detected_target if detected_target != "minimal" else "vscode"
@@ -467,6 +462,7 @@ def compile(
                     should_compile_claude_md,
                     should_compile_gemini_md,
                 )
+
                 _parts = []
                 if should_compile_agents_md(effective_target):
                     _parts.append("AGENTS.md")
@@ -474,9 +470,7 @@ def compile(
                     _parts.append("CLAUDE.md")
                 if should_compile_gemini_md(effective_target):
                     _parts.append("GEMINI.md")
-                logger.progress(
-                    f"Compiling for {' + '.join(_parts)} ({_target_label})"
-                )
+                logger.progress(f"Compiling for {' + '.join(_parts)} ({_target_label})")
             elif (
                 isinstance(effective_target, str)
                 and effective_target == "vscode"
@@ -489,14 +483,10 @@ def compile(
                 )
             else:
                 description = get_target_description(effective_target)
-                logger.progress(
-                    f"Compiling for {description} - {detection_reason}"
-                )
+                logger.progress(f"Compiling for {description} - {detection_reason}")
 
             if dry_run:
-                logger.dry_run_notice(
-                    "showing placement without writing files"
-                )
+                logger.dry_run_notice("showing placement without writing files")
             if verbose:
                 logger.verbose_detail(
                     "Verbose mode: showing source attribution and optimizer analysis"
@@ -588,7 +578,7 @@ def compile(
                         idx = lines.index(BUILD_ID_PLACEHOLDER)
                     except ValueError:
                         idx = None
-                    hash_input_lines = [l for i, l in enumerate(lines) if i != idx]
+                    hash_input_lines = [l for i, l in enumerate(lines) if i != idx]  # noqa: E741
                     hash_bytes = "\n".join(hash_input_lines).encode("utf-8")
                     build_id = hashlib.sha256(hash_bytes).hexdigest()[:12]
                     if idx is not None:
@@ -646,20 +636,14 @@ def compile(
                     _display_single_file_summary(stats, c_status, c_hash, output_path, dry_run)
 
                     if dry_run:
-                        preview = final_content[:500] + (
-                            "..." if len(final_content) > 500 else ""
-                        )
-                        _rich_panel(
-                            preview, title=" Generated Content Preview", style="cyan"
-                        )
+                        preview = final_content[:500] + ("..." if len(final_content) > 500 else "")
+                        _rich_panel(preview, title=" Generated Content Preview", style="cyan")
                     else:
                         _display_next_steps(output)
 
         # Display warnings for all compilation modes
         if result.warnings:
-            logger.warning(
-                f"Compilation completed with {len(result.warnings)} warning(s):"
-            )
+            logger.warning(f"Compilation completed with {len(result.warnings)} warning(s):")
             for warning in result.warnings:
                 logger.warning(f"  {warning}")
 

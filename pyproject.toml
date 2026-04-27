@@ -43,8 +43,7 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "pytest-xdist>=3.0.0",
-    "black>=26.3.1; python_version>='3.10'",
-    "isort>=5.0.0",
+    "ruff>=0.11.0",
     "mypy>=1.0.0",
 ]
 build = [
@@ -58,13 +57,69 @@ apm = "apm_cli.cli:main"
 where = ["src"]
 include = ["apm_cli*"]
 
-[tool.black]
-line-length = 88
-target-version = ["py312"]
+[tool.ruff]
+line-length = 100
+target-version = "py310"
 
-[tool.isort]
-profile = "black"
-line_length = 88
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes (unused imports, undefined names)
+    "I",    # isort (import ordering)
+    "UP",   # pyupgrade (Python modernisation)
+    "B",    # bugbear (common bugs: mutable defaults, assert-false)
+    "SIM",  # simplify (mechanical transformations)
+    "RUF",  # ruff-specific patterns
+    "S",    # bandit security checks
+    "PLR",  # pylint refactor (complexity metrics)
+    "C90",  # McCabe cyclomatic complexity
+]
+ignore = [
+    "PLR2004",  # magic-value-comparison -- too noisy, especially in tests
+    "E501",     # line-too-long -- ruff format handles code; remaining are strings/URLs
+    # --- Deferred rules: enable in dedicated future PRs ---
+    "B904",     # raise-without-from-inside-except -- 60 existing violations, needs careful migration
+    "SIM117",   # multiple-with-statements -- 44 violations, style preference
+    "S110",     # try-except-pass -- 37 violations, often intentional in CLI error handling
+    "SIM102",   # collapsible-if -- 19 violations, style preference
+    "RUF003",   # ambiguous-unicode-character-comment -- 14 violations, review against ASCII convention
+    "RUF002",   # ambiguous-unicode-character-docstring -- 8 violations, same as above
+    "S602",     # subprocess-popen-with-shell -- 14 violations, intentional in CLI tool
+    "E402",     # module-import-not-at-top -- 6 violations, often intentional (lazy/conditional imports)
+]
+
+[tool.ruff.lint.pylint]
+# High initial thresholds set just above current codebase maximums.
+# Prevents new code from exceeding the worst existing violations.
+# Tighten these over time via dedicated refactoring PRs.
+max-statements = 300   # current max: 285 (mcp_integrator.py::install)
+max-args = 16          # current max: 15  (install/services.py)
+max-branches = 130     # current max: 128 (mcp_integrator.py::install)
+max-returns = 20       # current max: 19  (target_detection.py)
+
+[tool.ruff.lint.mccabe]
+max-complexity = 110   # current max: 104 (mcp_integrator.py::install)
+
+[tool.ruff.lint.per-file-ignores]
+# Subprocess calls are intentional in a CLI tool
+"src/apm_cli/**" = ["S603", "S607"]
+# Tests: assert is expected; security rules produce false positives on fixtures;
+# F821 undefined-name from TYPE_CHECKING + PEP 563 deferred annotations
+"tests/**" = ["S101", "S105", "S106", "S108", "S110", "S112", "S603", "S607"]
+# Files using `from __future__ import annotations` with forward-reference-only
+# type imports (PEP 563). Ruff cannot resolve these without a type checker.
+"src/apm_cli/policy/ci_checks.py" = ["F821", "S603", "S607"]
+"src/apm_cli/policy/policy_checks.py" = ["F821", "S603", "S607"]
+"src/apm_cli/security/audit_report.py" = ["F821", "S603", "S607"]
+"src/apm_cli/cli.py" = ["F821", "S603", "S607"]
+"src/apm_cli/commands/audit.py" = ["F821", "S603", "S607"]
+"src/apm_cli/commands/init.py" = ["F821", "S603", "S607"]
+"src/apm_cli/install/pipeline.py" = ["F821", "S603", "S607"]
+"src/apm_cli/integration/skill_integrator.py" = ["F821", "S603", "S607"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
 
 [tool.mypy]
 python_version = "3.12"
@@ -79,3 +134,4 @@ markers = [
     "slow: marks tests as slow running tests",
     "benchmark: marks performance benchmark tests (deselected by default, run with -m benchmark)",
 ]
+

@@ -2,26 +2,25 @@
 
 from __future__ import annotations
 
-import json
+import json  # noqa: F401
 import textwrap
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch  # noqa: F401
 
 import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import marketplace
-from apm_cli.marketplace.builder import BuildOptions, BuildReport, ResolvedPackage
+from apm_cli.marketplace.builder import BuildOptions, BuildReport, ResolvedPackage  # noqa: F401
 from apm_cli.marketplace.errors import (
     BuildError,
     GitLsRemoteError,
     HeadNotAllowedError,
-    MarketplaceYmlError,
+    MarketplaceYmlError,  # noqa: F401
     NoMatchingVersionError,
     OfflineMissError,
     RefNotFoundError,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -50,8 +49,13 @@ _BASIC_YML = textwrap.dedent("""\
 
 
 def _make_report(
-    resolved=None, errors=(), dry_run=False,
-    unchanged=0, added=2, updated=0, removed=0,
+    resolved=None,
+    errors=(),
+    dry_run=False,
+    unchanged=0,
+    added=2,
+    updated=0,
+    removed=0,
 ):
     """Build a fake BuildReport."""
     if resolved is None:
@@ -249,10 +253,12 @@ class TestBuildSchemaError:
         (tmp_path / "marketplace.yml").write_text("not: valid\n", encoding="utf-8")
         result = runner.invoke(marketplace, ["build"])
         assert result.exit_code == 2
-        assert "config error" in result.output.lower() or \
-            "schema error" in result.output.lower() or \
-            "required" in result.output.lower() or \
-            "unknown" in result.output.lower()
+        assert (
+            "config error" in result.output.lower()
+            or "schema error" in result.output.lower()
+            or "required" in result.output.lower()
+            or "unknown" in result.output.lower()
+        )
 
     def test_bad_yaml_syntax_exits_2(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -272,9 +278,7 @@ class TestBuildErrors:
     @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
     def test_no_matching_version_error(self, MockBuilder, runner, yml_cwd):
         mock_inst = MockBuilder.return_value
-        mock_inst.build.side_effect = NoMatchingVersionError(
-            "pkg-alpha", "^1.0.0"
-        )
+        mock_inst.build.side_effect = NoMatchingVersionError("pkg-alpha", "^1.0.0")
 
         result = runner.invoke(marketplace, ["build"])
         assert result.exit_code == 1
@@ -283,9 +287,7 @@ class TestBuildErrors:
     @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
     def test_ref_not_found_error(self, MockBuilder, runner, yml_cwd):
         mock_inst = MockBuilder.return_value
-        mock_inst.build.side_effect = RefNotFoundError(
-            "pkg-alpha", "v99.0.0", "acme-org/pkg-alpha"
-        )
+        mock_inst.build.side_effect = RefNotFoundError("pkg-alpha", "v99.0.0", "acme-org/pkg-alpha")
 
         result = runner.invoke(marketplace, ["build"])
         assert result.exit_code == 1
@@ -319,9 +321,7 @@ class TestBuildErrors:
     @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
     def test_head_not_allowed_error(self, MockBuilder, runner, yml_cwd):
         mock_inst = MockBuilder.return_value
-        mock_inst.build.side_effect = HeadNotAllowedError(
-            package="pkg-alpha", ref="main"
-        )
+        mock_inst.build.side_effect = HeadNotAllowedError(package="pkg-alpha", ref="main")
 
         result = runner.invoke(marketplace, ["build"])
         assert result.exit_code == 1
@@ -330,9 +330,7 @@ class TestBuildErrors:
     @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
     def test_generic_build_error(self, MockBuilder, runner, yml_cwd):
         mock_inst = MockBuilder.return_value
-        mock_inst.build.side_effect = BuildError(
-            "Something unexpected", package="pkg-alpha"
-        )
+        mock_inst.build.side_effect = BuildError("Something unexpected", package="pkg-alpha")
 
         result = runner.invoke(marketplace, ["build"])
         assert result.exit_code == 1
@@ -407,9 +405,7 @@ class TestBuildVerboseTraceback:
     """build --verbose -- traceback on unexpected failure."""
 
     @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
-    def test_verbose_shows_traceback_on_unexpected_error(
-        self, MockBuilder, runner, yml_cwd
-    ):
+    def test_verbose_shows_traceback_on_unexpected_error(self, MockBuilder, runner, yml_cwd):
         """When --verbose is passed and build raises an unexpected error,
         stderr should contain the full traceback."""
         mock_inst = MockBuilder.return_value
@@ -440,12 +436,11 @@ class TestBuildVerboseTraceback:
 class TestBuildGHEHost:
     """build command -- GHE / custom host scenarios."""
 
-    def test_build_ghe_host_env(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_build_ghe_host_env(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """MarketplaceBuilder respects GITHUB_HOST for token resolution."""
         monkeypatch.setenv("GITHUB_HOST", "corp.ghe.com")
-        from apm_cli.marketplace.builder import MarketplaceBuilder, BuildOptions
+        from apm_cli.marketplace.builder import BuildOptions, MarketplaceBuilder  # noqa: F401, F811
+
         yml_path = tmp_path / "marketplace.yml"
         yml_path.write_text("name: test\noutput: marketplace.json\npackages: []\n")
         builder = MarketplaceBuilder(yml_path)

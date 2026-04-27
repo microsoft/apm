@@ -32,14 +32,10 @@ class TestMatchesPattern(unittest.TestCase):
         self.assertTrue(matches_pattern("contoso/foo", "contoso/**"))
 
     def test_host_qualified(self):
-        self.assertTrue(
-            matches_pattern("gitlab.com/org/repo", "gitlab.com/**")
-        )
+        self.assertTrue(matches_pattern("gitlab.com/org/repo", "gitlab.com/**"))
 
     def test_host_qualified_single_star_no_match(self):
-        self.assertFalse(
-            matches_pattern("gitlab.com/org/repo", "gitlab.com/*")
-        )
+        self.assertFalse(matches_pattern("gitlab.com/org/repo", "gitlab.com/*"))
 
     def test_host_qualified_single_star_match(self):
         self.assertTrue(matches_pattern("gitlab.com/org", "gitlab.com/*"))
@@ -57,14 +53,10 @@ class TestMatchesPattern(unittest.TestCase):
         self.assertTrue(matches_pattern("contoso/foo/bar", "contoso/*/bar"))
 
     def test_wildcard_in_middle_no_match(self):
-        self.assertFalse(
-            matches_pattern("contoso/foo/baz/bar", "contoso/*/bar")
-        )
+        self.assertFalse(matches_pattern("contoso/foo/baz/bar", "contoso/*/bar"))
 
     def test_double_wildcard_in_middle(self):
-        self.assertTrue(
-            matches_pattern("contoso/a/b/c/bar", "contoso/**/bar")
-        )
+        self.assertTrue(matches_pattern("contoso/a/b/c/bar", "contoso/**/bar"))
 
 
 class TestCheckDependencyAllowed(unittest.TestCase):
@@ -87,9 +79,7 @@ class TestCheckDependencyAllowed(unittest.TestCase):
 
     def test_empty_allow_deny_matches(self):
         policy = DependencyPolicy(deny=["evil-corp/**"])
-        allowed, reason = check_dependency_allowed(
-            "evil-corp/bad", policy
-        )
+        allowed, reason = check_dependency_allowed("evil-corp/bad", policy)  # noqa: RUF059
         self.assertFalse(allowed)
 
     def test_allowlist_mode_ref_allowed(self):
@@ -112,9 +102,7 @@ class TestCheckDependencyAllowed(unittest.TestCase):
 
     def test_deny_pattern_with_double_wildcard(self):
         policy = DependencyPolicy(deny=["untrusted/**"])
-        allowed, reason = check_dependency_allowed(
-            "untrusted/deep/nested", policy
-        )
+        allowed, reason = check_dependency_allowed("untrusted/deep/nested", policy)  # noqa: RUF059
         self.assertFalse(allowed)
 
 
@@ -132,7 +120,7 @@ class TestCheckMcpAllowed(unittest.TestCase):
 
     def test_empty_allow_deny_only(self):
         policy = McpPolicy(deny=["bad-server"])
-        allowed, reason = check_mcp_allowed("good-server", policy)
+        allowed, reason = check_mcp_allowed("good-server", policy)  # noqa: RUF059
         self.assertTrue(allowed)
 
     def test_allowlist_blocks_unlisted(self):
@@ -143,12 +131,12 @@ class TestCheckMcpAllowed(unittest.TestCase):
 
     def test_allowlist_permits_match(self):
         policy = McpPolicy(allow=["approved/*"])
-        allowed, reason = check_mcp_allowed("approved/tool", policy)
+        allowed, reason = check_mcp_allowed("approved/tool", policy)  # noqa: RUF059
         self.assertTrue(allowed)
 
     def test_no_rules_all_allowed(self):
         policy = McpPolicy()
-        allowed, reason = check_mcp_allowed("anything", policy)
+        allowed, reason = check_mcp_allowed("anything", policy)  # noqa: RUF059
         self.assertTrue(allowed)
 
 

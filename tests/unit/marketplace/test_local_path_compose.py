@@ -11,9 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.marketplace.builder import MarketplaceBuilder, BuildOptions
+from apm_cli.marketplace.builder import BuildOptions, MarketplaceBuilder
 from apm_cli.marketplace.migration import load_marketplace_config
-
 
 _APM_WITH_LOCAL_BLOCK = """\
 name: my-project
@@ -51,9 +50,7 @@ def test_local_package_skips_git_resolution(
 ) -> None:
     """Local-path packages must not call git ls-remote."""
     config = load_marketplace_config(project_with_local)
-    builder = MarketplaceBuilder.from_config(
-        config, project_with_local, BuildOptions(offline=True)
-    )
+    builder = MarketplaceBuilder.from_config(config, project_with_local, BuildOptions(offline=True))
     # Resolve only the local entry.
     local_entry = next(p for p in config.packages if p.is_local)
     resolved = builder._resolve_entry(local_entry)
@@ -68,9 +65,7 @@ def test_compose_emits_local_source_as_string(
 ) -> None:
     """Local-path packages must emit ``source`` as a plain string."""
     config = load_marketplace_config(project_with_local)
-    builder = MarketplaceBuilder.from_config(
-        config, project_with_local, BuildOptions(offline=True)
-    )
+    builder = MarketplaceBuilder.from_config(config, project_with_local, BuildOptions(offline=True))
 
     local_entry = next(p for p in config.packages if p.is_local)
     local_resolved = builder._resolve_entry(local_entry)
@@ -94,9 +89,7 @@ def test_compose_inherited_top_level_omits_description_and_version(
     top level (Anthropic spec: only emit what the maintainer set).
     """
     config = load_marketplace_config(project_with_local)
-    builder = MarketplaceBuilder.from_config(
-        config, project_with_local, BuildOptions(offline=True)
-    )
+    builder = MarketplaceBuilder.from_config(config, project_with_local, BuildOptions(offline=True))
     local_entry = next(p for p in config.packages if p.is_local)
     local_resolved = builder._resolve_entry(local_entry)
     doc = builder.compose_marketplace_json([local_resolved])
@@ -121,13 +114,9 @@ def test_legacy_compose_keeps_top_level_description(tmp_path: Path) -> None:
             source: acme/tool
             ref: v1.0.0
         """
-    (tmp_path / "marketplace.yml").write_text(
-        textwrap.dedent(legacy), encoding="utf-8"
-    )
+    (tmp_path / "marketplace.yml").write_text(textwrap.dedent(legacy), encoding="utf-8")
     config = load_marketplace_config(tmp_path)
-    builder = MarketplaceBuilder.from_config(
-        config, tmp_path, BuildOptions(offline=True)
-    )
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
     # Compose with no resolved packages -- we only inspect the top-level shape.
     doc = builder.compose_marketplace_json([])
     assert doc["name"] == "legacy-mp"

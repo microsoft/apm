@@ -18,7 +18,6 @@ from apm_cli.marketplace.ref_resolver import (
     _redact_token,
 )
 
-
 # ---------------------------------------------------------------------------
 # _parse_ls_remote_output
 # ---------------------------------------------------------------------------
@@ -61,11 +60,7 @@ class TestParseLsRemoteOutput:
         assert len(refs) == 0
 
     def test_blank_lines_skipped(self) -> None:
-        output = (
-            "\n"
-            "aaaa23456789abcdef1234567890abcdef123456\trefs/tags/v1.0.0\n"
-            "\n"
-        )
+        output = "\naaaa23456789abcdef1234567890abcdef123456\trefs/tags/v1.0.0\n\n"
         refs = _parse_ls_remote_output(output)
         assert len(refs) == 1
 
@@ -105,10 +100,7 @@ class TestRedactToken:
         assert _redact_token(text) == text
 
     def test_multiple_tokens_redacted(self) -> None:
-        text = (
-            "https://user:pass1@github.com/a/b "
-            "https://user:pass2@github.com/c/d"
-        )
+        text = "https://user:pass1@github.com/a/b https://user:pass2@github.com/c/d"
         result = _redact_token(text)
         assert "pass1" not in result
         assert "pass2" not in result
@@ -184,9 +176,7 @@ _SHA_B = "b" * 40
 _SHA_C = "c" * 40
 
 _MOCK_LS_REMOTE_OUTPUT = (
-    f"{_SHA_A}\trefs/tags/v1.0.0\n"
-    f"{_SHA_B}\trefs/tags/v2.0.0\n"
-    f"{_SHA_C}\trefs/heads/main\n"
+    f"{_SHA_A}\trefs/tags/v1.0.0\n{_SHA_B}\trefs/tags/v2.0.0\n{_SHA_C}\trefs/heads/main\n"
 )
 
 
@@ -363,7 +353,7 @@ class TestResolveRefSha:
         sha = resolver.resolve_ref_sha("acme/tools", ref="main")
         assert sha == _SHA_B
         # Verify command uses the ref directly (no --tags --heads).
-        args, kwargs = mock_run.call_args
+        args, kwargs = mock_run.call_args  # noqa: RUF059
         cmd = args[0]
         assert cmd[:2] == ["git", "ls-remote"]
         assert cmd[-1] == "main"
@@ -499,9 +489,7 @@ class TestGitTerminalPromptSuppression:
 
         _, kwargs = mock_run.call_args
         env = kwargs.get("env", {})
-        assert env.get("GIT_ASKPASS") == "echo", (
-            "subprocess.run must pass GIT_ASKPASS=echo in env"
-        )
+        assert env.get("GIT_ASKPASS") == "echo", "subprocess.run must pass GIT_ASKPASS=echo in env"
         resolver.close()
 
 
@@ -527,7 +515,9 @@ class TestRefResolverGHEHost:
         resolver.close()
 
     @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
-    def test_default_host_env_var(self, mock_run: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_default_host_env_var(
+        self, mock_run: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """RefResolver respects GITHUB_HOST env var when no explicit host given."""
         monkeypatch.setenv("GITHUB_HOST", "ghe.example.com")
         resolver = RefResolver()
@@ -543,9 +533,7 @@ class TestRefResolverGHEHost:
     def test_resolve_ref_sha_custom_host(self, mock_run: MagicMock) -> None:
         """resolve_ref_sha with custom host uses that host in URL."""
         resolver = RefResolver(host="corp.ghe.com")
-        mock_run.return_value = _make_completed(
-            stdout="deadbeef" * 5 + "\tHEAD\n", returncode=0
-        )
+        mock_run.return_value = _make_completed(stdout="deadbeef" * 5 + "\tHEAD\n", returncode=0)
         resolver.resolve_ref_sha("acme/tools", "HEAD")
         args = mock_run.call_args[0][0]
         url = args[-2]  # URL is second-to-last, ref is last

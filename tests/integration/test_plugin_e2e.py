@@ -29,7 +29,6 @@ from apm_cli.models.apm_package import (
 )
 from apm_cli.utils.helpers import find_plugin_json
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -37,7 +36,9 @@ from apm_cli.utils.helpers import find_plugin_json
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures" / "mock-marketplace-plugin"
 
 
-def _make_package_info(package: APMPackage, install_path: Path, package_type: PackageType) -> PackageInfo:
+def _make_package_info(
+    package: APMPackage, install_path: Path, package_type: PackageType
+) -> PackageInfo:
     """Build a PackageInfo with a dummy resolved reference."""
     return PackageInfo(
         package=package,
@@ -102,7 +103,7 @@ class TestPluginHeroScenarios:
         (project_root / ".github").mkdir()
 
         pkg_info = _make_package_info(result.package, plugin_dir, result.package_type)
-        prompt_r, agent_r, skill_r, command_r = _run_integrators(pkg_info, project_root)
+        prompt_r, agent_r, skill_r, command_r = _run_integrators(pkg_info, project_root)  # noqa: RUF059
 
         # 5. Assert scattered files
         assert (project_root / ".github" / "prompts" / "test-command.prompt.md").exists()
@@ -161,7 +162,7 @@ class TestPluginHeroScenarios:
             if has_skill and not has_apm:
                 is_sub = False
                 check = candidate.parent
-                while check != modules_root and check != check.parent:
+                while check != modules_root and check != check.parent:  # noqa: PLR1714
                     if (check / "apm.yml").exists():
                         is_sub = True
                         break
@@ -187,18 +188,24 @@ class TestPluginHeroScenarios:
 
     # ---- Test 4: Symlinks not followed ----------------------------------
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="Symlinks require admin privileges on Windows")
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="Symlinks require admin privileges on Windows"
+    )
     def test_symlinks_not_followed(self, tmp_path):
         """Symlinks inside plugin dirs must NOT be dereferenced during copytree."""
         plugin_dir = tmp_path / "symlink-plugin"
         plugin_dir.mkdir()
 
         # plugin.json so it's detected as a plugin
-        (plugin_dir / "plugin.json").write_text(json.dumps({
-            "name": "Symlink Plugin",
-            "version": "1.0.0",
-            "description": "Plugin with a symlink"
-        }))
+        (plugin_dir / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "name": "Symlink Plugin",
+                    "version": "1.0.0",
+                    "description": "Plugin with a symlink",
+                }
+            )
+        )
 
         # agents/ with a symlink pointing at an external file
         agents_dir = plugin_dir / "agents"
@@ -268,9 +275,7 @@ class TestPluginHeroScenarios:
         pkg_path = apm_modules / "github" / "awesome-copilot" / "plugins" / "context-engineering"
         pkg_path.mkdir(parents=True)
         (pkg_path / "apm.yml").write_text(
-            "name: context-engineering\n"
-            "version: 2.0.0\n"
-            "description: Context engineering plugin\n"
+            "name: context-engineering\nversion: 2.0.0\ndescription: Context engineering plugin\n"
         )
         (pkg_path / "SKILL.md").write_text("---\nname: context-engineering\n---\n# Skill")
 
@@ -278,10 +283,9 @@ class TestPluginHeroScenarios:
         package = "github/awesome-copilot/plugins/context-engineering"
         direct_match = apm_modules / package
         assert direct_match.is_dir()
-        assert (
-            (direct_match / "apm.yml").exists()
-            or (direct_match / "SKILL.md").exists()
-        ), "direct_match lookup must find deep sub-path package"
+        assert (direct_match / "apm.yml").exists() or (direct_match / "SKILL.md").exists(), (
+            "direct_match lookup must find deep sub-path package"
+        )
 
         # Parse the resolved package
         pkg = APMPackage.from_apm_yml(direct_match / "apm.yml")
@@ -322,9 +326,7 @@ class TestPluginHeroScenarios:
         # Plugin primitives should appear (agents/ and any instructions in .apm/)
         all_sources = [p.source for p in collection.all_primitives()]
         has_dep_source = any("dependency:microsoft/apm-test-plugin" in s for s in all_sources)
-        assert has_dep_source, (
-            f"Plugin primitives not discovered. Sources found: {all_sources}"
-        )
+        assert has_dep_source, f"Plugin primitives not discovered. Sources found: {all_sources}"
 
     # ---- Test 8: lockfile package_type round-trip -----------------------
 
@@ -362,9 +364,7 @@ class TestPluginHeroScenarios:
         assert result.is_valid
 
         parsed = yaml_lib.safe_load((plugin_dir / "apm.yml").read_text())
-        assert parsed["type"] == "hybrid", (
-            f"Expected type 'hybrid', got '{parsed.get('type')}'"
-        )
+        assert parsed["type"] == "hybrid", f"Expected type 'hybrid', got '{parsed.get('type')}'"
 
 
 # ===========================================================================
@@ -418,7 +418,10 @@ class TestPluginNetworkE2E:
         """Install a real plugin from GitHub, verify artifacts on disk."""
         result = subprocess.run(
             [apm_command, "install", self.PLUGIN_REF, "--verbose"],
-            capture_output=True, text=True, cwd=str(temp_project), timeout=180,
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=180,
         )
         assert result.returncode == 0, (
             f"apm install failed (rc={result.returncode}):\n"
@@ -448,12 +451,18 @@ class TestPluginNetworkE2E:
         # Install first
         subprocess.run(
             [apm_command, "install", self.PLUGIN_REF, "--verbose"],
-            capture_output=True, text=True, cwd=str(temp_project), timeout=180,
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=180,
         )
 
         result = subprocess.run(
             [apm_command, "deps", "list"],
-            capture_output=True, text=True, cwd=str(temp_project), timeout=60,
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=60,
         )
         assert result.returncode == 0, (
             f"deps list failed (rc={result.returncode}):\n{result.stderr}"
@@ -470,12 +479,18 @@ class TestPluginNetworkE2E:
         """deps tree output should contain the plugin reference."""
         subprocess.run(
             [apm_command, "install", self.PLUGIN_REF, "--verbose"],
-            capture_output=True, text=True, cwd=str(temp_project), timeout=180,
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=180,
         )
 
         result = subprocess.run(
             [apm_command, "deps", "tree"],
-            capture_output=True, text=True, cwd=str(temp_project), timeout=60,
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=60,
         )
         assert result.returncode == 0, (
             f"deps tree failed (rc={result.returncode}):\n{result.stderr}"
@@ -502,7 +517,10 @@ class TestPluginNetworkE2E:
 
         result = subprocess.run(
             [apm_command, "install", "--verbose"],
-            capture_output=True, text=True, cwd=str(temp_project), timeout=180,
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=180,
         )
         assert result.returncode == 0, (
             f"mixed install failed (rc={result.returncode}):\n"
@@ -512,8 +530,12 @@ class TestPluginNetworkE2E:
         # Both packages installed
         assert (temp_project / "apm_modules" / self.PLUGIN_REF).is_dir()
         review_path = (
-            temp_project / "apm_modules" / "github" / "awesome-copilot"
-            / "skills" / "review-and-refactor"
+            temp_project
+            / "apm_modules"
+            / "github"
+            / "awesome-copilot"
+            / "skills"
+            / "review-and-refactor"
         )
         # The skill may be installed as a virtual subdir or flattened — check either
         skill_installed = review_path.is_dir() or any(
@@ -524,12 +546,13 @@ class TestPluginNetworkE2E:
         # deps list — no orphans
         list_result = subprocess.run(
             [apm_command, "deps", "list"],
-            capture_output=True, text=True, cwd=str(temp_project), timeout=60,
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=60,
         )
         combined = list_result.stdout + list_result.stderr
-        assert "orphan" not in combined.lower(), (
-            f"False orphan in mixed install:\n{combined}"
-        )
+        assert "orphan" not in combined.lower(), f"False orphan in mixed install:\n{combined}"
 
     # ---- Test 5: uninstall plugin ---------------------------------------
 
@@ -538,7 +561,10 @@ class TestPluginNetworkE2E:
         # Install first
         subprocess.run(
             [apm_command, "install", self.PLUGIN_REF, "--verbose"],
-            capture_output=True, text=True, cwd=str(temp_project), timeout=180,
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=180,
         )
         pkg_path = temp_project / "apm_modules" / self.PLUGIN_REF
         assert pkg_path.is_dir(), "Plugin must be installed before uninstall test"
@@ -546,7 +572,10 @@ class TestPluginNetworkE2E:
         # Uninstall
         result = subprocess.run(
             [apm_command, "uninstall", self.PLUGIN_REF],
-            capture_output=True, text=True, cwd=str(temp_project), timeout=60,
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=60,
         )
         assert result.returncode == 0, (
             f"uninstall failed (rc={result.returncode}):\n"
@@ -565,19 +594,26 @@ class TestPluginNetworkE2E:
         # Install plugin
         r1 = subprocess.run(
             [apm_command, "install", self.PLUGIN_REF],
-            capture_output=True, text=True, cwd=str(temp_project), timeout=180,
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=180,
         )
         assert r1.returncode == 0, f"First install failed:\n{r1.stderr}"
 
         # Install skill separately
         r2 = subprocess.run(
             [apm_command, "install", skill_ref],
-            capture_output=True, text=True, cwd=str(temp_project), timeout=180,
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=180,
         )
         assert r2.returncode == 0, f"Second install failed:\n{r2.stderr}"
 
         # Lockfile should contain BOTH entries
         import yaml
+
         lockfile = yaml.safe_load((temp_project / "apm.lock.yaml").read_text())
         dep_keys = {
             f"{d['repo_url']}/{d.get('virtual_path', '')}" for d in lockfile["dependencies"]
@@ -592,7 +628,10 @@ class TestPluginNetworkE2E:
         # deps tree should show both
         tree = subprocess.run(
             [apm_command, "deps", "tree"],
-            capture_output=True, text=True, cwd=str(temp_project), timeout=60,
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=60,
         )
         combined = tree.stdout + tree.stderr
         assert "context-engineering" in combined, "Plugin missing from deps tree"
@@ -601,13 +640,14 @@ class TestPluginNetworkE2E:
         # Uninstall plugin should clean up agent files
         r3 = subprocess.run(
             [apm_command, "uninstall", self.PLUGIN_REF],
-            capture_output=True, text=True, cwd=str(temp_project), timeout=60,
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=60,
         )
         assert r3.returncode == 0, f"Uninstall failed:\n{r3.stderr}"
         combined = r3.stdout + r3.stderr
-        assert "agent" in combined.lower(), (
-            f"Uninstall should report agent cleanup:\n{combined}"
-        )
+        assert "agent" in combined.lower(), f"Uninstall should report agent cleanup:\n{combined}"
 
     # ---- Test 7: compile includes plugin primitives ---------------------
 
@@ -616,27 +656,31 @@ class TestPluginNetworkE2E:
         # Install the plugin
         r = subprocess.run(
             [apm_command, "install", self.PLUGIN_REF, "--verbose"],
-            capture_output=True, text=True, cwd=str(temp_project), timeout=180,
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=180,
         )
         assert r.returncode == 0, f"Install failed:\n{r.stderr}"
 
         # Compile
         result = subprocess.run(
             [apm_command, "compile"],
-            capture_output=True, text=True, cwd=str(temp_project), timeout=60,
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=60,
         )
-        assert result.returncode == 0, (
-            f"Compile failed (rc={result.returncode}):\n{result.stderr}"
-        )
+        assert result.returncode == 0, f"Compile failed (rc={result.returncode}):\n{result.stderr}"
 
         # AGENTS.md should exist (even if minimal — plugin primitives are in .apm/)
         agents_md = temp_project / "AGENTS.md"
         if agents_md.exists():
             content = agents_md.read_text()
             # Should reference the plugin as a source
-            assert "context-engineering" in content.lower() or "awesome-copilot" in content.lower(), (
-                f"AGENTS.md should reference the plugin source:\n{content[:500]}"
-            )
+            assert (
+                "context-engineering" in content.lower() or "awesome-copilot" in content.lower()
+            ), f"AGENTS.md should reference the plugin source:\n{content[:500]}"
 
     # ---- Test 8: prune removes orphaned plugin --------------------------
 
@@ -645,7 +689,10 @@ class TestPluginNetworkE2E:
         # Install the plugin
         r = subprocess.run(
             [apm_command, "install", self.PLUGIN_REF, "--verbose"],
-            capture_output=True, text=True, cwd=str(temp_project), timeout=180,
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=180,
         )
         assert r.returncode == 0, f"Install failed:\n{r.stderr}"
 
@@ -665,11 +712,12 @@ class TestPluginNetworkE2E:
         # Prune should detect and remove the orphan
         result = subprocess.run(
             [apm_command, "prune"],
-            capture_output=True, text=True, cwd=str(temp_project), timeout=60,
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=60,
         )
-        assert result.returncode == 0, (
-            f"Prune failed (rc={result.returncode}):\n{result.stderr}"
-        )
+        assert result.returncode == 0, f"Prune failed (rc={result.returncode}):\n{result.stderr}"
 
         combined = result.stdout + result.stderr
         assert "orphan" in combined.lower() or "removed" in combined.lower(), (
@@ -682,7 +730,10 @@ class TestPluginNetworkE2E:
         """apm install output should count plugin as an installed dependency."""
         result = subprocess.run(
             [apm_command, "install", self.PLUGIN_REF],
-            capture_output=True, text=True, cwd=str(temp_project), timeout=180,
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=180,
         )
         assert result.returncode == 0, f"Install failed:\n{result.stderr}"
 
@@ -698,7 +749,10 @@ class TestPluginNetworkE2E:
         """Lockfile should record package_type for plugin dependencies."""
         result = subprocess.run(
             [apm_command, "install", self.PLUGIN_REF],
-            capture_output=True, text=True, cwd=str(temp_project), timeout=180,
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=180,
         )
         assert result.returncode == 0, f"Install failed:\n{result.stderr}"
 
@@ -730,7 +784,10 @@ class TestPluginNetworkE2E:
         # First install
         r1 = subprocess.run(
             [apm_command, "install", self.PLUGIN_REF],
-            capture_output=True, text=True, cwd=str(temp_project), timeout=180,
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=180,
         )
         assert r1.returncode == 0, f"First install failed:\n{r1.stderr}"
 
@@ -742,7 +799,10 @@ class TestPluginNetworkE2E:
         # Second install (should use cache)
         r2 = subprocess.run(
             [apm_command, "install", self.PLUGIN_REF],
-            capture_output=True, text=True, cwd=str(temp_project), timeout=180,
+            capture_output=True,
+            text=True,
+            cwd=str(temp_project),
+            timeout=180,
         )
         assert r2.returncode == 0, f"Second install failed:\n{r2.stderr}"
 

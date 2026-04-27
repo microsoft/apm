@@ -11,7 +11,7 @@ import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import List, Set
+from typing import List, Set  # noqa: F401, UP035
 
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.command_integrator import CommandIntegrator
@@ -22,7 +22,6 @@ from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
 from apm_cli.models.validation import PackageType
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -44,9 +43,7 @@ def _make_pkg(
     if instructions:
         d = pkg / ".apm" / "instructions"
         d.mkdir(parents=True, exist_ok=True)
-        (d / "python.instructions.md").write_text(
-            "---\napplyTo: '**/*.py'\n---\n\n# Python rules"
-        )
+        (d / "python.instructions.md").write_text("---\napplyTo: '**/*.py'\n---\n\n# Python rules")
 
     if agents:
         d = pkg / ".apm" / "agents"
@@ -57,9 +54,7 @@ def _make_pkg(
         # command_integrator.find_prompt_files searches .apm/prompts/
         d = pkg / ".apm" / "prompts"
         d.mkdir(parents=True, exist_ok=True)
-        (d / "review.prompt.md").write_text(
-            "---\ndescription: Review code\n---\n# Review command"
-        )
+        (d / "review.prompt.md").write_text("---\ndescription: Review code\n---\n# Review command")
 
     if prompts:
         d = pkg / ".apm" / "prompts"
@@ -96,7 +91,7 @@ def _make_pkg(
     )
 
 
-def _posix_relpaths(project_root: Path, paths: List[Path]) -> Set[str]:
+def _posix_relpaths(project_root: Path, paths: list[Path]) -> set[str]:
     """Convert absolute target_paths to posix-format relative strings."""
     result = set()
     for p in paths:
@@ -150,9 +145,7 @@ class TestCopilotInstallUninstallCycle:
 
         # Collect deployed paths
         all_paths = (
-            inst_result.target_paths
-            + agent_result.target_paths
-            + prompt_result.target_paths
+            inst_result.target_paths + agent_result.target_paths + prompt_result.target_paths
         )
         deployed = _posix_relpaths(self.project_root, all_paths)
 
@@ -184,9 +177,7 @@ class TestCopilotInstallUninstallCycle:
         assert prompt_sync["errors"] == 0
 
         total_removed = (
-            inst_sync["files_removed"]
-            + agent_sync["files_removed"]
-            + prompt_sync["files_removed"]
+            inst_sync["files_removed"] + agent_sync["files_removed"] + prompt_sync["files_removed"]
         )
         assert total_removed == len(deployed)
 
@@ -202,9 +193,7 @@ class TestCopilotInstallUninstallCycle:
         assert "instructions" not in target.primitives
         assert "prompts" not in target.primitives
 
-        pkg_info = _make_pkg(
-            self.project_root, instructions=True, agents=True, prompts=True
-        )
+        pkg_info = _make_pkg(self.project_root, instructions=True, agents=True, prompts=True)
 
         agent_integrator = AgentIntegrator()
         inst_integrator = InstructionIntegrator()
@@ -292,11 +281,7 @@ class TestClaudeInstallUninstallCycle:
         assert agent_result.files_integrated >= 1
         assert cmd_result.files_integrated >= 1
 
-        all_paths = (
-            inst_result.target_paths
-            + agent_result.target_paths
-            + cmd_result.target_paths
-        )
+        all_paths = inst_result.target_paths + agent_result.target_paths + cmd_result.target_paths
         deployed = _posix_relpaths(self.project_root, all_paths)
 
         # claude_rules format -> .claude/rules/*.md
@@ -323,9 +308,7 @@ class TestClaudeInstallUninstallCycle:
         assert cmd_sync["errors"] == 0
 
         total_removed = (
-            inst_sync["files_removed"]
-            + agent_sync["files_removed"]
-            + cmd_sync["files_removed"]
+            inst_sync["files_removed"] + agent_sync["files_removed"] + cmd_sync["files_removed"]
         )
         assert total_removed == len(deployed)
         for p in deployed:
@@ -371,11 +354,7 @@ class TestClaudeInstallUninstallCycle:
         assert agent_result.files_integrated >= 1
         assert cmd_result.files_integrated >= 1
 
-        all_paths = (
-            inst_result.target_paths
-            + agent_result.target_paths
-            + cmd_result.target_paths
-        )
+        all_paths = inst_result.target_paths + agent_result.target_paths + cmd_result.target_paths
         deployed = _posix_relpaths(self.project_root, all_paths)
 
         for p in deployed:
@@ -393,9 +372,7 @@ class TestClaudeInstallUninstallCycle:
         )
 
         total_removed = (
-            inst_sync["files_removed"]
-            + agent_sync["files_removed"]
-            + cmd_sync["files_removed"]
+            inst_sync["files_removed"] + agent_sync["files_removed"] + cmd_sync["files_removed"]
         )
         assert total_removed == len(deployed)
         for p in deployed:
@@ -423,9 +400,7 @@ class TestCursorInstallUninstallCycle:
         # auto_create=False: simulate opt-in
         (self.project_root / ".cursor").mkdir()
 
-        pkg_info = _make_pkg(
-            self.project_root, instructions=True, agents=True
-        )
+        pkg_info = _make_pkg(self.project_root, instructions=True, agents=True)
 
         inst_integrator = InstructionIntegrator()
         agent_integrator = AgentIntegrator()
@@ -479,9 +454,7 @@ class TestCursorInstallUninstallCycle:
         # auto_create=False: create dir
         (self.project_root / ".cursor").mkdir()
 
-        pkg_info = _make_pkg(
-            self.project_root, instructions=True, agents=True
-        )
+        pkg_info = _make_pkg(self.project_root, instructions=True, agents=True)
 
         inst_integrator = InstructionIntegrator()
         agent_integrator = AgentIntegrator()
@@ -745,9 +718,7 @@ class TestSkillInstallUninstallCycle:
         )
 
         integrator = SkillIntegrator()
-        result = integrator.integrate_package_skill(
-            pkg_info, self.project_root, targets=[target]
-        )
+        result = integrator.integrate_package_skill(pkg_info, self.project_root, targets=[target])
 
         assert result.skill_created or result.skill_updated
         assert not result.skill_skipped
@@ -785,9 +756,7 @@ class TestSkillInstallUninstallCycle:
         )
 
         integrator = SkillIntegrator()
-        result = integrator.integrate_package_skill(
-            pkg_info, self.project_root, targets=[target]
-        )
+        result = integrator.integrate_package_skill(pkg_info, self.project_root, targets=[target])
 
         assert result.skill_created or result.skill_updated
         assert len(result.target_paths) >= 1
@@ -830,9 +799,7 @@ class TestSkillInstallUninstallCycle:
         )
 
         integrator = SkillIntegrator()
-        result = integrator.integrate_package_skill(
-            pkg_info, self.project_root, targets=[target]
-        )
+        result = integrator.integrate_package_skill(pkg_info, self.project_root, targets=[target])
 
         assert result.skill_created or result.skill_updated
         assert len(result.target_paths) >= 1
@@ -873,9 +840,7 @@ class TestSkillInstallUninstallCycle:
         )
 
         integrator = SkillIntegrator()
-        result = integrator.integrate_package_skill(
-            pkg_info, self.project_root, targets=[target]
-        )
+        result = integrator.integrate_package_skill(pkg_info, self.project_root, targets=[target])
 
         assert result.skill_created or result.skill_updated
         assert len(result.target_paths) >= 1
@@ -913,9 +878,7 @@ class TestSkillInstallUninstallCycle:
         )
 
         integrator = SkillIntegrator()
-        result = integrator.integrate_package_skill(
-            pkg_info, self.project_root, targets=[target]
-        )
+        result = integrator.integrate_package_skill(pkg_info, self.project_root, targets=[target])
 
         assert result.skill_created or result.skill_updated
         deployed = _posix_relpaths(self.project_root, result.target_paths)
@@ -936,9 +899,7 @@ class TestSkillInstallUninstallCycle:
         )
 
         integrator = SkillIntegrator()
-        result = integrator.integrate_package_skill(
-            pkg_info, self.project_root, targets=[target]
-        )
+        result = integrator.integrate_package_skill(pkg_info, self.project_root, targets=[target])
 
         assert result.skill_created or result.skill_updated
         assert len(result.target_paths) >= 1

@@ -15,8 +15,7 @@ from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
-from typing import List
-
+from typing import List  # noqa: F401, UP035
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -107,14 +106,11 @@ def ensure_user_dirs() -> Path:
 # ---------------------------------------------------------------------------
 
 
-def get_unsupported_targets() -> List[str]:
+def get_unsupported_targets() -> list[str]:
     """Return target names that do not support user-scope deployment."""
     from ..integration.targets import KNOWN_TARGETS
 
-    return [
-        name for name, profile in KNOWN_TARGETS.items()
-        if profile.user_supported is False
-    ]
+    return [name for name, profile in KNOWN_TARGETS.items() if profile.user_supported is False]
 
 
 def warn_unsupported_user_scope() -> str:
@@ -133,28 +129,19 @@ def warn_unsupported_user_scope() -> str:
     """
     from ..integration.targets import KNOWN_TARGETS
 
-    fully_supported = [
-        name for name, p in KNOWN_TARGETS.items()
-        if p.user_supported is True
-    ]
+    fully_supported = [name for name, p in KNOWN_TARGETS.items() if p.user_supported is True]
     partially_supported = [
-        name for name, p in KNOWN_TARGETS.items()
-        if p.user_supported == "partial"
+        name for name, p in KNOWN_TARGETS.items() if p.user_supported == "partial"
     ]
-    unsupported = [
-        name for name, p in KNOWN_TARGETS.items()
-        if p.user_supported is False
-    ]
+    unsupported = [name for name, p in KNOWN_TARGETS.items() if p.user_supported is False]
 
     if not unsupported and not partially_supported:
         return ""
 
-    parts: List[str] = []
+    parts: list[str] = []
 
     supported_names = ", ".join(fully_supported)
-    parts.append(
-        f"User-scope primitives are fully supported by {supported_names}."
-    )
+    parts.append(f"User-scope primitives are fully supported by {supported_names}.")
 
     if partially_supported:
         partial_names = ", ".join(partially_supported)
@@ -165,15 +152,12 @@ def warn_unsupported_user_scope() -> str:
         parts[0] += f" Targets without native user-level support: {unsupported_names}"
 
     # Collect per-target unsupported primitives
-    unsupported_prims: List[str] = []
+    unsupported_prims: list[str] = []
     for name, profile in KNOWN_TARGETS.items():
         prims = profile.unsupported_user_primitives
         if prims:
             unsupported_prims.append(f"{name} ({', '.join(prims)})")
     if unsupported_prims:
-        parts.append(
-            "Some primitives are not supported: "
-            + "; ".join(unsupported_prims)
-        )
+        parts.append("Some primitives are not supported: " + "; ".join(unsupported_prims))
 
     return "\n".join(parts)
