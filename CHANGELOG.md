@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Renamed the experimental Cowork target and all user-facing surfaces from `cowork` to `copilot-cowork` for futureproofing (e.g. `apm experimental enable copilot-cowork`, `--target copilot-cowork`, `apm config set copilot-cowork-skills-dir`, `APM_COPILOT_COWORK_SKILLS_DIR`). No behaviour change; the `[0.9.3]` release shipped as `cowork` and this rename landed immediately after. (#926)
+
 ### Fixed
 
 - Docs site auto-deploys again after bot-cut releases by correctly detecting tag-push context in `docs.yml`. (#953)
