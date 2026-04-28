@@ -27,6 +27,7 @@ from typing import Dict, List, Optional
 from .errors import GitLsRemoteError, OfflineMissError
 from ._git_utils import redact_token as _redact_token
 from .git_stderr import translate_git_stderr
+from ..utils.github_host import default_host, build_https_clone_url
 
 __all__ = [
     "RemoteRef",
@@ -136,6 +137,10 @@ class RefResolver:
     stderr_translator_enabled:
         When ``True`` (default), stderr from failed ``git`` calls is
         classified via ``translate_git_stderr``.
+    token:
+        Optional GitHub PAT to embed in the ``https://`` URL.  When set
+        the URL uses ``x-access-token`` authentication; when ``None``
+        (default) git runs unauthenticated.
     """
 
     def __init__(
@@ -144,10 +149,14 @@ class RefResolver:
         timeout_seconds: float = 10.0,
         offline: bool = False,
         stderr_translator_enabled: bool = True,
+        host: Optional[str] = None,
+        token: Optional[str] = None,
     ) -> None:
         self._timeout = timeout_seconds
         self._offline = offline
         self._stderr_translator = stderr_translator_enabled
+        self._host: str = host or default_host() or "github.com"
+        self._token: Optional[str] = token
         self._cache = RefCache()
         self._lock = threading.Lock()
         # Per-remote locks to serialise calls to the same remote while
@@ -166,7 +175,7 @@ class RefResolver:
             return self._remote_locks[owner_repo]
 
     def list_remote_refs(self, owner_repo: str) -> List[RemoteRef]:
-        """Fetch all tags and heads from ``https://github.com/<owner_repo>.git``.
+        """Fetch all tags and heads from the configured Git host.
 
         Results are cached; subsequent calls for the same remote return
         the cached value until the TTL expires.
@@ -198,7 +207,9 @@ class RefResolver:
             if self._offline:
                 raise OfflineMissError(package="", remote=owner_repo)
 
-            url = f"https://github.com/{owner_repo}.git"
+            url = build_https_clone_url(self._host, owner_repo, token=self._token)
+            if not url.endswith(".git"):
+                url += ".git"
             env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
             try:
                 result = subprocess.run(
@@ -273,7 +284,9 @@ class RefResolver:
         GitLsRemoteError
             When the ref does not exist or the subprocess fails.
         """
-        url = f"https://github.com/{owner_repo}.git"
+        url = build_https_clone_url(self._host, owner_repo, token=self._token)
+        if not url.endswith(".git"):
+            url += ".git"
         env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
         try:
             result = subprocess.run(
