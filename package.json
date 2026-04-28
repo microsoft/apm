@@ -8,6 +8,6 @@
   "license": "MIT",
   "packageManager": "pnpm@10.33.2",
   "scripts": {
-    "generate": "node packages/@apm/apm/scripts/generate-packages.mjs"
+    "build": "node packages/@apm/apm/scripts/generate-packages.mjs"
   }
 }
