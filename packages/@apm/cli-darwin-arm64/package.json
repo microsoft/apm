@@ -10,6 +10,9 @@
   "engines": {
     "node": ">=20"
   },
+  "publishConfig": {
+    "provenance": true
+  },
   "homepage": "https://microsoft.github.io/apm/",
   "os": [
     "darwin"
