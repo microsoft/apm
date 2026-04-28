@@ -150,6 +150,8 @@ class AgentIntegrator(BaseIntegrator):
             if mapping.format_id == "codex_agent":
                 self._write_codex_agent(source_file, target_path)
                 links_resolved = 0
+            elif mapping.format_id == "windsurf_agent_skill":
+                links_resolved = self._write_windsurf_agent_skill(source_file, target_path)
             else:
                 links_resolved = self.copy_agent(source_file, target_path)
             total_links_resolved += links_resolved
@@ -270,6 +272,63 @@ class AgentIntegrator(BaseIntegrator):
             "developer_instructions": body.strip(),
         }
         target.write_text(_toml.dumps(doc), encoding="utf-8")
+
+    # ------------------------------------------------------------------
+    # Windsurf agent-skill transformer (agent.md -> skills/<name>/SKILL.md)
+    # ------------------------------------------------------------------
+
+    def _write_windsurf_agent_skill(self, source: Path, target: Path) -> int:
+        """Transform an ``.agent.md`` file to a Windsurf Skill (``SKILL.md``).
+
+        Windsurf Skills are the closest equivalent to a specialist persona:
+        - Invocable with ``@skill-name`` (like ``@agent-name`` in Copilot)
+        - Auto-invoked by Cascade when the description matches the task
+        - Support a directory with supplementary resource files
+
+        The conversion:
+        - Keeps ``name`` (or derives from filename) and ``description``.
+        - Strips agent-specific keys (``model``, ``tools``).
+        - Preserves the markdown body verbatim.
+        """
+        import yaml
+
+        content = source.read_text(encoding="utf-8")
+
+        stem = source.name
+        if stem.endswith(".agent.md"):
+            stem = stem[:-9]
+        elif stem.endswith(".chatmode.md"):
+            stem = stem[:-12]
+        else:
+            stem = Path(stem).stem
+
+        fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
+        if fm_match:
+            body = content[fm_match.end():]
+            try:
+                fm = yaml.safe_load(fm_match.group(1)) or {}
+            except Exception:
+                fm = {}
+        else:
+            body = content
+            fm = {}
+
+        name = fm.get("name", stem)
+        description = fm.get("description", "")
+
+        # Use yaml.dump to safely serialize values -- prevents YAML key
+        # injection via multi-line name/description strings.
+
+        fm_data: dict = {"name": name}
+        if description:
+            fm_data["description"] = description
+        fm_yaml = yaml.dump(fm_data, default_flow_style=False, allow_unicode=False).rstrip("\n")
+
+        result = f"---\n{fm_yaml}\n---\n" + body
+        result, links_resolved = self.resolve_links(result, source, target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(result, encoding="utf-8")
+        return links_resolved
 
     # DEPRECATED: use integrate_agents_for_target(KNOWN_TARGETS["copilot"], ...) instead.
     def integrate_package_agents(

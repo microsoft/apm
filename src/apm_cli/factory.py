@@ -8,6 +8,7 @@ from .adapters.client.cursor import CursorClientAdapter
 from .adapters.client.gemini import GeminiClientAdapter
 from .adapters.client.opencode import OpenCodeClientAdapter
 from .adapters.client.vscode import VSCodeClientAdapter
+from .adapters.client.windsurf import WindsurfClientAdapter
 from .adapters.package_manager.default_manager import DefaultMCPPackageManager
 
 
@@ -41,6 +42,7 @@ class ClientFactory:
             "cursor": CursorClientAdapter,
             "gemini": GeminiClientAdapter,
             "opencode": OpenCodeClientAdapter,
+            "windsurf": WindsurfClientAdapter,
             # Add more clients as needed
         }
 

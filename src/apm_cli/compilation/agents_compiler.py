@@ -45,6 +45,7 @@ _KNOWN_TARGETS = (  # noqa: RUF005
     "opencode",
     "codex",
     "gemini",
+    "windsurf",
     "all",
     "minimal",
 ) + _VSCODE_TARGET_ALIASES

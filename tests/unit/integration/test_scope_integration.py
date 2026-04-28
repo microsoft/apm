@@ -303,6 +303,8 @@ class TestResolveTargetsConsistency:
                     assert "instructions" not in t.primitives
                 if t.name == "opencode":
                     assert "hooks" not in t.primitives
+                if t.name == "windsurf":
+                    assert "instructions" not in t.primitives
 
     def test_project_scope_preserves_all_primitives(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -310,6 +312,72 @@ class TestResolveTargetsConsistency:
             copilot = next(t for t in targets if t.name == "copilot")
             assert "prompts" in copilot.primitives
             assert "instructions" in copilot.primitives
+
+
+# -- Windsurf scope resolution ------------------------------------------------
+
+
+class TestWindsurfScopeResolution:
+    """Verify Windsurf deploys to .windsurf at project scope, .codeium/windsurf at user scope."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.project_root = Path(self.temp_dir)
+
+    def teardown_method(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_project_scope_uses_windsurf_root(self):
+        windsurf = KNOWN_TARGETS["windsurf"]
+        resolved = windsurf.for_scope(user_scope=False)
+        assert resolved.root_dir == ".windsurf"
+        assert "instructions" in resolved.primitives
+
+    def test_user_scope_uses_codeium_windsurf_root(self):
+        windsurf = KNOWN_TARGETS["windsurf"]
+        resolved = windsurf.for_scope(user_scope=True)
+        assert resolved.root_dir == ".codeium/windsurf"
+
+    def test_user_scope_filters_instructions(self):
+        """At user scope, instructions are filtered out (unsupported)."""
+        windsurf = KNOWN_TARGETS["windsurf"]
+        resolved = windsurf.for_scope(user_scope=True)
+        assert "instructions" not in resolved.primitives
+
+    def test_user_scope_keeps_skills_and_commands(self):
+        windsurf = KNOWN_TARGETS["windsurf"]
+        resolved = windsurf.for_scope(user_scope=True)
+        assert "skills" in resolved.primitives
+        assert "commands" in resolved.primitives
+        assert "hooks" in resolved.primitives
+
+    def test_project_scope_deploys_instructions(self):
+        """At project scope, instructions deploy to .windsurf/rules/."""
+        (self.project_root / ".windsurf").mkdir()
+        windsurf = KNOWN_TARGETS["windsurf"]
+        resolved = windsurf.for_scope(user_scope=False)
+
+        pkg = self.project_root / "apm_modules" / "test-pkg"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "python.instructions.md").write_text(
+            "---\napplyTo: '**/*.py'\n---\n\n# Python rules"
+        )
+        pkg_info = _make_package_info(pkg)
+
+        integrator = InstructionIntegrator()
+        result = integrator.integrate_instructions_for_target(
+            resolved,
+            pkg_info,
+            self.project_root,
+        )
+
+        assert result.files_integrated == 1
+        deployed = self.project_root / ".windsurf" / "rules" / "python.md"
+        assert deployed.exists()
+        content = deployed.read_text()
+        assert "trigger: glob" in content
+        assert "globs: **/*.py" in content
 
 
 # -- Skill deploy at user scope ----------------------------------------------
