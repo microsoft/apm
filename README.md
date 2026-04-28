@@ -86,6 +86,22 @@ Agent context is executable in effect — a prompt is a program for an LLM. APM 
 
 ## Get Started
 
+#### Node.js projects
+
+```bash
+# Install globally
+npm install -g @apm/apm
+# or: pnpm add -g @apm/apm
+# or: yarn global add @apm/apm
+
+# Or install as a project devDependency (recommended)
+npm install -D @apm/apm
+# or: pnpm add -D @apm/apm
+# or: yarn add -D @apm/apm
+
+npx apm init
+```
+
 #### Linux / macOS
 
 ```bash

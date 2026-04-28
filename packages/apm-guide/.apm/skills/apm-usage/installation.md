@@ -13,6 +13,10 @@ irm https://aka.ms/apm-windows | iex
 ## Package managers
 
 ```bash
+# Node.js environments
+npm install -g @apm/apm      # Global (or pnpm add -g / yarn global add)
+npm install -D @apm/apm      # Project devDependency (or pnpm/yarn add -D)
+
 # Homebrew (macOS / Linux)
 brew install microsoft/apm/apm
 

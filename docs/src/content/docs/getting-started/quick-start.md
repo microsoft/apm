@@ -9,6 +9,20 @@ Three commands. Three minutes. Your AI agent learns your project's standards aut
 
 ## Install APM
 
+**Node.js projects:**
+
+```bash
+# Global
+npm install -g @apm/apm
+# or: pnpm add -g @apm/apm
+# or: yarn global add @apm/apm
+
+# Or as a project devDependency
+npm install -D @apm/apm
+# or: pnpm add -D @apm/apm
+# or: yarn add -D @apm/apm
+```
+
 **macOS / Linux:**
 
 ```bash
