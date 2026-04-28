@@ -27,6 +27,7 @@ function copyBinaryToNativePackage(npmPlatform, npmArch) {
 
 	// Update the package.json manifest
 	const { version, license, repository, engines, homepage, publishConfig, description } = rootManifest;
+	const binaryFile = isWindows ? "apm.exe" : "apm";
 	const manifest = JSON.stringify(
 		{
 			name: packageName,
@@ -38,7 +39,8 @@ function copyBinaryToNativePackage(npmPlatform, npmArch) {
 			homepage,
 			os: [npmPlatform],
 			cpu: [npmArch],
-			publishConfig
+			publishConfig,
+			files: [binaryFile, "_internal", "README.md", "LICENSE"],
 		},
 		null,
 		2,
