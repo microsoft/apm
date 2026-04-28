@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Remove redundant `seen` set from `_scan_patterns()` discovery walk (#918)
+- Correct targeting of compiled artifacts so GEMINI.md is only created if requested (#1019)
 
 ## [0.10.0] - 2026-04-27
 
