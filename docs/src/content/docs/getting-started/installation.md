@@ -58,14 +58,14 @@ GITHUB_URL=https://github.corp.com VERSION=v1.2.3 sh install.sh
 
 ```bash
 # Global installation
-npm install -g @apm/apm
-# or: pnpm add -g @apm/apm
-# or: yarn global add @apm/apm
+npm install -g @microsoft/apm-cli
+# or: pnpm add -g @microsoft/apm-cli
+# or: yarn global add @microsoft/apm-cli
 
 # Or as a project devDependency (recommended)
-npm install -D @apm/apm
-# or: pnpm add -D @apm/apm
-# or: yarn add -D @apm/apm
+npm install -D @microsoft/apm-cli
+# or: pnpm add -D @microsoft/apm-cli
+# or: yarn add -D @microsoft/apm-cli
 
 npx apm --version
 ```

@@ -13,14 +13,14 @@ Three commands. Three minutes. Your AI agent learns your project's standards aut
 
 ```bash
 # Global
-npm install -g @apm/apm
-# or: pnpm add -g @apm/apm
-# or: yarn global add @apm/apm
+npm install -g @microsoft/apm-cli
+# or: pnpm add -g @microsoft/apm-cli
+# or: yarn global add @microsoft/apm-cli
 
 # Or as a project devDependency
-npm install -D @apm/apm
-# or: pnpm add -D @apm/apm
-# or: yarn add -D @apm/apm
+npm install -D @microsoft/apm-cli
+# or: pnpm add -D @microsoft/apm-cli
+# or: yarn add -D @microsoft/apm-cli
 ```
 
 **macOS / Linux:**

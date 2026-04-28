@@ -4,15 +4,15 @@ const { execSync } = require("child_process");
 
 const PLATFORMS = {
 	win32: {
-		x64: "@apm/cli-win32-x64/apm.exe",
+		x64: "@microsoft/cli-win32-x64/apm.exe",
 	},
 	darwin: {
-		x64: "@apm/cli-darwin-x64/apm",
-		arm64: "@apm/cli-darwin-arm64/apm",
+		x64: "@microsoft/cli-darwin-x64/apm",
+		arm64: "@microsoft/cli-darwin-arm64/apm",
 	},
 	linux: {
-		x64: "@apm/cli-linux-x64/apm",
-		arm64: "@apm/cli-linux-arm64/apm",
+		x64: "@microsoft/cli-linux-x64/apm",
+		arm64: "@microsoft/cli-linux-arm64/apm",
 	},
 };
 

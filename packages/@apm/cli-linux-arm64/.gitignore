@@ -1,9 +1,0 @@
-# Generated binary
-apm
-
-# PyInstaller runtime dependencies
-_internal/
-
-# Copied from repo root
-README.md
-LICENSE
