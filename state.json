@@ -1,51 +1,50 @@
 {
-  "last_updated": "2026-04-27T03:36:28Z",
-  "last_run_tasks": ["task4", "task7"],
+  "last_updated": "2026-04-28T03:36:20Z",
+  "last_run_tasks": ["task3", "task7"],
   "validated_commands": {
     "test": "python3 -m uv run pytest tests/unit tests/test_console.py -x -q",
     "test_full": "python3 -m uv run pytest tests/unit tests/test_console.py -q",
     "format": "python3 -m uv run black . && python3 -m uv run isort .",
     "install_dev": "pip install uv --break-system-packages && python3 -m uv sync --extra dev",
-    "notes": "uv is not on PATH in CI; use 'pip install uv --break-system-packages' then 'python3 -m uv'. Do NOT use --cov: causes PyYAML global state corruption. Rich outputs ANSI styling codes (\x1b[3m italic, \x1b[1m bold) even with NO_COLOR=1; strip ANSI with regex r'\\x1b\\[[0-9;]*[A-Za-z]' before text assertions. _ascii_only must strip ANSI first - fixed in PR 2026-04-27."
+    "notes": "uv is not on PATH in CI; use 'python3 -m uv'. Do NOT use --cov: PyYAML global state corruption. Rich outputs ANSI codes even with NO_COLOR=1; strip with regex."
   },
   "coverage_baseline": {
     "total": "61%+",
-    "run_date": "2026-04-27",
-    "test_count": 5516,
-    "passing": 5516,
+    "run_date": "2026-04-28",
+    "test_count": 6564,
+    "passing": 6564,
     "pre_existing_failures": 0,
-    "notes": "All 5516 tests pass as of 2026-04-27 main. Previous count was 5476 (policy_status tests excluded due to failure). Fix restores 40 tests in test_policy_status.py."
+    "notes": "All 6564 tests pass as of 2026-04-28 main."
   },
   "monthly_activity_issue": "open-2026-04",
   "monthly_activity_issue_number": 749,
-  "yaml_pollution_note": "Running tests with --cov causes PyYAML global state corruption from some earlier test. Tests pass without --cov.",
-  "ansi_note": "Rich outputs ANSI codes (italic \\x1b[3m, bold \\x1b[1m) even with NO_COLOR=1. Use regex r'\\x1b\\[[0-9;]*[A-Za-z]' to strip before text assertions. Fixed in test_policy_status.py _ascii_only helper via PR 2026-04-27.",
+  "ansi_note": "Rich outputs ANSI codes (italic \\x1b[3m, bold \\x1b[1m) even with NO_COLOR=1. Use regex r'\\x1b\\[[0-9;]*[A-Za-z]' to strip before text assertions. Add _strip_ansi() helper. Fixed in test_policy_status.py PR 2026-04-28.",
   "lockfile_format_note": "Lockfile is apm.lock.yaml (LOCKFILE_NAME constant). Tests should write apm.lock.yaml.",
-  "lazy_import_note": "RegistryIntegration imported lazily inside mcp.py. Patch 'apm_cli.registry.integration.RegistryIntegration'.",
-  "deps_utils_note": "_is_nested_under_package and _count_primitives now fully tested (43 tests in test_deps_utils.py). Maintainer added these tests.",
   "testing_backlog": [
     {"id": "install-command", "file": "src/apm_cli/commands/install.py", "coverage": "43%", "priority": "high", "notes": "Large complex file ~2804 lines. Core install logic. High risk. Deferred."},
-    {"id": "compile-cli-full", "file": "src/apm_cli/commands/compile/cli.py", "coverage": "38%", "priority": "medium", "notes": "Display helpers covered in PR; main command logic still sparse."},
+    {"id": "compile-cli-full", "file": "src/apm_cli/commands/compile/cli.py", "coverage": "38%", "priority": "medium", "notes": "Main command logic still sparse."},
     {"id": "uninstall-engine", "file": "src/apm_cli/commands/uninstall/engine.py", "coverage": "71%", "priority": "medium", "notes": "Uninstall orchestration logic."},
     {"id": "view-command", "file": "src/apm_cli/commands/view.py", "coverage": "66%", "priority": "medium", "notes": "View command has missing paths."},
-    {"id": "deps-cli", "file": "src/apm_cli/commands/deps/cli.py", "coverage": "71%", "priority": "medium", "notes": "list/tree/info covered. Main update() orchestration still complex."},
-    {"id": "hook-integrator", "file": "src/apm_cli/integration/hook_integrator.py", "coverage": "93%", "priority": "low", "notes": "Already well-covered."}
+    {"id": "deps-cli", "file": "src/apm_cli/commands/deps/cli.py", "coverage": "71%", "priority": "medium", "notes": "list/tree/info covered. Main update() orchestration still complex."}
   ],
-  "backlog_cursor": "compile-cli-full",
+  "backlog_cursor": "uninstall-engine",
   "completed_work": [
+    {
+      "run": "2026-04-28T03:36:20Z",
+      "tasks": ["task3", "task7"],
+      "pr_status": "pr_created",
+      "branch": "test-assist/fix-policy-status-ansi-v2",
+      "description": "Fixed 7 pre-existing test failures in test_policy_status.py. _ascii_only lacked ANSI stripping. Added _strip_ansi() helper. 6564 tests pass."
+    },
     {
       "run": "2026-04-27T03:36:28Z",
       "tasks": ["task4", "task7"],
-      "pr_status": "pr_created",
-      "branch": "test-assist/fix-policy-status-ansi-24975296739",
-      "description": "Fixed 7 pre-existing test failures in test_policy_status.py. _ascii_only was rejecting Rich ANSI codes. Strip CSI sequences before check. 5476->5516 tests passing.",
-      "note": "All previous Test Improver PRs appear closed/merged - none showing as open."
+      "description": "Previous Test Improver PRs appeared closed. 5516 tests on main."
     },
     {
       "run": "2026-04-19T01:11:37Z",
       "tasks": ["task1", "task2", "task7"],
-      "pr_status": "no_pr_created",
-      "description": "Task1: 3933 tests pass. Task2: Identified _utils.py gaps (since covered by maintainer)."
+      "description": "Task1: commands validated. Task2: backlog identified."
     }
   ]
 }
