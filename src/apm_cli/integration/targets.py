@@ -382,6 +382,43 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         user_supported="partial",
     ),
+    # Windsurf/Cascade -- .windsurf/ is the workspace config directory.
+    # Rules are markdown files with trigger/globs frontmatter under .windsurf/rules/.
+    # Skills use the standard SKILL.md format under .windsurf/skills/.
+    # Workflows (≈ commands) are markdown files under .windsurf/workflows/.
+    # Hooks are configured in .windsurf/hooks.json.
+    # At user scope, ~/.codeium/windsurf/ is used.  Global rules use a single
+    # file (~/.codeium/windsurf/memories/global_rules.md) with a different
+    # format, so "instructions" is excluded from user scope.
+    # MCP config: ~/.codeium/windsurf/mcp_config.json (mcpServers JSON format).
+    # Ref: https://docs.windsurf.com/windsurf/cascade/memories
+    # Ref: https://docs.windsurf.com/windsurf/cascade/mcp
+    "windsurf": TargetProfile(
+        name="windsurf",
+        root_dir=".windsurf",
+        primitives={
+            "instructions": PrimitiveMapping(
+                "rules", ".md", "windsurf_rules"
+            ),
+            "agents": PrimitiveMapping(
+                "skills", "/SKILL.md", "windsurf_agent_skill"
+            ),
+            "skills": PrimitiveMapping(
+                "skills", "/SKILL.md", "skill_standard"
+            ),
+            "commands": PrimitiveMapping(
+                "workflows", ".md", "windsurf_workflow"
+            ),
+            "hooks": PrimitiveMapping(
+                "", "hooks.json", "windsurf_hooks"
+            ),
+        },
+        auto_create=False,
+        detect_by_dir=True,
+        user_supported="partial",
+        user_root_dir=".codeium/windsurf",
+        unsupported_user_primitives=("instructions",),
+    ),
     # Microsoft 365 Copilot (Cowork) -- experimental, user-scope only.
     # Skills are deployed to <OneDrive>/Documents/Cowork/skills/.
     # The deploy root is resolved dynamically at runtime via

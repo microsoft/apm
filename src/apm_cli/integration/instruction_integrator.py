@@ -92,7 +92,7 @@ class InstructionIntegrator(BaseIntegrator):
         deploy_dir.mkdir(parents=True, exist_ok=True)
 
         fmt = mapping.format_id
-        needs_rename = fmt in ("cursor_rules", "claude_rules")
+        needs_rename = fmt in ("cursor_rules", "claude_rules", "windsurf_rules")
 
         files_integrated = 0
         files_skipped = 0
@@ -125,6 +125,8 @@ class InstructionIntegrator(BaseIntegrator):
                 links_resolved = self.copy_instruction_cursor(source_file, target_path)
             elif fmt == "claude_rules":
                 links_resolved = self.copy_instruction_claude(source_file, target_path)
+            elif fmt == "windsurf_rules":
+                links_resolved = self.copy_instruction_windsurf(source_file, target_path)
             else:
                 links_resolved = self.copy_instruction(source_file, target_path)
 
@@ -156,6 +158,10 @@ class InstructionIntegrator(BaseIntegrator):
         legacy_dir = project_root / effective_root / mapping.subdir
         if mapping.format_id == "cursor_rules":
             legacy_pattern = "*.mdc"
+        elif mapping.format_id == "windsurf_rules":
+            # Do not use a broad legacy glob for Windsurf rules to avoid
+            # deleting user-authored .md files under .windsurf/rules/.
+            legacy_pattern = None
         elif mapping.format_id == "claude_rules":
             # Do not use a broad legacy glob for Claude rules to avoid
             # deleting user-authored .md files under .claude/rules/.
@@ -317,6 +323,60 @@ class InstructionIntegrator(BaseIntegrator):
             project_root,
             managed_files=managed_files,
         )
+
+    # ------------------------------------------------------------------
+    # Windsurf Rules (.md with trigger/globs frontmatter)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _convert_to_windsurf_rules(content: str) -> str:
+        """Convert APM instruction content to Windsurf rules ``.md`` format.
+
+        Parses existing YAML frontmatter, maps ``applyTo`` to Windsurf's
+        ``trigger: glob`` + ``globs`` frontmatter.  Instructions without
+        ``applyTo`` become ``trigger: always_on`` rules.
+
+        Ref: https://docs.windsurf.com/windsurf/cascade/memories
+        """
+        body = content
+        apply_to = ""
+        description = ""
+
+        # Parse existing frontmatter
+        fm_match = re.match(r'^---\s*\n(.*?)\n---\s*\n?', content, re.DOTALL)
+        if fm_match:
+            fm_block = fm_match.group(1)
+            body = content[fm_match.end():]
+
+            for line in fm_block.splitlines():
+                line_stripped = line.strip()
+                if line_stripped.startswith("applyTo:"):
+                    apply_to = line_stripped[len("applyTo:"):].strip().strip("'\"")
+                elif line_stripped.startswith("description:"):
+                    description = line_stripped[len("description:"):].strip().strip("'\"")
+
+        # Build Windsurf rules frontmatter
+        parts = ["---"]
+        if apply_to:
+            parts.append("trigger: glob")
+            parts.append(f"globs: {apply_to}")
+        else:
+            parts.append("trigger: always_on")
+        parts.append("---")
+
+        return "\n".join(parts) + "\n\n" + body.lstrip("\n")
+
+    def copy_instruction_windsurf(self, source: Path, target: Path) -> int:
+        """Copy instruction file converted to Windsurf rules format.
+
+        Converts ``applyTo:`` to ``trigger: glob`` + ``globs:`` frontmatter
+        and resolves links.
+        """
+        content = source.read_text(encoding='utf-8')
+        content = self._convert_to_windsurf_rules(content)
+        content, links_resolved = self.resolve_links(content, source, target)
+        target.write_text(content, encoding='utf-8')
+        return links_resolved
 
     # ------------------------------------------------------------------
     # Claude Code Rules (.md with paths: frontmatter)
