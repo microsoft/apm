@@ -1,5 +1,6 @@
 {
   "name": "@apm/cli-win32-x64",
+  "description": "APM (Agent Package Manager) -- ship and govern AI agent context",
   "version": "0.10.0",
   "license": "MIT",
   "repository": {
@@ -10,9 +11,6 @@
   "engines": {
     "node": ">=20"
   },
-  "publishConfig": {
-    "provenance": true
-  },
   "homepage": "https://microsoft.github.io/apm/",
   "os": [
     "win32"
@@ -20,10 +18,7 @@
   "cpu": [
     "x64"
   ],
-  "files": [
-    "apm.exe",
-    "_internal",
-    "README.md",
-    "LICENSE"
-  ]
+  "publishConfig": {
+    "provenance": true
+  }
 }
