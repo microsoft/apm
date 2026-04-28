@@ -20,5 +20,11 @@
   ],
   "publishConfig": {
     "provenance": true
-  }
+  },
+  "files": [
+    "apm.exe",
+    "_internal",
+    "README.md",
+    "LICENSE"
+  ]
 }
