@@ -25,9 +25,16 @@ description: Multi-persona expert panel review of labelled PRs, posting a single
 #        `gh pr diff` which return inert text
 #      - imports are pinned to microsoft/apm#main (panel skill +
 #        persona definitions are trusted, not from the PR)
-#      - the only write surface is safe-outputs.add-comment (max 7
-#        is a safety ceiling; the agent is instructed to emit one
-#        synthesized verdict comment)
+#      - write surfaces are tightly scoped:
+#          add-comment max 2 (one CEO comment + one safety overflow)
+#          add-labels allowed [panel-approved, panel-rejected] max 1
+#            (mutually exclusive verdict; orchestrator emits exactly one)
+#          remove-labels allowed [panel-review] max 1
+#            (clear the trigger label after the run so re-applying it
+#             re-runs the panel idempotently)
+#        The verdict labels themselves are stripped on every new push
+#        by the deterministic companion workflow pr-panel-label-reset.yml
+#        (plain GitHub Actions, no LLM).
 #      - `roles: [admin, maintainer, write]` ensures only repo
 #        maintainers can trigger -- matches the trust model that
 #        applying the `panel-review` label requires write access.
@@ -99,8 +106,21 @@ network:
     - github
 
 safe-outputs:
+  # Single CEO comment per panel run. max:2 is a fail-soft ceiling; the
+  # one-comment discipline lives inside the apm-review-panel skill.
   add-comment:
-    max: 7
+    max: 2
+  # Verdict label. Mutually exclusive (orchestrator picks exactly one).
+  # The companion workflow pr-panel-label-reset.yml strips both on every
+  # new push so a stale verdict can never linger past a code change.
+  add-labels:
+    allowed: [panel-approved, panel-rejected]
+    max: 1
+  # Trigger label cleanup. Removed after the run so re-applying
+  # `panel-review` re-triggers the panel cleanly.
+  remove-labels:
+    allowed: [panel-review]
+    max: 1
 
 timeout-minutes: 30
 ---

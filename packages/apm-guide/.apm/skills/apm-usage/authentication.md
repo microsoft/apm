@@ -78,6 +78,7 @@ If `ADO_APM_PAT` is set but ADO returns 401, APM silently retries with the `az` 
 export GITHUB_HOST=github.company.com
 export GITHUB_APM_PAT_MYORG=ghp_ghes_token
 apm install myorg/internal-package       # resolves to github.company.com
+apm marketplace build                    # also resolves to github.company.com
 ```
 
 ## GHE Cloud data residency (*.ghe.com)

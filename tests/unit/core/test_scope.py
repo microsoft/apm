@@ -297,10 +297,16 @@ class TestActiveTargetsUserScope:
         assert "cursor" in names
         assert "opencode" in names
 
-    def test_explicit_unknown_returns_empty(self):
-        from apm_cli.integration.targets import active_targets_user_scope
-        result = active_targets_user_scope(explicit_target="nonexistent")
-        assert result == []
+    def test_unknown_target_raises_at_parse_time(self):
+        """Unknown tokens fail at the parser, not silently in the
+        user-scope resolver.  Mirrors the project-scope contract change
+        from #820 -- both entry points share one validator
+        (:func:`apm_cli.core.target_detection.parse_target_field`)."""
+        import pytest
+        from apm_cli.core.target_detection import parse_target_field
+
+        with pytest.raises(ValueError, match="not a valid target"):
+            parse_target_field("nonexistent")
 
     def test_explicit_vscode_alias(self):
         from apm_cli.integration.targets import active_targets_user_scope
