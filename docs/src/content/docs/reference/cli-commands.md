@@ -84,10 +84,11 @@ apm install [PACKAGES...] [OPTIONS]
 - `PACKAGES` - Optional APM packages to add and install. Accepts shorthand (`owner/repo`), HTTPS URLs, SSH URLs, FQDN shorthand (`host/owner/repo`), local filesystem paths (`./path`, `../path`, `/absolute/path`, `~/path`), or marketplace references (`NAME@MARKETPLACE[#ref]`). All forms are normalized to canonical format in `apm.yml`.
 
 **Options:**
-- `--runtime TEXT` - Target specific runtime only (copilot, codex, vscode)
+- `--runtime TEXT` - Target specific runtime only (copilot, codex, gemini, vscode)
 - `--exclude TEXT` - Exclude specific runtime from installation
 - `--only [apm|mcp]` - Install only specific dependency type
-- `--target [copilot|claude|cursor|codex|opencode|all]` - Force deployment to specific target(s). Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Overrides auto-detection
+- `--target [copilot|claude|cursor|codex|opencode|gemini|copilot-cowork|all]` - Force deployment to specific target(s). Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Overrides auto-detection
+  - `copilot-cowork` - Microsoft 365 Copilot Cowork skills (user scope only, requires `copilot-cowork` experimental flag)
 - `--update` - Update dependencies to latest Git references  
 - `--force` - Overwrite locally-authored files on collision; bypass security scan blocks
 - `--dry-run` - Show what would be installed without installing
@@ -110,6 +111,7 @@ apm install [PACKAGES...] [OPTIONS]
 - `--allow-protocol-fallback` - Restore the legacy permissive cross-protocol fallback chain (HTTPS-then-SSH or vice-versa). Strict-by-default otherwise. Each retry emits a `[!]` warning naming both protocols. When the dependency URL carries a custom port, APM also emits a one-shot `[!]` warning before the first clone attempt noting that the same port will be reused across schemes (wrong on servers like Bitbucket Datacenter that serve SSH and HTTPS on different ports) -- to avoid the mismatch, omit this flag and pin the dependency with an explicit `ssh://` or `https://` URL.
 - `--no-policy` -- Skip org policy enforcement for this invocation. Loudly logged. Does NOT bypass `apm audit --ci`. Available on `apm install`, `apm install <pkg>`, and `apm install --mcp <name>`.
   - Equivalent env var: `APM_POLICY_DISABLE=1` (applies to the entire shell session). Note: `apm deps update` runs the install pipeline and is gated by policy but does not currently expose a `--no-policy` flag -- use `APM_POLICY_DISABLE=1` as the only escape hatch there.
+- `--skill NAME` - Install only named skill(s) from a `SKILL_BUNDLE` package. Repeatable. The selection is **persisted** in `apm.yml` (as a `skills:` list in dict-form entries) and in `apm.lock.yaml` (as `skill_subset`), so subsequent bare `apm install` commands are deterministic. Use `--skill '*'` to reset and install all skills from the bundle.
 
 **Transport env vars:**
 
@@ -264,6 +266,8 @@ APM automatically detects which integrations to enable based on your project str
 - **Claude integration**: Enabled when `.claude/` directory exists
 - **Cursor integration**: Enabled when `.cursor/` directory exists
 - **OpenCode integration**: Enabled when `.opencode/` directory exists
+- **Codex integration**: Enabled when `.codex/` directory exists
+- **Gemini integration**: Enabled when `.gemini/` directory exists
 - All integrations can coexist in the same project
 
 **VSCode Integration (`.github/` present):**
@@ -370,6 +374,9 @@ apm uninstall -g microsoft/apm-sample-package
 | OpenCode agents | `.opencode/agents/*.md` |
 | OpenCode commands | `.opencode/commands/*.md` |
 | OpenCode skills | `.opencode/skills/{folder-name}/` |
+| Gemini commands | `.gemini/commands/*.toml` |
+| Gemini skills | `.gemini/skills/{folder-name}/` |
+| Gemini settings | `.gemini/settings.json` (hooks + MCP cleaned) |
 | Lockfile entries | `apm.lock.yaml` (removed packages + orphaned transitives) |
 
 **Behavior:**
@@ -424,8 +431,8 @@ apm audit [PACKAGE] [OPTIONS]
 - `-v, --verbose` - Show info-level findings and file details
 - `-f, --format [text|json|sarif|markdown]` - Output format: `text` (default), `json` (machine-readable), `sarif` (GitHub Code Scanning), `markdown` (step summaries). Cannot be combined with `--strip` or `--dry-run`.
 - `-o, --output PATH` - Write report to file. Auto-detects format from extension (`.sarif`, `.sarif.json` → SARIF; `.json` → JSON; `.md` → Markdown) when `--format` is not specified.
-- `--ci` - Run lockfile consistency checks for CI/CD gates. Exit 0 if clean, 1 if violations found. Auto-discovers org policy from the org `.github` repo unless `--no-policy` is set.
-- `--policy SOURCE` - *(Experimental)* Override discovery: `org` (auto-discover from org), file path, or URL. Without this flag, `--ci` auto-discovers.
+- `--ci` - Run lockfile consistency checks for CI/CD gates. Exit 0 if clean, 1 if violations found. Auto-discovers org policy from the org `.github` repo unless `--no-policy` is set. Runs the 7 baseline checks: lockfile presence, ref consistency, deployed files present, no orphaned packages, MCP config consistency, content integrity (Unicode + hash drift on every deployed file including local content), includes consent (advisory).
+- `--policy SOURCE` - *(Experimental)* Policy source. Accepts: `org` (auto-discover from your project's git remote), `owner/repo` (defaults to github.com), an `https://` URL, or a local file path. Used with `--ci` for policy checks. Without this flag, `--ci` auto-discovers.
 - `--no-policy` - Skip policy discovery and enforcement entirely. Equivalent to `APM_POLICY_DISABLE=1`.
 - `--no-cache` - Force fresh policy fetch (skip cache). Only relevant with policy discovery active.
 - `--no-fail-fast` - Run all checks even after a failure. By default, CI mode stops at the first failing check to save time.
@@ -498,6 +505,7 @@ apm audit --ci --policy org --no-fail-fast
 - **Critical**: Tag characters (U+E0001–E007F), bidi overrides (U+202A–E, U+2066–9), variation selectors 17–256 (U+E0100–E01EF, Glassworm attack vector)
 - **Warning**: Zero-width spaces/joiners (U+200B–D), variation selectors 1–15 (U+FE00–FE0E), bidi marks (U+200E–F, U+061C), invisible operators (U+2061–4), annotation markers (U+FFF9–B), deprecated formatting (U+206A–F), soft hyphen (U+00AD), mid-file BOM
 - **Info**: Non-breaking spaces, unusual whitespace, emoji presentation selector (U+FE0F). ZWJ between emoji characters is context-downgraded to info.
+- **Hash drift (`--ci` only)**: Files deployed by `apm install` whose on-disk SHA-256 no longer matches the value recorded in the lockfile (`deployed_file_hashes`). Covers content from package dependencies AND local `.apm/` content via the synthesized self-entry.
 
 ### `apm policy` - Inspect organization policy
 
@@ -512,7 +520,7 @@ apm policy status [OPTIONS]
 ```
 
 **Options:**
-- `--policy-source SOURCE` - Override discovery: `org`, file path, or URL. Same shape as `apm install --policy`.
+- `--policy-source SOURCE` - Override discovery. Accepts: `org` (auto-discover from your project's git remote), `owner/repo` (defaults to github.com), an `https://` URL, or a local file path.
 - `--no-cache` - Force fresh fetch (skip cache).
 - `--json` / `-o json` - Machine-readable output for SIEM ingestion or CI inspection.
 - `--check` - Exit non-zero (1) when no usable policy is found. Default is always 0; use `--check` for CI pre-checks.
@@ -554,7 +562,7 @@ apm pack [OPTIONS]
 
 **Options:**
 - `-o, --output PATH` - Output directory (default: `./build`)
-- `-t, --target [copilot|vscode|claude|cursor|codex|opencode|all]` - Filter files by target. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Auto-detects from `apm.yml` if not specified. `vscode` is an alias for `copilot`
+- `-t, --target [copilot|vscode|claude|cursor|codex|opencode|gemini|all]` - Filter files by target. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Auto-detects from `apm.yml` if not specified. `vscode` is an alias for `copilot`
 - `--archive` - Produce a `.tar.gz` archive instead of a directory
 - `--dry-run` - List files that would be packed without writing anything
 - `--format [apm|plugin]` - Bundle format (default: `apm`). `plugin` produces a standalone plugin directory with `plugin.json`
@@ -596,6 +604,7 @@ apm pack -o dist/
 | `claude` | `.claude/` |
 | `cursor` | `.cursor/` |
 | `opencode` | `.opencode/` |
+| `gemini` | `.gemini/` |
 | `all` | all of the above |
 
 **Enriched lockfile example:**
@@ -955,7 +964,7 @@ apm deps update [PACKAGES...] [OPTIONS]
 - `--verbose, -v` - Show detailed update information
 - `--force` - Overwrite locally-authored files on collision
 - `-g, --global` - Update user-scope dependencies (`~/.apm/`)
-- `--target, -t` - Force deployment to specific target(s). Accepts comma-separated values (e.g., `-t claude,copilot`). Valid values: copilot, claude, cursor, opencode, vscode, agents, all
+- `--target, -t` - Force deployment to specific target(s). Accepts comma-separated values (e.g., `-t claude,copilot`). Valid values: copilot, claude, cursor, opencode, gemini, vscode, agents, all
 - `--parallel-downloads` - Max concurrent downloads (default: 4)
 
 **Policy enforcement:** `apm deps update` runs the install pipeline and is therefore gated by org `apm-policy.yml`. There is no `--no-policy` flag on this command -- the only escape hatch is `APM_POLICY_DISABLE=1` for the shell session. See [Policy reference](../../enterprise/policy-reference/#install-time-enforcement).
@@ -995,6 +1004,22 @@ Alias for [`apm install --mcp`](#apm-install---install-dependencies-and-deploy-l
 ```bash
 apm mcp install NAME [OPTIONS] [-- COMMAND ARGV...]
 ```
+
+**Arguments:**
+- `NAME` - MCP server name. Use a registry name for registry installs, or a local name for self-defined stdio and remote servers.
+
+**Options:**
+- `--transport [stdio|http|sse|streamable-http]` - MCP transport. Inferred from `--url` or post-`--` argv when omitted.
+- `--url URL` - MCP server URL for `http`, `sse`, or `streamable-http` transports.
+- `--env KEY=VALUE` - Environment variable for stdio MCP servers. Repeatable.
+- `--header KEY=VALUE` - HTTP header for remote MCP servers. Repeatable.
+- `--mcp-version VER` - Pin a registry MCP entry to a specific version.
+- `--registry URL` - Custom MCP registry URL for resolving `NAME`.
+- `--dev` - Add the server to `devDependencies`.
+- `--dry-run` - Show what would be added without writing.
+- `--force` - Replace an existing MCP entry.
+- `-v, --verbose` - Show detailed output.
+- `--no-policy` - Skip org policy enforcement for this invocation.
 
 **Examples:**
 ```bash
@@ -1232,6 +1257,264 @@ apm marketplace validate acme-plugins
 apm marketplace validate acme-plugins --verbose
 ```
 
+#### `apm marketplace init` - Scaffold a marketplace.yml
+
+Create a richly-commented `marketplace.yml` in the current directory. The scaffold is valid against the schema and ready to be edited. See the [Authoring a marketplace guide](../../guides/marketplace-authoring/).
+
+```bash
+apm marketplace init [OPTIONS]
+```
+
+**Options:**
+- `--force` - Overwrite an existing `marketplace.yml`
+- `--no-gitignore-check` - Skip the `.gitignore` staleness check
+- `-v, --verbose` - Show detailed output
+
+**Exit codes:**
+- `0` - Scaffold written
+- `1` - File already exists (without `--force`) or write failure
+
+**Examples:**
+```bash
+apm marketplace init
+apm marketplace init --force
+```
+
+#### `apm marketplace build` - Compile marketplace.yml
+
+Resolve all package version ranges against the source repositories and write an Anthropic-compliant `marketplace.json`. APM-only fields (`build:`, version ranges, tag patterns) are stripped; `metadata:` is passed through verbatim.
+
+```bash
+apm marketplace build [OPTIONS]
+```
+
+**Options:**
+- `--dry-run` - Resolve and print the result table, but do not write `marketplace.json`
+- `--offline` - Use cached refs only (no `git ls-remote` calls)
+- `--include-prerelease` - Allow pre-release tags to satisfy ranges
+- `-v, --verbose` - Per-entry resolution detail
+
+**Exit codes:**
+- `0` - Build succeeded (or dry run complete)
+- `1` - Build error (network failure, unresolvable ref, no matching tag)
+- `2` - Schema error in `marketplace.yml`
+
+**Examples:**
+```bash
+# Compile marketplace.yml -> marketplace.json
+apm marketplace build
+
+# Preview without writing
+apm marketplace build --dry-run
+
+# Offline build against cached refs
+apm marketplace build --offline
+```
+
+#### `apm marketplace outdated` - Report available upgrades
+
+List packages in `marketplace.yml` whose source repositories have newer tags available. Range-aware: distinguishes "latest in range" (picked up by next `build`) from "latest overall" (requires a manual range bump).
+
+```bash
+apm marketplace outdated [OPTIONS]
+```
+
+**Options:**
+- `--offline` - Use cached refs only
+- `--include-prerelease` - Include pre-release tags
+- `-v, --verbose` - Show detailed output
+
+**Exit codes:**
+- `0` - Report rendered (even if upgrades are available)
+- `1` - Unable to query refs
+- `2` - Schema error in `marketplace.yml`
+
+**Examples:**
+```bash
+apm marketplace outdated
+apm marketplace outdated --include-prerelease
+```
+
+#### `apm marketplace check` - Validate marketplace.yml entries
+
+Validate the `marketplace.yml` schema and verify that every package entry is resolvable (ref exists, at least one tag satisfies the range). Intended for CI use before publishing.
+
+```bash
+apm marketplace check [OPTIONS]
+```
+
+**Options:**
+- `--offline` - Schema and cached-ref checks only (no network)
+- `-v, --verbose` - Show detailed output
+
+**Exit codes:**
+- `0` - All entries OK
+- `1` - One or more entries are unreachable or unresolvable
+- `2` - Schema error in `marketplace.yml`
+
+**Examples:**
+```bash
+apm marketplace check
+apm marketplace check --offline
+```
+
+#### `apm marketplace doctor` - Environment diagnostics
+
+Check git, network reachability, authentication, `gh` CLI availability, and the presence of `marketplace.yml`. Run this first when `build` or `publish` fails in an unfamiliar environment.
+
+```bash
+apm marketplace doctor [OPTIONS]
+```
+
+**Options:**
+- `-v, --verbose` - Per-check detail
+
+**Exit codes:**
+- `0` - All checks pass
+- `1` - One or more checks failed
+
+**Examples:**
+```bash
+apm marketplace doctor
+apm marketplace doctor --verbose
+```
+
+#### `apm marketplace publish` - Open PRs on consumer repositories
+
+Drive the compiled `marketplace.json` out to consumer repositories listed in a `consumer-targets.yml` file, opening a pull request on each. Requires an authenticated `gh` CLI unless `--no-pr` is used. See the [Authoring a marketplace guide](../../guides/marketplace-authoring/#publishing-to-consumers) for the full workflow.
+
+```bash
+apm marketplace publish [OPTIONS]
+```
+
+**Options:**
+- `--targets PATH` - Path to the targets file (default: `./consumer-targets.yml`)
+- `--dry-run` - Preview without pushing or opening PRs
+- `--no-pr` - Push branches but skip PR creation
+- `--draft` - Create PRs as drafts
+- `--allow-downgrade` - Allow pushing a lower version than the target currently references
+- `--allow-ref-change` - Allow switching ref types (for example, branch to SHA)
+- `--parallel N` - Maximum concurrent target updates (default: `4`)
+- `-y, --yes` - Skip the confirmation prompt (required in non-interactive sessions)
+- `-v, --verbose` - Per-target detail
+
+**Exit codes:**
+- `0` - All targets succeeded (or were already up to date)
+- `1` - One or more targets failed, or prerequisites missing
+
+**Examples:**
+```bash
+# Preview the publish plan
+apm marketplace publish --dry-run --yes
+
+# Publish with PRs
+apm marketplace publish
+
+# Push branches only (no gh CLI needed)
+apm marketplace publish --no-pr
+```
+
+Run history and PR URLs are recorded in `.apm/publish-state.json` so re-runs can detect existing PRs.
+
+#### `apm marketplace package add` - Add a package entry
+
+Add a package entry to `marketplace.yml`.
+
+```bash
+apm marketplace package add SOURCE [OPTIONS]
+```
+
+**Arguments:**
+- `SOURCE` - GitHub `owner/repo` reference
+
+**Options:**
+- `--version TEXT` - Semver range constraint (e.g. `">=1.0.0"`)
+- `--ref TEXT` - Pin to a git ref (SHA, tag, or HEAD). Mutable refs are auto-resolved to SHA
+- `-d`, `--description TEXT` - Short description for the entry
+- `-s`, `--subdir TEXT` - Subdirectory inside source repo
+- `--include-prerelease` - Include pre-release versions
+- `--no-verify` - Skip remote repository verification
+- `--verbose` - Enable verbose output
+
+`--version` and `--ref` are mutually exclusive. When neither is provided, the current `HEAD` SHA is pinned automatically.
+
+**Examples:**
+```bash
+# Add a package with a version range
+apm marketplace package add acme/code-review --version ">=1.0.0"
+
+# Pin to a specific tag
+apm marketplace package add acme/code-review --ref v2.1.0
+
+# Pin to current HEAD (auto-resolved to SHA)
+apm marketplace package add acme/code-review
+
+# Add with description and skip verification (requires explicit --ref SHA)
+apm marketplace package add acme/code-review --ref abc123...40chars \
+  --description "Code review skill" --no-verify
+```
+
+#### `apm marketplace package set` - Update a package entry
+
+Update fields on an existing package entry in `marketplace.yml`.
+
+```bash
+apm marketplace package set NAME [OPTIONS]
+```
+
+**Arguments:**
+- `NAME` - Name of the existing package entry
+
+**Options:**
+- `--version TEXT` - New semver range constraint
+- `--ref TEXT` - New git ref (SHA, tag, or HEAD). Mutable refs are auto-resolved to SHA
+- `--description TEXT` - New description
+- `--include-prerelease` - Enable pre-release version inclusion
+- `--verbose` - Enable verbose output
+
+`--version` and `--ref` are mutually exclusive. At least one field option must be specified.
+
+**Examples:**
+```bash
+# Widen the version range
+apm marketplace package set code-review --version ">=2.0.0"
+
+# Switch from version to pinned ref
+apm marketplace package set code-review --ref abc1234
+
+# Re-pin to current HEAD SHA
+apm marketplace package set code-review --ref HEAD
+
+# Update the description
+apm marketplace package set code-review --description "Updated review skill"
+```
+
+#### `apm marketplace package remove` - Remove a package entry
+
+Remove a package entry from `marketplace.yml`.
+
+```bash
+apm marketplace package remove NAME [OPTIONS]
+```
+
+**Arguments:**
+- `NAME` - Name of the package entry to remove
+
+**Options:**
+- `--yes` - Skip confirmation prompt
+- `--verbose` - Enable verbose output
+
+Prompts for confirmation unless `--yes` is passed. In non-interactive environments (CI), use `--yes`.
+
+**Examples:**
+```bash
+# Remove with confirmation prompt
+apm marketplace package remove code-review
+
+# Skip confirmation (CI-friendly)
+apm marketplace package remove code-review --yes
+```
+
 ### `apm search` - Search plugins in a marketplace
 
 Search for plugins by name or description within a specific marketplace.
@@ -1347,7 +1630,7 @@ apm compile [OPTIONS]
 
 **Options:**
 - `-o, --output TEXT` - Output file path (for single-file mode)
-- `-t, --target [vscode|agents|claude|codex|opencode|all]` - Target agent format. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). `agents` is an alias for `vscode`. Auto-detects if not specified.
+- `-t, --target [vscode|agents|claude|codex|opencode|gemini|all]` - Target agent format. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). `agents` is an alias for `vscode`. Auto-detects if not specified.
 - `--chatmode TEXT` - Chatmode to prepend to the AGENTS.md file
 - `--dry-run` - Preview compilation without writing files (shows placement decisions)
 - `--no-links` - Skip markdown link resolution
@@ -1368,6 +1651,7 @@ When `--target` is not specified, APM auto-detects based on existing project str
 | `.github/` exists only | `vscode` | AGENTS.md + .github/ |
 | `.claude/` exists only | `claude` | CLAUDE.md + .claude/ |
 | `.codex/` exists | `codex` | AGENTS.md + .codex/ + .agents/ |
+| `.gemini/` exists | `gemini` | GEMINI.md + .gemini/ |
 | Both folders exist | `all` | All outputs |
 | Neither folder exists | `minimal` | AGENTS.md only |
 
@@ -1388,10 +1672,11 @@ target: [claude, copilot]  # multiple targets -- only these are compiled/install
 
 | Target | Output Files | Best For |
 |--------|--------------|----------|
-| `vscode` | AGENTS.md, .github/prompts/, .github/agents/, .github/skills/ | GitHub Copilot, Cursor, Gemini |
+| `vscode` | AGENTS.md, .github/prompts/, .github/agents/, .github/skills/ | GitHub Copilot, Cursor |
 | `claude` | CLAUDE.md, .claude/commands/, SKILL.md | Claude Code, Claude Desktop |
 | `codex` | AGENTS.md, .agents/skills/, .codex/agents/, .codex/hooks.json | Codex CLI |
 | `opencode` | AGENTS.md, .opencode/agents/, .opencode/commands/, .opencode/skills/ | OpenCode |
+| `gemini` | GEMINI.md, .gemini/commands/, .gemini/skills/ | Gemini CLI |
 | `all` | All of the above | Universal compatibility |
 
 **Examples:**
@@ -1546,6 +1831,7 @@ apm config get [KEY]
 - `KEY` (optional) - Configuration key to retrieve. Supported keys:
   - `auto-integrate` - Whether to automatically integrate `.prompt.md` files into AGENTS.md
   - `temp-dir` - Custom temporary directory for clone/download operations
+  - `copilot-cowork-skills-dir` - Override the resolved Cowork OneDrive skills directory
 
 If `KEY` is omitted, displays all configuration values.
 
@@ -1570,6 +1856,7 @@ apm config set KEY VALUE
 - `KEY` - Configuration key to set. Supported keys:
   - `auto-integrate` - Enable/disable automatic integration of `.prompt.md` files
   - `temp-dir` - Set a custom temporary directory path
+  - `copilot-cowork-skills-dir` - Override the resolved Cowork OneDrive skills directory
 - `VALUE` - Value to set. For boolean keys, use: `true`, `false`, `yes`, `no`, `1`, `0`
 
 **Configuration Keys:**
@@ -1615,11 +1902,35 @@ apm config get temp-dir
 export APM_TEMP_DIR=/tmp/apm-work
 ```
 
+**`copilot-cowork-skills-dir`** - Override the resolved Cowork OneDrive skills directory
+- **Type:** String (absolute directory path)
+- **Default:** Auto-detected Cowork skills directory (not stored)
+- **Description:** Override the resolved Cowork OneDrive skills directory. Gated on the `copilot-cowork` experimental flag for `set`; `get` and `unset` are always available for cleanup.
+- **Resolution order:** `APM_COPILOT_COWORK_SKILLS_DIR` environment variable > `copilot_cowork_skills_dir` in `~/.apm/config.json` > platform auto-detection.
+- **Use Cases:**
+  - Set a specific OneDrive-backed Cowork skills directory instead of relying on auto-detection
+  - Clear the override with `apm config unset copilot-cowork-skills-dir` when returning to auto-detection
+
+**Examples:**
+```bash
+# Enable the experimental flag, then set an explicit Cowork skills directory
+apm experimental enable copilot-cowork
+apm config set copilot-cowork-skills-dir ~/Library/CloudStorage/OneDrive-Contoso/Documents/Cowork/skills
+
+# Check the current copilot-cowork-skills-dir setting
+apm config get copilot-cowork-skills-dir
+
+# Remove the override and return to auto-detection
+apm config unset copilot-cowork-skills-dir
+```
+
+See also: [Cowork integration](../integrations/copilot-cowork/).
+
 ## Runtime Management (Experimental)
 
 ### `apm runtime` (Experimental) - Manage AI runtimes
 
-APM manages AI runtime installation and configuration automatically. Currently supports three runtimes: `copilot`, `codex`, and `llm`.
+APM manages AI runtime installation and configuration automatically. Currently supports four runtimes: `copilot`, `codex`, `llm`, and `gemini`.
 
 > See the [Agent Workflows guide](../../guides/agent-workflows/) for usage details.
 
@@ -1631,17 +1942,18 @@ apm runtime COMMAND [OPTIONS]
 - **`copilot`** - GitHub Copilot coding agent
 - **`codex`** - OpenAI Codex CLI with GitHub Models support
 - **`llm`** - Simon Willison's LLM library with multiple providers
+- **`gemini`** - Google Gemini CLI
 
 #### `apm runtime setup` - Install AI runtime
 
 Download and configure an AI runtime from official sources.
 
 ```bash
-apm runtime setup [OPTIONS] {copilot|codex|llm}
+apm runtime setup [OPTIONS] {copilot|codex|llm|gemini}
 ```
 
 **Arguments:**
-- `{copilot|codex|llm}` - Runtime to install
+- `{copilot|codex|llm|gemini}` - Runtime to install
 
 **Options:**
 - `--version TEXT` - Specific version to install
@@ -1692,14 +2004,14 @@ apm runtime list
 Remove an installed runtime and its configuration.
 
 ```bash
-apm runtime remove [OPTIONS] {copilot|codex|llm}
+apm runtime remove [OPTIONS] {copilot|codex|llm|gemini}
 ```
 
 **Arguments:**
-- `{copilot|codex|llm}` - Runtime to remove
+- `{copilot|codex|llm|gemini}` - Runtime to remove
 
 **Options:**
-- `--yes` - Confirm the action without prompting
+- `-y, --yes` - Confirm the action without prompting
 
 #### `apm runtime status` - Show active runtime and preference order
 
@@ -1710,6 +2022,79 @@ apm runtime status
 ```
 
 **Output includes:**
-- Runtime preference order (copilot → codex → llm)
+- Runtime preference order (copilot → codex → gemini → llm)
 - Currently active runtime
 - Next steps if no runtime is available
+
+## Experimental Features
+
+### `apm experimental` - Manage experimental feature flags
+
+Manage opt-in flags that gate new or changing behaviour. Running `apm experimental` with no subcommand lists the available flags.
+
+```bash
+apm experimental [OPTIONS] COMMAND [ARGS]...
+```
+
+**Options:**
+- `-v, --verbose` - Show verbose output
+
+**Subcommands:**
+
+| Command | Description |
+|---------|-------------|
+| `list` | List all experimental features |
+| `enable NAME` | Enable an experimental feature |
+| `disable NAME` | Disable an experimental feature |
+| `reset [NAME]` | Reset one feature, or all features, to defaults |
+
+#### `apm experimental list`
+
+```bash
+apm experimental list [OPTIONS]
+```
+
+**Options:**
+- `--enabled` - Show only enabled features
+- `--disabled` - Show only disabled features
+- `--json` - Output as a JSON array
+- `-v, --verbose` - Show detailed output
+
+#### `apm experimental enable`
+
+```bash
+apm experimental enable NAME [OPTIONS]
+```
+
+**Arguments:**
+- `NAME` - Experimental feature name
+
+**Options:**
+- `-v, --verbose` - Show verbose output
+
+#### `apm experimental disable`
+
+```bash
+apm experimental disable NAME [OPTIONS]
+```
+
+**Arguments:**
+- `NAME` - Experimental feature name
+
+**Options:**
+- `-v, --verbose` - Show verbose output
+
+#### `apm experimental reset`
+
+```bash
+apm experimental reset [NAME] [OPTIONS]
+```
+
+**Arguments:**
+- `NAME` - Optional experimental feature name. Omit to reset all feature overrides.
+
+**Options:**
+- `-y, --yes` - Skip the confirmation prompt when resetting all features
+- `-v, --verbose` - Show verbose output
+
+See the full reference in [Experimental Flags](../experimental/).

@@ -276,14 +276,14 @@ def _substitute_plugin_root(
     servers: Dict[str, Any], abs_root: str, logger: logging.Logger
 ) -> Dict[str, Any]:
     """Replace ``${CLAUDE_PLUGIN_ROOT}`` in server config string values."""
-    token = "${CLAUDE_PLUGIN_ROOT}"
+    placeholder = "${CLAUDE_PLUGIN_ROOT}"
     substituted = False
 
     def _walk(obj: Any) -> Any:
         nonlocal substituted
-        if isinstance(obj, str) and token in obj:
+        if isinstance(obj, str) and placeholder in obj:
             substituted = True
-            return obj.replace(token, abs_root)
+            return obj.replace(placeholder, abs_root)
         if isinstance(obj, dict):
             return {k: _walk(v) for k, v in obj.items()}
         if isinstance(obj, list):

@@ -1,6 +1,40 @@
 # Package Authoring
 
-## Package directory structure
+## Supported package layouts
+
+APM recognizes three layouts. The shape of the package root tells APM
+how to install it:
+
+| Root signal | Author intent | Install semantic |
+|---|---|---|
+| `.apm/` (with or without apm.yml) | Multiple independent primitives | Hoist each primitive into the consumer runtime dirs |
+| `SKILL.md` (alone, or with apm.yml = HYBRID) | One skill bundle | Copy whole tree to `<target>/skills/<name>/` |
+| `plugin.json` / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
+
+The HYBRID layout (apm.yml + SKILL.md) is a single skill bundle that
+also uses APM dependency resolution. APM installs it as a skill -- it
+does NOT dissect the bundle into top-level primitives. Co-located
+subdirectories like `agents/`, `assets/`, `scripts/` are bundle
+resources, not standalone primitives.
+
+In a HYBRID package, `apm.yml` and `SKILL.md` each own their
+`description` field **independently** -- APM never merges or
+backfills one from the other:
+- `apm.yml.description` is a short human-facing tagline rendered by
+  `apm view`, `apm search`, `apm deps list`, and registry listings.
+- `SKILL.md` `description` (frontmatter) is the agent-runtime
+  invocation matcher (per agentskills.io). APM copies `SKILL.md`
+  byte-for-byte and never reads or mutates this field.
+- `allowed-tools` lives exclusively in `SKILL.md` frontmatter; there
+  is no apm.yml-side equivalent.
+- `name`, `version`, `license`, `dependencies`, `scripts` live
+  exclusively in `apm.yml`.
+
+Populate both descriptions when you ship a HYBRID package. `apm pack`
+warns when `apm.yml.description` is missing so listings do not
+degrade silently while the agent runtime keeps working.
+
+## Package directory structure (APM layout)
 
 ```
 my-package/
@@ -134,6 +168,70 @@ git tag v1.0.0 && git push --tags
 # 6. Consumers install via
 apm install org/my-package#v1.0.0
 ```
+
+## Marketplace authoring
+
+A **marketplace** is a curated index of packages (plugins) that consumers
+install via `apm install <name>@<marketplace>`. Maintainers author a
+`marketplace.yml` source file and compile it to an Anthropic-compliant
+`marketplace.json` with `apm marketplace build`. Both files are committed.
+
+### When to run `apm marketplace init`
+
+- The user is setting up a new marketplace repository.
+- The user wants to convert an ad-hoc list of plugins into a proper index.
+
+Do NOT run `init` inside an existing package directory; a marketplace
+repository is a separate repo whose job is to list plugins, not to be one.
+
+### marketplace.yml shape
+
+```yaml
+name: my-marketplace
+description: Short summary
+version: 0.1.0
+owner:
+  name: acme-org
+  url: https://github.com/acme-org
+build:                       # APM-only, stripped at compile time
+  tagPattern: "v{version}"
+metadata:                    # pass-through, copied verbatim to marketplace.json
+  homepage: https://example.com
+packages:
+  - name: example-package
+    description: What this package does
+    source: acme-org/example-package   # <owner>/<repo>
+    version: "^1.0.0"                  # semver range OR 'ref:' below
+    # ref: 3f2a9b1c                    # explicit SHA/tag/branch; overrides version
+    # subdir: tools/x                  # optional subdirectory
+    # tag_pattern: "{name}-v{version}" # optional per-package override
+    # include_prerelease: false        # optional
+```
+
+Schema rules:
+- `name`, `description`, `version`, `owner.name` are required.
+- Each package needs either `version` (a semver range) or `ref` (explicit).
+- `ref` takes precedence over `version`.
+- Unknown keys raise a schema error -- do not invent fields.
+
+### Build semantics
+
+`apm marketplace build` runs `git ls-remote` against each package source,
+picks the highest tag satisfying the range (under the applicable
+`tagPattern`), and writes `marketplace.json`. The compiler:
+
+1. Emits `plugins:` verbatim (Anthropic's key name).
+2. Copies `metadata:` byte-for-byte.
+3. Strips `build:`, per-package `version`, `tag_pattern`, `include_prerelease`.
+4. Does not emit `versions[]` -- each plugin carries a single resolved ref.
+
+Exit codes: `0` success, `1` build error, `2` schema error.
+
+### Full guide
+
+See [docs/guides/marketplace-authoring](../../../../../docs/src/content/docs/guides/marketplace-authoring.md)
+for the complete maintainer workflow (quickstart, version ranges, `check`,
+`doctor`, `outdated`, and `publish`).
 
 ## Org-wide packages
 

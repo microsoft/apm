@@ -259,10 +259,10 @@ class ScriptRunner:
             with open(compiled_path, "r", encoding="utf-8") as f:
                 compiled_content = f.read().strip()
 
-            # Check if this is a runtime command (copilot, codex, llm) before transformation
+            # Check if this is a runtime command before transformation
             is_runtime_cmd = any(
                 re.search(r"(?:^|\s)" + runtime + r"(?:\s|$)", command)
-                for runtime in ["copilot", "codex", "llm"]
+                for runtime in ["copilot", "codex", "llm", "gemini"]
             ) and re.search(re.escape(prompt_file), command)
 
             # Transform command based on runtime pattern
@@ -281,6 +281,9 @@ class ScriptRunner:
     ) -> str:
         """Transform runtime commands to their proper execution format.
 
+        Dispatches to per-runtime builders after extracting arguments
+        around the prompt file reference.
+
         Args:
             command: Original command
             prompt_file: Original .prompt.md file path
@@ -292,8 +295,9 @@ class ScriptRunner:
         """
         # Handle environment variables prefix (e.g., "ENV1=val1 ENV2=val2 codex [args] file.prompt.md")
         # More robust approach: split by runtime commands to separate env vars from command
-        runtime_commands = ["codex", "copilot", "llm"]
+        runtime_commands = ["codex", "copilot", "llm", "gemini"]
 
+        # Try matching with env-var prefix (e.g. "ENV=val codex args file.prompt.md")
         for runtime_cmd in runtime_commands:
             runtime_pattern = f" {runtime_cmd} "
             if runtime_pattern in command and re.search(
@@ -303,103 +307,166 @@ class ScriptRunner:
                 potential_env_part = parts[0]
                 runtime_part = runtime_cmd + " " + parts[1]
 
-                # Check if the first part looks like environment variables (has = signs)
                 if "=" in potential_env_part and not potential_env_part.startswith(
                     runtime_cmd
                 ):
-                    env_vars = potential_env_part
-
-                    # Extract arguments before and after the prompt file from runtime part
-                    runtime_match = re.search(
-                        f"{runtime_cmd}\\s+(.*?)("
-                        + re.escape(prompt_file)
-                        + r")(.*?)$",
-                        runtime_part,
+                    result = self._parse_and_build_runtime_command(
+                        runtime_cmd, runtime_part, prompt_file,
+                        env_prefix=potential_env_part,
                     )
-                    if runtime_match:
-                        args_before_file = runtime_match.group(1).strip()
-                        args_after_file = runtime_match.group(3).strip()
-
-                        # Build the command based on runtime
-                        if runtime_cmd == "codex":
-                            if args_before_file:
-                                result = f"{env_vars} codex exec {args_before_file}"
-                            else:
-                                result = f"{env_vars} codex exec"
-                        else:
-                            # For copilot and llm, keep the runtime name and args
-                            result = f"{env_vars} {runtime_cmd}"
-                            if args_before_file:
-                                # Remove any existing -p flag since we'll handle it in execution
-                                cleaned_args = args_before_file.replace(
-                                    "-p", ""
-                                ).strip()
-                                if cleaned_args:
-                                    result += f" {cleaned_args}"
-
-                        if args_after_file:
-                            result += f" {args_after_file}"
+                    if result is not None:
                         return result
 
-        # Handle individual runtime patterns without environment variables
-
-        # Handle "codex [args] file.prompt.md [more_args]" -> "codex exec [args] [more_args]"
-        if re.search(r"^codex\s+.*" + re.escape(prompt_file), command):
-            match = re.search(
-                r"codex\s+(.*?)(" + re.escape(prompt_file) + r")(.*?)$", command
-            )
-            if match:
-                args_before_file = match.group(1).strip()
-                args_after_file = match.group(3).strip()
-
-                result = "codex exec"
-                if args_before_file:
-                    result += f" {args_before_file}"
-                if args_after_file:
-                    result += f" {args_after_file}"
-                return result
-
-        # Handle "copilot [args] file.prompt.md [more_args]" -> "copilot [args] [more_args]"
-        elif re.search(r"^copilot\s+.*" + re.escape(prompt_file), command):
-            match = re.search(
-                r"copilot\s+(.*?)(" + re.escape(prompt_file) + r")(.*?)$", command
-            )
-            if match:
-                args_before_file = match.group(1).strip()
-                args_after_file = match.group(3).strip()
-
-                result = "copilot"
-                if args_before_file:
-                    # Remove any existing -p flag since we'll handle it in execution
-                    cleaned_args = args_before_file.replace("-p", "").strip()
-                    if cleaned_args:
-                        result += f" {cleaned_args}"
-                if args_after_file:
-                    result += f" {args_after_file}"
-                return result
-
-        # Handle "llm [args] file.prompt.md [more_args]" -> "llm [args] [more_args]"
-        elif re.search(r"^llm\s+.*" + re.escape(prompt_file), command):
-            match = re.search(
-                r"llm\s+(.*?)(" + re.escape(prompt_file) + r")(.*?)$", command
-            )
-            if match:
-                args_before_file = match.group(1).strip()
-                args_after_file = match.group(3).strip()
-
-                result = "llm"
-                if args_before_file:
-                    result += f" {args_before_file}"
-                if args_after_file:
-                    result += f" {args_after_file}"
-                return result
+        # Try individual runtime patterns without environment variables
+        for runtime_cmd in runtime_commands:
+            if re.search(
+                r"^" + runtime_cmd + r"\s+.*" + re.escape(prompt_file), command
+            ):
+                result = self._parse_and_build_runtime_command(
+                    runtime_cmd, command, prompt_file,
+                )
+                if result is not None:
+                    return result
 
         # Handle bare "file.prompt.md" -> "codex exec" (default to codex)
-        elif command.strip() == prompt_file:
+        if command.strip() == prompt_file:
             return "codex exec"
 
         # Fallback: just replace file path with compiled path (for non-runtime commands)
         return command.replace(prompt_file, compiled_path)
+
+    def _parse_and_build_runtime_command(
+        self, runtime_cmd: str, command_part: str, prompt_file: str,
+        env_prefix: str = None,
+    ) -> Optional[str]:
+        """Parse arguments around the prompt file and delegate to a per-runtime builder.
+
+        Args:
+            runtime_cmd: Runtime name (codex, copilot, llm, or gemini)
+            command_part: The command portion containing the runtime invocation
+            prompt_file: The .prompt.md filename to strip
+            env_prefix: Optional environment variable prefix (e.g. "DEBUG=1")
+
+        Returns:
+            Transformed command string, or None if the pattern does not match
+        """
+        match = re.search(
+            f"{runtime_cmd}\\s+(.*?)(" + re.escape(prompt_file) + r")(.*?)$",
+            command_part,
+        )
+        if not match:
+            return None
+
+        args_before = match.group(1).strip()
+        args_after = match.group(3).strip()
+
+        # In the env-var path, non-codex runtimes strip -p flags (matches
+        # original behaviour where copilot and llm shared an else branch).
+        if env_prefix is not None and runtime_cmd != "codex":
+            args_before = args_before.replace("-p", "").strip()
+
+        builders = {
+            "codex": self._build_codex_command,
+            "copilot": self._build_copilot_command,
+            "llm": self._build_llm_command,
+            "gemini": self._build_gemini_command,
+        }
+        builder = builders.get(runtime_cmd)
+        if builder:
+            return builder(args_before, args_after, env_prefix)
+        return None
+
+    def _build_codex_command(
+        self, args_before: str, args_after: str, env_prefix: Optional[str] = None,
+    ) -> str:
+        """Build a codex command from parsed arguments.
+
+        Args:
+            args_before: Arguments that appeared before the prompt file
+            args_after: Arguments that appeared after the prompt file
+            env_prefix: Optional environment variable prefix
+
+        Returns:
+            Assembled codex command string
+        """
+        prefix = f"{env_prefix} " if env_prefix else ""
+        result = f"{prefix}codex exec"
+        if args_before:
+            result += f" {args_before}"
+        if args_after:
+            result += f" {args_after}"
+        return result
+
+    def _build_copilot_command(
+        self, args_before: str, args_after: str, env_prefix: Optional[str] = None,
+    ) -> str:
+        """Build a copilot command from parsed arguments.
+
+        Removes any existing -p flag since content is passed separately
+        during execution.
+
+        Args:
+            args_before: Arguments that appeared before the prompt file
+            args_after: Arguments that appeared after the prompt file
+            env_prefix: Optional environment variable prefix
+
+        Returns:
+            Assembled copilot command string
+        """
+        prefix = f"{env_prefix} " if env_prefix else ""
+        result = f"{prefix}copilot"
+        if args_before:
+            # Remove any existing -p flag since we handle it in execution
+            cleaned_args = args_before.replace("-p", "").strip()
+            if cleaned_args:
+                result += f" {cleaned_args}"
+        if args_after:
+            result += f" {args_after}"
+        return result
+
+    def _build_llm_command(
+        self, args_before: str, args_after: str, env_prefix: Optional[str] = None,
+    ) -> str:
+        """Build an llm command from parsed arguments.
+
+        Args:
+            args_before: Arguments that appeared before the prompt file
+            args_after: Arguments that appeared after the prompt file
+            env_prefix: Optional environment variable prefix
+
+        Returns:
+            Assembled llm command string
+        """
+        prefix = f"{env_prefix} " if env_prefix else ""
+        result = f"{prefix}llm"
+        if args_before:
+            result += f" {args_before}"
+        if args_after:
+            result += f" {args_after}"
+        return result
+
+    def _build_gemini_command(
+        self, args_before: str, args_after: str, env_prefix: Optional[str] = None,
+    ) -> str:
+        """Build a gemini command from parsed arguments.
+
+        Args:
+            args_before: Arguments that appeared before the prompt file
+            args_after: Arguments that appeared after the prompt file
+            env_prefix: Optional environment variable prefix
+
+        Returns:
+            Assembled gemini command string
+        """
+        prefix = f"{env_prefix} " if env_prefix else ""
+        result = f"{prefix}gemini"
+        if args_before:
+            cleaned_args = re.sub(r'(^|\s)-p(?=\s|$)', '', args_before).strip()
+            if cleaned_args:
+                result += f" {cleaned_args}"
+        if args_after:
+            result += f" {args_after}"
+        return result
 
     def _detect_runtime(self, command: str) -> str:
         """Detect which runtime is being used in the command.
@@ -408,7 +475,7 @@ class ScriptRunner:
             command: The command to analyze
 
         Returns:
-            Name of the detected runtime (copilot, codex, llm, or unknown)
+            Name of the detected runtime (copilot, codex, llm, gemini, or unknown)
         """
         command_lower = command.lower().strip()
         if re.search(r"(?:^|\s)copilot(?:\s|$)", command_lower):
@@ -417,6 +484,8 @@ class ScriptRunner:
             return "codex"
         elif re.search(r"(?:^|\s)llm(?:\s|$)", command_lower):
             return "llm"
+        elif re.search(r"(?:^|\s)gemini(?:\s|$)", command_lower):
+            return "gemini"
         else:
             return "unknown"
 
@@ -472,6 +541,9 @@ class ScriptRunner:
         elif runtime == "llm":
             # LLM expects content as argument
             actual_command_args.append(content)
+        elif runtime == "gemini":
+            # Gemini uses -p flag for prompt content
+            actual_command_args.extend(["-p", content])
         else:
             # Default: assume content as last argument
             actual_command_args.append(content)
@@ -847,7 +919,7 @@ class ScriptRunner:
     def _detect_installed_runtime(self) -> str:
         """Detect installed runtime with priority order.
 
-        Priority: copilot > codex > error
+        Priority: copilot > codex > gemini > error
 
         Returns:
             Name of detected runtime
@@ -857,18 +929,21 @@ class ScriptRunner:
         """
         import shutil
 
-        # Priority order: copilot first (recommended), then codex
         if shutil.which("copilot"):
             return "copilot"
         elif shutil.which("codex"):
             return "codex"
+        elif shutil.which("gemini"):
+            return "gemini"
         else:
             raise RuntimeError(
                 "No compatible runtime found.\n"
                 "Install GitHub Copilot CLI with:\n"
                 "  apm runtime setup copilot\n"
                 "Or install Codex CLI with:\n"
-                "  apm runtime setup codex"
+                "  apm runtime setup codex\n"
+                "Or install Gemini CLI with:\n"
+                "  apm runtime setup gemini"
             )
 
     def _generate_runtime_command(self, runtime: str, prompt_file: Path) -> str:
@@ -882,11 +957,11 @@ class ScriptRunner:
             Full command string with runtime-specific defaults
         """
         if runtime == "copilot":
-            # GitHub Copilot CLI with all recommended flags
             return f"copilot --log-level all --log-dir copilot-logs --allow-all-tools -p {prompt_file}"
         elif runtime == "codex":
-            # Codex CLI with default sandbox and git repo check skip
             return f"codex -s workspace-write --skip-git-repo-check {prompt_file}"
+        elif runtime == "gemini":
+            return f"gemini -p {prompt_file}"
         else:
             raise ValueError(f"Unsupported runtime: {runtime}")
 
@@ -976,38 +1051,70 @@ class PromptCompiler:
             if common_path.exists() and not common_path.is_symlink():
                 return common_path
 
-        # If not found locally, search in dependency modules
+        # Search dependencies — scan directory tree once to avoid double walk
         apm_modules_dir = Path("apm_modules")
-        if apm_modules_dir.exists():
-            for org_dir in apm_modules_dir.iterdir():
-                if org_dir.is_dir() and not org_dir.name.startswith("."):
-                    for repo_dir in org_dir.iterdir():
-                        if repo_dir.is_dir() and not repo_dir.name.startswith("."):
-                            dep_prompt_path = repo_dir / prompt_file
-                            if dep_prompt_path.exists() and not dep_prompt_path.is_symlink():
-                                return dep_prompt_path
+        dep_dirs = self._collect_dependency_dirs(apm_modules_dir)
 
-                            for subdir in ["prompts", ".", "workflows"]:
-                                sub_prompt_path = repo_dir / subdir / prompt_file
-                                if sub_prompt_path.exists() and not sub_prompt_path.is_symlink():
-                                    return sub_prompt_path
+        for _org_name, _repo_name, repo_dir in dep_dirs:
+            dep_prompt_path = repo_dir / prompt_file
+            if dep_prompt_path.exists() and not dep_prompt_path.is_symlink():
+                return dep_prompt_path
 
-        # If still not found, raise an error with helpful message
+            for subdir in ["prompts", ".", "workflows"]:
+                sub_prompt_path = repo_dir / subdir / prompt_file
+                if sub_prompt_path.exists() and not sub_prompt_path.is_symlink():
+                    return sub_prompt_path
+
+        # Build error using already-collected directories (no second walk)
+        self._raise_prompt_not_found(prompt_file, prompt_path, dep_dirs)
+
+    def _collect_dependency_dirs(self, apm_modules_dir: Path) -> list:
+        """Collect (org_name, repo_name, repo_dir) tuples from apm_modules.
+
+        Walks the two-level directory tree once so callers can iterate
+        without repeated filesystem scans.
+
+        Args:
+            apm_modules_dir: Path to the apm_modules directory
+
+        Returns:
+            List of (org_name, repo_name, repo_dir) tuples
+        """
+        if not apm_modules_dir.exists():
+            return []
+        result = []
+        for org_dir in apm_modules_dir.iterdir():
+            if org_dir.is_dir() and not org_dir.name.startswith("."):
+                for repo_dir in org_dir.iterdir():
+                    if repo_dir.is_dir() and not repo_dir.name.startswith("."):
+                        result.append((org_dir.name, repo_dir.name, repo_dir))
+        return result
+
+    def _raise_prompt_not_found(
+        self, prompt_file: str, prompt_path: Path, dep_dirs: list,
+    ) -> None:
+        """Build and raise a helpful FileNotFoundError for a missing prompt.
+
+        Args:
+            prompt_file: Original prompt file reference
+            prompt_path: Local Path that was checked
+            dep_dirs: Pre-collected dependency directory tuples
+
+        Raises:
+            FileNotFoundError: Always — with a message listing searched locations
+        """
         searched_locations = [
             f"Local: {prompt_path}",
             f"GitHub prompts: .github/prompts/{prompt_file}",
             f"APM prompts: .apm/prompts/{prompt_file}",
         ]
 
-        if apm_modules_dir.exists():
+        if dep_dirs:
             searched_locations.append("Dependencies:")
-            for org_dir in apm_modules_dir.iterdir():
-                if org_dir.is_dir() and not org_dir.name.startswith("."):
-                    for repo_dir in org_dir.iterdir():
-                        if repo_dir.is_dir() and not repo_dir.name.startswith("."):
-                            searched_locations.append(
-                                f"  - {org_dir.name}/{repo_dir.name}/{prompt_file}"
-                            )
+            for org_name, repo_name, _repo_dir in dep_dirs:
+                searched_locations.append(
+                    f"  - {org_name}/{repo_name}/{prompt_file}"
+                )
 
         raise FileNotFoundError(
             f"Prompt file '{prompt_file}' not found.\n"

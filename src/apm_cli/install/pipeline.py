@@ -28,7 +28,8 @@ from typing import TYPE_CHECKING, List, Optional
 from ..models.results import InstallResult
 from ..utils.console import _rich_error
 from ..utils.diagnostics import DiagnosticCollector
-from .errors import PolicyViolationError
+from ..utils.path_security import PathTraversalError
+from .errors import DirectDependencyError, PolicyViolationError
 
 if TYPE_CHECKING:
     from ..core.auth import AuthResolver
@@ -60,6 +61,8 @@ def run_install_pipeline(
     protocol_pref=None,
     allow_protocol_fallback: "Optional[bool]" = None,
     no_policy: bool = False,
+    skill_subset: "Optional[tuple]" = None,
+    skill_subset_from_cli: bool = False,
 ):
     """Install APM package dependencies.
 
@@ -152,6 +155,9 @@ def run_install_pipeline(
         root_has_local_primitives=_root_has_local_primitives,
         old_local_deployed=_old_local_deployed,
         no_policy=no_policy,
+        skill_subset=skill_subset,
+        skill_subset_from_cli=skill_subset_from_cli,
+        early_lockfile=_early_lockfile,
     )
 
     # ------------------------------------------------------------------
@@ -320,6 +326,18 @@ def run_install_pipeline(
 
         _integrate_phase.run(ctx)
 
+        # Fail-loud: if any direct dependency failed validation or
+        # download, render the diagnostic summary and raise so the
+        # caller exits non-zero immediately.  Transitive failures
+        # are allowed to proceed (log + continue).
+        if ctx.direct_dep_failed:
+            if ctx.diagnostics and ctx.diagnostics.has_diagnostics:
+                ctx.diagnostics.render_summary()
+            raise DirectDependencyError(
+                "One or more direct dependencies failed validation. "
+                "Run with --verbose for details."
+            )
+
         # Update .gitignore
         from apm_cli.commands._helpers import _update_gitignore_for_apm_modules
 
@@ -364,6 +382,14 @@ def run_install_pipeline(
         # dependencies: Install blocked by org policy ..."``.  Re-raising
         # the typed exception lets the caller render the policy message
         # as-is.
+        raise
+    except DirectDependencyError:
+        # #946: same pattern -- surface the message as-is instead of
+        # double-wrapping it through the generic RuntimeError below.
+        raise
+    except PathTraversalError:
+        # Path-safety violation in SKILL_BUNDLE or other nested
+        # resolution -- surface as-is for actionable user guidance.
         raise
     except Exception as e:
         raise RuntimeError(f"Failed to resolve APM dependencies: {e}")

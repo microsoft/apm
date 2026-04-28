@@ -41,7 +41,7 @@ integration suite runs only at merge time via GitHub Merge Queue
    - `.github/CODEOWNERS` requires Lead Maintainer review for any change
      to `.github/workflows/**`.
 4. **`build-release.yml`** - `push` to main, tags, schedule, `workflow_dispatch`
-   - **Linux + Windows** run combined `build-and-test` (unit tests + binary build in one job).
+   - **Linux + Windows** run combined `build-and-test` (unit tests + binary build in one job). Unit tests run on every push for platform-regression signal; **smoke tests are gated to tag/schedule/dispatch only** (promotion boundaries) to avoid duplicating `ci-integration.yml`'s merge-time smoke and to cut redundant codex-binary downloads.
    - **macOS Intel** uses `build-and-validate-macos-intel` (root node, runs own unit tests - no dependency on `build-and-test`). Builds the binary on every push for early regression feedback; integration + release-validation phases conditional on tag/schedule/dispatch.
    - **macOS ARM** uses `build-and-validate-macos-arm` (root node, tag/schedule/dispatch only - ARM runners are extremely scarce with 2-4h+ queue waits). Only requested when the binary is actually needed for a release.
    - Secrets always available. Full 5-platform binary output (linux x86_64/arm64, darwin x86_64/arm64, windows x86_64).

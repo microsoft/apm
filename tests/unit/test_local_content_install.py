@@ -174,10 +174,26 @@ class TestIntegrateLocalContent:
 
     @patch("apm_cli.install.services.integrate_package_primitives")
     def test_package_info_install_path_is_project_root(self, mock_integrate, tmp_path):
-        """The synthetic PackageInfo must point to project_root, not .apm/."""
+        """The synthetic PackageInfo must point to project_root at project scope."""
         mock_integrate.return_value = _zero_counters()
 
         _integrate_local_content(tmp_path, **_make_integrators())
+
+        package_info = mock_integrate.call_args[0][0]
+        assert package_info.install_path == tmp_path
+
+    @patch("apm_cli.install.services.integrate_package_primitives")
+    def test_user_scope_install_path_stays_project_root(self, mock_integrate, tmp_path):
+        """At user scope, install_path must remain project_root so that
+        integrators can still find <project_root>/.apm/<type>/.
+        The recursive-glob fix lives in init_link_resolver, not here.
+        Regression check for #830."""
+        from apm_cli.core.scope import InstallScope
+
+        mock_integrate.return_value = _zero_counters()
+        (tmp_path / ".apm").mkdir(exist_ok=True)
+
+        _integrate_local_content(tmp_path, **_make_integrators(), scope=InstallScope.USER)
 
         package_info = mock_integrate.call_args[0][0]
         assert package_info.install_path == tmp_path

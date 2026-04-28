@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "id": "auth-refactor",
+  "summary": "Cross-cutting auth refactor: token resolution moves into a single AuthResolver; multiple call sites updated; one breaking change to a public CLI flag. PR is non-trivial and exercises every required section.",
+  "scenario": {
+    "branch": "refactor/auth-resolver",
+    "base": "main",
+    "files_changed": [
+      "M src/apm_cli/auth/__init__.py",
+      "A src/apm_cli/auth/resolver.py",
+      "M src/apm_cli/cli.py",
+      "M src/apm_cli/integration/git.py",
+      "M tests/unit/auth/test_resolver.py",
+      "M CHANGELOG.md"
+    ],
+    "commits": [
+      "feat(auth): introduce AuthResolver as single source of token resolution",
+      "refactor(cli): replace per-host PAT lookup with AuthResolver.get(host)",
+      "fix(integration/git): drop legacy GITHUB_APM_PAT fallback path",
+      "docs(changelog): note breaking removal of --token-source flag"
+    ],
+    "linked_issue": "#812 -- token resolution scattered across modules; intermittent EMU lookups failing",
+    "validation_evidence": "uv run pytest tests/unit/auth -x  ->  142 passed in 3.4s\napm audit --ci  ->  0 findings"
+  },
+  "rubric": [
+    {"id": "tldr-present", "pattern": "(?im)^\\s*##?\\s*TL;DR\\b", "weight": 1, "description": "TL;DR section header present"},
+    {"id": "tldr-short", "pattern": "(?is)##?\\s*TL;DR.{1,800}?\\n##?\\s", "weight": 1, "description": "TL;DR is short (under 800 chars before next H2)"},
+    {"id": "problem-section", "pattern": "(?im)^\\s*##?\\s*Problem\\b", "weight": 1, "description": "Problem (WHY) section present"},
+    {"id": "anchored-quote", "pattern": "\\[\"[^\"]{8,}\"\\]\\(https?://", "weight": 2, "description": "At least one verbatim quote anchored to a URL"},
+    {"id": "approach-or-implementation", "pattern": "(?im)^\\s*##?\\s*(Approach|Implementation)\\b", "weight": 1, "description": "Approach or Implementation section present"},
+    {"id": "mermaid-block", "pattern": "(?s)```mermaid[\\s\\S]+?```", "weight": 2, "description": "At least one mermaid diagram block"},
+    {"id": "tradeoffs-section", "pattern": "(?im)^\\s*##?\\s*Trade-?offs?\\b", "weight": 1, "description": "Trade-offs section present"},
+    {"id": "validation-section", "pattern": "(?im)^\\s*##?\\s*Validation\\b", "weight": 1, "description": "Validation section present"},
+    {"id": "validation-real-output", "pattern": "(?im)pytest|apm audit|uv run", "weight": 1, "description": "Validation shows real command output"},
+    {"id": "how-to-test", "pattern": "(?im)^\\s*##?\\s*How to test\\b", "weight": 1, "description": "How to test section present"},
+    {"id": "trailer", "pattern": "Co-authored-by: Copilot <223556219", "weight": 1, "description": "Copilot co-author trailer present"},
+    {"id": "no-marketing-tone", "pattern": "(?i)significantly enhances|best-in-class|game-changing|revolutionary", "weight": -2, "description": "PENALTY: marketing tone detected"}
+  ],
+  "fixtures": {
+    "with_skill": "../fixtures/auth-refactor__with_skill.md",
+    "without_skill": "../fixtures/auth-refactor__without_skill.md"
+  }
+}

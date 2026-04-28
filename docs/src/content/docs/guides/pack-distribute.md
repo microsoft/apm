@@ -221,7 +221,9 @@ Dependencies listed under [`devDependencies`](../../reference/manifest-schema/#5
 apm install --dev owner/test-helpers
 ```
 
-This keeps development-only packages (test helpers, lint rules) out of distributed plugins.
+This keeps third-party development-only packages (test helpers, lint rules) out of distributed plugins.
+
+**Caveat for primitives you author yourself:** the dev/prod split is enforced via the lockfile's `is_dev` marker for resolved dependencies. The local-content scanner that ships your own `.apm/` content does NOT consult that marker -- it bundles everything under `.apm/`. To keep maintainer-only primitives (release-checklist skills, internal debugging agents) out of plugin bundles, author them OUTSIDE `.apm/` (e.g. under `dev/`) and reference them via a local-path devDependency. See [Dev-only Primitives](./dev-only-primitives/).
 
 ### Example output
 

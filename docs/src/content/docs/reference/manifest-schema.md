@@ -48,6 +48,7 @@ license:       <string>
 target:        <enum>
 type:          <enum>
 scripts:       <map<string, string>>
+includes:      <enum | list<string>>
 dependencies:
   apm:         <list<ApmDependency>>
   mcp:         <list<McpDependency>>
@@ -164,7 +165,39 @@ Declares how the package's content is processed during install and compile. Curr
 | **Value** | Shell command string |
 | **Description** | Named commands executed via `apm run <name>`. MUST support `--param key=value` substitution. |
 
-### 3.9. `policy`
+### 3.9. `includes`
+
+| | |
+|---|---|
+| **Type** | `string` (literal `auto`) `\| list<string>` |
+| **Required** | OPTIONAL |
+| **Default** | Undeclared (legacy implicit auto-publish; flagged by `apm audit`) |
+| **Allowed values** | `auto` or a list of paths relative to the project root |
+
+Declares which local `.apm/` content the project consents to publish when packing or deploying. Three forms are supported:
+
+1. **Undeclared** -- field omitted. Legacy behaviour: all local `.apm/` content is published as if `auto` were set. `apm audit` emits an `includes-consent` advisory (the check itself passes; the message recommends declaring `includes: auto`) whenever local content is deployed under this form.
+2. **`includes: auto`** -- explicit consent to publish all local `.apm/` content via the file scanner. No path enumeration required. Default for newly initialised projects.
+3. **`includes: [<path>, ...]`** -- explicit allow-list of paths the project consents to publish. Strongest governance form; changes are reviewable in PR diffs.
+
+```yaml
+# Form 1: undeclared (legacy; audit advisory)
+# includes: <omitted>
+
+# Form 2: explicit auto-publish (default for new projects)
+includes: auto
+
+# Form 3: explicit path list (strongest governance)
+# includes:
+#   - .apm/instructions/
+#   - .apm/skills/my-skill/
+```
+
+**`includes:` is allow-list only.** There is no `exclude:` form. The field controls which `.apm/` content the project consents to publish; it cannot be used to fence off subdirectories of `.apm/` from the scanner. To keep maintainer-only primitives out of shipped artifacts, author them OUTSIDE `.apm/` and reference them via a local-path devDependency -- see [Dev-only Primitives](../../guides/dev-only-primitives/).
+
+When `policy.manifest.require_explicit_includes` is `true` (see [Governance guide](../../enterprise/governance-guide/)), only form 3 passes the policy check; `auto` and undeclared are rejected at install/audit time by the `explicit-includes` policy check (not at YAML parse time).
+
+### 3.10. `policy`
 
 | | |
 |---|---|
@@ -412,6 +445,16 @@ Created automatically by `apm init --plugin`. Use [`apm install --dev`](../cli-c
 
 ```bash
 apm install --dev owner/test-helpers
+```
+
+Plain `apm install` (no flag) deploys both `dependencies` and `devDependencies`. There is currently no `--omit=dev` flag -- the dev/prod separation kicks in at `apm pack --format plugin` time. The local-content scanner that builds plugin bundles also operates on `.apm/` only and does not consult the devDep marker. To keep maintainer-only primitives out of shipped artifacts, author them outside `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../../guides/dev-only-primitives/).
+
+Local-path devDependency example:
+
+```yaml
+devDependencies:
+  apm:
+    - path: ./dev/skills/release-checklist
 ```
 
 ---

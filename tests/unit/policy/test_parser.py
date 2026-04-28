@@ -56,6 +56,28 @@ class TestValidatePolicy(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("scripts", errors[0])
 
+    def test_valid_require_explicit_includes(self):
+        for val in (True, False):
+            errors, warnings = validate_policy(
+                {"manifest": {"require_explicit_includes": val}}
+            )
+            self.assertEqual(errors, [])
+            self.assertEqual(warnings, [])
+
+    def test_invalid_require_explicit_includes_string(self):
+        errors, warnings = validate_policy(
+            {"manifest": {"require_explicit_includes": "true"}}
+        )
+        self.assertEqual(len(errors), 1)
+        self.assertIn("require_explicit_includes", errors[0])
+
+    def test_invalid_require_explicit_includes_int(self):
+        errors, warnings = validate_policy(
+            {"manifest": {"require_explicit_includes": 1}}
+        )
+        self.assertEqual(len(errors), 1)
+        self.assertIn("require_explicit_includes", errors[0])
+
     def test_invalid_unmanaged_action(self):
         errors, warnings = validate_policy({"unmanaged_files": {"action": "block"}})
         self.assertEqual(len(errors), 1)
@@ -211,6 +233,25 @@ class TestLoadPolicyFromString(unittest.TestCase):
         self.assertEqual(policy.cache.ttl, 3600)
         self.assertIsNone(policy.dependencies.allow)
         self.assertEqual(policy.dependencies.max_depth, 50)
+        self.assertFalse(policy.manifest.require_explicit_includes)
+
+    def test_require_explicit_includes_true(self):
+        yaml_str = textwrap.dedent("""
+            manifest:
+              require_explicit_includes: true
+        """)
+        policy, warnings = load_policy(yaml_str)
+        self.assertEqual(warnings, [])
+        self.assertTrue(policy.manifest.require_explicit_includes)
+
+    def test_require_explicit_includes_no_unknown_warning(self):
+        yaml_str = textwrap.dedent("""
+            manifest:
+              require_explicit_includes: false
+        """)
+        policy, warnings = load_policy(yaml_str)
+        self.assertEqual(warnings, [])
+        self.assertFalse(policy.manifest.require_explicit_includes)
 
     def test_empty_yaml(self):
         policy, warnings = load_policy("")
@@ -279,6 +320,26 @@ class TestLoadPolicyFromString(unittest.TestCase):
     def test_version_coerced_to_string(self):
         policy, warnings = load_policy("version: '2.0'")
         self.assertEqual(policy.version, "2.0")
+
+    def test_long_yaml_string_does_not_crash(self):
+        """Long YAML strings (> PATH_MAX on macOS) must not raise OSError."""
+        # Build a YAML payload larger than typical PATH_MAX limits (1024 bytes)
+        # so that Path.is_file() can raise ENAMETOOLONG on macOS.
+        long_comment = "# " + "x" * 2048 + "\n"
+        yaml_str = (
+            long_comment
+            + "name: long-policy\n"
+            + "version: '1.0'\n"
+            + "enforcement: off\n"
+        )
+        # Ensure the string is long enough to trigger ENAMETOOLONG on macOS
+        self.assertGreater(len(yaml_str), 1024)
+
+        # This should parse as inline YAML, not as a file path
+        policy, warnings = load_policy(yaml_str)
+        self.assertEqual(policy.name, "long-policy")
+        self.assertEqual(policy.version, "1.0")
+        self.assertEqual(policy.enforcement, "off")
 
 
 class TestLoadPolicyFromFile(unittest.TestCase):

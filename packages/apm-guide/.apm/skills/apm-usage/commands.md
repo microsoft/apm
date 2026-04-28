@@ -10,7 +10,7 @@
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm install [PKGS...]` | Install packages | `--update` refresh refs, `--force` overwrite, `--dry-run`, `--verbose`, `--only [apm\|mcp]`, `--target` (comma-separated), `--dev`, `-g` global, `--trust-transitive-mcp`, `--parallel-downloads N`, `--allow-insecure`, `--allow-insecure-host HOSTNAME`, `--mcp NAME` add MCP entry, `--transport`, `--url`, `--env KEY=VAL`, `--header KEY=VAL`, `--mcp-version`, `--registry URL` custom MCP registry |
+| `apm install [PKGS...]` | Install APM and MCP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json)) | `--update` refresh refs, `--force` overwrite, `--dry-run`, `--verbose`, `--only [apm\|mcp]`, `--target` (comma-separated; use `copilot-cowork` with `--global` after `apm experimental enable copilot-cowork`), `--dev`, `-g` global, `--trust-transitive-mcp`, `--parallel-downloads N`, `--allow-insecure`, `--allow-insecure-host HOSTNAME`, `--skill NAME` install named skill(s) from SKILL_BUNDLE (repeatable; persisted in apm.yml; `'*'` resets to all), `--mcp NAME` add MCP entry, `--transport`, `--url`, `--env KEY=VAL`, `--header KEY=VAL`, `--mcp-version`, `--registry URL` custom MCP registry |
 | `apm uninstall PKGS...` | Remove packages | `--dry-run`, `-g` global |
 | `apm prune` | Remove orphaned packages | `--dry-run` |
 | `apm deps list` | List installed packages | `-g` global, `--all` both scopes, `--insecure` |
@@ -48,7 +48,9 @@
 | `apm pack` | Bundle package for distribution | `-o PATH`, `-t TARGET`, `--archive`, `--dry-run`, `--format [apm\|plugin]`, `--force` |
 | `apm unpack BUNDLE` | Extract a bundle | `-o PATH`, `--skip-verify`, `--force`, `--dry-run` |
 
-## Marketplace
+## Marketplace (experimental — authoring only)
+
+> **Authoring commands gated behind `apm experimental enable marketplace-authoring`**. Consumer commands (add, list, browse, update, remove, validate, search) are always available.
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
@@ -61,6 +63,20 @@
 | `apm search QUERY@MARKETPLACE` | Search marketplace | `--limit N` |
 | `apm install NAME@MKT[#ref]` | Install from marketplace | Optional `#ref` override |
 | `apm view NAME@MARKETPLACE` | View marketplace plugin info | -- |
+
+## Marketplace authoring (experimental)
+
+| Command | Purpose | Key flags |
+|---------|---------|-----------|
+| `apm marketplace init` | Scaffold `marketplace.yml` in CWD | `--force`, `--no-gitignore-check` |
+| `apm marketplace build` | Compile `marketplace.yml` to Anthropic-compliant `marketplace.json` | `--dry-run`, `--offline`, `--include-prerelease`, `-v` |
+| `apm marketplace outdated` | Report upgradable packages, range-aware | `--offline`, `--include-prerelease`, `-v` |
+| `apm marketplace check` | Validate yml and verify refs resolve | `--offline`, `-v` |
+| `apm marketplace doctor` | Diagnose git, network, auth, yml readiness | `-v` |
+| `apm marketplace publish` | Open PRs on consumer repos from `consumer-targets.yml` | `--targets PATH`, `--dry-run`, `--no-pr`, `--draft`, `--allow-downgrade`, `--allow-ref-change`, `--parallel N`, `-y` |
+| `apm marketplace package add <source>` | Add a package entry to `marketplace.yml` | `--name`, `--version`, `--ref` (mutable refs auto-resolved to SHA), `-d`/`--description`, `-s`/`--subdir`, `--tag-pattern`, `--tags`, `--include-prerelease`, `--no-verify` |
+| `apm marketplace package set <name>` | Update fields on an existing package entry | `--version`, `--ref` (mutable refs auto-resolved to SHA), `--description`, `--subdir`, `--tag-pattern`, `--tags`, `--include-prerelease` |
+| `apm marketplace package remove <name>` | Remove a package entry from `marketplace.yml` | `--yes` |
 
 ## MCP servers
 
@@ -77,16 +93,33 @@ Set `MCP_REGISTRY_URL` (default `https://api.mcp.github.com`) to point all `apm 
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm runtime setup {copilot\|codex\|llm}` | Install a runtime | `--version`, `--vanilla` |
+| `apm runtime setup {copilot\|codex\|llm\|gemini}` | Install a runtime | `--version`, `--vanilla` |
 | `apm runtime list` | Show installed runtimes | -- |
-| `apm runtime remove {copilot\|codex\|llm}` | Remove a runtime | `--yes` |
+| `apm runtime remove {copilot\|codex\|llm\|gemini}` | Remove a runtime | `-y`, `--yes` |
 | `apm runtime status` | Show active runtime | -- |
+
+## Experimental features
+
+| Command | Purpose | Key flags |
+|---------|---------|-----------|
+| `apm experimental` | Default to `apm experimental list` | `-v` verbose |
+| `apm experimental list` | List registered experimental flags or emit JSON for automation | `--enabled`, `--disabled`, `--json`, `-v` verbose |
+| `apm experimental enable NAME` | Enable an opt-in experimental flag | `-v` verbose |
+| `apm experimental disable NAME` | Disable an opt-in experimental flag | `-v` verbose |
+| `apm experimental reset [NAME]` | Reset one flag or all flags to defaults; also cleans malformed overrides during bulk reset | `-y` skip confirm, `-v` verbose |
+
+Use `apm experimental enable copilot-cowork` to turn on Microsoft 365 Copilot Cowork skill deployment. Once enabled, deploy skills with `apm install --target copilot-cowork --global`.
+
+Experimental flags MUST NOT gate security-critical behaviour (content scanning, path validation, lockfile integrity, token handling, MCP trust, collision detection). Flags are ergonomic/UX toggles only.
 
 ## Configuration and updates
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
 | `apm config` | Show current configuration | -- |
-| `apm config get [KEY]` | Get a config value (`auto-integrate`, `temp-dir`) | -- |
-| `apm config set KEY VALUE` | Set a config value (`auto-integrate`, `temp-dir`) | -- |
+| `apm config get [KEY]` | Get a config value (`auto-integrate`, `temp-dir`, `copilot-cowork-skills-dir`) | -- |
+| `apm config set KEY VALUE` | Set a config value (`auto-integrate`, `temp-dir`; `copilot-cowork-skills-dir` requires `apm experimental enable copilot-cowork`) | -- |
+| `apm config unset KEY` | Remove a stored config value (`temp-dir`, `copilot-cowork-skills-dir`) | -- |
 | `apm update` | Update APM itself (or show distributor guidance when self-update is disabled at build time) | `--check` only check |
+
+`apm config set copilot-cowork-skills-dir <absolute-path>` persists the Cowork skills directory across shells. `apm config get copilot-cowork-skills-dir` and `apm config unset copilot-cowork-skills-dir` remain available even when the `copilot-cowork` flag is disabled so leftover state can still be inspected or cleared. In `apm config` and bare `apm config get`, the `copilot-cowork-skills-dir` entry is shown only when the `copilot-cowork` flag is enabled.

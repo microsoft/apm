@@ -3,7 +3,7 @@ name: auth
 description: >
   Activate when code touches token management, credential resolution, git auth
   flows, GITHUB_APM_PAT, ADO_APM_PAT, AuthResolver, HostInfo, AuthContext, or
-  any remote host authentication — even if 'auth' isn't mentioned explicitly.
+  any remote host authentication -- even if 'auth' isn't mentioned explicitly.
 ---
 
 # Auth Skill
@@ -35,7 +35,7 @@ ADO hosts (`dev.azure.com`, `*.visualstudio.com`) resolve auth in this order:
 2. AAD bearer via `az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798` if `az` is installed and `az account show` succeeds
 3. Otherwise: auth-failed error from `build_error_context`
 
-Token source constants live in `src/apm_cli/core/token_manager.py`: `ADO_APM_PAT = "ADO_APM_PAT"`, `ADO_BEARER_SOURCE = "AAD_BEARER_AZ_CLI"`.
+`ADO_APM_PAT` is the env var name used by the auth flow. The AAD bearer source constant lives in `src/apm_cli/core/token_manager.py` as `GitHubTokenManager.ADO_BEARER_SOURCE = "AAD_BEARER_AZ_CLI"`.
 
 **Stale-PAT silent fallback:** if `ADO_APM_PAT` is rejected with HTTP 401, APM retries with the az bearer and emits:
 

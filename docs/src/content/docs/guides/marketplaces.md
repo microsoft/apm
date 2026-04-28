@@ -86,6 +86,11 @@ apm marketplace add acme/plugin-marketplace
 
 This registers the marketplace and fetches its `marketplace.json`. By default APM tracks the `main` branch.
 
+:::tip[Create your own marketplace]
+You can author and publish your own marketplace registry.
+See the [Marketplace Authoring Guide](../marketplace-authoring/) for details.
+:::
+
 **Options:**
 - `--name/-n` -- Custom display name for the marketplace
 - `--branch/-b` -- Branch to track (default: `main`)
@@ -258,3 +263,55 @@ Shadow detection runs automatically during install -- no configuration required.
 - **Use commit SHAs as refs** -- tags and branches can be moved; commit SHAs cannot.
 - **Keep plugin names unique across marketplaces** -- avoids shadow warnings and reduces confusion.
 - **Review immutability warnings** -- a changed ref for an existing version is a strong signal of tampering.
+
+## Authoring: monorepo workflows
+
+When building a marketplace that tracks packages from a monorepo (multiple packages inside one Git repository), use `--subdir` to point each entry at its subdirectory:
+
+```bash
+apm marketplace package add acme/monorepo --subdir plugins/eslint-rules --name eslint-rules
+apm marketplace package add acme/monorepo --subdir plugins/formatter --name formatter
+```
+
+### Ref auto-resolution
+
+Mutable git refs (`HEAD`, branch names) are automatically resolved to concrete 40-character SHAs before being stored in `marketplace.yml`. This ensures supply-chain safety -- the entry always pins to an immutable commit.
+
+**Default behaviour (no `--ref`):** When neither `--version` nor `--ref` is provided, the current `HEAD` SHA is pinned automatically:
+
+```bash
+# Resolves HEAD to its current SHA and stores it
+apm marketplace package add acme/code-review
+```
+
+**Explicit `HEAD`:** Passing `--ref HEAD` warns that HEAD is mutable, then resolves:
+
+```bash
+apm marketplace package add acme/code-review --ref HEAD
+# [!] 'HEAD' is a mutable ref. Resolving to current SHA for safety.
+# [i] Resolved HEAD to abc123def456
+```
+
+**Branch names:** Branch names that match `refs/heads/*` on the remote are also resolved:
+
+```bash
+apm marketplace package add acme/code-review --ref main
+# [!] 'main' is a branch (mutable ref). Resolving to current SHA for safety.
+# [i] Resolved main to abc123def456
+```
+
+**Updating pinned SHAs:** Use `package set` with `--ref HEAD` to re-pin to the latest commit:
+
+```bash
+apm marketplace package set code-review --ref HEAD
+```
+
+Tags and concrete SHAs are stored as-is without resolution.
+
+:::note
+Ref auto-resolution requires network access. When using `--no-verify`, you must provide an explicit SHA with `--ref`.
+:::
+
+## Creating your own marketplace
+
+If you want to create and maintain your own marketplace registry, see the [Marketplace Authoring Guide](../../guides/marketplace-authoring/).

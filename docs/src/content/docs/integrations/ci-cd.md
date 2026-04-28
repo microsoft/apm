@@ -28,7 +28,7 @@ jobs:
       - name: Install APM packages
         uses: microsoft/apm-action@v1
         # Optional: add compile: true if targeting Codex, Gemini,
-        # or other tools without native APM integration
+        # or other tools whose instructions require compilation
 ```
 
 ### Private Dependencies
@@ -44,13 +44,13 @@ For private repositories, pass a token via the workflow `env:` block. See the [A
 
 ### Verify Compiled Output (Optional)
 
-If your project uses `apm compile` to target tools like Cursor, Codex, or Gemini, add a check to ensure compiled output stays in sync:
+If your project uses `apm compile` to target tools like Codex or Gemini, add a check to ensure compiled output stays in sync:
 
 ```yaml
       - name: Check for drift
         run: |
           apm compile
-          if [ -n "$(git status --porcelain -- AGENTS.md CLAUDE.md)" ]; then
+          if [ -n "$(git status --porcelain -- AGENTS.md CLAUDE.md GEMINI.md)" ]; then
             echo "Compiled output is out of date. Run 'apm compile' locally and commit."
             exit 1
           fi
@@ -60,19 +60,23 @@ This step is not needed if your team only uses GitHub Copilot and Claude, which 
 
 ### Verify Deployed Primitives
 
-To ensure `.github/`, `.claude/`, `.cursor/`, and `.opencode/` integration files stay in sync with `apm.yml`, add a drift check:
+To ensure `.github/`, `.claude/`, `.cursor/`, `.opencode/`, and `.gemini/` integration files stay in sync with `apm.yml`, add a drift check:
 
 ```yaml
       - name: Check APM integration drift
         run: |
           apm install
-          if [ -n "$(git status --porcelain -- .github/ .claude/ .cursor/ .opencode/)" ]; then
+          if [ -n "$(git status --porcelain -- .github/ .claude/ .cursor/ .opencode/ .gemini/)" ]; then
             echo "APM integration files are out of date. Run 'apm install' and commit."
             exit 1
           fi
 ```
 
 This catches cases where a developer updates `apm.yml` but forgets to re-run `apm install`.
+
+:::tip[We dogfood this]
+APM's own repo uses the `APM Self-Check` job in [`microsoft/apm`'s `ci.yml`](https://github.com/microsoft/apm/blob/main/.github/workflows/ci.yml) as a reference implementation for installing APM, running CI validation commands such as `apm audit --ci`, and checking for drift with `git status --porcelain`. Use it as a practical example when wiring these checks into your own workflow.
+:::
 
 ## Azure Pipelines
 
@@ -143,7 +147,7 @@ apm install
 
 ## Governance with `apm audit`
 
-`apm audit --ci` verifies lockfile consistency in CI (6 baseline checks, no configuration). Add `--policy org` to enforce organizational rules (16 additional checks). For full setup including SARIF integration and GitHub Code Scanning, see the [CI Policy Enforcement guide](../../guides/ci-policy-setup/).
+`apm audit --ci` verifies lockfile consistency in CI (7 baseline checks, no configuration). Add `--policy org` to enforce organizational rules (17 additional checks). For full setup including SARIF integration and GitHub Code Scanning, see the [CI Policy Enforcement guide](../../guides/ci-policy-setup/).
 
 For content scanning and hidden Unicode detection, `apm install` automatically blocks critical findings. Run `apm audit` for on-demand reporting. See [Governance](../../enterprise/governance-guide/) for the full governance model.
 
@@ -197,6 +201,6 @@ See the [Pack & Distribute guide](../../guides/pack-distribute/) for the full wo
 
 - **Pin APM version** in CI to avoid unexpected changes: `pip install apm-cli==0.7.7`
 - **Commit `apm.lock.yaml`** so CI resolves the same dependency versions as local development
-- **Commit `.github/`, `.claude/`, `.cursor/`, and `.opencode/` deployed files** so contributors and cloud-based Copilot get agent context without running `apm install`
-- **If using `apm compile`** (for Codex, Gemini), run it in CI and fail the build if the output differs from what's committed
+- **Commit `.github/`, `.claude/`, `.cursor/`, `.opencode/`, and `.gemini/` deployed files** so contributors and cloud-based Copilot get agent context without running `apm install`
+- **If using `apm compile`** (for Codex, Gemini instructions), run it in CI and fail the build if the output differs from what's committed
 - **Use `GITHUB_APM_PAT`** for private dependencies; never use the default `GITHUB_TOKEN` for cross-repo access

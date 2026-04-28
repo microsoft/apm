@@ -15,6 +15,8 @@ from ..models.apm_package import DependencyReference
 
 logger = logging.getLogger(__name__)
 
+_SELF_KEY = "."
+
 
 @dataclass
 class LockedDependency:
@@ -42,6 +44,7 @@ class LockedDependency:
     marketplace_plugin_name: Optional[str] = None  # Plugin name in marketplace
     is_insecure: bool = False  # True when the locked source was http://
     allow_insecure: bool = False  # True when the manifest explicitly allowed HTTP
+    skill_subset: List[str] = field(default_factory=list)  # Sorted skill names for SKILL_BUNDLE
 
     def get_unique_key(self) -> str:
         """Returns unique key for this dependency."""
@@ -98,6 +101,8 @@ class LockedDependency:
             result["is_insecure"] = True
         if self.allow_insecure:
             result["allow_insecure"] = True
+        if self.skill_subset:
+            result["skill_subset"] = sorted(self.skill_subset)
         return result
 
     @classmethod
@@ -151,6 +156,7 @@ class LockedDependency:
             marketplace_plugin_name=data.get("marketplace_plugin_name"),
             is_insecure=data.get("is_insecure", False),
             allow_insecure=data.get("allow_insecure", False),
+            skill_subset=list(data.get("skill_subset") or []),
         )
 
     @classmethod
@@ -199,6 +205,7 @@ class LockedDependency:
             is_dev=is_dev,
             is_insecure=dep_ref.is_insecure,
             allow_insecure=dep_ref.allow_insecure,
+            skill_subset=sorted(dep_ref.skill_subset) if isinstance(getattr(dep_ref, "skill_subset", None), list) else [],
         )
 
     def to_dependency_ref(self) -> DependencyReference:
@@ -251,27 +258,40 @@ class LockFile:
             self.dependencies.values(), key=lambda d: (d.depth, d.repo_url)
         )
 
+    def get_package_dependencies(self) -> List[LockedDependency]:
+        """Get all dependencies excluding the virtual self-entry."""
+        return [d for d in self.get_all_dependencies() if d.local_path != "."]
+
     def to_yaml(self) -> str:
         """Serialize to YAML string."""
-        data: Dict[str, Any] = {
-            "lockfile_version": self.lockfile_version,
-            "generated_at": self.generated_at,
-        }
-        if self.apm_version:
-            data["apm_version"] = self.apm_version
-        data["dependencies"] = [dep.to_dict() for dep in self.get_all_dependencies()]
-        if self.mcp_servers:
-            data["mcp_servers"] = sorted(self.mcp_servers)
-        if self.mcp_configs:
-            data["mcp_configs"] = dict(sorted(self.mcp_configs.items()))
-        if self.local_deployed_files:
-            data["local_deployed_files"] = sorted(self.local_deployed_files)
-        if self.local_deployed_file_hashes:
-            data["local_deployed_file_hashes"] = dict(
-                sorted(self.local_deployed_file_hashes.items())
-            )
-        from ..utils.yaml_io import yaml_to_str
-        return yaml_to_str(data)
+        # The synthesized self-entry (key ".") is an in-memory normalization
+        # of the flat local_deployed_files / local_deployed_file_hashes
+        # fields. It must not be written back into the dependencies list,
+        # since the flat fields remain the source of truth in YAML.
+        _self_dep = self.dependencies.pop(_SELF_KEY, None)
+        try:
+            data: Dict[str, Any] = {
+                "lockfile_version": self.lockfile_version,
+                "generated_at": self.generated_at,
+            }
+            if self.apm_version:
+                data["apm_version"] = self.apm_version
+            data["dependencies"] = [dep.to_dict() for dep in self.get_all_dependencies()]
+            if self.mcp_servers:
+                data["mcp_servers"] = sorted(self.mcp_servers)
+            if self.mcp_configs:
+                data["mcp_configs"] = dict(sorted(self.mcp_configs.items()))
+            if self.local_deployed_files:
+                data["local_deployed_files"] = sorted(self.local_deployed_files)
+            if self.local_deployed_file_hashes:
+                data["local_deployed_file_hashes"] = dict(
+                    sorted(self.local_deployed_file_hashes.items())
+                )
+            from ..utils.yaml_io import yaml_to_str
+            return yaml_to_str(data)
+        finally:
+            if _self_dep is not None:
+                self.dependencies[_SELF_KEY] = _self_dep
 
     @classmethod
     def from_yaml(cls, yaml_str: str) -> "LockFile":
@@ -294,6 +314,19 @@ class LockFile:
         lock.local_deployed_file_hashes = dict(
             data.get("local_deployed_file_hashes") or {}
         )
+        # Synthesize a virtual self-entry representing the project's own
+        # local content. This unifies traversal across "real" dependencies
+        # and the local package, without changing the on-disk YAML shape.
+        if lock.local_deployed_files:
+            lock.dependencies[_SELF_KEY] = LockedDependency(
+                repo_url="<self>",
+                source="local",
+                local_path=".",
+                is_dev=True,
+                depth=0,
+                deployed_files=list(lock.local_deployed_files),
+                deployed_file_hashes=dict(lock.local_deployed_file_hashes),
+            )
         return lock
 
     def write(self, path: Path) -> None:
@@ -388,6 +421,8 @@ class LockFile:
         seen: set = set()
         paths: List[str] = []
         for dep in self.get_all_dependencies():
+            if dep.local_path == _SELF_KEY:
+                continue
             dep_ref = dep.to_dependency_ref()
             install_path = dep_ref.get_install_path(apm_modules_dir)
             try:
@@ -422,6 +457,10 @@ class LockFile:
         if self.mcp_configs != other.mcp_configs:
             return False
         if sorted(self.local_deployed_files) != sorted(other.local_deployed_files):
+            return False
+        # Issue #887: include hash dict in equivalence so post-install
+        # hash updates persist even when the file list is unchanged.
+        if dict(self.local_deployed_file_hashes) != dict(other.local_deployed_file_hashes):
             return False
         return True
 

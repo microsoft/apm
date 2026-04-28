@@ -486,6 +486,13 @@ class TestMcpInstallAlias:
         assert result.exit_code == 0
         assert "Alias for 'apm install --mcp'" in result.output
         assert "apm mcp install fetch" in result.output
+        assert "Usage: mcp install [OPTIONS] NAME" in result.output
+        assert "--transport" in result.output
+        assert "--url" in result.output
+        assert "--env" in result.output
+        assert "--header" in result.output
+        assert "--mcp-version" in result.output
+        assert "--registry" in result.output
 
     def test_forwards_args_to_root_install_with_mcp_flag(self):
         """Verify the alias invokes the root `cli` with `install --mcp <argv>`."""

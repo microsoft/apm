@@ -295,3 +295,70 @@ class TestClearCache:
 
         assert pkg1.name == "test-pkg"
         assert pkg2.name == "changed-pkg"
+
+
+class TestIncludesField:
+    """Tests for the 'includes' field on APMPackage (auto-publish opt-in)."""
+
+    def test_includes_auto_parses_to_string(self, tmp_path):
+        yml = _write_apm_yml(tmp_path, {
+            "name": "test-pkg",
+            "version": "1.0.0",
+            "includes": "auto",
+        })
+        pkg = APMPackage.from_apm_yml(yml)
+        assert pkg.includes == "auto"
+
+    def test_includes_list_parses_to_list(self, tmp_path):
+        yml = _write_apm_yml(tmp_path, {
+            "name": "test-pkg",
+            "version": "1.0.0",
+            "includes": ["path/a", "path/b"],
+        })
+        pkg = APMPackage.from_apm_yml(yml)
+        assert pkg.includes == ["path/a", "path/b"]
+
+    def test_includes_missing_is_none(self, tmp_path):
+        yml = _write_apm_yml(tmp_path, {
+            "name": "test-pkg",
+            "version": "1.0.0",
+        })
+        pkg = APMPackage.from_apm_yml(yml)
+        assert pkg.includes is None
+
+    def test_includes_invalid_int_raises(self, tmp_path):
+        yml = _write_apm_yml(tmp_path, {
+            "name": "test-pkg",
+            "version": "1.0.0",
+            "includes": 42,
+        })
+        with pytest.raises(ValueError, match="'includes' must be 'auto' or a list of strings"):
+            APMPackage.from_apm_yml(yml)
+
+    def test_includes_list_with_non_strings_raises(self, tmp_path):
+        yml = _write_apm_yml(tmp_path, {
+            "name": "test-pkg",
+            "version": "1.0.0",
+            "includes": [1, 2],
+        })
+        with pytest.raises(ValueError, match="'includes' must be 'auto' or a list of strings"):
+            APMPackage.from_apm_yml(yml)
+
+    def test_includes_other_string_raises(self, tmp_path):
+        yml = _write_apm_yml(tmp_path, {
+            "name": "test-pkg",
+            "version": "1.0.0",
+            "includes": "explicit",
+        })
+        with pytest.raises(ValueError, match="'includes' must be 'auto' or a list of strings"):
+            APMPackage.from_apm_yml(yml)
+
+    def test_has_apm_dependencies_false_for_include_only_manifest(self, tmp_path):
+        """Include-only manifests (no apm: deps) still report no APM dependencies."""
+        yml = _write_apm_yml(tmp_path, {
+            "name": "test-pkg",
+            "version": "1.0.0",
+            "includes": "auto",
+        })
+        pkg = APMPackage.from_apm_yml(yml)
+        assert pkg.has_apm_dependencies() is False
