@@ -38,9 +38,20 @@ jobs:
   unit-bats:
     name: bats unit tests
     runs-on: ubuntu-24.04
+    # The bats sandbox uses PATH="$STUB_BIN:/bin" to isolate install.sh from
+    # the real environment. On Ubuntu 24.04 /bin is a symlink to /usr/bin
+    # (merged-/usr), so real apt-get / pip / curl shadow the stubs and
+    # negative-path tests false-pass. Alpine 3.20 keeps /bin as busybox-only
+    # (apk lives in /sbin which is not on the test PATH), so the stubs work
+    # exactly as the test author designed.
+    container:
+      image: alpine:3.20
     permissions:
       contents: read
     steps:
+      - name: Install bash + git (bats needs bash; submodule checkout needs git)
+        run: apk add --no-cache bash git
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive

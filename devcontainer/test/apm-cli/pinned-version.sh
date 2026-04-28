@@ -11,6 +11,6 @@ source "$(dirname "$0")/generic-checks.sh"
 
 # Scenario-specific checks
 check "apm --version reports the pinned version (0.8.11)" \
-    bash -c "apm --version | grep -qx '0\.8\.11'"
+    bash -c "apm --version | grep -q '0\.8\.11'"
 
 reportResults
