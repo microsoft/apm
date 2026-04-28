@@ -28,7 +28,7 @@ def build_mcp_entry(name, *, transport, url, env, headers, version, command_argv
     :meth:`from_string`) for the validation chokepoint.  Validation
     failures surface as :class:`ValueError` from the model.
     """
-    from ..models.dependency.mcp import MCPDependency
+    from ...models.dependency.mcp import MCPDependency
 
     if command_argv:
         # Self-defined stdio

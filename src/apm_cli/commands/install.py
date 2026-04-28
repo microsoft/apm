@@ -460,10 +460,10 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
 # MCP CLI helpers (W3 --mcp flag)
 # ---------------------------------------------------------------------------
 
-# F7 / F5 install-time MCP warnings live in apm_cli/install/mcp_warnings.py
+# F7 / F5 install-time MCP warnings live in apm_cli/install/mcp/warnings.py
 # per LOC budget. Re-bind module-level names for back-compat with tests
 # that still patch ``apm_cli.commands.install._warn_*``.
-from ..install.mcp_warnings import (
+from ..install.mcp.warnings import (
     warn_ssrf_url as _warn_ssrf_url,
     warn_shell_metachars as _warn_shell_metachars,
     _SHELL_METACHAR_TOKENS,
@@ -471,33 +471,33 @@ from ..install.mcp_warnings import (
     _is_internal_or_metadata_host,
 )
 
-# --registry helpers live in apm_cli/install/mcp_registry.py per LOC budget.
-from ..install.mcp_registry import (
+# --registry helpers live in apm_cli/install/mcp/registry.py per LOC budget.
+from ..install.mcp.registry import (
     validate_registry_url as _validate_registry_url,
     resolve_registry_url as _resolve_registry_url,
     validate_mcp_dry_run_entry as _validate_mcp_dry_run_entry,
 )
 
-# MCP --mcp helpers live in apm_cli/install/mcp_*.py per LOC budget.
+# MCP --mcp helpers live in apm_cli/install/mcp/*.py per LOC budget.
 # Re-bind module-level ``_xxx`` names so existing test patches against
 # ``apm_cli.commands.install._<helper>`` and direct imports
 # (``from apm_cli.commands.install import _build_mcp_entry``) keep
 # working without modification.
-from ..install.mcp_args import (
+from ..install.mcp.args import (
     parse_env_pairs as _parse_env_pairs,
     parse_header_pairs as _parse_header_pairs,
     parse_kv_pairs as _parse_kv_pairs,
 )
-from ..install.mcp_entry import build_mcp_entry as _build_mcp_entry
-from ..install.mcp_writer import (
+from ..install.mcp.entry import build_mcp_entry as _build_mcp_entry
+from ..install.mcp.writer import (
     _diff_entry,
     add_mcp_to_apm_yml as _add_mcp_to_apm_yml,
 )
-from ..install.mcp_conflicts import (
+from ..install.mcp.conflicts import (
     MCP_REQUIRED_FLAGS as _MCP_REQUIRED_FLAGS,
     validate_mcp_conflicts as _validate_mcp_conflicts,
 )
-from ..install.mcp_command import run_mcp_install as _run_mcp_install
+from ..install.mcp.command import run_mcp_install as _run_mcp_install
 
 
 @click.command(

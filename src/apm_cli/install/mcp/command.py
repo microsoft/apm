@@ -1,9 +1,9 @@
 """Orchestrator for the ``apm install --mcp`` code path.
 
 Extracted from ``commands/install.py`` per the architecture-invariants
-LOC budget. ``run_mcp_install`` composes the smaller MCP modules
-(``mcp_args``, ``mcp_entry``, ``mcp_writer``, ``mcp_warnings``,
-``mcp_registry``) into the user-visible install flow:
+LOC budget. ``run_mcp_install`` composes the sibling MCP modules
+(``args``, ``entry``, ``writer``, ``warnings``, ``registry``) into the
+user-visible install flow:
 
     parse args -> build entry -> warn -> write apm.yml -> integrate
 """
@@ -12,11 +12,11 @@ from __future__ import annotations
 
 import click
 
-from .mcp_args import parse_env_pairs, parse_header_pairs
-from .mcp_entry import build_mcp_entry
-from .mcp_registry import registry_env_override
-from .mcp_warnings import warn_shell_metachars, warn_ssrf_url
-from .mcp_writer import add_mcp_to_apm_yml
+from .args import parse_env_pairs, parse_header_pairs
+from .entry import build_mcp_entry
+from .registry import registry_env_override
+from .warnings import warn_shell_metachars, warn_ssrf_url
+from .writer import add_mcp_to_apm_yml
 
 
 # APM Dependencies (conditional import for graceful degradation).
@@ -25,8 +25,8 @@ from .mcp_writer import add_mcp_to_apm_yml
 # code paths (package install vs. MCP install).
 APM_DEPS_AVAILABLE = False
 try:
-    from ..deps.lockfile import LockFile, get_lockfile_path
-    from ..integration.mcp_integrator import MCPIntegrator
+    from ...deps.lockfile import LockFile, get_lockfile_path
+    from ...integration.mcp_integrator import MCPIntegrator
 
     APM_DEPS_AVAILABLE = True
 except ImportError:
@@ -55,7 +55,7 @@ def run_mcp_install(
 ):
     """Execute the --mcp install path. ``registry_url`` is the validated
     --registry value; the caller resolved precedence vs MCP_REGISTRY_URL."""
-    from ..models.dependency.mcp import MCPDependency
+    from ...models.dependency.mcp import MCPDependency
 
     env = parse_env_pairs(env_pairs)
     headers = parse_header_pairs(header_pairs)

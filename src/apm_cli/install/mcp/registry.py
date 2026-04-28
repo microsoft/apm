@@ -27,7 +27,7 @@ from urllib.parse import urlparse, urlunparse
 
 import click
 
-from ..models.dependency.mcp import _ALLOWED_URL_SCHEMES
+from ...models.dependency.mcp import _ALLOWED_URL_SCHEMES
 
 
 # Defensive cap on registry URL length to keep apm.yml diffs reviewable
@@ -246,7 +246,7 @@ def validate_mcp_dry_run_entry(name, **kwargs) -> None:
     would reject. Lives here (not in commands/install.py) per the LOC-budget
     invariant on that module.
     """
-    from .mcp_entry import build_mcp_entry
+    from .entry import build_mcp_entry
     try:
         build_mcp_entry(name, **kwargs)
     except ValueError as exc:

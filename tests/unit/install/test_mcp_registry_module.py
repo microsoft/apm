@@ -1,4 +1,4 @@
-"""Unit tests for ``apm_cli.install.mcp_registry``.
+"""Unit tests for ``apm_cli.install.mcp.registry``.
 
 Covers:
 - ``resolve_registry_url`` precedence chain and visibility of overrides.
@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from apm_cli.install.mcp_registry import (
+from apm_cli.install.mcp.registry import (
     registry_env_override,
     resolve_registry_url,
     validate_registry_url,
@@ -183,7 +183,7 @@ class TestRedactUrlCredentials:
     """U3 regression: never echo URL credentials in logger output."""
 
     def test_strips_user_password(self):
-        from apm_cli.install.mcp_registry import _redact_url_credentials
+        from apm_cli.install.mcp.registry import _redact_url_credentials
         from urllib.parse import urlparse
         out = _redact_url_credentials("https://user:secret@registry.example.com/v0")
         assert "secret" not in out
@@ -192,7 +192,7 @@ class TestRedactUrlCredentials:
         assert parsed.hostname == "registry.example.com"
 
     def test_keeps_port(self):
-        from apm_cli.install.mcp_registry import _redact_url_credentials
+        from apm_cli.install.mcp.registry import _redact_url_credentials
         from urllib.parse import urlparse
         out = _redact_url_credentials("https://u:p@registry.example.com:8443/x")
         parsed = urlparse(out)
@@ -201,7 +201,7 @@ class TestRedactUrlCredentials:
         assert "p" not in (parsed.password or "")
 
     def test_no_creds_passthrough(self):
-        from apm_cli.install.mcp_registry import _redact_url_credentials
+        from apm_cli.install.mcp.registry import _redact_url_credentials
         url = "https://registry.example.com/v0"
         assert _redact_url_credentials(url) == url
 

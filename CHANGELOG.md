@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed `AttributeError: 'str' object has no attribute 'get'` crash when running `apm install --mcp <name>` without `--transport`, `--url`, `--mcp-version`, `--registry`, or a post-`--` stdio command. The bare-string registry shorthand now exits 0 and persists correctly to `apm.yml`. Closes #938 (#951)
 
+### Changed
+
+- Grouped the seven `apm_cli/install/mcp_*.py` helper modules into an `apm_cli/install/mcp/` subpackage and stripped the redundant `mcp_` prefix from each filename, aligning with the unprefixed-noun naming convention used by the rest of `install/`. Pure refactor; behaviour and public API unchanged. (#951)
+
 ## [0.10.0] - 2026-04-27
 
 ### Added

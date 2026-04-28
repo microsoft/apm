@@ -1,7 +1,7 @@
 """MCP CLI argument parsing for ``--env`` and ``--header`` repetitions.
 
 Extracted from ``commands/install.py`` per the architecture-invariants
-LOC budget (sibling to ``mcp_warnings.py`` / ``mcp_registry.py``).
+LOC budget (sibling to ``warnings.py`` / ``registry.py``).
 """
 
 from __future__ import annotations

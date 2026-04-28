@@ -13,8 +13,8 @@ from pathlib import Path
 
 import click
 
-from ..constants import APM_YML_FILENAME
-from ..utils.console import _rich_echo, _rich_warning
+from ...constants import APM_YML_FILENAME
+from ...utils.console import _rich_echo, _rich_warning
 
 
 def _diff_entry(old, new) -> list:
@@ -49,7 +49,7 @@ def add_mcp_to_apm_yml(name, entry, *, dev=False, force=False, project_root=None
       the CLI exits with code 2.
     - New entry: append, return ``("added", None)``.
     """
-    from ..utils.yaml_io import dump_yaml, load_yaml
+    from ...utils.yaml_io import dump_yaml, load_yaml
 
     apm_yml_path = manifest_path or Path(APM_YML_FILENAME)
     if not apm_yml_path.exists():
