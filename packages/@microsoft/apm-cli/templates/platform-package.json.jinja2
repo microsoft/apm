@@ -1,5 +1,5 @@
 {
-  "name": "@microsoft/apm-cli-{{os}}-{{cpu}}",
+  "name": "@microsoft/apm-cli-{{npm_platform}}-{{npm_arch}}",
   "version": "{{ version }}",
   "description": "APM (Agent Package Manager) -- ship and govern AI agent context",
   "license": "MIT",
@@ -12,8 +12,8 @@
   "engines": {
     "node": ">=20"
   },
-  "os": [{{ os | tojson }}],
-  "cpu": [{{ cpu | tojson }}],
+  "os": [{{ npm_platform | tojson }}],
+  "cpu": [{{ npm_arch | tojson }}],
   "publishConfig": {
     "provenance": true
   }

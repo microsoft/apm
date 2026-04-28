@@ -12,6 +12,7 @@ This script:
 import logging
 import shutil
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
@@ -36,182 +37,146 @@ ARCH_MAP = {"x64": "x86_64", "arm64": "arm64"}
 
 def get_archive_name(npm_platform: str, npm_arch: str) -> str:
     """Convert npm platform/arch to APM release archive name."""
-    platform_name = PLATFORM_MAP[npm_platform]
-    arch_name = ARCH_MAP[npm_arch]
-    return f"apm-{platform_name}-{arch_name}"
+    return f"apm-{PLATFORM_MAP[npm_platform]}-{ARCH_MAP[npm_arch]}"
 
 
 def get_repo_root() -> Path:
-    """Get the repository root directory."""
     return Path(__file__).parent.parent
 
 
-def get_version() -> str:
+def get_version(repo_root: Path) -> str:
     """Get the version from pyproject.toml."""
-    repo_root = get_repo_root()
+    import toml
+    
     manifest_path = repo_root / "pyproject.toml"
-
-    with open(manifest_path) as f:
-        content = f.read()
-
-    # Parse version line: version = "0.10.0"
-    for line in content.split("\n"):
-        if line.startswith("version ="):
-            # Extract version from: version = "0.10.0"
-            version = line.split('"')[1]
-            return version
-
-    raise ValueError("Could not find version in pyproject.toml")
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        data = toml.load(f)
+        
+    return data["project"]["version"]
 
 
-def render_platform_package_json(
-    version: str,
-    npm_platform: str,
-    npm_arch: str,
-) -> str:
-    """Render platform package.json using Jinja2 template."""
-    repo_root = get_repo_root()
+def setup_jinja_env(repo_root: Path) -> Environment:
     template_dir = repo_root / "packages/@microsoft/apm-cli/templates"
-    env = Environment(loader=FileSystemLoader(str(template_dir)))
-    template = env.get_template("platform-package.json.jinja2")
-
-    return template.render(
-        version=version,
-        os=npm_platform,
-        cpu=npm_arch,
-    )
+    return Environment(loader=FileSystemLoader(str(template_dir)))
 
 
-def generate_platform_package(npm_platform: str, npm_arch: str) -> None:
-    """Generate a single platform package into dist/npm/."""
-    repo_root = get_repo_root()
-    version = get_version()
-    archive_name = get_archive_name(npm_platform, npm_arch)
-    package_name = f"apm-cli-{npm_platform}-{npm_arch}"
+def copy_common_files(repo_root: Path, dest_dir: Path) -> None:
+    """Copy README.md and LICENSE to the package directory."""
+    for filename in ["README.md", "LICENSE"]:
+        src = repo_root / filename
+        dest = dest_dir / filename
+        if src.exists():
+            shutil.copy2(src, dest)
 
-    # Generate into dist/npm/
-    dist_root = repo_root / "dist/npm"
-    package_root = dist_root / package_name
-    package_json_path = package_root / "package.json"
 
-    # Create package directory if it doesn't exist
-    package_root.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Package directory: {package_root}")
+def write_template(env: Environment, template_name: str, dest_path: Path, **kwargs) -> None:
+    """Render a Jinja2 template and write to disk."""
+    content = env.get_template(template_name).render(**kwargs)
+    dest_path.write_text(content)
+    logger.info(f"Writing {dest_path}")
 
-    # Render and write package.json
-    pkg_json_content = render_platform_package_json(
-        version=version,
-        npm_platform=npm_platform,
-        npm_arch=npm_arch,
-    )
-    logger.info(f"Writing {package_json_path}")
-    package_json_path.write_text(pkg_json_content)
 
-    # Find and copy the binary content folder (dist/{archive_name} or artifacts/{archive_name}/dist/{archive_name})
+def find_binary_content(repo_root: Path, archive_name: str) -> Path:
+    """Find the compiled binary content folder."""
     candidates = [
         repo_root / "dist" / archive_name,
         repo_root / "artifacts" / archive_name / "dist" / archive_name,
     ]
-
-    binary_src = None
     for candidate in candidates:
         if candidate.exists():
-            binary_src = candidate
-            break
-    if not binary_src:
-        logger.error(f"Could not find binary content for {archive_name} in expected locations:")
-        for candidate in candidates:
-            logger.error(f"  - {candidate}")
-        raise FileNotFoundError(f"Binary content for {archive_name} not found")
+            return candidate
+            
+    logger.error(f"Could not find binary content for {archive_name} in expected locations:")
+    for candidate in candidates:
+        logger.error(f"  - {candidate}")
+    raise FileNotFoundError(f"Binary content for {archive_name} not found")
 
-    # Copy binary content to package directory
+
+def generate_platform_package(
+    env: Environment, repo_root: Path, npm_dist_root: Path, npm_platform: str, npm_arch: str, version: str
+) -> None:
+    """Generate a single platform package into dist/npm/."""
+    package_name = f"apm-cli-{npm_platform}-{npm_arch}"
+    package_root = npm_dist_root / package_name
+    package_root.mkdir(parents=True, exist_ok=True)
+
+    # 1. Write package.json
+    write_template(
+        env,
+        "platform-package.json.jinja2",
+        package_root / "package.json",
+        version=version,
+        npm_platform=npm_platform,
+        npm_arch=npm_arch,
+    )
+
+    # 2. Copy binary content
+    binary_src = find_binary_content(repo_root, get_archive_name(npm_platform, npm_arch))
     logger.info(f"Copying binary content from {binary_src} to {package_root}")
     shutil.copytree(binary_src, package_root, dirs_exist_ok=True)
 
-    # Copy README.md and LICENSE from repo root
-    for filename in ["README.md", "LICENSE"]:
-        src = repo_root / filename
-        dest = package_root / filename
-        if src.exists():
-            logger.info(f"Copying {src} -> {dest}")
-            shutil.copy2(src, dest)
+    # 3. Copy standard files
+    copy_common_files(repo_root, package_root)
 
 
-def update_main_package() -> None:
+def generate_main_package(env: Environment, repo_root: Path, npm_dist_root: Path, version: str) -> None:
     """Generate the main apm-cli package with launcher and dependencies into dist/npm/."""
-    repo_root = get_repo_root()
-    version = get_version()
-
-    # Generate into dist/npm/
-    dist_root = repo_root / "dist/npm"
-    main_package_root = dist_root / "apm-cli"
-    manifest_path = main_package_root / "package.json"
-
-    # Ensure main package directory exists
+    main_package_root = npm_dist_root / "apm-cli"
     main_package_root.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Generating main package at {main_package_root}")
 
-    # Render and write package.json using template
-    template_dir = repo_root / "packages/@microsoft/apm-cli/templates"
-    env = Environment(loader=FileSystemLoader(str(template_dir)))
-    template = env.get_template("apm-cli-package.json.jinja2")
-
-    pkg_json_content = template.render(
+    # 1. Write package.json
+    write_template(
+        env,
+        "apm-cli-package.json.jinja2",
+        main_package_root / "package.json",
         version=version,
         platforms=PLATFORMS,
     )
-    logger.info(f"Writing {manifest_path}")
-    manifest_path.write_text(pkg_json_content)
 
-    # Ensure bin directory exists
+    # 2. Write launcher (bin/apm)
     bin_dir = main_package_root / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
+    
+    grouped_platforms = defaultdict(list)
+    for p_os, p_arch in PLATFORMS:
+        grouped_platforms[p_os].append(p_arch)
 
-    # Copy launcher from repo (packages/@microsoft/apm-cli/bin/apm)
-    src_launcher = repo_root / "packages/@microsoft/apm-cli/bin/apm"
     launcher_target = bin_dir / "apm"
-    if src_launcher.exists():
-        logger.info(f"Copying launcher {src_launcher} -> {launcher_target}")
-        shutil.copy2(src_launcher, launcher_target)
-        launcher_target.chmod(0o755)
-    else:
-        logger.warning(f"Launcher not found at {src_launcher}")
-        logger.warning("Please ensure packages/@microsoft/apm-cli/bin/apm exists")
+    write_template(
+        env,
+        "apm-cli-bin.js.jinja2",
+        launcher_target,
+        grouped_platforms=dict(grouped_platforms),
+    )
+    launcher_target.chmod(0o755)
 
-    # Copy README.md and LICENSE from repo root
-    for filename in ["README.md", "LICENSE"]:
-        src = repo_root / filename
-        dest = main_package_root / filename
-        if src.exists():
-            logger.info(f"Copying {src} -> {dest}")
-            shutil.copy2(src, dest)
+    # 3. Copy standard files
+    copy_common_files(repo_root, main_package_root)
 
 
 def main() -> None:
-    """Generate all platform packages."""
+    """Generate all npm packages for APM."""
     logger.info("Starting npm package generation")
 
     repo_root = get_repo_root()
-    version = get_version()
+    npm_dist_root = repo_root / "dist" / "npm"
+    version = get_version(repo_root)
+    env = setup_jinja_env(repo_root)
+    
     logger.info(f"Version: {version}")
 
-    # Generate each platform package
-    for npm_platform, npm_arch in PLATFORMS:
-        logger.info(f"Generating package for {npm_platform}-{npm_arch}")
-        try:
-            generate_platform_package(npm_platform, npm_arch)
-        except Exception as e:
-            logger.error(f"Failed to generate package for {npm_platform}-{npm_arch}: {e}")
-            sys.exit(1)
-
-    # Update main package
     try:
-        update_main_package()
-    except Exception as e:
-        logger.error(f"Failed to update main package: {e}")
-        sys.exit(1)
+        for npm_platform, npm_arch in PLATFORMS:
+            logger.info(f"Generating package for {npm_platform}-{npm_arch}")
+            generate_platform_package(env, repo_root, npm_dist_root, npm_platform, npm_arch, version)
 
-    logger.info("All packages generated successfully")
+        logger.info("Generating main package")
+        generate_main_package(env, repo_root, npm_dist_root, version)
+        
+        logger.info("All packages generated successfully")
+    except Exception as e:
+        logger.error(f"Failed during package generation: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
