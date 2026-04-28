@@ -1,22 +1,26 @@
 {
   "name": "@apm/cli-win32-x64",
   "version": "0.10.0",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/microsoft/apm.git",
-    "directory": "packages/@apm/cli-win32-x64"
+    "directory": "packages/@apm/apm"
   },
-  "homepage": "https://microsoft.github.io/apm/",
   "engines": {
     "node": ">=20"
   },
+  "homepage": "https://microsoft.github.io/apm/",
   "os": [
     "win32"
   ],
   "cpu": [
     "x64"
   ],
-  "publishConfig": {
-    "provenance": true
-  }
+  "files": [
+    "apm.exe",
+    "_internal",
+    "README.md",
+    "LICENSE"
+  ]
 }

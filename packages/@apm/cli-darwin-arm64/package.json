@@ -1,22 +1,26 @@
 {
   "name": "@apm/cli-darwin-arm64",
   "version": "0.10.0",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/microsoft/apm.git",
-    "directory": "packages/@apm/cli-darwin-arm64"
+    "directory": "packages/@apm/apm"
   },
-  "homepage": "https://microsoft.github.io/apm/",
   "engines": {
     "node": ">=20"
   },
+  "homepage": "https://microsoft.github.io/apm/",
   "os": [
     "darwin"
   ],
   "cpu": [
     "arm64"
   ],
-  "publishConfig": {
-    "provenance": true
-  }
+  "files": [
+    "apm",
+    "_internal",
+    "README.md",
+    "LICENSE"
+  ]
 }

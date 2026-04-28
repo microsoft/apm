@@ -27,6 +27,7 @@ function copyBinaryToNativePackage(npmPlatform, npmArch) {
 
 	// Update the package.json manifest
 	const { version, license, repository, engines, homepage } = rootManifest;
+	const binaryFile = isWindows ? "apm.exe" : "apm";
 	const manifest = JSON.stringify(
 		{
 			name: packageName,
@@ -37,6 +38,7 @@ function copyBinaryToNativePackage(npmPlatform, npmArch) {
 			homepage,
 			os: [npmPlatform],
 			cpu: [npmArch],
+			files: [binaryFile, "_internal", "README.md", "LICENSE"],
 		},
 		null,
 		2,
@@ -65,6 +67,32 @@ function copyBinaryToNativePackage(npmPlatform, npmArch) {
 	fs.copyFileSync(binarySource, binaryTarget);
 	fs.chmodSync(binaryTarget, 0o755);
 	console.info(`Copied ${binarySource} -> ${binaryTarget}`);
+
+	// Copy _internal directory (PyInstaller onedir runtime dependencies)
+	const internalSource = resolve(binarySource, "..", "_internal");
+	const internalTarget = resolve(packageRoot, "_internal");
+	if (fs.existsSync(internalSource)) {
+		if (fs.existsSync(internalTarget)) {
+			fs.rmSync(internalTarget, { recursive: true });
+		}
+		fs.cpSync(internalSource, internalTarget, { recursive: true });
+		console.info(`Copied ${internalSource} -> ${internalTarget}`);
+	} else {
+		console.warn(`_internal not found at ${internalSource}, skipping`);
+	}
+
+	// Copy README.md and LICENSE from repo root
+	for (const fileName of ["README.md", "LICENSE"]) {
+		const src = resolve(REPO_ROOT, fileName);
+		const dest = resolve(packageRoot, fileName);
+		if (fs.existsSync(src)) {
+			fs.copyFileSync(src, dest);
+			console.info(`Copied ${src} -> ${dest}`);
+		} else {
+			console.warn(`${fileName} not found at ${src}, skipping`);
+		}
+	}
+
 }
 
 /**
@@ -116,4 +144,19 @@ for (const [platform, arch] of PACKAGES) {
 }
 
 updateVersionInJsPackage("apm");
+
+// Copy README.md and LICENSE from repo root to the @apm/apm package directory
+const APM_PACKAGE_ROOT = resolve(PACKAGES_ROOT, "apm");
+for (const fileName of ["README.md", "LICENSE"]) {
+	const src = resolve(REPO_ROOT, fileName);
+	const dest = resolve(APM_PACKAGE_ROOT, fileName);
+	if (fs.existsSync(src)) {
+		fs.copyFileSync(src, dest);
+		console.info(`Copied ${src} -> ${dest}`);
+	} else {
+		console.warn(`${fileName} not found at ${src}, skipping`);
+	}
+}
+
+
 
