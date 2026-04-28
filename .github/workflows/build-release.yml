@@ -843,11 +843,11 @@ jobs:
         with:
           path: ./artifacts
 
-      - name: Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
+      - name: Install Node.js and pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Install dependencies
+        run: pnpm install
 
       # Extracts each platform binary into its packages/@apm/cli-* folder
       # and syncs the version across all package.json files.
