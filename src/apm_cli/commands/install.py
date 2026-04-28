@@ -1,10 +1,11 @@
 """APM install command and dependency installation engine."""
 
 import builtins
+import dataclasses
 import os
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import click
 
@@ -153,6 +154,48 @@ dict = builtins.dict
 
 
 # ---------------------------------------------------------------------------
+# InstallContext -- parameter bundle for the APM install pipeline
+# ---------------------------------------------------------------------------
+
+@dataclasses.dataclass
+class InstallContext:
+    """Bundles install command state to reduce function signatures.
+
+    Created by :func:`install` after argument parsing and scope resolution,
+    then threaded through :func:`_install_apm_packages` and
+    :func:`_post_install_summary` to avoid long parameter lists.
+    """
+
+    scope: Any  # InstallScope
+    manifest_path: "Path"
+    manifest_display: str
+    apm_dir: "Path"
+    project_root: "Path"
+    logger: Any  # InstallLogger
+    auth_resolver: Any  # AuthResolver
+    verbose: bool
+    force: bool
+    dry_run: bool
+    update: bool
+    dev: bool
+    runtime: Optional[str]
+    exclude: Optional[str]
+    target: Optional[str]
+    parallel_downloads: int
+    allow_insecure: bool
+    allow_insecure_hosts: tuple
+    protocol_pref: Any  # ProtocolPreference
+    allow_protocol_fallback: bool
+    trust_transitive_mcp: bool
+    no_policy: bool
+    install_mode: Any  # InstallMode
+    packages: tuple  # Original Click packages
+    only_packages: Optional[builtins.list] = None
+    manifest_snapshot: Optional[bytes] = None
+    snapshot_manifest_path: Optional["Path"] = None
+
+
+# ---------------------------------------------------------------------------
 # Argv `--` boundary helpers (W3 --mcp flag)
 # ---------------------------------------------------------------------------
 #
@@ -208,53 +251,20 @@ except ImportError as e:
     _APM_IMPORT_ERROR = str(e)
 
 
-def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, logger=None, manifest_path=None, auth_resolver=None, scope=None, allow_insecure=False):
-    """Validate packages exist and can be accessed, then add to apm.yml dependencies section.
+# ---------------------------------------------------------------------------
+# Package validation helpers (extracted from _validate_and_add_packages_to_apm_yml)
+# ---------------------------------------------------------------------------
 
-    Implements normalize-on-write: any input form (HTTPS URL, SSH URL, FQDN, shorthand)
-    is canonicalized before storage. Default host (github.com) is stripped;
-    non-default hosts are preserved. Duplicates are detected by identity.
 
-    Args:
-        packages: Package specifiers to validate and add.
-        dry_run: If True, only show what would be added.
-        dev: If True, write to devDependencies instead of dependencies.
-        logger: InstallLogger for structured output.
-        manifest_path: Explicit path to apm.yml (defaults to cwd/apm.yml).
-        auth_resolver: Shared auth resolver for caching credentials.
-        scope: InstallScope controlling project vs user deployment.
+def _check_package_conflicts(current_deps):
+    """Build identity set from existing deps for duplicate detection.
+
+    Parses each entry in *current_deps* (string or dict form) through
+    :class:`DependencyReference` and collects identity strings.
 
     Returns:
-        Tuple of (validated_packages list, _ValidationOutcome).
+        ``set`` of identity strings for existing dependencies.
     """
-    import subprocess
-    import tempfile
-    from pathlib import Path
-
-    apm_yml_path = manifest_path or Path(APM_YML_FILENAME)
-
-    # Read current apm.yml
-    try:
-        from ..utils.yaml_io import load_yaml
-        data = load_yaml(apm_yml_path) or {}
-    except Exception as e:
-        if logger:
-            logger.error(f"Failed to read {APM_YML_FILENAME}: {e}")
-        else:
-            _rich_error(f"Failed to read {APM_YML_FILENAME}: {e}")
-        sys.exit(1)
-
-    # Ensure dependencies structure exists
-    dep_section = "devDependencies" if dev else "dependencies"
-    if dep_section not in data:
-        data[dep_section] = {}
-    if "apm" not in data[dep_section]:
-        data[dep_section]["apm"] = []
-
-    current_deps = data[dep_section]["apm"] or []
-    validated_packages = []
-
-    # Build identity set from existing deps for duplicate detection
     existing_identities = builtins.set()
     for dep_entry in current_deps:
         try:
@@ -267,12 +277,35 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
             existing_identities.add(ref.get_identity())
         except (ValueError, TypeError, AttributeError, KeyError):
             continue
+    return existing_identities
 
-    # First, validate all packages
+
+def _resolve_package_references(
+    packages,
+    existing_identities,
+    *,
+    auth_resolver=None,
+    logger=None,
+    scope=None,
+    allow_insecure=False,
+):
+    """Validate, canonicalize, and resolve package references.
+
+    Handles marketplace refs, canonical parsing, insecure-URL guards,
+    local-at-user-scope rejection, and accessibility checks.
+
+    *existing_identities* is mutated (new identities are added to prevent
+    duplicates within the same batch).
+
+    Returns:
+        Tuple of ``(valid_outcomes, invalid_outcomes, validated_packages,
+        marketplace_provenance, apm_yml_entries)``.
+    """
     valid_outcomes = []  # (canonical, already_present) tuples
     invalid_outcomes = []  # (package, reason) tuples
     _marketplace_provenance = {}  # canonical -> {discovered_via, marketplace_plugin_name}
     _apm_yml_entries = {}  # canonical -> apm.yml entry (str or dict for HTTP deps)
+    validated_packages = []
 
     if logger:
         logger.validation_start(len(packages))
@@ -402,6 +435,118 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
             if logger:
                 logger.validation_fail(package, reason)
 
+    return (
+        valid_outcomes,
+        invalid_outcomes,
+        validated_packages,
+        _marketplace_provenance,
+        _apm_yml_entries,
+    )
+
+
+def _merge_packages_into_yml(
+    validated_packages,
+    apm_yml_entries,
+    current_deps,
+    data,
+    dep_section,
+    apm_yml_path,
+    *,
+    dev=False,
+    logger=None,
+):
+    """Append *validated_packages* to the dependency list and write apm.yml.
+
+    Mutates *current_deps* in place and persists the updated manifest to
+    *apm_yml_path*.
+    """
+    dep_label = "devDependencies" if dev else "apm.yml"
+    for package in validated_packages:
+        current_deps.append(apm_yml_entries.get(package, package))
+        if logger:
+            logger.verbose_detail(f"Added {package} to {dep_label}")
+
+    # Update dependencies
+    data[dep_section]["apm"] = current_deps
+
+    # Write back to apm.yml
+    try:
+        from ..utils.yaml_io import dump_yaml
+        dump_yaml(data, apm_yml_path)
+        if logger:
+            logger.success(f"Updated {APM_YML_FILENAME} with {len(validated_packages)} new package(s)")
+    except Exception as e:
+        if logger:
+            logger.error(f"Failed to write {APM_YML_FILENAME}: {e}")
+        else:
+            _rich_error(f"Failed to write {APM_YML_FILENAME}: {e}")
+        sys.exit(1)
+
+
+def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, logger=None, manifest_path=None, auth_resolver=None, scope=None, allow_insecure=False):
+    """Validate packages exist and can be accessed, then add to apm.yml dependencies section.
+
+    Implements normalize-on-write: any input form (HTTPS URL, SSH URL, FQDN, shorthand)
+    is canonicalized before storage. Default host (github.com) is stripped;
+    non-default hosts are preserved. Duplicates are detected by identity.
+
+    Args:
+        packages: Package specifiers to validate and add.
+        dry_run: If True, only show what would be added.
+        dev: If True, write to devDependencies instead of dependencies.
+        logger: InstallLogger for structured output.
+        manifest_path: Explicit path to apm.yml (defaults to cwd/apm.yml).
+        auth_resolver: Shared auth resolver for caching credentials.
+        scope: InstallScope controlling project vs user deployment.
+
+    Returns:
+        Tuple of (validated_packages list, _ValidationOutcome).
+    """
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    apm_yml_path = manifest_path or Path(APM_YML_FILENAME)
+
+    # Read current apm.yml
+    try:
+        from ..utils.yaml_io import load_yaml
+        data = load_yaml(apm_yml_path) or {}
+    except Exception as e:
+        if logger:
+            logger.error(f"Failed to read {APM_YML_FILENAME}: {e}")
+        else:
+            _rich_error(f"Failed to read {APM_YML_FILENAME}: {e}")
+        sys.exit(1)
+
+    # Ensure dependencies structure exists
+    dep_section = "devDependencies" if dev else "dependencies"
+    if dep_section not in data:
+        data[dep_section] = {}
+    if "apm" not in data[dep_section]:
+        data[dep_section]["apm"] = []
+
+    current_deps = data[dep_section]["apm"] or []
+
+    # Detect duplicates against existing deps
+    existing_identities = _check_package_conflicts(current_deps)
+
+    # Validate and canonicalize all package references
+    (
+        valid_outcomes,
+        invalid_outcomes,
+        validated_packages,
+        _marketplace_provenance,
+        _apm_yml_entries,
+    ) = _resolve_package_references(
+        packages,
+        existing_identities,
+        auth_resolver=auth_resolver,
+        logger=logger,
+        scope=scope,
+        allow_insecure=allow_insecure,
+    )
+
     outcome = _ValidationOutcome(
         valid=valid_outcomes,
         invalid=invalid_outcomes,
@@ -430,28 +575,17 @@ def _validate_and_add_packages_to_apm_yml(packages, dry_run=False, dev=False, lo
                 logger.verbose_detail(f"  + {pkg}")
         return validated_packages, outcome
 
-    # Add validated packages to dependencies (already canonical)
-    dep_label = "devDependencies" if dev else "apm.yml"
-    for package in validated_packages:
-        current_deps.append(_apm_yml_entries.get(package, package))
-        if logger:
-            logger.verbose_detail(f"Added {package} to {dep_label}")
-
-    # Update dependencies
-    data[dep_section]["apm"] = current_deps
-
-    # Write back to apm.yml
-    try:
-        from ..utils.yaml_io import dump_yaml
-        dump_yaml(data, apm_yml_path)
-        if logger:
-            logger.success(f"Updated {APM_YML_FILENAME} with {len(validated_packages)} new package(s)")
-    except Exception as e:
-        if logger:
-            logger.error(f"Failed to write {APM_YML_FILENAME}: {e}")
-        else:
-            _rich_error(f"Failed to write {APM_YML_FILENAME}: {e}")
-        sys.exit(1)
+    # Persist validated packages to apm.yml
+    _merge_packages_into_yml(
+        validated_packages,
+        _apm_yml_entries,
+        current_deps,
+        data,
+        dep_section,
+        apm_yml_path,
+        dev=dev,
+        logger=logger,
+    )
 
     return validated_packages, outcome
 
@@ -911,6 +1045,116 @@ def _run_mcp_install(
     logger.tree_item(f"  apm.yml: {manifest_path}")
 
 
+# ---------------------------------------------------------------------------
+# install() decomposition: extracted flow helpers
+# ---------------------------------------------------------------------------
+
+
+def _handle_mcp_install(
+    *,
+    mcp_name,
+    transport,
+    url,
+    env_pairs,
+    header_pairs,
+    mcp_version,
+    command_argv,
+    dev,
+    force,
+    runtime,
+    exclude,
+    verbose,
+    dry_run,
+    logger,
+    no_policy,
+    validated_registry_url,
+):
+    """Execute the ``--mcp`` install path (MCP server add).
+
+    Resolves registry URL, runs policy preflight, handles dry-run,
+    and delegates to :func:`_run_mcp_install` for the actual installation.
+    Called from :func:`install` when ``--mcp`` is specified; the caller
+    returns immediately after this function completes.
+    """
+    from ..core.scope import (
+        InstallScope, get_apm_dir, get_manifest_path,
+    )
+    # Apply CLI > env > default precedence; emit override diagnostic.
+    resolved_registry_url, _registry_source = _resolve_registry_url(
+        validated_registry_url, logger=logger,
+    )
+    mcp_scope = InstallScope.PROJECT
+    mcp_manifest_path = get_manifest_path(mcp_scope)
+    mcp_apm_dir = get_apm_dir(mcp_scope)
+    # -- W2-mcp-preflight: policy enforcement before MCP install --
+    # Build a lightweight MCPDependency for policy evaluation.
+    # This mirrors _build_mcp_entry routing but we only need the
+    # fields that policy checks inspect (name, transport, registry).
+    from ..models.dependency.mcp import MCPDependency as _MCPDep
+    from ..policy.install_preflight import (
+        PolicyBlockError,
+        run_policy_preflight,
+    )
+
+    _is_self_defined = bool(url or command_argv)
+    _preflight_transport = transport
+    if _preflight_transport is None:
+        if command_argv:
+            _preflight_transport = "stdio"
+        elif url:
+            _preflight_transport = "http"
+    _preflight_dep = _MCPDep(
+        name=mcp_name,
+        transport=_preflight_transport,
+        registry=False if _is_self_defined else None,
+        url=url,
+    )
+
+    try:
+        _pf_result, _pf_active = run_policy_preflight(
+            project_root=Path.cwd(),
+            mcp_deps=[_preflight_dep],
+            no_policy=no_policy,
+            logger=logger,
+            dry_run=dry_run,
+        )
+    except PolicyBlockError:
+        # Diagnostics already emitted by the helper + logger.
+        logger.render_summary()
+        sys.exit(1)
+
+    if dry_run:
+        # C1: validate eagerly so dry-run rejects what real install would.
+        _validate_mcp_dry_run_entry(
+            mcp_name, transport=transport, url=url, env=env_pairs,
+            headers=header_pairs, version=mcp_version,
+            command_argv=command_argv, registry_url=resolved_registry_url,
+        )
+        logger.dry_run_notice(
+            f"would add MCP server '{mcp_name}' to {mcp_manifest_path}"
+        )
+        return
+    _run_mcp_install(
+        mcp_name=mcp_name,
+        transport=transport,
+        url=url,
+        env_pairs=env_pairs,
+        header_pairs=header_pairs,
+        mcp_version=mcp_version,
+        command_argv=command_argv,
+        dev=dev,
+        force=force,
+        runtime=runtime,
+        exclude=exclude,
+        verbose=verbose,
+        logger=logger,
+        manifest_path=mcp_manifest_path,
+        apm_dir=mcp_apm_dir,
+        scope=mcp_scope,
+        registry_url=validated_registry_url,
+    )
+
+
 @click.command(
     help="Install APM and MCP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json); auto-creates apm.yml; use --allow-insecure for http:// packages)"
 )
@@ -1144,76 +1388,7 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                 _skill_subset = builtins.tuple(skill_names)
 
         if mcp_name is not None:
-            # MCP install routing block. This branch has accreted
-            # significantly (--mcp / --registry / --transport / --env /
-            # --header / --mcp-version + dry-run validation + chaos
-            # fixes). It is the next extraction target.
-            #
-            # WHEN THIS BLOCK GROWS: do NOT just trim cosmetically to
-            # stay under the LOC budget. Engage the python-architecture
-            # skill (.github/skills/python-architecture/SKILL.md) and
-            # propose extracting _maybe_handle_mcp_install() into
-            # apm_cli/install/ with a proper contract and tests.
-            # Modularity gets us back under budget; trimming hides debt.
-            from ..core.scope import (
-                InstallScope, get_apm_dir, get_manifest_path,
-            )
-            # Apply CLI > env > default precedence; emit override diagnostic.
-            resolved_registry_url, _registry_source = _resolve_registry_url(
-                validated_registry_url, logger=logger,
-            )
-            mcp_scope = InstallScope.PROJECT
-            mcp_manifest_path = get_manifest_path(mcp_scope)
-            mcp_apm_dir = get_apm_dir(mcp_scope)
-            # -- W2-mcp-preflight: policy enforcement before MCP install --
-            # Build a lightweight MCPDependency for policy evaluation.
-            # This mirrors _build_mcp_entry routing but we only need the
-            # fields that policy checks inspect (name, transport, registry).
-            from ..models.dependency.mcp import MCPDependency as _MCPDep
-            from ..policy.install_preflight import (
-                PolicyBlockError,
-                run_policy_preflight,
-            )
-
-            _is_self_defined = bool(url or command_argv)
-            _preflight_transport = transport
-            if _preflight_transport is None:
-                if command_argv:
-                    _preflight_transport = "stdio"
-                elif url:
-                    _preflight_transport = "http"
-            _preflight_dep = _MCPDep(
-                name=mcp_name,
-                transport=_preflight_transport,
-                registry=False if _is_self_defined else None,
-                url=url,
-            )
-
-            try:
-                _pf_result, _pf_active = run_policy_preflight(
-                    project_root=Path.cwd(),
-                    mcp_deps=[_preflight_dep],
-                    no_policy=no_policy,
-                    logger=logger,
-                    dry_run=dry_run,
-                )
-            except PolicyBlockError:
-                # Diagnostics already emitted by the helper + logger.
-                logger.render_summary()
-                sys.exit(1)
-
-            if dry_run:
-                # C1: validate eagerly so dry-run rejects what real install would.
-                _validate_mcp_dry_run_entry(
-                    mcp_name, transport=transport, url=url, env=env_pairs,
-                    headers=header_pairs, version=mcp_version,
-                    command_argv=command_argv, registry_url=resolved_registry_url,
-                )
-                logger.dry_run_notice(
-                    f"would add MCP server '{mcp_name}' to {mcp_manifest_path}"
-                )
-                return
-            _run_mcp_install(
+            _handle_mcp_install(
                 mcp_name=mcp_name,
                 transport=transport,
                 url=url,
@@ -1226,11 +1401,10 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
                 runtime=runtime,
                 exclude=exclude,
                 verbose=verbose,
+                dry_run=dry_run,
                 logger=logger,
-                manifest_path=mcp_manifest_path,
-                apm_dir=mcp_apm_dir,
-                scope=mcp_scope,
-                registry_url=validated_registry_url,
+                no_policy=no_policy,
+                validated_registry_url=validated_registry_url,
             )
             return
 
@@ -1303,8 +1477,10 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
             sys.exit(1)
 
         # If packages are specified, validate and add them to apm.yml first
+        validated_packages = []
+        outcome = None
         if packages:
-            # ── W2-pkg-rollback (#827): snapshot raw bytes BEFORE mutation ──
+            # -- W2-pkg-rollback (#827): snapshot raw bytes BEFORE mutation --
             # _validate_and_add_packages_to_apm_yml does a YAML round-trip
             # (load + dump) which may alter whitespace, key ordering, or
             # trailing newlines.  We snapshot the raw bytes so rollback is
@@ -1325,298 +1501,48 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
             # Note: Empty validated_packages is OK if packages are already in apm.yml
             # We'll proceed with installation from apm.yml to ensure everything is synced
 
-        logger.resolution_start(
-            to_install_count=len(validated_packages) if packages else 0,
-            lockfile_count=0,  # Refined later inside _install_apm_dependencies
+        # Build install context
+        install_ctx = InstallContext(
+            scope=scope,
+            manifest_path=manifest_path,
+            manifest_display=manifest_display,
+            apm_dir=apm_dir,
+            project_root=project_root,
+            logger=logger,
+            auth_resolver=auth_resolver,
+            verbose=verbose,
+            force=force,
+            dry_run=dry_run,
+            update=update,
+            dev=dev,
+            runtime=runtime,
+            exclude=exclude,
+            target=target,
+            parallel_downloads=parallel_downloads,
+            allow_insecure=allow_insecure,
+            allow_insecure_hosts=allow_insecure_hosts,
+            protocol_pref=protocol_pref,
+            allow_protocol_fallback=allow_protocol_fallback,
+            trust_transitive_mcp=trust_transitive_mcp,
+            no_policy=no_policy,
+            install_mode=InstallMode(only) if only else InstallMode.ALL,
+            packages=packages,
+            only_packages=builtins.list(validated_packages) if packages else None,
+            manifest_snapshot=_manifest_snapshot,
+            snapshot_manifest_path=_snapshot_manifest_path,
         )
 
-        # Parse apm.yml to get both APM and MCP dependencies
-        try:
-            apm_package = APMPackage.from_apm_yml(manifest_path)
-        except Exception as e:
-            logger.error(f"Failed to parse {manifest_display}: {e}")
-            sys.exit(1)
-
-        logger.verbose_detail(
-            f"Parsed {APM_YML_FILENAME}: {len(apm_package.get_apm_dependencies())} APM deps, "
-            f"{len(apm_package.get_mcp_dependencies())} MCP deps"
-            + (f", {len(apm_package.get_dev_apm_dependencies())} dev deps"
-               if apm_package.get_dev_apm_dependencies() else "")
+        apm_count, mcp_count, apm_diagnostics = _install_apm_packages(
+            install_ctx, outcome,
         )
 
-        # Get APM and MCP dependencies
-        apm_deps = apm_package.get_apm_dependencies()
-        dev_apm_deps = apm_package.get_dev_apm_dependencies()
-        has_any_apm_deps = bool(apm_deps) or bool(dev_apm_deps)
-        mcp_deps = apm_package.get_mcp_dependencies()
-
-        all_apm_deps = list(apm_deps) + list(dev_apm_deps)
-        _check_insecure_dependencies(all_apm_deps, allow_insecure, logger)
-
-        # Convert --only string to InstallMode enum
-        if only is None:
-            install_mode = InstallMode.ALL
-        else:
-            install_mode = InstallMode(only)
-
-        # Determine what to install based on install mode
-        should_install_apm = install_mode != InstallMode.MCP
-        should_install_mcp = install_mode != InstallMode.APM
-
-        # Compute the canonical only_packages list once -- used both by
-        # the dry-run orphan preview and the actual install path.  When
-        # the user passed --packages, we restrict to validated_packages
-        # (canonical strings) rather than the raw input which may carry
-        # marketplace refs like NAME@MARKETPLACE.
-        only_pkgs = builtins.list(validated_packages) if packages else None
-
-        # Show what will be installed if dry run
-        if dry_run:
-            # -- W2-dry-run (#827): policy preflight in preview mode --
-            # Runs discovery + checks against direct manifest deps (not
-            # resolved/transitive -- dry-run does not run the resolver).
-            # Block-severity violations render as "Would be blocked by
-            # policy" without raising.  Documented limitation: transitive
-            # deps are NOT evaluated since the resolver does not run.
-            from apm_cli.policy.install_preflight import run_policy_preflight as _dr_preflight
-
-            _dr_apm_deps = builtins.list(apm_deps) + builtins.list(dev_apm_deps)
-            _dr_preflight(
-                project_root=project_root,
-                apm_deps=_dr_apm_deps,
-                mcp_deps=mcp_deps if should_install_mcp else None,
-                no_policy=no_policy,
-                logger=logger,
-                dry_run=True,
-            )
-
-            from apm_cli.install.presentation.dry_run import render_and_exit
-
-            render_and_exit(
-                logger=logger,
-                should_install_apm=should_install_apm,
-                apm_deps=apm_deps,
-                mcp_deps=mcp_deps,
-                dev_apm_deps=dev_apm_deps,
-                should_install_mcp=should_install_mcp,
-                update=update,
-                only_packages=only_pkgs,
-                apm_dir=apm_dir,
-            )
-            return
-
-        # Install APM dependencies first (if requested)
-        apm_count = 0
-        prompt_count = 0
-        agent_count = 0
-
-        # Migrate legacy apm.lock -> apm.lock.yaml if needed (one-time, transparent)
-        migrate_lockfile_if_needed(apm_dir)
-
-        # Capture old MCP servers and configs from lockfile BEFORE
-        # _install_apm_dependencies regenerates it (which drops the fields).
-        # We always read this -- even when --only=apm -- so we can restore the
-        # field after the lockfile is regenerated by the APM install step.
-        old_mcp_servers: builtins.set = builtins.set()
-        old_mcp_configs: builtins.dict = {}
-        _lock_path = get_lockfile_path(apm_dir)
-        _existing_lock = LockFile.read(_lock_path)
-        if _existing_lock:
-            old_mcp_servers = builtins.set(_existing_lock.mcp_servers)
-            old_mcp_configs = builtins.dict(_existing_lock.mcp_configs)
-
-        # Also enter the APM install path when the project root has local .apm/
-        # primitives, even if there are no external APM dependencies (#714).
-        from apm_cli.core.scope import get_deploy_root as _get_deploy_root
-        _cli_project_root = _get_deploy_root(scope)
-
-        apm_diagnostics = None
-        if should_install_apm and (has_any_apm_deps or _project_has_root_primitives(_cli_project_root)):
-            if not APM_DEPS_AVAILABLE:
-                logger.error("APM dependency system not available")
-                logger.progress(f"Import error: {_APM_IMPORT_ERROR}")
-                sys.exit(1)
-
-            try:
-                # If specific packages were requested, only install those
-                # Otherwise install all from apm.yml.
-                # `only_pkgs` was computed above so the dry-run preview
-                # and the actual install share one canonical list.
-                install_result = _install_apm_dependencies(
-                    apm_package, update, verbose, only_pkgs, force=force,
-                    parallel_downloads=parallel_downloads,
-                    logger=logger,
-                    scope=scope,
-                    auth_resolver=auth_resolver,
-                    target=target,
-                    allow_insecure=allow_insecure,
-                    allow_insecure_hosts=allow_insecure_hosts,
-                    marketplace_provenance=(
-                        outcome.marketplace_provenance if packages and outcome else None
-                    ),
-                    protocol_pref=protocol_pref,
-                    allow_protocol_fallback=allow_protocol_fallback,
-                    no_policy=no_policy,
-                    skill_subset=_skill_subset,
-                    skill_subset_from_cli=bool(skill_names),
-                )
-                apm_count = install_result.installed_count
-                prompt_count = install_result.prompts_integrated
-                agent_count = install_result.agents_integrated
-                apm_diagnostics = install_result.diagnostics
-
-                # -- Skill subset write-back (Phase 11) --
-                # When CLI provided --skill on a SKILL_BUNDLE package, persist
-                # the subset selection in apm.yml so bare `apm install` is
-                # deterministic.
-                if skill_names and packages:
-                    from ._apm_yml_writer import set_skill_subset_for_entry
-
-                    _star_sentinel = any(s == "*" for s in skill_names)
-                    for dep_key, pkg_type in install_result.package_types.items():
-                        if pkg_type == "skill_bundle":
-                            if _star_sentinel:
-                                # Explicit-all: REMOVE any persisted skills:
-                                if set_skill_subset_for_entry(manifest_path, dep_key, None):
-                                    logger.success(f"Cleared skill subset for {dep_key}")
-                            else:
-                                subset_list = sorted(builtins.set(_skill_subset))
-                                if set_skill_subset_for_entry(manifest_path, dep_key, subset_list):
-                                    logger.success(
-                                        f"Persisted skill subset for {dep_key}: "
-                                        f"[{', '.join(subset_list)}]"
-                                    )
-                        elif pkg_type != "skill_bundle" and not _star_sentinel:
-                            # Non-bundle: warn but do NOT persist
-                            logger.warning(
-                                f"--skill ignored for {dep_key} "
-                                f"(package type: {pkg_type}, not a skill bundle)"
-                            )
-            except InsecureDependencyPolicyError:
-                _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
-                sys.exit(1)
-            except Exception as e:
-                _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
-                # #832: surface PolicyViolationError verbatim (no double-nesting).
-                msg = str(e) if isinstance(e, PolicyViolationError) else f"Failed to install APM dependencies: {e}"
-                logger.error(msg)
-                if not verbose:
-                    logger.progress("Run with --verbose for detailed diagnostics")
-                sys.exit(1)
-        elif should_install_apm and not has_any_apm_deps:
-            logger.verbose_detail("No APM dependencies found in apm.yml")
-
-        # When --update is used, package files on disk may have changed.
-        # Clear the parse cache so transitive MCP collection reads fresh data.
-        if update:
-            from apm_cli.models.apm_package import clear_apm_yml_cache
-            clear_apm_yml_cache()
-
-        # Collect transitive MCP dependencies from resolved APM packages
-        transitive_mcp = []
-        apm_modules_path = get_modules_dir(scope)
-        if should_install_mcp and apm_modules_path.exists():
-            lock_path = get_lockfile_path(apm_dir)
-            transitive_mcp = MCPIntegrator.collect_transitive(
-                apm_modules_path, lock_path, trust_transitive_mcp,
-                diagnostics=apm_diagnostics,
-            )
-            if transitive_mcp:
-                logger.verbose_detail(f"Collected {len(transitive_mcp)} transitive MCP dependency(ies)")
-                mcp_deps = MCPIntegrator.deduplicate(mcp_deps + transitive_mcp)
-
-        # -- S1/S2 fix (#827-C2/C3): enforce policy on ALL MCP deps ----
-        # The pipeline gate phase (policy_gate.py) checks direct APM deps
-        # and direct MCP deps from apm.yml.  However, transitive MCP
-        # servers (discovered via collect_transitive above) are only known
-        # after APM packages are installed.  Run a second preflight
-        # against the *merged* MCP set (direct + transitive) BEFORE
-        # MCPIntegrator writes runtime configs.  On PolicyBlockError we
-        # abort the MCP write but leave already-installed APM packages
-        # in place (they were approved by the gate phase).
-        if should_install_mcp and mcp_deps:
-            from apm_cli.policy.install_preflight import (
-                PolicyBlockError as _TransitivePBE,
-                run_policy_preflight as _transitive_preflight,
-            )
-
-            try:
-                _transitive_preflight(
-                    project_root=project_root,
-                    mcp_deps=mcp_deps,
-                    no_policy=no_policy,
-                    logger=logger,
-                    dry_run=False,
-                )
-            except _TransitivePBE:
-                logger.error(
-                    "MCP server(s) blocked by org policy. "
-                    "APM packages remain installed; MCP configs were NOT written."
-                )
-                logger.render_summary()
-                sys.exit(1)
-
-        # Continue with MCP installation (existing logic)
-        mcp_count = 0
-        new_mcp_servers: builtins.set = builtins.set()
-        if should_install_mcp and mcp_deps:
-            mcp_count = MCPIntegrator.install(
-                mcp_deps, runtime, exclude, verbose,
-                stored_mcp_configs=old_mcp_configs,
-                diagnostics=apm_diagnostics,
-                scope=scope,
-            )
-            new_mcp_servers = MCPIntegrator.get_server_names(mcp_deps)
-            new_mcp_configs = MCPIntegrator.get_server_configs(mcp_deps)
-
-            # Remove stale MCP servers that are no longer needed
-            stale_servers = old_mcp_servers - new_mcp_servers
-            if stale_servers:
-                MCPIntegrator.remove_stale(stale_servers, runtime, exclude, scope=scope)
-
-            # Persist the new MCP server set and configs in the lockfile
-            MCPIntegrator.update_lockfile(new_mcp_servers, mcp_configs=new_mcp_configs)
-        elif should_install_mcp and not mcp_deps:
-            # No MCP deps at all -- remove any old APM-managed servers
-            if old_mcp_servers:
-                MCPIntegrator.remove_stale(old_mcp_servers, runtime, exclude, scope=scope)
-                MCPIntegrator.update_lockfile(builtins.set(), mcp_configs={})
-            logger.verbose_detail("No MCP dependencies found in apm.yml")
-        elif not should_install_mcp and old_mcp_servers:
-            # --only=apm: APM install regenerated the lockfile and dropped
-            # mcp_servers.  Restore the previous set so it is not lost.
-            MCPIntegrator.update_lockfile(old_mcp_servers, mcp_configs=old_mcp_configs)
-
-        # Local .apm/ content integration is now handled inside the
-        # install pipeline (phases/integrate.py + phases/post_deps_local.py,
-        # refactor F3).  The duplicate target resolution, integrator
-        # initialization, and inline stale-cleanup block that lived here
-        # have been removed.
-
-        # Show diagnostics and final install summary
-        if apm_diagnostics and apm_diagnostics.has_diagnostics:
-            apm_diagnostics.render_summary()
-        else:
-            _rich_blank_line()
-
-        error_count = 0
-        if apm_diagnostics:
-            try:
-                error_count = int(apm_diagnostics.error_count)
-            except (TypeError, ValueError):
-                error_count = 0
-        logger.install_summary(
+        _post_install_summary(
+            logger=logger,
             apm_count=apm_count,
             mcp_count=mcp_count,
-            errors=error_count,
-            stale_cleaned=logger.stale_cleaned_total,
+            apm_diagnostics=apm_diagnostics,
+            force=force,
         )
-
-        # Hard-fail when critical security findings blocked any package.
-        # Consistent with apm unpack which also hard-fails on critical.
-        # Use --force to override.
-        if not force and apm_diagnostics and apm_diagnostics.has_critical_security:
-            sys.exit(1)
 
     except InsecureDependencyPolicyError:
         _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
@@ -1641,6 +1567,289 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
             os.environ.pop("APM_VERBOSE", None)
         else:
             os.environ["APM_VERBOSE"] = _apm_verbose_prev
+
+
+# ---------------------------------------------------------------------------
+# install() decomposition: APM pipeline + post-install summary
+# ---------------------------------------------------------------------------
+
+
+def _install_apm_packages(ctx, outcome):
+    """Execute the APM + transitive MCP installation pipeline.
+
+    Parses ``apm.yml``, installs APM dependencies, collects and installs
+    transitive MCP servers, and handles lockfile updates.
+
+    Args:
+        ctx: :class:`InstallContext` with configuration and environment.
+        outcome: ``_ValidationOutcome`` from package validation (may be
+            ``None`` when no explicit packages were passed).
+
+    Returns:
+        Tuple of ``(apm_count, mcp_count, apm_diagnostics)``.
+    """
+    logger = ctx.logger
+
+    logger.resolution_start(
+        to_install_count=len(ctx.only_packages or []) if ctx.packages else 0,
+        lockfile_count=0,  # Refined later inside _install_apm_dependencies
+    )
+
+    # Parse apm.yml to get both APM and MCP dependencies
+    try:
+        apm_package = APMPackage.from_apm_yml(ctx.manifest_path)
+    except Exception as e:
+        logger.error(f"Failed to parse {ctx.manifest_display}: {e}")
+        sys.exit(1)
+
+    logger.verbose_detail(
+        f"Parsed {APM_YML_FILENAME}: {len(apm_package.get_apm_dependencies())} APM deps, "
+        f"{len(apm_package.get_mcp_dependencies())} MCP deps"
+        + (f", {len(apm_package.get_dev_apm_dependencies())} dev deps"
+           if apm_package.get_dev_apm_dependencies() else "")
+    )
+
+    # Get APM and MCP dependencies
+    apm_deps = apm_package.get_apm_dependencies()
+    dev_apm_deps = apm_package.get_dev_apm_dependencies()
+    has_any_apm_deps = bool(apm_deps) or bool(dev_apm_deps)
+    mcp_deps = apm_package.get_mcp_dependencies()
+
+    all_apm_deps = list(apm_deps) + list(dev_apm_deps)
+    _check_insecure_dependencies(all_apm_deps, ctx.allow_insecure, logger)
+
+    # Determine what to install based on install mode
+    should_install_apm = ctx.install_mode != InstallMode.MCP
+    should_install_mcp = ctx.install_mode != InstallMode.APM
+
+    # Show what will be installed if dry run
+    if ctx.dry_run:
+        # -- W2-dry-run (#827): policy preflight in preview mode --
+        # Runs discovery + checks against direct manifest deps (not
+        # resolved/transitive -- dry-run does not run the resolver).
+        # Block-severity violations render as "Would be blocked by
+        # policy" without raising.  Documented limitation: transitive
+        # deps are NOT evaluated since the resolver does not run.
+        from apm_cli.policy.install_preflight import run_policy_preflight as _dr_preflight
+
+        _dr_apm_deps = builtins.list(apm_deps) + builtins.list(dev_apm_deps)
+        _dr_preflight(
+            project_root=ctx.project_root,
+            apm_deps=_dr_apm_deps,
+            mcp_deps=mcp_deps if should_install_mcp else None,
+            no_policy=ctx.no_policy,
+            logger=logger,
+            dry_run=True,
+        )
+
+        from apm_cli.install.presentation.dry_run import render_and_exit
+
+        render_and_exit(
+            logger=logger,
+            should_install_apm=should_install_apm,
+            apm_deps=apm_deps,
+            mcp_deps=mcp_deps,
+            dev_apm_deps=dev_apm_deps,
+            should_install_mcp=should_install_mcp,
+            update=ctx.update,
+            only_packages=ctx.only_packages,
+            apm_dir=ctx.apm_dir,
+        )
+        return 0, 0, None  # render_and_exit exits; this line is defensive
+
+    # Install APM dependencies first (if requested)
+    apm_count = 0
+    prompt_count = 0
+    agent_count = 0
+
+    # Migrate legacy apm.lock -> apm.lock.yaml if needed (one-time, transparent)
+    migrate_lockfile_if_needed(ctx.apm_dir)
+
+    # Capture old MCP servers and configs from lockfile BEFORE
+    # _install_apm_dependencies regenerates it (which drops the fields).
+    # We always read this -- even when --only=apm -- so we can restore the
+    # field after the lockfile is regenerated by the APM install step.
+    old_mcp_servers: builtins.set = builtins.set()
+    old_mcp_configs: builtins.dict = {}
+    _lock_path = get_lockfile_path(ctx.apm_dir)
+    _existing_lock = LockFile.read(_lock_path)
+    if _existing_lock:
+        old_mcp_servers = builtins.set(_existing_lock.mcp_servers)
+        old_mcp_configs = builtins.dict(_existing_lock.mcp_configs)
+
+    # Also enter the APM install path when the project root has local .apm/
+    # primitives, even if there are no external APM dependencies (#714).
+    from apm_cli.core.scope import get_deploy_root as _get_deploy_root
+    _cli_project_root = _get_deploy_root(ctx.scope)
+
+    apm_diagnostics = None
+    if should_install_apm and (has_any_apm_deps or _project_has_root_primitives(_cli_project_root)):
+        if not APM_DEPS_AVAILABLE:
+            logger.error("APM dependency system not available")
+            logger.progress(f"Import error: {_APM_IMPORT_ERROR}")
+            sys.exit(1)
+
+        try:
+            # If specific packages were requested, only install those
+            # Otherwise install all from apm.yml.
+            # `only_packages` was computed above so the dry-run preview
+            # and the actual install share one canonical list.
+            install_result = _install_apm_dependencies(
+                apm_package, ctx.update, ctx.verbose, ctx.only_packages, force=ctx.force,
+                parallel_downloads=ctx.parallel_downloads,
+                logger=logger,
+                scope=ctx.scope,
+                auth_resolver=ctx.auth_resolver,
+                target=ctx.target,
+                allow_insecure=ctx.allow_insecure,
+                allow_insecure_hosts=ctx.allow_insecure_hosts,
+                marketplace_provenance=(
+                    outcome.marketplace_provenance if ctx.packages and outcome else None
+                ),
+                protocol_pref=ctx.protocol_pref,
+                allow_protocol_fallback=ctx.allow_protocol_fallback,
+                no_policy=ctx.no_policy,
+            )
+            apm_count = install_result.installed_count
+            prompt_count = install_result.prompts_integrated
+            agent_count = install_result.agents_integrated
+            apm_diagnostics = install_result.diagnostics
+        except InsecureDependencyPolicyError:
+            _maybe_rollback_manifest(ctx.snapshot_manifest_path, ctx.manifest_snapshot, logger)
+            sys.exit(1)
+        except Exception as e:
+            _maybe_rollback_manifest(ctx.snapshot_manifest_path, ctx.manifest_snapshot, logger)
+            # #832: surface PolicyViolationError verbatim (no double-nesting).
+            msg = str(e) if isinstance(e, PolicyViolationError) else f"Failed to install APM dependencies: {e}"
+            logger.error(msg)
+            if not ctx.verbose:
+                logger.progress("Run with --verbose for detailed diagnostics")
+            sys.exit(1)
+    elif should_install_apm and not has_any_apm_deps:
+        logger.verbose_detail("No APM dependencies found in apm.yml")
+
+    # When --update is used, package files on disk may have changed.
+    # Clear the parse cache so transitive MCP collection reads fresh data.
+    if ctx.update:
+        from apm_cli.models.apm_package import clear_apm_yml_cache
+        clear_apm_yml_cache()
+
+    # Collect transitive MCP dependencies from resolved APM packages
+    transitive_mcp = []
+    from ..core.scope import get_modules_dir
+    apm_modules_path = get_modules_dir(ctx.scope)
+    if should_install_mcp and apm_modules_path.exists():
+        lock_path = get_lockfile_path(ctx.apm_dir)
+        transitive_mcp = MCPIntegrator.collect_transitive(
+            apm_modules_path, lock_path, ctx.trust_transitive_mcp,
+            diagnostics=apm_diagnostics,
+        )
+        if transitive_mcp:
+            logger.verbose_detail(f"Collected {len(transitive_mcp)} transitive MCP dependency(ies)")
+            mcp_deps = MCPIntegrator.deduplicate(mcp_deps + transitive_mcp)
+
+    # -- S1/S2 fix (#827-C2/C3): enforce policy on ALL MCP deps ----
+    # The pipeline gate phase (policy_gate.py) checks direct APM deps
+    # and direct MCP deps from apm.yml.  However, transitive MCP
+    # servers (discovered via collect_transitive above) are only known
+    # after APM packages are installed.  Run a second preflight
+    # against the *merged* MCP set (direct + transitive) BEFORE
+    # MCPIntegrator writes runtime configs.  On PolicyBlockError we
+    # abort the MCP write but leave already-installed APM packages
+    # in place (they were approved by the gate phase).
+    if should_install_mcp and mcp_deps:
+        from apm_cli.policy.install_preflight import (
+            PolicyBlockError as _TransitivePBE,
+            run_policy_preflight as _transitive_preflight,
+        )
+
+        try:
+            _transitive_preflight(
+                project_root=ctx.project_root,
+                mcp_deps=mcp_deps,
+                no_policy=ctx.no_policy,
+                logger=logger,
+                dry_run=False,
+            )
+        except _TransitivePBE:
+            logger.error(
+                "MCP server(s) blocked by org policy. "
+                "APM packages remain installed; MCP configs were NOT written."
+            )
+            logger.render_summary()
+            sys.exit(1)
+
+    # Continue with MCP installation (existing logic)
+    mcp_count = 0
+    new_mcp_servers: builtins.set = builtins.set()
+    if should_install_mcp and mcp_deps:
+        mcp_count = MCPIntegrator.install(
+            mcp_deps, ctx.runtime, ctx.exclude, ctx.verbose,
+            stored_mcp_configs=old_mcp_configs,
+            diagnostics=apm_diagnostics,
+            scope=ctx.scope,
+        )
+        new_mcp_servers = MCPIntegrator.get_server_names(mcp_deps)
+        new_mcp_configs = MCPIntegrator.get_server_configs(mcp_deps)
+
+        # Remove stale MCP servers that are no longer needed
+        stale_servers = old_mcp_servers - new_mcp_servers
+        if stale_servers:
+            MCPIntegrator.remove_stale(stale_servers, ctx.runtime, ctx.exclude, scope=ctx.scope)
+
+        # Persist the new MCP server set and configs in the lockfile
+        MCPIntegrator.update_lockfile(new_mcp_servers, mcp_configs=new_mcp_configs)
+    elif should_install_mcp and not mcp_deps:
+        # No MCP deps at all -- remove any old APM-managed servers
+        if old_mcp_servers:
+            MCPIntegrator.remove_stale(old_mcp_servers, ctx.runtime, ctx.exclude, scope=ctx.scope)
+            MCPIntegrator.update_lockfile(builtins.set(), mcp_configs={})
+        logger.verbose_detail("No MCP dependencies found in apm.yml")
+    elif not should_install_mcp and old_mcp_servers:
+        # --only=apm: APM install regenerated the lockfile and dropped
+        # mcp_servers.  Restore the previous set so it is not lost.
+        MCPIntegrator.update_lockfile(old_mcp_servers, mcp_configs=old_mcp_configs)
+
+    # Local .apm/ content integration is now handled inside the
+    # install pipeline (phases/integrate.py + phases/post_deps_local.py,
+    # refactor F3).  The duplicate target resolution, integrator
+    # initialization, and inline stale-cleanup block that lived here
+    # have been removed.
+
+    return apm_count, mcp_count, apm_diagnostics
+
+
+def _post_install_summary(*, logger, apm_count, mcp_count, apm_diagnostics, force):
+    """Render diagnostics and final install summary.
+
+    Shows diagnostic details (if any), the install summary line, and
+    exits with code 1 when critical security findings are present
+    (unless *force* is set).
+    """
+    # Show diagnostics and final install summary
+    if apm_diagnostics and apm_diagnostics.has_diagnostics:
+        apm_diagnostics.render_summary()
+    else:
+        _rich_blank_line()
+
+    error_count = 0
+    if apm_diagnostics:
+        try:
+            error_count = int(apm_diagnostics.error_count)
+        except (TypeError, ValueError):
+            error_count = 0
+    logger.install_summary(
+        apm_count=apm_count,
+        mcp_count=mcp_count,
+        errors=error_count,
+        stale_cleaned=logger.stale_cleaned_total,
+    )
+
+    # Hard-fail when critical security findings blocked any package.
+    # Consistent with apm unpack which also hard-fails on critical.
+    # Use --force to override.
+    if not force and apm_diagnostics and apm_diagnostics.has_critical_security:
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------

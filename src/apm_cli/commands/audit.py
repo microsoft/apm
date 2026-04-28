@@ -11,16 +11,18 @@ Exit codes:
     2 -- warnings only (no critical)
 """
 
+import dataclasses
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import click
 
+from ..core.command_logger import CommandLogger
 from ..deps.lockfile import LockFile, get_lockfile_path
+from ..policy._help_text import POLICY_SOURCE_FORMS_HELP
 from ..security.content_scanner import ContentScanner, ScanFinding
 from ..security.file_scanner import scan_lockfile_packages
-from ..core.command_logger import CommandLogger
 from ..utils.console import (
     _get_console,
     _rich_echo,
@@ -29,6 +31,24 @@ from ..utils.console import (
     _rich_warning,
     STATUS_SYMBOLS,
 )
+
+
+# -- Shared config --------------------------------------------------
+
+
+@dataclasses.dataclass(frozen=True)
+class _AuditConfig:
+    """Bundled configuration shared by both audit modes.
+
+    Reduces parameter counts on extracted handler functions so each
+    receives a single config object plus its mode-specific arguments.
+    """
+
+    project_root: Path
+    logger: "CommandLogger"
+    verbose: bool
+    output_format: str
+    output_path: Optional[str]
 
 
 # -- Helpers --------------------------------------------------------
@@ -384,261 +404,157 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
         )
 
 
-# -- Command --------------------------------------------------------
+# -- Mode handlers --------------------------------------------------
 
 
-@click.command(help="Scan installed packages for hidden Unicode characters")
-@click.argument("package", required=False)
-@click.option(
-    "--file",
-    "file_path",
-    type=click.Path(exists=False),
-    help="Scan an arbitrary file (not just APM-managed files)",
-)
-@click.option(
-    "--strip",
-    is_flag=True,
-    help="Remove hidden characters from scanned files (preserves emoji and whitespace)",
-)
-@click.option(
-    "--verbose",
-    "-v",
-    is_flag=True,
-    help="Show all findings including harmless ones",
-)
-@click.option(
-    "--dry-run",
-    is_flag=True,
-    help="Preview what --strip would remove without modifying files",
-)
-@click.option(
-    "--format",
-    "-f",
-    "output_format",
-    type=click.Choice(["text", "json", "sarif", "markdown"], case_sensitive=False),
-    default="text",
-    help="Output format: text (default), json, sarif (GitHub Code Scanning), markdown (step summaries).",
-)
-@click.option(
-    "--output",
-    "-o",
-    "output_path",
-    type=click.Path(),
-    default=None,
-    help="Write output to file (auto-detects format from extension: .sarif, .json, .md).",
-)
-@click.option(
-    "--ci",
-    is_flag=True,
-    help="Run lockfile consistency checks for CI/CD gates. Exit 0 if clean, 1 if violations found.",
-)
-@click.option(
-    "--policy",
-    "policy_source",
-    default=None,
-    help=(
-        "Policy source: 'org' (auto-discover), file path, or URL. "
-        "Used with --ci for policy checks. [experimental]"
-    ),
-)
-@click.option(
-    "--no-cache",
-    "no_cache",
-    is_flag=True,
-    help="Force fresh policy fetch (skip cache).",
-)
-@click.option(
-    "--no-policy",
-    "no_policy",
-    is_flag=True,
-    help=(
-        "Skip org policy discovery and enforcement. "
-        "Overridden when --policy is passed explicitly."
-    ),
-)
-@click.option(
-    "--no-fail-fast",
-    "no_fail_fast",
-    is_flag=True,
-    help="Run all checks even after a failure (default: stop at first failure).",
-)
-@click.pass_context
-def audit(ctx, package, file_path, strip, verbose, dry_run, output_format, output_path, ci, policy_source, no_cache, no_policy, no_fail_fast):
-    """Scan deployed prompt files for hidden Unicode characters.
+def _audit_ci_gate(
+    cfg: _AuditConfig,
+    policy_source: Optional[str],
+    no_cache: bool,
+    no_policy: bool,
+    no_fail_fast: bool,
+) -> None:
+    """Handle ``apm audit --ci`` -- lockfile consistency gate.
 
-    Detects invisible characters that could embed hidden instructions in
-    prompt, instruction, and rules files. Dangerous and suspicious
-    characters can be removed with --strip.
-
-    With --ci, runs lockfile consistency checks instead of content scanning.
-    This validates that the on-disk state matches what the lockfile declares,
-    suitable for CI/CD pipeline gates.
-
-    \b
-    Exit codes:
-        0  Clean, info-only findings, or successful strip
-        1  Critical findings detected (or --ci with violations)
-        2  Warning-only findings (suspicious but not critical)
-
-    \b
-    Examples:
-        apm audit                      # Scan all installed packages
-        apm audit my-package           # Scan a specific package
-        apm audit --file .cursorrules  # Scan any file
-        apm audit --strip              # Remove dangerous/suspicious chars
-        apm audit --ci                 # Lockfile consistency gate
-        apm audit --ci --policy org    # CI gate with org policy checks
-        apm audit --ci -f json         # JSON CI report
-        apm audit --ci -f sarif        # SARIF for GitHub Code Scanning
-        apm audit -o report.sarif      # Write SARIF to file
+    Runs baseline lockfile checks and (optionally) org-policy checks,
+    then emits a structured report and exits with 0 (clean) or 1
+    (violations).
     """
-    project_root = Path.cwd()
-    logger = CommandLogger("audit", verbose=verbose)
+    logger = cfg.logger
 
-    # -- CI mode: lockfile consistency gate -------------------------
-    if ci:
-        if verbose:
-            logger.warning(
-                "--verbose has no effect in --ci mode (output is structured)"
-            )
-        if strip or dry_run or file_path or package:
-            logger.error(
-                "--ci cannot be combined with --strip, --dry-run, --file, or PACKAGE"
-            )
-            sys.exit(1)
+    from ..policy.ci_checks import run_baseline_checks
+    from ..policy.policy_checks import run_policy_checks
 
-        if output_format == "markdown":
-            logger.error(
-                "--ci does not support --format markdown. Use json or sarif."
-            )
-            sys.exit(1)
+    fail_fast = not no_fail_fast
 
-        from ..policy.ci_checks import run_baseline_checks
-        from ..policy.policy_checks import run_policy_checks
+    # Always run baseline checks
+    ci_result = run_baseline_checks(cfg.project_root, fail_fast=fail_fast)
 
-        fail_fast = not no_fail_fast
+    # Resolve policy source: explicit --policy wins; otherwise mirror
+    # install's auto-discovery (closes #827) so CI catches sideloaded
+    # files via unmanaged-files checks. --no-policy skips discovery.
+    from ..policy.discovery import discover_policy, discover_policy_with_chain
+    from ..policy.project_config import (
+        read_project_fetch_failure_default,
+    )
 
-        # Always run baseline checks
-        ci_result = run_baseline_checks(project_root, fail_fast=fail_fast)
-
-        # Resolve policy source: explicit --policy wins; otherwise mirror
-        # install's auto-discovery (closes #827) so CI catches sideloaded
-        # files via unmanaged-files checks. --no-policy skips discovery.
-        from ..policy.discovery import discover_policy, discover_policy_with_chain
-        from ..policy.project_config import (
-            read_project_fetch_failure_default,
+    fetch_result = None
+    if policy_source and (not fail_fast or ci_result.passed):
+        fetch_result = discover_policy(
+            cfg.project_root,
+            policy_override=policy_source,
+            no_cache=no_cache,
         )
+    elif (
+        not policy_source
+        and not no_policy
+        and (not fail_fast or ci_result.passed)
+    ):
+        # Auto-discovery (mirror install path)
+        fetch_result = discover_policy_with_chain(cfg.project_root)
+        # Treat outcomes that mean "no policy to enforce" as a no-op.
+        if fetch_result.outcome in ("absent", "no_git_remote", "empty", "disabled"):
+            fetch_result = None
 
-        fetch_result = None
-        if policy_source and (not fail_fast or ci_result.passed):
-            fetch_result = discover_policy(
-                project_root,
-                policy_override=policy_source,
-                no_cache=no_cache,
-            )
-        elif (
-            not policy_source
-            and not no_policy
-            and (not fail_fast or ci_result.passed)
+    if fetch_result is not None:
+        # Honour project-side fetch_failure_default when the org policy
+        # could not be fetched / parsed (closes #829). Default "warn"
+        # downgrades the previous unconditional sys.exit(1) into a log.
+        if fetch_result.error or (
+            fetch_result.outcome
+            in ("malformed", "cache_miss_fetch_fail", "garbage_response")
         ):
-            # Auto-discovery (mirror install path)
-            fetch_result = discover_policy_with_chain(project_root)
-            # Treat outcomes that mean "no policy to enforce" as a no-op.
-            if fetch_result.outcome in ("absent", "no_git_remote", "empty", "disabled"):
+            project_default = read_project_fetch_failure_default(cfg.project_root)
+            err_text = fetch_result.error or fetch_result.fetch_error or fetch_result.outcome
+            if project_default == "block":
+                logger.error(
+                    f"Policy fetch failed: {err_text} "
+                    "(policy.fetch_failure_default=block)"
+                )
+                sys.exit(1)
+            else:
+                logger.warning(
+                    f"Policy fetch failed: {err_text}; "
+                    "proceeding without policy checks "
+                    "(set policy.fetch_failure_default=block in apm.yml to fail closed)"
+                )
                 fetch_result = None
 
-        if fetch_result is not None:
-            # Honor project-side fetch_failure_default when the org policy
-            # could not be fetched / parsed (closes #829). Default "warn"
-            # downgrades the previous unconditional sys.exit(1) into a log.
-            if fetch_result.error or (
-                fetch_result.outcome
-                in ("malformed", "cache_miss_fetch_fail", "garbage_response")
-            ):
-                project_default = read_project_fetch_failure_default(project_root)
-                err_text = fetch_result.error or fetch_result.fetch_error or fetch_result.outcome
-                if project_default == "block":
-                    logger.error(
-                        f"Policy fetch failed: {err_text} "
-                        "(policy.fetch_failure_default=block)"
-                    )
-                    sys.exit(1)
-                else:
-                    logger.warning(
-                        f"Policy fetch failed: {err_text}; "
-                        "proceeding without policy checks "
-                        "(set policy.fetch_failure_default=block in apm.yml to fail closed)"
-                    )
-                    fetch_result = None
+    if fetch_result is not None and fetch_result.found:
+        policy_obj = fetch_result.policy
 
-        if fetch_result is not None and fetch_result.found:
-            policy_obj = fetch_result.policy
-
-            # Respect enforcement level
-            if policy_obj.enforcement == "off":
-                pass  # Policy checks disabled
-            else:
-                from ..policy.models import CheckResult
-
-                policy_result = run_policy_checks(
-                    project_root, policy_obj, fail_fast=fail_fast
-                )
-                if policy_obj.enforcement == "block":
-                    ci_result.checks.extend(policy_result.checks)
-                else:
-                    # enforcement == "warn": include results but don't fail
-                    for check in policy_result.checks:
-                        ci_result.checks.append(
-                            CheckResult(
-                                name=check.name,
-                                passed=True,  # downgrade to pass
-                                message=check.message + (" (enforcement: warn)" if not check.passed else ""),
-                                details=check.details,
-                            )
-                        )
-
-        # Resolve effective format
-        effective_format = output_format
-        if output_path and effective_format == "text":
-            from ..security.audit_report import detect_format_from_extension
-
-            effective_format = detect_format_from_extension(Path(output_path))
-
-        if effective_format in ("json", "sarif"):
-            import json as _json
-
-            payload = (
-                ci_result.to_sarif()
-                if effective_format == "sarif"
-                else ci_result.to_json()
-            )
-            output = _json.dumps(payload, indent=2)
-            if output_path:
-                Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-                Path(output_path).write_text(output, encoding="utf-8")
-                logger.success(f"CI audit report written to {output_path}")
-            else:
-                click.echo(output)
+        # Respect enforcement level
+        if policy_obj.enforcement == "off":
+            pass  # Policy checks disabled
         else:
-            _render_ci_results(ci_result)
+            from ..policy.models import CheckResult
 
-        sys.exit(0 if ci_result.passed else 1)
+            policy_result = run_policy_checks(
+                cfg.project_root, policy_obj, fail_fast=fail_fast
+            )
+            if policy_obj.enforcement == "block":
+                ci_result.checks.extend(policy_result.checks)
+            else:
+                # enforcement == "warn": include results but don't fail
+                for check in policy_result.checks:
+                    ci_result.checks.append(
+                        CheckResult(
+                            name=check.name,
+                            passed=True,  # downgrade to pass
+                            message=check.message + (" (enforcement: warn)" if not check.passed else ""),
+                            details=check.details,
+                        )
+                    )
 
-    # -- Content scan mode ------------------------------------------
-
-    if policy_source:
-        logger.warning(
-            "--policy requires --ci mode. "
-            "Use 'apm audit --ci --policy <source>' to run policy checks."
-        )
-
-    # Resolve effective format (auto-detect from extension when needed)
-
-    effective_format = output_format
-    if output_path and effective_format == "text":
+    # Resolve effective format
+    effective_format = cfg.output_format
+    if cfg.output_path and effective_format == "text":
         from ..security.audit_report import detect_format_from_extension
 
-        effective_format = detect_format_from_extension(Path(output_path))
+        effective_format = detect_format_from_extension(Path(cfg.output_path))
+
+    if effective_format in ("json", "sarif"):
+        import json as _json
+
+        payload = (
+            ci_result.to_sarif()
+            if effective_format == "sarif"
+            else ci_result.to_json()
+        )
+        output = _json.dumps(payload, indent=2)
+        if cfg.output_path:
+            Path(cfg.output_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(cfg.output_path).write_text(output, encoding="utf-8")
+            logger.success(f"CI audit report written to {cfg.output_path}")
+        else:
+            click.echo(output)
+    else:
+        _render_ci_results(ci_result)
+
+    sys.exit(0 if ci_result.passed else 1)
+
+
+def _audit_content_scan(
+    cfg: _AuditConfig,
+    package: Optional[str],
+    file_path: Optional[str],
+    strip: bool,
+    dry_run: bool,
+) -> None:
+    """Handle default ``apm audit`` -- content integrity scanning.
+
+    Scans deployed prompt files (or a single file via ``--file``) for
+    hidden Unicode characters, optionally stripping them.
+    """
+    logger = cfg.logger
+    project_root = cfg.project_root
+
+    # Resolve effective format (auto-detect from extension when needed)
+    effective_format = cfg.output_format
+    if cfg.output_path and effective_format == "text":
+        from ..security.audit_report import detect_format_from_extension
+
+        effective_format = detect_format_from_extension(Path(cfg.output_path))
 
     # --format json/sarif/markdown is incompatible with --strip / --dry-run
     if effective_format != "text" and (strip or dry_run):
@@ -707,23 +623,23 @@ def audit(ctx, package, file_path, strip, verbose, dry_run, output_format, outpu
         exit_code = 1 if ContentScanner.has_critical(all_findings) else 2
 
     if effective_format == "text":
-        if output_path:
+        if cfg.output_path:
             logger.error(
                 "Text format does not support --output. "
                 "Use --format json, sarif, or markdown to write to a file."
             )
             sys.exit(1)
         if findings_by_file:
-            _render_findings_table(findings_by_file, verbose=verbose)
+            _render_findings_table(findings_by_file, verbose=cfg.verbose)
         _render_summary(findings_by_file, files_scanned, logger)
     elif effective_format == "markdown":
         from ..security.audit_report import findings_to_markdown
 
         md_report = findings_to_markdown(findings_by_file, files_scanned=files_scanned)
-        if output_path:
-            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-            Path(output_path).write_text(md_report, encoding="utf-8")
-            logger.success(f"Audit report written to {output_path}")
+        if cfg.output_path:
+            Path(cfg.output_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(cfg.output_path).write_text(md_report, encoding="utf-8")
+            logger.success(f"Audit report written to {cfg.output_path}")
         else:
             click.echo(md_report)
     else:
@@ -745,11 +661,160 @@ def audit(ctx, package, file_path, strip, verbose, dry_run, output_format, outpu
                 exit_code=exit_code,
             )
 
-        if output_path:
-            write_report(report, Path(output_path))
-            logger.success(f"Audit report written to {output_path}")
+        if cfg.output_path:
+            write_report(report, Path(cfg.output_path))
+            logger.success(f"Audit report written to {cfg.output_path}")
         else:
             click.echo(serialize_report(report))
 
     # -- Exit code --
     sys.exit(exit_code)
+
+
+# -- Command --------------------------------------------------------
+
+
+@click.command(help="Scan installed packages for hidden Unicode characters")
+@click.argument("package", required=False)
+@click.option(
+    "--file",
+    "file_path",
+    type=click.Path(exists=False),
+    help="Scan an arbitrary file (not just APM-managed files)",
+)
+@click.option(
+    "--strip",
+    is_flag=True,
+    help="Remove hidden characters from scanned files (preserves emoji and whitespace)",
+)
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Show all findings including harmless ones",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Preview what --strip would remove without modifying files",
+)
+@click.option(
+    "--format",
+    "-f",
+    "output_format",
+    type=click.Choice(["text", "json", "sarif", "markdown"], case_sensitive=False),
+    default="text",
+    help="Output format: text (default), json, sarif (GitHub Code Scanning), markdown (step summaries).",
+)
+@click.option(
+    "--output",
+    "-o",
+    "output_path",
+    type=click.Path(),
+    default=None,
+    help="Write output to file (auto-detects format from extension: .sarif, .json, .md).",
+)
+@click.option(
+    "--ci",
+    is_flag=True,
+    help="Run lockfile consistency checks for CI/CD gates. Exit 0 if clean, 1 if violations found.",
+)
+@click.option(
+    "--policy",
+    "policy_source",
+    default=None,
+    help=(
+        f"Policy source. {POLICY_SOURCE_FORMS_HELP} "
+        "Used with --ci for policy checks. [experimental]"
+    ),
+)
+@click.option(
+    "--no-cache",
+    "no_cache",
+    is_flag=True,
+    help="Force fresh policy fetch (skip cache).",
+)
+@click.option(
+    "--no-policy",
+    "no_policy",
+    is_flag=True,
+    help=(
+        "Skip org policy discovery and enforcement. "
+        "Overridden when --policy is passed explicitly."
+    ),
+)
+@click.option(
+    "--no-fail-fast",
+    "no_fail_fast",
+    is_flag=True,
+    help="Run all checks even after a failure (default: stop at first failure).",
+)
+@click.pass_context
+def audit(ctx, package, file_path, strip, verbose, dry_run, output_format, output_path, ci, policy_source, no_cache, no_policy, no_fail_fast):
+    """Scan deployed prompt files for hidden Unicode characters.
+
+    Detects invisible characters that could embed hidden instructions in
+    prompt, instruction, and rules files. Dangerous and suspicious
+    characters can be removed with --strip.
+
+    With --ci, runs lockfile consistency checks instead of content scanning.
+    This validates that the on-disk state matches what the lockfile declares,
+    suitable for CI/CD pipeline gates.
+
+    \b
+    Exit codes:
+        0  Clean, info-only findings, or successful strip
+        1  Critical findings detected (or --ci with violations)
+        2  Warning-only findings (suspicious but not critical)
+
+    \b
+    Examples:
+        apm audit                      # Scan all installed packages
+        apm audit my-package           # Scan a specific package
+        apm audit --file .cursorrules  # Scan any file
+        apm audit --strip              # Remove dangerous/suspicious chars
+        apm audit --ci                 # Lockfile consistency gate
+        apm audit --ci --policy org    # CI gate with org policy checks
+        apm audit --ci -f json         # JSON CI report
+        apm audit --ci -f sarif        # SARIF for GitHub Code Scanning
+        apm audit -o report.sarif      # Write SARIF to file
+    """
+    project_root = Path.cwd()
+    logger = CommandLogger("audit", verbose=verbose)
+
+    cfg = _AuditConfig(
+        project_root=project_root,
+        logger=logger,
+        verbose=verbose,
+        output_format=output_format,
+        output_path=output_path,
+    )
+
+    # -- CI mode: lockfile consistency gate -------------------------
+    if ci:
+        if verbose:
+            logger.warning(
+                "--verbose has no effect in --ci mode (output is structured)"
+            )
+        if strip or dry_run or file_path or package:
+            logger.error(
+                "--ci cannot be combined with --strip, --dry-run, --file, or PACKAGE"
+            )
+            sys.exit(1)
+        if output_format == "markdown":
+            logger.error(
+                "--ci does not support --format markdown. Use json or sarif."
+            )
+            sys.exit(1)
+
+        _audit_ci_gate(cfg, policy_source, no_cache, no_policy, no_fail_fast)
+        return  # _audit_ci_gate calls sys.exit; return guards against fall-through
+
+    # -- Content scan mode ------------------------------------------
+    if policy_source:
+        logger.warning(
+            "--policy requires --ci mode. "
+            "Use 'apm audit --ci --policy <source>' to run policy checks."
+        )
+
+    _audit_content_scan(cfg, package, file_path, strip, dry_run)

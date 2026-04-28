@@ -157,6 +157,7 @@ def run_install_pipeline(
         no_policy=no_policy,
         skill_subset=skill_subset,
         skill_subset_from_cli=skill_subset_from_cli,
+        early_lockfile=_early_lockfile,
     )
 
     # ------------------------------------------------------------------
