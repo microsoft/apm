@@ -13,6 +13,22 @@ from ...models.apm_package import APMPackage, DependencyReference
 from ...integration.mcp_integrator import MCPIntegrator
 
 
+def _build_children_index(lockfile):
+    """Build parent_url -> [child_deps] index in a single O(n) pass.
+
+    Returns a dict mapping each ``resolved_by`` URL to the list of
+    dependency objects that claim it as their parent.
+    """
+    children = {}
+    for dep in lockfile.get_package_dependencies():
+        parent = dep.resolved_by
+        if parent:
+            if parent not in children:
+                children[parent] = []
+            children[parent].append(dep)
+    return children
+
+
 def _parse_dependency_entry(dep_entry):
     """Parse a dependency entry from apm.yml into a DependencyReference."""
     if isinstance(dep_entry, DependencyReference):
@@ -88,17 +104,17 @@ def _dry_run_uninstall(packages_to_remove, apm_modules_dir, logger):
                 removed_repo_urls.add(ref.repo_url)
             except (ValueError, TypeError, AttributeError, KeyError):
                 removed_repo_urls.add(pkg)
+        children_index = _build_children_index(lockfile)
         queue = builtins.list(removed_repo_urls)
         potential_orphans = builtins.set()
         while queue:
             parent_url = queue.pop()
-            for dep in lockfile.get_package_dependencies():
+            for dep in children_index.get(parent_url, []):
                 key = dep.get_unique_key()
                 if key in potential_orphans:
                     continue
-                if dep.resolved_by and dep.resolved_by == parent_url:
-                    potential_orphans.add(key)
-                    queue.append(dep.repo_url)
+                potential_orphans.add(key)
+                queue.append(dep.repo_url)
         if potential_orphans:
             logger.progress(f"  Transitive dependencies that would be removed:")
             for orphan_key in sorted(potential_orphans):
@@ -161,17 +177,17 @@ def _cleanup_transitive_orphans(lockfile, packages_to_remove, apm_modules_dir, a
             removed_repo_urls.add(pkg)
 
     # Find transitive orphans recursively
+    children_index = _build_children_index(lockfile)
     orphans = builtins.set()
     queue = builtins.list(removed_repo_urls)
     while queue:
         parent_url = queue.pop()
-        for dep in lockfile.get_package_dependencies():
+        for dep in children_index.get(parent_url, []):
             key = dep.get_unique_key()
             if key in orphans:
                 continue
-            if dep.resolved_by and dep.resolved_by == parent_url:
-                orphans.add(key)
-                queue.append(dep.repo_url)
+            orphans.add(key)
+            queue.append(dep.repo_url)
 
     if not orphans:
         return 0, builtins.set()

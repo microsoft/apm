@@ -196,8 +196,9 @@ class TestSearch:
     @patch("apm_cli.marketplace.registry.get_marketplace_by_name")
     def test_search_unknown_marketplace(self, mock_get, runner):
         from apm_cli.commands.marketplace import search
+        from apm_cli.marketplace.errors import MarketplaceNotFoundError
 
-        mock_get.side_effect = Exception("not found")
+        mock_get.side_effect = MarketplaceNotFoundError("nonexistent")
         result = runner.invoke(search, ["security@nonexistent"])
         assert result.exit_code != 0
         assert "not registered" in result.output.lower()

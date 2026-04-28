@@ -23,25 +23,66 @@ from ._utils import (
 )
 
 
-@click.group(help="Manage APM package dependencies")
-def deps():
-    """APM dependency management commands."""
-    pass
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+def _format_primitive_counts(primitives):
+    """Format primitive type counts into a comma-separated summary string."""
+    parts = []
+    for ptype, count in primitives.items():
+        if count > 0:
+            parts.append(f"{count} {ptype}")
+    return ", ".join(parts)
 
 
-def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_only=False):
-    """Display dependencies for a single scope (Project or Global)."""
+def _dep_display_name(dep) -> str:
+    """Get display name for a locked dependency (key@version)."""
+    key = dep.get_unique_key()
+    version = (
+        dep.version
+        or (dep.resolved_commit[:7] if dep.resolved_commit else None)
+        or dep.resolved_ref
+        or "latest"
+    )
+    return f"{key}@{version}"
+
+
+def _add_tree_children(parent_branch, parent_repo_url, children_map, has_rich, depth=0):
+    """Recursively add transitive deps as nested children of a tree node."""
+    kids = children_map.get(parent_repo_url, [])
+    for child_dep in kids:
+        child_name = _dep_display_name(child_dep)
+        if has_rich:
+            child_branch = parent_branch.add(f"[dim]{child_name}[/dim]")
+        else:
+            child_branch = child_name
+        if depth < 5:  # Prevent infinite recursion
+            _add_tree_children(
+                child_branch, child_dep.repo_url, children_map, has_rich, depth + 1
+            )
+
+
+# ---------------------------------------------------------------------------
+# Data resolution — deps list
+# ---------------------------------------------------------------------------
+
+def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
+    """Resolve installed packages and orphan status for a single scope.
+
+    Returns ``(installed_packages, orphaned_packages)`` where
+    *installed_packages* is a list of dicts and *orphaned_packages* is a
+    list of name strings, or ``(None, None)`` when no ``apm_modules``
+    directory exists.
+    """
     from ...deps.lockfile import LockFile, get_lockfile_path
 
     apm_modules_path = apm_dir / APM_MODULES_DIR
-    lockfile = None
     insecure_lock_deps = {}
 
     # Check if apm_modules exists
     if not apm_modules_path.exists():
-        logger.progress(f"No APM dependencies installed ({scope_label} scope)")
-        logger.verbose_detail("Run 'apm install' to install dependencies from apm.yml")
-        return
+        return None, None
 
     # Load project dependencies to check for orphaned packages
     # GitHub: owner/repo or owner/virtual-pkg-name (2 levels)
@@ -157,6 +198,26 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
 
     if insecure_only:
         installed_packages = [pkg for pkg in installed_packages if pkg['is_insecure']]
+
+    return installed_packages, orphaned_packages
+
+
+@click.group(help="Manage APM package dependencies")
+def deps():
+    """APM dependency management commands."""
+    pass
+
+
+def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_only=False):
+    """Display dependencies for a single scope (Project or Global)."""
+    installed_packages, orphaned_packages = _resolve_scope_deps(
+        apm_dir, logger, insecure_only
+    )
+
+    if installed_packages is None:
+        logger.progress(f"No APM dependencies installed ({scope_label} scope)")
+        logger.verbose_detail("Run 'apm install' to install dependencies from apm.yml")
+        return
 
     if not installed_packages:
         if insecure_only:
@@ -294,6 +355,99 @@ def list_packages(global_, show_all, insecure_only):
         sys.exit(1)
 
 
+# ---------------------------------------------------------------------------
+# Data resolution — deps tree
+# ---------------------------------------------------------------------------
+
+def _build_dep_tree(apm_dir):
+    """Build dependency tree data from lockfile or directory scan.
+
+    Returns a dict describing the tree structure::
+
+        {
+            'project_name': str,
+            'apm_modules_path': Path,
+            'source': 'lockfile' | 'directory',
+            'direct': [dep, ...],           # lockfile mode only
+            'children_map': {url: [dep]},   # lockfile mode only
+            'scanned_packages': [{...}],    # directory fallback only
+            'has_modules': bool,
+        }
+    """
+    apm_modules_path = apm_dir / APM_MODULES_DIR
+
+    # Load project info
+    project_name = "my-project"
+    try:
+        apm_yml_path = apm_dir / APM_YML_FILENAME
+        if apm_yml_path.exists():
+            root_package = APMPackage.from_apm_yml(apm_yml_path)
+            project_name = root_package.name
+    except Exception:
+        pass
+
+    result = {
+        'project_name': project_name,
+        'apm_modules_path': apm_modules_path,
+        'source': 'directory',
+        'direct': [],
+        'children_map': {},
+        'scanned_packages': [],
+        'has_modules': apm_modules_path.exists(),
+    }
+
+    # Try to load lockfile for accurate tree with depth/parent info
+    try:
+        from ...deps.lockfile import LockFile, get_lockfile_path
+        lockfile_path = get_lockfile_path(apm_dir)
+        if lockfile_path.exists():
+            lockfile = LockFile.read(lockfile_path)
+            if lockfile:
+                lockfile_deps = lockfile.get_package_dependencies()
+                if lockfile_deps:
+                    result['source'] = 'lockfile'
+                    result['direct'] = [d for d in lockfile_deps if d.depth <= 1]
+                    transitive = [d for d in lockfile_deps if d.depth > 1]
+                    children_map: Dict[str, list] = {}
+                    for dep in transitive:
+                        parent_key = dep.resolved_by or ""
+                        if parent_key not in children_map:
+                            children_map[parent_key] = []
+                        children_map[parent_key].append(dep)
+                    result['children_map'] = children_map
+                    return result
+    except Exception:
+        pass
+
+    # Fallback: scan apm_modules directory (no lockfile)
+    if not apm_modules_path.exists():
+        return result
+
+    scanned = []
+    for candidate in sorted(apm_modules_path.rglob("*")):
+        if not candidate.is_dir() or candidate.name.startswith('.'):
+            continue
+        has_apm = (candidate / APM_YML_FILENAME).exists()
+        has_skill = (candidate / SKILL_MD_FILENAME).exists()
+        if not has_apm and not has_skill:
+            continue
+        rel_parts = candidate.relative_to(apm_modules_path).parts
+        if len(rel_parts) < 2:
+            continue
+        if '.apm' in rel_parts:
+            continue
+        if has_skill and not has_apm and _is_nested_under_package(candidate, apm_modules_path):
+            continue
+        info = _get_package_display_info(candidate)
+        primitives = _count_primitives(candidate)
+        scanned.append({
+            'display_name': info['display_name'],
+            'primitives': primitives,
+        })
+    result['scanned_packages'] = scanned
+    return result
+
+
 @deps.command(help="Show dependency tree structure")
 @click.option("--global", "-g", "global_", is_flag=True, default=False,
               help="Show user-scope dependency tree (~/.apm/)")
@@ -315,92 +469,37 @@ def tree(global_):
         from ...core.scope import InstallScope, get_apm_dir
         scope = InstallScope.USER if global_ else InstallScope.PROJECT
         apm_dir = get_apm_dir(scope)
-        project_root = apm_dir
-        apm_modules_path = apm_dir / APM_MODULES_DIR
 
-        # Load project info
-        project_name = "my-project"
-        try:
-            apm_yml_path = apm_dir / APM_YML_FILENAME
-            if apm_yml_path.exists():
-                root_package = APMPackage.from_apm_yml(apm_yml_path)
-                project_name = root_package.name
-        except Exception:
-            pass
+        tree_data = _build_dep_tree(apm_dir)
+        project_name = tree_data['project_name']
+        apm_modules_path = tree_data['apm_modules_path']
 
-        # Try to load lockfile for accurate tree with depth/parent info
-        lockfile_deps = None
-        try:
-            from ...deps.lockfile import LockFile, get_lockfile_path
-            lockfile_path = get_lockfile_path(apm_dir)
-            if lockfile_path.exists():
-                lockfile = LockFile.read(lockfile_path)
-                if lockfile:
-                    lockfile_deps = lockfile.get_package_dependencies()
-        except Exception:
-            pass
-        
-        if lockfile_deps:
-            # Build tree from lockfile (accurate depth + parent info)
-            # Separate direct (depth=1) from transitive (depth>1)
-            direct = [d for d in lockfile_deps if d.depth <= 1]
-            transitive = [d for d in lockfile_deps if d.depth > 1]
-            
-            # Build parent->children map
-            children_map: Dict[str, list] = {}
-            for dep in transitive:
-                parent_key = dep.resolved_by or ""
-                if parent_key not in children_map:
-                    children_map[parent_key] = []
-                children_map[parent_key].append(dep)
-            
-            def _dep_display_name(dep) -> str:
-                """Get display name for a locked dependency."""
-                key = dep.get_unique_key()
-                version = dep.version or (dep.resolved_commit[:7] if dep.resolved_commit else None) or dep.resolved_ref or "latest"
-                return f"{key}@{version}"
-            
-            def _add_children(parent_branch, parent_repo_url, depth=0):
-                """Recursively add transitive deps as nested children."""
-                kids = children_map.get(parent_repo_url, [])
-                for child_dep in kids:
-                    child_name = _dep_display_name(child_dep)
-                    if has_rich:
-                        child_branch = parent_branch.add(f"[dim]{child_name}[/dim]")
-                    else:
-                        child_branch = child_name
-                    if depth < 5:  # Prevent infinite recursion
-                        _add_children(child_branch, child_dep.repo_url, depth + 1)
-            
+        if tree_data['source'] == 'lockfile':
+            direct = tree_data['direct']
+            children_map = tree_data['children_map']
+
             if has_rich:
                 root_tree = Tree(f"[bold cyan]{project_name}[/bold cyan] (local)")
-                
                 if not direct:
                     root_tree.add("[dim]No dependencies installed[/dim]")
                 else:
                     for dep in direct:
                         display = _dep_display_name(dep)
-                        # Get primitive counts if install path exists
                         install_key = dep.get_unique_key()
                         install_path = apm_modules_path / install_key
                         branch = root_tree.add(f"[green]{display}[/green]")
-                        
                         if install_path.exists():
-                            primitives = _count_primitives(install_path)
-                            prim_parts = []
-                            for ptype, count in primitives.items():
-                                if count > 0:
-                                    prim_parts.append(f"{count} {ptype}")
-                            if prim_parts:
-                                branch.add(f"[dim]{', '.join(prim_parts)}[/dim]")
-                        
-                        # Add transitive deps as nested children
-                        _add_children(branch, dep.repo_url)
-                
+                            prim_summary = _format_primitive_counts(
+                                _count_primitives(install_path)
+                            )
+                            if prim_summary:
+                                branch.add(f"[dim]{prim_summary}[/dim]")
+                        _add_tree_children(
+                            branch, dep.repo_url, children_map, has_rich
+                        )
                 console.print(root_tree)
             else:
                 click.echo(f"{project_name} (local)")
-                
                 if not direct:
                     click.echo("+-- No dependencies installed")
                 else:
@@ -409,7 +508,6 @@ def tree(global_):
                         prefix = "+-- " if is_last else "|-- "
                         display = _dep_display_name(dep)
                         click.echo(f"{prefix}{display}")
-                        
                         # Show transitive deps
                         kids = children_map.get(dep.repo_url, [])
                         sub_prefix = "    " if is_last else "|   "
@@ -421,39 +519,18 @@ def tree(global_):
             # Fallback: scan apm_modules directory (no lockfile)
             if has_rich:
                 root_tree = Tree(f"[bold cyan]{project_name}[/bold cyan] (local)")
-                
-                if not apm_modules_path.exists():
+                if not tree_data['has_modules']:
                     root_tree.add("[dim]No dependencies installed[/dim]")
                 else:
-                    for candidate in sorted(apm_modules_path.rglob("*")):
-                        if not candidate.is_dir() or candidate.name.startswith('.'):
-                            continue
-                        has_apm = (candidate / APM_YML_FILENAME).exists()
-                        has_skill = (candidate / SKILL_MD_FILENAME).exists()
-                        if not has_apm and not has_skill:
-                            continue
-                        rel_parts = candidate.relative_to(apm_modules_path).parts
-                        if len(rel_parts) < 2:
-                            continue
-                        if '.apm' in rel_parts:
-                            continue
-                        if has_skill and not has_apm and _is_nested_under_package(candidate, apm_modules_path):
-                            continue
-                        display = "/".join(rel_parts)
-                        info = _get_package_display_info(candidate)
-                        branch = root_tree.add(f"[green]{info['display_name']}[/green]")
-                        primitives = _count_primitives(candidate)
-                        prim_parts = []
-                        for ptype, count in primitives.items():
-                            if count > 0:
-                                prim_parts.append(f"{count} {ptype}")
-                        if prim_parts:
-                            branch.add(f"[dim]{', '.join(prim_parts)}[/dim]")
-                
+                    for pkg in tree_data['scanned_packages']:
+                        branch = root_tree.add(f"[green]{pkg['display_name']}[/green]")
+                        prim_summary = _format_primitive_counts(pkg['primitives'])
+                        if prim_summary:
+                            branch.add(f"[dim]{prim_summary}[/dim]")
                 console.print(root_tree)
             else:
                 click.echo(f"{project_name} (local)")
-                if not apm_modules_path.exists():
+                if not tree_data['has_modules']:
                     click.echo("+-- No dependencies installed")
 
     except Exception as e:
