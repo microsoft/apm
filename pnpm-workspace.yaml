@@ -1,0 +1,5 @@
+linkWorkspacePackages: true
+packages:
+  - "packages/@apm/*"
+ignoredOptionalDependencies:
+  - "@apm/cli-*"

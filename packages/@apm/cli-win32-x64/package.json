@@ -1,0 +1,19 @@
+{
+  "name": "@apm/cli-win32-x64",
+  "version": "0.10.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/microsoft/apm.git",
+    "directory": "packages/@apm/cli-win32-x64"
+  },
+  "homepage": "https://microsoft.github.io/apm/",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "publishConfig": {
+    "provenance": true
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@apm/monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "packageManager": "pnpm@10.33.2"
+}

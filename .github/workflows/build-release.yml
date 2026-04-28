@@ -821,3 +821,51 @@ jobs:
                 "windows_x86_64": "${{ steps.checksums.outputs.windows-x86_64-sha }}"
               }
             }
+  
+  publish-npm:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs: [build-and-test, build-and-validate-macos-intel, build-and-validate-macos-arm, integration-tests, release-validation, create-release]
+    if: github.ref_type == 'tag' && needs.create-release.outputs.is_private_repo != 'true' && needs.create-release.outputs.is_prerelease != 'true'
+    environment:
+      name: npm-publish
+      url: https://www.npmjs.com/package/@apm/apm
+    permissions:
+      contents: read
+      id-token: write  # Required for npm provenance (publishConfig.provenance: true)
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      # Extracts each platform binary into its packages/@apm/cli-* folder
+      # and syncs the version across all package.json files.
+      - name: Generate npm packages
+        run: node packages/@apm/apm/scripts/generate-packages.mjs
+
+      # Publish platform packages first, then the main wrapper that lists
+      # them as optionalDependencies.
+      - name: Publish npm packages
+        run: |
+          for package in \
+            packages/@apm/cli-linux-x64 \
+            packages/@apm/cli-linux-arm64 \
+            packages/@apm/cli-darwin-x64 \
+            packages/@apm/cli-darwin-arm64 \
+            packages/@apm/cli-win32-x64 \
+            packages/@apm/apm; do
+            npm publish "$package" --tag latest --access public
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
