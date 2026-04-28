@@ -227,6 +227,7 @@ def _integrate_root_project(
             diagnostics=diagnostics,
             logger=logger,
             scope=ctx.scope,
+            ctx=ctx,
         )
 
         # Track deployed files for the post-deps-local phase (stale
@@ -271,6 +272,72 @@ def _integrate_root_project(
 
 
 # ======================================================================
+# Cowork cap checks (Amendment 7)
+# ======================================================================
+
+_COWORK_MAX_SKILLS: int = 50
+"""Warn when the cowork skills directory contains more than this many skills."""
+
+_COWORK_MAX_SKILL_SIZE: int = 1_048_576  # 1 MB
+"""Warn when any source SKILL.md exceeds this size in bytes."""
+
+
+def _check_cowork_caps(ctx: "InstallContext") -> None:
+    """Emit warn-only diagnostics for cowork skill count and size caps.
+
+    Walks ``<cowork_root>/skills/*/SKILL.md`` (existing + just-installed)
+    and checks against ``_COWORK_MAX_SKILLS`` and ``_COWORK_MAX_SKILL_SIZE``.
+    Install still succeeds regardless.
+    """
+    if not ctx.targets:
+        return
+
+    cowork_root = None
+    for t in ctx.targets:
+        if t.name == "copilot-cowork" and t.resolved_deploy_root is not None:
+            cowork_root = t.resolved_deploy_root
+            break
+    if cowork_root is None:
+        return
+    if not cowork_root.is_dir():
+        return
+
+    skill_dirs = sorted(
+        d for d in cowork_root.iterdir()
+        if d.is_dir() and (d / "SKILL.md").exists()
+    )
+
+    # --- count cap ---
+    if len(skill_dirs) > _COWORK_MAX_SKILLS:
+        msg = (
+            f"Cowork skills directory contains {len(skill_dirs)} skills "
+            f"(cap: {_COWORK_MAX_SKILLS}). Consider removing unused skills."
+        )
+        if ctx.logger:
+            ctx.logger.warning(msg, symbol="warning")
+        if ctx.diagnostics:
+            ctx.diagnostics.warn(msg, package="cowork")
+
+    # --- per-file size cap ---
+    for skill_dir in skill_dirs:
+        skill_md = skill_dir / "SKILL.md"
+        try:
+            size = skill_md.stat().st_size
+        except OSError:
+            continue
+        if size > _COWORK_MAX_SKILL_SIZE:
+            size_mb = size / (1024 * 1024)
+            msg = (
+                f"Skill '{skill_dir.name}/SKILL.md' is {size_mb:.1f} MB "
+                f"(cap: 1 MB). Large skills may degrade Copilot performance."
+            )
+            if ctx.logger:
+                ctx.logger.warning(msg, symbol="warning")
+            if ctx.diagnostics:
+                ctx.diagnostics.warn(msg, package="cowork")
+
+
+# ======================================================================
 # Public phase entry point
 # ======================================================================
 
@@ -302,6 +369,12 @@ def run(ctx: "InstallContext") -> None:
     # ------------------------------------------------------------------
     deps_to_install = ctx.deps_to_install
     apm_modules_dir = ctx.apm_modules_dir
+
+    # Direct dep keys: used to distinguish direct vs transitive failures
+    # so direct failures can be surfaced immediately.
+    direct_dep_keys = builtins.set(
+        dep.get_unique_key() for dep in ctx.all_apm_deps
+    )
 
     # Int counters (written back to ctx at end of function)
     installed_count = ctx.installed_count
@@ -367,6 +440,25 @@ def run(ctx: "InstallContext") -> None:
             deltas = run_integration_template(source)
 
             if deltas is None:
+                # Direct dependency failure: surface a single concise
+                # inline marker so the user sees `[x] <pkg>: integration
+                # failed` immediately (fixes "perceived hang" on HYBRID
+                # validation failures). The full diagnostic detail --
+                # resolved path and `--verbose` hint -- is rendered once
+                # by `render_summary()` to avoid double-output.
+                if dep_key in direct_dep_keys:
+                    if ctx.diagnostics:
+                        ctx.diagnostics.error(
+                            f"{dep_key}: integration failed",
+                            package=dep_key,
+                            detail=(
+                                f"Resolved at {install_path}. "
+                                f"Run with --verbose for details."
+                            ),
+                        )
+                    elif ctx.logger:
+                        ctx.logger.error(f"{dep_key}: integration failed")
+                    ctx.direct_dep_failed = True
                 continue
 
             # Accumulate counter deltas from this package
@@ -410,3 +502,10 @@ def run(ctx: "InstallContext") -> None:
     ctx.total_commands_integrated = total_commands_integrated
     ctx.total_hooks_integrated = total_hooks_integrated
     ctx.total_links_resolved = total_links_resolved
+
+    # ------------------------------------------------------------------
+    # Amendment 7: cowork 50-skill / 1 MB cap check (warn-only).
+    # Runs once per install, after all packages integrate, only when
+    # a cowork target with a resolved_deploy_root is active.
+    # ------------------------------------------------------------------
+    _check_cowork_caps(ctx)

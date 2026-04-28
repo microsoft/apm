@@ -30,7 +30,7 @@ All token-bearing requests use HTTPS. Tokens are never sent over unencrypted con
 | 4 | `GH_TOKEN` | Any host | Set by `gh auth login` |
 | 5 | `git credential fill` | Per-host | System credential manager, `gh auth`, OS keychain |
 
-For Azure DevOps, the only token source is `ADO_APM_PAT`.
+For Azure DevOps, APM resolves credentials in this order: `ADO_APM_PAT` env var, then a Microsoft Entra ID (AAD) bearer token from the Azure CLI (`az`). See [Azure DevOps](#azure-devops) below.
 
 For Artifactory registry proxies, use `PROXY_REGISTRY_TOKEN`. See [Registry proxy (Artifactory)](#registry-proxy-artifactory) below.
 
@@ -146,6 +146,39 @@ apm install dev.azure.com/myorg/My%20Project/_git/My%20Repo%20Name
 
 Create the PAT at `https://dev.azure.com/{org}/_usersSettings/tokens` with **Code (Read)** permission.
 
+### Authenticating with Microsoft Entra ID (AAD) bearer tokens
+
+When your org has disabled PAT creation (managed-identity-only orgs, locked-down enterprise tenants), APM can use an AAD bearer token issued by the Azure CLI instead. No env var is required: APM picks up the token from your active `az` session on demand.
+
+**Prerequisite:** install the [Azure CLI](https://aka.ms/installazurecli) and sign in against the tenant that owns the org:
+
+```bash
+az login --tenant <your-tenant-id>
+apm install dev.azure.com/myorg/myproject/myrepo
+```
+
+**Resolution precedence for ADO hosts** (`dev.azure.com`, `*.visualstudio.com`):
+
+1. `ADO_APM_PAT` env var if set
+2. AAD bearer via `az account get-access-token` if `az` is installed and signed in
+3. Otherwise: auth-failed error with guidance for both paths
+
+**Stale-PAT fallback:** if `ADO_APM_PAT` is set but rejected (HTTP 401), APM silently retries with the `az` bearer and emits:
+
+```
+[!] ADO_APM_PAT was rejected for dev.azure.com (HTTP 401); fell back to az cli bearer.
+[!]     Consider unsetting the stale variable.
+```
+
+**Verbose output** (`--verbose`) shows which source was used per host:
+
+```
+[i] dev.azure.com -- using bearer from az cli (source: AAD_BEARER_AZ_CLI)
+[i] dev.azure.com -- token from ADO_APM_PAT
+```
+
+Bearer tokens are short-lived (~60 minutes), acquired on demand, never persisted by APM. See [Security Model: Token handling](../../enterprise/security/#token-handling) for the full posture.
+
 ## Package source behavior
 
 | Package source | Host | Auth behavior | Fallback |
@@ -154,7 +187,7 @@ Create the PAT at `https://dev.azure.com/{org}/_usersSettings/tokens` with **Cod
 | `github.com/org/repo` | github.com | Global env vars → credential fill | Unauth for public repos |
 | `contoso.ghe.com/org/repo` | *.ghe.com | Global env vars → credential fill | Auth-only (no public repos) |
 | GHES via `GITHUB_HOST` | ghes.company.com | Global env vars → credential fill | Unauth for public repos |
-| `dev.azure.com/org/proj/repo` | ADO | `ADO_APM_PAT` only | Auth-only |
+| `dev.azure.com/org/proj/repo` | ADO | `ADO_APM_PAT` -> AAD bearer via `az` | Auth-only |
 | Artifactory registry proxy | custom FQDN | `PROXY_REGISTRY_TOKEN` | Error if `PROXY_REGISTRY_ONLY=1` |
 
 ## Registry proxy (Artifactory)

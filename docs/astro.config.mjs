@@ -9,6 +9,10 @@ import mermaid from 'astro-mermaid';
 export default defineConfig({
 	site: 'https://microsoft.github.io',
 	base: '/apm/',
+	redirects: {
+		'/enterprise/teams': '/enterprise/making-the-case',
+		'/enterprise/governance': '/enterprise/governance-guide',
+	},
 	integrations: [
 		mermaid(),
 		starlight({
@@ -46,6 +50,7 @@ export default defineConfig({
 						{ label: 'Why APM?', slug: 'introduction/why-apm' },
 						{ label: 'How It Works', slug: 'introduction/how-it-works' },
 						{ label: 'Key Concepts', slug: 'introduction/key-concepts' },
+						{ label: 'Anatomy of an APM Package', slug: 'introduction/anatomy-of-an-apm-package' },
 					],
 				},
 				{
@@ -65,24 +70,34 @@ export default defineConfig({
 						{ label: 'Skills', slug: 'guides/skills' },
 						{ label: 'Prompts', slug: 'guides/prompts' },
 						{ label: 'Plugins', slug: 'guides/plugins' },
+						{ label: 'MCP Servers', slug: 'guides/mcp-servers' },
 						{ label: 'Dependencies & Lockfile', slug: 'guides/dependencies' },
 						{ label: 'Pack & Distribute', slug: 'guides/pack-distribute' },
 						{ label: 'Private Packages', slug: 'guides/private-packages' },
 						{ label: 'Org-Wide Packages', slug: 'guides/org-packages' },
 						{ label: 'Marketplaces', slug: 'guides/marketplaces' },
+						{ label: 'Marketplace Authoring', slug: 'guides/marketplace-authoring' },
 						{ label: 'CI Policy Enforcement', slug: 'guides/ci-policy-setup' },
 						{ label: 'Agent Workflows (Experimental)', slug: 'guides/agent-workflows' },
 					],
 				},
 				{
+					label: 'Troubleshooting',
+					items: [
+						{ label: 'SSL / TLS issues', slug: 'troubleshooting/ssl-issues' },
+					],
+				},
+				{
 					label: 'Enterprise',
 					items: [
-						{ label: 'APM for Teams', slug: 'enterprise/teams' },
-						{ label: 'Governance & Compliance', slug: 'enterprise/governance' },
-						{ label: 'Policy Reference', slug: 'enterprise/policy-reference' },
-						{ label: 'Security Model', slug: 'enterprise/security' },
-						{ label: 'Adoption Playbook', slug: 'enterprise/adoption-playbook' },
+						{ label: 'Enterprise', slug: 'enterprise' },
 						{ label: 'Making the Case', slug: 'enterprise/making-the-case' },
+						{ label: 'Adoption Playbook', slug: 'enterprise/adoption-playbook' },
+						{ label: 'Security Model', slug: 'enterprise/security' },
+						{ label: 'Governance', slug: 'enterprise/governance-guide' },
+						{ label: 'Registry Proxy & Air-gapped', slug: 'enterprise/registry-proxy' },
+						{ label: 'Policy Files', slug: 'enterprise/apm-policy' },
+						{ label: 'Policy Reference', slug: 'enterprise/policy-reference' },
 					],
 				},
 				{
@@ -91,6 +106,7 @@ export default defineConfig({
 						{ label: 'CI/CD Pipelines', slug: 'integrations/ci-cd' },
 						{ label: 'GitHub Agentic Workflows', slug: 'integrations/gh-aw' },
 						{ label: 'IDE & Tool Integration', slug: 'integrations/ide-tool-integration' },
+						{ label: 'Microsoft 365 Copilot Cowork (Experimental)', slug: 'integrations/copilot-cowork' },
 						{ label: 'AI Runtime Compatibility', slug: 'integrations/runtime-compatibility' },
 						{ label: 'GitHub Rulesets', slug: 'integrations/github-rulesets' },
 					],

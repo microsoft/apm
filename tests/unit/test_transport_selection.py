@@ -4,6 +4,7 @@ Covers the selection matrix from issue microsoft/apm#778:
 
 * explicit ssh:// URLs are strict (no HTTPS fallback) -- closes #661
 * explicit https:// URLs are strict (no SSH fallback)
+* explicit http:// URLs are strict and never use token auth
 * shorthand consults git insteadOf rewrites and prefers SSH on rewrite hits
   -- closes #328
 * shorthand defaults to HTTPS-only when no rewrite, no CLI pref, no env
@@ -113,6 +114,18 @@ class TestExplicitSchemeStrict:
         )
         assert plan.strict is True
         assert _scheme_labels(plan) == ["https"]
+        assert plan.attempts[0].use_token is False
+
+    def test_explicit_http_is_strict_and_never_uses_token(self):
+        sel = TransportSelector(insteadof_resolver=FakeInsteadOfResolver())
+        plan = sel.select(
+            dep_ref=_dep("http://gitlab.company.internal/acme/lib.git"),
+            cli_pref=ProtocolPreference.NONE,
+            allow_fallback=False,
+            has_token=True,
+        )
+        assert plan.strict is True
+        assert _scheme_labels(plan) == ["http"]
         assert plan.attempts[0].use_token is False
 
     def test_explicit_ssh_ignores_cli_pref_https(self):
@@ -231,17 +244,49 @@ class TestAllowFallback:
         assert "ssh" in schemes and "https" in schemes
         assert plan.strict is False
 
-    def test_explicit_https_with_allow_fallback_runs_chain(self):
-        """Migration safety: clones that succeeded under the legacy chain still succeed."""
+    def test_explicit_https_with_allow_fallback_keeps_https_first(self):
+        """Explicit https:// keeps HTTPS first when fallback is enabled."""
         sel = TransportSelector(insteadof_resolver=FakeInsteadOfResolver())
         plan = sel.select(
             dep_ref=_dep("https://gitlab.com/acme/lib.git"),
             cli_pref=ProtocolPreference.NONE,
             allow_fallback=True,
-            has_token=False,
+            has_token=True,
         )
-        schemes = _scheme_labels(plan)
-        assert "ssh" in schemes and "https" in schemes
+        assert [(a.scheme, a.use_token) for a in plan.attempts] == [
+            ("https", True),
+            ("ssh", False),
+            ("https", False),
+        ]
+        assert plan.strict is False
+
+    def test_explicit_ssh_with_allow_fallback_keeps_ssh_first(self):
+        sel = TransportSelector(insteadof_resolver=FakeInsteadOfResolver())
+        plan = sel.select(
+            dep_ref=_dep("ssh://git@github.com/owner/repo.git"),
+            cli_pref=ProtocolPreference.NONE,
+            allow_fallback=True,
+            has_token=True,
+        )
+        assert [(a.scheme, a.use_token) for a in plan.attempts] == [
+            ("ssh", False),
+            ("https", True),
+            ("https", False),
+        ]
+        assert plan.strict is False
+
+    def test_explicit_http_with_allow_fallback_keeps_http_first(self):
+        sel = TransportSelector(insteadof_resolver=FakeInsteadOfResolver())
+        plan = sel.select(
+            dep_ref=_dep("http://gitlab.company.internal/acme/lib.git"),
+            cli_pref=ProtocolPreference.NONE,
+            allow_fallback=True,
+            has_token=True,
+        )
+        assert [(a.scheme, a.use_token) for a in plan.attempts] == [
+            ("http", False),
+            ("ssh", False),
+        ]
         assert plan.strict is False
 
 

@@ -20,22 +20,22 @@ import { Card, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
 
 **An open-source dependency manager for AI agents.** Think `package.json`, `requirements.txt`, or `Cargo.toml` — but for AI agent configuration.
 
-AI coding agents need context and capabilities to be useful — instructions, skills, prompts, plugins, MCP servers. But today, every developer configures theirs differently. Copying files, writing instructions from scratch, sharing knowledge in Slack threads. None of it is portable. None of it is versioned.
+AI coding agents need context and capabilities to be useful — instructions, skills, prompts, plugins, MCP servers. But today every developer configures theirs differently. Nothing is portable. Nothing is reproducible. Nothing is governed.
 
-APM fixes this. You declare your project's agent configuration once in `apm.yml` — skills, prompts, instructions, agents, hooks, plugins, MCP servers — and every developer who clones your repo gets a fully configured agent setup in seconds. New developer joins the team? `git clone`, `cd`, `apm install`. Done.
+APM fixes this. You declare your project's agent configuration once in `apm.yml` — and every developer who clones your repo gets a fully configured agent setup in seconds, locked to exact versions, scanned for hidden threats, and gated by the policies your organization defines.
 
 <CardGrid>
-  <Card title="One Manifest, Every Agent" icon="document">
-    `apm.yml` declares skills, instructions, prompts, agents, hooks, plugins, and MCP servers — deployed to Copilot, Claude Code, Cursor, OpenCode, and Codex from a single source of truth.
+  <Card title="Portable by manifest" icon="document">
+    One `apm.yml` declares skills, instructions, prompts, agents, hooks, plugins, and MCP servers. Transitive dependencies resolve like npm or pip; `apm.lock.yaml` pins exact versions for reproducible installs across Copilot, Claude Code, Cursor, OpenCode, Codex, and Gemini.
   </Card>
-  <Card title="Dependencies That Resolve" icon="random">
-    Packages depend on packages. APM resolves the full tree — transitive dependencies just work, like npm or pip.
+  <Card title="Secure by default" icon="approve-check-circle">
+    Skills, prompts, instructions, hooks — everything agents execute is an attack surface. `apm install` scans packages for hidden Unicode and other tampering before they reach your agents; `apm audit` reports the full chain of trust.
   </Card>
-  <Card title="Any Git Host" icon="github">
-    Install from GitHub, GitLab, Bitbucket, Azure DevOps, GitHub Enterprise, or any self-hosted git server.
+  <Card title="Governed by policy" icon="setting">
+    `apm-policy.yml` lets platform teams allow-list dependencies, restrict deploy targets, and enforce trust rules at install time — across every repo, from a single source of truth. See the [Governance Guide](/apm/enterprise/governance-guide/).
   </Card>
-  <Card title="Supply Chain Security" icon="approve-check-circle">
-    Skills, prompts, instructions, hooks — everything agents execute is an attack surface. APM scans packages before deployment, blocking threats before they reach your agents.
+  <Card title="Any git host" icon="github">
+    Install from GitHub, GitLab, Bitbucket, Azure DevOps, GitHub Enterprise, or any self-hosted git server. No registry to run, no central service to depend on.
   </Card>
 </CardGrid>
 
@@ -92,7 +92,7 @@ New developer joins the team:
 git clone <org/repo> && cd <repo> && apm install
 ```
 
-**That's it.** Copilot, Claude, Cursor, OpenCode, Codex — every harness is configured with the right context and capabilities. The manifest defines the project's custom and portable Agentic SDLC setup installable in a single command.
+**That's it.** Copilot, Claude, Cursor, OpenCode, Codex, Gemini — every harness is configured with the right context and capabilities. The manifest defines the project's custom and portable Agentic SDLC setup installable in a single command.
 
 ## Open Source & Community
 

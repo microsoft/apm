@@ -84,6 +84,7 @@ class ManifestPolicy:
     required_fields: Tuple[str, ...] = ()
     scripts: str = "allow"  # allow | deny
     content_types: Optional[Dict] = None  # {"allow": [...]}
+    require_explicit_includes: bool = False
 
 
 @dataclass(frozen=True)
@@ -102,6 +103,7 @@ class ApmPolicy:
     version: str = ""
     extends: Optional[str] = None  # "org", "<owner>/<repo>", or URL
     enforcement: str = "warn"  # warn | block | off
+    fetch_failure: str = "warn"  # warn | block (closes #829)
     cache: PolicyCache = field(default_factory=PolicyCache)
     dependencies: DependencyPolicy = field(default_factory=DependencyPolicy)
     mcp: McpPolicy = field(default_factory=McpPolicy)

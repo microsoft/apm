@@ -48,6 +48,7 @@ license:       <string>
 target:        <enum>
 type:          <enum>
 scripts:       <map<string, string>>
+includes:      <enum | list<string>>
 dependencies:
   apm:         <list<ApmDependency>>
   mcp:         <list<McpDependency>>
@@ -55,6 +56,7 @@ devDependencies:
   apm:         <list<ApmDependency>>
   mcp:         <list<McpDependency>>
 compilation:   <CompilationConfig>
+policy:        <PolicyConfig>
 ```
 
 ---
@@ -162,6 +164,59 @@ Declares how the package's content is processed during install and compile. Curr
 | **Key pattern** | Script name (free-form string) |
 | **Value** | Shell command string |
 | **Description** | Named commands executed via `apm run <name>`. MUST support `--param key=value` substitution. |
+
+### 3.9. `includes`
+
+| | |
+|---|---|
+| **Type** | `string` (literal `auto`) `\| list<string>` |
+| **Required** | OPTIONAL |
+| **Default** | Undeclared (legacy implicit auto-publish; flagged by `apm audit`) |
+| **Allowed values** | `auto` or a list of paths relative to the project root |
+
+Declares which local `.apm/` content the project consents to publish when packing or deploying. Three forms are supported:
+
+1. **Undeclared** -- field omitted. Legacy behaviour: all local `.apm/` content is published as if `auto` were set. `apm audit` emits an `includes-consent` advisory (the check itself passes; the message recommends declaring `includes: auto`) whenever local content is deployed under this form.
+2. **`includes: auto`** -- explicit consent to publish all local `.apm/` content via the file scanner. No path enumeration required. Default for newly initialised projects.
+3. **`includes: [<path>, ...]`** -- explicit allow-list of paths the project consents to publish. Strongest governance form; changes are reviewable in PR diffs.
+
+```yaml
+# Form 1: undeclared (legacy; audit advisory)
+# includes: <omitted>
+
+# Form 2: explicit auto-publish (default for new projects)
+includes: auto
+
+# Form 3: explicit path list (strongest governance)
+# includes:
+#   - .apm/instructions/
+#   - .apm/skills/my-skill/
+```
+
+**`includes:` is allow-list only.** There is no `exclude:` form. The field controls which `.apm/` content the project consents to publish; it cannot be used to fence off subdirectories of `.apm/` from the scanner. To keep maintainer-only primitives out of shipped artifacts, author them OUTSIDE `.apm/` and reference them via a local-path devDependency -- see [Dev-only Primitives](../../guides/dev-only-primitives/).
+
+When `policy.manifest.require_explicit_includes` is `true` (see [Governance guide](../../enterprise/governance-guide/)), only form 3 passes the policy check; `auto` and undeclared are rejected at install/audit time by the `explicit-includes` policy check (not at YAML parse time).
+
+### 3.10. `policy`
+
+| | |
+|---|---|
+| **Type** | `map<string, string>` |
+| **Required** | OPTIONAL |
+| **Description** | Consumer-side controls for org policy discovery and verification. All fields are optional; defaults preserve current fail-open install behaviour. |
+
+```yaml
+policy:
+  fetch_failure_default: warn      # warn | block, default warn (#829)
+  hash: "sha256:<hex>"             # optional consumer-side pin on the org policy bytes
+  hash_algorithm: sha256           # sha256 (default) | sha384 | sha512
+```
+
+| Sub-key | Type | Default | Allowed values | Semantic |
+|---|---|---|---|---|
+| `fetch_failure_default` | `string` | `warn` | `warn`, `block` | Posture when no policy is reachable AND none is cached. `warn` keeps installs unblocked when GitHub is unreachable; `block` opts into fail-closed semantics. See [Network failure semantics](../../enterprise/policy-reference/#95-network-failure-semantics). |
+| `hash` | `string` | unset | `<algo>:<hex-digest>` (e.g. `sha256:6a8c...e2f1`) | Pin on the raw bytes of the fetched leaf org policy. Verified before YAML parsing; mismatch is always fail-closed regardless of `fetch_failure_default`. See [Hash pin: `policy.hash`](../../enterprise/policy-reference/#96-hash-pin-policyhash-consumer-side-verification). |
+| `hash_algorithm` | `string` | `sha256` | `sha256`, `sha384`, `sha512` | Digest algorithm for `policy.hash`. Inferred from the `<algo>:` prefix when present; this field is the explicit override. MD5 and SHA-1 are rejected at parse time. |
 
 ---
 
@@ -300,7 +355,7 @@ A plain registry reference: `io.github.github/github-mcp-server`
 | Field | Type | Required | Constraint | Description |
 |---|---|---|---|---|
 | `name` | `string` | REQUIRED | Non-empty | Server identifier (registry name or custom name). |
-| `transport` | `enum<string>` | Conditional | `stdio` · `sse` · `http` · `streamable-http` | Transport protocol. REQUIRED when `registry: false`. |
+| `transport` | `enum<string>` | Conditional | `stdio` · `sse` · `http` · `streamable-http` | Transport protocol. REQUIRED when `registry: false`. Values are MCP transport names, not URL schemes: remote variants connect over HTTPS. |
 | `env` | `map<string, string>` | OPTIONAL | | Environment variable overrides. Values may contain `${input:<id>}` references (VS Code only — see §4.2.4). |
 | `args` | `dict` or `list` | OPTIONAL | | Dict for overlay variable overrides (registry), list for positional args (self-defined). |
 | `version` | `string` | OPTIONAL | | Pin to a specific server version. |
@@ -309,7 +364,7 @@ A plain registry reference: `io.github.github/github-mcp-server`
 | `headers` | `map<string, string>` | OPTIONAL | | Custom HTTP headers for remote endpoints. Values may contain `${input:<id>}` references (VS Code only — see §4.2.4). |
 | `tools` | `list<string>` | OPTIONAL | Default: `["*"]` | Restrict which tools are exposed. |
 | `url` | `string` | Conditional | | Endpoint URL. REQUIRED when `registry: false` and `transport` is `http`, `sse`, or `streamable-http`. |
-| `command` | `string` | Conditional | | Binary path. REQUIRED when `registry: false` and `transport` is `stdio`. |
+| `command` | `string` | Conditional | Single binary path; no embedded whitespace unless `args` is also present | Binary path. REQUIRED when `registry: false` and `transport` is `stdio`. |
 
 #### 4.2.3. Validation Rules for Self-Defined Servers
 
@@ -318,6 +373,7 @@ When `registry` is `false`, the following constraints apply:
 1. `transport` MUST be present.
 2. If `transport` is `stdio`, `command` MUST be present.
 3. If `transport` is `http`, `sse`, or `streamable-http`, `url` MUST be present.
+4. If `transport` is `stdio`, `command` MUST be a single binary path with no embedded whitespace. APM does not split `command` on whitespace; use `args` for additional arguments. A path that legitimately contains spaces (e.g. `/opt/My App/server`) is allowed when `args` is also provided (including an explicit empty list `args: []`), signaling the author has taken responsibility for the shape.
 
 ```yaml
 dependencies:
@@ -389,6 +445,16 @@ Created automatically by `apm init --plugin`. Use [`apm install --dev`](../cli-c
 
 ```bash
 apm install --dev owner/test-helpers
+```
+
+Plain `apm install` (no flag) deploys both `dependencies` and `devDependencies`. There is currently no `--omit=dev` flag -- the dev/prod separation kicks in at `apm pack --format plugin` time. The local-content scanner that builds plugin bundles also operates on `.apm/` only and does not consult the devDep marker. To keep maintainer-only primitives out of shipped artifacts, author them outside `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../../guides/dev-only-primitives/).
+
+Local-path devDependency example:
+
+```yaml
+devDependencies:
+  apm:
+    - path: ./dev/skills/release-checklist
 ```
 
 ---

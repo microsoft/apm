@@ -42,14 +42,35 @@ For SSO-protected orgs, authorize the token under Settings > Tokens > Configure 
 
 ## Azure DevOps (ADO)
 
-ADO uses a dedicated token variable -- the GitHub token chain does not apply:
+ADO supports two auth modes; the GitHub token chain does not apply. Resolution order:
+
+1. `ADO_APM_PAT` env var if set
+2. AAD bearer from `az account get-access-token` if `az` is installed and signed in
+3. Otherwise: auth-failed error
 
 ```bash
+# PAT mode
 export ADO_APM_PAT=your_ado_pat
+apm install dev.azure.com/org/project/_git/repo
+
+# Bearer mode (no env var needed)
+az login --tenant <tenant-id>
 apm install dev.azure.com/org/project/_git/repo
 ```
 
 ADO paths use the 3-segment format: `org/project/repo`. Auth is always required.
+
+If `ADO_APM_PAT` is set but ADO returns 401, APM silently retries with the `az` bearer and warns:
+`[!] ADO_APM_PAT was rejected for {host} (HTTP 401); fell back to az cli bearer.`
+
+### ADO auth troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `No ADO_APM_PAT was set and az CLI is not installed` | Neither path available | Install `az` from https://aka.ms/installazurecli and run `az login --tenant <tenant>`, or set `ADO_APM_PAT` |
+| `az CLI is installed but no active session was found` | `az account show` fails | Run `az login --tenant <tenant>` against the tenant that owns the org |
+| `az CLI returned a token but the org does not accept it (likely a tenant mismatch)` | Wrong tenant | Run `az login --tenant <correct-tenant>`, or set `ADO_APM_PAT` |
+| `ADO_APM_PAT was rejected (HTTP 401) and no az cli fallback was available` | Stale PAT, no `az` | Rotate the PAT, or install `az` and run `az login --tenant <tenant>` |
 
 ## GitHub Enterprise Server (GHES)
 

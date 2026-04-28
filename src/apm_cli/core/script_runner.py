@@ -263,9 +263,9 @@ class ScriptRunner:
             with open(compiled_path, "r", encoding="utf-8") as f:
                 compiled_content = f.read().strip()
 
-            # Check if this is a runtime command (copilot, codex, llm) before transformation
+            # Check if this is a runtime command before transformation
             is_runtime_cmd = any(
-                runtime in command for runtime in ["copilot", "codex", "llm"]
+                runtime in command for runtime in ["copilot", "codex", "llm", "gemini"]
             ) and re.search(re.escape(prompt_file), command)
 
             # Transform command based on runtime pattern
@@ -295,7 +295,7 @@ class ScriptRunner:
         """
         # Handle environment variables prefix (e.g., "ENV1=val1 ENV2=val2 codex [args] file.prompt.md")
         # More robust approach: split by runtime commands to separate env vars from command
-        runtime_commands = ["codex", "copilot", "llm"]
+        runtime_commands = ["codex", "copilot", "llm", "gemini"]
 
         for runtime_cmd in runtime_commands:
             runtime_pattern = f" {runtime_cmd} "
@@ -330,13 +330,9 @@ class ScriptRunner:
                             else:
                                 result = f"{env_vars} codex exec"
                         else:
-                            # For copilot and llm, keep the runtime name and args
                             result = f"{env_vars} {runtime_cmd}"
                             if args_before_file:
-                                # Remove any existing -p flag since we'll handle it in execution
-                                cleaned_args = args_before_file.replace(
-                                    "-p", ""
-                                ).strip()
+                                cleaned_args = re.sub(r'(^|\s)-p(?=\s|$)', '', args_before_file).strip()
                                 if cleaned_args:
                                     result += f" {cleaned_args}"
 
@@ -359,8 +355,7 @@ class ScriptRunner:
 
                 result = "copilot"
                 if args_before_file:
-                    # Remove any existing -p flag since we'll handle it in execution
-                    cleaned_args = args_before_file.replace("-p", "").strip()
+                    cleaned_args = re.sub(r'(^|\s)-p(?=\s|$)', '', args_before_file).strip()
                     if cleaned_args:
                         result += f" {cleaned_args}"
                 if args_after_file:
@@ -399,6 +394,24 @@ class ScriptRunner:
                     result += f" {args_after_file}"
                 return result
 
+        # Handle "gemini [args] file.prompt.md [more_args]" -> "gemini [args] [more_args]"
+        elif re.search(r"^gemini\s+.*" + re.escape(prompt_file), command):
+            match = re.search(
+                r"gemini\s+(.*?)(" + re.escape(prompt_file) + r")(.*?)$", command
+            )
+            if match:
+                args_before_file = match.group(1).strip()
+                args_after_file = match.group(3).strip()
+
+                result = "gemini"
+                if args_before_file:
+                    cleaned_args = re.sub(r'(^|\s)-p(?=\s|$)', '', args_before_file).strip()
+                    if cleaned_args:
+                        result += f" {cleaned_args}"
+                if args_after_file:
+                    result += f" {args_after_file}"
+                return result
+
         # Handle bare "file.prompt.md" -> "codex exec" (default to codex)
         elif command.strip() == prompt_file:
             return "codex exec"
@@ -413,7 +426,7 @@ class ScriptRunner:
             command: The command to analyze
 
         Returns:
-            Name of the detected runtime (copilot, codex, llm, or unknown)
+            Name of the detected runtime (copilot, codex, llm, gemini, or unknown)
         """
         command_lower = command.lower().strip()
         if not command_lower:
@@ -430,6 +443,8 @@ class ScriptRunner:
             return "codex"
         elif binary_stem == "llm":
             return "llm"
+        elif re.search(r"(?:^|\s)gemini(?:\s|$)", command_lower):
+            return "gemini"
         else:
             return "unknown"
 
@@ -485,6 +500,9 @@ class ScriptRunner:
         elif runtime == "llm":
             # LLM expects content as argument
             actual_command_args.append(content)
+        elif runtime == "gemini":
+            # Gemini uses -p flag for prompt content
+            actual_command_args.extend(["-p", content])
         else:
             # Default: assume content as last argument
             actual_command_args.append(content)
@@ -888,8 +906,8 @@ class ScriptRunner:
         Priority:
           1. APM runtimes dir: copilot  (codex excluded -- v0.116+ is
              incompatible with GitHub Models' Chat Completions API)
-          2. PATH: llm > copilot > codex  (llm uses Chat Completions, works
-             with GitHub Models even when codex dropped that API)
+          2. PATH: llm > copilot > codex > gemini  (llm uses Chat Completions,
+             works with GitHub Models even when codex dropped that API)
 
         Returns:
             Name of detected runtime
@@ -926,13 +944,17 @@ class ScriptRunner:
             return "copilot"
         elif shutil.which("codex"):
             return "codex"
+        elif shutil.which("gemini"):
+            return "gemini"
         else:
             raise RuntimeError(
                 "No compatible runtime found.\n"
                 "Install the llm CLI with:\n"
                 "  apm runtime setup llm\n"
                 "Or install GitHub Copilot CLI with:\n"
-                "  apm runtime setup copilot"
+                "  apm runtime setup copilot\n"
+                "Or install Gemini CLI with:\n"
+                "  apm runtime setup gemini"
             )
 
     def _generate_runtime_command(self, runtime: str, prompt_file: Path) -> str:
@@ -946,14 +968,14 @@ class ScriptRunner:
             Full command string with runtime-specific defaults
         """
         if runtime == "copilot":
-            # GitHub Copilot CLI with all recommended flags
             return f"copilot --log-level all --log-dir copilot-logs --allow-all-tools -p {prompt_file}"
         elif runtime == "codex":
-            # Codex CLI with default sandbox and git repo check skip
             return f"codex -s workspace-write --skip-git-repo-check {prompt_file}"
         elif runtime == "llm":
             # llm CLI -- uses Chat Completions, compatible with GitHub Models
             return f"llm -m github/gpt-4o {prompt_file}"
+        elif runtime == "gemini":
+            return f"gemini -p {prompt_file}"
         else:
             raise ValueError(f"Unsupported runtime: {runtime}")
 

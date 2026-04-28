@@ -46,6 +46,8 @@ class InstallContext:
     parallel_downloads: int = 4
     logger: Any = None  # InstallLogger
     target_override: Optional[str] = None  # CLI --target value
+    allow_insecure: bool = False
+    allow_insecure_hosts: Tuple[str, ...] = ()
 
     dry_run: bool = False
     force: bool = False
@@ -58,6 +60,12 @@ class InstallContext:
     # ------------------------------------------------------------------
     # Resolve phase outputs
     # ------------------------------------------------------------------
+    # Direct dependencies declared in apm.yml (regular + dev), NOT the
+    # full transitive closure. Transitive deps are discovered later by
+    # the resolver and recorded on `deps_to_install` /
+    # `dependency_graph`. Treat `all_apm_deps` as "what the project
+    # author wrote" -- iterate `deps_to_install` for the full set of
+    # packages that will be installed.
     all_apm_deps: List[Any] = field(default_factory=list)  # resolve
     root_has_local_primitives: bool = False  # resolve
     deps_to_install: List[Any] = field(default_factory=list)  # resolve
@@ -107,6 +115,17 @@ class InstallContext:
     total_commands_integrated: int = 0  # integrate
     total_hooks_integrated: int = 0  # integrate
     total_links_resolved: int = 0  # integrate
+    direct_dep_failed: bool = False  # integrate -- set when any direct dep fails
+
+    # ------------------------------------------------------------------
+    # policy_gate
+    # ------------------------------------------------------------------
+    policy_fetch: Any = None  # Optional[PolicyFetchResult] from discovery
+    policy_enforcement_active: bool = False
+    no_policy: bool = False  # W2-escape-hatch will wire --no-policy here
+    skill_subset: Optional[Tuple[str, ...]] = None  # --skill filter for SKILL_BUNDLE packages
+    skill_subset_from_cli: bool = False  # True when user passed --skill (even --skill '*')
+    direct_mcp_deps: Optional[List[Any]] = None  # Direct MCP deps from apm.yml for policy gate
 
     # ------------------------------------------------------------------
     # Post-deps local content tracking (F3)
@@ -114,3 +133,8 @@ class InstallContext:
     old_local_deployed: List[str] = field(default_factory=list)  # pipeline setup
     local_deployed_files: List[str] = field(default_factory=list)  # integrate (root)
     local_content_errors_before: int = 0  # integrate (pre-root)
+
+    # ------------------------------------------------------------------
+    # Cowork integration state
+    # ------------------------------------------------------------------
+    cowork_nonsupported_warned: bool = False  # integrate (once-per-run guard)

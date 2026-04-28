@@ -6,10 +6,6 @@ env:
 on:
   pull_request:
     branches: [ main ]
-    paths-ignore:
-      - 'docs/**'
-      - '.gitignore'
-      - 'LICENSE'
   # Tier 1 also runs in merge queue context so the same unit + build checks
   # execute against the tentative merge commit that the queue creates. See
   # microsoft/apm#770 for the design.
@@ -96,3 +92,45 @@ jobs:
         include-hidden-files: true
         retention-days: 30
         if-no-files-found: error
+
+  # Dogfood the two CI gates we ship and document to users:
+  #   - Gate A (consumer-side): `apm audit --ci` -- lockfile / install fidelity.
+  #   - Gate B (producer-side): regeneration drift -- did someone hand-edit
+  #     a regenerated file under .github/ without updating canonical .apm/?
+  # See microsoft/apm#883 for context. Tier 1 (no secrets needed).
+  apm-self-check:
+    name: APM Self-Check
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      # Installs the APM CLI (latest stable) and runs `apm install` against
+      # this repo's apm.yml. Auto-detects target from the existing .github/
+      # directory and re-integrates local .apm/ content, regenerating
+      # .github/instructions/, .github/agents/, .github/skills/, etc.
+      # Adds `apm` to PATH for subsequent steps.
+      - uses: microsoft/apm-action@v1
+
+      # Gate A: lockfile / install fidelity (consumer-side).
+      # Verifies every file in lockfile.deployed_files exists, ref consistency
+      # between apm.yml and apm.lock.yaml, no orphan packages, and
+      # content-integrity (hidden Unicode) on deployed package content.
+      # Does NOT verify deployed-file content vs lockfile (see #684).
+      - name: apm audit --ci
+        run: apm audit --ci
+
+      # Gate B: regeneration drift (producer-side).
+      # The action's `apm install` step re-integrated local .apm/ into
+      # .github/ via target auto-detection. If anything in the governed
+      # integration directories changed, someone edited the regenerated
+      # output without updating the canonical .apm/ source.
+      - name: Check APM integration drift
+        run: |
+          if [ -n "$(git status --porcelain -- .github/ .claude/ .cursor/ .opencode/)" ]; then
+            echo "::error::APM integration files are out of date."
+            echo "Run 'apm install' locally (with .github/ present) and commit the result."
+            git --no-pager diff -- .github/ .claude/ .cursor/ .opencode/
+            exit 1
+          fi

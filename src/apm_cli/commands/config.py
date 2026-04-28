@@ -14,6 +14,47 @@ from ._helpers import HIGHLIGHT, RESET, _get_console, _load_apm_config
 # Restore builtin since a subcommand is named ``set``
 set = builtins.set
 
+_BOOLEAN_TRUE_VALUES = {"true", "1", "yes"}
+_BOOLEAN_FALSE_VALUES = {"false", "0", "no"}
+_CONFIG_KEY_DISPLAY_NAMES = {
+    "auto_integrate": "auto-integrate",
+    "temp_dir": "temp-dir",
+    "copilot_cowork_skills_dir": "copilot-cowork-skills-dir",
+}
+
+
+def _parse_bool_value(value: str) -> bool:
+    """Parse a CLI boolean value."""
+    normalized = value.strip().lower()
+    if normalized in _BOOLEAN_TRUE_VALUES:
+        return True
+    if normalized in _BOOLEAN_FALSE_VALUES:
+        return False
+    raise ValueError(f"Invalid value '{value}'. Use 'true' or 'false'.")
+
+
+def _get_config_setters():
+    """Return config setters keyed by CLI option name."""
+    from ..config import set_auto_integrate
+
+    return {
+        "auto-integrate": (set_auto_integrate, "Auto-integration"),
+    }
+
+
+def _get_config_getters():
+    """Return config getters keyed by CLI option name."""
+    from ..config import get_auto_integrate
+
+    return {
+        "auto-integrate": get_auto_integrate,
+    }
+
+
+def _valid_config_keys() -> str:
+    """Return valid config keys for messages."""
+    return ", ".join(["auto-integrate", "temp-dir", "copilot-cowork-skills-dir"])
+
 
 @click.group(help="Configure APM CLI", invoke_without_command=True)
 @click.pass_context
@@ -90,6 +131,18 @@ def config(ctx):
             if _temp_dir_val:
                 config_table.add_row("", "Temp Directory", _temp_dir_val)
 
+            from ..core.experimental import is_enabled as _is_enabled
+
+            if _is_enabled("copilot_cowork"):
+                from ..config import get_copilot_cowork_skills_dir as _get_csd
+
+                _csd_val = _get_csd()
+                config_table.add_row(
+                    "",
+                    "Cowork Skills Dir",
+                    _csd_val if _csd_val else "Not set (using auto-detection)",
+                )
+
             console.print(config_table)
 
         except (ImportError, NameError):
@@ -117,6 +170,17 @@ def config(ctx):
             if _temp_dir_fb:
                 click.echo(f"  Temp Directory: {_temp_dir_fb}")
 
+            from ..core.experimental import is_enabled as _is_enabled_fb
+
+            if _is_enabled_fb("copilot_cowork"):
+                from ..config import get_copilot_cowork_skills_dir as _get_csd_fb
+
+                _csd_fb = _get_csd_fb()
+                click.echo(
+                    f"  Cowork Skills Dir: "
+                    f"{_csd_fb if _csd_fb else 'Not set (using auto-detection)'}"
+                )
+
 
 @config.command(help="Set a configuration value")
 @click.argument("key")
@@ -128,34 +192,61 @@ def set(key, value):
         apm config set auto-integrate false
         apm config set auto-integrate true
     """
-    from ..config import set_auto_integrate, set_temp_dir
+    from ..config import get_temp_dir, set_temp_dir
 
     logger = CommandLogger("config set")
-    if key == "auto-integrate":
-        if value.lower() in ["true", "1", "yes"]:
-            set_auto_integrate(True)
-            logger.success("Auto-integration enabled")
-        elif value.lower() in ["false", "0", "no"]:
-            set_auto_integrate(False)
-            logger.success("Auto-integration disabled")
-        else:
-            logger.error(f"Invalid value '{value}'. Use 'true' or 'false'.")
+    if key == "copilot-cowork-skills-dir":
+        from ..core.experimental import is_enabled
+
+        if not is_enabled("copilot_cowork"):
+            logger.error(
+                "copilot-cowork-skills-dir requires the copilot-cowork experimental flag. "
+                "Run: apm experimental enable copilot-cowork"
+            )
             sys.exit(1)
-    elif key == "temp-dir":
+        from ..config import get_copilot_cowork_skills_dir, set_copilot_cowork_skills_dir
+
+        try:
+            set_copilot_cowork_skills_dir(value)
+            logger.success(
+                f"Cowork skills directory set to: {get_copilot_cowork_skills_dir()}"
+            )
+        except ValueError as exc:
+            logger.error(str(exc))
+            sys.exit(1)
+        return
+
+    if key == "temp-dir":
         try:
             set_temp_dir(value)
-            from ..config import get_temp_dir
             logger.success(f"Temporary directory set to: {get_temp_dir()}")
         except ValueError as exc:
             logger.error(str(exc))
             sys.exit(1)
-    else:
+        return
+
+    setters = _get_config_setters()
+    config_entry = setters.get(key)
+    if config_entry is None:
         logger.error(f"Unknown configuration key: '{key}'")
-        logger.progress("Valid keys: auto-integrate, temp-dir")
+        logger.progress(f"Valid keys: {_valid_config_keys()}")
         logger.progress(
             "This error may indicate a bug in command routing. Please report this issue."
         )
         sys.exit(1)
+
+    try:
+        enabled = _parse_bool_value(value)
+    except ValueError as exc:
+        logger.error(str(exc))
+        sys.exit(1)
+
+    setter, label = config_entry
+    setter(enabled)
+    if enabled:
+        logger.success(f"{label} enabled")
+    else:
+        logger.success(f"{label} disabled")
 
 
 @config.command(help="Get a configuration value")
@@ -170,23 +261,38 @@ def get(key):
     from ..config import get_auto_integrate, get_temp_dir
 
     logger = CommandLogger("config get")
+    getters = _get_config_getters()
     if key:
-        if key == "auto-integrate":
-            value = get_auto_integrate()
-            click.echo(f"auto-integrate: {value}")
-        elif key == "temp-dir":
+        if key == "copilot-cowork-skills-dir":
+            from ..config import get_copilot_cowork_skills_dir
+
+            value = get_copilot_cowork_skills_dir()
+            if value is None:
+                click.echo(
+                    "copilot-cowork-skills-dir: Not set (using auto-detection)"
+                )
+            else:
+                click.echo(f"copilot-cowork-skills-dir: {value}")
+            return
+
+        if key == "temp-dir":
             value = get_temp_dir()
             if value is None:
                 click.echo("temp-dir: Not set (using system default)")
             else:
                 click.echo(f"temp-dir: {value}")
-        else:
+            return
+
+        getter = getters.get(key)
+        if getter is None:
             logger.error(f"Unknown configuration key: '{key}'")
-            logger.progress("Valid keys: auto-integrate, temp-dir")
+            logger.progress(f"Valid keys: {_valid_config_keys()}")
             logger.progress(
                 "This error may indicate a bug in command routing. Please report this issue."
             )
             sys.exit(1)
+        value = getter()
+        click.echo(f"{key}: {value}")
     else:
         # Show all user-settable keys with their effective values (including
         # defaults).  Iterating raw config keys would hide settings that
@@ -195,3 +301,44 @@ def get(key):
         click.echo(f"  auto-integrate: {get_auto_integrate()}")
         temp_dir = get_temp_dir()
         click.echo(f"  temp-dir: {temp_dir if temp_dir is not None else 'Not set (using system default)'}")
+
+        from ..core.experimental import is_enabled as _is_enabled_get
+
+        if _is_enabled_get("copilot_cowork"):
+            from ..config import get_copilot_cowork_skills_dir as _get_csd_get
+
+            csd = _get_csd_get()
+            click.echo(
+                f"  copilot-cowork-skills-dir: "
+                f"{csd if csd is not None else 'Not set (using auto-detection)'}"
+            )
+
+
+@config.command(help="Unset a configuration value")
+@click.argument("key")
+def unset(key):
+    """Unset (remove) a configuration value.
+
+    Examples:
+        apm config unset temp-dir
+        apm config unset copilot-cowork-skills-dir
+    """
+    logger = CommandLogger("config unset")
+
+    if key == "temp-dir":
+        from ..config import unset_temp_dir
+
+        unset_temp_dir()
+        logger.success("Temporary directory configuration removed")
+        return
+
+    if key == "copilot-cowork-skills-dir":
+        from ..config import unset_copilot_cowork_skills_dir
+
+        unset_copilot_cowork_skills_dir()
+        logger.success("Cowork skills directory configuration removed")
+        return
+
+    logger.error(f"Unknown configuration key: '{key}'")
+    logger.progress(f"Valid keys: {_valid_config_keys()}")
+    sys.exit(1)

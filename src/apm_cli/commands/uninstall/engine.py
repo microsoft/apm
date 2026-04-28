@@ -92,7 +92,7 @@ def _dry_run_uninstall(packages_to_remove, apm_modules_dir, logger):
         potential_orphans = builtins.set()
         while queue:
             parent_url = queue.pop()
-            for dep in lockfile.get_all_dependencies():
+            for dep in lockfile.get_package_dependencies():
                 key = dep.get_unique_key()
                 if key in potential_orphans:
                     continue
@@ -165,7 +165,7 @@ def _cleanup_transitive_orphans(lockfile, packages_to_remove, apm_modules_dir, a
     queue = builtins.list(removed_repo_urls)
     while queue:
         parent_url = queue.pop()
-        for dep in lockfile.get_all_dependencies():
+        for dep in lockfile.get_package_dependencies():
             key = dep.get_unique_key()
             if key in orphans:
                 continue
@@ -190,7 +190,7 @@ def _cleanup_transitive_orphans(lockfile, packages_to_remove, apm_modules_dir, a
     except Exception:
         pass
 
-    for dep in lockfile.get_all_dependencies():
+    for dep in lockfile.get_package_dependencies():
         key = dep.get_unique_key()
         if key not in orphans and dep.repo_url not in removed_repo_urls:
             remaining_deps.add(key)
@@ -298,11 +298,43 @@ def _sync_integrations_after_uninstall(apm_package, project_root, all_deployed_f
             if (project_root / er / "skills").exists():
                 _skill_dirs_exist = True
                 break
-    if _skill_dirs_exist:
+
+    # Scan sync_managed DIRECTLY for cowork:// entries.
+    # partition_managed_files() uses resolved_deploy_root to detect
+    # dynamic-root targets, but the static KNOWN_TARGETS["copilot-cowork"]
+    # always has resolved_deploy_root=None (it is only set after for_scope()
+    # resolves the OneDrive path at install time).  As a result, cowork://
+    # paths are never routed into _buckets["skills"] by the partition, so
+    # the bucket-based _has_cowork_skills check in the previous fix always
+    # returned False.  Bypassing the bucket and scanning sync_managed
+    # directly is the correct approach: no partition logic is involved.
+    _cowork_skill_files: "set" = set()
+    if sync_managed:
+        from ...integration.copilot_cowork_paths import COWORK_URI_SCHEME
+        _cowork_skill_files = {
+            p for p in sync_managed if p.startswith(COWORK_URI_SCHEME)
+        }
+    _has_cowork_skills = bool(_cowork_skill_files)
+
+    if _skill_dirs_exist or _has_cowork_skills:
+        # Merge cowork entries into the skills bucket so sync_integration
+        # receives them via managed_files.
+        if _has_cowork_skills and _buckets is not None:
+            _buckets.setdefault("skills", set()).update(_cowork_skill_files)
+        elif _has_cowork_skills:
+            _buckets = {"skills": _cowork_skill_files, "hooks": set()}
+
+        # When cowork entries are present, pass targets=None so
+        # sync_integration builds skill_prefix_tuple from KNOWN_TARGETS
+        # (which includes the copilot-cowork target with user_root_resolver
+        # set).  Using _resolved_targets alone would yield only the local
+        # prefix (.copilot/skills/) and cowork:// paths would be silently
+        # skipped by the startswith() guard inside sync_integration.
+        _sync_targets = None if _has_cowork_skills else _resolved_targets
         result = _integrators["skills"].sync_integration(
             apm_package, project_root,
             managed_files=_buckets["skills"] if _buckets else None,
-            targets=_resolved_targets,
+            targets=_sync_targets,
         )
         counts["skills"] = result.get("files_removed", 0)
 
