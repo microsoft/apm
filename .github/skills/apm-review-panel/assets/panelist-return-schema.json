@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "panelist-return-schema.json",
+  "title": "APM Review Panel - Panelist Return Shape",
+  "description": "Shape every panel persona MUST return when invoked by the apm-review-panel skill. Two severity buckets only: required (blocks merge) and nits (skip-if-you-want, single line). NO third bucket. NO disposition - the orchestrator computes verdict deterministically from aggregated required-counts.",
+  "type": "object",
+  "required": ["persona", "required", "nits"],
+  "additionalProperties": false,
+  "properties": {
+    "persona": {
+      "type": "string",
+      "description": "Persona slug. MUST equal the .agent.md filename stem.",
+      "enum": [
+        "python-architect",
+        "cli-logging-expert",
+        "devx-ux-expert",
+        "supply-chain-security-expert",
+        "oss-growth-hacker",
+        "auth-expert"
+      ]
+    },
+    "active": {
+      "type": "boolean",
+      "description": "Set to false ONLY for auth-expert when the conditional rule does not activate it. All other personas MUST set active=true. When false, required and nits MUST be empty arrays and inactive_reason MUST be a one-sentence explanation citing the touched files.",
+      "default": true
+    },
+    "inactive_reason": {
+      "type": "string",
+      "description": "Required when active=false. One sentence citing the touched files."
+    },
+    "required": {
+      "type": "array",
+      "description": "Findings that MUST be addressed before merge. Empty array means this persona has no blocking concerns. Anything in this array causes the orchestrator to emit a REJECT verdict.",
+      "items": { "$ref": "#/definitions/finding" }
+    },
+    "nits": {
+      "type": "array",
+      "description": "One-line suggestions the author can skip. NEVER block merge. No cap - trust the panelist's judgement.",
+      "items": { "$ref": "#/definitions/finding" }
+    },
+    "extras": {
+      "type": "object",
+      "description": "Persona-specific structured payload. Reserved for python-architect mermaid diagrams and oss-growth-hacker side-channel notes. Never blocks; never affects verdict.",
+      "additionalProperties": true
+    }
+  },
+  "definitions": {
+    "finding": {
+      "type": "object",
+      "required": ["summary", "rationale"],
+      "additionalProperties": false,
+      "properties": {
+        "summary": {
+          "type": "string",
+          "description": "One-line description of the finding. ASCII only. No emojis."
+        },
+        "rationale": {
+          "type": "string",
+          "description": "WHY this matters. Cite the rule or pattern violated. ASCII only."
+        },
+        "file": {
+          "type": "string",
+          "description": "Optional repo-relative path to the file."
+        },
+        "line": {
+          "type": "integer",
+          "description": "Optional line number."
+        },
+        "suggestion": {
+          "type": "string",
+          "description": "Optional concrete fix (diff hint, replacement code, command to run)."
+        }
+      }
+    }
+  }
+}
