@@ -1,11 +1,11 @@
 #!/usr/bin/env bats
-# Unit tests for devcontainer/src/apm/install.sh
+# Unit tests for devcontainer/src/apm-cli/install.sh
 # PATH is fully isolated to STUB_BIN -- no network, no real packages, no Docker.
 
 load "../../test_helper/bats-support/load"
 load "../../test_helper/bats-assert/load"
 
-INSTALL_SH="$(cd "$(dirname "$BATS_TEST_FILENAME")/../../../src/apm" && pwd)/install.sh"
+INSTALL_SH="$(cd "$(dirname "$BATS_TEST_FILENAME")/../../../src/apm-cli" && pwd)/install.sh"
 
 # -- Helpers ------------------------------------------------------------------
 

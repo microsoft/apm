@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Dev Container Feature** `ghcr.io/microsoft/apm/apm-cli` -- one-line install of the APM CLI into any `devcontainer.json`, GitHub Codespace, or JetBrains Gateway workspace. Supports a `version` option (`latest` or pinned semver), declares `installsAfter` for the official Python feature, handles PEP 668 on Ubuntu 24.04+. Ships with 37 bats unit tests and a 6-distro Docker integration matrix (Ubuntu 24.04, Ubuntu 22.04, Debian 12, Alpine 3.20, Fedora 41, plus Python-feature combo). (#861)
+
 ### Changed
 
 - Rename `DownloadStrategyManager` to `DownloadDelegate` to better reflect Facade/Delegate pattern (#918)

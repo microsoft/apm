@@ -35,11 +35,11 @@ The feature declares `installsAfter: ghcr.io/devcontainers/features/python` so t
 ```
 devcontainer/
 +-- src/
-|   \-- apm/
+|   \-- apm-cli/
 |       +-- devcontainer-feature.json   # Feature manifest (id, options, metadata)
 |       \-- install.sh                  # Install script executed inside the container
 \-- test/
-    +-- apm/
+    +-- apm-cli/
     |   +-- scenarios.json              # Integration test matrix (base image x options)
     |   +-- generic-checks.sh           # Shared post-install checks (apm on PATH, --version, --help)
     |   +-- default-ubuntu-24.sh        # Ubuntu 24.04 scenario (PEP 668 path)
@@ -61,11 +61,11 @@ devcontainer/
 
 ### Manifest
 
-[src/apm/devcontainer-feature.json](src/apm/devcontainer-feature.json) declares the feature id (`apm`), its options, and `installsAfter`. The devcontainer CLI reads this to understand how to build an image that consumes the feature.
+[src/apm-cli/devcontainer-feature.json](src/apm-cli/devcontainer-feature.json) declares the feature id (`apm-cli`), its options, and `installsAfter`. The devcontainer CLI reads this to understand how to build an image that consumes the feature.
 
 ### Install flow
 
-When a devcontainer is built, the CLI injects each option as an uppercased environment variable (e.g. `VERSION`) and runs [src/apm/install.sh](src/apm/install.sh) as root. The script:
+When a devcontainer is built, the CLI injects each option as an uppercased environment variable (e.g. `VERSION`) and runs [src/apm-cli/install.sh](src/apm-cli/install.sh) as root. The script:
 
 1. **Validates `VERSION`** -- accepts `latest` or a strict semver `X.Y.Z`; otherwise exits `1`.
 2. **Verifies it is running as root** -- fails with a clear message otherwise.
@@ -85,61 +85,75 @@ When a devcontainer is built, the CLI injects each option as an uppercased envir
 
 ## 4. How to use `devcontainer` in your project
 
-### Option A -- test it locally
+### Quick start -- add the published feature
 
-Recent versions of the Dev Containers CLI (bundled with `ms-vscode-remote.remote-containers` >= 0.454.0) enforce that a local Feature path must resolve **inside** the `.devcontainer/` folder. An upward `../devcontainer/src/apm` path -- and symlinks pointing outside `.devcontainer/` -- are rejected with:
-
-```
-Local file path parse error. Resolved path must be a child of the .devcontainer/ folder.
-```
-
-To test the feature against this repo's own dev container, run the helper script from the repo root before opening the container -- it copies the feature into `.devcontainer/apm-feature` and writes a matching `devcontainer.json`:
-
-```sh
-./devcontainer/scripts/sync-local-devcontainer.sh
-```
-
-The script is idempotent: re-run it whenever [src/apm/install.sh](src/apm/install.sh) or [src/apm/devcontainer-feature.json](src/apm/devcontainer-feature.json) changes.
-
-This constraint only affects local consumption and is primarily meant for local testing. Published OCI references (Option B) and tarball references are unaffected.
-
-### Option B -- consume it from the published OCI reference
-
-Once published, users add it to `devcontainer.json` like any other feature:
+Add the published feature to any `.devcontainer/devcontainer.json`:
 
 ```json
 {
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
   "features": {
-    "ghcr.io/<org>/<collection>/apm:1": {}
+    "ghcr.io/microsoft/apm/apm-cli:1": {}
   }
 }
 ```
 
-### Pin a specific version
+Rebuild the container in VS Code (Dev Containers: Rebuild Container), GitHub Codespaces, or JetBrains Gateway. The `apm` binary is on `PATH`; verify with `apm --version`.
+
+### Pin a specific apm-cli release
 
 ```json
 {
   "features": {
-    "ghcr.io/<org>/<collection>/apm:1": {
-      "version": "0.8.11"
+    "ghcr.io/microsoft/apm/apm-cli:1": {
+      "version": "0.10.0"
     }
   }
 }
 ```
 
-### Combine with the Python feature
+### Combine with the official Python feature
+
+The APM feature declares `installsAfter` for the upstream Python feature, so ordering is automatic:
 
 ```json
 {
   "image": "ubuntu:24.04",
   "features": {
     "ghcr.io/devcontainers/features/python:1": {},
-    "ghcr.io/<org>/<collection>/apm:1": {}
+    "ghcr.io/microsoft/apm/apm-cli:1": {}
   }
 }
 ```
 
-`installsAfter` ensures Python is installed before APM.
+### Tag selection
+
+| Tag                                       | Resolves to              | Use when                              |
+| ----------------------------------------- | ------------------------ | ------------------------------------- |
+| `ghcr.io/microsoft/apm/apm-cli:1`         | latest 1.x.y             | recommended default                   |
+| `ghcr.io/microsoft/apm/apm-cli:1.0`       | latest 1.0.x             | locked to a minor line                |
+| `ghcr.io/microsoft/apm/apm-cli:1.0.0`     | exact patch              | maximum reproducibility               |
+| `ghcr.io/microsoft/apm/apm-cli:latest`    | newest published         | not recommended (crosses majors)      |
+
+The feature manifest version is independent of the `apm-cli` PyPI release. To pin the CLI, use the `version` option above.
+
+### Local development -- test an unpublished build
+
+Recent versions of the Dev Containers CLI (bundled with `ms-vscode-remote.remote-containers` >= 0.454.0) enforce that a local Feature path must resolve **inside** the `.devcontainer/` folder. An upward `../devcontainer/src/apm-cli` path -- and symlinks pointing outside `.devcontainer/` -- are rejected with:
+
+```
+Local file path parse error. Resolved path must be a child of the .devcontainer/ folder.
+```
+
+To test the feature against this repo's own dev container, run the helper script from the repo root before opening the container -- it copies the feature into `.devcontainer/apm-cli-feature` and writes a matching `devcontainer.json`:
+
+```sh
+./devcontainer/scripts/sync-local-devcontainer.sh
+```
+
+The script is idempotent: re-run it whenever [src/apm-cli/install.sh](src/apm-cli/install.sh) or [src/apm-cli/devcontainer-feature.json](src/apm-cli/devcontainer-feature.json) changes.
+
+This constraint only affects local consumption and is primarily meant for local testing. Published OCI references and tarball references are unaffected.
 
 ### Requirements for the base image
 
@@ -152,7 +166,7 @@ Once published, users add it to `devcontainer.json` like any other feature:
 
 ## 5. Unit tests
 
-**Where:** [test/apm/unit/install.bats](test/apm/unit/install.bats)
+**Where:** [test/apm-cli/unit/install.bats](test/apm-cli/unit/install.bats)
 **Tool:** [bats-core](https://github.com/bats-core/bats-core), plus `bats-support` and `bats-assert` (all vendored as git submodules under `test/bats/` and `test/test_helper/`).
 **Count:** 37 tests.
 
@@ -188,7 +202,7 @@ git submodule update --init --recursive
 Then:
 
 ```sh
-cd devcontainer/test/apm/unit
+cd devcontainer/test/apm-cli/unit
 ../../bats/bin/bats install.bats
 ```
 
@@ -197,7 +211,7 @@ cd devcontainer/test/apm/unit
 ## 6. Integration tests
 
 **Tool:** `devcontainer features test` from [`@devcontainers/cli`](https://github.com/devcontainers/cli) -- the official Microsoft test runner for Dev Container Features.
-**Matrix:** [test/apm/scenarios.json](test/apm/scenarios.json).
+**Matrix:** [test/apm-cli/scenarios.json](test/apm-cli/scenarios.json).
 
 ### How scenarios are wired
 
@@ -205,7 +219,7 @@ For each entry in `scenarios.json` the CLI:
 
 1. Builds a Docker image from the scenario's base `image`.
 2. Runs the real `install.sh` inside the container with the scenario's options injected as environment variables.
-3. Copies the `<scenario-id>.sh` file into the container and runs it -- the scenario id must match a filename under `test/apm/`.
+3. Copies the `<scenario-id>.sh` file into the container and runs it -- the scenario id must match a filename under `test/apm-cli/`.
 4. The test script sources `dev-container-features-test-lib` (provided by the CLI) and `generic-checks.sh`, then issues per-distro assertions, and calls `reportResults`.
 
 ### Scenario matrix
@@ -221,7 +235,7 @@ For each entry in `scenarios.json` the CLI:
 
 ### Shared checks
 
-[test/apm/generic-checks.sh](test/apm/generic-checks.sh) runs on every scenario and verifies:
+[test/apm-cli/generic-checks.sh](test/apm-cli/generic-checks.sh) runs on every scenario and verifies:
 
 - `apm` is on `PATH`
 - `apm --version` exits `0`
@@ -237,13 +251,13 @@ From the repo root, with Docker running and `@devcontainers/cli` installed (`npm
 ```sh
 # All scenarios
 devcontainer features test \
-  --features apm \
+  --features apm-cli \
   --skip-autogenerated \
   --project-folder devcontainer
 
 # One scenario
 devcontainer features test \
-  --features apm \
+  --features apm-cli \
   --filter default-ubuntu-24 \
   --skip-autogenerated \
   --project-folder devcontainer

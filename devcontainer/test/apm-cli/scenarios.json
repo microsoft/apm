@@ -2,31 +2,31 @@
   "default-ubuntu-24": {
     "image": "ubuntu:24.04",
     "features": {
-      "apm": {}
+      "apm-cli": {}
     }
   },
   "default-debian-12": {
     "image": "debian:12",
     "features": {
-      "apm": {}
+      "apm-cli": {}
     }
   },
   "default-alpine-3": {
     "image": "alpine:3.20",
     "features": {
-      "apm": {}
+      "apm-cli": {}
     }
   },
   "default-fedora": {
     "image": "fedora:41",
     "features": {
-      "apm": {}
+      "apm-cli": {}
     }
   },
   "pinned-version": {
     "image": "ubuntu:22.04",
     "features": {
-      "apm": {
+      "apm-cli": {
         "version": "0.8.11"
       }
     }
@@ -35,7 +35,7 @@
     "image": "ubuntu:24.04",
     "features": {
       "ghcr.io/devcontainers/features/python:1": {},
-      "apm": {}
+      "apm-cli": {}
     }
   }
 }
