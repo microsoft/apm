@@ -61,6 +61,21 @@ FLAGS: dict[str, ExperimentalFlag] = {
         default=False,
         hint="Run 'apm --version' to see the new output.",
     ),
+"copilot_cowork": ExperimentalFlag(
+        name="copilot_cowork",
+        description="Enable Microsoft 365 Copilot Cowork skills deployment via OneDrive.",
+        default=False,
+        hint=(
+            "Use '--target copilot-cowork --global' to deploy skills. "
+            "See https://microsoft.github.io/apm/integrations/copilot-cowork/"
+        ),
+    ),
+    "marketplace_authoring": ExperimentalFlag(
+        name="marketplace_authoring",
+        description="Enable marketplace authoring commands (init, build, publish, etc.).",
+        default=False,
+        hint="Run 'apm marketplace --help' to see available commands.",
+    ),
 }
 
 

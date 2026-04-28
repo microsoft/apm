@@ -12,6 +12,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed `AttributeError: 'str' object has no attribute 'get'` crash when running `apm install --mcp <name>` without `--transport`, `--url`, `--mcp-version`, `--registry`, or a post-`--` stdio command. The bare-string registry shorthand now exits 0 and persists correctly to `apm.yml`. Closes #938 (#951)
 
+## [0.10.0] - 2026-04-27
+
+### Added
+
+- **Microsoft 365 Copilot Cowork** target works end-to-end: `apm install --target cowork --global` deploys skills to OneDrive (behind `apm experimental enable cowork`). (#926)
+- **[Experimental] `apm marketplace` authoring CLI**: maintainers can scaffold, build, validate, and publish Anthropic-compliant marketplaces from the CLI (`init` -> `package add` -> `build` -> `publish`). (#790)
+- README "Coming from `npx skills add`?" 30-second migration table for users arriving from the agentskills.io ecosystem. (#980)
+
+### Changed
+
+- [Experimental] `apm marketplace plugin` renamed to `apm marketplace package` (npm/pip/cargo familiarity); `--help` grouped into Consumer / Authoring sections. (#722)
+
+### Fixed
+
+- Docs site auto-deploys again after bot-cut releases (now triggered on tag push). (#981)
+
+### Maintainer tooling
+
+- `pr-description-skill` ships an evals suite so PR-description quality regressions are caught in CI without an LLM API key. (#985)
+- `pr-description-skill` mermaid guidance hardened with `assets/mermaid-conventions.md` (diagram-type-by-intent + GitHub-renderer gotchas `mmdc` misses). (#984)
+- Cowork tests mock `sys.platform` so the macOS auto-detection paths don't false-fail on Windows CI. (#989)
+
 ## [0.9.4] - 2026-04-27
 
 ### Added
@@ -19,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Day-0 install parity with `npx skills add`**: every public repo that installs cleanly with `npx skills add owner/repo` now installs with `apm install owner/repo`. APM recognises bare `skills/<name>/SKILL.md` (vercel-labs/agent-skills, xixu-me/skills, larksuite/cli, the agentskills.io ecosystem) as a first-class shape (`SKILL_BUNDLE`); `apm.yml` is optional. `--skill <NAME>` (repeatable) selects a subset and **persists** it to `apm.yml` + `apm.lock.yaml`, so bare `apm install` is reproducible across machines. `--skill '*'` resets; `apm audit --ci` flags drift. (#974)
 - `curl | sh` install works in air-gapped, GHE, and internal-mirror setups: `install.sh` now reads `APM_INSTALL_DIR`, `GITHUB_URL`, `APM_REPO`, and `VERSION` (or `@vX.Y.Z` arg) -- pinning a version skips the GitHub API entirely, so corporate runners without api.github.com egress can bootstrap APM. (#660)
 
+### Changed
+
+- `apm marketplace` authoring commands (init, build, check, outdated, doctor, publish, package) ring-fenced behind `apm experimental enable marketplace-authoring` feature flag (default: disabled) (#790)
 ### Fixed
 
 - `apm install` no longer fails behind corporate TLS-intercepting proxies: validation now honours `REQUESTS_CA_BUNDLE` instead of misreporting CA failures as auth errors. (#911)
@@ -36,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Gemini CLI** as a supported APM target (`--target gemini`): auto-detects `.gemini/`, writes MCP config to `.gemini/settings.json`, and adds `apm runtime setup|remove gemini`. (#917)
+- Experimental `cowork` target for Microsoft 365 Copilot Cowork custom-skill deployment via OneDrive (`apm experimental enable cowork`; `apm install --target cowork --global`; persisted via `apm config set cowork-skills-dir`). (#913)
 - `apm experimental` command group (`list` / `enable` / `disable` / `reset`) lets you opt into new behaviour before it graduates to default. Ships with the `verbose-version` flag. (#849)
 - `apm audit --ci` now verifies hash integrity of locally deployed `.apm/` files so hand-edits and config drift fail CI instead of slipping through. (#887)
 - `includes:` manifest field (`auto` or list) gives you explicit control over which local `.apm/` files are deployed; pair with `policy.manifest.require_explicit_includes` to block silent expansion. Audit raises an `includes-consent` advisory while you migrate. (#887)
@@ -77,6 +103,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enterprise docs IA refactor: hub page + merged team guides, deduped governance content. (#858)
 - Landing page rewritten around the three-pillar spine. (#855)
 - First-package tutorial rewritten end-to-end; fixes `.apm/` anatomy hallucinations. (#866)
+- `apm install --ssh` / `--https` flags and `APM_GIT_PROTOCOL=ssh|https` env to pick the initial transport for shorthand dependencies (#778)
+- `apm install --allow-protocol-fallback` flag and `APM_ALLOW_PROTOCOL_FALLBACK=1` env as the migration escape hatch for cross-protocol fallback (#778)
+- Add APM Review Panel skill (`.github/skills/apm-review-panel/`) and four new specialist personas (`devx-ux-expert`, `supply-chain-security-expert`, `apm-ceo`, `oss-growth-hacker`) with auto-activating per-persona skills. Routes specialist findings through an APM CEO arbiter for strategic / breaking-change calls, with the OSS growth hacker side-channeling adoption insights via `WIP/growth-strategy.md`. Instrumentation per Handbook Ch. 9 (`The Instrumented Codebase`); PROSE-compliant (thin SKILL.md routers, persona detail lazy-loaded via markdown links, explicit boundaries per persona).
+- `apm view plugin@marketplace` displays marketplace plugin metadata (name, version, source, description) (#514)
+- `apm outdated` checks marketplace plugin refs and shows a "Source" column distinguishing marketplace vs git updates (#514)
+- `apm marketplace validate` command with schema validation and duplicate name detection (#514)
+- Ref immutability advisory: caches plugin-to-ref pins and warns when a previously pinned plugin's ref changes (#514)
+- Multi-marketplace shadow detection: warns when the same plugin name appears in multiple registered marketplaces (#514)
 
 ### Changed
 

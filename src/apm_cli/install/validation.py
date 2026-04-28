@@ -219,9 +219,22 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                 dep_ref.repo_url, use_ssh=False, dep_ref=dep_ref, token=_url_token
             )
 
-            explicit_scheme = getattr(dep_ref, "explicit_scheme", None)
+            explicit_scheme = (getattr(dep_ref, "explicit_scheme", None) or "").lower() or None
             is_insecure = bool(getattr(dep_ref, "is_insecure", False))
             prefer_web_probe_first = explicit_scheme in ("http", "https") or is_insecure
+
+            # Strict-by-default cross-protocol policy (issue microsoft/apm#992):
+            # an explicit ``http://`` / ``https://`` / ``ssh://`` URL is honored
+            # exactly and does NOT silently fall back to a different protocol.
+            # This mirrors the strict default of ``_clone_with_fallback`` /
+            # :class:`TransportSelector` and prevents the foot-gun where a user
+            # types ``https://corp-bitbucket.example/...`` and the validation
+            # pre-check silently retries SSH on port 22, masking the real HTTPS
+            # failure (auth/redirect/etc.) behind a 30s SSH timeout. The
+            # ``APM_ALLOW_PROTOCOL_FALLBACK=1`` env var (the same escape-hatch
+            # the clone path honors) restores the legacy permissive chain.
+            from apm_cli.deps.transport_selection import is_fallback_allowed
+            allow_fallback_env = is_fallback_allowed()
 
             # For generic hosts (not GitHub, not ADO), relax the env so native
             # credential helpers (SSH keys, macOS Keychain, etc.) can work.
@@ -234,23 +247,64 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             else:
                 validate_env = {**os.environ, **ado_downloader.git_env}
 
-            if verbose_log:
-                verbose_log(f"Trying git ls-remote for {dep_ref.host}")
-
-            # Generic shorthand keeps the legacy SSH-first probe order. Explicit
-            # HTTP(S) should test the web transport first so validation matches
-            # the clone plan closely enough to avoid surprise SSH prompts.
+            # Build the probe order. Non-generic hosts (GHES/ADO) always probe
+            # a single authenticated URL. Generic hosts:
+            #   - explicit https/http  -> web URL only (strict)
+            #   - explicit ssh         -> SSH URL only (strict)
+            #   - shorthand (no scheme) -> legacy [SSH, HTTPS] chain
+            # ``APM_ALLOW_PROTOCOL_FALLBACK=1`` re-appends the opposite scheme
+            # for the explicit cases to match clone semantics exactly.
             urls_to_try = []
             if is_generic:
                 ssh_url = ado_downloader._build_repo_url(
                     dep_ref.repo_url, use_ssh=True, dep_ref=dep_ref
                 )
-                if prefer_web_probe_first:
-                    urls_to_try = [package_url, ssh_url]
+                if explicit_scheme in ("http", "https"):
+                    urls_to_try = [package_url] if not allow_fallback_env else [package_url, ssh_url]
+                elif explicit_scheme == "ssh":
+                    urls_to_try = [ssh_url] if not allow_fallback_env else [ssh_url, package_url]
                 else:
+                    # Shorthand has no user-stated transport; keep the legacy
+                    # SSH-first chain so existing flows (e.g. SSH-key users on
+                    # corporate hosts) keep validating successfully.
                     urls_to_try = [ssh_url, package_url]
             else:
                 urls_to_try = [package_url]
+
+            if verbose_log:
+                attempt_word = "attempt" if len(urls_to_try) == 1 else "attempts"
+                verbose_log(
+                    f"Trying git ls-remote for {dep_ref.host} "
+                    f"({len(urls_to_try)} {attempt_word})"
+                )
+
+            def _scheme_of(url: str) -> str:
+                return url.split("://", 1)[0] if "://" in url else "ssh"
+
+            def _log_attempt_result(probe_url: str, run_result):
+                """Per-attempt sanitized verbose logging.
+
+                The previous implementation only logged the final attempt's
+                result, which masked the actual failure (typically the HTTPS
+                leg) behind the SSH-fallback timeout. Logging each attempt
+                gives users the diagnostic data they need to act.
+                """
+                if not verbose_log:
+                    return
+                scheme = _scheme_of(probe_url)
+                if run_result.returncode == 0:
+                    verbose_log(f"git ls-remote ({scheme}) rc=0 for {package}")
+                    return
+                raw_stderr = (run_result.stderr or "").strip()[:200]
+                stderr_snippet = ado_downloader._sanitize_git_error(raw_stderr)
+                for env_var in ("GIT_ASKPASS", "GIT_CONFIG_GLOBAL"):
+                    env_val = validate_env.get(env_var, "")
+                    if env_val:
+                        stderr_snippet = stderr_snippet.replace(env_val, "***")
+                verbose_log(
+                    f"git ls-remote ({scheme}) rc={run_result.returncode}: "
+                    f"{stderr_snippet}"
+                )
 
             result = None
             for probe_url in urls_to_try:
@@ -263,6 +317,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                     timeout=30,
                     env=validate_env,
                 )
+                _log_attempt_result(probe_url, result)
                 if result.returncode == 0:
                     break
 
@@ -313,26 +368,11 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                 except ImportError:
                     pass
 
-            if verbose_log:
-                if result.returncode == 0:
-                    verbose_log(f"git ls-remote rc=0 for {package}")
-                else:
-                    # Sanitize stderr to avoid leaking tokens.  Two layers:
-                    # 1) scrub PAT-bearing URLs (git often echoes the URL
-                    #    in error messages -- the URL we built above
-                    #    embeds _url_token).  Use the same sanitizer the
-                    #    downloader uses for clone errors.
-                    # 2) belt-and-suspenders: also redact any literal env
-                    #    values that may have leaked through unrelated
-                    #    diagnostics paths.
-                    raw_stderr = (result.stderr or "").strip()[:200]
-                    stderr_snippet = ado_downloader._sanitize_git_error(raw_stderr)
-                    for env_var in ("GIT_ASKPASS", "GIT_CONFIG_GLOBAL"):
-                        env_val = validate_env.get(env_var, "")
-                        if env_val:
-                            stderr_snippet = stderr_snippet.replace(env_val, "***")
-                    verbose_log(f"git ls-remote rc={result.returncode}: {stderr_snippet}")
-
+            # Per-attempt verbose logging is emitted inside the probe loop
+            # (and by the bearer-fallback branch above), so the result is
+            # already on screen by the time we get here. Stderr is sanitized
+            # via ``GitHubPackageDownloader._sanitize_git_error`` to scrub
+            # any token-bearing URLs / env values before logging.
             return result.returncode == 0
 
         # For GitHub.com, use AuthResolver with unauth-first fallback

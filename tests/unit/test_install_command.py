@@ -903,13 +903,40 @@ class TestGenericHostSshFirstValidation:
         )
 
     @patch("subprocess.run")
-    def test_generic_host_falls_back_to_https_when_ssh_fails(self, mock_run):
-        """HTTPS fallback is used for generic hosts when SSH ls-remote fails."""
+    def test_explicit_ssh_url_does_not_fall_back_to_https(self, mock_run):
+        """Strict-by-default (issue #992): explicit SSH URLs must NOT silently
+        fall back to HTTPS, mirroring ``_clone_with_fallback`` semantics. The
+        legacy permissive chain stays available behind
+        ``APM_ALLOW_PROTOCOL_FALLBACK=1``."""
+        from apm_cli.commands.install import _validate_package_exists
+
+        # SSH probe fails; previously this would have silently retried HTTPS.
+        mock_run.return_value = self._make_completed_process(
+            returncode=128, stderr="ssh: connect to host"
+        )
+
+        result = _validate_package_exists(
+            "git@git.example.org:org/group/repo.git", verbose=False
+        )
+
+        assert result is False
+        assert mock_run.call_count == 1, (
+            "explicit ssh:// must be strict; got "
+            f"{[c[0][0] for c in mock_run.call_args_list]!r}"
+        )
+        first_cmd = mock_run.call_args_list[0][0][0]
+        assert any("git@git.example.org:" in arg for arg in first_cmd), (
+            f"Expected SSH URL in only call, got: {first_cmd}"
+        )
+
+    @patch.dict(os.environ, {"APM_ALLOW_PROTOCOL_FALLBACK": "1"})
+    @patch("subprocess.run")
+    def test_explicit_ssh_falls_back_to_https_with_allow_fallback_env(self, mock_run):
+        """Legacy permissive chain restored when the env opt-in is set."""
         from urllib.parse import urlsplit
 
         from apm_cli.commands.install import _validate_package_exists
 
-        # SSH probe fails, HTTPS succeeds
         mock_run.side_effect = [
             self._make_completed_process(returncode=128, stderr="ssh: connect to host"),
             self._make_completed_process(returncode=0),
@@ -921,28 +948,21 @@ class TestGenericHostSshFirstValidation:
 
         assert result is True
         assert mock_run.call_count == 2
-        # First call: SSH (SCP-style URLs are not parseable by urlsplit, so
-        # keep the substring check scoped to the SSH prefix form git@host:).
         first_cmd = mock_run.call_args_list[0][0][0]
-        assert any("git@git.example.org:" in arg for arg in first_cmd), (
-            f"Expected SSH URL in first call, got: {first_cmd}"
-        )
-        # Second call: HTTPS -- parse scheme + netloc explicitly to avoid
-        # substring false-positives.
+        assert any("git@git.example.org:" in arg for arg in first_cmd)
         second_cmd = mock_run.call_args_list[1][0][0]
-        https_arg_found = False
-        for arg in second_cmd:
-            parts = urlsplit(arg)
-            if parts.scheme == "https" and parts.netloc == "git.example.org":
-                https_arg_found = True
-                break
+        https_arg_found = any(
+            urlsplit(arg).scheme == "https"
+            and urlsplit(arg).netloc == "git.example.org"
+            for arg in second_cmd
+        )
         assert https_arg_found, (
             f"Expected https://git.example.org URL in second call, got: {second_cmd}"
         )
 
     @patch("subprocess.run")
-    def test_generic_host_returns_false_when_both_transports_fail(self, mock_run):
-        """Validation returns False when both SSH and HTTPS fail for a generic host."""
+    def test_generic_host_returns_false_when_explicit_ssh_fails(self, mock_run):
+        """Strict mode: a single failed SSH probe is the only attempt."""
         from apm_cli.commands.install import _validate_package_exists
 
         mock_run.return_value = self._make_completed_process(
@@ -954,7 +974,7 @@ class TestGenericHostSshFirstValidation:
         )
 
         assert result is False
-        assert mock_run.call_count == 2  # tried SSH then HTTPS
+        assert mock_run.call_count == 1  # strict: SSH only, no HTTPS retry
 
     @patch("subprocess.run")
     def test_explicit_http_generic_host_tries_http_first(self, mock_run):
