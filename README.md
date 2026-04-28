@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/microsoft-apm-badge.png)](https://mseep.ai/app/microsoft-apm)
+
 # APM – Agent Package Manager
 
 **An open-source, community-driven dependency manager for AI agents.**
