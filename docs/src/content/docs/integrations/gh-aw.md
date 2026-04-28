@@ -71,6 +71,20 @@ Packages are fetched using gh-aw's cascading token fallback: `GH_AW_PLUGINS_TOKE
 Earlier gh-aw versions accepted a top-level `dependencies:` field on the workflow. That form is deprecated and no longer supported -- migrate to the `imports: - uses: shared/apm.md` pattern shown above.
 :::
 
+:::tip[Vendor the canonical `shared/apm.md`]
+`shared/apm.md` is a **local file** that gh-aw resolves at `.github/workflows/shared/apm.md` in your repository -- not a remote import. Two copies exist in the wild: one in [microsoft/apm](https://github.com/microsoft/apm/blob/main/.github/workflows/shared/apm.md) (canonical, current) and one in [github/gh-aw](https://github.com/github/gh-aw/blob/main/.github/workflows/shared/apm.md) (vendored, may lag).
+
+To get the canonical version with multi-org GitHub App auth (`apps:`) and multi-bundle restore:
+
+```bash
+mkdir -p .github/workflows/shared
+curl -sSL https://raw.githubusercontent.com/microsoft/apm/main/.github/workflows/shared/apm.md \
+  > .github/workflows/shared/apm.md
+```
+
+Check whether your vendored copy is current by comparing the `Source of truth:` and `apm-action pin:` lines near the top of the file with the canonical copy linked above.
+:::
+
 ### apm-action Pre-Step
 
 For more control over the installation process, use [`microsoft/apm-action@v1`](https://github.com/microsoft/apm-action) as an explicit workflow step. This approach runs `apm install` directly, giving you access to the full APM CLI. To also compile, add `compile: true` to the action configuration.

@@ -1,5 +1,5 @@
 # gh-aw-metadata: {"schema_version":"v3","frontmatter_hash":"1477b4d463ca800dfc0e5e0dee19d03097a122660a33fb4deb2d0e70c129871b","compiler_version":"v0.68.3","strict":true,"agent_id":"copilot"}
-# gh-aw-manifest: {"version":1,"secrets":["COPILOT_GITHUB_TOKEN","GH_AW_GITHUB_MCP_SERVER_TOKEN","GH_AW_GITHUB_TOKEN","GH_AW_PLUGINS_TOKEN","GITHUB_TOKEN"],"actions":[{"repo":"actions/checkout","sha":"de0fac2e4500dabe0009e67214ff5f5447ce83dd","version":"v6.0.2"},{"repo":"actions/download-artifact","sha":"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c","version":"v8.0.1"},{"repo":"actions/github-script","sha":"373c709c69115d41ff229c7e5df9f8788daa9553","version":"v9"},{"repo":"actions/upload-artifact","sha":"043fb46d1a93c77aae656e7c1c64a875d1fc6a0a","version":"v7"},{"repo":"github/gh-aw-actions/setup","sha":"ba90f2186d7ad780ec640f364005fa24e797b360","version":"v0.68.3"},{"repo":"microsoft/apm-action","sha":"9fe9337ef58b5e620e0113071ceb47a6a8a232f7","version":"v1.4.2"}],"containers":[{"image":"ghcr.io/github/gh-aw-firewall/agent:0.25.20"},{"image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.25.20"},{"image":"ghcr.io/github/gh-aw-firewall/squid:0.25.20"},{"image":"ghcr.io/github/gh-aw-mcpg:v0.2.19"},{"image":"ghcr.io/github/github-mcp-server:v0.32.0"},{"image":"node:lts-alpine"}]}
+# gh-aw-manifest: {"version":1,"secrets":["COPILOT_GITHUB_TOKEN","GH_AW_GITHUB_MCP_SERVER_TOKEN","GH_AW_GITHUB_TOKEN","GH_AW_PLUGINS_TOKEN","GITHUB_TOKEN"],"actions":[{"repo":"actions/checkout","sha":"de0fac2e4500dabe0009e67214ff5f5447ce83dd","version":"v6.0.2"},{"repo":"actions/create-github-app-token","sha":"1b10c78c7865c340bc4f6099eb2f838309f1e8c3","version":"v3.1.1"},{"repo":"actions/download-artifact","sha":"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c","version":"v8.0.1"},{"repo":"actions/github-script","sha":"373c709c69115d41ff229c7e5df9f8788daa9553","version":"v9"},{"repo":"actions/upload-artifact","sha":"043fb46d1a93c77aae656e7c1c64a875d1fc6a0a","version":"v7"},{"repo":"github/gh-aw-actions/setup","sha":"ba90f2186d7ad780ec640f364005fa24e797b360","version":"v0.68.3"},{"repo":"microsoft/apm-action","sha":"454b8a1d279376a47df8bb8d525ec076ca0fcef7","version":"v1.5.0"},{"repo":"ruby/setup-ruby","sha":"4c56a21280b36d862b5fc31348f463d60bdc55d5","version":"v1.301.0"}],"containers":[{"image":"ghcr.io/github/gh-aw-firewall/agent:0.25.20"},{"image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.25.20"},{"image":"ghcr.io/github/gh-aw-firewall/squid:0.25.20"},{"image":"ghcr.io/github/gh-aw-mcpg:v0.2.19"},{"image":"ghcr.io/github/github-mcp-server:v0.32.0"},{"image":"node:lts-alpine"}]}
 #    ___                   _   _      
 #   / _ \                 | | (_)     
 #  | |_| | __ _  ___ _ __ | |_ _  ___ 
@@ -37,12 +37,14 @@
 #
 # Custom actions used:
 #   - actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+#   - actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
 #   - actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
 #   - actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9
 #   - actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
 #   - actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
 #   - github/gh-aw-actions/setup@ba90f2186d7ad780ec640f364005fa24e797b360 # v0.68.3
-#   - microsoft/apm-action@9fe9337ef58b5e620e0113071ceb47a6a8a232f7 # v1.4.2
+#   - microsoft/apm-action@454b8a1d279376a47df8bb8d525ec076ca0fcef7 # v1.5.0
+#   - ruby/setup-ruby@4c56a21280b36d862b5fc31348f463d60bdc55d5 # v1.301.0
 #
 # Container images used:
 #   - ghcr.io/github/gh-aw-firewall/agent:0.25.20
@@ -360,6 +362,7 @@ jobs:
     needs:
       - activation
       - apm
+      - apm-prep
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -404,24 +407,34 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@4c56a21280b36d862b5fc31348f463d60bdc55d5 # v1.301.0
+        with:
+          ruby-version: '3.3'
       - name: Create gh-aw temp directory
         run: bash "${RUNNER_TEMP}/gh-aw/actions/create_gh_aw_tmp_dir.sh"
       - name: Configure gh CLI for GitHub Enterprise
         run: bash "${RUNNER_TEMP}/gh-aw/actions/configure_gh_for_ghe.sh"
         env:
           GH_TOKEN: ${{ github.token }}
-      - name: Download APM bundle artifact
+      - name: Download APM bundle artifacts (all groups)
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ${{ needs.activation.outputs.artifact_prefix }}apm
-          path: /tmp/gh-aw/apm-bundle
-      - id: apm_bundle
-        name: Find APM bundle path
-        run: echo "path=$(find /tmp/gh-aw/apm-bundle -name '*.tar.gz' | head -1)" >> "$GITHUB_OUTPUT"
-      - name: Restore APM packages
-        uses: microsoft/apm-action@9fe9337ef58b5e620e0113071ceb47a6a8a232f7 # v1.4.2
+          merge-multiple: false
+          path: /tmp/gh-aw/apm-bundles
+          pattern: ${{ needs.activation.outputs.artifact_prefix }}apm-*
+      - env:
+          ARTIFACT_PREFIX: ${{ needs.activation.outputs.artifact_prefix }}
+          EXPECTED_MATRIX: ${{ needs.apm-prep.outputs.matrix }}
+        name: Validate downloaded bundles match matrix manifest
+        run: "set -euo pipefail\nexpected=$(echo \"$EXPECTED_MATRIX\" | jq -r --arg prefix \"$ARTIFACT_PREFIX\" '.group | map($prefix + \"apm-\" + .id) | sort | .[]')\nactual=$(ls /tmp/gh-aw/apm-bundles | sort)\nmissing=$(comm -23 <(echo \"$expected\") <(echo \"$actual\") || true)\nunexpected=$(comm -13 <(echo \"$expected\") <(echo \"$actual\") || true)\nif [ -n \"$missing\" ]; then\n  echo \"::error::missing APM bundles (group did not pack successfully): $missing\"\n  exit 1\nfi\nif [ -n \"$unexpected\" ]; then\n  echo \"::error::unexpected artifact in apm bundle download (collision attack?): $unexpected\"\n  exit 1\nfi\n"
+      - id: bundles
+        name: Build bundle list
+        run: "set -euo pipefail\nmapfile -t list < <(find /tmp/gh-aw/apm-bundles -name '*.tar.gz' | sort)\n[ ${#list[@]} -gt 0 ] || { echo '::error::no apm bundles found'; exit 1; }\nprintf '%s\\n' \"${list[@]}\" > /tmp/gh-aw/apm-bundle-list.txt\n"
+      - name: Restore APM packages (all bundles)
+        uses: microsoft/apm-action@454b8a1d279376a47df8bb8d525ec076ca0fcef7 # v1.5.0
         with:
-          bundle: ${{ steps.apm_bundle.outputs.path }}
+          bundles-file: /tmp/gh-aw/apm-bundle-list.txt
 
       - name: Configure Git credentials
         env:
@@ -965,8 +978,13 @@ jobs:
           if-no-files-found: ignore
 
   apm:
-    needs: activation
+    needs:
+      - activation
+      - apm-prep
     runs-on: ubuntu-slim
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.apm-prep.outputs.matrix) }}
     permissions:
       {}
 
@@ -980,25 +998,34 @@ jobs:
           GH_HOST="${GITHUB_SERVER_URL#https://}"
           GH_HOST="${GH_HOST#http://}"
           echo "GH_HOST=${GH_HOST}" >> "$GITHUB_ENV"
-      - name: Prepare APM package list
-        id: apm_prep
+      - name: Mint installation token
+        id: token
+        if: ${{ matrix.group.app-id != '' }}
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        with:
+          app-id: ${{ matrix.group.app-id }}
+          owner: ${{ matrix.group.owner != '' && matrix.group.owner || github.repository_owner }}
+          private-key: ${{ matrix.group.private-key }}
+          repositories: ${{ matrix.group.repositories }}
+      - name: Render package list
+        id: list
         run: |
-          DEPS=$(echo "$AW_APM_PACKAGES" | jq -r '.[] | "- " + .')
+          DEPS=$(echo "$AW_PKG" | jq -r '.[] | "- " + .')
           {
             echo "deps<<APMDEPS"
             printf '%s\n' "$DEPS"
             echo "APMDEPS"
           } >> "$GITHUB_OUTPUT"
         env:
-          AW_APM_PACKAGES: "[\"microsoft/apm#main\"]"
+          AW_PKG: ${{ toJSON(matrix.group.packages) }}
       - name: Pack APM packages
-        id: apm_pack
-        uses: microsoft/apm-action@9fe9337ef58b5e620e0113071ceb47a6a8a232f7 # v1.4.2
+        id: pack
+        uses: microsoft/apm-action@454b8a1d279376a47df8bb8d525ec076ca0fcef7 # v1.5.0
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_AW_PLUGINS_TOKEN || secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.token.outputs.token || secrets.GH_AW_PLUGINS_TOKEN || secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
         with:
           archive: "true"
-          dependencies: ${{ steps.apm_prep.outputs.deps }}
+          dependencies: ${{ steps.list.outputs.deps }}
           isolated: "true"
           pack: "true"
           target: all
@@ -1007,15 +1034,95 @@ jobs:
         if: success()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: ${{ needs.activation.outputs.artifact_prefix }}apm
-          path: ${{ steps.apm_pack.outputs.bundle-path }}
+          name: ${{ needs.activation.outputs.artifact_prefix }}apm-${{ matrix.group.id }}
+          path: ${{ steps.pack.outputs.bundle-path }}
           retention-days: "1"
+
+  apm-prep:
+    needs: activation
+    runs-on: ubuntu-slim
+    permissions:
+      {}
+
+    outputs:
+      matrix: ${{ steps.compute.outputs.matrix }}
+    steps:
+      - name: Configure GH_HOST for enterprise compatibility
+        id: ghes-host-config
+        shell: bash
+        run: |
+          # Derive GH_HOST from GITHUB_SERVER_URL so the gh CLI targets the correct
+          # GitHub instance (GHES/GHEC). On github.com this is a harmless no-op.
+          GH_HOST="${GITHUB_SERVER_URL#https://}"
+          GH_HOST="${GH_HOST#http://}"
+          echo "GH_HOST=${GH_HOST}" >> "$GITHUB_ENV"
+      - name: Compute APM credential-group matrix
+        id: compute
+        run: |
+          set -euo pipefail
+          packages_json=${AW_APM_PACKAGES:-null}
+          apps_json=${AW_APM_APPS:-null}
+          legacy_id=${AW_APM_LEGACY_APP_ID:-}
+
+          groups=$(jq -nc \
+            --argjson packages "$packages_json" \
+            --argjson apps "$apps_json" \
+            --arg legacy_id "$legacy_id" \
+            --arg legacy_pk "${AW_APM_LEGACY_PRIVATE_KEY:-}" \
+            --arg legacy_owner "${AW_APM_LEGACY_OWNER:-}" \
+            --arg legacy_repos "${AW_APM_LEGACY_REPOS:-}" \
+            'def slug(s): s | gsub("[^a-zA-Z0-9-]"; "-") | ascii_downcase | .[0:32];
+             def with_id(g):
+               g + (if (g.id // "") == "" then {id: ("auto-" + slug(g.owner // "default"))} else {} end);
+             [
+               (if (($packages // []) | length) > 0 and $legacy_id == ""
+                  then [{id:"default",("app-id"):"",("private-key"):"",owner:"",repositories:"",packages:$packages}]
+                  else [] end),
+               (if $legacy_id != ""
+                  then [with_id({id:"legacy",("app-id"):$legacy_id,("private-key"):$legacy_pk,owner:$legacy_owner,repositories:$legacy_repos,packages:($packages // [])})]
+                  else [] end),
+               (($apps // []) | map(with_id(.)))
+             ] | add // []')
+
+          count=$(echo "$groups" | jq 'length')
+          if [ "$count" = "0" ]; then
+            echo "::error::shared/apm.md import provided no packages. Add packages: <list>, single-app inputs (app-id + private-key), or apps: <list> in the with: block."
+            exit 1
+          fi
+
+          dups=$(echo "$groups" | jq -r '[.[].id] | group_by(.) | map(select(length > 1) | first) | join(", ")')
+          if [ -n "$dups" ]; then
+            echo "::error::duplicate apm group ids after auto-derivation: $dups. Set apps[].id explicitly when two entries share the same owner."
+            exit 1
+          fi
+
+          while IFS= read -r id; do
+            if ! echo "$id" | grep -Eq '^[a-z0-9-]{1,32}$'; then
+              echo "::error::invalid apm group id: '$id' (lowercase alphanumeric and dashes, 1-32 chars). Set apps[].id explicitly."
+              exit 1
+            fi
+          done < <(echo "$groups" | jq -r '.[].id')
+
+          # SAFE: emit only id + package-count to logs. Never $groups in full.
+          {
+            echo "matrix={\"group\":$groups}"
+          } >> "$GITHUB_OUTPUT"
+          printf "::notice::APM matrix: %d credential group(s)\n" "$count"
+          echo "$groups" | jq -r '.[] | "  - " + .id + " (" + (.packages | length | tostring) + " package(s))"'
+        env:
+          AW_APM_APPS: ${{ github.aw.import-inputs.apps }}
+          AW_APM_LEGACY_APP_ID: ${{ github.aw.import-inputs.app-id }}
+          AW_APM_LEGACY_OWNER: ${{ github.aw.import-inputs.owner }}
+          AW_APM_LEGACY_PRIVATE_KEY: ${{ github.aw.import-inputs.private-key }}
+          AW_APM_LEGACY_REPOS: ${{ github.aw.import-inputs.repositories }}
+          AW_APM_PACKAGES: "[microsoft/apm#main]"
 
   conclusion:
     needs:
       - activation
       - agent
       - apm
+      - apm-prep
       - detection
       - safe_outputs
     if: >

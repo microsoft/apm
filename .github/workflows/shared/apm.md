@@ -9,12 +9,11 @@
 # declared packages with microsoft/apm-action, and uploads a uniquely-named artifact.
 # Pre-agent-steps then download all bundles and restore them in one apm-action call.
 #
-# STATUS: blocked on upstream microsoft/apm-action gaining a `bundles-file:` input.
-# The matrix restore block in `steps:` below is intentionally commented out until
-# that input ships -- see TODO marker. Until then this workflow does not produce
-# a working agent run; the diff is for design review only.
+# Source of truth: https://github.com/microsoft/apm/blob/main/.github/workflows/shared/apm.md
+# apm-action pin:  microsoft/apm-action@v1.5.0
+# To check whether a vendored copy is current, compare these two lines.
 #
-# Documentation: https://github.com/microsoft/APM
+# Documentation: https://microsoft.github.io/apm/integrations/gh-aw/
 #
 # Three user-facing forms (all valid, additive):
 #
