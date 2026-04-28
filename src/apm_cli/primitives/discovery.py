@@ -307,25 +307,80 @@ def get_dependency_declaration_order(base_dir: str) -> List[str]:
         return []
 
 
-def _scan_patterns(base_dir: Path, patterns: Dict[str, List[str]], collection: PrimitiveCollection, source: str) -> None:
-    """Glob-scan-parse loop for one base directory and one patterns dict.
+def _glob_match(rel_path: str, pattern: str) -> bool:
+    """Match a relative path against a single glob pattern (supports ``**/`` prefix).
+
+    ``fnmatch.fnmatch`` already treats ``*`` as matching any character
+    including ``/``, so it handles single-segment wildcards over paths.
+    This helper adds support for a leading ``**/`` which means *zero or
+    more directory levels* — it strips the prefix and tries the remaining
+    sub-pattern against every suffix of *rel_path*.
 
     Args:
-        base_dir (Path): Directory to scan (e.g., dep/.apm or dep/.github).
-        patterns (Dict[str, List[str]]): Primitive-type → glob-pattern mapping.
-        collection (PrimitiveCollection): Collection to add primitives to.
-        source (str): Source identifier for discovered primitives.
+        rel_path: Forward-slash-normalised path relative to the walk root.
+        pattern: Glob pattern, e.g. ``agents/*.agent.md`` or
+            ``**/.apm/agents/*.agent.md``.
     """
+    if pattern.startswith("**/"):
+        sub_pattern = pattern[3:]
+        # Try at root depth (zero-level match)
+        if fnmatch.fnmatch(rel_path, sub_pattern):
+            return True
+        # Try at every deeper suffix after each "/"
+        idx = 0
+        while True:
+            idx = rel_path.find("/", idx)
+            if idx == -1:
+                break
+            if fnmatch.fnmatch(rel_path[idx + 1:], sub_pattern):
+                return True
+            idx += 1
+        return False
+    return fnmatch.fnmatch(rel_path, pattern)
+
+
+def _matches_any_pattern(rel_path: str, patterns: List[str]) -> bool:
+    """Return ``True`` if *rel_path* matches at least one glob pattern."""
+    for pattern in patterns:
+        if _glob_match(rel_path, pattern):
+            return True
+    return False
+
+
+def _scan_patterns(base_dir: Path, patterns: Dict[str, List[str]], collection: PrimitiveCollection, source: str) -> None:
+    """Walk *base_dir* once, match files against all patterns, parse and collect.
+
+    Replaces the previous per-pattern ``glob.glob`` loop with a single
+    ``os.walk`` pass, reducing filesystem traversals from O(patterns) to O(1).
+
+    Args:
+        base_dir: Directory to scan (e.g., dep/.apm or dep/.github).
+        patterns: Primitive-type → glob-pattern mapping.
+        collection: Collection to add primitives to.
+        source: Source identifier for discovered primitives.
+    """
+    if not base_dir.exists():
+        return
+
+    # Flatten all patterns into a single list for matching
+    all_patterns: List[str] = []
     for _primitive_type, type_patterns in patterns.items():
-        for pattern in type_patterns:
-            for file_path_str in glob.glob(str(base_dir / pattern), recursive=True):
-                file_path = Path(file_path_str)
-                if file_path.is_file() and _is_readable(file_path):
-                    try:
-                        primitive = parse_primitive_file(file_path, source=source)
-                        collection.add_primitive(primitive)
-                    except Exception as e:
-                        print(f"Warning: Failed to parse dependency primitive {file_path}: {e}")
+        all_patterns.extend(type_patterns)
+
+    base_str = str(base_dir)
+    for dirpath, _dirnames, filenames in os.walk(base_str, followlinks=False):
+        for filename in filenames:
+            full_path = os.path.join(dirpath, filename)
+            rel_path = os.path.relpath(full_path, base_str).replace(os.sep, "/")
+            if not _matches_any_pattern(rel_path, all_patterns):
+                continue
+            file_path = Path(full_path)
+            if file_path.is_file() and _is_readable(file_path):
+                try:
+                    primitive = parse_primitive_file(file_path, source=source)
+                    collection.add_primitive(primitive)
+                except Exception as e:
+                    print(f"Warning: Failed to parse dependency primitive {file_path}: {e}")
 
 
 def scan_directory_with_source(directory: Path, collection: PrimitiveCollection, source: str) -> None:

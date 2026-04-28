@@ -618,5 +618,73 @@ class TestCompileAgentsMdFunction(unittest.TestCase):
         self.assertEqual(content, "# Generated")
 
 
+# ---------------------------------------------------------------------------
+# _compile_claude_md – constitution injection failure path (G2)
+# ---------------------------------------------------------------------------
+
+
+class TestCompileClaudeMdConstitutionInjectionFailure(unittest.TestCase):
+    """Verify that ConstitutionInjector.inject failure inside _compile_claude_md
+    is swallowed and logged, matching the symmetric AGENTS.md behaviour."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        # Create a minimal instruction so compilation has something to work with
+        inst_dir = Path(self.tmp) / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        inst_file = inst_dir / "test.instructions.md"
+        inst_file.write_text(
+            "---\ndescription: test\napplyTo: '**/*.py'\n---\nUse type hints.\n"
+        )
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_compile_claude_md_constitution_injection_failure(self):
+        """Constitution injection failure in _compile_claude_md is swallowed
+        and logged at debug level, compilation still succeeds."""
+        compiler = AgentsCompiler(self.tmp)
+        primitives = _make_primitives(
+            _make_instruction(
+                name="style",
+                apply_to="**/*.py",
+                content="Use type hints.",
+                file_path=Path(self.tmp) / ".apm" / "instructions" / "style.instructions.md",
+            )
+        )
+        config = CompilationConfig(
+            target="claude",
+            with_constitution=True,
+            dry_run=False,
+        )
+
+        with patch(
+            "apm_cli.compilation.injector.ConstitutionInjector.inject",
+            side_effect=RuntimeError("injector exploded"),
+        ), patch(
+            "apm_cli.compilation.agents_compiler._logger"
+        ) as mock_logger:
+            result = compiler._compile_claude_md(config, primitives)
+
+        # Compilation must still succeed (the exception is swallowed)
+        self.assertTrue(
+            result.success,
+            f"Expected successful compilation, got errors: {result.errors}",
+        )
+
+        # Verify the debug log was emitted with the expected message fragment
+        debug_calls = mock_logger.debug.call_args_list
+        matched = any(
+            "Constitution injection failed" in str(call)
+            for call in debug_calls
+        )
+        self.assertTrue(
+            matched,
+            f"Expected 'Constitution injection failed' in debug logs, got: {debug_calls}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
