@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Remove redundant `seen` set from `_scan_patterns()` discovery walk (#918)
 - `apm marketplace build` now respects `GITHUB_HOST` for GitHub Enterprise repos -- ref resolution, token lookup, and metadata fetch all use the configured host instead of hardcoded `github.com`. `git ls-remote` is authenticated so private repos work without separate credential setup. (#1008)
-- `apm marketplace build` now accepts any valid Git URL (GitHub, GHES, GitLab, Bitbucket, ADO, SSH) for `type: url` sources via `DependencyReference.parse()`, not just github.com. (#1008)
+- `apm marketplace build` now accepts multiple Git URL forms (GitHub, GHES, GitLab, Bitbucket, ADO, SSH) for `type: url` parsing via `DependencyReference.parse()`. Host resolution is still driven by `GITHUB_HOST`, so non-`github.com` hosts require `GITHUB_HOST` to be set accordingly. (#1008)
 
 ## [0.10.0] - 2026-04-27
 

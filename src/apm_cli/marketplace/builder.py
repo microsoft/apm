@@ -181,13 +181,15 @@ class MarketplaceBuilder:
         """Lazily resolve host classification and GitHub token.
 
         Short-circuits when already resolved (even if no token was found)
-        or when running in offline mode.  Called by ``_get_resolver()`` so
-        both ``resolve()`` and ``build()`` benefit from authenticated
-        ``git ls-remote``.
+        or when running in offline mode.  Offline mode is still marked as
+        resolved so repeated calls remain idempotent.  Called by
+        ``_get_resolver()`` so both ``resolve()`` and ``build()`` benefit
+        from authenticated ``git ls-remote`` when available.
         """
         if self._auth_resolved:
             return
         if self._options.offline:
+            self._auth_resolved = True
             return
         self._github_token = self._resolve_github_token()
         self._auth_resolved = True

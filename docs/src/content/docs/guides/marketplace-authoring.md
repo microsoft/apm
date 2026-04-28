@@ -278,7 +278,7 @@ export GITHUB_HOST=github.company.com
 apm marketplace build
 ```
 
-Token resolution and metadata fetch use the same host, so existing auth configuration (see [Authentication](../../getting-started/authentication/)) works automatically. `git ls-remote` calls are authenticated with the resolved token, so private GHES repos work without a separate git credential helper. `type: url` sources accept any valid Git URL (GitHub, GHES, GitLab, Bitbucket, ADO, SSH) -- not just github.com.
+Token resolution and metadata fetch use the same host, so existing auth configuration (see [Authentication](../../getting-started/authentication/)) works automatically. `git ls-remote` calls are authenticated with the resolved token, so private GHES repos work without a separate git credential helper. `type: url` sources accept Git-style repository URLs as input, including HTTPS and SSH forms, but APM resolves auth and metadata against `GITHUB_HOST`. In practice, the URL host is ignored unless it matches `GITHUB_HOST`, so do not rely on `type: url` for true cross-host resolution.
 
 ## Discovering upgrades
 
