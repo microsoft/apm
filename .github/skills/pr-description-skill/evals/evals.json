@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "skill": "pr-description-skill",
+  "skill_path": "../SKILL.md",
+  "triggers_manifest": "triggers.json",
+  "content_manifests": [
+    "content/auth-refactor.json",
+    "content/docs-only.json",
+    "content/dep-bump.json"
+  ],
+  "gates": {
+    "triggers": {
+      "split": "val",
+      "should_fire_rate_min": 0.5,
+      "should_not_fire_rate_max": 0.5
+    },
+    "content": {
+      "delta_min_anchors": 1,
+      "scope": "every_scenario"
+    }
+  },
+  "stop_list": [
+    "commit message",
+    "release note",
+    "release notes",
+    "changelog",
+    "open an issue",
+    "open issue",
+    "review this pr",
+    "code review comment",
+    "design doc",
+    "summarize the diff"
+  ],
+  "trigger_keywords_primary": [
+    "pr description",
+    "pr body",
+    "pull request description",
+    "pull request body",
+    "pr template",
+    "pr write-up",
+    "pr writeup",
+    "draft the pr",
+    "draft a pr",
+    "open the pr",
+    "open a pr",
+    "summarize this branch as a pr",
+    "fill in the pr template"
+  ],
+  "trigger_keywords_secondary": [
+    "pr",
+    "pull",
+    "request",
+    "description",
+    "body",
+    "draft",
+    "open",
+    "write",
+    "fill",
+    "summarize",
+    "branch"
+  ]
+}

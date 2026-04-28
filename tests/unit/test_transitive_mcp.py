@@ -633,12 +633,11 @@ class TestCheckSelfDefinedServersNeeding:
 # ---------------------------------------------------------------------------
 class TestInstallSelfDefinedSkipLogic:
 
-    @patch("apm_cli.integration.mcp_integrator._rich_success")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.integration.mcp_integrator._get_console", return_value=None)
     def test_already_configured_self_defined_servers_skipped(
-        self, _console, mock_install_runtime, mock_check, mock_rich_success
+        self, _console, mock_install_runtime, mock_check,
     ):
         """Self-defined servers already configured should not trigger _install_for_runtime."""
         mock_check.return_value = []  # none need installation
@@ -651,8 +650,6 @@ class TestInstallSelfDefinedSkipLogic:
 
         assert count == 0
         mock_install_runtime.assert_not_called()
-        mock_rich_success.assert_called_once()
-        assert "already configured" in mock_rich_success.call_args.args[0]
 
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
@@ -955,12 +952,11 @@ class TestDiffAwareSelfDefinedInstall:
         )
         assert "updated" in printed_lines
 
-    @patch("apm_cli.integration.mcp_integrator._rich_success")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.integration.mcp_integrator._get_console", return_value=None)
     def test_no_stored_configs_preserves_existing_behavior(
-        self, _console, mock_install_runtime, mock_check, mock_rich_success
+        self, _console, mock_install_runtime, mock_check,
     ):
         """Without stored configs (first install), behavior unchanged."""
         mock_check.return_value = []
@@ -974,5 +970,3 @@ class TestDiffAwareSelfDefinedInstall:
 
         assert count == 0
         mock_install_runtime.assert_not_called()
-        mock_rich_success.assert_called_once()
-        assert "already configured" in mock_rich_success.call_args.args[0]

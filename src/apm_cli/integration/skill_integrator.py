@@ -1,7 +1,7 @@
 """Skill integration functionality for APM packages (Claude Code & Cursor support)."""
 
 from pathlib import Path
-from typing import List, Dict
+from typing import Dict, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
 import filecmp
@@ -504,6 +504,8 @@ class SkillIntegrator(BaseIntegrator):
             try:
                 rel_prefix = target_skills_root.relative_to(project_root).as_posix()
             except ValueError:
+                # Dynamic-root targets (cowork): use synthetic prefix
+                # when the skills root lives outside the project tree.
                 rel_prefix = target_skills_root.name
         else:
             rel_prefix = target_skills_root.name
@@ -676,8 +678,12 @@ class SkillIntegrator(BaseIntegrator):
 
             is_primary = (idx == 0)  # first active target owns diagnostics
             skills_mapping = target.primitives["skills"]
-            effective_root = skills_mapping.deploy_root or target.root_dir
-            target_skills_root = project_root / effective_root / "skills"
+            # Dynamic-root targets (cowork): use resolved_deploy_root.
+            if target.resolved_deploy_root is not None:
+                target_skills_root = target.resolved_deploy_root
+            else:
+                effective_root = skills_mapping.deploy_root or target.root_dir
+                target_skills_root = project_root / effective_root / "skills"
             target_skills_root.mkdir(parents=True, exist_ok=True)
 
             n, deployed = self._promote_sub_skills(
@@ -784,8 +790,12 @@ class SkillIntegrator(BaseIntegrator):
 
             is_primary = (idx == 0)  # first active target owns diagnostics
             skills_mapping = target.primitives["skills"]
-            effective_root = skills_mapping.deploy_root or target.root_dir
-            target_skill_dir = project_root / effective_root / "skills" / skill_name
+            # Dynamic-root targets (cowork): use resolved_deploy_root.
+            if target.resolved_deploy_root is not None:
+                target_skill_dir = target.resolved_deploy_root / skill_name
+            else:
+                effective_root = skills_mapping.deploy_root or target.root_dir
+                target_skill_dir = project_root / effective_root / "skills" / skill_name
 
             if is_primary:
                 skill_created = not target_skill_dir.exists()
@@ -806,6 +816,8 @@ class SkillIntegrator(BaseIntegrator):
                         try:
                             rel_prefix = target_skill_dir.parent.relative_to(project_root).as_posix()
                         except ValueError:
+                            # Dynamic-root targets (cowork): directory is
+                            # outside the project tree.
                             rel_prefix = "skills"
                         rel_path = f"{rel_prefix}/{skill_name}"
                         # Issue 1: package= should identify the package causing the
@@ -850,7 +862,10 @@ class SkillIntegrator(BaseIntegrator):
                 files_copied = sum(1 for _ in target_skill_dir.rglob('*') if _.is_file())
 
             # Promote sub-skills for this target
-            target_skills_root = project_root / effective_root / "skills"
+            if target.resolved_deploy_root is not None:
+                target_skills_root = target.resolved_deploy_root
+            else:
+                target_skills_root = project_root / effective_root / "skills"
             _, sub_deployed = self._promote_sub_skills(
                 sub_skills_dir, target_skills_root, skill_name,
                 warn=is_primary,
@@ -1099,6 +1114,12 @@ class SkillIntegrator(BaseIntegrator):
         for t in source:
             if not t.supports("skills"):
                 continue
+            # Dynamic-root targets (cowork) use cowork:// URI prefix.
+            if t.user_root_resolver is not None:
+                from apm_cli.integration.copilot_cowork_paths import COWORK_LOCKFILE_PREFIX
+                if COWORK_LOCKFILE_PREFIX not in skill_prefixes:
+                    skill_prefixes.append(COWORK_LOCKFILE_PREFIX)
+                continue
             sm = t.primitives["skills"]
             effective_root = sm.deploy_root or t.root_dir
             skill_prefixes.append(f"{effective_root}/skills/")
@@ -1107,20 +1128,68 @@ class SkillIntegrator(BaseIntegrator):
         if managed_files is not None:
             # Manifest-based removal -- only remove tracked skill directories
             project_root_resolved = project_root.resolve()
+
+            # Lazy-resolve cowork root at most once per invocation
+            # (mirrors the pattern in cleanup.py and sync_remove_files).
+            _cowork_root_resolved: bool = False
+            _cowork_root_cached: Optional[Path] = None
+            _cowork_skipped: int = 0
+
             for rel_path in managed_files:
                 if not rel_path.startswith(skill_prefix_tuple):
                     continue
                 if ".." in rel_path:
                     continue
-                target = project_root / rel_path
-                if not str(target.resolve()).startswith(str(project_root_resolved)):
-                    continue
-                if target.exists() and target.is_dir():
+
+                # ── Cowork:// paths ──────────────────────────────────
+                from apm_cli.integration.copilot_cowork_paths import COWORK_URI_SCHEME
+                if rel_path.startswith(COWORK_URI_SCHEME):
                     try:
-                        shutil.rmtree(target)
-                        stats['files_removed'] += 1
+                        if not _cowork_root_resolved:
+                            from apm_cli.integration.copilot_cowork_paths import (
+                                resolve_copilot_cowork_skills_dir,
+                            )
+                            _cowork_root_cached = resolve_copilot_cowork_skills_dir()
+                            _cowork_root_resolved = True
+                        if _cowork_root_cached is None:
+                            _cowork_skipped += 1
+                            continue
+                        from apm_cli.integration.copilot_cowork_paths import from_lockfile_path
+                        target = from_lockfile_path(rel_path, _cowork_root_cached)
                     except Exception:
                         stats['errors'] += 1
+                        continue
+                else:
+                    target = project_root / rel_path
+                    if not str(target.resolve()).startswith(str(project_root_resolved)):
+                        continue
+
+                if not target.exists():
+                    continue
+
+                try:
+                    if target.is_dir():
+                        shutil.rmtree(target)
+                    else:
+                        target.unlink()
+                    stats['files_removed'] += 1
+                except Exception:
+                    stats['errors'] += 1
+
+            # One-time warning when cowork entries were skipped
+            # because the OneDrive path is unavailable.
+            if _cowork_skipped > 0:
+                from apm_cli.utils.console import _rich_warning
+                _rich_warning(
+                    f"Cowork: skipping {_cowork_skipped} skill "
+                    f"{'entry' if _cowork_skipped == 1 else 'entries'}"
+                    " -- OneDrive path not detected.\n"
+                    "Run: apm config set copilot-cowork-skills-dir <path>  "
+                    "(or set APM_COPILOT_COWORK_SKILLS_DIR)\n"
+                    "to clean up these entries on the next install/uninstall.",
+                    symbol="warning",
+                )
+
             return stats
 
         # Legacy fallback: npm-style orphan detection

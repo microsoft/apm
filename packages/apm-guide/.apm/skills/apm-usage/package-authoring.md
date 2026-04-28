@@ -58,6 +58,30 @@ my-package/
         resource2.md
 ```
 
+## Manifest fields: `target:` validation contract
+
+The `target:` field in `apm.yml` controls which output runtimes the package
+compiles and installs to. Both `apm.yml`'s `target:` and the `--target` CLI
+flag share the same validator, so identical input is rejected or accepted
+the same way at every entry point. Invalid values fail at parse time with a
+message naming the apm.yml path and the offending token -- they do **not**
+silently fall through to auto-detect.
+
+| Form | Behaviour |
+|------|-----------|
+| `target: copilot` | Single token; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `all` |
+| `target: [claude, copilot]` | List form; only listed targets are compiled/installed |
+| `target: claude,copilot` | CSV-string form; parses identically to the list form (the shared validator splits on `,`). Before #820 was fixed, this silently produced zero deployment |
+| `target:` omitted entirely | Auto-detect from project folders (`.github/`, `.claude/`, `.codex/`) |
+| `target: bogus` (unknown token) | **Parse error** -- fix the typo |
+| `target: ""` or `target: []` (empty) | **Parse error** -- remove the line if you meant auto-detect |
+| `target: [all, claude]` (`all` mixed with other targets) | **Parse error** -- use `all` alone |
+
+Error messages always name the `apm.yml` path and the offending token, so the
+fix point is unambiguous. The list form (`target: [a, b]`) is the recommended
+shape; the CSV-string form is supported for parity with `--target a,b` on the
+CLI but reads less cleanly in YAML.
+
 ## The 7 primitive types
 
 ### 1. Instruction (`*.instructions.md`)
@@ -168,6 +192,70 @@ git tag v1.0.0 && git push --tags
 # 6. Consumers install via
 apm install org/my-package#v1.0.0
 ```
+
+## Marketplace authoring
+
+A **marketplace** is a curated index of packages (plugins) that consumers
+install via `apm install <name>@<marketplace>`. Maintainers author a
+`marketplace.yml` source file and compile it to an Anthropic-compliant
+`marketplace.json` with `apm marketplace build`. Both files are committed.
+
+### When to run `apm marketplace init`
+
+- The user is setting up a new marketplace repository.
+- The user wants to convert an ad-hoc list of plugins into a proper index.
+
+Do NOT run `init` inside an existing package directory; a marketplace
+repository is a separate repo whose job is to list plugins, not to be one.
+
+### marketplace.yml shape
+
+```yaml
+name: my-marketplace
+description: Short summary
+version: 0.1.0
+owner:
+  name: acme-org
+  url: https://github.com/acme-org
+build:                       # APM-only, stripped at compile time
+  tagPattern: "v{version}"
+metadata:                    # pass-through, copied verbatim to marketplace.json
+  homepage: https://example.com
+packages:
+  - name: example-package
+    description: What this package does
+    source: acme-org/example-package   # <owner>/<repo>
+    version: "^1.0.0"                  # semver range OR 'ref:' below
+    # ref: 3f2a9b1c                    # explicit SHA/tag/branch; overrides version
+    # subdir: tools/x                  # optional subdirectory
+    # tag_pattern: "{name}-v{version}" # optional per-package override
+    # include_prerelease: false        # optional
+```
+
+Schema rules:
+- `name`, `description`, `version`, `owner.name` are required.
+- Each package needs either `version` (a semver range) or `ref` (explicit).
+- `ref` takes precedence over `version`.
+- Unknown keys raise a schema error -- do not invent fields.
+
+### Build semantics
+
+`apm marketplace build` runs `git ls-remote` against each package source,
+picks the highest tag satisfying the range (under the applicable
+`tagPattern`), and writes `marketplace.json`. The compiler:
+
+1. Emits `plugins:` verbatim (Anthropic's key name).
+2. Copies `metadata:` byte-for-byte.
+3. Strips `build:`, per-package `version`, `tag_pattern`, `include_prerelease`.
+4. Does not emit `versions[]` -- each plugin carries a single resolved ref.
+
+Exit codes: `0` success, `1` build error, `2` schema error.
+
+### Full guide
+
+See [docs/guides/marketplace-authoring](../../../../../docs/src/content/docs/guides/marketplace-authoring.md)
+for the complete maintainer workflow (quickstart, version ranges, `check`,
+`doctor`, `outdated`, and `publish`).
 
 ## Org-wide packages
 

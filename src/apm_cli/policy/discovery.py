@@ -542,9 +542,17 @@ def discover_policy(
 
     Resolution order:
     1. If policy_override is a local file path -> load from file
-    2. If policy_override is a URL -> fetch from URL
-    3. If policy_override is "org" -> auto-discover from org
-    4. If policy_override is None -> auto-discover from org
+    2. If policy_override is an https:// URL -> fetch from URL
+       (http:// is rejected for security)
+    3. If policy_override is "org" -> auto-discover from project's git remote
+    4. If policy_override is "owner/repo" (or "host/owner/repo")
+       -> fetch from that repo via GitHub Contents API
+    5. If policy_override is None -> auto-discover from project's git remote
+
+    The user-facing forms are documented in
+    ``apm_cli.policy._help_text.POLICY_SOURCE_FORMS_HELP``; that constant
+    is the single source of truth shared by ``apm audit --policy`` and
+    ``apm policy status --policy-source``.
 
     The optional ``expected_hash`` (``"<algo>:<hex>"``) pins the leaf
     policy bytes; mismatches return ``outcome="hash_mismatch"`` and
@@ -990,7 +998,8 @@ def _get_token_for_host(host: str) -> Optional[str]:
 
         manager = GitHubTokenManager()
         return manager.get_token_with_credential_fallback("modules", host)
-    except Exception:
+    except Exception as exc:
+        logger.debug("Token manager failed for %s: %s", host, exc)
         if _is_github_host(host):
             return (
                 os.environ.get("GITHUB_TOKEN")

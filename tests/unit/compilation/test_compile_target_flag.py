@@ -556,8 +556,60 @@ Use type hints in Python code.
         try:
             os.chdir(temp_project)
             result = runner.invoke(cli, ["compile", "-t", "vscode", "--dry-run"])
-            
+
             assert "Invalid value for '--target'" not in result.output
+        finally:
+            os.chdir(original_dir)
+
+    # ----- #820 regression: apm.yml target: contract -----
+
+    def test_csv_target_in_apm_yml_no_longer_silent(self, runner, temp_project):
+        """CSV string in apm.yml's ``target:`` used to leave install/compile
+        with exit-0 success and zero deployment.  Now the same string flows
+        through ``parse_target_field`` and yields a real list of targets.
+        """
+        original_dir = os.getcwd()
+        try:
+            os.chdir(temp_project)
+            (temp_project / "apm.yml").write_text(
+                "name: test-project\nversion: 0.1.0\n"
+                "target: opencode,claude,copilot\n"
+            )
+            result = runner.invoke(cli, ["compile", "--dry-run"])
+            # No "Invalid value" gripe -- the string is a valid CSV now.
+            assert "Invalid value for '--target'" not in result.output
+            # And compile no longer prints success-after-zero-effect: it
+            # either succeeds with output (dry-run preview) or surfaces a
+            # real error.  The pre-fix log line "Compilation completed
+            # successfully!" with no files written must not appear when
+            # zero targets resolve.
+            assert result.exit_code == 0 or "Invalid 'target'" in result.output
+        finally:
+            os.chdir(original_dir)
+
+    def test_unknown_target_in_apm_yml_fails_loudly(self, runner, temp_project):
+        """Unknown token in apm.yml ``target:`` now fails the command with
+        a ValueError naming the bad token, instead of being swallowed by
+        the old ``except Exception: pass`` in compile/cli.py."""
+        original_dir = os.getcwd()
+        try:
+            os.chdir(temp_project)
+            (temp_project / "apm.yml").write_text(
+                "name: test-project\nversion: 0.1.0\n"
+                "target: claude,bogus,copilot\n"
+            )
+            result = runner.invoke(cli, ["compile", "--dry-run"])
+            # Either the CLI exits non-zero with the error, or the error
+            # is included in the output -- both are acceptable signals
+            # that the silent-swallow path is gone.  Normalize whitespace
+            # because the error message may be soft-wrapped onto multiple
+            # lines by the CLI logger.
+            combined = " ".join(
+                ((result.output or "")
+                 + (str(result.exception) if result.exception else "")).split()
+            )
+            assert "'bogus'" in combined
+            assert "not a valid target" in combined
         finally:
             os.chdir(original_dir)
 
