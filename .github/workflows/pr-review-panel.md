@@ -93,7 +93,9 @@ imports:
   - uses: shared/apm.md
     with:
       packages:
-        - microsoft/apm#main
+        # TEMP: pinned to feature branch for end-to-end pre-merge eval (PR #1022).
+        # MUST be reverted to microsoft/apm#main before merge.
+        - microsoft/apm#refactor/review-panel-fanout
 
 tools:
   github:
