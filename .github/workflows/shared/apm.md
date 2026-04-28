@@ -235,7 +235,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
       - name: Pack APM packages
         id: pack
-        uses: microsoft/apm-action@v1.4.2
+        uses: microsoft/apm-action@v1.5.0
         env:
           GITHUB_TOKEN: ${{ steps.token.outputs.token || secrets.GH_AW_PLUGINS_TOKEN || secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
         with:
@@ -253,50 +253,42 @@ jobs:
           path: ${{ steps.pack.outputs.bundle-path }}
           retention-days: '1'
 
-# TODO(microsoft/apm-action bundles-file): the multi-bundle restore below is
-# blocked on an upstream apm-action input that accepts a newline-separated list
-# of bundle tarballs. Until that PR ships, this workflow produces N artifacts
-# (apm-<group-id>) but cannot restore them in one call. Tracked in microsoft/apm#983
-# (PR-A in the proposal). Do NOT merge this workflow until the commented block
-# below is uncommented and the apm-action version pinned.
-#
-# steps:
-#   - name: Download APM bundle artifacts (all groups)
-#     uses: actions/download-artifact@v8.0.1
-#     with:
-#       pattern: ${{ needs.activation.outputs.artifact_prefix }}apm-*
-#       path: /tmp/gh-aw/apm-bundles
-#       merge-multiple: false
-#   - name: Validate downloaded bundles match matrix manifest
-#     env:
-#       EXPECTED_MATRIX: ${{ needs.apm-prep.outputs.matrix }}
-#       ARTIFACT_PREFIX: ${{ needs.activation.outputs.artifact_prefix }}
-#     run: |
-#       set -euo pipefail
-#       expected=$(echo "$EXPECTED_MATRIX" | jq -r --arg prefix "$ARTIFACT_PREFIX" '.group | map($prefix + "apm-" + .id) | sort | .[]')
-#       actual=$(ls /tmp/gh-aw/apm-bundles | sort)
-#       missing=$(comm -23 <(echo "$expected") <(echo "$actual") || true)
-#       unexpected=$(comm -13 <(echo "$expected") <(echo "$actual") || true)
-#       if [ -n "$missing" ]; then
-#         echo "::error::missing APM bundles (group did not pack successfully): $missing"
-#         exit 1
-#       fi
-#       if [ -n "$unexpected" ]; then
-#         echo "::error::unexpected artifact in apm bundle download (collision attack?): $unexpected"
-#         exit 1
-#       fi
-#   - name: Build bundle list
-#     id: bundles
-#     run: |
-#       set -euo pipefail
-#       mapfile -t list < <(find /tmp/gh-aw/apm-bundles -name '*.tar.gz' | sort)
-#       [ ${#list[@]} -gt 0 ] || { echo '::error::no apm bundles found'; exit 1; }
-#       printf '%s\n' "${list[@]}" > /tmp/gh-aw/apm-bundle-list.txt
-#   - name: Restore APM packages (all bundles)
-#     uses: microsoft/apm-action@<NEW_VERSION>  # pin once bundles-file lands
-#     with:
-#       bundles-file: /tmp/gh-aw/apm-bundle-list.txt
-steps: []
+steps:
+  - name: Download APM bundle artifacts (all groups)
+    uses: actions/download-artifact@v8.0.1
+    with:
+      pattern: ${{ needs.activation.outputs.artifact_prefix }}apm-*
+      path: /tmp/gh-aw/apm-bundles
+      merge-multiple: false
+  - name: Validate downloaded bundles match matrix manifest
+    env:
+      EXPECTED_MATRIX: ${{ needs.apm-prep.outputs.matrix }}
+      ARTIFACT_PREFIX: ${{ needs.activation.outputs.artifact_prefix }}
+    run: |
+      set -euo pipefail
+      expected=$(echo "$EXPECTED_MATRIX" | jq -r --arg prefix "$ARTIFACT_PREFIX" '.group | map($prefix + "apm-" + .id) | sort | .[]')
+      actual=$(ls /tmp/gh-aw/apm-bundles | sort)
+      missing=$(comm -23 <(echo "$expected") <(echo "$actual") || true)
+      unexpected=$(comm -13 <(echo "$expected") <(echo "$actual") || true)
+      if [ -n "$missing" ]; then
+        echo "::error::missing APM bundles (group did not pack successfully): $missing"
+        exit 1
+      fi
+      if [ -n "$unexpected" ]; then
+        echo "::error::unexpected artifact in apm bundle download (collision attack?): $unexpected"
+        exit 1
+      fi
+  - name: Build bundle list
+    id: bundles
+    run: |
+      set -euo pipefail
+      mapfile -t list < <(find /tmp/gh-aw/apm-bundles -name '*.tar.gz' | sort)
+      [ ${#list[@]} -gt 0 ] || { echo '::error::no apm bundles found'; exit 1; }
+      printf '%s\n' "${list[@]}" > /tmp/gh-aw/apm-bundle-list.txt
+  - name: Restore APM packages (all bundles)
+    uses: microsoft/apm-action@v1.5.0
+    with:
+      bundles-file: /tmp/gh-aw/apm-bundle-list.txt
 ---
 
 <!--
@@ -306,8 +298,8 @@ This shared workflow installs APM packages in a dedicated `apm` job that runs
 in parallel one matrix replica per credential group, packs each group's packages
 with `microsoft/apm-action`, and uploads a per-group bundle artifact. The agent
 job's pre-agent-steps then download all bundles and restore them in a single
-`apm-action` invocation (blocked on upstream `bundles-file:` input -- see
-the TODO marker in the workflow body).
+`apm-action` invocation (using the `bundles-file:` input shipped in
+`microsoft/apm-action@v1.5.0`).
 
 ### How it works
 
@@ -320,8 +312,8 @@ the TODO marker in the workflow body).
    packages, and uploads `apm-<group-id>` as an artifact.
 3. **Restore** (agent pre-agent-steps): all `apm-*` artifacts are downloaded,
    validated against the matrix manifest (defends against same-run artifact-name
-   collision attacks), and restored in one call. Currently blocked on the
-   upstream apm-action `bundles-file:` input.
+   collision attacks), and restored in one call via the `bundles-file:` input
+   on `microsoft/apm-action@v1.5.0`.
 
 ### Authentication
 
