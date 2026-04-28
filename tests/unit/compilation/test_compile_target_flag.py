@@ -996,11 +996,11 @@ class TestResolveCompileTarget:
         assert _resolve_compile_target("all") == "all"
         assert _resolve_compile_target("copilot") == "copilot"
 
-    def test_list_claude_and_copilot_returns_all(self):
+    def test_list_claude_and_copilot_returns_agents_claude_set(self):
         from apm_cli.commands.compile.cli import _resolve_compile_target
 
-        assert _resolve_compile_target(["claude", "vscode"]) == "all"
-        assert _resolve_compile_target(["claude", "copilot"]) == "all"
+        assert _resolve_compile_target(["claude", "vscode"]) == frozenset({"agents", "claude"})
+        assert _resolve_compile_target(["claude", "copilot"]) == frozenset({"agents", "claude"})
 
     def test_list_claude_only_returns_claude(self):
         from apm_cli.commands.compile.cli import _resolve_compile_target
@@ -1022,28 +1022,102 @@ class TestResolveCompileTarget:
         assert _resolve_compile_target(["codex"]) == "vscode"
         assert _resolve_compile_target(["cursor", "opencode"]) == "vscode"
 
-    def test_list_cursor_and_claude_returns_all(self):
+    def test_list_cursor_and_claude_returns_agents_claude_set(self):
         from apm_cli.commands.compile.cli import _resolve_compile_target
 
-        assert _resolve_compile_target(["cursor", "claude"]) == "all"
-        assert _resolve_compile_target(["codex", "claude"]) == "all"
+        assert _resolve_compile_target(["cursor", "claude"]) == frozenset({"agents", "claude"})
+        assert _resolve_compile_target(["codex", "claude"]) == frozenset({"agents", "claude"})
 
     def test_list_gemini_only_returns_gemini(self):
         from apm_cli.commands.compile.cli import _resolve_compile_target
 
         assert _resolve_compile_target(["gemini"]) == "gemini"
 
-    def test_list_gemini_and_claude_returns_all(self):
+    def test_list_gemini_and_claude_returns_claude_gemini_set(self):
         from apm_cli.commands.compile.cli import _resolve_compile_target
 
-        assert _resolve_compile_target(["gemini", "claude"]) == "all"
+        assert _resolve_compile_target(["gemini", "claude"]) == frozenset({"claude", "gemini"})
 
-    def test_list_gemini_and_copilot_returns_all(self):
+    def test_list_gemini_and_copilot_returns_agents_gemini_set(self):
         from apm_cli.commands.compile.cli import _resolve_compile_target
 
-        assert _resolve_compile_target(["gemini", "vscode"]) == "all"
+        assert _resolve_compile_target(["gemini", "vscode"]) == frozenset({"agents", "gemini"})
 
-    def test_list_all_targets_returns_all(self):
+    def test_list_all_three_families_returns_full_set(self):
         from apm_cli.commands.compile.cli import _resolve_compile_target
 
-        assert _resolve_compile_target(["claude", "vscode", "cursor"]) == "all"
+        assert _resolve_compile_target(["claude", "vscode", "gemini"]) == frozenset({"agents", "claude", "gemini"})
+        assert _resolve_compile_target(["claude", "vscode", "cursor"]) == frozenset({"agents", "claude"})
+
+
+class TestMultiTargetDoesNotGenerateUnrequestedFiles:
+    """Regression tests: multi-target lists must not generate files for families not requested."""
+
+    def test_claude_codex_does_not_compile_gemini(self):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+        from apm_cli.core.target_detection import (
+            should_compile_agents_md,
+            should_compile_claude_md,
+            should_compile_gemini_md,
+        )
+
+        resolved = _resolve_compile_target(["claude", "codex"])
+        assert should_compile_agents_md(resolved) is True
+        assert should_compile_claude_md(resolved) is True
+        assert should_compile_gemini_md(resolved) is False
+
+    def test_claude_cursor_does_not_compile_gemini(self):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+        from apm_cli.core.target_detection import (
+            should_compile_agents_md,
+            should_compile_claude_md,
+            should_compile_gemini_md,
+        )
+
+        resolved = _resolve_compile_target(["claude", "cursor"])
+        assert should_compile_agents_md(resolved) is True
+        assert should_compile_claude_md(resolved) is True
+        assert should_compile_gemini_md(resolved) is False
+
+    def test_gemini_codex_does_not_compile_claude(self):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+        from apm_cli.core.target_detection import (
+            should_compile_agents_md,
+            should_compile_claude_md,
+            should_compile_gemini_md,
+        )
+
+        resolved = _resolve_compile_target(["gemini", "codex"])
+        assert should_compile_agents_md(resolved) is True
+        assert should_compile_claude_md(resolved) is False
+        assert should_compile_gemini_md(resolved) is True
+
+    def test_all_string_still_compiles_everything(self):
+        from apm_cli.core.target_detection import (
+            should_compile_agents_md,
+            should_compile_claude_md,
+            should_compile_gemini_md,
+        )
+
+        assert should_compile_agents_md("all") is True
+        assert should_compile_claude_md("all") is True
+        assert should_compile_gemini_md("all") is True
+
+    def test_single_target_strings_unchanged(self):
+        from apm_cli.core.target_detection import (
+            should_compile_agents_md,
+            should_compile_claude_md,
+            should_compile_gemini_md,
+        )
+
+        assert should_compile_agents_md("vscode") is True
+        assert should_compile_claude_md("vscode") is False
+        assert should_compile_gemini_md("vscode") is False
+
+        assert should_compile_agents_md("claude") is False
+        assert should_compile_claude_md("claude") is True
+        assert should_compile_gemini_md("claude") is False
+
+        assert should_compile_agents_md("gemini") is True
+        assert should_compile_claude_md("gemini") is False
+        assert should_compile_gemini_md("gemini") is True

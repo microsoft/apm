@@ -21,7 +21,7 @@ from .template_builder import (
 )
 from .link_resolver import resolve_markdown_links, validate_link_targets
 from ..utils.paths import portable_relpath
-from ..core.target_detection import should_compile_agents_md, should_compile_claude_md, should_compile_gemini_md
+from ..core.target_detection import should_compile_agents_md, should_compile_claude_md, should_compile_gemini_md, CompileTargetType
 
 _logger = logging.getLogger(__name__)
 
@@ -47,7 +47,8 @@ class CompilationConfig:
     # "vscode" or "agents" -> AGENTS.md + .github/
     # "claude" -> CLAUDE.md + .claude/
     # "all" -> both targets
-    target: str = "all"
+    # frozenset({"agents","claude"}) -> AGENTS.md + CLAUDE.md (multi-target)
+    target: CompileTargetType = "all"
     
     # Distributed compilation settings (Task 7)
     strategy: str = "distributed"  # "distributed" or "single-file"
@@ -214,23 +215,26 @@ class AgentsCompiler:
             # Use target_detection helpers as the single source of truth so
             # new targets (codex, opencode, cursor, minimal, ...) route
             # correctly without touching this method again.
-            routing_target = (
-                "vscode" if config.target in _VSCODE_TARGET_ALIASES else config.target
-            )
+            if isinstance(config.target, frozenset):
+                routing_target = config.target
+            else:
+                routing_target = (
+                    "vscode" if config.target in _VSCODE_TARGET_ALIASES else config.target
+                )
 
-            if routing_target not in _KNOWN_TARGETS and config.target not in _KNOWN_TARGETS:
-                self.errors.append(
-                    f"Unknown compilation target: {config.target!r}. "
-                    f"Expected one of: {', '.join(sorted(set(_KNOWN_TARGETS)))}"
-                )
-                return CompilationResult(
-                    success=False,
-                    output_path="",
-                    content="",
-                    warnings=self.warnings.copy(),
-                    errors=self.errors.copy(),
-                    stats={},
-                )
+                if routing_target not in _KNOWN_TARGETS and config.target not in _KNOWN_TARGETS:
+                    self.errors.append(
+                        f"Unknown compilation target: {config.target!r}. "
+                        f"Expected one of: {', '.join(sorted(set(_KNOWN_TARGETS)))}"
+                    )
+                    return CompilationResult(
+                        success=False,
+                        output_path="",
+                        content="",
+                        warnings=self.warnings.copy(),
+                        errors=self.errors.copy(),
+                        stats={},
+                    )
 
             results: List[CompilationResult] = []
 
