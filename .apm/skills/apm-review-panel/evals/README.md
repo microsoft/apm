@@ -21,22 +21,47 @@ Per genesis Step 8 evals gate. Two categories:
 - `content-eval-rejected-pr.md` -- synthetic PR with one architectural
   smell + one nit; expected verdict = REJECT, python-architect returns
   one `required` finding.
+- `run-verdict-harness.py` -- DETERMINISTIC harness covering the
+  parts of the panel that do NOT require an LLM: JSON schema
+  validation (S4 gate) and verdict computation. Five cases: two
+  positive (clean-pr APPROVE, rejected-pr REJECT) and three negative
+  (missing-nits, unknown-persona, disposition-leak). All five MUST
+  pass before merging any change to schemas, the SKILL.md execution
+  checklist verdict rule, or the persona output contracts.
 
 ## How to run
 
+### Deterministic harness (free, runs anywhere)
+
+```
+uv run --with jsonschema python3 \
+    .apm/skills/apm-review-panel/evals/run-verdict-harness.py
+```
+
+Expected: `RESULT: ALL PASS`. Proves schemas reject malformed shapes
+and verdict math is correct. Does NOT prove the LLM panelists will
+return well-formed JSON in practice -- that requires a real run.
+
+### Full end-to-end (option B, branch-pin test)
+
+The gh-aw workflow imports the panel skill from `microsoft/apm#main`
+for security (anti-self-approval). Pre-merge validation requires a
+temporary branch pin:
+
+1. On the feature branch, change `imports.packages` in
+   `.github/workflows/pr-review-panel.md` from `microsoft/apm#main`
+   to `microsoft/apm#<feature-branch>`.
+2. `gh aw compile pr-review-panel`.
+3. Commit as `chore: TEMP pin to branch for end-to-end test`.
+4. Open a tiny throwaway PR; label it `panel-review`.
+5. Observe: 6 task threads spawn, JSON returns, verdict label
+   applied, `panel-review` removed, `panel-approved` (or
+   `panel-rejected`) set. Push a commit and watch the
+   deterministic `pr-panel-label-reset.yml` strip the verdict
+   label.
+6. Revert the temp-pin commit before merge.
+
+### Trigger evals
+
 Trigger evals can be run via the genesis evals harness or any
-dispatcher that loads the skill description and queries it. Content
-evals are run by:
-
-1. Invoke the apm-review-panel skill with the synthetic PR content
-   inlined as the panel input.
-2. Capture the orchestrator's emitted comment.
-3. Diff against the expected output shape declared in the eval file.
-4. Note: `with_skill` vs `without_skill` delta is qualitative -- the
-   without-skill baseline produces unstructured prose review without
-   the binary verdict, fan-out, or label automation. The whole point
-   of the skill is the structure.
-
-## Latest run
-
-See PR description for the most recent eval trace.
+dispatcher that loads the skill description and queries it.
