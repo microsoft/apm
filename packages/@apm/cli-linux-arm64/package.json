@@ -7,6 +7,9 @@
     "directory": "packages/@apm/cli-linux-arm64"
   },
   "homepage": "https://microsoft.github.io/apm/",
+  "engines": {
+    "node": ">=20"
+  },
   "os": [
     "linux"
   ],

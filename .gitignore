@@ -74,3 +74,6 @@ scout-pipeline-result.png
 .copilot/
 .playwright-mcp/
 server.pid
+
+# Node.js
+node_modules/

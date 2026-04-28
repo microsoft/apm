@@ -29,7 +29,7 @@
     "cli"
   ],
   "engines": {
-    "node": ">=14.21.3"
+    "node": ">=20"
   },
   "publishConfig": {
     "provenance": true
