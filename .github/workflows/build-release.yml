@@ -865,7 +865,7 @@ jobs:
             packages/@apm/cli-darwin-arm64 \
             packages/@apm/cli-win32-x64 \
             packages/@apm/apm; do
-            npm publish "$package" --tag latest --access public
+            pnpm publish "$package" --tag latest --access public
           done
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
