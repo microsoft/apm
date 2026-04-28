@@ -29,6 +29,10 @@ import click
 # Valid target values (internal canonical form)
 TargetType = Literal["vscode", "claude", "cursor", "opencode", "codex", "gemini", "all", "minimal"]
 
+# Compile target: either a single TargetType string or a frozenset of compiler
+# families ({"agents", "claude", "gemini"}) for multi-target lists.
+CompileTargetType = Union[str, frozenset]
+
 # User-facing target values (includes aliases accepted by CLI)
 UserTargetType = Literal["copilot", "vscode", "agents", "claude", "cursor", "opencode", "codex", "gemini", "all", "minimal"]
 
@@ -123,42 +127,51 @@ def detect_target(
         return "minimal", "no target folder found"
 
 
-def should_compile_agents_md(target: TargetType) -> bool:
+def should_compile_agents_md(target: CompileTargetType) -> bool:
     """Check if AGENTS.md should be compiled.
 
     AGENTS.md is generated for vscode, codex, gemini, all, and minimal
     targets.  Gemini needs it because GEMINI.md imports AGENTS.md.
-    
+
     Args:
-        target: The detected or configured target
-        
+        target: The detected or configured target. May be a string or a
+            frozenset of compiler families for multi-target lists.
+
     Returns:
         bool: True if AGENTS.md should be generated
     """
+    if isinstance(target, frozenset):
+        return "agents" in target or "gemini" in target
     return target in ("vscode", "opencode", "codex", "gemini", "all", "minimal")
 
 
-def should_compile_claude_md(target: TargetType) -> bool:
+def should_compile_claude_md(target: CompileTargetType) -> bool:
     """Check if CLAUDE.md should be compiled.
 
     Args:
-        target: The detected or configured target
+        target: The detected or configured target. May be a string or a
+            frozenset of compiler families for multi-target lists.
 
     Returns:
         bool: True if CLAUDE.md should be generated
     """
+    if isinstance(target, frozenset):
+        return "claude" in target
     return target in ("claude", "all")
 
 
-def should_compile_gemini_md(target: TargetType) -> bool:
+def should_compile_gemini_md(target: CompileTargetType) -> bool:
     """Check if GEMINI.md should be compiled.
 
     Args:
-        target: The detected or configured target
+        target: The detected or configured target. May be a string or a
+            frozenset of compiler families for multi-target lists.
 
     Returns:
         bool: True if GEMINI.md should be generated
     """
+    if isinstance(target, frozenset):
+        return "gemini" in target
     return target in ("gemini", "all")
 
 
