@@ -169,6 +169,27 @@ Use `sudo` for system-wide installation, or install to a user-writable directory
 curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR=$HOME/.local/bin sh
 ```
 
+### Binary install fails on older Linux (devcontainers, Debian-based images)
+
+On systems with a glibc version older than what the pre-built binary requires, the
+binary will fail to run. This commonly affects Debian Bookworm-based devcontainers
+(glibc 2.36) since the binary is built on Ubuntu 24.04 (glibc 2.39). The installer
+automatically detects incompatible glibc versions and falls back to
+`pip install --user apm-cli`.
+
+This installs the `apm` command into your user `bin` directory (commonly `~/.local/bin`).
+If `apm` is not found after installation, ensure that this directory is on your `PATH`.
+
+**Recommended fix for devcontainers:** switch your base image from `bookworm` to
+`trixie` (e.g., `mcr.microsoft.com/devcontainers/universal:24-trixie`), which ships
+glibc 2.40+ and runs the pre-built binary directly.
+
+If you prefer to install via pip directly:
+
+```bash
+pip install --user apm-cli
+```
+
 ### Authentication errors when installing packages
 
 See [Authentication -- Troubleshooting](../authentication/#troubleshooting) for token setup, SSO authorization, and diagnosing auth failures.
