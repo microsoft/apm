@@ -709,17 +709,17 @@ Use type hints.
         yield temp_path
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def test_all_target_creates_both_files(self, temp_project):
-        """Test that --target all creates both AGENTS.md and CLAUDE.md."""
+    def test_all_target_creates_all_files(self, temp_project):
+        """Test that --target all creates AGENTS.md, CLAUDE.md, and GEMINI.md."""
         config = CompilationConfig(
             target="all",
             dry_run=False,
             single_agents=True  # Use single-file for simpler verification
         )
-        
+
         compiler = AgentsCompiler(str(temp_project))
         primitives = PrimitiveCollection()
-        
+
         instruction = Instruction(
             name="test",
             file_path=temp_project / ".apm/instructions/test.instructions.md",
@@ -730,18 +730,20 @@ Use type hints.
             source="local"
         )
         primitives.add_primitive(instruction)
-        
+
         result = compiler.compile(config, primitives)
-        
+
         # Should succeed
         assert result.success
-        
-        # Both files should be created
+
+        # All three files should be created
         agents_md = temp_project / "AGENTS.md"
         claude_md = temp_project / "CLAUDE.md"
-        
+        gemini_md = temp_project / "GEMINI.md"
+
         assert agents_md.exists(), "AGENTS.md should be created for target='all'"
         assert claude_md.exists(), "CLAUDE.md should be created for target='all'"
+        assert gemini_md.exists(), "GEMINI.md should be created for target='all'"
 
     def test_all_target_result_references_both(self, temp_project):
         """Test that --target all result references both outputs."""
