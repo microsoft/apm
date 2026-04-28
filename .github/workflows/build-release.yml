@@ -856,7 +856,7 @@ jobs:
           enable-cache: true
 
       - name: Install test dependencies
-        run: uv sync --extra dev
+        run: uv sync --extra build
 
       - name: Build npm packages
         run: uv run scripts/npm_publish.py
