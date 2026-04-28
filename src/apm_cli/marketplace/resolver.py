@@ -96,9 +96,11 @@ def _resolve_github_source(source: dict) -> str:
 def _resolve_url_source(source: dict) -> str:
     """Resolve a ``url`` source type.
 
-    Delegates to ``DependencyReference.parse()`` so that any valid Git URL
-    (GitHub, GHES, GitLab, Bitbucket, ADO, SSH) is accepted and normalised
-    to the canonical ``owner/repo[#ref]`` format used by the marketplace.
+    Delegates to ``DependencyReference.parse()`` to extract the
+    ``owner/repo`` coordinate from any valid Git URL (GitHub, GHES, GitLab,
+    Bitbucket, ADO, SSH).  The URL's host is *not* preserved -- downstream
+    resolution (``RefResolver``) uses the configured ``GITHUB_HOST`` for
+    ``git ls-remote``.  True cross-host resolution is tracked in #1010.
     """
     url = source.get("url", "")
     if not url:

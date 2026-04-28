@@ -157,6 +157,7 @@ class MarketplaceBuilder:
         self._github_token: Optional[str] = None
         self._host: str = default_host() or "github.com"
         self._host_info: Optional["HostInfo"] = None
+        self._auth_resolved: bool = False
 
     # -- lazy loaders -------------------------------------------------------
 
@@ -179,15 +180,17 @@ class MarketplaceBuilder:
     def _ensure_auth(self) -> None:
         """Lazily resolve host classification and GitHub token.
 
-        Short-circuits when already resolved or when running in offline mode.
-        Called by ``_get_resolver()`` so both ``resolve()`` and ``build()``
-        benefit from authenticated ``git ls-remote``.
+        Short-circuits when already resolved (even if no token was found)
+        or when running in offline mode.  Called by ``_get_resolver()`` so
+        both ``resolve()`` and ``build()`` benefit from authenticated
+        ``git ls-remote``.
         """
-        if self._github_token is not None:
+        if self._auth_resolved:
             return
         if self._options.offline:
             return
         self._github_token = self._resolve_github_token()
+        self._auth_resolved = True
 
     # -- output path --------------------------------------------------------
 

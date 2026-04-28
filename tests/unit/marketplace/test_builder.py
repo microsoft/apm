@@ -1911,11 +1911,12 @@ class TestEnsureAuth:
         assert builder._github_token is None
 
     def test_ensure_auth_idempotent(self, tmp_path: Path) -> None:
-        """Calling _ensure_auth() when token already set does not re-resolve."""
+        """Calling _ensure_auth() when already resolved does not re-resolve."""
         yml_path = tmp_path / "marketplace.yml"
         yml_path.write_text("name: test\noutput: out.json\npackages: []\n")
         builder = MarketplaceBuilder(yml_path)
         builder._github_token = "already_set"
+        builder._auth_resolved = True
 
         with patch.object(builder, "_resolve_github_token") as mock_resolve:
             builder._ensure_auth()
