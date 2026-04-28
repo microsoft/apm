@@ -852,7 +852,7 @@ jobs:
       # Extracts each platform binary into its packages/@apm/cli-* folder
       # and syncs the version across all package.json files.
       - name: Generate npm packages
-        run: node packages/@apm/apm/scripts/generate-packages.mjs
+        run: pnpm run build
 
       # Publish platform packages first, then the main wrapper that lists
       # them as optionalDependencies.
