@@ -1873,3 +1873,65 @@ class TestFetchRemoteMetadataGHEHost:
             result = builder._fetch_remote_metadata(pkg)
         assert result is None
         mock_open.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _ensure_auth lazy resolution
+# ---------------------------------------------------------------------------
+
+
+class TestEnsureAuth:
+    """Tests for the lazy _ensure_auth() method."""
+
+    def test_ensure_auth_populates_token(self, tmp_path: Path) -> None:
+        """_ensure_auth() resolves token via the injected auth resolver."""
+        yml_path = tmp_path / "marketplace.yml"
+        yml_path.write_text("name: test\noutput: out.json\npackages: []\n")
+        builder = MarketplaceBuilder(yml_path)
+
+        mock_ctx = SimpleNamespace(token="ghp_resolved", source="env")
+        # Pre-set _host_info so classify_host() branch is skipped,
+        # and inject a fake auth resolver so AuthResolver() ctor is skipped.
+        builder._host_info = SimpleNamespace(kind="github", api_base="https://api.github.com")
+        builder._auth_resolver = SimpleNamespace(resolve=lambda host: mock_ctx)
+
+        builder._ensure_auth()
+
+        assert builder._github_token == "ghp_resolved"
+        assert builder._host_info is not None
+
+    def test_ensure_auth_skips_offline(self, tmp_path: Path) -> None:
+        """_ensure_auth() short-circuits immediately in offline mode."""
+        yml_path = tmp_path / "marketplace.yml"
+        yml_path.write_text("name: test\noutput: out.json\npackages: []\n")
+        builder = MarketplaceBuilder(yml_path, options=BuildOptions(offline=True))
+
+        builder._ensure_auth()
+
+        assert builder._github_token is None
+
+    def test_ensure_auth_idempotent(self, tmp_path: Path) -> None:
+        """Calling _ensure_auth() when token already set does not re-resolve."""
+        yml_path = tmp_path / "marketplace.yml"
+        yml_path.write_text("name: test\noutput: out.json\npackages: []\n")
+        builder = MarketplaceBuilder(yml_path)
+        builder._github_token = "already_set"
+
+        with patch.object(builder, "_resolve_github_token") as mock_resolve:
+            builder._ensure_auth()
+            mock_resolve.assert_not_called()
+
+        assert builder._github_token == "already_set"
+
+    def test_get_resolver_has_token(self, tmp_path: Path) -> None:
+        """_get_resolver() passes the resolved token to RefResolver."""
+        yml_path = tmp_path / "marketplace.yml"
+        yml_path.write_text("name: test\noutput: out.json\npackages: []\n")
+        builder = MarketplaceBuilder(yml_path)
+
+        mock_ctx = SimpleNamespace(token="ghp_wired", source="env")
+        builder._host_info = SimpleNamespace(kind="github", api_base="https://api.github.com")
+        builder._auth_resolver = SimpleNamespace(resolve=lambda host: mock_ctx)
+
+        resolver = builder._get_resolver()
+        assert resolver._token == "ghp_wired"

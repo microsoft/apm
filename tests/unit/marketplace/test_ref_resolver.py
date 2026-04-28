@@ -561,3 +561,53 @@ class TestRefResolverGHEHost:
         resolver = RefResolver()
         assert resolver._host == "github.com"
         resolver.close()
+
+
+# ---------------------------------------------------------------------------
+# Token injection into ls-remote URLs
+# ---------------------------------------------------------------------------
+
+
+class TestRefResolverTokenInjection:
+    """Token injection into ls-remote URLs."""
+
+    def test_token_injected_in_url(self) -> None:
+        """When token is provided, URL uses x-access-token auth and ends with .git."""
+        resolver = RefResolver(host="github.com", token="ghp_testtoken123")
+        with patch("apm_cli.marketplace.ref_resolver.subprocess.run") as mock_run:
+            mock_run.return_value = _make_completed("aaaa" * 10 + "\trefs/tags/v1.0.0\n")
+            resolver.list_remote_refs("owner/repo")
+            cmd_args = mock_run.call_args[0][0]
+            # ["git", "ls-remote", "--tags", "--heads", url]
+            url_arg = cmd_args[cmd_args.index("--heads") + 1]
+            parsed = urllib.parse.urlparse(url_arg)
+            assert parsed.scheme == "https"
+            assert parsed.hostname == "github.com"
+            assert parsed.username == "x-access-token"
+            assert parsed.path.endswith(".git")
+
+    def test_no_token_url_has_git_suffix(self) -> None:
+        """Without token, URL still ends with .git and has no userinfo."""
+        resolver = RefResolver(host="github.com")
+        with patch("apm_cli.marketplace.ref_resolver.subprocess.run") as mock_run:
+            mock_run.return_value = _make_completed("aaaa" * 10 + "\trefs/tags/v1.0.0\n")
+            resolver.list_remote_refs("owner/repo")
+            cmd_args = mock_run.call_args[0][0]
+            url_arg = cmd_args[cmd_args.index("--heads") + 1]
+            parsed = urllib.parse.urlparse(url_arg)
+            assert parsed.path.endswith(".git")
+            assert parsed.username is None
+
+    def test_resolve_ref_sha_with_token(self) -> None:
+        """Token is also injected in resolve_ref_sha URL."""
+        resolver = RefResolver(host="corp.ghe.com", token="ghp_xxx")
+        with patch("apm_cli.marketplace.ref_resolver.subprocess.run") as mock_run:
+            mock_run.return_value = _make_completed("bbbb" * 10 + "\trefs/heads/main\n")
+            resolver.resolve_ref_sha("org/repo", "main")
+            cmd_args = mock_run.call_args[0][0]
+            # ["git", "ls-remote", url, ref]
+            url_arg = cmd_args[2]
+            parsed = urllib.parse.urlparse(url_arg)
+            assert parsed.hostname == "corp.ghe.com"
+            assert parsed.username == "x-access-token"
+            assert parsed.path.endswith(".git")

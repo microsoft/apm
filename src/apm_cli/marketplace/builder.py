@@ -26,7 +26,10 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from ..core.auth import HostInfo
 
 import yaml
 
@@ -153,7 +156,7 @@ class MarketplaceBuilder:
         # Resolved once per build, used by worker threads (read-only).
         self._github_token: Optional[str] = None
         self._host: str = default_host() or "github.com"
-        self._host_info: Optional[object] = None  # lazily resolved HostInfo
+        self._host_info: Optional["HostInfo"] = None
 
     # -- lazy loaders -------------------------------------------------------
 
@@ -164,12 +167,27 @@ class MarketplaceBuilder:
 
     def _get_resolver(self) -> RefResolver:
         if self._resolver is None:
+            self._ensure_auth()
             self._resolver = RefResolver(
                 timeout_seconds=self._options.timeout_seconds,
                 offline=self._options.offline,
                 host=self._host,
+                token=self._github_token,
             )
         return self._resolver
+
+    def _ensure_auth(self) -> None:
+        """Lazily resolve host classification and GitHub token.
+
+        Short-circuits when already resolved or when running in offline mode.
+        Called by ``_get_resolver()`` so both ``resolve()`` and ``build()``
+        benefit from authenticated ``git ls-remote``.
+        """
+        if self._github_token is not None:
+            return
+        if self._options.offline:
+            return
+        self._github_token = self._resolve_github_token()
 
     # -- output path --------------------------------------------------------
 
@@ -369,6 +387,11 @@ class MarketplaceBuilder:
         results: Dict[int, ResolvedPackage] = {}
         errors: List[Tuple[str, str]] = []
 
+        # Eagerly resolve auth + create the shared RefResolver before
+        # spawning workers -- avoids a race on _ensure_auth() and
+        # matches the pattern used in _prefetch_metadata().
+        self._get_resolver()
+
         with ThreadPoolExecutor(
             max_workers=min(self._options.concurrency, len(entries))
         ) as pool:
@@ -428,7 +451,7 @@ class MarketplaceBuilder:
             file_path = f"{path_prefix}apm.yml"
 
             # Determine URL strategy based on host kind
-            host_kind = getattr(self._host_info, "kind", "github") if self._host_info else "github"
+            host_kind = self._host_info.kind if self._host_info else "github"
 
             if host_kind not in ("github", "ghe_cloud", "ghes"):
                 # Non-GitHub hosts -- skip metadata enrichment
@@ -458,7 +481,7 @@ class MarketplaceBuilder:
             else:
                 # GHES / GHE Cloud -- use REST API
                 api_base = (
-                    getattr(self._host_info, "api_base", None)
+                    self._host_info.api_base
                     if self._host_info
                     else None
                 ) or f"https://{self._host}/api/v3"
@@ -544,7 +567,7 @@ class MarketplaceBuilder:
             return {}
 
         # Resolve token once -- threads read self._github_token (immutable).
-        self._github_token = self._resolve_github_token()
+        self._ensure_auth()
 
         results: Dict[str, Dict[str, str]] = {}
         workers = min(self._options.concurrency, len(resolved))

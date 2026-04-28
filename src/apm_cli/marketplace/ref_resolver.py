@@ -137,6 +137,10 @@ class RefResolver:
     stderr_translator_enabled:
         When ``True`` (default), stderr from failed ``git`` calls is
         classified via ``translate_git_stderr``.
+    token:
+        Optional GitHub PAT to embed in the ``https://`` URL.  When set
+        the URL uses ``x-access-token`` authentication; when ``None``
+        (default) git runs unauthenticated.
     """
 
     def __init__(
@@ -146,11 +150,13 @@ class RefResolver:
         offline: bool = False,
         stderr_translator_enabled: bool = True,
         host: Optional[str] = None,
+        token: Optional[str] = None,
     ) -> None:
         self._timeout = timeout_seconds
         self._offline = offline
         self._stderr_translator = stderr_translator_enabled
         self._host: str = host or default_host() or "github.com"
+        self._token: Optional[str] = token
         self._cache = RefCache()
         self._lock = threading.Lock()
         # Per-remote locks to serialise calls to the same remote while
@@ -201,7 +207,9 @@ class RefResolver:
             if self._offline:
                 raise OfflineMissError(package="", remote=owner_repo)
 
-            url = build_https_clone_url(self._host, owner_repo) + ".git"
+            url = build_https_clone_url(self._host, owner_repo, token=self._token)
+            if not url.endswith(".git"):
+                url += ".git"
             env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
             try:
                 result = subprocess.run(
@@ -276,7 +284,9 @@ class RefResolver:
         GitLsRemoteError
             When the ref does not exist or the subprocess fails.
         """
-        url = build_https_clone_url(self._host, owner_repo) + ".git"
+        url = build_https_clone_url(self._host, owner_repo, token=self._token)
+        if not url.endswith(".git"):
+            url += ".git"
         env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
         try:
             result = subprocess.run(
