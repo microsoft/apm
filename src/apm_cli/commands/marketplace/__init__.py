@@ -83,7 +83,6 @@ class MarketplaceGroup(click.Group):
     ]
     _authoring_commands = [
         "init",
-        "build",
         "check",
         "outdated",
         "doctor",
@@ -92,20 +91,23 @@ class MarketplaceGroup(click.Group):
         "migrate",
     ]
 
-    @staticmethod
-    def _authoring_visible() -> bool:
-        """Return True when authoring commands should appear in ``--help``."""
-        try:
-            from ...core.experimental import is_enabled
-
-            return is_enabled("marketplace_authoring")
-        except Exception:  # noqa: BLE001 -- fail-open UI visibility check
-            return True  # fail open — show commands if flag check fails
+    def get_command(self, ctx, cmd_name):
+        # The 'build' subcommand was removed in favour of the unified
+        # 'apm pack' entrypoint. Surface a hard error with a migration
+        # hint rather than silently aliasing.
+        if cmd_name == "build":
+            raise click.UsageError(
+                "'apm marketplace build' was removed. Use 'apm pack' instead.\n"
+                "marketplace.json is now produced by 'apm pack' when "
+                "apm.yml has a 'marketplace:' block."
+            )
+        return super().get_command(ctx, cmd_name)
 
     def format_commands(self, ctx, formatter):
-        sections = [("Consumer commands", self._consumer_commands)]
-        if self._authoring_visible():
-            sections.append(("Authoring commands", self._authoring_commands))
+        sections = [
+            ("Consumer commands", self._consumer_commands),
+            ("Authoring commands", self._authoring_commands),
+        ]
 
         for section_name, cmd_names in sections:
             commands = []
@@ -196,27 +198,8 @@ def _find_duplicate_names(yml):
     return ""
 
 def _require_authoring_flag():
-    """Exit with enablement hint if marketplace-authoring flag is disabled."""
-    from ...core.experimental import is_enabled
-
-    if not is_enabled("marketplace_authoring"):
-        _rich_warning(
-            "Marketplace authoring commands are experimental.",
-            symbol="warning",
-        )
-        _rich_info(
-            "Enable with: apm experimental enable marketplace-authoring",
-            symbol="info",
-        )
-        _rich_info(
-            "Learn more:  apm experimental list",
-            symbol="info",
-        )
-        _rich_info(
-            "Docs: https://microsoft.github.io/apm/guides/marketplace-authoring/",
-            symbol="info",
-        )
-        sys.exit(1)
+    """Compatibility no-op for extracted command modules."""
+    return None
 
 @click.group(cls=MarketplaceGroup, help="Manage marketplaces for discovery and governance")
 @click.pass_context
@@ -1228,7 +1211,6 @@ def search(expression, limit, verbose):
 
 
 
-from .build import build  # noqa: E402
 from .check import check  # noqa: E402
 from .doctor import doctor  # noqa: E402
 from .init import init  # noqa: E402
@@ -1252,7 +1234,6 @@ __all__ = [
     "update",
     "remove",
     "validate",
-    "build",
     "outdated",
     "check",
     "doctor",

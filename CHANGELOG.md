@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Added
 
+- `apm pack` produces `.claude-plugin/marketplace.json` when `apm.yml` has a `marketplace:` block; new flags `--offline`, `--include-prerelease`, `--marketplace-output PATH`. (#722)
+- `marketplace:` block in `apm.yml` unifies catalog authoring with the manifest. (#1038)
+- `apm marketplace migrate` -- one-shot consolidation of legacy `marketplace.yml` into `apm.yml`. (#1038)
+- `apm init --marketplace` -- seeds a fresh `apm.yml` with a `marketplace:` authoring block. (#1038)
+- Local-path package sources (`source: ./path/to/dir`) are first-class in `marketplace.packages`. (#1038)
 - Codex CLI MCP config is now project-local (`.codex/config.toml`) during project installs and gated to active project targets; Codex user-scope primitive deployment is also supported. (#803)
 - **Dev Container Feature** `ghcr.io/microsoft/apm/apm-cli` -- one-line install of the APM CLI into any `devcontainer.json`, GitHub Codespace, or JetBrains Gateway workspace. Supports a `version` option (`latest` or pinned semver), declares `installsAfter` for the official Python feature, handles PEP 668 on Ubuntu 24.04+. Ships with 37 bats unit tests and a 6-distro Docker integration matrix (Ubuntu 24.04, Ubuntu 22.04, Debian 12, Alpine 3.20, Fedora 41, plus Python-feature combo). (#861)
 - `shared/apm.md` gh-aw workflow gains an `apps:` array input for cross-org private packages: each entry mints its own GitHub App installation token via `actions/create-github-app-token` and packs only its declared packages, with a matrix fan-out one replica per credential group. The single-app top-level form (`app-id`, `private-key`, `owner`, `repositories`) shipped earlier in this cycle is preserved as the canonical shorthand for one-org users; `apps[]` is purely additive. Multi-bundle restore uses the `bundles-file:` input from `microsoft/apm-action@v1.5.0` (microsoft/apm-action#30, microsoft/apm-action#29).
@@ -16,16 +21,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `apm marketplace init` and `apm init --marketplace` next-step hints now point at `apm pack` (was `apm marketplace build`). (#722)
 - **Manifest contract: invalid `target:` values now raise a parse error.** Previously, an unknown token (or a CSV string like `target: opencode,claude,copilot,agents` instead of the YAML list `target: [opencode, claude, copilot, agents]`) was silently ignored, leaving `apm install` and `apm compile` to exit 0 while deploying nothing. The shared parser used by `--target` now also validates `apm.yml`'s `target:`, so the same input resolves the same way at every entry point. **Migration:** three previously-silent inputs now fail loud -- (1) unknown tokens (`target: bogus` -> fix the typo), (2) empty values (`target: ""`, `target: []` -> remove the line if you meant auto-detect), (3) `all` mixed with other targets (`target: [all, claude]` -> use `all` alone). Omitting `target:` entirely still triggers auto-detection. (#820)
 - Rename `DownloadStrategyManager` to `DownloadDelegate` to better reflect Facade/Delegate pattern (#918)
 - Fix incorrect double-checked locking in marketplace registry `_load()` -- hold lock across full check+read+set (#918)
+
+### Removed
+
+- **`apm marketplace build` command removed.** `apm pack` now produces marketplace.json directly. Invoking the old subcommand exits 2 with a one-line migration message pointing at `apm pack`. (#722)
+- **`marketplace_authoring` experimental flag removed.** Marketplace authoring (init, package add, validate, publish, etc.) is now generally available with no opt-in. (#722)
+
+### Deprecated
+
+- Standalone `marketplace.yml` (still loaded; emits a deprecation warning; slated for removal in v0.13). (#1038)
 
 ### Fixed
 
 - `apm install` and `apm compile` no longer exit 0 with success messages when `target:` in `apm.yml` is a CSV string -- the value now parses identically to the same input on `--target`, and zero-target resolution surfaces a warning instead of a silent no-op. (#820)
 - Remove redundant `seen` set from `_scan_patterns()` discovery walk (#918)
-- `apm marketplace build` now respects `GITHUB_HOST` for GitHub Enterprise repos -- ref resolution, token lookup, and metadata fetch all use the configured host instead of hardcoded `github.com`. `git ls-remote` is authenticated so private repos work without separate credential setup. (#1008)
-- `apm marketplace build` now accepts multiple Git URL forms (GitHub, GHES, GitLab, Bitbucket, ADO, SSH) for `type: url` parsing via `DependencyReference.parse()`. Host resolution is still driven by `GITHUB_HOST`, so non-`github.com` hosts require `GITHUB_HOST` to be set accordingly. (#1008)
+- `apm pack` (marketplace producer) now respects `GITHUB_HOST` for GitHub Enterprise repos -- ref resolution, token lookup, and metadata fetch all use the configured host instead of hardcoded `github.com`. `git ls-remote` is authenticated so private repos work without separate credential setup. (#1008)
+- `apm pack` (marketplace producer) now accepts multiple Git URL forms (GitHub, GHES, GitLab, Bitbucket, ADO, SSH) for `type: url` parsing via `DependencyReference.parse()`. Host resolution is still driven by `GITHUB_HOST`, so non-`github.com` hosts require `GITHUB_HOST` to be set accordingly. (#1008)
 - **ADO Entra ID auth path no longer silently fails.** Bearer tokens from `az account get-access-token` are now correctly plumbed through validation (auth scheme, git env). Auth failures raise a typed `AuthenticationError` with an actionable 4-case diagnostic instead of the ambiguous "not accessible or doesn't exist" message. `apm install --update` runs a pre-flight auth check before modifying any files -- on failure it aborts with "No files were modified". (#1015)
 - Correct targeting of compiled artifacts so GEMINI.md is only created if requested (#1019)
 

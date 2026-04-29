@@ -24,7 +24,6 @@ from ..utils.path_security import PathTraversalError, validate_path_segments
 from ._io import atomic_write
 from .errors import MarketplaceYmlError
 from .yml_schema import (
-    LOCAL_SOURCE_RE,
     SOURCE_RE,
     load_marketplace_from_apm_yml,
     load_marketplace_yml,
@@ -65,18 +64,23 @@ def _dump_rt(data) -> str:
     return stream.getvalue()
 
 
-def _is_apm_yml_with_marketplace(data) -> bool:
+def _is_apm_yml_with_marketplace(data: object) -> bool:
     """Detect an apm.yml file that hosts a ``marketplace:`` block.
 
     The legacy ``marketplace.yml`` shape has marketplace fields (``owner``,
     ``packages``) at the root; the apm.yml shape nests them under
     ``marketplace:``.  We pick whichever shape the file actually has.
+
+    Requires the ``marketplace`` value itself to be a mapping; otherwise
+    downstream callers (e.g. :func:`_get_marketplace_container`) would
+    return a non-dict and crash on ``container.get(...)``.
     """
     if not isinstance(data, dict):
         return False
-    if "marketplace" not in data or data["marketplace"] is None:
+    block = data.get("marketplace")
+    if block is None:
         return False
-    return True
+    return isinstance(block, dict)
 
 
 def _get_marketplace_container(data):

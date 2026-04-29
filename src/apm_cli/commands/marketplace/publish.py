@@ -69,7 +69,7 @@ def publish(
     mkt_json_path = Path.cwd() / "marketplace.json"
     if not mkt_json_path.exists():
         logger.error(
-            "marketplace.json not found. Run 'apm marketplace build' first.",
+            "marketplace.json not found. Run 'apm pack' first.",
             symbol="error",
         )
         sys.exit(1)

@@ -61,16 +61,36 @@ class ConfigSource(enum.Enum):
 
 
 def _has_marketplace_block(apm_yml_path: Path) -> bool:
-    """Return ``True`` when *apm_yml_path* exists and has ``marketplace:``."""
+    """Return ``True`` when *apm_yml_path* has a non-null ``marketplace:``.
+
+    Missing files and valid YAML without a top-level ``marketplace`` block
+    return ``False``. Read failures and YAML parse errors raise
+    :class:`MarketplaceYmlError` so callers do not mistake a malformed
+    ``apm.yml`` for an absent marketplace configuration (which would
+    surface a misleading "no marketplace config" message instead of the
+    real parse error).
+    """
     if not apm_yml_path.exists():
         return False
     try:
         text = apm_yml_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise MarketplaceYmlError(
+            f"Could not read {apm_yml_path.name}: {exc}"
+        ) from exc
+
+    try:
         data = yaml.safe_load(text)
-    except (OSError, yaml.YAMLError):
-        return False
-    return isinstance(data, dict) and "marketplace" in data and \
-        data["marketplace"] is not None
+    except yaml.YAMLError as exc:
+        raise MarketplaceYmlError(
+            f"Invalid YAML in {apm_yml_path.name}: {exc}"
+        ) from exc
+
+    return (
+        isinstance(data, dict)
+        and "marketplace" in data
+        and data["marketplace"] is not None
+    )
 
 
 def detect_config_source(project_root: Path) -> ConfigSource:
@@ -229,7 +249,26 @@ def migrate_marketplace_yml(
 
     # Load apm.yml round-trip so we can safely insert the new key.
     apm_text = apm_path.read_text(encoding="utf-8")
-    apm_data = rt.load(apm_text)
+    try:
+        apm_data = rt.load(apm_text)
+    except Exception as exc:  # ruamel.yaml.YAMLError and parser subclasses
+        from ruamel.yaml import YAMLError
+        if not isinstance(exc, YAMLError):
+            raise
+        raise MarketplaceYmlError(
+            f"apm.yml is malformed: {exc}"
+        ) from exc
+
+    if apm_data is None:
+        # Empty apm.yml: round-trip with an empty mapping so we can
+        # still insert the marketplace block.
+        from ruamel.yaml.comments import CommentedMap
+        apm_data = CommentedMap()
+    elif not isinstance(apm_data, dict):
+        raise MarketplaceYmlError(
+            "apm.yml must be a YAML mapping at the top level "
+            f"(got {type(apm_data).__name__}). Cannot migrate."
+        )
 
     if "marketplace" in apm_data and apm_data["marketplace"] is not None:
         if not force:

@@ -316,7 +316,7 @@ class TestPublishMissingFiles:
         result = runner.invoke(marketplace, ["publish", "--yes"])
         assert result.exit_code == 1
         assert "marketplace.json not found" in result.output
-        assert "apm marketplace build" in result.output
+        assert "apm pack" in result.output
 
     def test_marketplace_yml_schema_error_exit_2(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

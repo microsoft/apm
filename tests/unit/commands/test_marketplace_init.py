@@ -67,7 +67,7 @@ class TestInitHappyPath:
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(marketplace, ["init"])
         assert result.exit_code == 0
-        assert "apm marketplace build" in result.output
+        assert "apm pack" in result.output
 
 
 # ---------------------------------------------------------------------------

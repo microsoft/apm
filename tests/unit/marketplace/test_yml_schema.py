@@ -686,7 +686,7 @@ class TestEdgeCases:
         with pytest.raises(MarketplaceYmlError, match="owner"):
             load_marketplace_yml(yml)
 
-    def test_source_dot_traversal(self, tmp_path: Path):
+    def test_local_source_accepted(self, tmp_path: Path):
         """Local-path source './acme' is now valid (no version/ref needed)."""
         content = _minimal_yml(
             packages=(

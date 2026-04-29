@@ -65,9 +65,20 @@ def init(force, no_gitignore_check, name, owner, verbose):
         logger.error(f"Failed to parse apm.yml: {exc}", symbol="error")
         sys.exit(1)
 
+    if data is None:
+        from ruamel.yaml.comments import CommentedMap
+
+        data = CommentedMap()
+    elif not isinstance(data, dict):
+        logger.error(
+            "apm.yml must be a YAML mapping at the top level "
+            f"(got {type(data).__name__}).",
+            symbol="error",
+        )
+        sys.exit(1)
+
     if (
-        isinstance(data, dict)
-        and "marketplace" in data
+        "marketplace" in data
         and data["marketplace"] is not None
         and not force
     ):
@@ -103,7 +114,7 @@ def init(force, no_gitignore_check, name, owner, verbose):
     # Next steps panel
     next_steps = [
         "Edit the 'marketplace:' block in apm.yml to add your packages",
-        "Run 'apm marketplace build' to generate .claude-plugin/marketplace.json",
+        "Run 'apm pack' to generate .claude-plugin/marketplace.json",
         "Commit BOTH apm.yml and the generated marketplace.json",
     ]
 

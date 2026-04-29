@@ -25,7 +25,7 @@ from . import (
 )
 
 
-@marketplace.command(help="Run environment diagnostics for marketplace builds")
+@marketplace.command(help="Run environment diagnostics for marketplace publishing")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def doctor(verbose):
     """Check git, network, auth, and marketplace config readiness."""
