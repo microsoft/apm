@@ -61,7 +61,7 @@ from apm_cli.install.phases.local_content import (
     _has_local_apm_content,
     _project_has_root_primitives,
 )
-from apm_cli.install.errors import DirectDependencyError, PolicyViolationError
+from apm_cli.install.errors import AuthenticationError, DirectDependencyError, PolicyViolationError
 from apm_cli.install.insecure_policy import (
     _InsecureDependencyInfo,
     _allow_insecure_host_callback,
@@ -1547,6 +1547,13 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
     except InsecureDependencyPolicyError:
         _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
         sys.exit(1)
+    except AuthenticationError as e:
+        # #1015: render auth diagnostics on the DEFAULT path (not --verbose).
+        _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
+        _rich_error(str(e))
+        if e.diagnostic_context:
+            _rich_echo(e.diagnostic_context)
+        sys.exit(1)
     except DirectDependencyError as e:
         _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
         logger.error(str(e))
@@ -1716,6 +1723,13 @@ def _install_apm_packages(ctx, outcome):
             apm_diagnostics = install_result.diagnostics
         except InsecureDependencyPolicyError:
             _maybe_rollback_manifest(ctx.snapshot_manifest_path, ctx.manifest_snapshot, logger)
+            sys.exit(1)
+        except AuthenticationError as e:
+            # #1015: render auth diagnostics on the DEFAULT path (not --verbose).
+            _maybe_rollback_manifest(ctx.snapshot_manifest_path, ctx.manifest_snapshot, logger)
+            _rich_error(str(e))
+            if e.diagnostic_context:
+                _rich_echo(e.diagnostic_context)
             sys.exit(1)
         except Exception as e:
             _maybe_rollback_manifest(ctx.snapshot_manifest_path, ctx.manifest_snapshot, logger)
