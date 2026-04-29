@@ -289,9 +289,21 @@ steps:
       # whenever exactly one artifact matches the pattern, ignoring
       # `merge-multiple: false`. Re-shape into the per-group subdir layout so
       # downstream validation sees a stable structure regardless of matrix size.
-      expected_count=$(echo "$EXPECTED_MATRIX" | jq '.group | length')
+      # Upstream reference:
+      # https://github.com/actions/download-artifact/blob/v8.0.1/src/download-artifact.ts
+      # (see the `isSingleArtifactDownload || mergeMultiple || artifacts.length === 1`
+      # branch). Remove this step once download-artifact stops flattening or
+      # exposes an opt-out.
+      expected_count=$(echo "$EXPECTED_MATRIX" | jq '.group // [] | length')
       if [ "$expected_count" -eq 1 ]; then
         group_id=$(echo "$EXPECTED_MATRIX" | jq -r '.group[0].id')
+        # Defence-in-depth: group_id is interpolated into a shell path. apm-prep
+        # produces a sanitised id today, but enforce a strict allowlist here so
+        # any future schema drift cannot smuggle traversal sequences.
+        if ! printf '%s' "$group_id" | grep -Eq '^[A-Za-z0-9_-]+$'; then
+          echo "::error::unsafe group_id '$group_id' (must match ^[A-Za-z0-9_-]+$)"
+          exit 1
+        fi
         group_dir="/tmp/gh-aw/apm-bundles/${ARTIFACT_PREFIX}apm-${group_id}"
         if [ ! -d "$group_dir" ]; then
           mkdir -p "$group_dir"
