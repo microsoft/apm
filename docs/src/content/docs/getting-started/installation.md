@@ -54,6 +54,22 @@ GITHUB_URL=https://github.corp.com VERSION=v1.2.3 sh install.sh
 
 ## Package managers
 
+**Node.js projects:**
+
+```bash
+# Global installation
+npm install -g @microsoft/apm-cli
+# or: pnpm add -g @microsoft/apm-cli
+# or: yarn global add @microsoft/apm-cli
+
+# Or as a project devDependency (recommended)
+npm install -D @microsoft/apm-cli
+# or: pnpm add -D @microsoft/apm-cli
+# or: yarn add -D @microsoft/apm-cli
+
+npx apm --version
+```
+
 **Homebrew (macOS/Linux):**
 
 ```bash
