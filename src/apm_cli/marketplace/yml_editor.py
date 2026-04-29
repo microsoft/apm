@@ -64,7 +64,7 @@ def _dump_rt(data) -> str:
     return stream.getvalue()
 
 
-def _is_apm_yml_with_marketplace(data) -> bool:
+def _is_apm_yml_with_marketplace(data: object) -> bool:
     """Detect an apm.yml file that hosts a ``marketplace:`` block.
 
     The legacy ``marketplace.yml`` shape has marketplace fields (``owner``,

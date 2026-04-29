@@ -249,7 +249,15 @@ def migrate_marketplace_yml(
 
     # Load apm.yml round-trip so we can safely insert the new key.
     apm_text = apm_path.read_text(encoding="utf-8")
-    apm_data = rt.load(apm_text)
+    try:
+        apm_data = rt.load(apm_text)
+    except Exception as exc:  # ruamel.yaml.YAMLError and parser subclasses
+        from ruamel.yaml import YAMLError
+        if not isinstance(exc, YAMLError):
+            raise
+        raise MarketplaceYmlError(
+            f"apm.yml is malformed: {exc}"
+        ) from exc
 
     if apm_data is None:
         # Empty apm.yml: round-trip with an empty mapping so we can
