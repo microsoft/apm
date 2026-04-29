@@ -37,13 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm compile`, `apm prune`, and `apm deps list` no longer falsely flag parent directories of subdirectory virtual packages as orphaned. When a dependency uses dict-form (`git:` + `path:`) pointing at a nested path (e.g., `.apm/skills/skill-name`), the intermediate `owner/repo/` directory is now recognized as an ancestor of the expected install path rather than an orphaned package. (#1050)
 - `apm install` and `apm compile` no longer exit 0 with success messages when `target:` in `apm.yml` is a CSV string -- the value now parses identically to the same input on `--target`, and zero-target resolution surfaces a warning instead of a silent no-op. (#820)
 - Remove redundant `seen` set from `_scan_patterns()` discovery walk (#918)
 - `apm pack` (marketplace producer) now respects `GITHUB_HOST` for GitHub Enterprise repos -- ref resolution, token lookup, and metadata fetch all use the configured host instead of hardcoded `github.com`. `git ls-remote` is authenticated so private repos work without separate credential setup. (#1008)
 - `apm pack` (marketplace producer) now accepts multiple Git URL forms (GitHub, GHES, GitLab, Bitbucket, ADO, SSH) for `type: url` parsing via `DependencyReference.parse()`. Host resolution is still driven by `GITHUB_HOST`, so non-`github.com` hosts require `GITHUB_HOST` to be set accordingly. (#1008)
 - **ADO Entra ID auth path no longer silently fails.** Bearer tokens from `az account get-access-token` are now correctly plumbed through validation (auth scheme, git env). Auth failures raise a typed `AuthenticationError` with an actionable 4-case diagnostic instead of the ambiguous "not accessible or doesn't exist" message. `apm install --update` runs a pre-flight auth check before modifying any files -- on failure it aborts with "No files were modified". (#1015)
 - Correct targeting of compiled artifacts so GEMINI.md is only created if requested (#1019)
+- `apm compile`, `apm prune`, and `apm deps list` no longer falsely flag parent directories of subdirectory virtual packages as orphaned. When a dependency uses dict-form (`git:` + `path:`) pointing at a nested path (e.g., `.apm/skills/skill-name`), the intermediate `owner/repo/` directory is now recognized as an ancestor of the expected install path rather than an orphaned package. (#1050)
 
 ## [0.10.0] - 2026-04-27
 
