@@ -58,6 +58,30 @@ my-package/
         resource2.md
 ```
 
+## Manifest fields: `target:` validation contract
+
+The `target:` field in `apm.yml` controls which output runtimes the package
+compiles and installs to. Both `apm.yml`'s `target:` and the `--target` CLI
+flag share the same validator, so identical input is rejected or accepted
+the same way at every entry point. Invalid values fail at parse time with a
+message naming the apm.yml path and the offending token -- they do **not**
+silently fall through to auto-detect.
+
+| Form | Behaviour |
+|------|-----------|
+| `target: copilot` | Single token; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `all` |
+| `target: [claude, copilot]` | List form; only listed targets are compiled/installed |
+| `target: claude,copilot` | CSV-string form; parses identically to the list form (the shared validator splits on `,`). Before #820 was fixed, this silently produced zero deployment |
+| `target:` omitted entirely | Auto-detect from project folders (`.github/`, `.claude/`, `.codex/`) |
+| `target: bogus` (unknown token) | **Parse error** -- fix the typo |
+| `target: ""` or `target: []` (empty) | **Parse error** -- remove the line if you meant auto-detect |
+| `target: [all, claude]` (`all` mixed with other targets) | **Parse error** -- use `all` alone |
+
+Error messages always name the `apm.yml` path and the offending token, so the
+fix point is unambiguous. The list form (`target: [a, b]`) is the recommended
+shape; the CSV-string form is supported for parity with `--target a,b` on the
+CLI but reads less cleanly in YAML.
+
 ## The 7 primitive types
 
 ### 1. Instruction (`*.instructions.md`)

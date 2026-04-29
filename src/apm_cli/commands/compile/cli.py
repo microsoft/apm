@@ -379,16 +379,19 @@ def compile(
         # Auto-detect target if not explicitly provided
         from ...core.target_detection import detect_target, get_target_description
 
-        # Get config target from apm.yml if available
-        config_target = None
-        try:
-            from ...models.apm_package import APMPackage
+        # Get config target from apm.yml if available.  When the file is
+        # absent we proceed with auto-detection; when it is present but
+        # malformed we let the parse error surface so users see exactly
+        # what is wrong (e.g. ``target: opencode,bogus`` -> a ValueError
+        # naming the bad token), rather than silently falling through to
+        # auto-detect.  See #820.
+        from ...models.apm_package import APMPackage
 
-            apm_pkg = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
+        config_target = None
+        apm_yml_path = Path(APM_YML_FILENAME)
+        if apm_yml_path.exists():
+            apm_pkg = APMPackage.from_apm_yml(apm_yml_path)
             config_target = apm_pkg.target
-        except Exception:
-            # No apm.yml or parsing error - proceed with auto-detection
-            pass
 
         # Resolve list targets to compiler-understood string
         compile_target = _resolve_compile_target(target)
@@ -475,8 +478,39 @@ def compile(
                     # Success message for dry run already included in formatter output
                     pass
                 else:
-                    # Success message for actual compilation
-                    logger.success("Compilation completed successfully!", symbol="check")
+                    # Defense-in-depth (#820): don't claim "completed
+                    # successfully" when zero files were emitted.  With
+                    # parse_target_field as the upstream gatekeeper this is
+                    # unreachable in normal flow, but silent zero-effect
+                    # success is the worst-case package-manager DX.
+                    #
+                    # Pattern-based stat scan (instead of a hardcoded key
+                    # list) so new compile-time targets pick up the guard
+                    # automatically: any stat ending in ``_files_written``
+                    # or ``_files_generated`` contributes to the total.
+                    _files_written = sum(
+                        int(v or 0)
+                        for k, v in result.stats.items()
+                        if k.endswith(("_files_written", "_files_generated"))
+                    )
+                    if _files_written > 0:
+                        logger.success(
+                            "Compilation completed successfully!",
+                            symbol="check",
+                        )
+                    else:
+                        # Zero-output compile is the silent-success failure
+                        # mode #820 guards against.  Don't claim success;
+                        # surface what the user can act on.  The cause is
+                        # usually one of: target dirs not present (auto-
+                        # detect found nothing), explicit target rejected
+                        # by policy, or no primitives in the project.
+                        logger.warning(
+                            "Compilation completed but produced no output "
+                            "files. Check that target directories exist "
+                            "(e.g. .github/, .claude/) or set 'target:' "
+                            "in apm.yml / pass --target explicitly."
+                        )
 
             else:
                 # Traditional single-file compilation - keep existing logic

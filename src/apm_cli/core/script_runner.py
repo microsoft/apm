@@ -73,7 +73,7 @@ class ScriptRunner:
         if discovered_prompt:
             # Print discovery message early to allow E2E tests to validate
             # This message appears before runtime detection, which may fail in test environments
-            print(f"[i] Auto-discovered: {discovered_prompt}")
+            print(f"[i] Auto-discovered: {discovered_prompt.as_posix()}")
 
             # Detect runtime and generate command
             runtime = self._detect_installed_runtime()

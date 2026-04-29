@@ -138,8 +138,52 @@ class TestResolveUrlSource:
         assert _resolve_url_source({"url": "https://github.com/owner/repo.git"}) == "owner/repo"
 
     def test_non_github_url(self):
+        # DependencyReference.parse() handles any valid Git host URL
+        assert _resolve_url_source({"url": "https://gitlab.com/owner/repo"}) == "owner/repo"
+
+    def test_url_host_is_not_preserved_in_output(self):
+        """Host from the URL is stripped -- only owner/repo is returned.
+
+        This is intentional: downstream RefResolver resolves owner/repo
+        against the configured GITHUB_HOST, not the URL's original host.
+        Cross-host resolution is tracked in #1010.
+        """
+        # Different hosts all resolve to the same owner/repo coordinate
+        urls = [
+            "https://github.com/acme/tools",
+            "https://gitlab.com/acme/tools",
+            "https://bitbucket.org/acme/tools",
+            "https://corp.ghe.com/acme/tools",
+        ]
+        for url in urls:
+            result = _resolve_url_source({"url": url})
+            assert result == "acme/tools", (
+                f"Expected 'acme/tools' for {url}, got '{result}'"
+            )
+
+    def test_ghes_url(self):
+        """GHES URLs are resolved via DependencyReference.parse()."""
+        assert _resolve_url_source({"url": "https://corp.ghe.com/org/repo"}) == "org/repo"
+
+    def test_ssh_url(self):
+        """SSH URLs are resolved via DependencyReference.parse()."""
+        assert _resolve_url_source({"url": "git@gitlab.com:org/repo.git"}) == "org/repo"
+
+    def test_url_with_ref_fragment(self):
+        """URL with #ref preserves the ref in owner/repo#ref format."""
+        assert _resolve_url_source({"url": "https://github.com/org/repo#v2.0"}) == "org/repo#v2.0"
+
+    def test_empty_url_rejected(self):
+        with pytest.raises(ValueError, match="non-empty"):
+            _resolve_url_source({"url": ""})
+
+    def test_local_path_rejected(self):
+        with pytest.raises(ValueError, match="local path"):
+            _resolve_url_source({"url": "./local/path"})
+
+    def test_invalid_url_rejected(self):
         with pytest.raises(ValueError, match="Cannot resolve URL source"):
-            _resolve_url_source({"url": "https://gitlab.com/owner/repo"})
+            _resolve_url_source({"url": ":::invalid:::"})
 
 
 class TestResolveGitSubdirSource:
