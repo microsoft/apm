@@ -1067,6 +1067,26 @@ jobs:
           apps_json=${AW_APM_APPS:-null}
           legacy_id=${AW_APM_LEGACY_APP_ID:-}
 
+          # gh-aw substitutes `["microsoft/apm#main"]` at
+          # compile time using Go's default slice formatter, which emits
+          # `[a b c]` (space-separated, no quotes) instead of valid JSON.
+          # That breaks `jq --argjson` below. Repair string-array inputs
+          # in place; leave already-valid JSON untouched. apps[] (objects)
+          # is not repairable this way -- consumers must use the legacy
+          # single-app inputs until upstream gh-aw exposes a JSON-encoding
+          # helper for import-inputs.
+          repair_string_array() {
+            local raw="$1"
+            if [ -z "$raw" ] || [ "$raw" = "null" ]; then
+              echo "$raw"; return
+            fi
+            if printf '%s' "$raw" | jq -e 'type=="array"' >/dev/null 2>&1; then
+              echo "$raw"; return
+            fi
+            python3 -c 'import json, re, sys; s=sys.argv[1].strip(); s=s[1:-1] if s.startswith("[") and s.endswith("]") else s; print(json.dumps([t for t in re.split(r"[\s,]+", s) if t]))' "$raw"
+          }
+          packages_json=$(repair_string_array "$packages_json")
+
           groups=$(jq -nc \
             --argjson packages "$packages_json" \
             --argjson apps "$apps_json" \
