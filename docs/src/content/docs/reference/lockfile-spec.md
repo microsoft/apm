@@ -72,7 +72,7 @@ generated_at: "2026-03-09T14:00:00Z"
 apm_version: "0.7.7"
 
 dependencies:
-  - repo_url: https://github.com/acme-corp/security-skills
+  - repo_url: https://git.example.invalid/acme/security-skills
     resolved_commit: a1b2c3d4e5f6789012345678901234567890abcd
     resolved_ref: v2.1.0
     version: "2.1.0"
@@ -83,11 +83,11 @@ dependencies:
       - .github/skills/acme/security-review
       - .github/skills/acme/threat-modeling
 
-  - repo_url: https://github.com/acme-corp/common-prompts
+  - repo_url: https://git.example.invalid/acme/common-prompts
     resolved_commit: f6e5d4c3b2a1098765432109876543210fedcba9
     resolved_ref: main
     depth: 2
-    resolved_by: https://github.com/acme-corp/security-skills
+    resolved_by: https://git.example.invalid/acme/security-skills
     package_type: apm_package
     deployed_files:
       - .github/instructions/common-guidelines.instructions.md
@@ -155,7 +155,7 @@ filesystem ordering). `.git/` and `__pycache__/` directories are excluded.
 
 ```yaml
 dependencies:
-  - repo_url: https://github.com/acme-corp/security-baseline
+  - repo_url: https://git.example.invalid/acme/security-baseline
     resolved_commit: a1b2c3d4e5f6789012345678901234567890abcd
     content_hash: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     # ...
@@ -350,7 +350,7 @@ generated_at: "2026-03-09T14:00:00Z"
 apm_version: "0.7.7"
 
 dependencies:
-  - repo_url: https://github.com/acme-corp/security-baseline
+  - repo_url: https://git.example.invalid/acme/security-baseline
     resolved_commit: a1b2c3d4e5f6789012345678901234567890abcd
     resolved_ref: v2.1.0
     version: "2.1.0"
@@ -362,11 +362,11 @@ dependencies:
       - .github/agents/security-auditor.agent.md
       - .github/agents/threat-model.agent.md
 
-  - repo_url: https://github.com/acme-corp/common-prompts
+  - repo_url: https://git.example.invalid/acme/common-prompts
     resolved_commit: f6e5d4c3b2a1098765432109876543210fedcba9
     resolved_ref: main
     depth: 2
-    resolved_by: https://github.com/acme-corp/security-baseline
+    resolved_by: https://git.example.invalid/acme/security-baseline
     package_type: apm_package
     content_hash: "sha256:d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592"
     deployed_files:
