@@ -328,14 +328,14 @@ Package authors can opt in to namespaced skill deployment with `namespace` in
 `apm.yml`:
 
 ```yaml
-name: example-tools
+name: acme-tools
 version: 1.0.0
-namespace: example
+namespace: acme
 type: skill
 ```
 
 With this manifest, APM deploys package-owned skills under
-`.github/skills/example/<skill-name>/` (and the equivalent skills directory for
+`.github/skills/acme/<skill-name>/` (and the equivalent skills directory for
 other targets). Packages without `namespace` keep the legacy flat layout.
 
 ## Best Practices
