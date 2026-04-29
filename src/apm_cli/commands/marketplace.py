@@ -365,55 +365,32 @@ def _check_gitignore_for_marketplace_json(logger):
 @click.option("--host", default=None, help="Git host FQDN (default: github.com)")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def add(repo, name, branch, host, verbose):
-    """Register a marketplace from OWNER/REPO or HOST/OWNER/REPO."""
+    """Register a marketplace from OWNER/REPO, HOST/OWNER/.../REPO, or a full HTTPS URL."""
     logger = CommandLogger("marketplace-add", verbose=verbose)
     try:
         from ..marketplace.client import _auto_detect_path, fetch_marketplace
         from ..marketplace.models import MarketplaceSource
         from ..marketplace.registry import add_marketplace
 
-        # Parse OWNER/REPO or HOST/OWNER/REPO
-        if "/" not in repo:
-            logger.error(
-                f"Invalid format: '{repo}'. Use 'OWNER/REPO' "
-                f"(e.g., 'acme-org/plugin-marketplace')"
-            )
-            sys.exit(1)
-
         from ..utils.github_host import default_host, is_valid_fqdn
+        from ..models.apm_package import DependencyReference
 
-        parts = repo.split("/")
-        if len(parts) == 3 and parts[0] and parts[1] and parts[2]:
-            if not is_valid_fqdn(parts[0]):
-                logger.error(
-                    f"Invalid host: '{parts[0]}'. "
-                    f"Use 'OWNER/REPO' or 'HOST/OWNER/REPO' format."
-                )
-                sys.exit(1)
-            if host and host != parts[0]:
-                logger.error(
-                    f"Conflicting host: --host '{host}' vs '{parts[0]}' in argument."
-                )
-                sys.exit(1)
-            host = parts[0]
-            owner, repo_name = parts[1], parts[2]
-        elif len(parts) == 2 and parts[0] and parts[1]:
-            owner, repo_name = parts[0], parts[1]
-        else:
-            logger.error(f"Invalid format: '{repo}'. Expected 'OWNER/REPO'")
+        try:
+            dep_ref = DependencyReference.parse(repo)
+            resolved_host = dep_ref.host or default_host()
+            canonical = dep_ref.to_canonical()
+            repo_name = canonical.split("/")[-1]
+            owner = canonical[: -len("/" + repo_name)]
+            logger.verbose_detail(f"Parsed repository reference: host='{resolved_host}', owner='{owner}', repo='{repo_name}'")
+            if not is_valid_fqdn(resolved_host):
+                raise ValueError(f"Host '{resolved_host}' is not a valid FQDN")
+        except ValueError as exc:
+            logger.error(f"Invalid repository reference: {exc}", symbol="error")
             sys.exit(1)
 
-        if host is not None:
-            normalized_host = host.strip().lower()
-            if not is_valid_fqdn(normalized_host):
-                logger.error(
-                    f"Invalid host: '{host}'. Expected a valid host FQDN "
-                    f"(for example, 'github.com')."
-                )
-                sys.exit(1)
-            resolved_host = normalized_host
-        else:
-            resolved_host = default_host()
+
+        # Validate name is identifier-compatible for NAME@MARKETPLACE syntax
+        import re
 
         # Hard-fail if the user-supplied --name flag is malformed; the
         # manifest's name is validated softly below (publisher mistakes
@@ -545,7 +522,7 @@ def list_cmd(verbose):
         if not sources:
             logger.progress(
                 "No marketplaces registered. "
-                "Use 'apm marketplace add OWNER/REPO' to register one.",
+                "Use 'apm marketplace add OWNER/REPO' (or a full HTTPS URL) to register one.",
                 symbol="info",
             )
             return

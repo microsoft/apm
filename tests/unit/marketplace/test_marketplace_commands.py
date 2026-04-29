@@ -233,6 +233,109 @@ class TestMarketplaceAdd:
         assert result.exit_code != 0
         assert "marketplace.json" in result.output
 
+    # ------------------------------------------------------------------
+    # GitLab subgroup / deep-path support
+    # ------------------------------------------------------------------
+
+    @patch("apm_cli.marketplace.client.fetch_marketplace")
+    @patch("apm_cli.marketplace.client._auto_detect_path")
+    def test_add_gitlab_subgroup_shorthand(self, mock_detect, mock_fetch, runner):
+        """HOST/group/subgroup/.../repo shorthand stores all intermediate segments in owner."""
+        from apm_cli.commands.marketplace import marketplace
+
+        mock_detect.return_value = "marketplace.json"
+        mock_fetch.return_value = MarketplaceManifest(
+            name="Test",
+            plugins=(MarketplacePlugin(name="p1"),),
+        )
+
+        result = runner.invoke(
+            marketplace,
+            ["add", "gitlab.com/mycompany/myorg/specs-and-standards/internal-marketplace",
+             "--name", "myorg-internal"],
+        )
+        assert result.exit_code == 0, result.output
+
+        probe_source = mock_detect.call_args[0][0]
+        assert probe_source.host == "gitlab.com"
+        assert probe_source.owner == "mycompany/myorg/specs-and-standards"
+        assert probe_source.repo == "internal-marketplace"
+
+    @patch("apm_cli.marketplace.client.fetch_marketplace")
+    @patch("apm_cli.marketplace.client._auto_detect_path")
+    def test_add_gitlab_https_url(self, mock_detect, mock_fetch, runner):
+        """Full https:// GitLab URL is parsed correctly."""
+        from apm_cli.commands.marketplace import marketplace
+
+        mock_detect.return_value = "marketplace.json"
+        mock_fetch.return_value = MarketplaceManifest(
+            name="Test",
+            plugins=(MarketplacePlugin(name="p1"),),
+        )
+
+        result = runner.invoke(
+            marketplace,
+            ["add",
+             "https://gitlab.com/mycompany/myorg/specs-and-standards/internal-marketplace",
+             "--name", "myorg-internal"],
+        )
+        assert result.exit_code == 0, result.output
+
+        probe_source = mock_detect.call_args[0][0]
+        assert probe_source.host == "gitlab.com"
+        assert probe_source.owner == "mycompany/myorg/specs-and-standards"
+        assert probe_source.repo == "internal-marketplace"
+
+    @patch("apm_cli.marketplace.client.fetch_marketplace")
+    @patch("apm_cli.marketplace.client._auto_detect_path")
+    def test_add_https_url_strips_dot_git(self, mock_detect, mock_fetch, runner):
+        """Trailing .git suffix in a URL is stripped."""
+        from apm_cli.commands.marketplace import marketplace
+
+        mock_detect.return_value = "marketplace.json"
+        mock_fetch.return_value = MarketplaceManifest(
+            name="Test",
+            plugins=(MarketplacePlugin(name="p1"),),
+        )
+
+        result = runner.invoke(
+            marketplace,
+            ["add", "https://gitlab.com/myorg/sub/my-marketplace.git",
+             "--name", "my-mkt"],
+        )
+        assert result.exit_code == 0, result.output
+
+        probe_source = mock_detect.call_args[0][0]
+        assert probe_source.repo == "my-marketplace"
+
+    def test_add_https_url_conflicting_host_flag(self, runner):
+        """--host that disagrees with the URL host is rejected."""
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(
+            marketplace,
+            ["add", "https://gitlab.com/myorg/repo", "--host", "github.com"],
+        )
+        assert result.exit_code != 0
+        assert "Conflicting host" in result.output
+
+    def test_add_https_url_too_short_path(self, runner):
+        """A URL with only one path segment (no OWNER/REPO) is rejected."""
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(marketplace, ["add", "https://gitlab.com/only-one"])
+        assert result.exit_code != 0
+
+    def test_add_traversal_in_subgroup_rejected(self, runner):
+        """Path traversal sequences inside a subgroup path are rejected."""
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(
+            marketplace,
+            ["add", "gitlab.com/myorg/../evil/repo", "--name", "evil"],
+        )
+        assert result.exit_code != 0
+
 
 class TestMarketplaceList:
     """marketplace list."""
