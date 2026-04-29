@@ -36,6 +36,7 @@ apm init [PROJECT_NAME] [OPTIONS]
 **Options:**
 - `-y, --yes` - Skip interactive prompts and use auto-detected defaults
 - `--plugin` - Initialize as a plugin authoring project (creates `plugin.json` + `apm.yml` with `devDependencies`)
+- `--marketplace` - Seed `apm.yml` with a `marketplace:` authoring block (requires `apm experimental enable marketplace-authoring`). See the [Authoring a marketplace guide](../../guides/marketplace-authoring/).
 
 **Examples:**
 ```bash
@@ -53,6 +54,9 @@ apm init my-project --yes
 
 # Initialize a plugin authoring project
 apm init my-plugin --plugin
+
+# Initialize a project that also publishes a marketplace
+apm init my-marketplace --marketplace
 ```
 
 **Behavior:**
@@ -1257,32 +1261,61 @@ apm marketplace validate acme-plugins
 apm marketplace validate acme-plugins --verbose
 ```
 
-#### `apm marketplace init` - Scaffold a marketplace.yml
+#### `apm marketplace init` - Add a marketplace block to apm.yml
 
-Create a richly-commented `marketplace.yml` in the current directory. The scaffold is valid against the schema and ready to be edited. See the [Authoring a marketplace guide](../../guides/marketplace-authoring/).
+Add a `marketplace:` block to the project's `apm.yml`. If `apm.yml` is absent, a minimal one is scaffolded first. The block is richly commented and ready to be edited. See the [Authoring a marketplace guide](../../guides/marketplace-authoring/).
 
 ```bash
 apm marketplace init [OPTIONS]
 ```
 
 **Options:**
-- `--force` - Overwrite an existing `marketplace.yml`
+- `--force` - Overwrite an existing `marketplace:` block in `apm.yml`
 - `--no-gitignore-check` - Skip the `.gitignore` staleness check
+- `--name TEXT` - Marketplace/package name (defaults to `my-marketplace` when scaffolding apm.yml)
+- `--owner TEXT` - Owner name for the marketplace block
 - `-v, --verbose` - Show detailed output
 
 **Exit codes:**
-- `0` - Scaffold written
-- `1` - File already exists (without `--force`) or write failure
+- `0` - Block written
+- `1` - Block already exists (without `--force`) or write failure
 
 **Examples:**
 ```bash
 apm marketplace init
-apm marketplace init --force
+apm marketplace init --force --owner acme-org
 ```
 
-#### `apm marketplace build` - Compile marketplace.yml
+`apm init --marketplace` is the equivalent shortcut at project-creation time: it seeds a fresh `apm.yml` with the `marketplace:` block already in place.
 
-Resolve all package version ranges against the source repositories and write an Anthropic-compliant `marketplace.json`. APM-only fields (`build:`, version ranges, tag patterns) are stripped; `metadata:` is passed through verbatim.
+#### `apm marketplace migrate` - Fold marketplace.yml into apm.yml
+
+One-shot conversion of a legacy standalone `marketplace.yml` into the `marketplace:` block of `apm.yml`. Inheritable fields (`name`, `description`, `version`) are dropped from the block when they match `apm.yml`'s top-level values, and emitted as overrides when they differ. The legacy `marketplace.yml` is deleted on success.
+
+```bash
+apm marketplace migrate [OPTIONS]
+```
+
+**Options:**
+- `--force`, `--yes`, `-y` - Overwrite an existing `marketplace:` block in `apm.yml` (the three flags are aliases)
+- `--dry-run` - Print the proposed change without writing
+- `-v, --verbose` - Show detailed output
+
+**Exit codes:**
+- `0` - Migration applied (or dry run complete)
+- `1` - Migration failed (legacy file missing, conflict without `--force`, write failure)
+
+**Examples:**
+```bash
+apm marketplace migrate --dry-run
+apm marketplace migrate --yes
+```
+
+#### `apm marketplace build` - Compile the marketplace block
+
+Resolve all package version ranges against the source repositories and write an Anthropic-compliant `.claude-plugin/marketplace.json`. APM-only fields (`build:`, version ranges, tag patterns) are stripped; `metadata:` is passed through verbatim. Inherited top-level fields and empty `tags:` are omitted from the output.
+
+Reads from `apm.yml`'s `marketplace:` block by default; falls back to a legacy `marketplace.yml` (with a deprecation warning) when no block is present. Errors out when both are present at once.
 
 ```bash
 apm marketplace build [OPTIONS]
@@ -1297,11 +1330,11 @@ apm marketplace build [OPTIONS]
 **Exit codes:**
 - `0` - Build succeeded (or dry run complete)
 - `1` - Build error (network failure, unresolvable ref, no matching tag)
-- `2` - Schema error in `marketplace.yml`
+- `2` - Schema error in the `marketplace:` block
 
 **Examples:**
 ```bash
-# Compile marketplace.yml -> marketplace.json
+# Compile to .claude-plugin/marketplace.json
 apm marketplace build
 
 # Preview without writing
@@ -1313,7 +1346,7 @@ apm marketplace build --offline
 
 #### `apm marketplace outdated` - Report available upgrades
 
-List packages in `marketplace.yml` whose source repositories have newer tags available. Range-aware: distinguishes "latest in range" (picked up by next `build`) from "latest overall" (requires a manual range bump).
+List packages in the `marketplace:` block whose source repositories have newer tags available. Range-aware: distinguishes "latest in range" (picked up by next `build`) from "latest overall" (requires a manual range bump). Local-path packages and `ref:`-pinned entries show `--` in the range columns.
 
 ```bash
 apm marketplace outdated [OPTIONS]
@@ -1327,7 +1360,7 @@ apm marketplace outdated [OPTIONS]
 **Exit codes:**
 - `0` - Report rendered (even if upgrades are available)
 - `1` - Unable to query refs
-- `2` - Schema error in `marketplace.yml`
+- `2` - Schema error in the `marketplace:` block
 
 **Examples:**
 ```bash
@@ -1335,9 +1368,9 @@ apm marketplace outdated
 apm marketplace outdated --include-prerelease
 ```
 
-#### `apm marketplace check` - Validate marketplace.yml entries
+#### `apm marketplace check` - Validate marketplace entries
 
-Validate the `marketplace.yml` schema and verify that every package entry is resolvable (ref exists, at least one tag satisfies the range). Intended for CI use before publishing.
+Validate the `marketplace:` schema and verify that every package entry is resolvable (ref exists, at least one tag satisfies the range). Intended for CI use before publishing.
 
 ```bash
 apm marketplace check [OPTIONS]
@@ -1350,7 +1383,7 @@ apm marketplace check [OPTIONS]
 **Exit codes:**
 - `0` - All entries OK
 - `1` - One or more entries are unreachable or unresolvable
-- `2` - Schema error in `marketplace.yml`
+- `2` - Schema error in the `marketplace:` block
 
 **Examples:**
 ```bash
@@ -1360,7 +1393,7 @@ apm marketplace check --offline
 
 #### `apm marketplace doctor` - Environment diagnostics
 
-Check git, network reachability, authentication, `gh` CLI availability, and the presence of `marketplace.yml`. Run this first when `build` or `publish` fails in an unfamiliar environment.
+Check git, network reachability, authentication, `gh` CLI availability, and the presence of a marketplace config (in `apm.yml` or legacy `marketplace.yml`). Run this first when `build` or `publish` fails in an unfamiliar environment.
 
 ```bash
 apm marketplace doctor [OPTIONS]
@@ -1418,7 +1451,7 @@ Run history and PR URLs are recorded in `.apm/publish-state.json` so re-runs can
 
 #### `apm marketplace package add` - Add a package entry
 
-Add a package entry to `marketplace.yml`.
+Add a package entry to the `marketplace.packages` list in `apm.yml`.
 
 ```bash
 apm marketplace package add SOURCE [OPTIONS]
@@ -1456,7 +1489,7 @@ apm marketplace package add acme/code-review --ref abc123...40chars \
 
 #### `apm marketplace package set` - Update a package entry
 
-Update fields on an existing package entry in `marketplace.yml`.
+Update fields on an existing package entry in the `marketplace.packages` list of `apm.yml`.
 
 ```bash
 apm marketplace package set NAME [OPTIONS]
@@ -1491,7 +1524,7 @@ apm marketplace package set code-review --description "Updated review skill"
 
 #### `apm marketplace package remove` - Remove a package entry
 
-Remove a package entry from `marketplace.yml`.
+Remove a package entry from the `marketplace.packages` list in `apm.yml`.
 
 ```bash
 apm marketplace package remove NAME [OPTIONS]

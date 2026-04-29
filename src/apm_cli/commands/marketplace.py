@@ -40,7 +40,6 @@ from ..marketplace.publisher import (
 from ..marketplace.ref_resolver import RefResolver, RemoteRef
 from ..marketplace.semver import SemVer, parse_semver, satisfies_range
 from ..marketplace.migration import (
-    DEPRECATION_MESSAGE,
     ConfigSource,
     detect_config_source,
     load_marketplace_config,
@@ -281,8 +280,22 @@ def init(force, no_gitignore_check, name, owner, verbose):
             logger.error(f"Failed to parse apm.yml: {exc}", symbol="error")
             sys.exit(1)
 
-        if isinstance(data, dict) and "marketplace" in data and \
-                data["marketplace"] is not None and not force:
+        # An empty apm.yml round-trips to None; treat it as an empty
+        # mapping so the marketplace block can still be inserted.
+        # A non-mapping top level (list, scalar) is a hard error.
+        if data is None:
+            from ruamel.yaml.comments import CommentedMap
+            data = CommentedMap()
+        elif not isinstance(data, dict):
+            logger.error(
+                "apm.yml must be a YAML mapping at the top level "
+                f"(got {type(data).__name__}).",
+                symbol="error",
+            )
+            sys.exit(1)
+
+        if "marketplace" in data and data["marketplace"] is not None \
+                and not force:
             logger.warning(
                 "apm.yml already has a 'marketplace:' block. Use --force to overwrite.",
                 symbol="warning",
@@ -355,8 +368,8 @@ def _check_gitignore_for_marketplace_json(logger):
         if stripped in patterns:
             logger.warning(
                 "Your .gitignore ignores marketplace.json. "
-                "Both marketplace.yml and marketplace.json must be tracked "
-                "in git. Remove the .gitignore rule.",
+                "Both apm.yml and the generated marketplace.json must be "
+                "tracked in git. Remove the .gitignore rule.",
                 symbol="warning",
             )
             return

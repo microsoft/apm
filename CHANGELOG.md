@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Added
 
+- **[Experimental] Marketplace authoring folded into `apm.yml`.** A new top-level `marketplace:` block carries `owner`, `build`, `packages` and optional `name`/`description`/`version` overrides (inherited from apm.yml top level when omitted). `apm marketplace init` now adds the block to `apm.yml` (scaffolding `apm.yml` if absent) instead of writing a standalone `marketplace.yml`. `apm marketplace build`, `check`, `outdated`, `doctor`, `publish`, and `package add|set|remove` all read the block. Validation evidence: `microsoft/azure-skills` -- a real-world repo with a hand-authored `.claude-plugin/marketplace.json` -- builds byte-for-byte identical output from its `apm.yml`. (#1038)
+- **[Experimental] `apm marketplace migrate`** -- one-shot consolidation of a legacy `marketplace.yml` into `apm.yml`'s `marketplace:` block. Accepts `--force`/`--yes`/`-y` as aliases and `--dry-run` for preview. Inheritable fields are dropped from the block when they match the apm.yml top level and emitted as overrides when they differ. (#1038)
+- **[Experimental] `apm init --marketplace`** -- seeds a fresh `apm.yml` with a `marketplace:` authoring block at project-creation time. Equivalent shortcut to `apm init` followed by `apm marketplace init`. (#1038)
+- **Local-path package sources for marketplace authoring.** `source: ./path/to/dir` is now first-class in the `marketplace.packages` list; previously rejected by the source regex. Local entries skip git resolution and are emitted to `marketplace.json` as plain string sources (matches Anthropic's local-source convention). (#1038)
 - Codex CLI MCP config is now project-local (`.codex/config.toml`) during project installs and gated to active project targets; Codex user-scope primitive deployment is also supported. (#803)
 - **Dev Container Feature** `ghcr.io/microsoft/apm/apm-cli` -- one-line install of the APM CLI into any `devcontainer.json`, GitHub Codespace, or JetBrains Gateway workspace. Supports a `version` option (`latest` or pinned semver), declares `installsAfter` for the official Python feature, handles PEP 668 on Ubuntu 24.04+. Ships with 37 bats unit tests and a 6-distro Docker integration matrix (Ubuntu 24.04, Ubuntu 22.04, Debian 12, Alpine 3.20, Fedora 41, plus Python-feature combo). (#861)
 - `shared/apm.md` gh-aw workflow gains an `apps:` array input for cross-org private packages: each entry mints its own GitHub App installation token via `actions/create-github-app-token` and packs only its declared packages, with a matrix fan-out one replica per credential group. The single-app top-level form (`app-id`, `private-key`, `owner`, `repositories`) shipped earlier in this cycle is preserved as the canonical shorthand for one-org users; `apps[]` is purely additive. Multi-bundle restore uses the `bundles-file:` input from `microsoft/apm-action@v1.5.0` (microsoft/apm-action#30, microsoft/apm-action#29).
@@ -16,9 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **[Experimental] Marketplace authoring surface consolidated to `apm.yml`.** The publisher-side `marketplace.yml` was folded into the consumer manifest under a new `marketplace:` block. Authoring commands no longer create or expect a standalone `marketplace.yml` -- they read and write the block in `apm.yml`. The compiled artefact moves to `.claude-plugin/marketplace.json` (Anthropic-canonical location). Empty `tags:` and inherited top-level `description`/`version` are now omitted from the generated `marketplace.json` to match the canonical hand-authored shape (e.g. microsoft/azure-skills). (#1038)
 - **Manifest contract: invalid `target:` values now raise a parse error.** Previously, an unknown token (or a CSV string like `target: opencode,claude,copilot,agents` instead of the YAML list `target: [opencode, claude, copilot, agents]`) was silently ignored, leaving `apm install` and `apm compile` to exit 0 while deploying nothing. The shared parser used by `--target` now also validates `apm.yml`'s `target:`, so the same input resolves the same way at every entry point. **Migration:** three previously-silent inputs now fail loud -- (1) unknown tokens (`target: bogus` -> fix the typo), (2) empty values (`target: ""`, `target: []` -> remove the line if you meant auto-detect), (3) `all` mixed with other targets (`target: [all, claude]` -> use `all` alone). Omitting `target:` entirely still triggers auto-detection. (#820)
 - Rename `DownloadStrategyManager` to `DownloadDelegate` to better reflect Facade/Delegate pattern (#918)
 - Fix incorrect double-checked locking in marketplace registry `_load()` -- hold lock across full check+read+set (#918)
+
+### Deprecated
+
+- **Standalone `marketplace.yml` for marketplace authoring.** Loading still works for one release with a one-line deprecation warning; both files present at once is a hard error pointing at `apm marketplace migrate`. Slated for removal in the next minor release. Migrate with `apm marketplace migrate --yes`. (#1038)
 
 ### Fixed
 

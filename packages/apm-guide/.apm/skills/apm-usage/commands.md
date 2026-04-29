@@ -4,7 +4,7 @@
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm init [NAME]` | Initialize a new APM project | `-y` skip prompts, `--plugin` authoring mode |
+| `apm init [NAME]` | Initialize a new APM project | `-y` skip prompts, `--plugin` plugin authoring mode, `--marketplace` seed apm.yml with a `marketplace:` block (experimental) |
 
 ## Dependency management
 
@@ -66,17 +66,24 @@
 
 ## Marketplace authoring (experimental)
 
+> **Authoring is gated** behind `apm experimental enable marketplace-authoring`. Consumer commands (add, list, browse, update, remove, validate, search) are always available.
+>
+> Source of truth is the `marketplace:` block in `apm.yml`. The legacy standalone `marketplace.yml` is deprecated and slated for removal next minor; use `apm marketplace migrate` to fold it in.
+
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm marketplace init` | Scaffold `marketplace.yml` in CWD | `--force`, `--no-gitignore-check` |
-| `apm marketplace build` | Compile `marketplace.yml` to Anthropic-compliant `marketplace.json` | `--dry-run`, `--offline`, `--include-prerelease`, `-v` |
+| `apm marketplace init` | Add a `marketplace:` block to `apm.yml` (scaffolds `apm.yml` if absent) | `--force`, `--no-gitignore-check`, `--name`, `--owner` |
+| `apm marketplace migrate` | Fold a legacy `marketplace.yml` into `apm.yml`'s `marketplace:` block; deletes `marketplace.yml` on success | `--force`/`--yes`/`-y`, `--dry-run`, `-v` |
+| `apm marketplace build` | Compile `marketplace:` to Anthropic-compliant `.claude-plugin/marketplace.json` | `--dry-run`, `--offline`, `--include-prerelease`, `-v` |
 | `apm marketplace outdated` | Report upgradable packages, range-aware | `--offline`, `--include-prerelease`, `-v` |
-| `apm marketplace check` | Validate yml and verify refs resolve | `--offline`, `-v` |
-| `apm marketplace doctor` | Diagnose git, network, auth, yml readiness | `-v` |
+| `apm marketplace check` | Validate the `marketplace:` block and verify refs resolve | `--offline`, `-v` |
+| `apm marketplace doctor` | Diagnose git, network, auth, and marketplace config readiness | `-v` |
 | `apm marketplace publish` | Open PRs on consumer repos from `consumer-targets.yml` | `--targets PATH`, `--dry-run`, `--no-pr`, `--draft`, `--allow-downgrade`, `--allow-ref-change`, `--parallel N`, `-y` |
-| `apm marketplace package add <source>` | Add a package entry to `marketplace.yml` | `--name`, `--version`, `--ref` (mutable refs auto-resolved to SHA), `-d`/`--description`, `-s`/`--subdir`, `--tag-pattern`, `--tags`, `--include-prerelease`, `--no-verify` |
+| `apm marketplace package add <source>` | Add a package entry to `marketplace.packages` (source accepts `owner/repo` or `./path`) | `--name`, `--version`, `--ref` (mutable refs auto-resolved to SHA), `-d`/`--description`, `-s`/`--subdir`, `--tag-pattern`, `--tags`, `--include-prerelease`, `--no-verify` |
 | `apm marketplace package set <name>` | Update fields on an existing package entry | `--version`, `--ref` (mutable refs auto-resolved to SHA), `--description`, `--subdir`, `--tag-pattern`, `--tags`, `--include-prerelease` |
-| `apm marketplace package remove <name>` | Remove a package entry from `marketplace.yml` | `--yes` |
+| `apm marketplace package remove <name>` | Remove a package entry from `marketplace.packages` | `--yes` |
+
+`apm init --marketplace` is the equivalent shortcut at project-creation time -- it seeds a fresh `apm.yml` with the `marketplace:` block already in place (also gated by the experimental flag).
 
 ## MCP servers
 

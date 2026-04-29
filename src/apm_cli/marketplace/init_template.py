@@ -1,7 +1,11 @@
-"""Template renderer for ``apm marketplace init``.
+"""Template renderers for marketplace authoring scaffolds.
 
-Produces a richly-commented ``marketplace.yml`` scaffold that is valid
-against :func:`~apm_cli.marketplace.yml_schema.load_marketplace_yml`.
+Two renderers ship in this module:
+
+* :func:`render_marketplace_yml_template` -- legacy ``marketplace.yml``
+  scaffold, retained for one release while the deprecation runs out.
+* :func:`render_marketplace_block` -- the apm.yml ``marketplace:`` block
+  used by ``apm marketplace init`` and ``apm init --marketplace``.
 """
 
 from __future__ import annotations
