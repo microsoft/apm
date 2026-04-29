@@ -11,7 +11,11 @@ import click
 from ...core.command_logger import CommandLogger
 from ...marketplace.errors import MarketplaceYmlError
 from ...marketplace.git_stderr import translate_git_stderr
-from ...marketplace.yml_schema import load_marketplace_yml
+from ...marketplace.migration import ConfigSource, detect_config_source
+from ...marketplace.yml_schema import (
+    load_marketplace_from_apm_yml,
+    load_marketplace_yml,
+)
 from . import (
     marketplace,
     _DoctorCheck,
@@ -24,7 +28,7 @@ from . import (
 @marketplace.command(help="Run environment diagnostics for marketplace builds")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def doctor(verbose):
-    """Check git, network, auth, and marketplace.yml readiness."""
+    """Check git, network, auth, and marketplace config readiness."""
     _require_authoring_flag()
     logger = CommandLogger("marketplace-doctor", verbose=verbose)
     checks = []
@@ -131,26 +135,43 @@ def doctor(verbose):
         informational=True,
     ))
 
-    # Check 5: marketplace.yml presence + parsability
-    yml_path = Path.cwd() / "marketplace.yml"
-    yml_found = yml_path.exists()
-    yml_detail = ""
-    yml_parsed = False
+    # Check 5: marketplace config presence + parsability
+    project_root = Path.cwd()
+    apm_path = project_root / "apm.yml"
+    legacy_path = project_root / "marketplace.yml"
     yml_obj = None
-    if yml_found:
-        try:
-            yml_obj = load_marketplace_yml(yml_path)
-            yml_parsed = True
-            yml_detail = "marketplace.yml found and valid"
-        except MarketplaceYmlError as exc:
-            yml_detail = f"marketplace.yml has errors: {str(exc)[:60]}"
-    else:
-        yml_detail = "No marketplace.yml in current directory"
+    config_passed = True
+    config_detail = ""
+
+    try:
+        source = detect_config_source(project_root)
+        if source == ConfigSource.APM_YML:
+            try:
+                yml_obj = load_marketplace_from_apm_yml(apm_path)
+                config_detail = "apm.yml 'marketplace:' block found and valid"
+            except MarketplaceYmlError as exc:
+                config_passed = False
+                config_detail = f"apm.yml marketplace block has errors: {str(exc)[:60]}"
+        elif source == ConfigSource.LEGACY_YML:
+            try:
+                yml_obj = load_marketplace_yml(legacy_path)
+                config_detail = (
+                    "marketplace.yml found (legacy). Run 'apm marketplace "
+                    "migrate' to fold it into apm.yml."
+                )
+            except MarketplaceYmlError as exc:
+                config_passed = False
+                config_detail = f"marketplace.yml has errors: {str(exc)[:60]}"
+        else:
+            config_detail = "No marketplace authoring config in current directory"
+    except MarketplaceYmlError as exc:
+        config_passed = False
+        config_detail = str(exc)[:120]
 
     checks.append(_DoctorCheck(
-        name="marketplace.yml",
-        passed=yml_parsed if yml_found else True,  # informational if absent
-        detail=yml_detail,
+        name="marketplace config",
+        passed=config_passed,
+        detail=config_detail,
         informational=True,
     ))
 
@@ -174,7 +195,7 @@ def doctor(verbose):
 
     _render_doctor_table(logger, checks)
 
-    # Exit: 0 if checks 1-2 pass; checks 3-6 are informational
+    # Exit: 0 if checks 1-2 pass; config checks are informational
     critical_checks = [c for c in checks if not c.informational]
     if any(not c.passed for c in critical_checks):
         sys.exit(1)

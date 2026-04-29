@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import click
+import yaml
 
 from ....core.command_logger import CommandLogger
 from ....marketplace.errors import (
@@ -20,20 +21,55 @@ _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 def _yml_path() -> Path:
-    """Return the canonical ``marketplace.yml`` path in CWD."""
-    return Path.cwd() / "marketplace.yml"
+    """Return the active marketplace authoring config path in CWD."""
+    cwd = Path.cwd()
+    apm_path = cwd / "apm.yml"
+    legacy_path = cwd / "marketplace.yml"
+
+    if _has_marketplace_block(apm_path):
+        return apm_path
+    if legacy_path.exists():
+        return legacy_path
+    return apm_path
 
 def _ensure_yml_exists(logger: CommandLogger) -> Path:
     """Return the yml path or exit with guidance if it does not exist."""
-    path = _yml_path()
-    if not path.exists():
+    cwd = Path.cwd()
+    apm_path = cwd / "apm.yml"
+    legacy_path = cwd / "marketplace.yml"
+
+    if _has_marketplace_block(apm_path) and legacy_path.exists():
         logger.error(
-            "No marketplace.yml found. "
+            "Both apm.yml (with a 'marketplace:' block) and "
+            "marketplace.yml exist. Remove marketplace.yml or run "
+            "'apm marketplace migrate --force' to consolidate.",
+            symbol="error",
+        )
+        sys.exit(1)
+
+    path = _yml_path()
+    if not path.exists() or (path == apm_path and not _has_marketplace_block(path)):
+        logger.error(
+            "No marketplace authoring config found. "
             "Run 'apm marketplace init' to scaffold one.",
             symbol="error",
         )
         sys.exit(1)
     return path
+
+def _has_marketplace_block(apm_path: Path) -> bool:
+    """Return True when *apm_path* has a populated ``marketplace:`` block."""
+    if not apm_path.exists():
+        return False
+    try:
+        data = yaml.safe_load(apm_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return False
+    return (
+        isinstance(data, dict)
+        and "marketplace" in data
+        and data["marketplace"] is not None
+    )
 
 def _parse_tags(raw: str | None) -> list[str] | None:
     """Split a comma-separated tag string into a list, or return None."""
@@ -149,9 +185,9 @@ def _resolve_ref(
     # Not a branch - tag or unknown ref; store as-is.
     return ref
 
-@click.group(help="Manage packages in marketplace.yml (add, set, remove)")
+@click.group(help="Manage packages in marketplace authoring config")
 def package():
-    """Add, update, or remove packages in marketplace.yml."""
+    """Add, update, or remove packages in marketplace authoring config."""
     from .. import _require_authoring_flag
 
     _require_authoring_flag()
@@ -170,6 +206,7 @@ __all__ = [
     "_SHA_RE",
     "_yml_path",
     "_ensure_yml_exists",
+    "_has_marketplace_block",
     "_parse_tags",
     "_verify_source",
     "_resolve_ref",

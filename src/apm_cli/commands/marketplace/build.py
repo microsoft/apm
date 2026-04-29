@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import sys
 import traceback
-from pathlib import Path
 
 import click
 
@@ -13,14 +11,14 @@ from ...marketplace.builder import BuildOptions, MarketplaceBuilder
 from ...marketplace.errors import BuildError, MarketplaceYmlError
 from . import (
     marketplace,
-    _load_yml_or_exit,
+    _load_config_or_exit,
     _render_build_error,
     _render_build_table,
     _require_authoring_flag,
 )
 
 
-@marketplace.command(help="Build marketplace.json from marketplace.yml")
+@marketplace.command(help="Build marketplace.json from apm.yml or marketplace.yml")
 @click.option("--dry-run", is_flag=True, help="Preview without writing marketplace.json")
 @click.option("--offline", is_flag=True, help="Use cached refs only (no network)")
 @click.option(
@@ -31,10 +29,8 @@ def build(dry_run, offline, include_prerelease, verbose):
     """Resolve packages and compile marketplace.json."""
     _require_authoring_flag()
     logger = CommandLogger("marketplace-build", verbose=verbose)
-    yml_path = Path.cwd() / "marketplace.yml"
-
-    # Load yml (exit 1 on missing, exit 2 on schema error)
-    _load_yml_or_exit(logger)
+    project_root, config = _load_config_or_exit(logger)
+    config_path = config.source_path or project_root / "apm.yml"
 
     try:
         opts = BuildOptions(
@@ -42,7 +38,7 @@ def build(dry_run, offline, include_prerelease, verbose):
             offline=offline,
             include_prerelease=include_prerelease,
         )
-        builder = MarketplaceBuilder(yml_path, options=opts)
+        builder = MarketplaceBuilder(config_path, options=opts)
         report = builder.build()
     except MarketplaceYmlError as exc:
         logger.error(f"marketplace.yml schema error: {exc}", symbol="error")

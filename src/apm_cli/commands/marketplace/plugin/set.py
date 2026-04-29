@@ -17,7 +17,7 @@ from . import (
     _SHA_RE,
 )
 
-@package.command("set", help="Update a package entry in marketplace.yml")
+@package.command("set", help="Update a package entry in marketplace authoring config")
 @click.argument("name")
 @click.option("--version", default=None, help="Semver range (e.g. '>=1.0.0')")
 @click.option(
@@ -60,9 +60,15 @@ def set_cmd(
 
     # Resolve mutable refs to concrete SHAs.
     if ref is not None and not _SHA_RE.match(ref):
-        from ....marketplace.yml_schema import load_marketplace_yml
+        from ....marketplace.yml_schema import (
+            load_marketplace_from_apm_yml,
+            load_marketplace_yml,
+        )
 
-        yml_data = load_marketplace_yml(yml)
+        if yml.name == "apm.yml":
+            yml_data = load_marketplace_from_apm_yml(yml)
+        else:
+            yml_data = load_marketplace_yml(yml)
         source = None
         for pkg in yml_data.packages:
             if pkg.name.lower() == name.lower():

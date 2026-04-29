@@ -17,7 +17,7 @@ from . import (
     _verify_source,
 )
 
-@package.command(help="Add a package to marketplace.yml")
+@package.command(help="Add a package to marketplace authoring config")
 @click.argument("source")
 @click.option("--name", default=None, help="Package name (default: repo name)")
 @click.option("--version", default=None, help="Semver range (e.g. '>=1.0.0')")
@@ -46,7 +46,7 @@ def add(
     no_verify,
     verbose,
 ):
-    """Add a package entry to marketplace.yml."""
+    """Add a package entry to marketplace authoring config."""
     from ....marketplace.yml_editor import add_plugin_entry
 
     logger = CommandLogger("marketplace-package-add", verbose=verbose)

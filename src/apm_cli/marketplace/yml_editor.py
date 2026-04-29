@@ -23,7 +23,12 @@ from ruamel.yaml import YAML
 from ..utils.path_security import PathTraversalError, validate_path_segments
 from ._io import atomic_write
 from .errors import MarketplaceYmlError
-from .yml_schema import SOURCE_RE, load_marketplace_yml
+from .yml_schema import (
+    LOCAL_SOURCE_RE,
+    SOURCE_RE,
+    load_marketplace_from_apm_yml,
+    load_marketplace_yml,
+)
 
 __all__ = [
     "add_plugin_entry",
@@ -60,6 +65,39 @@ def _dump_rt(data) -> str:
     return stream.getvalue()
 
 
+def _is_apm_yml_with_marketplace(data) -> bool:
+    """Detect an apm.yml file that hosts a ``marketplace:`` block.
+
+    The legacy ``marketplace.yml`` shape has marketplace fields (``owner``,
+    ``packages``) at the root; the apm.yml shape nests them under
+    ``marketplace:``.  We pick whichever shape the file actually has.
+    """
+    if not isinstance(data, dict):
+        return False
+    if "marketplace" not in data or data["marketplace"] is None:
+        return False
+    return True
+
+
+def _get_marketplace_container(data):
+    """Return the dict-like container holding marketplace fields.
+
+    For apm.yml: ``data["marketplace"]``.
+    For legacy marketplace.yml: ``data`` itself.
+    """
+    if _is_apm_yml_with_marketplace(data):
+        return data["marketplace"]
+    return data
+
+
+def _validate_after_write(yml_path: Path, data) -> None:
+    """Re-validate *yml_path* using the loader matching its shape."""
+    if _is_apm_yml_with_marketplace(data):
+        load_marketplace_from_apm_yml(yml_path)
+    else:
+        load_marketplace_yml(yml_path)
+
+
 def _write_and_validate(yml_path: Path, data, original_text: str) -> None:
     """Atomically write *data* and re-validate.
 
@@ -69,7 +107,7 @@ def _write_and_validate(yml_path: Path, data, original_text: str) -> None:
     new_text = _dump_rt(data)
     atomic_write(yml_path, new_text)
     try:
-        load_marketplace_yml(yml_path)
+        _validate_after_write(yml_path, data)
     except MarketplaceYmlError:
         # Restore original content before propagating.
         atomic_write(yml_path, original_text)
@@ -87,18 +125,18 @@ def _find_entry_index(packages, name: str) -> int:
         if isinstance(entry_name, str) and entry_name.lower() == lower:
             return idx
     raise MarketplaceYmlError(
-        f"Package '{name}' not found in marketplace.yml"
+        f"Package '{name}' not found"
     )
 
 
 def _validate_source(source: str) -> None:
-    """Validate that *source* has ``owner/repo`` shape."""
+    """Validate that *source* has ``owner/repo`` shape or ``./...`` local path."""
     if not SOURCE_RE.match(source):
         raise MarketplaceYmlError(
-            f"'source' must match '<owner>/<repo>' shape, got '{source}'"
+            f"'source' must match '<owner>/<repo>' or './<path>' shape, got '{source}'"
         )
     try:
-        validate_path_segments(source, context="source")
+        validate_path_segments(source, context="source", allow_current_dir=True)
     except PathTraversalError as exc:
         raise MarketplaceYmlError(str(exc)) from exc
 
@@ -153,12 +191,13 @@ def add_plugin_entry(
 
     # --- load ---
     data, original_text = _load_rt(yml_path)
-    packages = data.get("packages")
+    container = _get_marketplace_container(data)
+    packages = container.get("packages")
     if packages is None:
         from ruamel.yaml.comments import CommentedSeq
 
         packages = CommentedSeq()
-        data["packages"] = packages
+        container["packages"] = packages
 
     # Duplicate check (case-insensitive).
     lower = name.lower()
@@ -166,7 +205,7 @@ def add_plugin_entry(
         entry_name = entry.get("name", "")
         if isinstance(entry_name, str) and entry_name.lower() == lower:
             raise MarketplaceYmlError(
-                f"Package '{name}' already exists in marketplace.yml"
+                f"Package '{name}' already exists"
             )
 
     # --- build entry mapping ---
@@ -202,10 +241,11 @@ def update_plugin_entry(yml_path: Path, name: str, **fields) -> None:
     Only fields that are explicitly provided (not ``None``) are updated.
     """
     data, original_text = _load_rt(yml_path)
-    packages = data.get("packages")
+    container = _get_marketplace_container(data)
+    packages = container.get("packages")
     if packages is None:
         raise MarketplaceYmlError(
-            f"Package '{name}' not found in marketplace.yml"
+            f"Package '{name}' not found"
         )
 
     idx = _find_entry_index(packages, name)
@@ -255,10 +295,11 @@ def update_plugin_entry(yml_path: Path, name: str, **fields) -> None:
 def remove_plugin_entry(yml_path: Path, name: str) -> None:
     """Remove a ``packages[]`` entry by name (case-insensitive match)."""
     data, original_text = _load_rt(yml_path)
-    packages = data.get("packages")
+    container = _get_marketplace_container(data)
+    packages = container.get("packages")
     if packages is None:
         raise MarketplaceYmlError(
-            f"Package '{name}' not found in marketplace.yml"
+            f"Package '{name}' not found"
         )
 
     idx = _find_entry_index(packages, name)

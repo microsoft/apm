@@ -1,0 +1,257 @@
+_header:
+  preamble: |
+    This file is generated and maintained per the Microsoft CELA "Manual NOTICE
+    Generation" process. It enumerates third-party open-source components that ship
+    with this project (the runtime dependencies of the `apm` Python package). Build-
+    time and contributor-only tooling (test runners, linters, type-checkers, the
+    PyInstaller build backend, and the `setuptools` / `wheel` build system) are not
+    distributed and are intentionally omitted, as is install-time user state created
+    by the CLI under `apm_modules/`. No third-party source is vendored into this
+    repository.
+
+    The `apm` source code itself is licensed under the MIT License; see `LICENSE`.
+components:
+  - name: click
+    pyproject_name: click
+    upstream: https://github.com/pallets/click
+    spdx: BSD-3-Clause
+    copyright_snippet: Copyright 2014 Pallets
+  - name: colorama
+    pyproject_name: colorama
+    upstream: https://github.com/tartley/colorama
+    spdx: BSD-3-Clause
+    copyright_snippet: Copyright (c) 2010 Jonathan Hartley
+  - name: PyYAML
+    pyproject_name: pyyaml
+    upstream: https://github.com/yaml/pyyaml
+    spdx: MIT
+    copyright_snippet: Copyright (c) 2017-2021 Ingy doet Net
+    version_requirement: '>=6.0.0 (declared as `pyyaml`)'
+  - name: requests
+    pyproject_name: requests
+    upstream: https://github.com/psf/requests
+    spdx: Apache-2.0
+    copyright_snippet: Copyright 2019 Kenneth Reitz (per upstream NOTICE file)
+    notes: Apache-2.0 requires forwarding the upstream NOTICE file verbatim.
+    additional_attribution:
+      source: upstream NOTICE file
+      text: |
+        Requests
+        Copyright 2019 Kenneth Reitz
+  - name: python-frontmatter
+    pyproject_name: python-frontmatter
+    upstream: https://github.com/eyeseast/python-frontmatter
+    spdx: MIT
+    copyright_snippet: Copyright (c) 2021 Chris Amico
+  - name: llm
+    pyproject_name: llm
+    upstream: https://github.com/simonw/llm
+    spdx: Apache-2.0
+    copyright_snippet: Copyright Simon Willison (per PyPI author metadata; LICENSE file is the unmodified Apache 2.0 boilerplate with no embedded copyright statement)
+    notes: No NOTICE or AUTHORS file present upstream; nothing additional to forward.
+  - name: llm-github-models
+    pyproject_name: llm-github-models
+    upstream: https://github.com/tonybaloney/llm-github-models
+    spdx: Apache-2.0
+    copyright_snippet: 'Copyright (c) 2025 Anthony Shaw (LICENSE header) -- note: file contents are MIT-style header followed by Apache-2.0 reference; see Open Issues'
+    notes: Upstream LICENSE file declares MIT license text but PyPI metadata + classifiers say Apache-2.0. See Open Issues.
+  - name: tomli
+    pyproject_name: tomli
+    upstream: https://github.com/hukkin/tomli
+    spdx: MIT
+    copyright_snippet: Copyright (c) 2021 Taneli Hukkinen
+    notes: 'Conditional dependency: only installed on Python < 3.11. Still ships in the sdist/wheel install graph.'
+    license_text: |
+      MIT License
+
+      Copyright (c) 2021 Taneli Hukkinen
+
+      Permission is hereby granted, free of charge, to any person obtaining a copy
+      of this software and associated documentation files (the "Software"), to deal
+      in the Software without restriction, including without limitation the rights
+      to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+      copies of the Software, and to permit persons to whom the Software is
+      furnished to do so, subject to the following conditions:
+
+      The above copyright notice and this permission notice shall be included in all
+      copies or substantial portions of the Software.
+
+      THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+      IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+      FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+      AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+      LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+      OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+      SOFTWARE.
+  - name: toml
+    pyproject_name: toml
+    upstream: https://github.com/uiri/toml
+    spdx: MIT
+    copyright_snippet: Copyright 2013-2019 William Pearson
+  - name: rich
+    pyproject_name: rich
+    upstream: https://github.com/Textualize/rich
+    spdx: MIT
+    copyright_snippet: Copyright (c) 2020 Will McGugan
+  - name: rich-click
+    pyproject_name: rich-click
+    upstream: https://github.com/ewels/rich-click
+    spdx: MIT
+    copyright_snippet: Copyright (c) 2022 Phil Ewels
+  - name: watchdog
+    pyproject_name: watchdog
+    upstream: https://github.com/gorakhargosh/watchdog
+    spdx: Apache-2.0
+    copyright_snippet: Copyright Yesudeep Mangalapilly, Mickael Schoentgen, and watchdog contributors (per upstream AUTHORS file; LICENSE file is the unmodified Apache 2.0 boilerplate)
+    notes: No NOTICE file upstream; AUTHORS reproduced for attribution.
+    additional_attribution:
+      source: upstream AUTHORS file
+      text: |
+        Original Project Lead:
+        ----------------------
+        Yesudeep Mangalapilly <yesudeep@google.com>
+
+        Current Project Lead:
+        ---------------------
+        Mickaël Schoentgen <contact@tiger-222.fr>
+
+        Contributors in alphabetical order:
+        -----------------------------------
+        Adrian Tejn Kern <tejnkern@gmail.com>
+        Andrew Schaaf <andrew@andrewschaaf.com>
+        Danilo de Jesus da Silva Bellini <danilo.bellini@gmail.com>
+        David LaPalomento <dlapalomento@gmail.com>
+        dvogel <dvogel@wlscapi.uwsc.wisc.edu>
+        Filip Noetzel <filip@j03.de>
+        Gary van der Merwe <garyvdm@garyvdm.localdomain>
+        gfxmonk <tim3d.junk@gmail.com>
+        Gora Khargosh <gora.khargosh@gmail.com>
+        Hannu Valtonen <hannu.valtonen@ohmu.fi>
+        Jesse Printz <jesse@jonypawks.net>
+        Kurt McKee <contactme@kurtmckee.org>
+        Léa Klein <lklein@nuxeo.com>
+        Luke McCarthy <luke@iogopro.co.uk>
+        Lukáš Lalinský <lalinsky@gmail.com>
+        Malthe Borch <mborch@gmail.com>
+        Martin Kreichgauer <kreichgauer@gmail.com>
+        Martin Kreichgauer <martin@kreichgauer.com>
+        Mike Lundy <mike@fluffypenguin.org>
+        Nicholas Hairs <info+watchdog@nicholashairs.com>
+        Raymond Hettinger <python@rcn.com>
+        Roman Ovchinnikov <coolthecold@gmail.com>
+        Rotem Yaari <vmalloc@gmail.com>
+        Ryan Kelly <ryan@rfk.id.au>
+        Senko Rasic <senko.rasic@dobarkod.hr>
+        Senko Rašić <senko@senko.net>
+        Shane Hathaway <shane@hathawaymix.org>
+        Simon Pantzare <simon@pewpewlabs.com>
+        Simon Pantzare <simpa395@student.liu.se>
+        Steven Samuel Cole <steven.samuel.cole@gmail.com>
+        Stéphane Klein <stephane@harobed.org>
+        Thomas Guest <tag@wordaligned.org>
+        Thomas Heller <theller@ctypes.org>
+        Tim Cuthbertson <tim+github@gfxmonk.net>
+        Todd Whiteman <toddw@activestate.com>
+        Will McGugan <will@willmcgugan.com>
+        Yesudeep Mangalapilly <gora.khargosh@gmail.com>
+        Yesudeep Mangalapilly <yesudeep@google.com>
+
+        We would like to thank these individuals for ideas:
+        ---------------------------------------------------
+        Tim Golden               <mail@timgolden.me.uk>
+        Sebastien Martini        <seb@dbzteam.org>
+
+        Initially we used the flask theme for the documentation which was written by
+        ----------------------------------------------------------------------------
+        Armin Ronacher           <armin.ronacher@active-4.com>
+
+
+        Watchdog also includes open source libraries or adapted code
+        from the following projects:
+
+        - MacFSEvents - https://github.com/malthe/macfsevents
+        - watch_directory.py - http://timgolden.me.uk/python/downloads/watch_directory.py
+        - pyinotify - https://github.com/seb-m/pyinotify
+        - fsmonitor - https://github.com/shaurz/fsmonitor
+        - echo - http://wordaligned.org/articles/echo
+        - Lukáš Lalinský's ordered set queue implementation:
+          https://stackoverflow.com/questions/1581895/how-check-if-a-task-is-already-in-python-queue
+        - Armin Ronacher's flask-sphinx-themes for the documentation:
+          https://github.com/mitsuhiko/flask-sphinx-themes
+        - pyfilesystem - https://github.com/PyFilesystem/pyfilesystem
+        - get_FILE_NOTIFY_INFORMATION - http://blog.gmane.org/gmane.comp.python.ctypes/month=20070901
+  - name: GitPython
+    pyproject_name: gitpython
+    upstream: https://github.com/gitpython-developers/GitPython
+    spdx: BSD-3-Clause
+    copyright_snippet: Copyright (C) 2008, 2009 Michael Trier and contributors
+    additional_attribution:
+      source: upstream AUTHORS file
+      text: |
+        GitPython was originally written by Michael Trier.
+        GitPython 0.2 was partially (re)written by Sebastian Thiel, based on 0.1.6 and git-dulwich.
+
+        Contributors are:
+
+        -Michael Trier <mtrier _at_ gmail.com>
+        -Alan Briolat
+        -Florian Apolloner <florian _at_ apolloner.eu>
+        -David Aguilar <davvid _at_ gmail.com>
+        -Jelmer Vernooij <jelmer _at_ samba.org>
+        -Steve Frécinaux <code _at_ istique.net>
+        -Kai Lautaportti <kai _at_ lautaportti.fi>
+        -Paul Sowden <paul _at_ idontsmoke.co.uk>
+        -Sebastian Thiel <byronimo _at_ gmail.com>
+        -Jonathan Chu <jonathan.chu _at_ me.com>
+        -Vincent Driessen <me _at_ nvie.com>
+        -Phil Elson <pelson _dot_ pub _at_ gmail.com>
+        -Bernard `Guyzmo` Pratz <guyzmo+gitpython+pub@m0g.net>
+        -Timothy B. Hartman <tbhartman _at_ gmail.com>
+        -Konstantin Popov <konstantin.popov.89 _at_ yandex.ru>
+        -Peter Jones <pjones _at_ redhat.com>
+        -Anson Mansfield <anson.mansfield _at_ gmail.com>
+        -Ken Odegard <ken.odegard _at_ gmail.com>
+        -Alexis Horgix Chotard
+        -Piotr Babij <piotr.babij _at_ gmail.com>
+        -Mikuláš Poul <mikulaspoul _at_ gmail.com>
+        -Charles Bouchard-Légaré <cblegare.atl _at_ ntis.ca>
+        -Yaroslav Halchenko <debian _at_ onerussian.com>
+        -Tim Swast <swast _at_ google.com>
+        -William Luc Ritchie
+        -David Host <hostdm _at_ outlook.com>
+        -A. Jesse Jiryu Davis <jesse _at_ emptysquare.net>
+        -Steven Whitman <ninloot _at_ gmail.com>
+        -Stefan Stancu <stefan.stancu _at_ gmail.com>
+        -César Izurieta <cesar _at_ caih.org>
+        -Arthur Milchior <arthur _at_ milchior.fr>
+        -Anil Khatri <anil.soccer.khatri _at_ gmail.com>
+        -JJ Graham <thetwoj _at_ gmail.com>
+        -Ben Thayer <ben _at_ benthayer.com>
+        -Dries Kennes <admin _at_ dries007.net>
+        -Pratik Anurag <panurag247365 _at_ gmail.com>
+        -Harmon <harmon.public _at_ gmail.com>
+        -Liam Beguin <liambeguin _at_ gmail.com>
+        -Ram Rachum <ram _at_ rachum.com>
+        -Alba Mendez <me _at_ alba.sh>
+        -Robert Westman <robert _at_ byteflux.io>
+        -Hugo van Kemenade
+        -Hiroki Tokunaga <tokusan441 _at_ gmail.com>
+        -Julien Mauroy <pro.julien.mauroy _at_ gmail.com>
+        -Patrick Gerard
+        -Luke Twist <itsluketwist@gmail.com>
+        -Joseph Hale <me _at_ jhale.dev>
+        -Santos Gallegos <stsewd _at_ proton.me>
+        -Wenhan Zhu <wzhu.cosmos _at_ gmail.com>
+        -Eliah Kagan <eliah.kagan _at_ gmail.com>
+        -Ethan Lin <et.repositories _at_ gmail.com>
+        -Jonas Scharpf <jonas.scharpf _at_ checkmk.com>
+        -Gordon Marx
+        -Enji Cooper
+
+        Portions derived from other open source works and are clearly marked.
+  - name: ruamel.yaml
+    pyproject_name: ruamel.yaml
+    upstream: 'https://sourceforge.net/p/ruamel-yaml/code/ (mirror: https://pypi.org/project/ruamel.yaml/)'
+    spdx: MIT
+    copyright_snippet: Copyright (c) 2014-2026 Anthon van der Neut, Ruamel bvba
+    notes: Canonical source is SourceForge (Mercurial). LICENSE retrieved from the official PyPI sdist tarball ruamel_yaml-0.19.1.tar.gz.

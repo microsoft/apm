@@ -15,7 +15,7 @@ from . import (
     _is_interactive,
 )
 
-@package.command(help="Remove a package from marketplace.yml")
+@package.command(help="Remove a package from marketplace authoring config")
 @click.argument("name")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
@@ -36,7 +36,7 @@ def remove(name, yes, verbose):
             sys.exit(1)
         try:
             click.confirm(
-                f"Remove package '{name}' from marketplace.yml?",
+                f"Remove package '{name}' from marketplace authoring config?",
                 abort=True,
             )
         except click.Abort:

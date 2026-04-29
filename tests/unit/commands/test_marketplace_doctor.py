@@ -390,7 +390,7 @@ class TestDoctorYmlCheck:
 
         result = runner.invoke(marketplace, ["doctor"])
         assert result.exit_code == 0
-        assert "No marketplace.yml" in result.output
+        assert "No marketplace authoring config" in result.output
 
 
 # ---------------------------------------------------------------------------

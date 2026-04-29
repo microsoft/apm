@@ -245,6 +245,21 @@ Use type hints in Python code.
         assert result.success is False
         assert any("Unknown compilation target" in e for e in result.errors)
 
+    def test_unknown_frozenset_target_family_returns_failure(self, temp_project, sample_primitives):
+        """Unknown multi-target family must fail explicitly instead of silently no-oping."""
+        config = CompilationConfig(
+            target=frozenset({"agents", "not-a-real-family"}),
+            dry_run=True,
+            single_agents=True,
+        )
+
+        compiler = AgentsCompiler(str(temp_project))
+        result = compiler.compile(config, sample_primitives)
+
+        assert result.success is False
+        assert any("Unknown compilation target family" in e for e in result.errors)
+        assert any("not-a-real-family" in e for e in result.errors)
+
 
 class TestMergeResults:
     """Tests for _merge_results() method."""
@@ -761,17 +776,17 @@ Use type hints.
         yield temp_path
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def test_all_target_creates_both_files(self, temp_project):
-        """Test that --target all creates both AGENTS.md and CLAUDE.md."""
+    def test_all_target_creates_all_files(self, temp_project):
+        """Test that --target all creates AGENTS.md, CLAUDE.md, and GEMINI.md."""
         config = CompilationConfig(
             target="all",
             dry_run=False,
             single_agents=True  # Use single-file for simpler verification
         )
-        
+
         compiler = AgentsCompiler(str(temp_project))
         primitives = PrimitiveCollection()
-        
+
         instruction = Instruction(
             name="test",
             file_path=temp_project / ".apm/instructions/test.instructions.md",
@@ -782,18 +797,20 @@ Use type hints.
             source="local"
         )
         primitives.add_primitive(instruction)
-        
+
         result = compiler.compile(config, primitives)
-        
+
         # Should succeed
         assert result.success
-        
-        # Both files should be created
+
+        # All three files should be created
         agents_md = temp_project / "AGENTS.md"
         claude_md = temp_project / "CLAUDE.md"
-        
+        gemini_md = temp_project / "GEMINI.md"
+
         assert agents_md.exists(), "AGENTS.md should be created for target='all'"
         assert claude_md.exists(), "CLAUDE.md should be created for target='all'"
+        assert gemini_md.exists(), "GEMINI.md should be created for target='all'"
 
     def test_all_target_result_references_both(self, temp_project):
         """Test that --target all result references both outputs."""
@@ -1048,11 +1065,11 @@ class TestResolveCompileTarget:
         assert _resolve_compile_target("all") == "all"
         assert _resolve_compile_target("copilot") == "copilot"
 
-    def test_list_claude_and_copilot_returns_all(self):
+    def test_list_claude_and_copilot_returns_agents_claude_set(self):
         from apm_cli.commands.compile.cli import _resolve_compile_target
 
-        assert _resolve_compile_target(["claude", "vscode"]) == "all"
-        assert _resolve_compile_target(["claude", "copilot"]) == "all"
+        assert _resolve_compile_target(["claude", "vscode"]) == frozenset({"agents", "claude"})
+        assert _resolve_compile_target(["claude", "copilot"]) == frozenset({"agents", "claude"})
 
     def test_list_claude_only_returns_claude(self):
         from apm_cli.commands.compile.cli import _resolve_compile_target
@@ -1074,28 +1091,154 @@ class TestResolveCompileTarget:
         assert _resolve_compile_target(["codex"]) == "vscode"
         assert _resolve_compile_target(["cursor", "opencode"]) == "vscode"
 
-    def test_list_cursor_and_claude_returns_all(self):
+    def test_list_cursor_and_claude_returns_agents_claude_set(self):
         from apm_cli.commands.compile.cli import _resolve_compile_target
 
-        assert _resolve_compile_target(["cursor", "claude"]) == "all"
-        assert _resolve_compile_target(["codex", "claude"]) == "all"
+        assert _resolve_compile_target(["cursor", "claude"]) == frozenset({"agents", "claude"})
+        assert _resolve_compile_target(["codex", "claude"]) == frozenset({"agents", "claude"})
 
     def test_list_gemini_only_returns_gemini(self):
         from apm_cli.commands.compile.cli import _resolve_compile_target
 
         assert _resolve_compile_target(["gemini"]) == "gemini"
 
-    def test_list_gemini_and_claude_returns_all(self):
+    def test_list_gemini_and_claude_returns_claude_gemini_set(self):
         from apm_cli.commands.compile.cli import _resolve_compile_target
 
-        assert _resolve_compile_target(["gemini", "claude"]) == "all"
+        assert _resolve_compile_target(["gemini", "claude"]) == frozenset({"claude", "gemini"})
 
-    def test_list_gemini_and_copilot_returns_all(self):
+    def test_list_gemini_and_copilot_returns_agents_gemini_set(self):
         from apm_cli.commands.compile.cli import _resolve_compile_target
 
-        assert _resolve_compile_target(["gemini", "vscode"]) == "all"
+        assert _resolve_compile_target(["gemini", "vscode"]) == frozenset({"agents", "gemini"})
 
-    def test_list_all_targets_returns_all(self):
+    def test_list_all_three_families_returns_full_set(self):
         from apm_cli.commands.compile.cli import _resolve_compile_target
 
-        assert _resolve_compile_target(["claude", "vscode", "cursor"]) == "all"
+        assert _resolve_compile_target(["claude", "vscode", "gemini"]) == frozenset({"agents", "claude", "gemini"})
+        assert _resolve_compile_target(["claude", "vscode", "cursor"]) == frozenset({"agents", "claude"})
+
+
+class TestMultiTargetDoesNotGenerateUnrequestedFiles:
+    """Regression tests: multi-target lists must not generate files for families not requested."""
+
+    def test_claude_codex_does_not_compile_gemini(self):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+        from apm_cli.core.target_detection import (
+            should_compile_agents_md,
+            should_compile_claude_md,
+            should_compile_gemini_md,
+        )
+
+        resolved = _resolve_compile_target(["claude", "codex"])
+        assert should_compile_agents_md(resolved) is True
+        assert should_compile_claude_md(resolved) is True
+        assert should_compile_gemini_md(resolved) is False
+
+    def test_claude_cursor_does_not_compile_gemini(self):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+        from apm_cli.core.target_detection import (
+            should_compile_agents_md,
+            should_compile_claude_md,
+            should_compile_gemini_md,
+        )
+
+        resolved = _resolve_compile_target(["claude", "cursor"])
+        assert should_compile_agents_md(resolved) is True
+        assert should_compile_claude_md(resolved) is True
+        assert should_compile_gemini_md(resolved) is False
+
+    def test_gemini_codex_does_not_compile_claude(self):
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+        from apm_cli.core.target_detection import (
+            should_compile_agents_md,
+            should_compile_claude_md,
+            should_compile_gemini_md,
+        )
+
+        resolved = _resolve_compile_target(["gemini", "codex"])
+        assert should_compile_agents_md(resolved) is True
+        assert should_compile_claude_md(resolved) is False
+        assert should_compile_gemini_md(resolved) is True
+
+    def test_all_string_still_compiles_everything(self):
+        from apm_cli.core.target_detection import (
+            should_compile_agents_md,
+            should_compile_claude_md,
+            should_compile_gemini_md,
+        )
+
+        assert should_compile_agents_md("all") is True
+        assert should_compile_claude_md("all") is True
+        assert should_compile_gemini_md("all") is True
+
+    def test_single_target_strings_unchanged(self):
+        from apm_cli.core.target_detection import (
+            should_compile_agents_md,
+            should_compile_claude_md,
+            should_compile_gemini_md,
+        )
+
+        assert should_compile_agents_md("vscode") is True
+        assert should_compile_claude_md("vscode") is False
+        assert should_compile_gemini_md("vscode") is False
+
+        assert should_compile_agents_md("claude") is False
+        assert should_compile_claude_md("claude") is True
+        assert should_compile_gemini_md("claude") is False
+
+        assert should_compile_agents_md("gemini") is True
+        assert should_compile_claude_md("gemini") is False
+        assert should_compile_gemini_md("gemini") is True
+
+
+class TestMultiTargetLogOutput:
+    """Regression tests for the 'Compiling for ...' log line on multi-target compiles."""
+
+    @pytest.fixture
+    def runner(self):
+        return CliRunner()
+
+    @pytest.fixture
+    def empty_project(self):
+        temp_dir = tempfile.mkdtemp()
+        temp_path = Path(temp_dir)
+        (temp_path / "apm.yml").write_text("name: test-project\nversion: 0.1.0\n")
+        apm_dir = temp_path / ".apm" / "instructions"
+        apm_dir.mkdir(parents=True)
+        (apm_dir / "good.instructions.md").write_text(
+            "---\napplyTo: '**/*.py'\n---\nFollow PEP 8.\n"
+        )
+        yield temp_path
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_cli_multi_target_log_message(self, runner, empty_project):
+        original_dir = os.getcwd()
+        try:
+            os.chdir(empty_project)
+            result = runner.invoke(
+                cli, ["compile", "--target", "claude,codex", "--dry-run"]
+            )
+            assert "Compiling for" in result.output
+            assert "AGENTS.md" in result.output and "CLAUDE.md" in result.output
+            assert "GEMINI.md" not in result.output.split("Compiling for", 1)[1].split("\n", 1)[0]
+            assert "--target claude,codex" in result.output
+        finally:
+            os.chdir(original_dir)
+
+    def test_config_multi_target_log_message_does_not_say_unknown(self, runner, empty_project):
+        """Regression: apm.yml multi-target list must not log 'unknown target'."""
+        (empty_project / "apm.yml").write_text(
+            "name: test-project\nversion: 0.1.0\ntarget: [claude, codex]\n"
+        )
+        original_dir = os.getcwd()
+        try:
+            os.chdir(empty_project)
+            result = runner.invoke(cli, ["compile", "--dry-run"])
+            assert "unknown target" not in result.output.lower(), (
+                f"Config-driven multi-target should not log 'unknown target'. Got:\n{result.output}"
+            )
+            assert "Compiling for" in result.output
+            assert "AGENTS.md" in result.output and "CLAUDE.md" in result.output
+        finally:
+            os.chdir(original_dir)

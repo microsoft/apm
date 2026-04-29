@@ -687,17 +687,29 @@ class TestEdgeCases:
             load_marketplace_yml(yml)
 
     def test_source_dot_traversal(self, tmp_path: Path):
-        """Single-dot segment in source is also traversal."""
+        """Local-path source './acme' is now valid (no version/ref needed)."""
         content = _minimal_yml(
             packages=(
                 "packages:\n"
                 "  - name: tool-a\n"
-                "    source: ./acme\n"
-                "    ref: main"
+                "    source: ./acme"
             )
         )
         yml = _write_yml(tmp_path, content)
-        # '.' triggers traversal, but also fails the owner/repo regex
+        result = load_marketplace_yml(yml)
+        assert result.packages[0].is_local is True
+        assert result.packages[0].source == "./acme"
+
+    def test_source_double_dot_rejected(self, tmp_path: Path):
+        """``..`` traversal is still rejected for both remote and local sources."""
+        content = _minimal_yml(
+            packages=(
+                "packages:\n"
+                "  - name: tool-a\n"
+                "    source: ./../acme"
+            )
+        )
+        yml = _write_yml(tmp_path, content)
         with pytest.raises(MarketplaceYmlError):
             load_marketplace_yml(yml)
 

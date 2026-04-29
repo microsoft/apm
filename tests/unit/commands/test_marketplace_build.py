@@ -233,7 +233,7 @@ class TestBuildMissingYml:
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(marketplace, ["build"])
         assert result.exit_code == 1
-        assert "No marketplace.yml found" in result.output
+        assert "No marketplace config" in result.output
 
     def test_missing_yml_suggests_init(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -249,7 +249,10 @@ class TestBuildSchemaError:
         (tmp_path / "marketplace.yml").write_text("not: valid\n", encoding="utf-8")
         result = runner.invoke(marketplace, ["build"])
         assert result.exit_code == 2
-        assert "schema error" in result.output.lower() or "required" in result.output.lower()
+        assert "config error" in result.output.lower() or \
+            "schema error" in result.output.lower() or \
+            "required" in result.output.lower() or \
+            "unknown" in result.output.lower()
 
     def test_bad_yaml_syntax_exits_2(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

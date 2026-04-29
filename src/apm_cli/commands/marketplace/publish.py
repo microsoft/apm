@@ -14,7 +14,7 @@ from .._helpers import _get_console, _is_interactive
 from . import (
     marketplace,
     _load_targets_file,
-    _load_yml_or_exit,
+    _load_config_or_exit,
     _render_publish_plan,
     _render_publish_summary,
     _require_authoring_flag,
@@ -62,8 +62,8 @@ def publish(
     # 1. Pre-flight checks
     # ------------------------------------------------------------------
 
-    # 1a. Load marketplace.yml
-    yml = _load_yml_or_exit(logger)
+    # 1a. Load marketplace authoring config
+    _load_config_or_exit(logger)
 
     # 1b. Load marketplace.json
     mkt_json_path = Path.cwd() / "marketplace.json"

@@ -30,6 +30,12 @@ from ...marketplace.errors import (
     RefNotFoundError,
 )
 from ...marketplace.git_stderr import translate_git_stderr
+from ...marketplace.migration import (
+    ConfigSource,
+    detect_config_source,
+    load_marketplace_config,
+    migrate_marketplace_yml,
+)
 from ...marketplace.pr_integration import PrIntegrator, PrResult, PrState
 from ...marketplace.publisher import (
     ConsumerTarget,
@@ -75,7 +81,16 @@ class MarketplaceGroup(click.Group):
         "remove",
         "validate",
     ]
-    _authoring_commands = ["init", "build", "check", "outdated", "doctor", "publish", "package"]
+    _authoring_commands = [
+        "init",
+        "build",
+        "check",
+        "outdated",
+        "doctor",
+        "publish",
+        "package",
+        "migrate",
+    ]
 
     @staticmethod
     def _authoring_visible() -> bool:
@@ -123,6 +138,31 @@ def _load_yml_or_exit(logger):
     except MarketplaceYmlError as exc:
         logger.error(f"marketplace.yml schema error: {exc}", symbol="error")
         sys.exit(2)
+
+def _load_config_or_exit(logger):
+    """Load the marketplace config from CWD (apm.yml or marketplace.yml).
+
+    Returns ``(project_root, config)``. Exits with code 1 when no config
+    is found or both files coexist; exits with code 2 on validation errors.
+    Emits a deprecation warning when the legacy file is in use.
+    """
+    project_root = Path.cwd()
+    try:
+        config = load_marketplace_config(
+            project_root,
+            warn_callback=lambda msg: logger.warning(msg, symbol="warning"),
+        )
+    except MarketplaceYmlError as exc:
+        msg = str(exc)
+        if msg.startswith("No marketplace config"):
+            logger.error(msg, symbol="error")
+            sys.exit(1)
+        if msg.startswith("Both apm.yml"):
+            logger.error(msg, symbol="error")
+            sys.exit(1)
+        logger.error(f"marketplace config error: {exc}", symbol="error")
+        sys.exit(2)
+    return project_root, config
 
 def _warn_duplicate_names(logger, yml):
     """Emit a warning for each duplicate package name in *yml*."""
@@ -1192,6 +1232,7 @@ from .build import build  # noqa: E402
 from .check import check  # noqa: E402
 from .doctor import doctor  # noqa: E402
 from .init import init  # noqa: E402
+from .migrate import migrate  # noqa: E402
 from .outdated import outdated  # noqa: E402
 from .publish import publish  # noqa: E402
 from .validate import validate  # noqa: E402
@@ -1216,6 +1257,7 @@ __all__ = [
     "check",
     "doctor",
     "publish",
+    "migrate",
     "search",
     "BuildOptions",
     "BuildReport",
@@ -1230,6 +1272,10 @@ __all__ = [
     "OfflineMissError",
     "RefNotFoundError",
     "translate_git_stderr",
+    "ConfigSource",
+    "detect_config_source",
+    "load_marketplace_config",
+    "migrate_marketplace_yml",
     "PrIntegrator",
     "PrResult",
     "PrState",

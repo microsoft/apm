@@ -16,7 +16,7 @@ from . import (
     _OutdatedRow,
     _extract_tag_versions,
     _load_current_versions,
-    _load_yml_or_exit,
+    _load_config_or_exit,
     _render_outdated_table,
     _require_authoring_flag,
 )
@@ -33,7 +33,7 @@ def outdated(offline, include_prerelease, verbose):
     _require_authoring_flag()
     logger = CommandLogger("marketplace-outdated", verbose=verbose)
 
-    yml = _load_yml_or_exit(logger)
+    _, yml = _load_config_or_exit(logger)
 
     # Load current marketplace.json for "Current" column
     current_versions = _load_current_versions()
