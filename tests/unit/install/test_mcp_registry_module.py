@@ -178,6 +178,38 @@ class TestValidateRegistryUrl:
         with pytest.raises(Exception):
             validate_registry_url("")
 
+    def test_credentials_redacted_in_invalid_url_message(self):
+        """UsageError text for an unparseable URL must not echo credentials."""
+        import click
+        with pytest.raises(click.UsageError) as exc_info:
+            validate_registry_url("nothttp://user:topsecret@example.com")
+        msg = str(exc_info.value.message)
+        assert "topsecret" not in msg
+        assert "user:" not in msg
+
+    def test_credentials_redacted_in_unsupported_scheme_message(self):
+        """UsageError text for an unsupported scheme must not echo credentials."""
+        import click
+        with pytest.raises(click.UsageError) as exc_info:
+            validate_registry_url("ws://user:topsecret@example.com")
+        msg = str(exc_info.value.message)
+        assert "topsecret" not in msg
+        assert "user:" not in msg
+
+
+class TestValidateMcpDryRunEntrySignature:
+    """Public-API contract: explicit typed kwargs, no silent **kwargs."""
+
+    def test_unknown_kwarg_raises_type_error(self):
+        from apm_cli.install.mcp.registry import validate_mcp_dry_run_entry
+        with pytest.raises(TypeError):
+            validate_mcp_dry_run_entry("srv", bogus_kwarg="x")
+
+    def test_accepts_documented_kwargs(self):
+        from apm_cli.install.mcp.registry import validate_mcp_dry_run_entry
+        # Should not raise -- bare-string registry shorthand is valid.
+        validate_mcp_dry_run_entry("srv")
+
 
 class TestRedactUrlCredentials:
     """U3 regression: never echo URL credentials in logger output."""

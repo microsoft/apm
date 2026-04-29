@@ -21,7 +21,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Marketplace `url:` sources now require `https://github.com/` or `http://github.com/` URLs; GHES, GitLab, and other non-GitHub hosts are no longer resolved. (#951)
 - Grouped the seven `apm_cli/install/mcp_*.py` helper modules into an `apm_cli/install/mcp/` subpackage and stripped the redundant `mcp_` prefix from each filename, aligning with the unprefixed-noun naming convention used by the rest of `install/`. Pure refactor; behaviour and public API unchanged. (#951)
 - `apm marketplace init` and `apm init --marketplace` next-step hints now point at `apm pack` (was `apm marketplace build`). (#722)
 - **Manifest contract: invalid `target:` values now raise a parse error.** Previously, an unknown token (or a CSV string like `target: opencode,claude,copilot,agents` instead of the YAML list `target: [opencode, claude, copilot, agents]`) was silently ignored, leaving `apm install` and `apm compile` to exit 0 while deploying nothing. The shared parser used by `--target` now also validates `apm.yml`'s `target:`, so the same input resolves the same way at every entry point. **Migration:** three previously-silent inputs now fail loud -- (1) unknown tokens (`target: bogus` -> fix the typo), (2) empty values (`target: ""`, `target: []` -> remove the line if you meant auto-detect), (3) `all` mixed with other targets (`target: [all, claude]` -> use `all` alone). Omitting `target:` entirely still triggers auto-detection. (#820)

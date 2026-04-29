@@ -1691,6 +1691,26 @@ class TestInstallMcpFlag:
             # shorthand-with-no-overlays; do not silently promote to a dict.
             assert data["dependencies"]["mcp"] == [ref]
 
+    def test_mcp_integration_failure_exits_1_with_redacted_message(self):
+        """Partial-failure (apm.yml mutated, integrator raised) must exit 1
+        with an actionable string -- not exit 0 with a warning that includes
+        a raw exception. CI must see a red run on this code path."""
+        ref = "io.github.example/srv"
+        boom = RuntimeError("internal token=ghp_SECRET path=/tmp/x.yml")
+        with self._chdir_with_apm_yml() as tmp, \
+             patch("apm_cli.commands.install._get_invocation_argv",
+                   return_value=["apm", "install", "--mcp", ref]), \
+             patch("apm_cli.install.mcp.command.MCPIntegrator") as mock_integ:
+            mock_integ.install.side_effect = boom
+            result = self.runner.invoke(cli, ["install", "--mcp", ref])
+            assert result.exit_code != 0, result.output
+            # Raw exception details must NOT appear at default log level.
+            assert "ghp_SECRET" not in result.output
+            assert "/tmp/x.yml" not in result.output
+            # Actionable fixed string is shown instead.
+            assert "tool integration failed" in result.output
+            assert "--verbose" in result.output
+
     # --- Conflict matrix E1-E14 ---
 
     def test_e1_mcp_with_positional_packages(self):
@@ -1857,7 +1877,8 @@ class TestInstallMcpFlag:
              patch("apm_cli.commands.install._get_invocation_argv",
                    return_value=["apm", "install", "--mcp", "srv",
                                  "--registry", "https://mcp.internal.example.com"]), \
-             patch("apm_cli.commands.install.MCPIntegrator"):
+             patch("apm_cli.commands.install.MCPIntegrator"), \
+             patch("apm_cli.install.mcp.command.MCPIntegrator"):
             result = self.runner.invoke(
                 cli, ["install", "--mcp", "srv",
                       "--registry", "https://mcp.internal.example.com"],
@@ -1875,7 +1896,8 @@ class TestInstallMcpFlag:
              patch("apm_cli.commands.install._get_invocation_argv",
                    return_value=["apm", "install", "--mcp", "srv",
                                  "--registry", "http://mcp.internal.local"]), \
-             patch("apm_cli.commands.install.MCPIntegrator"):
+             patch("apm_cli.commands.install.MCPIntegrator"), \
+             patch("apm_cli.install.mcp.command.MCPIntegrator"):
             result = self.runner.invoke(
                 cli, ["install", "--mcp", "srv",
                       "--registry", "http://mcp.internal.local"],
@@ -1890,7 +1912,8 @@ class TestInstallMcpFlag:
              patch("apm_cli.commands.install._get_invocation_argv",
                    return_value=["apm", "install", "--mcp", "srv",
                                  "--registry", "https://mcp.example.com/"]), \
-             patch("apm_cli.commands.install.MCPIntegrator"):
+             patch("apm_cli.commands.install.MCPIntegrator"), \
+             patch("apm_cli.install.mcp.command.MCPIntegrator"):
             result = self.runner.invoke(
                 cli, ["install", "--mcp", "srv",
                       "--registry", "https://mcp.example.com/"],
@@ -2001,6 +2024,7 @@ class TestInstallMcpFlag:
                    return_value=["apm", "install", "--mcp", "srv",
                                  "--registry", "https://flag.example.com"]), \
              patch("apm_cli.commands.install.MCPIntegrator"), \
+             patch("apm_cli.install.mcp.command.MCPIntegrator"), \
              patch.dict(os.environ, {"MCP_REGISTRY_URL": "https://env.example.com"}):
             result = self.runner.invoke(
                 cli, ["install", "--mcp", "srv", "--verbose",
@@ -2017,7 +2041,8 @@ class TestInstallMcpFlag:
                    return_value=["apm", "install", "--mcp", "srv",
                                  "--mcp-version", "1.2.3",
                                  "--registry", "https://mcp.example.com"]), \
-             patch("apm_cli.commands.install.MCPIntegrator"):
+             patch("apm_cli.commands.install.MCPIntegrator"), \
+             patch("apm_cli.install.mcp.command.MCPIntegrator"):
             result = self.runner.invoke(
                 cli, ["install", "--mcp", "srv",
                       "--mcp-version", "1.2.3",

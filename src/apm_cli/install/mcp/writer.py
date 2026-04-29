@@ -110,8 +110,11 @@ def add_mcp_to_apm_yml(
             log.warning(
                 f"MCP server '{name}' already exists. Replacement diff:"
             )
+            # Diff lines drive the confirm prompt below: emit unconditionally
+            # (tree_item is always-on, no --verbose gating) so users always
+            # see what they are about to confirm.
             for line in diff:
-                log.verbose_detail(line)
+                log.tree_item(line)
             if not click.confirm(f"Replace MCP server '{name}'?", default=False):
                 return "skipped", diff
             mcp_list[existing_idx] = entry

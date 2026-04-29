@@ -130,8 +130,21 @@ def run_mcp_install(
                 merged_configs = dict(old_configs)
                 merged_configs.update(new_configs)
                 MCPIntegrator.update_lockfile(merged_names, mcp_configs=merged_configs)
-            except Exception as exc:  # pragma: no cover -- defensive
-                logger.warning(f"MCP server written to apm.yml but integration failed: {exc}")
+            except Exception as exc:
+                # Keep the raw exception (which may contain internal paths,
+                # credentials, or stack-trace fragments) at verbose level
+                # only; surface a fixed actionable string to the user, then
+                # fail with exit 1 so CI does not see a green run on a
+                # partial-failure path (apm.yml mutated, integration didn't
+                # complete).
+                logger.verbose_detail(f"MCP integration error: {exc}")
+                logger.error(
+                    "MCP server written to apm.yml but tool integration "
+                    "failed. Run with --verbose for details."
+                )
+                raise click.ClickException(
+                    f"MCP integration failed for '{mcp_name}'"
+                )
 
     verb = "Replaced" if status == "replaced" else "Added"
     logger.success(f"{verb} MCP server '{mcp_name}'", symbol="check")
