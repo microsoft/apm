@@ -1,5 +1,5 @@
 {
-  "last_updated": "2026-04-28T03:36:20Z",
+  "last_updated": "2026-04-29T03:36:23Z",
   "last_run_tasks": ["task3", "task7"],
   "validated_commands": {
     "test": "python3 -m uv run pytest tests/unit tests/test_console.py -x -q",
@@ -10,15 +10,15 @@
   },
   "coverage_baseline": {
     "total": "61%+",
-    "run_date": "2026-04-28",
-    "test_count": 6564,
-    "passing": 6564,
+    "run_date": "2026-04-29",
+    "test_count": 6675,
+    "passing": 6675,
     "pre_existing_failures": 0,
-    "notes": "All 6564 tests pass as of 2026-04-28 main."
+    "notes": "All 6675 tests pass as of 2026-04-29 main after fix to test_policy_status.py."
   },
   "monthly_activity_issue": "open-2026-04",
   "monthly_activity_issue_number": 749,
-  "ansi_note": "Rich outputs ANSI codes (italic \\x1b[3m, bold \\x1b[1m) even with NO_COLOR=1. Use regex r'\\x1b\\[[0-9;]*[A-Za-z]' to strip before text assertions. Add _strip_ansi() helper. Fixed in test_policy_status.py PR 2026-04-28.",
+  "ansi_note": "Rich outputs ANSI codes (italic \\x1b[3m, bold \\x1b[1m) even with NO_COLOR=1. Use regex r'\\x1b\\[[0-9;]*[A-Za-z]' to strip before text assertions. Add _strip_ansi() helper. Fixed in test_policy_status.py in PR 2026-04-29.",
   "lockfile_format_note": "Lockfile is apm.lock.yaml (LOCKFILE_NAME constant). Tests should write apm.lock.yaml.",
   "testing_backlog": [
     {"id": "install-command", "file": "src/apm_cli/commands/install.py", "coverage": "43%", "priority": "high", "notes": "Large complex file ~2804 lines. Core install logic. High risk. Deferred."},
@@ -30,11 +30,18 @@
   "backlog_cursor": "uninstall-engine",
   "completed_work": [
     {
+      "run": "2026-04-29T03:36:23Z",
+      "tasks": ["task3", "task7"],
+      "pr_status": "pr_created",
+      "branch": "test-assist/fix-policy-status-ansi-v3",
+      "description": "Fixed 7 pre-existing test failures in test_policy_status.py. _ascii_only lacked ANSI stripping. Added _strip_ansi() helper. 6675 tests pass."
+    },
+    {
       "run": "2026-04-28T03:36:20Z",
       "tasks": ["task3", "task7"],
       "pr_status": "pr_created",
       "branch": "test-assist/fix-policy-status-ansi-v2",
-      "description": "Fixed 7 pre-existing test failures in test_policy_status.py. _ascii_only lacked ANSI stripping. Added _strip_ansi() helper. 6564 tests pass."
+      "description": "Fixed 7 pre-existing test failures in test_policy_status.py. Branch no longer present."
     },
     {
       "run": "2026-04-27T03:36:28Z",
