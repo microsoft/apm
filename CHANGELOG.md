@@ -11,55 +11,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.11.0] - 2026-04-29
 ### Added
 
-- `apm pack` produces `.claude-plugin/marketplace.json` when `apm.yml` has a `marketplace:` block; new flags `--offline`, `--include-prerelease`, `--marketplace-output PATH`. (#722)
-- `marketplace:` block in `apm.yml` unifies catalog authoring with the manifest. (#1038)
-- `apm marketplace migrate` -- one-shot consolidation of legacy `marketplace.yml` into `apm.yml`. (#1038)
-- `apm init --marketplace` -- seeds a fresh `apm.yml` with a `marketplace:` authoring block. (#1038)
-- Local-path package sources (`source: ./path/to/dir`) are first-class in `marketplace.packages`. (#1038)
-- Codex CLI MCP config is now project-local (`.codex/config.toml`) during project installs and gated to active project targets; Codex user-scope primitive deployment is also supported. (#803)
-- **Dev Container Feature** `ghcr.io/microsoft/apm/apm-cli` -- one-line install of the APM CLI into any `devcontainer.json`, GitHub Codespace, or JetBrains Gateway workspace. Supports a `version` option (`latest` or pinned semver), declares `installsAfter` for the official Python feature, handles PEP 668 on Ubuntu 24.04+. Ships with 37 bats unit tests and a 6-distro Docker integration matrix (Ubuntu 24.04, Ubuntu 22.04, Debian 12, Alpine 3.20, Fedora 41, plus Python-feature combo). (#861)
-- `shared/apm.md` gh-aw workflow gains an `apps:` array input for cross-org private packages: each entry mints its own GitHub App installation token via `actions/create-github-app-token` and packs only its declared packages, with a matrix fan-out one replica per credential group. The single-app top-level form (`app-id`, `private-key`, `owner`, `repositories`) shipped earlier in this cycle is preserved as the canonical shorthand for one-org users; `apps[]` is purely additive. Multi-bundle restore uses the `bundles-file:` input from `microsoft/apm-action@v1.5.0` (microsoft/apm-action#30, microsoft/apm-action#29).
-- `shared/apm.md` gh-aw workflow now accepts `app-id`, `private-key`, `owner`, and `repositories` inputs to mint a GitHub App installation token for fetching cross-org private APM packages, restoring parity with the deprecated `dependencies.github-app` form. The default `GH_AW_PLUGINS_TOKEN || GH_AW_GITHUB_TOKEN || GITHUB_TOKEN` cascade still applies when no app-id is supplied.
+- **`apm pack` is now the single command for marketplace builds** -- with an `apm.yml` `marketplace:` block it emits `.claude-plugin/marketplace.json` directly. New flags: `--offline`, `--include-prerelease`, `--marketplace-output PATH`. (#722)
+- **Author marketplaces from `apm.yml`.** New top-level `marketplace:` block, `apm marketplace migrate` to consolidate legacy `marketplace.yml`, `apm init --marketplace` to scaffold, and first-class `source: ./local/path` package sources. (#1038)
+- **Codex CLI installs are now project-scoped.** MCP config lands in `.codex/config.toml` for project installs (no more polluting the user-global file); user-scope primitive deployment is also supported. (#803)
+- **Dev Container Feature** `ghcr.io/microsoft/apm/apm-cli` -- one-line install of the APM CLI into any devcontainer, Codespace, or JetBrains Gateway workspace. Pinned-version support, PEP 668 handled, tested on 6 distros. (#861)
+- **Cross-org private packages in `shared/apm.md`** via a new `apps:` array (one GitHub App per credential group, matrix fan-out). The single-app shorthand (`app-id` / `private-key` / `owner` / `repositories`) is preserved. (#982)
 
 ### Changed
 
-- `apm marketplace init` and `apm init --marketplace` next-step hints now point at `apm pack` (was `apm marketplace build`). (#722)
-- `apm marketplace add` defaults the local alias to the `name` field declared inside the fetched `marketplace.json`, falling back to the repo name only when the manifest omits it (or declares an invalid value). Restores verbatim portability with Claude Code install instructions (e.g. `addyosmani/agent-skills` now registers as `addy-agent-skills` exactly as that repo's README documents). No-op when `manifest.name == repo.name`; existing `~/.apm/marketplaces.json` entries are untouched. (#1032)
-- `--policy` / `--policy-source` accepted forms (`org`, file path, `owner/repo`, https URL) are now documented identically across `apm audit --policy` Click help, `apm policy status --policy-source` Click help, and the CLI reference docs -- a single `POLICY_SOURCE_FORMS_HELP` constant is the source of truth, with lockstep tests pinning all four surfaces against drift. (#1000, closes #998 #994)
-- **Manifest contract: invalid `target:` values now raise a parse error.** Previously, an unknown token (or a CSV string like `target: opencode,claude,copilot,agents` instead of the YAML list `target: [opencode, claude, copilot, agents]`) was silently ignored, leaving `apm install` and `apm compile` to exit 0 while deploying nothing. The shared parser used by `--target` now also validates `apm.yml`'s `target:`, so the same input resolves the same way at every entry point. **Migration:** three previously-silent inputs now fail loud -- (1) unknown tokens (`target: bogus` -> fix the typo), (2) empty values (`target: ""`, `target: []` -> remove the line if you meant auto-detect), (3) `all` mixed with other targets (`target: [all, claude]` -> use `all` alone). Omitting `target:` entirely still triggers auto-detection. (#820)
-- Rename `DownloadStrategyManager` to `DownloadDelegate` to better reflect Facade/Delegate pattern (#918)
-- Fix incorrect double-checked locking in marketplace registry `_load()` -- hold lock across full check+read+set (#918)
+- **`apm marketplace add` preserves the upstream alias** -- now defaults to the `name` declared in the fetched `marketplace.json` instead of the repo name, so install instructions in third-party READMEs work verbatim. (#1032)
+- **`--policy` / `--policy-source` help is unified** across CLI and docs, with lockstep tests pinning all surfaces against drift. (#1000, closes #998 #994)
+- **BREAKING: invalid `target:` values now fail loud.** CSV strings (`target: a,b,c`), unknown tokens, empty values, and `all` mixed with other targets used to silently no-op `apm install` / `apm compile`; they now raise a parse error. Omitting `target:` still auto-detects. (#820)
+- Rename `DownloadStrategyManager` -> `DownloadDelegate` and fix double-checked-locking bug in marketplace registry `_load()`. (#918)
 
 ### Removed
 
-- **`apm marketplace build` command removed.** `apm pack` now produces marketplace.json directly. Invoking the old subcommand exits 2 with a one-line migration message pointing at `apm pack`. (#722)
-- **`marketplace_authoring` experimental flag removed.** Marketplace authoring (init, package add, validate, publish, etc.) is now generally available with no opt-in. (#722)
+- **BREAKING: `apm marketplace build` removed.** `apm pack` is the replacement; the old verb exits 2 with a migration hint. (#722)
+- **`marketplace_authoring` experimental flag removed** -- marketplace authoring is GA. (#722)
 
 ### Deprecated
 
-- Standalone `marketplace.yml` (still loaded; emits a deprecation warning; slated for removal in v0.13). (#1038)
+- Standalone `marketplace.yml` -- still loaded with a deprecation warning, removal slated for v0.13. (#1038)
 
 ### Fixed
 
-- `shared/apm.md` gh-aw workflow no longer fails the "Validate downloaded bundles match matrix manifest" step with a spurious `missing APM bundles (group did not pack successfully): apm-default` error when the matrix has exactly one credential group. `actions/download-artifact@v5+` flattens contents directly into the destination path whenever a single artifact matches the pattern (overriding `merge-multiple: false`), which collapsed the per-group subdir layout the validator expects. A new "Normalise bundle layout" step re-creates the expected `apm-<group_id>/` directory in the single-group case before validation runs. (#1051)
-- `apm install` and `apm compile` no longer exit 0 with success messages when `target:` in `apm.yml` is a CSV string -- the value now parses identically to the same input on `--target`, and zero-target resolution surfaces a warning instead of a silent no-op. (#820)
-- Remove redundant `seen` set from `_scan_patterns()` discovery walk (#918)
-- `apm pack` (marketplace producer) now respects `GITHUB_HOST` for GitHub Enterprise repos -- ref resolution, token lookup, and metadata fetch all use the configured host instead of hardcoded `github.com`. `git ls-remote` is authenticated so private repos work without separate credential setup. (#1008)
-- `apm pack` (marketplace producer) now accepts multiple Git URL forms (GitHub, GHES, GitLab, Bitbucket, ADO, SSH) for `type: url` parsing via `DependencyReference.parse()`. Host resolution is still driven by `GITHUB_HOST`, so non-`github.com` hosts require `GITHUB_HOST` to be set accordingly. (#1008)
-- **ADO Entra ID auth path no longer silently fails.** Bearer tokens from `az account get-access-token` are now correctly plumbed through validation (auth scheme, git env). Auth failures raise a typed `AuthenticationError` with an actionable 4-case diagnostic instead of the ambiguous "not accessible or doesn't exist" message. `apm install --update` runs a pre-flight auth check before modifying any files -- on failure it aborts with "No files were modified". (#1015)
-- Correct targeting of compiled artifacts so GEMINI.md is only created if requested (#1019)
-- Auto-discovery CLI output uses POSIX forward-slash paths on Windows (`Path.as_posix()` in `script_formatters.py` + `script_runner.py`) so `apm install` / `apm compile` output is cross-platform-readable and Windows CI tests for path display no longer fail. (#1018)
-- Generated file footer no longer prints the stray word `specify` before `apm compile` in the regeneration hint (`template_builder.py` + `distributed_compiler.py`). (#996)
-- CodeQL `py/clear-text-storage-sensitive-data` alert resolved (false positive) by renaming local variable `token` → `placeholder` in `_substitute_plugin_root` (`plugin_parser.py`). (#1002)
+- **`shared/apm.md` single-credential-group runs no longer fail validation** with a spurious `missing APM bundles: apm-default` -- a normalisation step recreates the per-group subdir layout that `actions/download-artifact@v5+` flattens away. (#1051)
+- **`apm install` / `apm compile` no longer silently exit 0** with a CSV `target:` string -- see Changed above. (#820)
+- **`apm pack` works against GitHub Enterprise and other Git hosts** -- honors `GITHUB_HOST` for GHES auth and accepts GitHub / GHES / GitLab / Bitbucket / ADO / SSH URL forms. (#1008)
+- **ADO Entra ID auth no longer silently fails.** Bearer tokens from `az account get-access-token` are plumbed through, errors are typed + actionable (4-case diagnostic), and `apm install --update` pre-flights auth before touching files. (#1015)
+- `GEMINI.md` is now only created when explicitly targeted. (#1019)
+- Windows-friendly: auto-discovery CLI output uses POSIX paths so `apm install` / `apm compile` output is readable on Windows. (#1018)
+- Generated-file footer no longer prints stray `specify` before `apm compile`. (#996)
+- CodeQL `clear-text-storage` false-positive resolved (variable rename). (#1002)
 
 ### Maintainer tooling
 
-- **NOTICE.md** for third-party components added at the top level of the repo per CELA template -- one entry per direct dependency with verbatim license text + copyright + upstream URL. (#1043)
-- **NOTICE.md is now self-maintaining** via `scripts/generate-notice.py` + `scripts/notice-metadata.yaml` + a CI drift gate (`.github/workflows/notice-drift.yml`). The generator reads `[project]` deps from `pyproject.toml`, curated per-component metadata from the YAML, and verbatim license text from the installed `.dist-info/licenses/` directory -- drift fails CI with the exact unified diff and a `make notice` fix command. The same workflow runs `actions/dependency-review-action@v4` on PRs as a license-policy gate (denies GPL/AGPL/SSPL additions). (#1045, closes #1044)
-- `shared/apm.md` carries a tiny `repair_string_array` Bash+Python helper that converts gh-aw's Go-default-formatter `[a b]` output into valid JSON before passing to `jq --argjson` -- unblocks every `pr-review-panel` and `triage-panel` run that uses `apm-prep`. Upstream paper-cut filed at github/gh-aw#29076. (#1033)
-- PR Review Panel and Triage Panel workflows now skip cleanly (gray ⊘ Skipped) on unmatched label events instead of marking the whole `pre_activation` job as Failed (red ❌). Uses top-level frontmatter `if:` expressions which `gh-aw` propagates to both `pre_activation` and `activation` jobs -- no failed check, no runner cold-start, no agent quota burn. Bumps `gh-aw` v0.68.3 → v0.71.1. (#1030)
-- `shared/apm.md` recompiled against `microsoft/apm-action@v1.5.0` so `pr-review-panel.lock.yml` + `triage-panel.lock.yml` use the new `bundles-file:` matrix-aware restore introduced in #982; stale `STATUS: blocked` banner dropped; new self-diagnosing 2-line version header so vendored copies are auditable; `integrations/gh-aw.md` adds a "Vendor the canonical `shared/apm.md`" callout. (#1026)
-- Review-panel workflow refactor: true matrix fan-out (one replica per reviewer persona), binary `approve`/`request-changes` verdict aggregation, and label automation that drives the merge gate. (#1022)
+- **NOTICE.md** added at repo root per CELA template -- one entry per direct dependency with verbatim license text. (#1043)
+- **NOTICE.md is self-maintaining**: a CI drift gate fails with an exact diff + a `make notice` fix command, plus `dependency-review-action` denies GPL/AGPL/SSPL additions on PR. (#1045, closes #1044)
+- `shared/apm.md` ships a `repair_string_array` helper to unblock `apm-prep` on gh-aw's `[a b]` Go-default formatting (paper-cut filed upstream). (#1033)
+- PR-review-panel and triage-panel skip cleanly (gray ⊘) on unmatched labels instead of failing -- no failed check, no quota burn. Bumps `gh-aw` to v0.71.1. (#1030)
+- `shared/apm.md` recompiled against `microsoft/apm-action@v1.5.0` for the new `bundles-file:` matrix restore (used by #982). (#1026)
+- Review-panel: true matrix fan-out per reviewer persona, binary `approve` / `request-changes` aggregation, label-driven merge gate. (#1022)
 
 ## [0.10.0] - 2026-04-27
 
