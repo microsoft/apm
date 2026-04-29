@@ -288,7 +288,7 @@ class TestCheckOrphanedPackagesSubdirectoryAncestor:
         apm_modules = tmp_path / "apm_modules"
         skill_dir = apm_modules / "owner" / "repo" / ".apm" / "skills" / "my-skill"
         skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text("# Skill")
+        (skill_dir / "SKILL.md").write_text("# Skill", encoding="utf-8")
 
         orphaned = _check_orphaned_packages()
         assert orphaned == [], (
@@ -314,11 +314,11 @@ class TestCheckOrphanedPackagesSubdirectoryAncestor:
         apm_modules = tmp_path / "apm_modules"
         skill_dir = apm_modules / "owner" / "repo" / ".apm" / "skills" / "my-skill"
         skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text("# Skill")
+        (skill_dir / "SKILL.md").write_text("# Skill", encoding="utf-8")
 
         orphan_dir = apm_modules / "other" / "stale-pkg"
         orphan_dir.mkdir(parents=True)
-        (orphan_dir / "apm.yml").write_text("name: stale-pkg")
+        (orphan_dir / "apm.yml").write_text("name: stale-pkg", encoding="utf-8")
 
         orphaned = _check_orphaned_packages()
         assert "other/stale-pkg" in orphaned
@@ -341,12 +341,12 @@ class TestCheckOrphanedPackagesSubdirectoryAncestor:
         apm_modules = tmp_path / "apm_modules"
         pkg_dir = apm_modules / "org" / "my-package"
         pkg_dir.mkdir(parents=True)
-        (pkg_dir / "apm.yml").write_text("name: my-package\nversion: 1.0.0")
+        (pkg_dir / "apm.yml").write_text("name: my-package\nversion: 1.0.0", encoding="utf-8")
         apm_dir = pkg_dir / ".apm"
         apm_dir.mkdir()
         instr_dir = apm_dir / "instructions"
         instr_dir.mkdir()
-        (instr_dir / "example.instructions.md").write_text("# Instructions")
+        (instr_dir / "example.instructions.md").write_text("# Instructions", encoding="utf-8")
 
         orphaned = _check_orphaned_packages()
         assert orphaned == [], (
@@ -371,12 +371,12 @@ class TestCheckOrphanedPackagesSubdirectoryAncestor:
         # Declared package
         pkg_dir = apm_modules / "org" / "my-package"
         pkg_dir.mkdir(parents=True)
-        (pkg_dir / "apm.yml").write_text("name: my-package\nversion: 1.0.0")
+        (pkg_dir / "apm.yml").write_text("name: my-package\nversion: 1.0.0", encoding="utf-8")
 
         # Stale package not in apm.yml
         stale_dir = apm_modules / "org" / "old-package"
         stale_dir.mkdir(parents=True)
-        (stale_dir / "apm.yml").write_text("name: old-package\nversion: 0.1.0")
+        (stale_dir / "apm.yml").write_text("name: old-package\nversion: 0.1.0", encoding="utf-8")
 
         orphaned = _check_orphaned_packages()
         assert "org/my-package" not in orphaned

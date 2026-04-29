@@ -290,13 +290,14 @@ class TestDepsListCommand(_DepsCmdBase):
                 "dependencies:\n"
                 "  apm:\n"
                 "    - git: github.example.com/owner/repo\n"
-                "      path: .apm/skills/my-skill\n"
+                "      path: .apm/skills/my-skill\n",
+                encoding="utf-8",
             )
 
             # Simulate installed layout: owner/repo/.apm/skills/my-skill/SKILL.md
             skill_dir = tmp / "apm_modules" / "owner" / "repo" / ".apm" / "skills" / "my-skill"
             skill_dir.mkdir(parents=True)
-            (skill_dir / "SKILL.md").write_text("# Skill")
+            (skill_dir / "SKILL.md").write_text("# Skill", encoding="utf-8")
 
             with patch("apm_cli.core.scope.get_apm_dir", return_value=tmp), _force_rich_fallback():
                 result = self.runner.invoke(cli, ["deps", "list"])
