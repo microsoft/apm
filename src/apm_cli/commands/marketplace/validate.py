@@ -57,7 +57,7 @@ def validate(name, check_refs, verbose):
         passed = 0
         warning_count = 0
         error_count = 0
-        click.echo()
+        logger.blank_line()
         logger.progress("Validation Results:", symbol="info")
         for r in results:
             if r.passed and not r.warnings:
@@ -77,7 +77,7 @@ def validate(name, check_refs, verbose):
                 error_count += len(r.errors)
                 warning_count += len(r.warnings)
 
-        click.echo()
+        logger.blank_line()
         logger.progress(
             f"Summary: {passed} passed, {warning_count} warnings, "
             f"{error_count} errors",
@@ -88,6 +88,6 @@ def validate(name, check_refs, verbose):
             sys.exit(1)
 
     except Exception as e:  # noqa: BLE001 -- top-level command catch-all
-        logger.error(f"Failed to validate marketplace: {e}")
+        logger.error(f"Failed to validate marketplace: {e}", symbol="error")
         logger.verbose_detail(traceback.format_exc())
         sys.exit(1)

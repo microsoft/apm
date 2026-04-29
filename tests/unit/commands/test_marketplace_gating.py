@@ -2,7 +2,7 @@
 
 Verifies:
   - ``marketplace_authoring`` flag is registered in the ``FLAGS`` registry
-  - Consumer commands (add, list, browse, update, remove, validate) work
+  - Consumer commands (add, list, browse, search, update, remove, validate) work
     WITHOUT the flag enabled
   - Authoring commands (init, build, check, outdated, doctor, publish, package)
     are blocked when the flag is disabled, with an enablement message
@@ -77,7 +77,7 @@ class TestMarketplaceFlagRegistration:
 class TestConsumerCommandsUngated:
     """Consumer commands must work without marketplace_authoring enabled."""
 
-    @pytest.mark.parametrize("subcmd", ["add", "list", "browse", "update", "remove", "validate"])
+    @pytest.mark.parametrize("subcmd", ["add", "list", "browse", "search", "update", "remove", "validate"])
     def test_consumer_command_reachable_when_flag_disabled(self, subcmd: str) -> None:
         """Consumer subcommands are not blocked by the authoring flag."""
         from apm_cli.commands.marketplace import marketplace
@@ -107,6 +107,7 @@ class TestConsumerCommandsUngated:
 
         assert result.exit_code == 0
         assert "Consumer commands" in result.output
+        assert "search" in result.output
 
     def test_marketplace_help_hides_authoring_when_flag_disabled(self) -> None:
         """``marketplace --help`` omits authoring section when flag is off."""

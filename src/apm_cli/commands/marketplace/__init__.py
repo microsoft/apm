@@ -52,7 +52,15 @@ list = builtins.list
 class MarketplaceGroup(click.Group):
     """Custom group that organises commands by audience."""
 
-    _consumer_commands = ["add", "list", "browse", "update", "remove", "validate"]
+    _consumer_commands = [
+        "add",
+        "list",
+        "browse",
+        "search",
+        "update",
+        "remove",
+        "validate",
+    ]
     _authoring_commands = ["init", "build", "check", "outdated", "doctor", "publish", "package"]
 
     @staticmethod
@@ -1122,6 +1130,8 @@ def search(expression, limit, verbose):
         sys.exit(1)
 
 
+
+marketplace.add_command(search)
 
 from .build import build  # noqa: E402
 from .check import check  # noqa: E402
