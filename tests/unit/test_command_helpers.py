@@ -324,6 +324,65 @@ class TestCheckOrphanedPackagesSubdirectoryAncestor:
         orphaned = _check_orphaned_packages()
         assert "other/stale-pkg" in orphaned
 
+    def test_whole_repo_dependency_not_orphaned(self, tmp_path, monkeypatch):
+        """A whole-repo dependency (owner/repo shorthand) is not flagged as orphaned."""
+        monkeypatch.chdir(tmp_path)
+
+        apm_yml = tmp_path / "apm.yml"
+        apm_yml.write_text(
+            "name: test\n"
+            "version: 1.0.0\n"
+            "dependencies:\n"
+            "  apm:\n"
+            "    - github.example.com/org/my-package\n",
+            encoding="utf-8",
+        )
+
+        # Simulate the installed whole-repo package with .apm content
+        apm_modules = tmp_path / "apm_modules"
+        pkg_dir = apm_modules / "org" / "my-package"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text("name: my-package\nversion: 1.0.0")
+        apm_dir = pkg_dir / ".apm"
+        apm_dir.mkdir()
+        instr_dir = apm_dir / "instructions"
+        instr_dir.mkdir()
+        (instr_dir / "example.instructions.md").write_text("# Instructions")
+
+        orphaned = _check_orphaned_packages()
+        assert orphaned == [], (
+            f"Whole-repo package should not be orphaned; got: {orphaned}"
+        )
+
+    def test_whole_repo_with_unrelated_orphan(self, tmp_path, monkeypatch):
+        """Whole-repo dep is fine; an unrelated stale package IS orphaned."""
+        monkeypatch.chdir(tmp_path)
+
+        apm_yml = tmp_path / "apm.yml"
+        apm_yml.write_text(
+            "name: test\n"
+            "version: 1.0.0\n"
+            "dependencies:\n"
+            "  apm:\n"
+            "    - github.example.com/org/my-package\n",
+            encoding="utf-8",
+        )
+
+        apm_modules = tmp_path / "apm_modules"
+        # Declared package
+        pkg_dir = apm_modules / "org" / "my-package"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text("name: my-package\nversion: 1.0.0")
+
+        # Stale package not in apm.yml
+        stale_dir = apm_modules / "org" / "old-package"
+        stale_dir.mkdir(parents=True)
+        (stale_dir / "apm.yml").write_text("name: old-package\nversion: 0.1.0")
+
+        orphaned = _check_orphaned_packages()
+        assert "org/my-package" not in orphaned
+        assert "org/old-package" in orphaned
+
 
 # ---------------------------------------------------------------------------
 # _check_and_notify_updates
