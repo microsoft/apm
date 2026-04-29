@@ -29,6 +29,7 @@ import requests
 
 from ..utils.console import _rich_echo, _rich_info
 from ..utils.github_host import default_host
+from .errors import AuthenticationError
 
 # ---------------------------------------------------------------------------
 # TLS failure helpers
@@ -205,9 +206,12 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             # carries an embedded token and avoids triggering OS credential
             # helper popups during git ls-remote validation.
             _url_token = None
+            _dep_ctx = None
+            _auth_scheme = "basic"
             if not is_generic:
                 _dep_ctx = auth_resolver.resolve_for_dep(dep_ref)
                 _url_token = _dep_ctx.token
+                _auth_scheme = getattr(_dep_ctx, "auth_scheme", "basic") or "basic"
 
             ado_downloader = GitHubPackageDownloader(auth_resolver=auth_resolver)
             # Set the host
@@ -215,8 +219,11 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                 ado_downloader.github_host = dep_ref.host
 
             # Build authenticated URL using the resolved per-dep token.
+            # #1015: pass auth_scheme so bearer tokens use extraheader
+            # injection instead of embedding a ~1.5KB JWT in the userinfo.
             package_url = ado_downloader._build_repo_url(
-                dep_ref.repo_url, use_ssh=False, dep_ref=dep_ref, token=_url_token
+                dep_ref.repo_url, use_ssh=False, dep_ref=dep_ref,
+                token=_url_token, auth_scheme=_auth_scheme,
             )
 
             explicit_scheme = (getattr(dep_ref, "explicit_scheme", None) or "").lower() or None
@@ -245,7 +252,11 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                     suppress_credential_helpers=is_insecure,
                 )
             else:
-                validate_env = {**os.environ, **ado_downloader.git_env}
+                # #1015: merge _dep_ctx.git_env (bearer-aware GIT_CONFIG_*
+                # overrides) into the subprocess env so `git ls-remote`
+                # actually sends the Authorization header for AAD tokens.
+                _ctx_git_env = getattr(_dep_ctx, "git_env", {}) if _dep_ctx else {}
+                validate_env = {**os.environ, **ado_downloader.git_env, **_ctx_git_env}
 
             # Build the probe order. Non-generic hosts (GHES/ADO) always probe
             # a single authenticated URL. Generic hosts:
@@ -373,6 +384,38 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             # already on screen by the time we get here. Stderr is sanitized
             # via ``GitHubPackageDownloader._sanitize_git_error`` to scrub
             # any token-bearing URLs / env values before logging.
+
+            # #1015: distinguish auth failures from non-auth failures (DNS,
+            # timeout, repo-truly-not-found 404). Auth failures get a typed
+            # exception with actionable diagnostics; non-auth failures keep
+            # the legacy False return so the caller can word its own message.
+            if result.returncode != 0 and not is_generic:
+                _stderr = (result.stderr or "").lower()
+                _auth_signals = (
+                    "401" in _stderr
+                    or "403" in _stderr
+                    or "authentication failed" in _stderr
+                    or "unauthorized" in _stderr
+                    or "could not read username" in _stderr
+                )
+                if _auth_signals:
+                    _host = dep_ref.host or "dev.azure.com"
+                    _org = (
+                        dep_ref.repo_url.split("/")[0]
+                        if dep_ref.repo_url and "/" in dep_ref.repo_url
+                        else None
+                    )
+                    _diag = auth_resolver.build_error_context(
+                        _host,
+                        "validate",
+                        org=_org,
+                        dep_url=dep_ref.repo_url,
+                    )
+                    raise AuthenticationError(
+                        f"Authentication failed for {_host}",
+                        diagnostic_context=_diag,
+                    )
+
             return result.returncode == 0
 
         # For GitHub.com, use AuthResolver with unauth-first fallback
@@ -443,6 +486,10 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                     pass
             return False
 
+    except AuthenticationError:
+        # #1015: let auth failures propagate to the caller for proper
+        # rendering -- the outer try/except is only for parse failures.
+        raise
     except Exception:
         # If parsing fails, assume it's a regular GitHub package
         host = default_host()
