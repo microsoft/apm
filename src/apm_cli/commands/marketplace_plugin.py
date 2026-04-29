@@ -34,21 +34,79 @@ _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 def _yml_path() -> Path:
-    """Return the canonical ``marketplace.yml`` path in CWD."""
-    return Path.cwd() / "marketplace.yml"
+    """Return the path to the active marketplace authoring config.
+
+    Prefers ``apm.yml`` when it has a ``marketplace:`` block; falls back
+    to legacy ``marketplace.yml`` otherwise.  Returns the apm.yml path
+    when both files are absent (so callers can produce a consistent
+    error message).
+    """
+    cwd = Path.cwd()
+    apm_path = cwd / "apm.yml"
+    legacy_path = cwd / "marketplace.yml"
+
+    # Detect apm.yml with marketplace block.
+    if apm_path.exists():
+        try:
+            import yaml
+            text = apm_path.read_text(encoding="utf-8")
+            data = yaml.safe_load(text)
+            if isinstance(data, dict) and "marketplace" in data \
+                    and data["marketplace"] is not None:
+                return apm_path
+        except (OSError, yaml.YAMLError):
+            pass
+    if legacy_path.exists():
+        return legacy_path
+    return apm_path
 
 
 def _ensure_yml_exists(logger: CommandLogger) -> Path:
     """Return the yml path or exit with guidance if it does not exist."""
+    cwd = Path.cwd()
+    apm_path = cwd / "apm.yml"
+    legacy_path = cwd / "marketplace.yml"
+
+    # Hard error when both files are present.
+    if apm_path.exists():
+        try:
+            import yaml
+            data = yaml.safe_load(apm_path.read_text(encoding="utf-8"))
+            has_block = isinstance(data, dict) and "marketplace" in data \
+                and data["marketplace"] is not None
+        except (OSError, yaml.YAMLError):
+            has_block = False
+        if has_block and legacy_path.exists():
+            logger.error(
+                "Both apm.yml (with a 'marketplace:' block) and "
+                "marketplace.yml exist. Remove marketplace.yml or run "
+                "'apm marketplace migrate --force' to consolidate.",
+                symbol="error",
+            )
+            sys.exit(1)
+
     path = _yml_path()
-    if not path.exists():
+    if not path.exists() or (
+        path == apm_path and path.exists() and not _has_marketplace_block(path)
+    ):
         logger.error(
-            "No marketplace.yml found. "
+            "No marketplace authoring config found. "
             "Run 'apm marketplace init' to scaffold one.",
             symbol="error",
         )
         sys.exit(1)
     return path
+
+
+def _has_marketplace_block(apm_path: Path) -> bool:
+    """Return True when *apm_path* has a populated ``marketplace:`` block."""
+    try:
+        import yaml
+        data = yaml.safe_load(apm_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return False
+    return isinstance(data, dict) and "marketplace" in data and \
+        data["marketplace"] is not None
 
 
 def _parse_tags(raw: str | None) -> list[str] | None:
