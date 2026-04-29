@@ -175,9 +175,9 @@ values, traversal (`.` or `..`), path separators, uppercase characters, and
 filesystem-unsafe punctuation.
 
 ```yaml
-name: acme-tools
+name: example-tools
 version: 1.0.0
-namespace: acme
+namespace: example
 type: skill
 ```
 
