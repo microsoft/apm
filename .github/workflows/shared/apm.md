@@ -279,6 +279,25 @@ steps:
       pattern: ${{ needs.activation.outputs.artifact_prefix }}apm-*
       path: /tmp/gh-aw/apm-bundles
       merge-multiple: false
+  - name: Normalise bundle layout (single-artifact flatten workaround)
+    env:
+      EXPECTED_MATRIX: ${{ needs.apm-prep.outputs.matrix }}
+      ARTIFACT_PREFIX: ${{ needs.activation.outputs.artifact_prefix }}
+    run: |
+      set -euo pipefail
+      # actions/download-artifact (>=v5) flattens contents directly into `path/`
+      # whenever exactly one artifact matches the pattern, ignoring
+      # `merge-multiple: false`. Re-shape into the per-group subdir layout so
+      # downstream validation sees a stable structure regardless of matrix size.
+      expected_count=$(echo "$EXPECTED_MATRIX" | jq '.group | length')
+      if [ "$expected_count" -eq 1 ]; then
+        group_id=$(echo "$EXPECTED_MATRIX" | jq -r '.group[0].id')
+        group_dir="/tmp/gh-aw/apm-bundles/${ARTIFACT_PREFIX}apm-${group_id}"
+        if [ ! -d "$group_dir" ]; then
+          mkdir -p "$group_dir"
+          find /tmp/gh-aw/apm-bundles -mindepth 1 -maxdepth 1 ! -path "$group_dir" -exec mv {} "$group_dir/" \;
+        fi
+      fi
   - name: Validate downloaded bundles match matrix manifest
     env:
       EXPECTED_MATRIX: ${{ needs.apm-prep.outputs.matrix }}
