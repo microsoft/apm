@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Added
 
-- **Unified `apm pack` entrypoint**: a single command now reads `apm.yml` and produces both bundle (`./build/<name>/`) and `.claude-plugin/marketplace.json` when the corresponding blocks are present. Three new flags: `--offline` (forbid network calls during marketplace resolution), `--include-prerelease` (allow non-stable git refs), and `--marketplace-output PATH` (override the marketplace.json destination). (#722)
+- `apm pack` produces `.claude-plugin/marketplace.json` when `apm.yml` has a `marketplace:` block; new flags `--offline`, `--include-prerelease`, `--marketplace-output PATH`. (#722)
 - `marketplace:` block in `apm.yml` unifies catalog authoring with the manifest. (#1038)
 - `apm marketplace migrate` -- one-shot consolidation of legacy `marketplace.yml` into `apm.yml`. (#1038)
 - `apm init --marketplace` -- seeds a fresh `apm.yml` with a `marketplace:` authoring block. (#1038)
