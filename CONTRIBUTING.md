@@ -90,6 +90,28 @@ can also summon any single persona (e.g. `python-architect`,
 `supply-chain-security-expert`) for a focused review of a specific file
 or design question without running the full panel.
 
+#### When to summon which persona during design and implementation
+
+Don't wait for the panel verdict to discover you should have talked to
+a specialist. The same personas the panel runs are the ones to consult
+*while* you are designing and building. Recommended pairings:
+
+| Situation | Persona to summon | Why |
+|---|---|---|
+| Any new feature or feature change | [`devx-ux-expert`](.apm/agents/devx-ux-expert.agent.md) **first** | Validate the user-facing approach (flags, defaults, error messages, manifest shape) *before* you write code. Cheaper than re-doing the implementation after the panel rejects it. |
+| Anything that prints to the terminal | [`cli-logging-expert`](.apm/agents/cli-logging-expert.agent.md) | Always include this. Keeps log levels, colours, prefixes, and progress indicators consistent across the CLI. |
+| Refactor, new module, or non-trivial architecture decision | [`python-architect`](.apm/agents/python-architect.agent.md) | Get the boundaries / interfaces / dependency direction right up front. |
+| Anything that fetches packages, evaluates manifests, scans content, signs / verifies / locks, or touches `apm install` | [`supply-chain-security-expert`](.apm/agents/supply-chain-security-expert.agent.md) **mandatory** | A core promise of APM is that `apm install` blocks compromised packages before agents read them. This persona is **non-optional** for any PR that touches the supply chain -- the panel will reject it otherwise. |
+| Any change touching authentication, tokens, credential resolution, or remote host auth (GitHub, GHE, ADO, EMU, GitHub Apps) | [`auth-expert`](.apm/agents/auth-expert.agent.md) | Auth bugs are silent and expensive. Run this persona on the design and again on the diff. |
+| New primitive type, manifest schema change, or cross-target deployment behaviour | [`apm-primitives-architect`](.apm/agents/apm-primitives-architect.agent.md) | Keeps the primitive model coherent across Copilot, Claude, Cursor, OpenCode, Codex, Gemini. |
+| Public-facing copy, README, docs site, or release notes | [`doc-writer`](.apm/agents/doc-writer.agent.md) and/or [`oss-growth-hacker`](.apm/agents/oss-growth-hacker.agent.md) | Voice consistency and positioning for new-user moments. |
+
+Rule of thumb: ask the matching persona to **critique your plan before
+you implement**, then ask it again to **review the diff before you
+push**. Two cheap, focused passes per persona beat one expensive panel
+rejection. The `apm-review-panel` skill at the end is then a sanity
+check, not a redesign.
+
 
 
 1. Fork the repository.
