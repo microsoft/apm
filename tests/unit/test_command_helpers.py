@@ -281,6 +281,13 @@ class TestExpandWithAncestors:
         """Empty set returns empty set."""
         assert _expand_with_ancestors(set()) == set()
 
+    def test_three_segment_ado_path(self):
+        """ADO-style org/project/repo produces org/project as ancestor."""
+        paths = {"org/project/repo"}
+        result = _expand_with_ancestors(paths)
+        assert "org/project/repo" in result
+        assert "org/project" in result
+
     def test_no_false_prefix_overlap(self):
         """owner/repo-extra does not collide with owner/repo."""
         paths = {"owner/repo-extra/.apm/skills/x"}
