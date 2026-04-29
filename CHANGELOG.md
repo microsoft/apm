@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm pack` (marketplace producer) now accepts multiple Git URL forms (GitHub, GHES, GitLab, Bitbucket, ADO, SSH) for `type: url` parsing via `DependencyReference.parse()`. Host resolution is still driven by `GITHUB_HOST`, so non-`github.com` hosts require `GITHUB_HOST` to be set accordingly. (#1008)
 - **ADO Entra ID auth path no longer silently fails.** Bearer tokens from `az account get-access-token` are now correctly plumbed through validation (auth scheme, git env). Auth failures raise a typed `AuthenticationError` with an actionable 4-case diagnostic instead of the ambiguous "not accessible or doesn't exist" message. `apm install --update` runs a pre-flight auth check before modifying any files -- on failure it aborts with "No files were modified". (#1015)
 - Correct targeting of compiled artifacts so GEMINI.md is only created if requested (#1019)
+- `apm compile --targets claude` no longer lists `@apm_modules/{owner}/{package}/CLAUDE.md` dependencies for packages that don't have a CLAUDE.md file on disk (#1047)
 
 ## [0.10.0] - 2026-04-27
 
