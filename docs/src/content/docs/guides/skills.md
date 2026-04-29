@@ -322,6 +322,22 @@ name: my-project
 target: vscode  # or claude, or all
 ```
 
+## Package Namespaces
+
+Package authors can opt in to namespaced skill deployment with `namespace` in
+`apm.yml`:
+
+```yaml
+name: acme-tools
+version: 1.0.0
+namespace: acme
+type: skill
+```
+
+With this manifest, APM deploys package-owned skills under
+`.github/skills/acme/<skill-name>/` (and the equivalent skills directory for
+other targets). Packages without `namespace` keep the legacy flat layout.
+
 ## Best Practices
 
 ### 1. Clear Naming

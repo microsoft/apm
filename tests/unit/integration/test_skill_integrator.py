@@ -290,7 +290,8 @@ class TestSkillIntegrator:
         description: str = None,
         dependency_ref: DependencyReference = None,
         package_type: PackageType = None,
-        content_type: "PackageContentType" = None
+        content_type: "PackageContentType" = None,
+        namespace: str = None,
     ) -> PackageInfo:
         """Helper to create PackageInfo objects for tests.
         
@@ -304,7 +305,8 @@ class TestSkillIntegrator:
             package_path=install_path or self.project_root / "package",
             source=source or f"github.com/test/{name}",
             description=description,
-            type=content_type
+            type=content_type,
+            namespace=namespace,
         )
         resolved_ref = ResolvedReference(
             original_ref="main",
@@ -411,6 +413,53 @@ class TestSkillIntegrator:
         assert result.skill_path is not None
         # Skill directory should be created
         assert result.skill_path.exists()
+
+    def test_integrate_package_skill_uses_manifest_namespace(self):
+        """Packages with namespace install skills under that namespace."""
+        package_dir = self.project_root / "my-skill"
+        package_dir.mkdir()
+        (package_dir / "SKILL.md").write_text("# My Skill")
+
+        package_info = self._create_package_info(
+            name="my-skill",
+            install_path=package_dir,
+            package_type=PackageType.CLAUDE_SKILL,
+            namespace="acme",
+        )
+
+        result = self.integrator.integrate_package_skill(
+            package_info, self.project_root
+        )
+
+        target = self.project_root / ".github" / "skills" / "acme" / "my-skill"
+        assert result.skill_created is True
+        assert result.skill_path == target / "SKILL.md"
+        assert (target / "SKILL.md").exists()
+        assert not (self.project_root / ".github" / "skills" / "my-skill").exists()
+
+    def test_integrate_sub_skills_uses_manifest_namespace(self):
+        """Sub-skills inherit the package namespace."""
+        package_dir = self.project_root / "bundle"
+        sub_skill = package_dir / ".apm" / "skills" / "helper"
+        sub_skill.mkdir(parents=True)
+        (sub_skill / "SKILL.md").write_text("# Helper")
+
+        package_info = self._create_package_info(
+            name="bundle",
+            install_path=package_dir,
+            package_type=PackageType.APM_PACKAGE,
+            namespace="acme",
+        )
+
+        result = self.integrator.integrate_package_skill(
+            package_info, self.project_root
+        )
+
+        assert result.sub_skills_promoted == 1
+        assert (
+            self.project_root / ".github" / "skills" / "acme" / "helper" / "SKILL.md"
+        ).exists()
+        assert not (self.project_root / ".github" / "skills" / "helper").exists()
     
     def test_integrate_package_skill_multiple_virtual_file_packages_no_collision(self):
         """Test that multiple virtual FILE packages from same repo don't create conflicting Skills.

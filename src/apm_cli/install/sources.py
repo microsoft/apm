@@ -215,6 +215,8 @@ class LocalDependencySource(DependencySource):
 
         if local_info.package_type:
             ctx.package_types[dep_key] = local_info.package_type.value
+        if getattr(local_info.package, "namespace", None):
+            ctx.package_namespaces[dep_key] = local_info.package.namespace
 
         return Materialization(
             package_info=local_info,
@@ -360,6 +362,8 @@ class CachedDependencySource(DependencySource):
             ctx.package_hashes[dep_key] = _compute_hash(install_path)
         if cached_package_info.package_type:
             ctx.package_types[dep_key] = cached_package_info.package_type.value
+        if getattr(cached_package_info.package, "namespace", None):
+            ctx.package_namespaces[dep_key] = cached_package_info.package.namespace
 
         return Materialization(
             package_info=cached_package_info,
@@ -528,6 +532,8 @@ class FreshDependencySource(DependencySource):
 
             if hasattr(package_info, "package_type") and package_info.package_type:
                 ctx.package_types[dep_key] = package_info.package_type.value
+            if getattr(package_info.package, "namespace", None):
+                ctx.package_namespaces[dep_key] = package_info.package.namespace
 
             if hasattr(package_info, "package_type"):
                 package_type = package_info.package_type

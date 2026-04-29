@@ -34,6 +34,7 @@ class LockedDependency:
     depth: int = 1
     resolved_by: Optional[str] = None
     package_type: Optional[str] = None
+    namespace: Optional[str] = None
     deployed_files: List[str] = field(default_factory=list)
     deployed_file_hashes: Dict[str, str] = field(default_factory=dict)
     source: Optional[str] = None  # "local" for local deps, None/absent for remote
@@ -78,6 +79,8 @@ class LockedDependency:
             result["resolved_by"] = self.resolved_by
         if self.package_type:
             result["package_type"] = self.package_type
+        if self.namespace:
+            result["namespace"] = self.namespace
         if self.deployed_files:
             result["deployed_files"] = sorted(self.deployed_files)
         if self.deployed_file_hashes:
@@ -143,6 +146,7 @@ class LockedDependency:
             depth=data.get("depth", 1),
             resolved_by=data.get("resolved_by"),
             package_type=data.get("package_type"),
+            namespace=data.get("namespace"),
             deployed_files=deployed_files,
             deployed_file_hashes=dict(data.get("deployed_file_hashes") or {}),
             source=data.get("source"),

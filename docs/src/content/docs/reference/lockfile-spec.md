@@ -78,9 +78,9 @@ dependencies:
     version: "2.1.0"
     depth: 1
     package_type: apm_package
+    namespace: acme
     deployed_files:
-      - .github/instructions/security.instructions.md
-      - .github/agents/security-auditor.agent.md
+      - .github/skills/acme/security-review
 
   - repo_url: https://github.com/acme-corp/common-prompts
     resolved_commit: f6e5d4c3b2a1098765432109876543210fedcba9
@@ -121,6 +121,7 @@ fields:
 | `depth` | integer | MUST | Dependency depth. `1` = direct dependency, `2`+ = transitive. |
 | `resolved_by` | string | MAY | `repo_url` of the parent that introduced this transitive dependency. Present only when `depth >= 2`. |
 | `package_type` | string | MUST | Package type: `apm_package`, `plugin`, `virtual`, or other registered types. |
+| `namespace` | string | MAY | Manifest-declared namespace applied to package-owned skills. Omitted for legacy flat installs. |
 | `content_hash` | string | MAY | SHA-256 hash of the package file tree, in the format `"sha256:<hex>"`. Used to verify cached packages on subsequent installs. Omitted for local path dependencies. See [section 4.4](#44-content-integrity). |
 | `is_dev` | boolean | MAY | `true` if the dependency was resolved through [`devDependencies`](../manifest-schema/#5-devdependencies). Omitted when `false`. Dev deps are excluded from `apm pack --format plugin` bundles. |
 | `deployed_files` | array of strings | MUST | Every file path APM deployed for this dependency, relative to project root. |

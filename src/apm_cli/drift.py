@@ -244,17 +244,25 @@ def build_download_ref(
         locked_dep = existing_lockfile.get_dependency(dep_ref.get_unique_key())
         if locked_dep:
             overrides: Dict[str, Any] = {}
+            locked_host = getattr(locked_dep, "host", None)
+            locked_registry_prefix = getattr(locked_dep, "registry_prefix", None)
+            locked_resolved_ref = getattr(locked_dep, "resolved_ref", None)
 
             # Prefer the lockfile host so re-installs fetch from the exact same
             # source (proxy host preserved) — fixes air-gapped reproducibility.
             # When registry_prefix is set, also restore the artifactory_prefix
             # field on dep_ref so the downloader takes the proxy code-path and
             # uses PROXY_REGISTRY_TOKEN for auth instead of the GitHub PAT.
-            if locked_dep.registry_prefix and locked_dep.host:
-                overrides["host"] = locked_dep.host
-                overrides["artifactory_prefix"] = locked_dep.registry_prefix
-            elif isinstance(getattr(locked_dep, "host", None), str) and locked_dep.host != dep_ref.host:
-                overrides["host"] = locked_dep.host
+            if (
+                isinstance(locked_registry_prefix, str)
+                and locked_registry_prefix
+                and isinstance(locked_host, str)
+                and locked_host
+            ):
+                overrides["host"] = locked_host
+                overrides["artifactory_prefix"] = locked_registry_prefix
+            elif isinstance(locked_host, str) and locked_host != dep_ref.host:
+                overrides["host"] = locked_host
 
             if getattr(locked_dep, "is_insecure", False) is True:
                 overrides["is_insecure"] = True
@@ -267,8 +275,14 @@ def build_download_ref(
                 overrides["reference"] = locked_dep.resolved_commit
             # For proxy deps without a commit SHA (Artifactory zip archives),
             # preserve the locked ref so we download the same ref on replay.
-            elif locked_dep.registry_prefix and locked_dep.resolved_ref and not dep_ref.reference:
-                overrides["reference"] = locked_dep.resolved_ref
+            elif (
+                isinstance(locked_registry_prefix, str)
+                and locked_registry_prefix
+                and isinstance(locked_resolved_ref, str)
+                and locked_resolved_ref
+                and not dep_ref.reference
+            ):
+                overrides["reference"] = locked_resolved_ref
 
             if overrides:
                 return _dataclass_replace(dep_ref, **overrides)
