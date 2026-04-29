@@ -720,7 +720,8 @@ class MarketplaceBuilder:
                 if meta.get("version"):
                     plugin["version"] = meta["version"]
 
-            plugin["tags"] = list(pkg.tags)
+            if pkg.tags:
+                plugin["tags"] = list(pkg.tags)
 
             if is_local:
                 # Anthropic spec: local sources are emitted as plain
