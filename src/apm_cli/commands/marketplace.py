@@ -228,35 +228,46 @@ marketplace.add_command(package)
 # ---------------------------------------------------------------------------
 
 
-@marketplace.command(help="Scaffold a new marketplace.yml in the current directory")
-@click.option("--force", is_flag=True, help="Overwrite existing marketplace.yml")
+@marketplace.command(help="Add a 'marketplace:' block to apm.yml (scaffolds apm.yml if missing)")
+@click.option("--force", is_flag=True, help="Overwrite an existing 'marketplace:' block in apm.yml")
 @click.option(
     "--no-gitignore-check",
     is_flag=True,
     help="Skip the .gitignore staleness check",
 )
-@click.option("--name", default=None, help="Marketplace name (default: my-marketplace)")
+@click.option("--name", default=None, help="Marketplace/package name (default: my-marketplace)")
 @click.option("--owner", default=None, help="Owner name for the marketplace")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def init(force, no_gitignore_check, name, owner, verbose):
-    """Scaffold marketplace authoring config (apm.yml block or legacy file)."""
+    """Scaffold a 'marketplace:' block in apm.yml (creates apm.yml if absent)."""
     _require_authoring_flag()
-    from ..marketplace.init_template import (
-        render_marketplace_block,
-        render_marketplace_yml_template,
-    )
+    from ..marketplace.init_template import render_marketplace_block
 
     logger = CommandLogger("marketplace-init", verbose=verbose)
     cwd = Path.cwd()
     apm_path = cwd / "apm.yml"
-    yml_path = cwd / "marketplace.yml"
 
-    # Strategy:
-    # 1. If apm.yml exists, inject a 'marketplace:' block into it.
-    # 2. Otherwise, fall back to scaffolding a legacy marketplace.yml so
-    #    users without an apm.yml in their project still have an
-    #    onboarding path.
-    if apm_path.exists():
+    # If apm.yml is missing, scaffold a minimal one with the marketplace
+    # block included. Per design: marketplace authoring is folded into
+    # apm.yml; no new marketplace.yml files are created.
+    if not apm_path.exists():
+        scaffold_name = name or "my-marketplace"
+        scaffold_text = (
+            f"name: {scaffold_name}\n"
+            f"version: 0.1.0\n"
+            f"description: A short description of what this repo offers\n"
+        )
+        try:
+            apm_path.write_text(scaffold_text, encoding="utf-8")
+        except OSError as exc:
+            logger.error(f"Failed to write apm.yml: {exc}", symbol="error")
+            sys.exit(1)
+        logger.success("Created apm.yml", symbol="check")
+        if verbose:
+            logger.verbose_detail(f"    Path: {apm_path}")
+
+    # apm.yml now exists -- inject the 'marketplace:' block.
+    if True:
         # Inject marketplace block into apm.yml.
         try:
             from ruamel.yaml import YAML
@@ -305,40 +316,6 @@ def init(force, no_gitignore_check, name, owner, verbose):
             "Edit the 'marketplace:' block in apm.yml to add your packages",
             "Run 'apm marketplace build' to generate .claude-plugin/marketplace.json",
             "Commit BOTH apm.yml and the generated marketplace.json",
-        ]
-    else:
-        # Legacy fallback: scaffold marketplace.yml.
-        if yml_path.exists() and not force:
-            logger.error(
-                "marketplace.yml already exists. Use --force to overwrite.",
-                symbol="error",
-            )
-            sys.exit(1)
-
-        template_text = render_marketplace_yml_template(name=name, owner=owner)
-        try:
-            yml_path.write_text(template_text, encoding="utf-8")
-        except OSError as exc:
-            logger.error(f"Failed to write marketplace.yml: {exc}", symbol="error")
-            sys.exit(1)
-
-        logger.success("Created marketplace.yml", symbol="check")
-        if verbose:
-            logger.verbose_detail(f"    Path: {yml_path}")
-        logger.warning(
-            "marketplace.yml is the legacy authoring shape. "
-            "Run 'apm init' first to create an apm.yml, then "
-            "'apm marketplace migrate' to consolidate.",
-            symbol="warning",
-        )
-
-        if not no_gitignore_check:
-            _check_gitignore_for_marketplace_json(logger)
-
-        next_steps = [
-            "Edit marketplace.yml to add your packages",
-            "Run 'apm marketplace build' to generate marketplace.json",
-            "Commit BOTH marketplace.yml and marketplace.json",
         ]
 
     try:
