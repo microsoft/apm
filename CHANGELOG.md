@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Hook integration no longer leaks cross-target variables (`${CURSOR_PLUGIN_ROOT}`, `${PLUGIN_ROOT}`) into Claude's `settings.json`, normalises event names to each target's convention (e.g. `postToolUse` -> `PostToolUse` for Claude), and deduplicates entries from multi-file hook packages. Target-specific hook files (e.g. `cursor-hooks.json`) are now routed only to their intended target. (#1007)
 - `shared/apm.md` gh-aw workflow no longer fails the "Validate downloaded bundles match matrix manifest" step with a spurious `missing APM bundles (group did not pack successfully): apm-default` error when the matrix has exactly one credential group. `actions/download-artifact@v5+` flattens contents directly into the destination path whenever a single artifact matches the pattern (overriding `merge-multiple: false`), which collapsed the per-group subdir layout the validator expects. A new "Normalise bundle layout" step re-creates the expected `apm-<group_id>/` directory in the single-group case before validation runs. (#1051)
 - `apm install` and `apm compile` no longer exit 0 with success messages when `target:` in `apm.yml` is a CSV string -- the value now parses identically to the same input on `--target`, and zero-target resolution surfaces a warning instead of a silent no-op. (#820)
 - Remove redundant `seen` set from `_scan_patterns()` discovery walk (#918)

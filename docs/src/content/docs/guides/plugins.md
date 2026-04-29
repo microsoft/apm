@@ -209,6 +209,24 @@ By default APM looks for `agents/`, `skills/`, `commands/`, and `hooks/` directo
 - For **agents**, directory contents are flattened into `.apm/agents/` (agents are flat files, not named directories)
 - `hooks` also accepts an inline object: `"hooks": {"hooks": {"PreToolUse": [...]}}`
 
+##### Target-specific hook files
+
+When a package ships hooks for multiple tools, use target-specific filenames so
+each tool receives only its own hooks:
+
+| Filename pattern | Deployed to |
+|---|---|
+| `*-copilot-hooks.json` | GitHub Copilot only |
+| `*-cursor-hooks.json` | Cursor only |
+| `*-claude-hooks.json` | Claude Code only |
+| `*-codex-hooks.json` | Codex CLI only |
+| `*-gemini-hooks.json` | Gemini CLI only |
+| `hooks.json` or other non-target `*-hooks.json` names | All targets |
+
+For example, a package with `copilot-hooks.json`, `cursor-hooks.json`, and
+`hooks.json` routes the named files to their target while `hooks.json` deploys
+everywhere.
+
 #### MCP Server Definitions
 
 Plugins can ship MCP servers that are automatically deployed through APM's MCP pipeline. Define servers using `mcpServers` in `plugin.json`:
