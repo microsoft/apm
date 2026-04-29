@@ -347,15 +347,8 @@ def add(repo, name, branch, host, verbose):
                 )
                 sys.exit(1)
 
-            if is_valid_fqdn(parts[0]):
+            if len(parts) >= 3 and is_valid_fqdn(parts[0]):
                 # HOST/OWNER/.../REPO (N >= 3 parts, first part is hostname)
-                if len(parts) < 3:
-                    logger.error(
-                        f"Invalid format: '{repo_input}'. "
-                        f"Expected 'HOST/OWNER/REPO' when a host is included "
-                        f"(e.g., 'gitlab.com/myorg/repo')."
-                    )
-                    sys.exit(1)
                 url_host = parts[0].lower()
                 if host and host.lower() != url_host:
                     logger.error(
