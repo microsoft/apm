@@ -386,9 +386,12 @@ def compile(
 
             apm_pkg = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
             config_target = apm_pkg.target
-        except Exception:
-            # No apm.yml or parsing error - proceed with auto-detection
+        except FileNotFoundError:
             pass
+        except Exception as exc:
+            logger.warning(
+                f"Could not load apm.yml: {exc}. Proceeding with auto-detection."
+            )
 
         # Resolve list targets to compiler-understood string
         compile_target = _resolve_compile_target(target)
@@ -469,14 +472,17 @@ def compile(
         if result.success:
             # Handle different compilation modes
             if config.strategy == "distributed" and not single_agents:
-                # Distributed compilation results - output already shown by professional formatter
-                # Just show final success message
                 if dry_run:
-                    # Success message for dry run already included in formatter output
                     pass
                 else:
-                    # Success message for actual compilation
-                    logger.success("Compilation completed successfully!", symbol="check")
+                    _files_written = getattr(result, "files_written", None)
+                    if _files_written is not None and _files_written == 0:
+                        logger.warning(
+                            "Compilation produced no output files. "
+                            "Check that .apm/ contains instruction or chatmode files."
+                        )
+                    else:
+                        logger.success("Compilation completed successfully!", symbol="check")
 
             else:
                 # Traditional single-file compilation - keep existing logic

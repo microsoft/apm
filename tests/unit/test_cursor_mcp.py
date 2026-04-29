@@ -317,6 +317,65 @@ class TestCursorClientAdapter(unittest.TestCase):
         self.assertNotIn("tools", config)
         self.assertNotIn("id", config)
 
+    def test_tools_override_stripped_for_cursor(self):
+        """_apm_tools_override should be applied by parent but stripped for Cursor."""
+        server_info = {
+            "name": "my-cli",
+            "_raw_stdio": {"command": "./cli", "args": ["mcp"]},
+            "_apm_tools_override": ["specific-tool"],
+        }
+        config = self.adapter._format_server_config(server_info)
+        self.assertNotIn("tools", config)
+
+    def test_empty_env_omitted_from_stdio_output(self):
+        """Empty env dict should not appear in stdio config output."""
+        server_info = {
+            "name": "my-cli",
+            "_raw_stdio": {
+                "command": "./my-cli",
+                "args": ["mcp"],
+            },
+        }
+        config = self.adapter._format_server_config(server_info)
+        self.assertEqual(config["type"], "stdio")
+        self.assertNotIn("env", config)
+
+    def test_runtime_label_is_cursor(self):
+        """Cursor adapter must report 'Cursor' as its runtime label."""
+        self.assertEqual(self.adapter._runtime_label, "Cursor")
+
+    def test_warn_input_variables_uses_cursor_label(self):
+        """_warn_input_variables should reference 'Cursor', not 'Copilot CLI'."""
+        server_info = {
+            "name": "my-cli",
+            "_raw_stdio": {
+                "command": "./my-cli",
+                "args": ["mcp"],
+                "env": {"API_TOKEN": "${input:api-token}"},
+            },
+        }
+        import io
+        from unittest.mock import patch as _patch
+
+        buf = io.StringIO()
+        with _patch("sys.stdout", buf):
+            self.adapter._format_server_config(server_info)
+        output = buf.getvalue()
+        self.assertIn("Cursor", output)
+        self.assertNotIn("Copilot CLI", output)
+
+    @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")
+    def test_no_packages_no_remotes_returns_false(self, mock_find):
+        """Server with no packages and no remotes should fail gracefully."""
+        mock_find.return_value = {
+            "id": "empty-uuid",
+            "name": "empty-srv",
+            "packages": [],
+            "remotes": [],
+        }
+        ok = self.adapter.configure_mcp_server("empty-srv", "empty-srv")
+        self.assertFalse(ok)
+
 
 class TestMCPIntegratorCursorStaleCleanup(unittest.TestCase):
     """remove_stale() cleans .cursor/mcp.json."""

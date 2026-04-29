@@ -31,11 +31,14 @@ class CursorClientAdapter(CopilotClientAdapter):
       (GitHub auth, header env-var resolution, ``_warn_input_variables``, etc.)
     - Translates Cursor-incompatible fields:
       - ``type: "local"`` becomes ``"stdio"`` (Cursor schema)
-      - ``sse/streamable-http`` transports normalized to ``"http"``
       - Copilot-specific ``tools`` and ``id`` fields stripped
+    - Security: resolved Bearer tokens and env-var secrets are replaced with
+      ``${env:...}`` references so credentials never touch the repo-local
+      ``.cursor/mcp.json`` file.
     """
 
     supports_user_scope: bool = False
+    _runtime_label: str = "Cursor"
 
     # ------------------------------------------------------------------ #
     # Config path
@@ -174,14 +177,37 @@ class CursorClientAdapter(CopilotClientAdapter):
         if config.get("type") == "local":
             config["type"] = "stdio"
 
-        # Security: for GitHub MCP servers, replace the literal Bearer token
-        # that the parent injected with an env-var reference.  This mirrors
-        # the VS Code adapter's approach of not persisting secrets to disk.
-        remote = (server_info.get("remotes") or [{}])[0]
-        if self._is_github_server(server_info.get("name", ""), remote.get("url", "")):
-            headers = config.get("headers", {})
-            auth = headers.get("Authorization", "")
-            if auth.startswith("Bearer ") and not auth.startswith("Bearer ${"):
-                headers["Authorization"] = "Bearer ${env:GITHUB_TOKEN}"
+        # Security: .cursor/mcp.json is repo-local and may be committed to
+        # version control.  Any header value that the parent resolved from
+        # an environment variable placeholder (<VAR>) must NOT be written
+        # as plaintext.  Replace resolved Bearer tokens with env-var
+        # references and strip other resolved secrets entirely.
+        _headers = config.get("headers", {})
+        if _headers:
+            remote = (server_info.get("remotes") or [{}])[0]
+            _is_gh = self._is_github_server(
+                server_info.get("name", ""), remote.get("url", "")
+            )
+            _keys_to_strip = []
+            for _hname, _hval in _headers.items():
+                if _is_gh and _hname == "Authorization":
+                    _auth = str(_hval)
+                    if _auth.startswith("Bearer ") and not _auth.startswith(
+                        "Bearer ${"
+                    ):
+                        _headers[_hname] = "Bearer ${env:GITHUB_TOKEN}"
+                elif isinstance(_hval, str) and not _hval.startswith("${"):
+                    _raw_headers = remote.get("headers", []) if remote else []
+                    _was_placeholder = any(
+                        h.get("name") == _hname
+                        and ("<" in h.get("value", "") or "${" in h.get("value", ""))
+                        for h in _raw_headers
+                    )
+                    if _was_placeholder:
+                        _keys_to_strip.append(_hname)
+            for _k in _keys_to_strip:
+                del _headers[_k]
+            if not _headers:
+                config.pop("headers", None)
 
         return config

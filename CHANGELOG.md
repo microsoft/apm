@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Cursor adapter: refactor `_format_server_config` from a ~100-line copy-paste fork to a `super()` + transform pattern (~15 lines). This restores GitHub MCP auto-auth, header env-var resolution, `_warn_input_variables`, and `_apm_tools_override` that were silently dropped in the initial Cursor integration. Fixes #844.
+- Cursor adapter: refactor `_format_server_config` from a ~100-line copy-paste fork to a `super()` + transform pattern (~15 lines). This restores header env-var resolution, `_warn_input_variables`, and `_apm_tools_override` that were silently dropped in the initial Cursor integration. For security, resolved Bearer tokens are replaced with `${env:GITHUB_TOKEN}` references so credentials never touch the repo-local `.cursor/mcp.json` file. Fixes #844.
 - Cursor adapter: update module and class docstrings to document the delegate-then-transform pattern (matching `OpenCodeClientAdapter`), and replace non-ASCII em dashes with ASCII.
 - Policy parser: catch `ValueError` alongside `OSError` in `load_policy()` `Path.is_file()` guard to tolerate invalid path strings (e.g. embedded NUL bytes) without crashing. Closes #848.
 - Rename `DownloadStrategyManager` to `DownloadDelegate` to better reflect Facade/Delegate pattern (#918)

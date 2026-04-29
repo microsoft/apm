@@ -120,6 +120,6 @@ class MCPClientAdapter(ABC):
                 seen.add(var_id)
                 print(
                     f"[!]  Warning: ${{input:{var_id}}} in server "
-                    f"'{server_name}' will not be resolved \u2014 "
+                    f"'{server_name}' will not be resolved -- "
                     f"{runtime_label} does not support input variable prompts"
                 )
