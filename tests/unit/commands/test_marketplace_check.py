@@ -356,7 +356,7 @@ class TestCheckDuplicateNames:
     """Defence-in-depth duplicate name check in the check command."""
 
     @patch("apm_cli.commands.marketplace.RefResolver")
-    @patch("apm_cli.commands.marketplace.load_marketplace_yml")
+    @patch("apm_cli.commands.marketplace.load_marketplace_config")
     def test_duplicate_names_warned(
         self, mock_load, MockResolver, runner, tmp_path, monkeypatch,
     ):
@@ -391,7 +391,7 @@ class TestCheckDuplicateNames:
         assert "Duplicate package name 'learning'" in result.output
 
     @patch("apm_cli.commands.marketplace.RefResolver")
-    @patch("apm_cli.commands.marketplace.load_marketplace_yml")
+    @patch("apm_cli.commands.marketplace.load_marketplace_config")
     def test_no_warning_when_unique(
         self, mock_load, MockResolver, runner, tmp_path, monkeypatch,
     ):
