@@ -35,11 +35,17 @@ def _load_raw_apm_yml(project_root: Path) -> Optional[dict]:
     try:
         with open(apm_yml_path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
+    except FileNotFoundError:
+        # TOCTOU: file disappeared between exists() check and open(); normal condition.
+        return None
     except yaml.YAMLError as exc:
         _logger.warning("Malformed YAML in %s: %s", apm_yml_path, exc)
         return None
     except OSError as exc:
         _logger.warning("Cannot read %s: %s", apm_yml_path, exc)
+        return None
+    except UnicodeDecodeError as exc:
+        _logger.warning("Cannot decode %s as UTF-8: %s", apm_yml_path, exc)
         return None
     if not isinstance(data, dict):
         _logger.warning(
@@ -954,7 +960,7 @@ def run_policy_checks(
     try:
         clear_apm_yml_cache()
         manifest = APMPackage.from_apm_yml(apm_yml_path)
-    except (ValueError, yaml.YAMLError) as exc:
+    except (ValueError, yaml.YAMLError, OSError) as exc:
         result.checks.append(
             CheckResult(
                 name="manifest-parse",

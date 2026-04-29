@@ -46,7 +46,7 @@ def _check_lockfile_exists(project_root: Path) -> CheckResult:
 
     try:
         manifest = APMPackage.from_apm_yml(apm_yml_path)
-    except (ValueError, yaml.YAMLError) as exc:
+    except (ValueError, yaml.YAMLError, OSError) as exc:
         return CheckResult(
             name="manifest-parse",
             passed=False,
