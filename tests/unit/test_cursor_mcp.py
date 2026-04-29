@@ -159,6 +159,28 @@ class TestMCPIntegratorCursorStaleCleanup(unittest.TestCase):
         MCPIntegrator.remove_stale({"stale"}, runtime="cursor")
         # No exception is the assertion
 
+    def test_remove_stale_cursor_uses_explicit_project_root(self):
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        other_root = Path(self.tmp.name) / "nested-project"
+        cursor_dir = other_root / ".cursor"
+        cursor_dir.mkdir(parents=True)
+        mcp_json = cursor_dir / "mcp.json"
+        mcp_json.write_text(
+            json.dumps({"mcpServers": {"keep": {"command": "k"}, "stale": {"command": "s"}}}),
+            encoding="utf-8",
+        )
+
+        MCPIntegrator.remove_stale(
+            {"stale"},
+            runtime="cursor",
+            project_root=other_root,
+        )
+
+        data = json.loads(mcp_json.read_text(encoding="utf-8"))
+        self.assertIn("keep", data["mcpServers"])
+        self.assertNotIn("stale", data["mcpServers"])
+
 
 if __name__ == "__main__":
     unittest.main()

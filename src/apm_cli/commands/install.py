@@ -61,7 +61,7 @@ from apm_cli.install.phases.local_content import (
     _has_local_apm_content,
     _project_has_root_primitives,
 )
-from apm_cli.install.errors import DirectDependencyError, PolicyViolationError
+from apm_cli.install.errors import AuthenticationError, DirectDependencyError, PolicyViolationError
 from apm_cli.install.insecure_policy import (
     _InsecureDependencyInfo,
     _allow_insecure_host_callback,
@@ -1547,6 +1547,12 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
     except InsecureDependencyPolicyError:
         _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
         sys.exit(1)
+    except AuthenticationError as e:
+        _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
+        _rich_error(str(e))
+        if e.diagnostic_context:
+            _rich_echo(e.diagnostic_context)
+        sys.exit(1)
     except DirectDependencyError as e:
         _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
         logger.error(str(e))
@@ -1679,7 +1685,7 @@ def _install_apm_packages(ctx, outcome):
 
     # Also enter the APM install path when the project root has local .apm/
     # primitives, even if there are no external APM dependencies (#714).
-    from apm_cli.core.scope import get_deploy_root as _get_deploy_root
+    from apm_cli.core.scope import InstallScope, get_deploy_root as _get_deploy_root
     _cli_project_root = _get_deploy_root(ctx.scope)
 
     apm_diagnostics = None
@@ -1716,6 +1722,13 @@ def _install_apm_packages(ctx, outcome):
             apm_diagnostics = install_result.diagnostics
         except InsecureDependencyPolicyError:
             _maybe_rollback_manifest(ctx.snapshot_manifest_path, ctx.manifest_snapshot, logger)
+            sys.exit(1)
+        except AuthenticationError as e:
+            # #1015: render auth diagnostics on the DEFAULT path (not --verbose).
+            _maybe_rollback_manifest(ctx.snapshot_manifest_path, ctx.manifest_snapshot, logger)
+            _rich_error(str(e))
+            if e.diagnostic_context:
+                _rich_echo(e.diagnostic_context)
             sys.exit(1)
         except Exception as e:
             _maybe_rollback_manifest(ctx.snapshot_manifest_path, ctx.manifest_snapshot, logger)
@@ -1782,10 +1795,18 @@ def _install_apm_packages(ctx, outcome):
     # Continue with MCP installation (existing logic)
     mcp_count = 0
     new_mcp_servers: builtins.set = builtins.set()
+    mcp_apm_config = {
+        "target": apm_package.target,
+        "scripts": apm_package.scripts or {},
+    }
     if should_install_mcp and mcp_deps:
         mcp_count = MCPIntegrator.install(
             mcp_deps, ctx.runtime, ctx.exclude, ctx.verbose,
             stored_mcp_configs=old_mcp_configs,
+            apm_config=mcp_apm_config,
+            project_root=ctx.project_root,
+            user_scope=(ctx.scope is InstallScope.USER),
+            explicit_target=ctx.target,
             diagnostics=apm_diagnostics,
             scope=ctx.scope,
         )
@@ -1795,14 +1816,28 @@ def _install_apm_packages(ctx, outcome):
         # Remove stale MCP servers that are no longer needed
         stale_servers = old_mcp_servers - new_mcp_servers
         if stale_servers:
-            MCPIntegrator.remove_stale(stale_servers, ctx.runtime, ctx.exclude, scope=ctx.scope)
+            MCPIntegrator.remove_stale(
+                stale_servers,
+                ctx.runtime,
+                ctx.exclude,
+                project_root=ctx.project_root,
+                user_scope=(ctx.scope is InstallScope.USER),
+                scope=ctx.scope,
+            )
 
         # Persist the new MCP server set and configs in the lockfile
         MCPIntegrator.update_lockfile(new_mcp_servers, mcp_configs=new_mcp_configs)
     elif should_install_mcp and not mcp_deps:
         # No MCP deps at all -- remove any old APM-managed servers
         if old_mcp_servers:
-            MCPIntegrator.remove_stale(old_mcp_servers, ctx.runtime, ctx.exclude, scope=ctx.scope)
+            MCPIntegrator.remove_stale(
+                old_mcp_servers,
+                ctx.runtime,
+                ctx.exclude,
+                project_root=ctx.project_root,
+                user_scope=(ctx.scope is InstallScope.USER),
+                scope=ctx.scope,
+            )
             MCPIntegrator.update_lockfile(builtins.set(), mcp_configs={})
         logger.verbose_detail("No MCP dependencies found in apm.yml")
     elif not should_install_mcp and old_mcp_servers:

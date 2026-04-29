@@ -1,21 +1,36 @@
 """Core operations for APM."""
 
+from pathlib import Path
+
 from ..factory import ClientFactory, PackageManagerFactory
 from .safe_installer import SafeMCPInstaller
 
 
-def configure_client(client_type, config_updates):
+def configure_client(
+    client_type,
+    config_updates,
+    project_root: Path | str | None = None,
+    user_scope: bool = False,
+):
     """Configure an MCP client.
     
     Args:
         client_type (str): Type of client to configure.
         config_updates (dict): Configuration updates to apply.
+        project_root (str | Path | None): Project root used to resolve
+            project-local client config paths.
+        user_scope (bool): Whether to update user-scope config instead of
+            project-local config for runtimes that support it.
     
     Returns:
         bool: True if successful, False otherwise.
     """
     try:
-        client = ClientFactory.create_client(client_type)
+        client = ClientFactory.create_client(
+            client_type,
+            project_root=project_root,
+            user_scope=user_scope,
+        )
         client.update_config(config_updates)
         return True
     except Exception as e:
@@ -23,7 +38,16 @@ def configure_client(client_type, config_updates):
         return False
 
 
-def install_package(client_type, package_name, version=None, shared_env_vars=None, server_info_cache=None, shared_runtime_vars=None):
+def install_package(
+    client_type,
+    package_name,
+    version=None,
+    shared_env_vars=None,
+    server_info_cache=None,
+    shared_runtime_vars=None,
+    project_root: Path | str | None = None,
+    user_scope: bool = False,
+):
     """Install an MCP package for a specific client type.
     
     Args:
@@ -33,13 +57,21 @@ def install_package(client_type, package_name, version=None, shared_env_vars=Non
         shared_env_vars (dict, optional): Pre-collected environment variables to use.
         server_info_cache (dict, optional): Pre-fetched server info to avoid duplicate registry calls.
         shared_runtime_vars (dict, optional): Pre-collected runtime variables to use.
+        project_root (str | Path | None): Project root used to resolve
+            project-local client config paths during installation.
+        user_scope (bool): Whether to install into user-scope config instead of
+            project-local config for runtimes that support it.
     
     Returns:
         dict: Result with 'success' (bool), 'installed' (bool), 'skipped' (bool) keys.
     """
     try:
         # Use safe installer with conflict detection
-        safe_installer = SafeMCPInstaller(client_type)
+        safe_installer = SafeMCPInstaller(
+            client_type,
+            project_root=project_root,
+            user_scope=user_scope,
+        )
         
         # Pass shared environment and runtime variables and server info cache if available
         if shared_env_vars is not None or server_info_cache is not None or shared_runtime_vars is not None:
@@ -69,18 +101,31 @@ def install_package(client_type, package_name, version=None, shared_env_vars=Non
         }
 
 
-def uninstall_package(client_type, package_name):
+def uninstall_package(
+    client_type,
+    package_name,
+    project_root: Path | str | None = None,
+    user_scope: bool = False,
+):
     """Uninstall an MCP package.
     
     Args:
         client_type (str): Type of client to configure.
         package_name (str): Name of the package to uninstall.
+        project_root (str | Path | None): Project root used to resolve
+            project-local client config paths during uninstall.
+        user_scope (bool): Whether to uninstall from user-scope config instead of
+            project-local config for runtimes that support it.
     
     Returns:
         bool: True if successful, False otherwise.
     """
     try:
-        client = ClientFactory.create_client(client_type)
+        client = ClientFactory.create_client(
+            client_type,
+            project_root=project_root,
+            user_scope=user_scope,
+        )
         package_manager = PackageManagerFactory.create_package_manager()
         
         # Uninstall the package

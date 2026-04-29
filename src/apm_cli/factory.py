@@ -1,5 +1,7 @@
 """Factory classes for creating adapters."""
 
+from pathlib import Path
+
 from .adapters.client.vscode import VSCodeClientAdapter
 from .adapters.client.codex import CodexClientAdapter
 from .adapters.client.copilot import CopilotClientAdapter
@@ -13,11 +15,18 @@ class ClientFactory:
     """Factory for creating MCP client adapters."""
     
     @staticmethod
-    def create_client(client_type):
+    def create_client(
+        client_type,
+        project_root: Path | str | None = None,
+        user_scope: bool = False,
+    ):
         """Create a client adapter based on the specified type.
         
         Args:
             client_type (str): Type of client adapter to create.
+            project_root: Project root used to resolve repo-local config paths.
+            user_scope: Whether the adapter should use user-scope paths instead
+                of project-local paths when supported.
         
         Returns:
             MCPClientAdapter: An instance of the specified client adapter.
@@ -38,7 +47,10 @@ class ClientFactory:
         if client_type.lower() not in clients:
             raise ValueError(f"Unsupported client type: {client_type}")
             
-        return clients[client_type.lower()]()
+        return clients[client_type.lower()](
+            project_root=project_root,
+            user_scope=user_scope,
+        )
 
 
 class PackageManagerFactory:

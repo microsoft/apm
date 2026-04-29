@@ -7,6 +7,7 @@ Click group pattern as ``mcp.py``.
 import builtins
 import json
 import os
+import re
 import subprocess
 import sys
 import traceback
@@ -38,10 +39,26 @@ from ..marketplace.publisher import (
 )
 from ..marketplace.ref_resolver import RefResolver, RemoteRef
 from ..marketplace.semver import SemVer, parse_semver, satisfies_range
+from ..marketplace.migration import (
+    ConfigSource,
+    detect_config_source,
+    load_marketplace_config,
+    migrate_marketplace_yml,
+)
 from ..marketplace.yml_schema import load_marketplace_yml
 from ..utils.path_security import PathTraversalError, validate_path_segments
 from ..utils.console import _rich_info, _rich_warning
 from ._helpers import _get_console, _is_interactive
+
+
+# Marketplace alias must satisfy this pattern so it can appear on the right of
+# ``@`` in ``apm install <plugin>@<marketplace>`` syntax.
+_ALIAS_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
+
+
+def _is_valid_alias(value: str) -> bool:
+    """Return True when ``value`` is a legal marketplace alias."""
+    return bool(value) and _ALIAS_PATTERN.match(value) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -53,22 +70,25 @@ class MarketplaceGroup(click.Group):
     """Custom group that organises commands by audience."""
 
     _consumer_commands = ["add", "list", "browse", "update", "remove", "validate"]
-    _authoring_commands = ["init", "build", "check", "outdated", "doctor", "publish", "package"]
+    _authoring_commands = ["init", "check", "outdated", "doctor", "publish", "package"]
 
-    @staticmethod
-    def _authoring_visible() -> bool:
-        """Return True when authoring commands should appear in ``--help``."""
-        try:
-            from ..core.experimental import is_enabled
-
-            return is_enabled("marketplace_authoring")
-        except Exception:  # noqa: BLE001 -- fail-open UI visibility check
-            return True  # fail open — show commands if flag check fails
+    def get_command(self, ctx, cmd_name):
+        # The 'build' subcommand was removed in favour of the unified
+        # 'apm pack' entrypoint. Surface a hard error with a migration
+        # hint rather than silently aliasing.
+        if cmd_name == "build":
+            raise click.UsageError(
+                "'apm marketplace build' was removed. Use 'apm pack' instead.\n"
+                "marketplace.json is now produced by 'apm pack' when "
+                "apm.yml has a 'marketplace:' block."
+            )
+        return super().get_command(ctx, cmd_name)
 
     def format_commands(self, ctx, formatter):
-        sections = [("Consumer commands", self._consumer_commands)]
-        if self._authoring_visible():
-            sections.append(("Authoring commands", self._authoring_commands))
+        sections = [
+            ("Consumer commands", self._consumer_commands),
+            ("Authoring commands", self._authoring_commands),
+        ]
 
         for section_name, cmd_names in sections:
             commands = []
@@ -112,6 +132,32 @@ def _load_yml_or_exit(logger):
         sys.exit(2)
 
 
+def _load_config_or_exit(logger):
+    """Load the marketplace config from CWD (apm.yml or legacy marketplace.yml).
+
+    Returns ``(project_root, config)``.  Exits with code 1 when no config
+    is found or both files coexist; exits with code 2 on validation errors.
+    Emits a deprecation warning when the legacy file is in use.
+    """
+    project_root = Path.cwd()
+    try:
+        config = load_marketplace_config(
+            project_root,
+            warn_callback=lambda msg: logger.warning(msg, symbol="warning"),
+        )
+    except MarketplaceYmlError as exc:
+        msg = str(exc)
+        if msg.startswith("No marketplace config"):
+            logger.error(msg, symbol="error")
+            sys.exit(1)
+        if msg.startswith("Both apm.yml"):
+            logger.error(msg, symbol="error")
+            sys.exit(1)
+        logger.error(f"marketplace config error: {exc}", symbol="error")
+        sys.exit(2)
+    return project_root, config
+
+
 def _warn_duplicate_names(logger, yml):
     """Emit a warning for each duplicate package name in *yml*."""
     seen: dict[str, int] = {}
@@ -144,30 +190,6 @@ def _find_duplicate_names(yml):
         return f"Duplicate names: {', '.join(duplicates)}"
     return ""
 
-def _require_authoring_flag():
-    """Exit with enablement hint if marketplace-authoring flag is disabled."""
-    from ..core.experimental import is_enabled
-
-    if not is_enabled("marketplace_authoring"):
-        _rich_warning(
-            "Marketplace authoring commands are experimental.",
-            symbol="warning",
-        )
-        _rich_info(
-            "Enable with: apm experimental enable marketplace-authoring",
-            symbol="info",
-        )
-        _rich_info(
-            "Learn more:  apm experimental list",
-            symbol="info",
-        )
-        _rich_info(
-            "Docs: https://microsoft.github.io/apm/guides/marketplace-authoring/",
-            symbol="info",
-        )
-        sys.exit(1)
-
-
 @click.group(cls=MarketplaceGroup, help="Manage marketplaces for discovery and governance")
 @click.pass_context
 def marketplace(ctx):
@@ -184,55 +206,111 @@ marketplace.add_command(package)
 # ---------------------------------------------------------------------------
 
 
-@marketplace.command(help="Scaffold a new marketplace.yml in the current directory")
-@click.option("--force", is_flag=True, help="Overwrite existing marketplace.yml")
+@marketplace.command(help="Add a 'marketplace:' block to apm.yml (scaffolds apm.yml if missing)")
+@click.option("--force", is_flag=True, help="Overwrite an existing 'marketplace:' block in apm.yml")
 @click.option(
     "--no-gitignore-check",
     is_flag=True,
     help="Skip the .gitignore staleness check",
 )
-@click.option("--name", default=None, help="Marketplace name (default: my-marketplace)")
+@click.option("--name", default=None, help="Marketplace/package name (default: my-marketplace)")
 @click.option("--owner", default=None, help="Owner name for the marketplace")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def init(force, no_gitignore_check, name, owner, verbose):
-    """Create a richly-commented marketplace.yml scaffold."""
-    _require_authoring_flag()
-    from ..marketplace.init_template import render_marketplace_yml_template
+    """Scaffold a 'marketplace:' block in apm.yml (creates apm.yml if absent)."""
+    from ..marketplace.init_template import render_marketplace_block
 
     logger = CommandLogger("marketplace-init", verbose=verbose)
-    yml_path = Path.cwd() / "marketplace.yml"
+    cwd = Path.cwd()
+    apm_path = cwd / "apm.yml"
+    scaffolded_apm_yml = False
 
-    # Guard: file already exists
-    if yml_path.exists() and not force:
-        logger.error(
-            "marketplace.yml already exists. Use --force to overwrite.",
-            symbol="error",
+    # If apm.yml is missing, scaffold a minimal one with the marketplace
+    # block included. Per design: marketplace authoring is folded into
+    # apm.yml; no new marketplace.yml files are created.
+    if not apm_path.exists():
+        scaffold_name = name or "my-marketplace"
+        scaffold_text = (
+            f"name: {scaffold_name}\n"
+            f"version: 0.1.0\n"
+            f"description: A short description of what this repo offers\n"
         )
-        sys.exit(1)
+        try:
+            apm_path.write_text(scaffold_text, encoding="utf-8")
+        except OSError as exc:
+            logger.error(f"Failed to write apm.yml: {exc}", symbol="error")
+            sys.exit(1)
+        scaffolded_apm_yml = True
+        if verbose:
+            logger.verbose_detail(f"    Path: {apm_path}")
 
-    # Write template
-    template_text = render_marketplace_yml_template(name=name, owner=owner)
-    try:
-        yml_path.write_text(template_text, encoding="utf-8")
-    except OSError as exc:
-        logger.error(f"Failed to write marketplace.yml: {exc}", symbol="error")
-        sys.exit(1)
+    # apm.yml now exists -- inject the 'marketplace:' block.
+    if True:
+        # Inject marketplace block into apm.yml.
+        try:
+            from ruamel.yaml import YAML
+            rt = YAML(typ="rt")
+            rt.preserve_quotes = True
+            rt.indent(mapping=2, sequence=4, offset=2)
+            existing_text = apm_path.read_text(encoding="utf-8")
+            data = rt.load(existing_text)
+        except Exception as exc:  # noqa: BLE001 -- guard malformed apm.yml
+            logger.error(f"Failed to parse apm.yml: {exc}", symbol="error")
+            sys.exit(1)
 
-    logger.success("Created marketplace.yml", symbol="check")
+        # An empty apm.yml round-trips to None; treat it as an empty
+        # mapping so the marketplace block can still be inserted.
+        # A non-mapping top level (list, scalar) is a hard error.
+        if data is None:
+            from ruamel.yaml.comments import CommentedMap
+            data = CommentedMap()
+        elif not isinstance(data, dict):
+            logger.error(
+                "apm.yml must be a YAML mapping at the top level "
+                f"(got {type(data).__name__}).",
+                symbol="error",
+            )
+            sys.exit(1)
 
-    if verbose:
-        logger.verbose_detail(f"    Path: {yml_path}")
+        if "marketplace" in data and data["marketplace"] is not None \
+                and not force:
+            logger.warning(
+                "apm.yml already has a 'marketplace:' block. Use --force to overwrite.",
+                symbol="warning",
+            )
+            sys.exit(1)
 
-    # .gitignore staleness check
-    if not no_gitignore_check:
-        _check_gitignore_for_marketplace_json(logger)
+        # Render the block as a YAML snippet, parse it, and inject.
+        block_text = render_marketplace_block(owner=owner)
+        block_data = rt.load(block_text)
+        # block_data is a dict with one key, 'marketplace'.
+        data["marketplace"] = block_data["marketplace"]
 
-    # Next steps panel
-    next_steps = [
-        "Edit marketplace.yml to add your packages",
-        "Run 'apm marketplace build' to generate marketplace.json",
-        "Commit BOTH marketplace.yml and marketplace.json",
-    ]
+        from io import StringIO
+        out = StringIO()
+        rt.dump(data, out)
+        try:
+            apm_path.write_text(out.getvalue(), encoding="utf-8")
+        except OSError as exc:
+            logger.error(f"Failed to write apm.yml: {exc}", symbol="error")
+            sys.exit(1)
+
+        if scaffolded_apm_yml:
+            success_msg = "Created apm.yml with 'marketplace:' block"
+        else:
+            success_msg = "Added 'marketplace:' block to apm.yml"
+        logger.success(success_msg, symbol="check")
+        if verbose:
+            logger.verbose_detail(f"    Path: {apm_path}")
+
+        if not no_gitignore_check:
+            _check_gitignore_for_marketplace_json(logger)
+
+        next_steps = [
+            "Edit the 'marketplace:' block in apm.yml to add your packages",
+            "Run 'apm pack' to generate .claude-plugin/marketplace.json",
+            "Commit BOTH apm.yml and the generated marketplace.json",
+        ]
 
     try:
         from ..utils.console import _rich_panel
@@ -268,8 +346,8 @@ def _check_gitignore_for_marketplace_json(logger):
         if stripped in patterns:
             logger.warning(
                 "Your .gitignore ignores marketplace.json. "
-                "Both marketplace.yml and marketplace.json must be tracked "
-                "in git. Remove the .gitignore rule.",
+                "Both apm.yml and the generated marketplace.json must be "
+                "tracked in git. Remove the .gitignore rule.",
                 symbol="warning",
             )
             return
@@ -336,28 +414,22 @@ def add(repo, name, branch, host, verbose):
             resolved_host = normalized_host
         else:
             resolved_host = default_host()
-        display_name = name or repo_name
 
-        # Validate name is identifier-compatible for NAME@MARKETPLACE syntax
-        import re
-
-        if not re.match(r"^[a-zA-Z0-9._-]+$", display_name):
+        # Hard-fail if the user-supplied --name flag is malformed; the
+        # manifest's name is validated softly below (publisher mistakes
+        # shouldn't break a successful add).
+        if name is not None and not _is_valid_alias(name):
             logger.error(
-                f"Invalid marketplace name: '{display_name}'. "
+                f"Invalid marketplace name: '{name}'. "
                 f"Names must only contain letters, digits, '.', '_', and '-' "
                 f"(required for 'apm install plugin@marketplace' syntax)."
             )
             sys.exit(1)
 
-        logger.start(f"Registering marketplace '{display_name}'...", symbol="gear")
-        logger.verbose_detail(f"    Repository: {owner}/{repo_name}")
-        logger.verbose_detail(f"    Branch: {branch}")
-        if resolved_host != "github.com":
-            logger.verbose_detail(f"    Host: {resolved_host}")
-
-        # Auto-detect marketplace.json location
+        # Probe for the marketplace.json location. The probe source's name
+        # is a placeholder -- _auto_detect_path only consults host/owner/repo.
         probe_source = MarketplaceSource(
-            name=display_name,
+            name=name or repo_name,
             owner=owner,
             repo=repo_name,
             branch=branch,
@@ -373,9 +445,56 @@ def add(repo, name, branch, host, verbose):
             )
             sys.exit(1)
 
-        logger.verbose_detail(f"    Detected path: {detected_path}")
+        # Fetch and validate the manifest before logging start, so that the
+        # success/start lines display the *final* alias the user must use.
+        fetch_source = MarketplaceSource(
+            name=name or repo_name,
+            owner=owner,
+            repo=repo_name,
+            branch=branch,
+            host=resolved_host,
+            path=detected_path,
+        )
+        manifest = fetch_marketplace(fetch_source, force_refresh=True)
+        plugin_count = len(manifest.plugins)
 
-        # Create source with detected path
+        # Resolve final alias: --name flag > manifest.name (if valid) > repo name.
+        # Track which tier won so we can report it in verbose mode and emit a
+        # warning when a publisher-declared name had to be rejected.
+        manifest_name = (manifest.name or "").strip()
+        if name is not None:
+            display_name = name
+            alias_source = "--name flag"
+        elif manifest_name and _is_valid_alias(manifest_name):
+            display_name = manifest_name
+            alias_source = f"manifest.name ('{manifest_name}')"
+        else:
+            display_name = repo_name
+            if manifest_name and not _is_valid_alias(manifest_name):
+                logger.warning(
+                    f"Manifest declares name '{manifest_name}' which is not a "
+                    f"valid alias (must match [a-zA-Z0-9._-]+). "
+                    f"Falling back to repo name."
+                )
+                alias_source = f"repo name (manifest.name '{manifest_name}' invalid)"
+            else:
+                alias_source = "repo name (manifest.name missing)"
+
+        # Defense-in-depth: repo names from GitHub already satisfy the alias
+        # regex, so this invariant should always hold by the time we register.
+        assert _is_valid_alias(display_name), (
+            f"Resolved marketplace alias '{display_name}' failed validation"
+        )
+
+        logger.start(f"Registering marketplace '{display_name}'...", symbol="gear")
+        logger.verbose_detail(f"    Repository: {owner}/{repo_name}")
+        logger.verbose_detail(f"    Branch: {branch}")
+        if resolved_host != "github.com":
+            logger.verbose_detail(f"    Host: {resolved_host}")
+        logger.verbose_detail(f"    Detected path: {detected_path}")
+        logger.verbose_detail(f"    Alias source: {alias_source}")
+
+        # Persist with the final alias.
         source = MarketplaceSource(
             name=display_name,
             owner=owner,
@@ -384,12 +503,6 @@ def add(repo, name, branch, host, verbose):
             host=resolved_host,
             path=detected_path,
         )
-
-        # Fetch and validate
-        manifest = fetch_marketplace(source, force_refresh=True)
-        plugin_count = len(manifest.plugins)
-
-        # Register
         add_marketplace(source)
 
         logger.success(
@@ -398,6 +511,14 @@ def add(repo, name, branch, host, verbose):
         )
         if manifest.description:
             logger.verbose_detail(f"    {manifest.description}")
+
+        # Surface the install syntax only when the alias is something the user
+        # could not have predicted from OWNER/REPO. Silence is fine otherwise.
+        if name is None and display_name != repo_name:
+            logger.progress(
+                f"Install plugins with: apm install <plugin>@{display_name}",
+                symbol="info",
+            )
 
     except Exception as e:  # noqa: BLE001 -- top-level command catch-all
         logger.error(f"Failed to register marketplace: {e}")
@@ -734,130 +855,6 @@ def validate(name, check_refs, verbose):
 # ---------------------------------------------------------------------------
 
 
-@marketplace.command(help="Build marketplace.json from marketplace.yml")
-@click.option("--dry-run", is_flag=True, help="Preview without writing marketplace.json")
-@click.option("--offline", is_flag=True, help="Use cached refs only (no network)")
-@click.option(
-    "--include-prerelease", is_flag=True, help="Include prerelease versions"
-)
-@click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
-def build(dry_run, offline, include_prerelease, verbose):
-    """Resolve packages and compile marketplace.json."""
-    _require_authoring_flag()
-    logger = CommandLogger("marketplace-build", verbose=verbose)
-    yml_path = Path.cwd() / "marketplace.yml"
-
-    # Load yml (exit 1 on missing, exit 2 on schema error)
-    _load_yml_or_exit(logger)
-
-    try:
-        opts = BuildOptions(
-            dry_run=dry_run,
-            offline=offline,
-            include_prerelease=include_prerelease,
-        )
-        builder = MarketplaceBuilder(yml_path, options=opts)
-        report = builder.build()
-    except MarketplaceYmlError as exc:
-        logger.error(f"marketplace.yml schema error: {exc}", symbol="error")
-        sys.exit(2)
-    except BuildError as exc:
-        _render_build_error(logger, exc)
-        logger.verbose_detail(traceback.format_exc())
-        sys.exit(1)
-    except Exception as e:  # noqa: BLE001 -- top-level command catch-all
-        logger.error(f"Build failed: {e}", symbol="error")
-        logger.verbose_detail(traceback.format_exc())
-        sys.exit(1)
-
-    # Render results table
-    _render_build_table(logger, report)
-
-    # Surface duplicate-name warnings from the builder
-    for warn_msg in report.warnings:
-        logger.warning(warn_msg, symbol="warning")
-
-    if dry_run:
-        logger.progress(
-            "Dry run -- marketplace.json not written", symbol="info"
-        )
-    else:
-        logger.success(
-            f"Built marketplace.json ({len(report.resolved)} packages)",
-            symbol="check",
-        )
-
-
-def _render_build_error(logger, exc):
-    """Render a BuildError with actionable hints."""
-    if isinstance(exc, GitLsRemoteError):
-        logger.error(exc.summary_text, symbol="error")
-        if exc.hint:
-            logger.progress(f"Hint: {exc.hint}", symbol="info")
-    elif isinstance(exc, NoMatchingVersionError):
-        logger.error(str(exc), symbol="error")
-        logger.progress(
-            "Check that your version range matches published tags.",
-            symbol="info",
-        )
-    elif isinstance(exc, RefNotFoundError):
-        logger.error(str(exc), symbol="error")
-        logger.progress(
-            "Verify the ref is spelled correctly and the remote is reachable.",
-            symbol="info",
-        )
-    elif isinstance(exc, HeadNotAllowedError):
-        logger.error(str(exc), symbol="error")
-    elif isinstance(exc, OfflineMissError):
-        logger.error(str(exc), symbol="error")
-        logger.progress(
-            "Run a build online first to populate the cache.",
-            symbol="info",
-        )
-    else:
-        logger.error(f"Build failed: {exc}", symbol="error")
-
-
-def _render_build_table(logger, report):
-    """Render the resolved-packages table (Rich with colorama fallback)."""
-    console = _get_console()
-    if not console:
-        # Colorama fallback
-        for pkg in report.resolved:
-            sha_short = pkg.sha[:8] if pkg.sha else "--"
-            ref_kind = "tag" if not pkg.ref.startswith("refs/heads/") else "branch"
-            logger.tree_item(
-                f"  [+] {pkg.name}  {pkg.ref}  {sha_short}  ({ref_kind})"
-            )
-        return
-
-    from rich.table import Table
-    from rich.text import Text
-
-    table = Table(
-        title="Resolved Packages",
-        show_header=True,
-        header_style="bold cyan",
-        border_style="cyan",
-    )
-    table.add_column("Status", style="green", no_wrap=True, width=6)
-    table.add_column("Package", style="bold white", no_wrap=True)
-    table.add_column("Version", style="cyan")
-    table.add_column("Commit", style="dim")
-    table.add_column("Ref Kind", style="white")
-
-    for pkg in report.resolved:
-        sha_short = pkg.sha[:8] if pkg.sha else "--"
-        # Determine ref kind
-        ref_kind = "tag"
-        if pkg.ref and not parse_semver(pkg.ref.lstrip("vV")):
-            ref_kind = "ref"
-        table.add_row(Text("[+]"), pkg.name, pkg.ref, sha_short, ref_kind)
-
-    console.print()
-    console.print(table)
-
-
 # ---------------------------------------------------------------------------
 # marketplace outdated
 # ---------------------------------------------------------------------------
@@ -871,10 +868,9 @@ def _render_build_table(logger, report):
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def outdated(offline, include_prerelease, verbose):
     """Compare installed versions against latest available tags."""
-    _require_authoring_flag()
     logger = CommandLogger("marketplace-outdated", verbose=verbose)
 
-    yml = _load_yml_or_exit(logger)
+    _, yml = _load_config_or_exit(logger)
 
     # Load current marketplace.json for "Current" column
     current_versions = _load_current_versions()
@@ -1128,10 +1124,9 @@ def _render_outdated_table(logger, rows):
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def check(offline, verbose):
     """Validate marketplace.yml and check each entry is resolvable."""
-    _require_authoring_flag()
     logger = CommandLogger("marketplace-check", verbose=verbose)
 
-    yml = _load_yml_or_exit(logger)
+    _, yml = _load_config_or_exit(logger)
 
     # Defence-in-depth: flag duplicate package names (yml_schema
     # also rejects them, but an extra check keeps diagnostics visible).
@@ -1307,7 +1302,6 @@ def _render_check_table(logger, results):
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def doctor(verbose):
     """Check git, network, auth, and marketplace.yml readiness."""
-    _require_authoring_flag()
     logger = CommandLogger("marketplace-doctor", verbose=verbose)
     checks = []
 
@@ -1413,27 +1407,46 @@ def doctor(verbose):
         informational=True,
     ))
 
-    # Check 5: marketplace.yml presence + parsability
-    yml_path = Path.cwd() / "marketplace.yml"
-    yml_found = yml_path.exists()
-    yml_detail = ""
-    yml_parsed = False
+    # Check 5: marketplace authoring config (apm.yml block or legacy file)
+    project_root = Path.cwd()
+    apm_path = project_root / "apm.yml"
+    legacy_path = project_root / "marketplace.yml"
     yml_obj = None
-    if yml_found:
-        try:
-            yml_obj = load_marketplace_yml(yml_path)
-            yml_parsed = True
-            yml_detail = "marketplace.yml found and valid"
-        except MarketplaceYmlError as exc:
-            yml_detail = f"marketplace.yml has errors: {str(exc)[:60]}"
-    else:
-        yml_detail = "No marketplace.yml in current directory"
+    config_detail = ""
+    config_passed = True
+    config_informational = True
+    try:
+        source = detect_config_source(project_root)
+        if source == ConfigSource.APM_YML:
+            from ..marketplace.yml_schema import load_marketplace_from_apm_yml
+            try:
+                yml_obj = load_marketplace_from_apm_yml(apm_path)
+                config_detail = "apm.yml 'marketplace:' block found and valid"
+            except MarketplaceYmlError as exc:
+                config_passed = False
+                config_detail = f"apm.yml marketplace block has errors: {str(exc)[:60]}"
+        elif source == ConfigSource.LEGACY_YML:
+            try:
+                yml_obj = load_marketplace_yml(legacy_path)
+                config_detail = (
+                    "marketplace.yml found (legacy). "
+                    "Run 'apm marketplace migrate' to fold it into apm.yml."
+                )
+            except MarketplaceYmlError as exc:
+                config_passed = False
+                config_detail = f"marketplace.yml has errors: {str(exc)[:60]}"
+        else:
+            config_detail = "No marketplace authoring config in current directory"
+    except MarketplaceYmlError as exc:
+        # Both files present.
+        config_passed = False
+        config_detail = str(exc)[:120]
 
     checks.append(_DoctorCheck(
-        name="marketplace.yml",
-        passed=yml_parsed if yml_found else True,  # informational if absent
-        detail=yml_detail,
-        informational=True,
+        name="marketplace config",
+        passed=config_passed,
+        detail=config_detail,
+        informational=config_informational,
     ))
 
     # Check 6: duplicate package names (defence-in-depth)
@@ -1614,7 +1627,6 @@ def publish(
     verbose,
 ):
     """Publish marketplace updates to consumer repositories."""
-    _require_authoring_flag()
     logger = CommandLogger("marketplace-publish", verbose=verbose)
 
     # ------------------------------------------------------------------
@@ -1622,13 +1634,13 @@ def publish(
     # ------------------------------------------------------------------
 
     # 1a. Load marketplace.yml
-    yml = _load_yml_or_exit(logger)
+    _, yml = _load_config_or_exit(logger)
 
     # 1b. Load marketplace.json
     mkt_json_path = Path.cwd() / "marketplace.json"
     if not mkt_json_path.exists():
         logger.error(
-            "marketplace.json not found. Run 'apm marketplace build' first.",
+            "marketplace.json not found. Run 'apm pack' first.",
             symbol="error",
         )
         sys.exit(1)
@@ -2062,3 +2074,59 @@ def search(expression, limit, verbose):
         logger.verbose_detail(traceback.format_exc())
         sys.exit(1)
 
+
+
+# ---------------------------------------------------------------------------
+# marketplace migrate
+# ---------------------------------------------------------------------------
+
+
+@marketplace.command(help="Fold marketplace.yml into apm.yml's 'marketplace:' block")
+@click.option(
+    "--force",
+    "--yes",
+    "-y",
+    "force",
+    is_flag=True,
+    help="Overwrite an existing 'marketplace:' block in apm.yml (alias: --yes/-y)",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Show the proposed apm.yml changes without writing them",
+)
+@click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
+def migrate(force, dry_run, verbose):
+    """One-shot conversion from legacy marketplace.yml to apm.yml block."""
+    logger = CommandLogger("marketplace-migrate", verbose=verbose)
+    project_root = Path.cwd()
+
+    try:
+        diff = migrate_marketplace_yml(
+            project_root, force=force, dry_run=dry_run
+        )
+    except MarketplaceYmlError as exc:
+        logger.error(str(exc), symbol="error")
+        sys.exit(1)
+    except Exception as exc:  # noqa: BLE001 -- top-level command catch-all
+        logger.error(f"Migration failed: {exc}", symbol="error")
+        logger.verbose_detail(traceback.format_exc())
+        sys.exit(1)
+
+    if dry_run:
+        logger.progress(
+            "Dry run -- the following changes would be applied to apm.yml:",
+            symbol="info",
+        )
+        # Echo the diff verbatim (already ASCII).
+        click.echo(diff if diff else "(no changes)")
+        return
+
+    logger.success(
+        "Migrated marketplace.yml into apm.yml's 'marketplace:' block",
+        symbol="check",
+    )
+    logger.progress(
+        "marketplace.yml has been removed. Commit apm.yml to record the migration.",
+        symbol="info",
+    )

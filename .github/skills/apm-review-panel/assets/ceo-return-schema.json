@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "ceo-return-schema.json",
+  "title": "APM Review Panel - CEO Synthesizer Return Shape",
+  "description": "Shape the apm-ceo persona MUST return when invoked as the panel synthesizer. CEO writes ARBITRATION PROSE only - never picks the verdict. The orchestrator derives verdict deterministically from aggregated panelist required-counts (APPROVE iff sum(required) == 0, REJECT otherwise).",
+  "type": "object",
+  "required": ["arbitration"],
+  "additionalProperties": false,
+  "properties": {
+    "arbitration": {
+      "type": "string",
+      "description": "One-to-three paragraph synthesis. Resolve any disagreement between specialists. Surface strategic implications (positioning, breaking change, naming, scope). If specialists agreed and the change is uncontroversial, say so plainly. ASCII only."
+    },
+    "dissent_notes": {
+      "type": "string",
+      "description": "Optional. When two or more panelists disagreed on whether a finding is REQUIRED vs NIT, name the disagreement and state which side the CEO sided with and why. Empty / omitted when no dissent."
+    },
+    "growth_signal": {
+      "type": "string",
+      "description": "Optional. CEO surface for the side-channel note from oss-growth-hacker (conversion, narrative, breaking-change comms). Empty / omitted when not relevant."
+    }
+  }
+}
