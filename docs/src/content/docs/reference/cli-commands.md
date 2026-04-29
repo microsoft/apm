@@ -36,7 +36,7 @@ apm init [PROJECT_NAME] [OPTIONS]
 **Options:**
 - `-y, --yes` - Skip interactive prompts and use auto-detected defaults
 - `--plugin` - Initialize as a plugin authoring project (creates `plugin.json` + `apm.yml` with `devDependencies`)
-- `--marketplace` - Seed `apm.yml` with a `marketplace:` authoring block (requires `apm experimental enable marketplace-authoring`). See the [Authoring a marketplace guide](../../guides/marketplace-authoring/).
+- `--marketplace` - Seed `apm.yml` with a `marketplace:` authoring block. See the [Authoring a marketplace guide](../../guides/marketplace-authoring/).
 
 **Examples:**
 ```bash
@@ -556,51 +556,73 @@ apm policy status --policy-source ./draft-policy.yml
 apm policy status --check
 ```
 
-### `apm pack` - Create a portable bundle
+### `apm pack` - Pack distributable artifacts
 
-Create a self-contained bundle from installed APM dependencies using the `deployed_files` recorded in `apm.lock.yaml` as the source of truth.
+Pack distributable artifacts from your APM project. The manifest drives what gets produced:
+
+- `dependencies:` block in `apm.yml` -> bundle (directory or `.tar.gz`)
+- `marketplace:` block in `apm.yml` -> `.claude-plugin/marketplace.json`
+- both blocks present -> both artifacts in a single run
+
+The lockfile (`apm.lock.yaml`) pins bundle contents. An enriched copy is embedded in each bundle.
 
 ```bash
 apm pack [OPTIONS]
 ```
 
 **Options:**
-- `-o, --output PATH` - Output directory (default: `./build`)
-- `-t, --target [copilot|vscode|claude|cursor|codex|opencode|gemini|all]` - Filter files by target. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Auto-detects from `apm.yml` if not specified. `vscode` is an alias for `copilot`
-- `--archive` - Produce a `.tar.gz` archive instead of a directory
-- `--dry-run` - List files that would be packed without writing anything
-- `--format [apm|plugin]` - Bundle format (default: `apm`). `plugin` produces a standalone plugin directory with `plugin.json`
-- `--force` - On collision (plugin format), last writer wins instead of first
+- `-o, --output PATH` - Bundle output directory (default: `./build`). Does not affect `marketplace.json` path.
+- `-t, --target [copilot|vscode|claude|cursor|codex|opencode|gemini|all]` - Filter bundle files by target. Accepts comma-separated values (e.g., `-t claude,copilot`). Auto-detects from `apm.yml` if omitted. `vscode` is an alias for `copilot`. No-op for marketplace output.
+- `--archive` - Produce a `.tar.gz` archive instead of a directory. Bundle only.
+- `--format [apm|plugin]` - Bundle format (default: `apm`). `plugin` produces a standalone plugin directory with `plugin.json`. No-op for marketplace output.
+- `--force` - On collision (plugin format), last writer wins instead of first. Bundle only.
+- `--dry-run` - Preview outputs without writing anything.
+- `--offline` - Marketplace: use cached refs only (skip `git ls-remote`).
+- `--include-prerelease` - Marketplace: allow pre-release tags to satisfy version ranges.
+- `--marketplace-output PATH` - Marketplace: override the output path (default: `.claude-plugin/marketplace.json`).
+- `-v, --verbose` - Detailed output from every producer.
+
+Flags whose scope does not match the detected outputs are silent no-ops, not errors. CI scripts can pass `--offline` unconditionally even when some projects only produce a bundle.
+
+**Exit codes:**
+- `0` - Success
+- `1` - Build or runtime error (network failure, ref not found, no tag matches a range, etc.)
+- `2` - Schema validation error in `apm.yml`
 
 **Examples:**
 ```bash
-# Pack to ./build/<name>-<version>/
+# Bundle only (apm.yml has dependencies:, no marketplace:)
 apm pack
+apm pack --target claude --archive
+apm pack --format plugin -o ./dist
 
-# Pack as a .tar.gz archive
-apm pack --archive
+# Marketplace only (apm.yml has marketplace:, no dependencies:)
+apm pack
+apm pack --offline --dry-run
 
-# Pack only VS Code / Copilot files
-apm pack --target vscode
+# Both blocks present -- one command, both artifacts
+apm pack
+apm pack --archive --offline
 
-# Export as a standalone plugin directory
-apm pack --format plugin
-
-# Preview what would be packed
-apm pack --dry-run
-
-# Custom output directory
-apm pack -o dist/
+# Override marketplace.json path (rare; default matches Anthropic spec)
+apm pack --marketplace-output ./build/marketplace.json
 ```
 
-**Behavior:**
+**Bundle behaviour:**
 - Reads `apm.lock.yaml` to enumerate all `deployed_files` from installed dependencies
 - Scans files for hidden Unicode characters before bundling — warns if findings are detected (non-blocking; consumers are protected by `apm install`/`apm unpack` which block on critical)
 - Copies files preserving directory structure
 - Writes an enriched `apm.lock.yaml` inside the bundle with a `pack:` metadata section (the project's own `apm.lock.yaml` is never modified)
 - **Plugin format** (`--format plugin`): Remaps `.apm/` content into plugin-native paths (`agents/`, `skills/`, `commands/`, etc.), generates or updates `plugin.json`, merges hooks into a single `hooks.json`. `devDependencies` are also excluded from plugin bundles. See [Pack & Distribute](../../guides/pack-distribute/#plugin-format) for the full mapping table
 
-**Target filtering:**
+**Marketplace behaviour:**
+- Reads the `marketplace:` block from `apm.yml` (falls back to legacy `marketplace.yml` with a deprecation warning when no block is present; both files present is a hard error)
+- Resolves each remote plugin's version range against `git ls-remote`; emits local-path entries verbatim
+- Writes `.claude-plugin/marketplace.json` atomically -- this is where Claude Code reads the file from the repo root
+- Creates `.claude-plugin/` if absent; never scaffolds other files there
+- See the [Authoring a marketplace guide](../../guides/marketplace-authoring/) for the full schema and workflow
+
+**Bundle target filtering:**
 
 | Target | Includes paths starting with |
 |--------|------------------------------|
@@ -1263,7 +1285,7 @@ apm marketplace validate acme-plugins --verbose
 
 #### `apm marketplace init` - Add a marketplace block to apm.yml
 
-Add a `marketplace:` block to the project's `apm.yml`. If `apm.yml` is absent, a minimal one is scaffolded first. The block is richly commented and ready to be edited. See the [Authoring a marketplace guide](../../guides/marketplace-authoring/).
+Add a `marketplace:` block to the project's `apm.yml`. If `apm.yml` is absent, a minimal one is scaffolded first. The block is richly commented and ready to be edited. Build the marketplace with [`apm pack`](#apm-pack---pack-distributable-artifacts). See the [Authoring a marketplace guide](../../guides/marketplace-authoring/).
 
 ```bash
 apm marketplace init [OPTIONS]
@@ -1309,39 +1331,6 @@ apm marketplace migrate [OPTIONS]
 ```bash
 apm marketplace migrate --dry-run
 apm marketplace migrate --yes
-```
-
-#### `apm marketplace build` - Compile the marketplace block
-
-Resolve all package version ranges against the source repositories and write an Anthropic-compliant `.claude-plugin/marketplace.json`. APM-only fields (`build:`, version ranges, tag patterns) are stripped; `metadata:` is passed through verbatim. Inherited top-level fields and empty `tags:` are omitted from the output.
-
-Reads from `apm.yml`'s `marketplace:` block by default; falls back to a legacy `marketplace.yml` (with a deprecation warning) when no block is present. Errors out when both are present at once.
-
-```bash
-apm marketplace build [OPTIONS]
-```
-
-**Options:**
-- `--dry-run` - Resolve and print the result table, but do not write `marketplace.json`
-- `--offline` - Use cached refs only (no `git ls-remote` calls)
-- `--include-prerelease` - Allow pre-release tags to satisfy ranges
-- `-v, --verbose` - Per-entry resolution detail
-
-**Exit codes:**
-- `0` - Build succeeded (or dry run complete)
-- `1` - Build error (network failure, unresolvable ref, no matching tag)
-- `2` - Schema error in the `marketplace:` block
-
-**Examples:**
-```bash
-# Compile to .claude-plugin/marketplace.json
-apm marketplace build
-
-# Preview without writing
-apm marketplace build --dry-run
-
-# Offline build against cached refs
-apm marketplace build --offline
 ```
 
 #### `apm marketplace outdated` - Report available upgrades
@@ -1393,7 +1382,7 @@ apm marketplace check --offline
 
 #### `apm marketplace doctor` - Environment diagnostics
 
-Check git, network reachability, authentication, `gh` CLI availability, and the presence of a marketplace config (in `apm.yml` or legacy `marketplace.yml`). Run this first when `build` or `publish` fails in an unfamiliar environment.
+Check git, network reachability, authentication, `gh` CLI availability, and the presence of a marketplace config (in `apm.yml` or legacy `marketplace.yml`). Run this first when `apm pack` or `publish` fails in an unfamiliar environment.
 
 ```bash
 apm marketplace doctor [OPTIONS]
@@ -1414,7 +1403,7 @@ apm marketplace doctor --verbose
 
 #### `apm marketplace publish` - Open PRs on consumer repositories
 
-Drive the compiled `marketplace.json` out to consumer repositories listed in a `consumer-targets.yml` file, opening a pull request on each. Requires an authenticated `gh` CLI unless `--no-pr` is used. See the [Authoring a marketplace guide](../../guides/marketplace-authoring/#publishing-to-consumers) for the full workflow.
+Drive the compiled `marketplace.json` out to consumer repositories listed in a `consumer-targets.yml` file, opening a pull request on each. Requires an authenticated `gh` CLI unless `--no-pr` is used. Run `apm pack` first to (re)build `marketplace.json`. See the [Authoring a marketplace guide](../../guides/marketplace-authoring/#publishing-to-consumers) for the full workflow.
 
 ```bash
 apm marketplace publish [OPTIONS]

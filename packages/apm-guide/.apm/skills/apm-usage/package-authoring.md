@@ -195,23 +195,20 @@ apm install org/my-package#v1.0.0
 
 ## Marketplace authoring
 
-A **marketplace** is a curated index of packages (plugins) that consumers
-install via `apm install <name>@<marketplace>`. Maintainers declare the
-marketplace in a `marketplace:` block inside `apm.yml` and compile it to
-an Anthropic-compliant `.claude-plugin/marketplace.json` with
-`apm marketplace build`. Both files are committed.
-
-Authoring is gated behind `apm experimental enable marketplace-authoring`.
+A **marketplace** is a curated index of plugins that consumers install via
+`apm install <name>@<marketplace>`. Maintainers declare the marketplace in a
+`marketplace:` block inside `apm.yml`; running `apm pack` builds an
+Anthropic-compliant `.claude-plugin/marketplace.json`. Both files are committed.
 
 ### When to run `apm marketplace init`
 
 - The user is setting up a new marketplace repository.
 - The user wants to convert an ad-hoc list of plugins into a proper index.
 
-`apm marketplace init` adds a `marketplace:` block to the project's
-`apm.yml` (and scaffolds a minimal `apm.yml` first if needed). Use
-`apm init --marketplace` instead when starting a brand-new project that
-will publish its own marketplace.
+`apm marketplace init` appends a `marketplace:` block to the project's
+`apm.yml` and creates `.claude-plugin/`. It does NOT scaffold a standalone
+`marketplace.yml`. Use `apm init --marketplace` when starting a brand-new
+project that will publish its own marketplace.
 
 ### apm.yml `marketplace:` block
 
@@ -230,14 +227,14 @@ marketplace:
     tagPattern: "v{version}"
   metadata:                    # pass-through, copied verbatim
     homepage: https://example.com
-  packages:
-    - name: example-package
-      description: What this package does
-      source: acme-org/example-package   # owner/repo (remote)
+  plugins:
+    - name: example-plugin
+      description: What this plugin does
+      source: acme-org/example-plugin    # owner/repo (remote)
       version: "^1.0.0"                  # semver range OR 'ref:' below
       # ref: 3f2a9b1c                    # explicit SHA/tag/branch
       # subdir: tools/x                  # optional subdirectory
-      # tag_pattern: "{name}-v{version}" # optional per-package override
+      # tag_pattern: "{name}-v{version}" # optional per-plugin override
       # include_prerelease: false        # optional
 
     - name: local-tool
@@ -249,34 +246,41 @@ marketplace:
 Schema rules:
 - `owner.name` is required. `name`, `description`, `version` are
   optional inside the block (inherited from apm.yml top level).
-- Each remote package needs either `version` or `ref`.
+- Each remote plugin needs either `version` or `ref`.
 - `ref` takes precedence over `version`.
-- `source: ./...` marks a local-path package: skips git resolution,
+- `source: ./...` marks a local-path entry: skips git resolution,
   emits the path verbatim into `marketplace.json`.
 - Unknown keys raise a schema error -- do not invent fields.
 
 ### Build semantics
 
-`apm marketplace build` runs `git ls-remote` against each remote package
-source, picks the highest tag satisfying the range (under the applicable
-`tagPattern`), leaves local-path entries untouched, and writes
-`.claude-plugin/marketplace.json`. The compiler:
+`apm pack` runs `git ls-remote` against each remote plugin source, picks the
+highest tag satisfying the range (under the applicable `tagPattern`), leaves
+local-path entries untouched, and writes `.claude-plugin/marketplace.json`.
+The compiler:
 
 1. Emits `plugins:` verbatim (Anthropic's key name).
 2. Copies `metadata:` byte-for-byte.
-3. Strips `build:`, per-package `version`, `tag_pattern`, `include_prerelease`.
+3. Strips `build:`, per-plugin `version`, `tag_pattern`, `include_prerelease`.
 4. Omits empty `tags:` and inherited top-level `description`/`version`
    from the output (matches Anthropic's canonical hand-authored shape,
    e.g. microsoft/azure-skills).
 5. Does not emit `versions[]` -- each plugin carries a single resolved ref.
+
+`apm pack` also produces a bundle if `apm.yml` declares `dependencies:`. With
+only a `marketplace:` block present, bundle flags (`--archive`, `-o`, `--format`,
+`--target`, `--force`) are silent no-ops.
+
+Marketplace-relevant flags on `apm pack`: `--dry-run`, `--offline`,
+`--include-prerelease`, `--marketplace-output PATH`, `-v`.
 
 Exit codes: `0` success, `1` build error, `2` schema error.
 
 ### Migrating from legacy `marketplace.yml`
 
 Earlier APM versions stored this configuration in a standalone
-`marketplace.yml`. That file is deprecated and slated for removal next
-minor. Run the one-shot migration:
+`marketplace.yml`. That file is deprecated; `apm marketplace init` no longer
+creates one. Run the one-shot migration:
 
 ```bash
 apm marketplace migrate --dry-run    # preview the apm.yml change
