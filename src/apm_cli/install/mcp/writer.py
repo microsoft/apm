@@ -14,7 +14,7 @@ from pathlib import Path
 import click
 
 from ...constants import APM_YML_FILENAME
-from ...utils.console import _rich_echo, _rich_warning
+from ...core.null_logger import NullCommandLogger
 
 
 def _diff_entry(old, new) -> list:
@@ -51,6 +51,7 @@ def add_mcp_to_apm_yml(name, entry, *, dev=False, force=False, project_root=None
     """
     from ...utils.yaml_io import dump_yaml, load_yaml
 
+    log = logger if logger is not None else NullCommandLogger()
     apm_yml_path = manifest_path or Path(APM_YML_FILENAME)
     if not apm_yml_path.exists():
         raise click.UsageError(
@@ -91,18 +92,11 @@ def add_mcp_to_apm_yml(name, entry, *, dev=False, force=False, project_root=None
             mcp_list[existing_idx] = entry
             status = "replaced"
         elif is_tty:
-            if logger:
-                logger.warning(
-                    f"MCP server '{name}' already exists. Replacement diff:"
-                )
-                for line in diff:
-                    logger.verbose_detail(line)
-            else:
-                _rich_warning(
-                    f"MCP server '{name}' already exists. Replacement diff:"
-                )
-                for line in diff:
-                    _rich_echo(line, color="dim")
+            log.warning(
+                f"MCP server '{name}' already exists. Replacement diff:"
+            )
+            for line in diff:
+                log.verbose_detail(line)
             if not click.confirm(f"Replace MCP server '{name}'?", default=False):
                 return "skipped", diff
             mcp_list[existing_idx] = entry

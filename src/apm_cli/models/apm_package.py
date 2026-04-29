@@ -27,6 +27,7 @@ from .validation import (
     ValidationResult,
     validate_apm_package,
 )
+from ..core.target_detection import parse_target_field
 
 # Re-export all moved symbols so `from apm_cli.models.apm_package import X` keeps working
 __all__ = [
@@ -196,6 +197,15 @@ class APMPackage:
             else:
                 raise ValueError("'includes' must be 'auto' or a list of strings")
 
+        # Parse target field through the same validator as --target so a CSV
+        # string like ``target: "claude,copilot"`` resolves identically to
+        # ``--target claude,copilot`` and unknown tokens fail at parse time
+        # (see apm_cli.core.target_detection.parse_target_field).
+        target_value = parse_target_field(
+            data.get('target'),
+            source_path=apm_yml_path,
+        )
+
         result = cls(
             name=data['name'],
             version=data['version'],
@@ -206,7 +216,7 @@ class APMPackage:
             dev_dependencies=dev_dependencies,
             scripts=data.get('scripts'),
             package_path=apm_yml_path.parent,
-            target=data.get('target'),
+            target=target_value,
             type=pkg_type,
             includes=includes,
         )

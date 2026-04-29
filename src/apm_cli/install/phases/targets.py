@@ -115,21 +115,30 @@ def run(ctx: "InstallContext") -> None:
                 )
             raise SystemExit(1)
 
-    # Log target detection results
-    if ctx.logger and _targets:
+    # Log target detection results.  The empty-targets branch is a defensive
+    # warning -- with parse_target_field as the upstream gatekeeper this
+    # state is unreachable in normal flow, but a silent zero-target install
+    # is the worst-case package-manager DX (see #820), so always emit.
+    if ctx.logger:
         _scope_label = "global" if _is_user else "project"
-        _target_names = ", ".join(
-            f"{t.name} (~/{t.root_dir}/)" if _is_user else t.name
-            for t in _targets
-        )
-        ctx.logger.verbose_detail(
-            f"Active {_scope_label} targets: {_target_names}"
-        )
-        if _is_user:
-            from apm_cli.deps.lockfile import get_lockfile_path
-
+        if _targets:
+            _target_names = ", ".join(
+                f"{t.name} (~/{t.root_dir}/)" if _is_user else t.name
+                for t in _targets
+            )
             ctx.logger.verbose_detail(
-                f"Lockfile: {get_lockfile_path(ctx.apm_dir)}"
+                f"Active {_scope_label} targets: {_target_names}"
+            )
+            if _is_user:
+                from apm_cli.deps.lockfile import get_lockfile_path
+
+                ctx.logger.verbose_detail(
+                    f"Lockfile: {get_lockfile_path(ctx.apm_dir)}"
+                )
+        else:
+            ctx.logger.warning(
+                f"No {_scope_label} targets resolved -- nothing will be "
+                f"deployed. Check 'target:' in apm.yml or use --target."
             )
 
     for _t in _targets:

@@ -408,12 +408,22 @@ class TestTargetParamType:
         """None value passes through unchanged."""
         assert self.tp.convert(None, None, None) is None
 
-    # -- Already-converted list passthrough -------------------------------
+    # -- List input goes through the same validator as strings -----------
 
-    def test_list_passthrough(self):
-        """A list value passes through unchanged."""
-        lst = ["claude", "vscode"]
-        assert self.tp.convert(lst, None, None) is lst
+    def test_list_input_is_validated(self):
+        """List input flows through parse_target_field: validated + deduped.
+
+        Returned list is a fresh canonical sequence, not the input list --
+        identity is no longer preserved because list and string inputs share
+        a single normalization path.
+        """
+        result = self.tp.convert(["claude", "vscode"], None, None)
+        assert result == ["claude", "vscode"]
+
+    def test_list_input_collapses_aliases_to_string(self):
+        """Multi-element list whose entries all alias to one canonical
+        target collapses to that single canonical name (``"vscode"``)."""
+        assert self.tp.convert(["copilot", "agents"], None, None) == "vscode"
 
     # -- Single target (backward compat: returns string) ------------------
 
