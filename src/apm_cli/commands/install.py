@@ -1548,7 +1548,6 @@ def install(ctx, packages, runtime, exclude, only, update, dry_run, force, verbo
         _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
         sys.exit(1)
     except AuthenticationError as e:
-        # #1015: render auth diagnostics on the DEFAULT path (not --verbose).
         _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
         _rich_error(str(e))
         if e.diagnostic_context:
