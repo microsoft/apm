@@ -611,7 +611,7 @@ class HookIntegrator(BaseIntegrator):
         target_paths: List[Path] = []
         # Events whose prior-owned entries have already been cleared on
         # this install run. Packages can contribute to the same event
-        # from multiple hook files — we must only strip once so earlier
+        # from multiple hook files -- we must only strip once so earlier
         # files' fresh entries aren't wiped by later iterations.
         cleared_events: set = set()
 

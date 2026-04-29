@@ -2605,17 +2605,17 @@ class TestBackslashPathRewrite:
         assert len(scripts) == 1
 
 
-# ─── Issue #1007: Claude settings.json hook emission fixes ───────────────────
+# === Issue #1007: Claude settings.json hook emission fixes ====================
 
 
 class TestIssue1007Fixes:
     """Regression tests for the four bug-fixes shipped in issue #1007.
 
-    Fix 1 – Target-aware hook file routing (_filter_hook_files_for_target)
-    Fix 2 – Variable pattern expansion (${PLUGIN_ROOT} / ${CURSOR_PLUGIN_ROOT})
-    Fix 3 – Event name normalisation for Claude (camelCase → PascalCase)
-    Fix 4a – Alias-aware clearing during reinstall
-    Fix 4b – Content-based deduplication within a package
+    Fix 1 -- Target-aware hook file routing (_filter_hook_files_for_target)
+    Fix 2 -- Variable pattern expansion (${PLUGIN_ROOT} / ${CURSOR_PLUGIN_ROOT})
+    Fix 3 -- Event name normalisation for Claude (camelCase -> PascalCase)
+    Fix 4a -- Alias-aware clearing during reinstall
+    Fix 4b -- Content-based deduplication within a package
     """
 
     @pytest.fixture
@@ -2644,7 +2644,7 @@ class TestIssue1007Fixes:
         Args:
             project: Project root path.
             pkg_name: Package name used as directory name.
-            hook_files: Mapping of filename → hook dict to write under hooks/.
+            hook_files: Mapping of filename -> hook dict to write under hooks/.
         """
         pkg_dir = project / "apm_modules" / pkg_name
         hooks_dir = pkg_dir / "hooks"
@@ -2760,7 +2760,7 @@ class TestIssue1007Fixes:
                         ]
                     }
                 },
-                # Cursor-specific hooks — must NOT appear in Claude output
+                # Cursor-specific hooks -- must NOT appear in Claude output
                 "cursor-hooks.json": {
                     "hooks": {
                         "postToolUse": [
@@ -2970,7 +2970,7 @@ class TestIssue1007Fixes:
             temp_project,
             "multi-format-pkg",
             {
-                # Generic (Claude) hooks — should be integrated
+                # Generic (Claude) hooks -- should be integrated
                 "hooks.json": {
                     "hooks": {
                         "PostToolUse": [
@@ -2978,7 +2978,7 @@ class TestIssue1007Fixes:
                         ]
                     }
                 },
-                # Copilot-specific — must be filtered out for Claude
+                # Copilot-specific -- must be filtered out for Claude
                 "copilot-hooks.json": {
                     "hooks": {
                         "postToolUse": [
@@ -2986,7 +2986,7 @@ class TestIssue1007Fixes:
                         ]
                     }
                 },
-                # Cursor-specific — must be filtered out for Claude
+                # Cursor-specific -- must be filtered out for Claude
                 "cursor-hooks.json": {
                     "hooks": {
                         "postToolUse": [
@@ -3104,7 +3104,7 @@ class TestIssue1007Fixes:
             "Stale camelCase alias key must be removed after reinstall"
         )
         assert "PostToolUse" in hooks, "PascalCase key must remain after reinstall"
-        # Ensure the stale alias entry is gone — only the fresh entry survives
+        # Ensure the stale alias entry is gone -- only the fresh entry survives
         commands = [
             e.get("command", "") for e in hooks["PostToolUse"] if isinstance(e, dict)
         ]
@@ -3130,7 +3130,7 @@ class TestIssue1007Fixes:
                         ]
                     }
                 },
-                # This file is filtered out for claude — must not affect count
+                # This file is filtered out for claude -- must not affect count
                 "cursor-hooks.json": {
                     "hooks": {
                         "postToolUse": [

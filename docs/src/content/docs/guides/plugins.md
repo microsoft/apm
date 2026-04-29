@@ -221,11 +221,18 @@ each tool receives only its own hooks:
 | `*-claude-hooks.json` | Claude Code only |
 | `*-codex-hooks.json` | Codex CLI only |
 | `*-gemini-hooks.json` | Gemini CLI only |
-| `hooks.json` or other non-target `*-hooks.json` names | All targets |
+| Any other name (e.g. `hooks.json`, `telemetry-hooks.json`) | All targets |
 
-For example, a package with `copilot-hooks.json`, `cursor-hooks.json`, and
-`hooks.json` routes the named files to their target while `hooks.json` deploys
-everywhere.
+Example directory tree for a multi-target hook package:
+
+```
+my-hooks-pkg/
+  hooks/
+    hooks.json              # deployed to all targets
+    copilot-hooks.json      # Copilot only
+    cursor-hooks.json       # Cursor only
+    claude-hooks.json       # Claude Code only
+```
 
 #### MCP Server Definitions
 
