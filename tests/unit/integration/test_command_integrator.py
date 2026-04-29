@@ -838,8 +838,14 @@ class TestCursorCommandIntegration:
         )
         assert result.files_integrated == 2
 
-    def test_frontmatter_preserved(self, temp_project):
-        """Claude-compatible frontmatter is preserved in output."""
+    def test_frontmatter_normalized_to_supported_subset(self, temp_project):
+        """Frontmatter is normalized to the supported command subset.
+
+        The shared command transformer keeps description, allowed-tools,
+        model, and argument-hint but drops unknown keys (e.g. author,
+        parameters).  This is intentional -- only the command-relevant
+        subset is emitted.
+        """
         pkg_info = self._make_package(
             temp_project,
             {
@@ -849,6 +855,8 @@ class TestCursorCommandIntegration:
                     'allowed-tools: ["bash", "edit"]\n'
                     "model: claude-sonnet\n"
                     "argument-hint: file path\n"
+                    "author: someone\n"
+                    "custom-field: should-be-dropped\n"
                     "---\n"
                     "# Review Command\n"
                 ),
@@ -867,22 +875,27 @@ class TestCursorCommandIntegration:
         assert post.metadata["allowed-tools"] == ["bash", "edit"]
         assert post.metadata["model"] == "claude-sonnet"
         assert post.metadata["argument-hint"] == "file path"
+        assert "author" not in post.metadata
+        assert "custom-field" not in post.metadata
 
-    def test_sync_removes_apm_commands(self, temp_project):
-        """Sync removes APM-managed commands from .cursor/commands/."""
+    def test_sync_removes_managed_commands(self, temp_project):
+        """Sync removes manifest-tracked commands from .cursor/commands/."""
         cmds = temp_project / ".cursor" / "commands"
         cmds.mkdir(parents=True)
-        (cmds / "test-apm.md").write_text("# APM managed")
+        (cmds / "review.md").write_text("# APM managed")
         (cmds / "custom.md").write_text("# User created")
+
+        managed = {".cursor/commands/review.md"}
 
         integrator = CommandIntegrator()
         from apm_cli.integration.targets import KNOWN_TARGETS
         result = integrator.sync_for_target(
-            KNOWN_TARGETS["cursor"], None, temp_project
+            KNOWN_TARGETS["cursor"], None, temp_project,
+            managed_files=managed,
         )
 
         assert result["files_removed"] == 1
-        assert not (cmds / "test-apm.md").exists()
+        assert not (cmds / "review.md").exists()
         assert (cmds / "custom.md").exists()
 
     def test_sync_handles_missing_dir(self, temp_project_no_cursor):

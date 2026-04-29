@@ -125,10 +125,10 @@ applyTo: "**/*"
 Executable workflows with parameters. Deployed as slash commands to targets
 that support them:
 
-- Claude Code: `.claude/commands/*.md` (frontmatter preserved)
-- Cursor: `.cursor/commands/*.md` (frontmatter preserved)
-- OpenCode: `.opencode/commands/*.md` (frontmatter preserved)
-- Gemini CLI: `.gemini/commands/*.toml` (converted to TOML)
+- Claude Code: `.claude/commands/*.md` (normalized to supported command frontmatter)
+- Cursor: `.cursor/commands/*.md` (normalized to supported command frontmatter)
+- OpenCode: `.opencode/commands/*.md` (normalized to supported command frontmatter)
+- Gemini CLI: `.gemini/commands/*.toml` (converted to TOML command format)
 
 ```yaml
 ---
