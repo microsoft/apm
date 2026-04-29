@@ -7,16 +7,20 @@ description: Multi-persona expert panel review of labelled PRs, posting a single
 # 1. pull_request_target: fires when a label is applied. We use _target
 #    (not plain pull_request) so that fork PRs run in the BASE repo
 #    context with full secrets (COPILOT_GITHUB_TOKEN etc.). gh-aw does
-#    not expose `names:` on `pull_request_target`, so the label-name
-#    filter is enforced via `on.steps:` -- a pre-activation step that
-#    exits non-zero for any label other than `panel-review`. This kills
-#    the entire downstream pipeline (activation, apm bundle restore,
-#    agent container) at the cheapest possible point. Previously the
-#    label check lived inside the agent prompt, which (a) cost a full
-#    runner cold-start + agent spin-up per label change on every PR in
-#    the repo, and (b) relied on the LLM honoring an "exit 0" prompt
-#    instruction -- not always reliable. The pre-activation step is a
-#    deterministic gate.
+#    not expose `names:` on `pull_request_target` in v0.68.x (the
+#    first-class `on.labels` filter landed post-v0.71.1 and is not yet
+#    released, see github/gh-aw ADR-28737). To filter by label name
+#    without producing a red-X failed CI check on every unrelated label
+#    change, we use the top-level frontmatter `if:` field below: gh-aw
+#    propagates that condition to BOTH the `pre_activation` and
+#    `activation` jobs, so unmatched labels yield a clean gray Skipped
+#    status (no failed run, no quota burn, no agent cold-start).
+#    Previously this was implemented as an `on.steps:` step that called
+#    `exit 1` to kill the pipeline -- correct gating, but it marked
+#    every unrelated `labeled` event as a Failed check, polluting CI
+#    dashboards on PRs that touch many labels. Replace with `on.labels:
+#    [panel-review]` once gh-aw releases a version that supports it on
+#    `pull_request_target`.
 #
 #    Why pull_request_target is safe here despite the well-known
 #    "pwn-request" pattern:
@@ -56,24 +60,14 @@ on:
         description: "Pull request number to review (works for fork PRs)"
         required: true
         type: string
-  steps:
-    - name: Filter on panel-review label
-      id: label_check
-      env:
-        EVENT_NAME: ${{ github.event_name }}
-        LABEL_NAME: ${{ github.event.label.name }}
-      run: |
-        if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-          echo "Manual workflow_dispatch -- proceeding."
-          exit 0
-        fi
-        if [ "$LABEL_NAME" = "panel-review" ]; then
-          echo "Triggering label is 'panel-review' -- proceeding."
-          exit 0
-        fi
-        echo "Triggering label is '$LABEL_NAME' (not 'panel-review'); skipping."
-        exit 1
   roles: [admin, maintainer, write]
+
+# Label-name gate: skip (not fail) when the triggering label isn't
+# `panel-review`. gh-aw injects this `if:` into both pre_activation and
+# activation jobs, producing a gray Skipped status for unrelated label
+# changes instead of a red Failed check. workflow_dispatch is always
+# allowed through. See trigger comment block above for context.
+if: ${{ github.event_name == 'workflow_dispatch' || github.event.label.name == 'panel-review' }}
 
 # Agent job runs READ-ONLY. Safe-output jobs are auto-granted scoped write.
 permissions:
@@ -130,9 +124,11 @@ timeout-minutes: 30
 You are orchestrating the **apm-review-panel** skill against pull request
 **#${{ github.event.pull_request.number || inputs.pr_number }}** in `${{ github.repository }}`.
 
-> The label-name guard runs at the workflow level (`on.steps:` pre-activation
-> step `label_check`). If you are reading this prompt, the triggering label
-> is `panel-review` or this is a manual `workflow_dispatch` -- proceed.
+> The label-name guard runs at the workflow level via the top-level
+> frontmatter `if:` field (skips both `pre_activation` and `activation`
+> for unrelated labels). If you are reading this prompt, the triggering
+> label is `panel-review` or this is a manual `workflow_dispatch` --
+> proceed.
 
 ## Step 1: Gather PR context (read-only)
 
