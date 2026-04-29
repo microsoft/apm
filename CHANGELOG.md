@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [Unreleased]
+
+## [0.11.0] - 2026-04-29
 ### Added
 
 - `apm pack` produces `.claude-plugin/marketplace.json` when `apm.yml` has a `marketplace:` block; new flags `--offline`, `--include-prerelease`, `--marketplace-output PATH`. (#722)
@@ -22,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `apm marketplace init` and `apm init --marketplace` next-step hints now point at `apm pack` (was `apm marketplace build`). (#722)
+- `apm marketplace add` defaults the local alias to the `name` field declared inside the fetched `marketplace.json`, falling back to the repo name only when the manifest omits it (or declares an invalid value). Restores verbatim portability with Claude Code install instructions (e.g. `addyosmani/agent-skills` now registers as `addy-agent-skills` exactly as that repo's README documents). No-op when `manifest.name == repo.name`; existing `~/.apm/marketplaces.json` entries are untouched. (#1032)
+- `--policy` / `--policy-source` accepted forms (`org`, file path, `owner/repo`, https URL) are now documented identically across `apm audit --policy` Click help, `apm policy status --policy-source` Click help, and the CLI reference docs -- a single `POLICY_SOURCE_FORMS_HELP` constant is the source of truth, with lockstep tests pinning all four surfaces against drift. (#1000, closes #998 #994)
 - **Manifest contract: invalid `target:` values now raise a parse error.** Previously, an unknown token (or a CSV string like `target: opencode,claude,copilot,agents` instead of the YAML list `target: [opencode, claude, copilot, agents]`) was silently ignored, leaving `apm install` and `apm compile` to exit 0 while deploying nothing. The shared parser used by `--target` now also validates `apm.yml`'s `target:`, so the same input resolves the same way at every entry point. **Migration:** three previously-silent inputs now fail loud -- (1) unknown tokens (`target: bogus` -> fix the typo), (2) empty values (`target: ""`, `target: []` -> remove the line if you meant auto-detect), (3) `all` mixed with other targets (`target: [all, claude]` -> use `all` alone). Omitting `target:` entirely still triggers auto-detection. (#820)
 - Rename `DownloadStrategyManager` to `DownloadDelegate` to better reflect Facade/Delegate pattern (#918)
 - Fix incorrect double-checked locking in marketplace registry `_load()` -- hold lock across full check+read+set (#918)
@@ -44,6 +48,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm pack` (marketplace producer) now accepts multiple Git URL forms (GitHub, GHES, GitLab, Bitbucket, ADO, SSH) for `type: url` parsing via `DependencyReference.parse()`. Host resolution is still driven by `GITHUB_HOST`, so non-`github.com` hosts require `GITHUB_HOST` to be set accordingly. (#1008)
 - **ADO Entra ID auth path no longer silently fails.** Bearer tokens from `az account get-access-token` are now correctly plumbed through validation (auth scheme, git env). Auth failures raise a typed `AuthenticationError` with an actionable 4-case diagnostic instead of the ambiguous "not accessible or doesn't exist" message. `apm install --update` runs a pre-flight auth check before modifying any files -- on failure it aborts with "No files were modified". (#1015)
 - Correct targeting of compiled artifacts so GEMINI.md is only created if requested (#1019)
+- Auto-discovery CLI output uses POSIX forward-slash paths on Windows (`Path.as_posix()` in `script_formatters.py` + `script_runner.py`) so `apm install` / `apm compile` output is cross-platform-readable and Windows CI tests for path display no longer fail. (#1018)
+- Generated file footer no longer prints the stray word `specify` before `apm compile` in the regeneration hint (`template_builder.py` + `distributed_compiler.py`). (#996)
+- CodeQL `py/clear-text-storage-sensitive-data` alert resolved (false positive) by renaming local variable `token` → `placeholder` in `_substitute_plugin_root` (`plugin_parser.py`). (#1002)
+
+### Maintainer tooling
+
+- **NOTICE.md** for third-party components added at the top level of the repo per CELA template -- one entry per direct dependency with verbatim license text + copyright + upstream URL. (#1043)
+- **NOTICE.md is now self-maintaining** via `scripts/generate-notice.py` + `scripts/notice-metadata.yaml` + a CI drift gate (`.github/workflows/notice-drift.yml`). The generator reads `[project]` deps from `pyproject.toml`, curated per-component metadata from the YAML, and verbatim license text from the installed `.dist-info/licenses/` directory -- drift fails CI with the exact unified diff and a `make notice` fix command. The same workflow runs `actions/dependency-review-action@v4` on PRs as a license-policy gate (denies GPL/AGPL/SSPL additions). (#1045, closes #1044)
+- `shared/apm.md` carries a tiny `repair_string_array` Bash+Python helper that converts gh-aw's Go-default-formatter `[a b]` output into valid JSON before passing to `jq --argjson` -- unblocks every `pr-review-panel` and `triage-panel` run that uses `apm-prep`. Upstream paper-cut filed at github/gh-aw#29076. (#1033)
+- PR Review Panel and Triage Panel workflows now skip cleanly (gray ⊘ Skipped) on unmatched label events instead of marking the whole `pre_activation` job as Failed (red ❌). Uses top-level frontmatter `if:` expressions which `gh-aw` propagates to both `pre_activation` and `activation` jobs -- no failed check, no runner cold-start, no agent quota burn. Bumps `gh-aw` v0.68.3 → v0.71.1. (#1030)
+- `shared/apm.md` recompiled against `microsoft/apm-action@v1.5.0` so `pr-review-panel.lock.yml` + `triage-panel.lock.yml` use the new `bundles-file:` matrix-aware restore introduced in #982; stale `STATUS: blocked` banner dropped; new self-diagnosing 2-line version header so vendored copies are auditable; `integrations/gh-aw.md` adds a "Vendor the canonical `shared/apm.md`" callout. (#1026)
+- Review-panel workflow refactor: true matrix fan-out (one replica per reviewer persona), binary `approve`/`request-changes` verdict aggregation, and label automation that drives the merge gate. (#1022)
 
 ## [0.10.0] - 2026-04-27
 
