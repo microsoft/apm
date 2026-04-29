@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `shared/apm.md` gh-aw workflow no longer fails the "Validate downloaded bundles match matrix manifest" step with a spurious `missing APM bundles (group did not pack successfully): apm-default` error when the matrix has exactly one credential group. `actions/download-artifact@v5+` flattens contents directly into the destination path whenever a single artifact matches the pattern (overriding `merge-multiple: false`), which collapsed the per-group subdir layout the validator expects. A new "Normalise bundle layout" step re-creates the expected `apm-<group_id>/` directory in the single-group case before validation runs. (#1051)
 - `apm install` and `apm compile` no longer exit 0 with success messages when `target:` in `apm.yml` is a CSV string -- the value now parses identically to the same input on `--target`, and zero-target resolution surfaces a warning instead of a silent no-op. (#820)
 - Remove redundant `seen` set from `_scan_patterns()` discovery walk (#918)
 - `apm pack` (marketplace producer) now respects `GITHUB_HOST` for GitHub Enterprise repos -- ref resolution, token lookup, and metadata fetch all use the configured host instead of hardcoded `github.com`. `git ls-remote` is authenticated so private repos work without separate credential setup. (#1008)
