@@ -214,6 +214,18 @@ class TestVSCodeRuntimeDetection(unittest.TestCase):
                 mock_cwd.return_value = mock_vscode
                 return _is_vscode_available()
 
+    def test_vscode_detected_via_explicit_project_root(self):
+        """Explicit project_root should be used instead of CWD for .vscode detection."""
+        from apm_cli.integration.mcp_integrator import _is_vscode_available
+
+        root = Path("/tmp/project-root")
+
+        with patch(f"{self.MODULE}.shutil.which", return_value=None), \
+             patch(f"{self.MODULE}.Path.cwd", return_value=Path("/tmp/other-cwd")), \
+             patch.object(Path, "is_dir", autospec=True) as mock_is_dir:
+            mock_is_dir.side_effect = lambda path: path == (root / ".vscode")
+            self.assertTrue(_is_vscode_available(project_root=root))
+
     def test_vscode_detected_via_code_binary(self):
         """`code` binary on PATH is sufficient to detect VS Code."""
         self.assertTrue(self._run(code_on_path=True, vscode_dir_exists=False))

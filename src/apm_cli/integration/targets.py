@@ -383,6 +383,7 @@ KNOWN_TARGETS: Dict[str, TargetProfile] = {
         },
         auto_create=False,
         detect_by_dir=True,
+        user_supported="partial",
     ),
     # Microsoft 365 Copilot (Cowork) -- experimental, user-scope only.
     # Skills are deployed to <OneDrive>/Documents/Cowork/skills/.

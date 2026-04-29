@@ -489,14 +489,17 @@ APM configures MCP servers in the native config format for each supported client
 |--------|----------------|--------|
 | VS Code | `.vscode/mcp.json` | JSON `servers` object |
 | GitHub Copilot CLI | `~/.copilot/mcp-config.json` | JSON `mcpServers` object |
-| Codex CLI | `~/.codex/config.toml` | TOML `mcp_servers` section |
+| Codex CLI (project) | `.codex/config.toml` | TOML `mcp_servers` section |
+| Codex CLI (`--global`) | `~/.codex/config.toml` | TOML `mcp_servers` section |
 | Claude | `.claude/settings.json` | JSON `mcpServers` object |
 | Cursor | `.cursor/mcp.json` | JSON `mcpServers` object |
 | Gemini CLI | `.gemini/settings.json` | JSON `mcpServers` object |
 
 **Runtime targeting**: APM detects which runtimes are installed and configures MCP servers for all of them. Use `--runtime <name>` or `--exclude <name>` to control which clients receive configuration.
 
-> **VS Code detection**: APM considers VS Code available when either the `code` CLI command is on PATH **or** a `.vscode/` directory exists in the current working directory. This means VS Code MCP configuration works even when `code` is not on PATH — common on macOS and Linux when "Install 'code' command in PATH" has not been run from the VS Code command palette, or when VS Code was installed via a method that doesn't register the CLI (e.g. `.tar.gz`, Flatpak, or a non-standard macOS install location).
+**Codex CLI**: Project installs write MCP configuration to `.codex/config.toml` only when Codex is an active project target. `--global` installs write to `~/.codex/config.toml`.
+
+> **VS Code detection**: APM considers VS Code available when either the `code` CLI command is on PATH **or** a `.vscode/` directory exists in the resolved project root (defaulting to the current working directory when no explicit project root is provided). This means VS Code MCP configuration works even when `code` is not on PATH — common on macOS and Linux when "Install 'code' command in PATH" has not been run from the VS Code command palette, or when VS Code was installed via a method that doesn't register the CLI (e.g. `.tar.gz`, Flatpak, or a non-standard macOS install location).
 
 ```bash
 # Install MCP dependencies for all detected runtimes

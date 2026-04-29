@@ -2,6 +2,7 @@
 
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
+from pathlib import Path
 from ..factory import ClientFactory
 from .conflict_detector import MCPConflictDetector
 from ..utils.console import _rich_warning, _rich_success, _rich_error
@@ -58,15 +59,27 @@ class InstallationSummary:
 class SafeMCPInstaller:
     """Safe MCP server installation with conflict detection."""
     
-    def __init__(self, runtime: str, logger=None):
+    def __init__(
+        self,
+        runtime: str,
+        logger=None,
+        project_root: Path | str | None = None,
+        user_scope: bool = False,
+    ):
         """Initialize the safe installer.
         
         Args:
             runtime: Target runtime (copilot, codex, vscode).
             logger: Optional CommandLogger for structured output.
+            project_root: Optional project root for repo-local runtime configs.
+            user_scope: Whether runtime config should resolve in user scope.
         """
         self.runtime = runtime
-        self.adapter = ClientFactory.create_client(runtime)
+        self.adapter = ClientFactory.create_client(
+            runtime,
+            project_root=project_root,
+            user_scope=user_scope,
+        )
         self.conflict_detector = MCPConflictDetector(self.adapter)
         self.logger = logger
     

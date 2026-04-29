@@ -97,8 +97,13 @@ class TestTargetProfileForScope:
     def test_for_scope_non_resolver_user_unsupported_returns_none(
         self,
     ) -> None:
-        codex = KNOWN_TARGETS["codex"]
-        result = codex.for_scope(user_scope=True)
+        unsupported = TargetProfile(
+            name="dummy",
+            root_dir=".dummy",
+            primitives={},
+            user_supported=False,
+        )
+        result = unsupported.for_scope(user_scope=True)
         assert result is None
 
 

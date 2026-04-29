@@ -24,7 +24,13 @@ class MCPServerOperations:
         """
         self.registry_client = SimpleRegistryClient(registry_url)
     
-    def check_servers_needing_installation(self, target_runtimes: List[str], server_references: List[str]) -> List[str]:
+    def check_servers_needing_installation(
+        self,
+        target_runtimes: List[str],
+        server_references: List[str],
+        project_root: Path | str | None = None,
+        user_scope: bool = False,
+    ) -> List[str]:
         """Check which MCP servers actually need installation across target runtimes.
         
         This method checks the actual MCP configuration files to see which servers
@@ -33,16 +39,24 @@ class MCPServerOperations:
         Args:
             target_runtimes: List of target runtimes to check
             server_references: List of MCP server references (names or IDs)
+            project_root: Project root used to resolve project-local client config
+                paths when checking install status.
+            user_scope: Whether to inspect user-scope config instead of
+                project-local config for runtimes that support it.
             
         Returns:
             List of server references that need installation in at least one runtime
         """
         servers_needing_installation = set()
-        
         # Pre-load installed IDs per runtime (O(R) reads instead of O(S*R))
-        installed_by_runtime: Dict[str, Set[str]] = {}
-        for runtime in target_runtimes:
-            installed_by_runtime[runtime] = self._get_installed_server_ids([runtime])
+        installed_by_runtime: Dict[str, Set[str]] = {
+            runtime: self._get_installed_server_ids(
+                [runtime],
+                project_root=project_root,
+                user_scope=user_scope,
+            )
+            for runtime in target_runtimes
+        }
         
         # Check each server reference
         for server_ref in server_references:
@@ -78,11 +92,20 @@ class MCPServerOperations:
         
         return list(servers_needing_installation)
     
-    def _get_installed_server_ids(self, target_runtimes: List[str]) -> Set[str]:
+    def _get_installed_server_ids(
+        self,
+        target_runtimes: List[str],
+        project_root: Path | str | None = None,
+        user_scope: bool = False,
+    ) -> Set[str]:
         """Get all installed server IDs across target runtimes.
         
         Args:
             target_runtimes: List of runtimes to check
+            project_root: Project root used to resolve project-local client config
+                paths while inspecting installed server IDs.
+            user_scope: Whether to inspect user-scope config instead of
+                project-local config for runtimes that support it.
             
         Returns:
             Set of server IDs that are currently installed
@@ -97,7 +120,11 @@ class MCPServerOperations:
         
         for runtime in target_runtimes:
             try:
-                client = ClientFactory.create_client(runtime)
+                client = ClientFactory.create_client(
+                    runtime,
+                    project_root=project_root,
+                    user_scope=user_scope,
+                )
                 config = client.get_current_config()
                 
                 if isinstance(config, dict):
@@ -120,18 +147,20 @@ class MCPServerOperations:
                                     installed_ids.add(server_id)
                                     
                     elif runtime == 'vscode':
-                        # VS Code stores servers in settings.json with different structure
-                        # Check both mcpServers and any nested structure
-                        mcp_servers = config.get("mcpServers", {})
-                        for server_name, server_config in mcp_servers.items():
-                            if isinstance(server_config, dict):
-                                server_id = (
-                                    server_config.get("id") or
-                                    server_config.get("serverId") or
-                                    server_config.get("server_id")
-                                )
-                                if server_id:
-                                    installed_ids.add(server_id)
+                        # VS Code stores project-local MCP config in .vscode/mcp.json
+                        # under the top-level "servers" key. Keep legacy fallbacks for
+                        # older settings.json-style structures when present.
+                        for key in ("servers", "mcpServers"):
+                            mcp_servers = config.get(key, {})
+                            for server_name, server_config in mcp_servers.items():
+                                if isinstance(server_config, dict):
+                                    server_id = (
+                                        server_config.get("id") or
+                                        server_config.get("serverId") or
+                                        server_config.get("server_id")
+                                    )
+                                    if server_id:
+                                        installed_ids.add(server_id)
                             
             except Exception:
                 # If we can't read a runtime's config, skip it
