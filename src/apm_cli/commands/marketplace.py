@@ -7,6 +7,7 @@ Click group pattern as ``mcp.py``.
 import builtins
 import json
 import os
+import re
 import subprocess
 import sys
 import traceback
@@ -42,6 +43,16 @@ from ..marketplace.yml_schema import load_marketplace_yml
 from ..utils.path_security import PathTraversalError, validate_path_segments
 from ..utils.console import _rich_info, _rich_warning
 from ._helpers import _get_console, _is_interactive
+
+
+# Marketplace alias must satisfy this pattern so it can appear on the right of
+# ``@`` in ``apm install <plugin>@<marketplace>`` syntax.
+_ALIAS_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
+
+
+def _is_valid_alias(value: str) -> bool:
+    """Return True when ``value`` is a legal marketplace alias."""
+    return bool(value) and _ALIAS_PATTERN.match(value) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -336,28 +347,22 @@ def add(repo, name, branch, host, verbose):
             resolved_host = normalized_host
         else:
             resolved_host = default_host()
-        display_name = name or repo_name
 
-        # Validate name is identifier-compatible for NAME@MARKETPLACE syntax
-        import re
-
-        if not re.match(r"^[a-zA-Z0-9._-]+$", display_name):
+        # Hard-fail if the user-supplied --name flag is malformed; the
+        # manifest's name is validated softly below (publisher mistakes
+        # shouldn't break a successful add).
+        if name is not None and not _is_valid_alias(name):
             logger.error(
-                f"Invalid marketplace name: '{display_name}'. "
+                f"Invalid marketplace name: '{name}'. "
                 f"Names must only contain letters, digits, '.', '_', and '-' "
                 f"(required for 'apm install plugin@marketplace' syntax)."
             )
             sys.exit(1)
 
-        logger.start(f"Registering marketplace '{display_name}'...", symbol="gear")
-        logger.verbose_detail(f"    Repository: {owner}/{repo_name}")
-        logger.verbose_detail(f"    Branch: {branch}")
-        if resolved_host != "github.com":
-            logger.verbose_detail(f"    Host: {resolved_host}")
-
-        # Auto-detect marketplace.json location
+        # Probe for the marketplace.json location. The probe source's name
+        # is a placeholder -- _auto_detect_path only consults host/owner/repo.
         probe_source = MarketplaceSource(
-            name=display_name,
+            name=name or repo_name,
             owner=owner,
             repo=repo_name,
             branch=branch,
@@ -373,9 +378,56 @@ def add(repo, name, branch, host, verbose):
             )
             sys.exit(1)
 
-        logger.verbose_detail(f"    Detected path: {detected_path}")
+        # Fetch and validate the manifest before logging start, so that the
+        # success/start lines display the *final* alias the user must use.
+        fetch_source = MarketplaceSource(
+            name=name or repo_name,
+            owner=owner,
+            repo=repo_name,
+            branch=branch,
+            host=resolved_host,
+            path=detected_path,
+        )
+        manifest = fetch_marketplace(fetch_source, force_refresh=True)
+        plugin_count = len(manifest.plugins)
 
-        # Create source with detected path
+        # Resolve final alias: --name flag > manifest.name (if valid) > repo name.
+        # Track which tier won so we can report it in verbose mode and emit a
+        # warning when a publisher-declared name had to be rejected.
+        manifest_name = (manifest.name or "").strip()
+        if name is not None:
+            display_name = name
+            alias_source = "--name flag"
+        elif manifest_name and _is_valid_alias(manifest_name):
+            display_name = manifest_name
+            alias_source = f"manifest.name ('{manifest_name}')"
+        else:
+            display_name = repo_name
+            if manifest_name and not _is_valid_alias(manifest_name):
+                logger.warning(
+                    f"Manifest declares name '{manifest_name}' which is not a "
+                    f"valid alias (must match [a-zA-Z0-9._-]+). "
+                    f"Falling back to repo name."
+                )
+                alias_source = f"repo name (manifest.name '{manifest_name}' invalid)"
+            else:
+                alias_source = "repo name (manifest.name missing)"
+
+        # Defense-in-depth: repo names from GitHub already satisfy the alias
+        # regex, so this invariant should always hold by the time we register.
+        assert _is_valid_alias(display_name), (
+            f"Resolved marketplace alias '{display_name}' failed validation"
+        )
+
+        logger.start(f"Registering marketplace '{display_name}'...", symbol="gear")
+        logger.verbose_detail(f"    Repository: {owner}/{repo_name}")
+        logger.verbose_detail(f"    Branch: {branch}")
+        if resolved_host != "github.com":
+            logger.verbose_detail(f"    Host: {resolved_host}")
+        logger.verbose_detail(f"    Detected path: {detected_path}")
+        logger.verbose_detail(f"    Alias source: {alias_source}")
+
+        # Persist with the final alias.
         source = MarketplaceSource(
             name=display_name,
             owner=owner,
@@ -384,12 +436,6 @@ def add(repo, name, branch, host, verbose):
             host=resolved_host,
             path=detected_path,
         )
-
-        # Fetch and validate
-        manifest = fetch_marketplace(source, force_refresh=True)
-        plugin_count = len(manifest.plugins)
-
-        # Register
         add_marketplace(source)
 
         logger.success(
@@ -398,6 +444,14 @@ def add(repo, name, branch, host, verbose):
         )
         if manifest.description:
             logger.verbose_detail(f"    {manifest.description}")
+
+        # Surface the install syntax only when the alias is something the user
+        # could not have predicted from OWNER/REPO. Silence is fine otherwise.
+        if name is None and display_name != repo_name:
+            logger.progress(
+                f"Install plugins with: apm install <plugin>@{display_name}",
+                symbol="info",
+            )
 
     except Exception as e:  # noqa: BLE001 -- top-level command catch-all
         logger.error(f"Failed to register marketplace: {e}")
