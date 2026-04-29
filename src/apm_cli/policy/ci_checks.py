@@ -40,15 +40,17 @@ def _check_lockfile_exists(project_root: Path) -> CheckResult:
             message="No apm.yml found -- nothing to check",
         )
 
+    import yaml
+
     from ..models.apm_package import APMPackage
 
     try:
         manifest = APMPackage.from_apm_yml(apm_yml_path)
-    except (ValueError, FileNotFoundError):
+    except (ValueError, yaml.YAMLError) as exc:
         return CheckResult(
-            name="lockfile-exists",
-            passed=True,
-            message="Could not parse apm.yml -- skipping lockfile check",
+            name="manifest-parse",
+            passed=False,
+            message="Cannot parse apm.yml: %s" % exc,
         )
 
     has_deps = manifest.has_apm_dependencies() or bool(manifest.get_mcp_dependencies())
@@ -447,10 +449,19 @@ def run_baseline_checks(
     if not apm_yml_path.exists() or not lockfile_path.exists():
         return result
 
+    import yaml
+
     try:
         clear_apm_yml_cache()
         manifest = APMPackage.from_apm_yml(apm_yml_path)
-    except (ValueError, FileNotFoundError):
+    except (ValueError, yaml.YAMLError) as exc:
+        result.checks.append(
+            CheckResult(
+                name="manifest-parse",
+                passed=False,
+                message="Cannot parse apm.yml: %s" % exc,
+            )
+        )
         return result
 
     lock = LockFile.read(lockfile_path)

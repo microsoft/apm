@@ -10,14 +10,23 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional
 
+import logging
+
 from .models import CIAuditResult, CheckResult
+
+_logger = logging.getLogger(__name__)
 
 
 # -- Helpers -------------------------------------------------------
 
 
 def _load_raw_apm_yml(project_root: Path) -> Optional[dict]:
-    """Load raw apm.yml as a dict for policy checks that inspect raw fields."""
+    """Load raw apm.yml as a dict for policy checks that inspect raw fields.
+
+    Returns ``None`` when the file is absent, unreadable, malformed YAML,
+    or not a mapping -- but now logs a warning so the failure is visible
+    rather than silently swallowed.
+    """
     import yaml
 
     apm_yml_path = project_root / "apm.yml"
@@ -26,9 +35,19 @@ def _load_raw_apm_yml(project_root: Path) -> Optional[dict]:
     try:
         with open(apm_yml_path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
-        return data if isinstance(data, dict) else None
-    except Exception:
+    except yaml.YAMLError as exc:
+        _logger.warning("Malformed YAML in %s: %s", apm_yml_path, exc)
         return None
+    except OSError as exc:
+        _logger.warning("Cannot read %s: %s", apm_yml_path, exc)
+        return None
+    if not isinstance(data, dict):
+        _logger.warning(
+            "apm.yml is not a YAML mapping (got %s) -- skipping raw-field checks",
+            type(data).__name__,
+        )
+        return None
+    return data
 
 
 # -- Individual policy checks --------------------------------------
@@ -930,10 +949,19 @@ def run_policy_checks(
     if not apm_yml_path.exists():
         return result
 
+    import yaml
+
     try:
         clear_apm_yml_cache()
         manifest = APMPackage.from_apm_yml(apm_yml_path)
-    except (ValueError, FileNotFoundError):
+    except (ValueError, yaml.YAMLError) as exc:
+        result.checks.append(
+            CheckResult(
+                name="manifest-parse",
+                passed=False,
+                message="Cannot parse apm.yml: %s" % exc,
+            )
+        )
         return result
 
     # Load lockfile (optional -- some checks work without it)

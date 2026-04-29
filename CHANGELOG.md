@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ADO Entra ID auth path no longer silently fails.** Bearer tokens from `az account get-access-token` are now correctly plumbed through validation (auth scheme, git env). Auth failures raise a typed `AuthenticationError` with an actionable 4-case diagnostic instead of the ambiguous "not accessible or doesn't exist" message. `apm install --update` runs a pre-flight auth check before modifying any files -- on failure it aborts with "No files were modified". (#1015)
 - Correct targeting of compiled artifacts so GEMINI.md is only created if requested (#1019)
 
+### Security
+
+- `apm audit --ci` and `apm install` now fail-closed when `apm.yml` is malformed YAML or not a mapping -- previously, policy and baseline checks were silently skipped. (#936)
+
 ## [0.10.0] - 2026-04-27
 
 ### Added

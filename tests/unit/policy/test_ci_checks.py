@@ -1021,3 +1021,102 @@ class TestIncludesConsent:
         consent = next(c for c in result.checks if c.name == "includes-consent")
         assert consent.passed
         assert "consider adding 'includes: auto'" in consent.message
+
+
+# -- Group 3: _check_lockfile_exists malformed-manifest tests ------
+
+
+class TestCheckLockfileExistsMalformedManifest:
+    """_check_lockfile_exists must fail-closed on malformed apm.yml (fix #936)."""
+
+    def test_malformed_yaml_returns_failing_check(self, tmp_path: Path) -> None:
+        """Malformed YAML produces manifest-parse check with passed=False."""
+        (tmp_path / "apm.yml").write_text(": :\n  bad: [yaml\n", encoding="utf-8")
+        check = _check_lockfile_exists(tmp_path)
+        assert check.name == "manifest-parse"
+        assert not check.passed
+        assert "Cannot parse apm.yml" in check.message
+
+    def test_non_dict_yaml_returns_failing_check(self, tmp_path: Path) -> None:
+        """Non-dict YAML (bare list) produces manifest-parse failure."""
+        (tmp_path / "apm.yml").write_text("- item1\n- item2\n", encoding="utf-8")
+        check = _check_lockfile_exists(tmp_path)
+        assert check.name == "manifest-parse"
+        assert not check.passed
+        assert "Cannot parse apm.yml" in check.message
+
+    def test_empty_file_returns_failing_check(self, tmp_path: Path) -> None:
+        """Empty apm.yml produces manifest-parse failure."""
+        (tmp_path / "apm.yml").write_text("", encoding="utf-8")
+        check = _check_lockfile_exists(tmp_path)
+        assert check.name == "manifest-parse"
+        assert not check.passed
+
+    def test_binary_content_returns_failing_check(self, tmp_path: Path) -> None:
+        """Binary content in apm.yml raises ReaderError (subclass of YAMLError)."""
+        (tmp_path / "apm.yml").write_bytes(b"\x89PNG\r\n\x1a\n")
+        check = _check_lockfile_exists(tmp_path)
+        assert check.name == "manifest-parse"
+        assert not check.passed
+
+
+# -- Group 4: run_baseline_checks malformed-manifest tests ---------
+
+
+class TestRunBaselineChecksMalformedManifest:
+    """run_baseline_checks must fail-closed on malformed apm.yml (fix #936)."""
+
+    def test_malformed_yaml_produces_failing_check(self, tmp_path: Path) -> None:
+        """Malformed YAML causes check 1 (_check_lockfile_exists) to return
+        a manifest-parse failure, which propagates through run_baseline_checks."""
+        (tmp_path / "apm.yml").write_text(": :\n  bad: [yaml\n", encoding="utf-8")
+        clear_apm_yml_cache()
+        result = run_baseline_checks(tmp_path)
+        assert not result.passed
+        parse_checks = [c for c in result.checks if c.name == "manifest-parse"]
+        assert len(parse_checks) >= 1
+        assert not parse_checks[0].passed
+
+    def test_non_dict_yaml_produces_failing_check(self, tmp_path: Path) -> None:
+        """Non-dict YAML (bare list) propagates as manifest-parse failure."""
+        (tmp_path / "apm.yml").write_text("- item1\n- item2\n", encoding="utf-8")
+        clear_apm_yml_cache()
+        result = run_baseline_checks(tmp_path)
+        assert not result.passed
+        parse_checks = [c for c in result.checks if c.name == "manifest-parse"]
+        assert len(parse_checks) >= 1
+        assert not parse_checks[0].passed
+
+    def test_second_parse_catch_with_mocked_check1(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test the run_baseline_checks manifest-parse catch after check 1 passes.
+
+        _check_lockfile_exists now fails on malformed YAML, so we monkeypatch it
+        to pass in order to exercise the second try/except block in
+        run_baseline_checks (line ~454) independently.
+        """
+        from apm_cli.policy.models import CheckResult as _CheckResult
+
+        # Write malformed apm.yml and a dummy lockfile so the path is reached.
+        (tmp_path / "apm.yml").write_text(": :\n  bad: [yaml\n", encoding="utf-8")
+        (tmp_path / "apm.lock.yaml").write_text(
+            "lockfile_version: '1'\ngenerated_at: '2025-01-01T00:00:00Z'\ndependencies: []\n",
+            encoding="utf-8",
+        )
+
+        # Mock _check_lockfile_exists so check 1 passes and execution continues.
+        monkeypatch.setattr(
+            "apm_cli.policy.ci_checks._check_lockfile_exists",
+            lambda project_root: _CheckResult(
+                name="lockfile-exists", passed=True, message="mocked pass"
+            ),
+        )
+
+        clear_apm_yml_cache()
+        result = run_baseline_checks(tmp_path)
+        assert not result.passed
+        parse_checks = [c for c in result.checks if c.name == "manifest-parse"]
+        assert len(parse_checks) == 1
+        assert not parse_checks[0].passed
+        assert "Cannot parse apm.yml" in parse_checks[0].message
