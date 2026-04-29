@@ -287,55 +287,99 @@ def _check_gitignore_for_marketplace_json(logger):
 @click.option("--host", default=None, help="Git host FQDN (default: github.com)")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def add(repo, name, branch, host, verbose):
-    """Register a marketplace from OWNER/REPO or HOST/OWNER/REPO."""
+    """Register a marketplace from OWNER/REPO, HOST/OWNER/.../REPO, or a full HTTPS URL."""
     logger = CommandLogger("marketplace-add", verbose=verbose)
     try:
         from ..marketplace.client import _auto_detect_path, fetch_marketplace
         from ..marketplace.models import MarketplaceSource
         from ..marketplace.registry import add_marketplace
 
-        # Parse OWNER/REPO or HOST/OWNER/REPO
-        if "/" not in repo:
-            logger.error(
-                f"Invalid format: '{repo}'. Use 'OWNER/REPO' "
-                f"(e.g., 'acme-org/plugin-marketplace')"
-            )
-            sys.exit(1)
+        # Parse OWNER/REPO, HOST/OWNER/.../REPO, or full HTTPS URL.
+        # Supports GitLab subgroups and any N-segment path.
+        import urllib.parse as _urlparse
 
         from ..utils.github_host import default_host, is_valid_fqdn
 
-        parts = repo.split("/")
-        if len(parts) == 3 and parts[0] and parts[1] and parts[2]:
-            if not is_valid_fqdn(parts[0]):
+        repo_input = repo
+        resolved_host = None
+
+        if repo_input.lower().startswith(("https://", "http://")):
+            # Full URL: https://gitlab.com/mycompany/myorg/sub/repo[.git]
+            _parsed = _urlparse.urlparse(repo_input)
+            url_host = (_parsed.hostname or "").lower()
+            if not is_valid_fqdn(url_host):
+                logger.error(f"Invalid host in URL: '{url_host}'.")
+                sys.exit(1)
+            if host and host.lower() != url_host:
                 logger.error(
-                    f"Invalid host: '{parts[0]}'. "
-                    f"Use 'OWNER/REPO' or 'HOST/OWNER/REPO' format."
+                    f"Conflicting host: --host '{host}' vs '{url_host}' in URL."
                 )
                 sys.exit(1)
-            if host and host != parts[0]:
+            resolved_host = url_host
+            _path = _parsed.path.strip("/")
+            if _path.endswith(".git"):
+                _path = _path[:-4]
+            path_parts = [p for p in _path.split("/") if p]
+            if len(path_parts) < 2:
                 logger.error(
-                    f"Conflicting host: --host '{host}' vs '{parts[0]}' in argument."
+                    f"Invalid URL '{repo_input}': expected at least OWNER/REPO in the path."
                 )
                 sys.exit(1)
-            host = parts[0]
-            owner, repo_name = parts[1], parts[2]
-        elif len(parts) == 2 and parts[0] and parts[1]:
-            owner, repo_name = parts[0], parts[1]
+            owner = "/".join(path_parts[:-1])
+            repo_name = path_parts[-1]
         else:
-            logger.error(f"Invalid format: '{repo}'. Expected 'OWNER/REPO'")
+            parts = [p for p in repo_input.split("/") if p]
+            if len(parts) < 2:
+                logger.error(
+                    f"Invalid format: '{repo_input}'. Use 'OWNER/REPO' "
+                    f"(e.g., 'acme-org/plugin-marketplace')"
+                )
+                sys.exit(1)
+
+            if is_valid_fqdn(parts[0]):
+                # HOST/OWNER/.../REPO (N >= 3 parts, first part is hostname)
+                if len(parts) < 3:
+                    logger.error(
+                        f"Invalid format: '{repo_input}'. "
+                        f"Expected 'HOST/OWNER/REPO' when a host is included "
+                        f"(e.g., 'gitlab.com/myorg/repo')."
+                    )
+                    sys.exit(1)
+                url_host = parts[0].lower()
+                if host and host.lower() != url_host:
+                    logger.error(
+                        f"Conflicting host: --host '{host}' vs '{parts[0]}' in argument."
+                    )
+                    sys.exit(1)
+                resolved_host = url_host
+                owner = "/".join(parts[1:-1])
+                repo_name = parts[-1]
+            else:
+                # OWNER/.../REPO (no host prefix, any number of segments)
+                owner = "/".join(parts[:-1])
+                repo_name = parts[-1]
+
+        # Security: reject traversal sequences in parsed path components
+        try:
+            validate_path_segments(owner, context="owner path")
+            validate_path_segments(repo_name, context="repository name")
+        except PathTraversalError as exc:
+            logger.error(str(exc))
             sys.exit(1)
 
-        if host is not None:
-            normalized_host = host.strip().lower()
-            if not is_valid_fqdn(normalized_host):
-                logger.error(
-                    f"Invalid host: '{host}'. Expected a valid host FQDN "
-                    f"(for example, 'github.com')."
-                )
-                sys.exit(1)
-            resolved_host = normalized_host
-        else:
-            resolved_host = default_host()
+        # Resolve --host flag or fall back to default
+        if resolved_host is None:
+            if host is not None:
+                normalized_host = host.strip().lower()
+                if not is_valid_fqdn(normalized_host):
+                    logger.error(
+                        f"Invalid host: '{host}'. Expected a valid host FQDN "
+                        f"(for example, 'github.com')."
+                    )
+                    sys.exit(1)
+                resolved_host = normalized_host
+            else:
+                resolved_host = default_host()
         display_name = name or repo_name
 
         # Validate name is identifier-compatible for NAME@MARKETPLACE syntax
@@ -424,7 +468,7 @@ def list_cmd(verbose):
         if not sources:
             logger.progress(
                 "No marketplaces registered. "
-                "Use 'apm marketplace add OWNER/REPO' to register one.",
+                "Use 'apm marketplace add OWNER/REPO' (or a full HTTPS URL) to register one.",
                 symbol="info",
             )
             return
