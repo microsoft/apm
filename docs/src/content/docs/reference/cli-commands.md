@@ -132,6 +132,18 @@ See [Dependencies: Transport selection](../../guides/dependencies/#transport-sel
 - Each `http://` dependency is warned at install time before any fetch begins
 - Transitive `http://` dependencies are allowed automatically when they use the same host as a direct insecure dependency you approved with `--allow-insecure`; other transitive hosts require `--allow-insecure-host HOSTNAME`
 
+**Claude Code: prompt `input:` -> slash command `arguments:`:**
+
+When installing into `.claude/commands/`, prompt files with an `input:` front-matter key are transformed so Claude Code can surface typed argument hints in the slash-command picker:
+
+- `input:` is mapped to Claude's `arguments:` front-matter (preserving order).
+- An `argument-hint:` is auto-generated as `<name1> <name2> ...` unless the prompt already sets one explicitly.
+- `${input:name}` references in the body are rewritten to Claude-style `$name` placeholders (double-brace `${{input:name}}` is also accepted).
+- Argument names are restricted to `^[A-Za-z][\w-]{0,63}$`; names containing YAML-significant characters are rejected with a warning and dropped from the output.
+- A short install-time message lists the mapped arguments per file so the transformation is visible without `--verbose`.
+
+This transformation only applies to the `claude` target. Other targets receive the prompt content unchanged.
+
 **Local `.apm/` Content Deployment:**
 
 After integrating dependencies, `apm install` deploys primitives from the project's own `.apm/` directory (instructions, prompts, agents, skills, hooks, commands) to target directories (`.github/`, `.claude/`, `.cursor/`, etc.). Local content takes priority over dependencies on collision. Deployed files are tracked in the lockfile for cleanup on subsequent installs. This works even with zero dependencies -- just `apm.yml` and `.apm/` content is enough.
