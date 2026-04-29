@@ -23,8 +23,19 @@ _logger = logging.getLogger(__name__)
 def _load_raw_apm_yml(project_root: Path) -> Optional[dict]:
     """Load raw apm.yml as a dict for policy checks that inspect raw fields.
 
+    This helper is called **after** :pymethod:`APMPackage.from_apm_yml` has
+    already succeeded in :func:`run_policy_checks`.  The primary security
+    gate is ``from_apm_yml()`` -- if it fails, the audit aborts with a
+    ``manifest-parse`` check result and this function is never reached.
+
+    Returning ``None`` here is therefore **defence-in-depth**: it covers
+    edge cases (TOCTOU race, transient I/O error) where the file becomes
+    unreadable between the two calls.  Callers that receive ``None``
+    gracefully skip supplementary raw-field checks (e.g.
+    ``compilation-target``, ``extensions-present``) rather than hard-failing.
+
     Returns ``None`` when the file is absent, unreadable, malformed YAML,
-    or not a mapping -- but now logs a warning so the failure is visible
+    or not a mapping -- but logs a warning so the failure is visible
     rather than silently swallowed.
     """
     import yaml
@@ -965,7 +976,7 @@ def run_policy_checks(
             CheckResult(
                 name="manifest-parse",
                 passed=False,
-                message="Cannot parse apm.yml: %s" % exc,
+                message="Cannot parse apm.yml: %s -- fix the YAML syntax error in apm.yml and re-run." % exc,
             )
         )
         return result

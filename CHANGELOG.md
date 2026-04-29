@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- `apm audit --ci` and `apm install` now fail-closed when `apm.yml` is malformed YAML or not a mapping -- previously, policy and baseline checks were silently skipped. (#936)
+- `apm audit --ci` and `apm install` now fail-closed when `apm.yml` is malformed YAML or not a mapping -- previously, policy and baseline checks were silently skipped (severity: medium -- policy bypass). **Migration:** repos with latently malformed `apm.yml` will go from CI-pass to CI-fail on upgrade. Validate before upgrading with `python -c "import yaml; yaml.safe_load(open('apm.yml'))"` or run `apm audit --ci` locally. Fix any YAML syntax errors in `apm.yml` (stray tabs, unquoted colons, non-mapping root). (#936)
 
 ## [0.10.0] - 2026-04-27
 
