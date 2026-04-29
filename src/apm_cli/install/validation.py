@@ -486,6 +486,10 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                     pass
             return False
 
+    except AuthenticationError:
+        # #1015: let auth failures propagate to the caller for proper
+        # rendering -- the outer try/except is only for parse failures.
+        raise
     except Exception:
         # If parsing fails, assume it's a regular GitHub package
         host = default_host()
