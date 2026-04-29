@@ -14,7 +14,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`apm pack` is now the single command for marketplace builds** -- with an `apm.yml` `marketplace:` block it emits `.claude-plugin/marketplace.json` directly. New flags: `--offline`, `--include-prerelease`, `--marketplace-output PATH`. (#722)
 - **Author marketplaces from `apm.yml`.** New top-level `marketplace:` block, `apm marketplace migrate` to consolidate legacy `marketplace.yml`, `apm init --marketplace` to scaffold, and first-class `source: ./local/path` package sources. (#1038)
 - **Codex CLI installs are now project-scoped.** MCP config lands in `.codex/config.toml` for project installs (no more polluting the user-global file); user-scope primitive deployment is also supported. (#803)
-- **Dev Container Feature** `ghcr.io/microsoft/apm/apm-cli` -- one-line install of the APM CLI into any devcontainer, Codespace, or JetBrains Gateway workspace. Pinned-version support, PEP 668 handled, tested on 6 distros. (#861)
 - **Cross-org private packages in `shared/apm.md`** via a new `apps:` array (one GitHub App per credential group, matrix fan-out). The single-app shorthand (`app-id` / `private-key` / `owner` / `repositories`) is preserved. (#982)
 
 ### Changed
@@ -52,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PR-review-panel and triage-panel skip cleanly (gray ⊘) on unmatched labels instead of failing -- no failed check, no quota burn. Bumps `gh-aw` to v0.71.1. (#1030)
 - `shared/apm.md` recompiled against `microsoft/apm-action@v1.5.0` for the new `bundles-file:` matrix restore (used by #982). (#1026)
 - Review-panel: true matrix fan-out per reviewer persona, binary `approve` / `request-changes` aggregation, label-driven merge gate. (#1022)
+- **Dev Container Feature scaffolded** under `devcontainer/` (closes #717) -- `install.sh` + 37 bats unit tests + 6-distro integration matrix. Not yet published to `ghcr.io`; will be announced in the release that publishes the OCI artifact. (#861)
 
 ## [0.10.0] - 2026-04-27
 
