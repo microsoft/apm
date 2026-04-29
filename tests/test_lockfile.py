@@ -116,11 +116,11 @@ class TestLockedDependency:
         assert loaded.deployed_file_hashes == {}
 
     def test_namespace_round_trip(self):
-        dep = LockedDependency(repo_url="owner/repo", namespace="acme")
+        dep = LockedDependency(repo_url="owner/repo", namespace="example")
         data = dep.to_dict()
-        assert data["namespace"] == "acme"
+        assert data["namespace"] == "example"
         restored = LockedDependency.from_dict(data)
-        assert restored.namespace == "acme"
+        assert restored.namespace == "example"
 
     def test_namespace_omitted_when_empty(self):
         dep = LockedDependency(repo_url="owner/repo")
@@ -399,8 +399,8 @@ class TestLockfileBuilderNamespaces:
     def test_attach_package_namespaces_records_dependency_namespace(self):
         lock = LockFile()
         lock.add_dependency(LockedDependency(repo_url="owner/repo"))
-        ctx = Mock(package_namespaces={"owner/repo": "acme"})
+        ctx = Mock(package_namespaces={"owner/repo": "example"})
 
         LockfileBuilder(ctx)._attach_package_namespaces(lock)
 
-        assert lock.dependencies["owner/repo"].namespace == "acme"
+        assert lock.dependencies["owner/repo"].namespace == "example"

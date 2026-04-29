@@ -424,14 +424,14 @@ class TestSkillIntegrator:
             name="my-skill",
             install_path=package_dir,
             package_type=PackageType.CLAUDE_SKILL,
-            namespace="acme",
+            namespace="example",
         )
 
         result = self.integrator.integrate_package_skill(
             package_info, self.project_root
         )
 
-        target = self.project_root / ".github" / "skills" / "acme" / "my-skill"
+        target = self.project_root / ".github" / "skills" / "example" / "my-skill"
         assert result.skill_created is True
         assert result.skill_path == target / "SKILL.md"
         assert (target / "SKILL.md").exists()
@@ -448,7 +448,7 @@ class TestSkillIntegrator:
             name="bundle",
             install_path=package_dir,
             package_type=PackageType.APM_PACKAGE,
-            namespace="acme",
+            namespace="example",
         )
 
         result = self.integrator.integrate_package_skill(
@@ -457,7 +457,7 @@ class TestSkillIntegrator:
 
         assert result.sub_skills_promoted == 1
         assert (
-            self.project_root / ".github" / "skills" / "acme" / "helper" / "SKILL.md"
+            self.project_root / ".github" / "skills" / "example" / "helper" / "SKILL.md"
         ).exists()
         assert not (self.project_root / ".github" / "skills" / "helper").exists()
     

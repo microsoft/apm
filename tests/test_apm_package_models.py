@@ -2067,13 +2067,13 @@ class TestPackageNamespace:
         clear_apm_yml_cache()
         manifest = tmp_path / "apm.yml"
         manifest.write_text(
-            "name: pkg\nversion: 1.0.0\nnamespace: acme-tools\n",
+            "name: pkg\nversion: 1.0.0\nnamespace: example-tools\n",
             encoding="utf-8",
         )
 
         package = APMPackage.from_apm_yml(manifest)
 
-        assert package.namespace == "acme-tools"
+        assert package.namespace == "example-tools"
 
     def test_from_apm_yml_rejects_traversal_namespace(self, tmp_path):
         from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
@@ -2094,7 +2094,7 @@ class TestPackageNamespace:
         clear_apm_yml_cache()
         manifest = tmp_path / "apm.yml"
         manifest.write_text(
-            "name: pkg\nversion: 1.0.0\nnamespace: acme/team\n",
+            "name: pkg\nversion: 1.0.0\nnamespace: example/team\n",
             encoding="utf-8",
         )
 
