@@ -32,13 +32,18 @@ from ._helpers import (
 @click.option(
     "--plugin", is_flag=True, help="Initialize as plugin author (creates plugin.json + apm.yml)"
 )
+@click.option(
+    "--marketplace", "marketplace_flag", is_flag=True,
+    help="Seed apm.yml with a 'marketplace:' authoring block",
+)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.pass_context
-def init(ctx, project_name, yes, plugin, verbose):
+def init(ctx, project_name, yes, plugin, marketplace_flag, verbose):
     """Initialize a new APM project (like npm init).
 
     Creates a minimal apm.yml with auto-detected metadata.
     With --plugin, also creates plugin.json for plugin authors.
+    With --marketplace, also seeds apm.yml with a marketplace authoring block.
     """
     logger = CommandLogger("init", verbose=verbose)
     try:
@@ -109,6 +114,22 @@ def init(ctx, project_name, yes, plugin, verbose):
         # Create plugin.json for plugin mode
         if plugin:
             _create_plugin_json(config)
+
+        # Append marketplace authoring block when requested.
+        if marketplace_flag:
+            from ..marketplace.init_template import render_marketplace_block
+            apm_yml_path = Path.cwd() / APM_YML_FILENAME
+            try:
+                existing = apm_yml_path.read_text(encoding="utf-8")
+                if not existing.endswith("\n"):
+                    existing += "\n"
+                block = render_marketplace_block(owner=config.get("name"))
+                apm_yml_path.write_text(existing + "\n" + block, encoding="utf-8")
+            except OSError as exc:
+                logger.warning(
+                    f"Failed to append marketplace block to apm.yml: {exc}",
+                    symbol="warning",
+                )
 
         logger.success("APM project initialized successfully!")
 
