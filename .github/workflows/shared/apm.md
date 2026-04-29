@@ -279,6 +279,37 @@ steps:
       pattern: ${{ needs.activation.outputs.artifact_prefix }}apm-*
       path: /tmp/gh-aw/apm-bundles
       merge-multiple: false
+  - name: Normalise bundle layout (single-artifact flatten workaround)
+    env:
+      EXPECTED_MATRIX: ${{ needs.apm-prep.outputs.matrix }}
+      ARTIFACT_PREFIX: ${{ needs.activation.outputs.artifact_prefix }}
+    run: |
+      set -euo pipefail
+      # actions/download-artifact (>=v5) flattens contents directly into `path/`
+      # whenever exactly one artifact matches the pattern, ignoring
+      # `merge-multiple: false`. Re-shape into the per-group subdir layout so
+      # downstream validation sees a stable structure regardless of matrix size.
+      # Upstream reference:
+      # https://github.com/actions/download-artifact/blob/v8.0.1/src/download-artifact.ts
+      # (see the `isSingleArtifactDownload || mergeMultiple || artifacts.length === 1`
+      # branch). Remove this step once download-artifact stops flattening or
+      # exposes an opt-out.
+      expected_count=$(echo "$EXPECTED_MATRIX" | jq '.group // [] | length')
+      if [ "$expected_count" -eq 1 ]; then
+        group_id=$(echo "$EXPECTED_MATRIX" | jq -r '.group[0].id')
+        # Defence-in-depth: group_id is interpolated into a shell path. apm-prep
+        # produces a sanitised id today, but enforce a strict allowlist here so
+        # any future schema drift cannot smuggle traversal sequences.
+        if ! printf '%s' "$group_id" | grep -Eq '^[A-Za-z0-9_-]+$'; then
+          echo "::error::unsafe group_id '$group_id' (must match ^[A-Za-z0-9_-]+$)"
+          exit 1
+        fi
+        group_dir="/tmp/gh-aw/apm-bundles/${ARTIFACT_PREFIX}apm-${group_id}"
+        if [ ! -d "$group_dir" ]; then
+          mkdir -p "$group_dir"
+          find /tmp/gh-aw/apm-bundles -mindepth 1 -maxdepth 1 ! -path "$group_dir" -exec mv {} "$group_dir/" \;
+        fi
+      fi
   - name: Validate downloaded bundles match matrix manifest
     env:
       EXPECTED_MATRIX: ${{ needs.apm-prep.outputs.matrix }}
