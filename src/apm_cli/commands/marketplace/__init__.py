@@ -1199,6 +1199,5 @@ __all__ = [
     "validate_path_segments",
     "_get_console",
     "_is_interactive",
-    "subprocess",
 ]
 

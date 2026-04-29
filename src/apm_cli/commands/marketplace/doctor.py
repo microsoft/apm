@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import sys
+import subprocess
 from pathlib import Path
 
 import click
 
 
-from . import (marketplace, _require_authoring_flag, _find_duplicate_names, _DoctorCheck, _render_doctor_table, CommandLogger, MarketplaceYmlError, translate_git_stderr, subprocess)
+from . import (marketplace, _require_authoring_flag, _find_duplicate_names, _DoctorCheck, _render_doctor_table, CommandLogger, MarketplaceYmlError, translate_git_stderr)
 
 @marketplace.command(help="Run environment diagnostics for marketplace builds")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
