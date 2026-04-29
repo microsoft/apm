@@ -75,11 +75,11 @@ def _resolve_ref(
     """
     from ....marketplace.ref_resolver import RefResolver
 
-    # Version-based — no ref resolution needed.
+    # Version-based - no ref resolution needed.
     if version is not None:
         return None
 
-    # Already a concrete SHA — store as-is.
+    # Already a concrete SHA - store as-is.
     if ref is not None and _SHA_RE.match(ref):
         return ref
 
@@ -113,12 +113,12 @@ def _resolve_ref(
         )
         return sha
 
-    # Non-HEAD, non-SHA ref — check whether it is a branch name.
+    # Non-HEAD, non-SHA ref - check whether it is a branch name.
     resolver = RefResolver()
     try:
         remote_refs = resolver.list_remote_refs(source)
     except (GitLsRemoteError, OfflineMissError):
-        # Cannot verify — store as-is but warn the user.
+        # Cannot verify - store as-is but warn the user.
         logger.warning(
             f"Could not verify ref '{ref}' for '{source}' (network unavailable). "
             "Storing unresolved -- run with network access to pin a concrete SHA.",
@@ -146,7 +146,7 @@ def _resolve_ref(
             )
             return remote_ref.sha
 
-    # Not a branch — tag or unknown ref; store as-is.
+    # Not a branch - tag or unknown ref; store as-is.
     return ref
 
 @click.group(help="Manage packages in marketplace.yml (add, set, remove)")
