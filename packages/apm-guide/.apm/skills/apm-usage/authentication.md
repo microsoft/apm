@@ -42,26 +42,34 @@ For SSO-protected orgs, authorize the token under Settings > Tokens > Configure 
 
 ## Azure DevOps (ADO)
 
-ADO supports two auth modes; the GitHub token chain does not apply. Resolution order:
+ADO supports two auth modes; the GitHub token chain does not apply. The recommended
+approach is `az login`; explicit PATs are also supported. Resolution order:
 
 1. `ADO_APM_PAT` env var if set
 2. AAD bearer from `az account get-access-token` if `az` is installed and signed in
-3. Otherwise: auth-failed error
+3. Otherwise: auth-failed error with actionable diagnostic
 
 ```bash
-# PAT mode
-export ADO_APM_PAT=your_ado_pat
+# Recommended: bearer mode (no env var needed)
+az login --tenant <tenant-id>
 apm install dev.azure.com/org/project/_git/repo
 
-# Bearer mode (no env var needed)
-az login --tenant <tenant-id>
+# Alternative: PAT mode
+export ADO_APM_PAT=your_ado_pat
 apm install dev.azure.com/org/project/_git/repo
 ```
 
 ADO paths use the 3-segment format: `org/project/repo`. Auth is always required.
 
+**Finding your tenant ID:** visit `https://dev.azure.com/{org}/_settings/organizationAad`,
+or run `az login` and inspect `az account show --query tenantId -o tsv`.
+
 If `ADO_APM_PAT` is set but ADO returns 401, APM silently retries with the `az` bearer and warns:
 `[!] ADO_APM_PAT was rejected for {host} (HTTP 401); fell back to az cli bearer.`
+
+When auth fails entirely, APM prints a targeted diagnostic (not a generic "not accessible"
+message). For `--update` operations, a pre-flight auth check runs before any files are
+modified -- on failure you see `No files were modified`.
 
 ### ADO auth troubleshooting
 
@@ -78,6 +86,7 @@ If `ADO_APM_PAT` is set but ADO returns 401, APM silently retries with the `az` 
 export GITHUB_HOST=github.company.com
 export GITHUB_APM_PAT_MYORG=ghp_ghes_token
 apm install myorg/internal-package       # resolves to github.company.com
+apm marketplace build                    # also resolves to github.company.com
 ```
 
 ## GHE Cloud data residency (*.ghe.com)

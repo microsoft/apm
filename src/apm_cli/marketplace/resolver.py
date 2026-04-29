@@ -13,6 +13,7 @@ import re
 from typing import Callable, Optional, Tuple
 
 from ..utils.path_security import PathTraversalError, validate_path_segments
+from ..models.dependency.reference import DependencyReference
 from .client import fetch_or_cache
 from .errors import MarketplaceFetchError, PluginNotFoundError
 from .models import MarketplacePlugin
@@ -95,25 +96,28 @@ def _resolve_github_source(source: dict) -> str:
 def _resolve_url_source(source: dict) -> str:
     """Resolve a ``url`` source type.
 
-    APM is Git-native -- URL sources that point to GitHub repos are
-    resolved to ``owner/repo``. Non-GitHub URLs are rejected.
+    Delegates to ``DependencyReference.parse()`` to extract the
+    ``owner/repo`` coordinate from any valid Git URL (GitHub, GHES, GitLab,
+    Bitbucket, ADO, SSH).  The URL's host is *not* preserved -- downstream
+    resolution (``RefResolver``) uses the configured ``GITHUB_HOST`` for
+    ``git ls-remote``.  True cross-host resolution is tracked in #1010.
     """
     url = source.get("url", "")
-    # Try to extract owner/repo from common GitHub URL patterns
-    for prefix in ("https://github.com/", "http://github.com/"):
-        if url.lower().startswith(prefix):
-            path = url[len(prefix) :].rstrip("/").split("?")[0]
-            # Remove .git suffix
-            if path.endswith(".git"):
-                path = path[:-4]
-            parts = path.split("/")
-            if len(parts) >= 2:
-                return f"{parts[0]}/{parts[1]}"
-
-    raise ValueError(
-        f"Cannot resolve URL source '{url}' to a Git coordinate. "
-        f"APM requires Git-based sources (owner/repo format)."
-    )
+    if not url:
+        raise ValueError("URL source requires a non-empty 'url' field")
+    try:
+        dep = DependencyReference.parse(url)
+    except ValueError as exc:
+        raise ValueError(
+            f"Cannot resolve URL source '{url}': {exc}"
+        ) from exc
+    if dep.is_local:
+        raise ValueError(
+            f"URL source '{url}' resolves to a local path, not a Git coordinate."
+        )
+    if dep.reference:
+        return f"{dep.repo_url}#{dep.reference}"
+    return dep.repo_url
 
 
 def _resolve_git_subdir_source(source: dict) -> str:

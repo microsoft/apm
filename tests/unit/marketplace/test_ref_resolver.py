@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import time
+import urllib.parse
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -314,13 +315,14 @@ class TestRefResolver:
     @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
     def test_correct_command_args(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(stdout="")
-        resolver = RefResolver(timeout_seconds=7.5)
+        resolver = RefResolver(timeout_seconds=7.5, host="github.com")
         resolver.list_remote_refs("acme/tools")
         args, kwargs = mock_run.call_args
-        assert args[0] == [
-            "git", "ls-remote", "--tags", "--heads",
-            "https://github.com/acme/tools.git",
-        ]
+        cmd = args[0]
+        assert cmd[:4] == ["git", "ls-remote", "--tags", "--heads"]
+        parsed = urllib.parse.urlparse(cmd[4])
+        assert parsed.hostname == "github.com"
+        assert parsed.path.rstrip("/") == "/acme/tools.git"
         assert kwargs["timeout"] == 7.5
         assert kwargs["capture_output"] is True
         assert kwargs["text"] is True
@@ -357,16 +359,17 @@ class TestResolveRefSha:
         mock_run.return_value = _make_completed(
             stdout=f"{_SHA_B}\trefs/heads/main\n",
         )
-        resolver = RefResolver(timeout_seconds=5.0)
+        resolver = RefResolver(timeout_seconds=5.0, host="github.com")
         sha = resolver.resolve_ref_sha("acme/tools", ref="main")
         assert sha == _SHA_B
         # Verify command uses the ref directly (no --tags --heads).
         args, kwargs = mock_run.call_args
-        assert args[0] == [
-            "git", "ls-remote",
-            "https://github.com/acme/tools.git",
-            "main",
-        ]
+        cmd = args[0]
+        assert cmd[:2] == ["git", "ls-remote"]
+        assert cmd[-1] == "main"
+        parsed = urllib.parse.urlparse(cmd[2])
+        assert parsed.hostname == "github.com"
+        assert parsed.path.rstrip("/") == "/acme/tools.git"
         resolver.close()
 
     @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
@@ -500,3 +503,111 @@ class TestGitTerminalPromptSuppression:
             "subprocess.run must pass GIT_ASKPASS=echo in env"
         )
         resolver.close()
+
+
+# ---------------------------------------------------------------------------
+# GHE / custom host support
+# ---------------------------------------------------------------------------
+
+
+class TestRefResolverGHEHost:
+    """Tests for RefResolver with custom or environment-driven host."""
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_custom_host_in_url(self, mock_run: MagicMock) -> None:
+        """RefResolver with explicit host uses that host in ls-remote URL."""
+        resolver = RefResolver(host="corp.ghe.com")
+        mock_run.return_value = _make_completed(stdout="abc123\trefs/tags/v1.0\n", returncode=0)
+        resolver.list_remote_refs("acme/tools")
+        args = mock_run.call_args[0][0]
+        url = args[-1]  # last arg is the URL
+        parsed = urllib.parse.urlparse(url)
+        assert parsed.hostname == "corp.ghe.com"
+        assert parsed.path.rstrip("/") == "/acme/tools.git"
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_default_host_env_var(self, mock_run: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
+        """RefResolver respects GITHUB_HOST env var when no explicit host given."""
+        monkeypatch.setenv("GITHUB_HOST", "ghe.example.com")
+        resolver = RefResolver()
+        mock_run.return_value = _make_completed(stdout="abc123\trefs/tags/v1.0\n", returncode=0)
+        resolver.list_remote_refs("acme/tools")
+        args = mock_run.call_args[0][0]
+        url = args[-1]
+        parsed = urllib.parse.urlparse(url)
+        assert parsed.hostname == "ghe.example.com"
+        resolver.close()
+
+    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    def test_resolve_ref_sha_custom_host(self, mock_run: MagicMock) -> None:
+        """resolve_ref_sha with custom host uses that host in URL."""
+        resolver = RefResolver(host="corp.ghe.com")
+        mock_run.return_value = _make_completed(
+            stdout="deadbeef" * 5 + "\tHEAD\n", returncode=0
+        )
+        resolver.resolve_ref_sha("acme/tools", "HEAD")
+        args = mock_run.call_args[0][0]
+        url = args[-2]  # URL is second-to-last, ref is last
+        parsed = urllib.parse.urlparse(url)
+        assert parsed.hostname == "corp.ghe.com"
+        resolver.close()
+
+    def test_empty_github_host_defaults_to_github_com(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Empty GITHUB_HOST falls back to github.com."""
+        monkeypatch.setenv("GITHUB_HOST", "")
+        resolver = RefResolver()
+        assert resolver._host == "github.com"
+        resolver.close()
+
+
+# ---------------------------------------------------------------------------
+# Token injection into ls-remote URLs
+# ---------------------------------------------------------------------------
+
+
+class TestRefResolverTokenInjection:
+    """Token injection into ls-remote URLs."""
+
+    def test_token_injected_in_url(self) -> None:
+        """When token is provided, URL uses x-access-token auth and ends with .git."""
+        resolver = RefResolver(host="github.com", token="ghp_testtoken123")
+        with patch("apm_cli.marketplace.ref_resolver.subprocess.run") as mock_run:
+            mock_run.return_value = _make_completed("aaaa" * 10 + "\trefs/tags/v1.0.0\n")
+            resolver.list_remote_refs("owner/repo")
+            cmd_args = mock_run.call_args[0][0]
+            # ["git", "ls-remote", "--tags", "--heads", url]
+            url_arg = cmd_args[cmd_args.index("--heads") + 1]
+            parsed = urllib.parse.urlparse(url_arg)
+            assert parsed.scheme == "https"
+            assert parsed.hostname == "github.com"
+            assert parsed.username == "x-access-token"
+            assert parsed.path.endswith(".git")
+
+    def test_no_token_url_has_git_suffix(self) -> None:
+        """Without token, URL still ends with .git and has no userinfo."""
+        resolver = RefResolver(host="github.com")
+        with patch("apm_cli.marketplace.ref_resolver.subprocess.run") as mock_run:
+            mock_run.return_value = _make_completed("aaaa" * 10 + "\trefs/tags/v1.0.0\n")
+            resolver.list_remote_refs("owner/repo")
+            cmd_args = mock_run.call_args[0][0]
+            url_arg = cmd_args[cmd_args.index("--heads") + 1]
+            parsed = urllib.parse.urlparse(url_arg)
+            assert parsed.path.endswith(".git")
+            assert parsed.username is None
+
+    def test_resolve_ref_sha_with_token(self) -> None:
+        """Token is also injected in resolve_ref_sha URL."""
+        resolver = RefResolver(host="corp.ghe.com", token="ghp_xxx")
+        with patch("apm_cli.marketplace.ref_resolver.subprocess.run") as mock_run:
+            mock_run.return_value = _make_completed("bbbb" * 10 + "\trefs/heads/main\n")
+            resolver.resolve_ref_sha("org/repo", "main")
+            cmd_args = mock_run.call_args[0][0]
+            # ["git", "ls-remote", url, ref]
+            url_arg = cmd_args[2]
+            parsed = urllib.parse.urlparse(url_arg)
+            assert parsed.hostname == "corp.ghe.com"
+            assert parsed.username == "x-access-token"
+            assert parsed.path.endswith(".git")
