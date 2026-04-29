@@ -60,7 +60,8 @@ class TestInitHappyPath:
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(marketplace, ["init"])
         assert result.exit_code == 0
-        assert "marketplace" in result.output.lower()
+        # Single collapsed success line for scaffold-and-inject path.
+        assert "Created apm.yml with 'marketplace:' block" in result.output
 
     def test_next_steps_shown(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

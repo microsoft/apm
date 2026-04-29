@@ -246,6 +246,7 @@ def init(force, no_gitignore_check, name, owner, verbose):
     logger = CommandLogger("marketplace-init", verbose=verbose)
     cwd = Path.cwd()
     apm_path = cwd / "apm.yml"
+    scaffolded_apm_yml = False
 
     # If apm.yml is missing, scaffold a minimal one with the marketplace
     # block included. Per design: marketplace authoring is folded into
@@ -262,7 +263,7 @@ def init(force, no_gitignore_check, name, owner, verbose):
         except OSError as exc:
             logger.error(f"Failed to write apm.yml: {exc}", symbol="error")
             sys.exit(1)
-        logger.success("Created apm.yml", symbol="check")
+        scaffolded_apm_yml = True
         if verbose:
             logger.verbose_detail(f"    Path: {apm_path}")
 
@@ -282,9 +283,9 @@ def init(force, no_gitignore_check, name, owner, verbose):
 
         if isinstance(data, dict) and "marketplace" in data and \
                 data["marketplace"] is not None and not force:
-            logger.error(
+            logger.warning(
                 "apm.yml already has a 'marketplace:' block. Use --force to overwrite.",
-                symbol="error",
+                symbol="warning",
             )
             sys.exit(1)
 
@@ -303,9 +304,11 @@ def init(force, no_gitignore_check, name, owner, verbose):
             logger.error(f"Failed to write apm.yml: {exc}", symbol="error")
             sys.exit(1)
 
-        logger.success(
-            "Added 'marketplace:' block to apm.yml", symbol="check"
-        )
+        if scaffolded_apm_yml:
+            success_msg = "Created apm.yml with 'marketplace:' block"
+        else:
+            success_msg = "Added 'marketplace:' block to apm.yml"
+        logger.success(success_msg, symbol="check")
         if verbose:
             logger.verbose_detail(f"    Path: {apm_path}")
 
@@ -2222,8 +2225,11 @@ def search(expression, limit, verbose):
 @marketplace.command(help="Fold marketplace.yml into apm.yml's 'marketplace:' block")
 @click.option(
     "--force",
+    "--yes",
+    "-y",
+    "force",
     is_flag=True,
-    help="Overwrite an existing 'marketplace:' block in apm.yml",
+    help="Overwrite an existing 'marketplace:' block in apm.yml (alias: --yes/-y)",
 )
 @click.option(
     "--dry-run",
