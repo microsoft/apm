@@ -22,9 +22,12 @@ from .models import (
 from .resolver import parse_marketplace_ref, resolve_marketplace_plugin
 from .yml_schema import (
     MarketplaceBuild,
+    MarketplaceConfig,
     MarketplaceOwner,
     MarketplaceYml,
     PackageEntry,
+    load_marketplace_from_apm_yml,
+    load_marketplace_from_legacy_yml,
     load_marketplace_yml,
 )
 from .builder import (
@@ -64,9 +67,12 @@ __all__ = [
     "parse_marketplace_ref",
     "resolve_marketplace_plugin",
     "MarketplaceBuild",
+    "MarketplaceConfig",
     "MarketplaceOwner",
     "MarketplaceYml",
     "PackageEntry",
+    "load_marketplace_from_apm_yml",
+    "load_marketplace_from_legacy_yml",
     "load_marketplace_yml",
     "BuildOptions",
     "BuildReport",

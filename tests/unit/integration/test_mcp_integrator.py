@@ -616,6 +616,60 @@ class TestRemoveStaleVscode:
         copilot_remaining = json.loads(copilot_mcp.read_text())
         assert "stale" in copilot_remaining["mcpServers"]
 
+    def test_removes_stale_server_from_vscode_with_explicit_project_root(self, tmp_path):
+        nested = tmp_path / "nested-project"
+        vscode_dir = nested / ".vscode"
+        self._write_vscode_mcp(vscode_dir, {"old-server": {}, "keep-server": {}})
+
+        with patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path), \
+             patch("pathlib.Path.home", return_value=tmp_path):
+            MCPIntegrator.remove_stale(
+                {"old-server"},
+                runtime="vscode",
+                project_root=nested,
+            )
+
+        remaining = json.loads((vscode_dir / "mcp.json").read_text())
+        assert "old-server" not in remaining["servers"]
+        assert "keep-server" in remaining["servers"]
+
+
+class TestInstallProjectRootDetection:
+    @patch("apm_cli.registry.operations.MCPServerOperations")
+    @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
+    @patch("apm_cli.runtime.manager.RuntimeManager")
+    @patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None)
+    def test_install_uses_explicit_project_root_for_workspace_runtime_detection(
+        self, _which, mock_mgr_cls, mock_install_rt, mock_ops_cls, tmp_path
+    ):
+        nested = tmp_path / "nested-project"
+        (nested / ".cursor").mkdir(parents=True)
+        (nested / ".opencode").mkdir()
+        (nested / ".vscode").mkdir()
+
+        mock_mgr = mock_mgr_cls.return_value
+        mock_mgr.is_runtime_available.return_value = False
+        mock_install_rt.return_value = True
+
+        mock_ops = mock_ops_cls.return_value
+        mock_ops.validate_servers_exist.return_value = (["test/server"], [])
+        mock_ops.check_servers_needing_installation.return_value = ["test/server"]
+        mock_ops.batch_fetch_server_info.return_value = {"test/server": {}}
+        mock_ops.collect_environment_variables.return_value = {}
+        mock_ops.collect_runtime_variables.return_value = {}
+
+        with patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path):
+            MCPIntegrator.install(
+                mcp_deps=["test/server"],
+                project_root=nested,
+                apm_config={},
+            )
+
+        called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
+        assert "vscode" in called_runtimes
+        assert "cursor" in called_runtimes
+        assert "opencode" in called_runtimes
+
 
 # ===========================================================================
 # MCPIntegrator.remove_stale - copilot

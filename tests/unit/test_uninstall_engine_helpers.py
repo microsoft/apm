@@ -374,7 +374,12 @@ class TestCleanupStaleMcp:
                 modules_dir=tmp_path / "apm_modules",
             )
 
-        mock_mcp.remove_stale.assert_called_once_with({"stale-server"}, scope=None)
+        mock_mcp.remove_stale.assert_called_once_with(
+            {"stale-server"},
+            project_root=None,
+            user_scope=False,
+            scope=None,
+        )
         mock_mcp.update_lockfile.assert_called_once()
 
     def test_non_stale_server_not_removed(self, tmp_path):
@@ -423,7 +428,12 @@ class TestCleanupStaleMcp:
                 scope="user",
             )
 
-        mock_mcp.remove_stale.assert_called_once_with({"stale"}, scope="user")
+        mock_mcp.remove_stale.assert_called_once_with(
+            {"stale"},
+            project_root=None,
+            user_scope=False,
+            scope="user",
+        )
 
     def test_get_mcp_dependencies_exception_handled(self, tmp_path):
         """Exception from apm_package.get_mcp_dependencies is swallowed."""

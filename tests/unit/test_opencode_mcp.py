@@ -363,6 +363,29 @@ class TestMCPIntegratorOpenCodeStaleCleanup(unittest.TestCase):
         MCPIntegrator.remove_stale({"stale"}, runtime="opencode")
         # No exception is the assertion
 
+    def test_remove_stale_opencode_uses_explicit_project_root(self):
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        other_root = Path(self.tmp.name) / "nested-project"
+        (other_root / ".opencode").mkdir(parents=True)
+        opencode_json = other_root / "opencode.json"
+        opencode_json.write_text(
+            json.dumps(
+                {"mcp": {"keep": {"type": "local"}, "stale": {"type": "remote"}}}
+            ),
+            encoding="utf-8",
+        )
+
+        MCPIntegrator.remove_stale(
+            {"stale"},
+            runtime="opencode",
+            project_root=other_root,
+        )
+
+        data = json.loads(opencode_json.read_text(encoding="utf-8"))
+        self.assertIn("keep", data["mcp"])
+        self.assertNotIn("stale", data["mcp"])
+
 
 if __name__ == "__main__":
     unittest.main()

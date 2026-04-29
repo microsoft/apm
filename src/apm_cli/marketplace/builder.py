@@ -149,6 +149,7 @@ class MarketplaceBuilder:
         auth_resolver: Optional[object] = None,
     ) -> None:
         self._yml_path = marketplace_yml_path
+        self._project_root = marketplace_yml_path.parent
         self._options = options or BuildOptions()
         self._yml: Optional[MarketplaceYml] = None
         self._resolver: Optional[RefResolver] = None
@@ -159,11 +160,47 @@ class MarketplaceBuilder:
         self._host_info: Optional["HostInfo"] = None
         self._auth_resolved: bool = False
 
+    @classmethod
+    def from_config(
+        cls,
+        config: MarketplaceYml,
+        project_root: Path,
+        options: Optional[BuildOptions] = None,
+        auth_resolver: Optional[object] = None,
+    ) -> "MarketplaceBuilder":
+        """Construct a builder from an already-loaded MarketplaceConfig.
+
+        Use this when the caller has already chosen between apm.yml and
+        the legacy ``marketplace.yml`` (typically via
+        ``migration.load_marketplace_config``).  ``project_root`` is the
+        directory output paths are resolved against.
+        """
+        # Use a synthetic path so legacy code paths that consult
+        # ``self._yml_path.parent`` still resolve to the project root.
+        synthetic_path = project_root / (
+            config.source_path.name
+            if config.source_path is not None
+            else "apm.yml"
+        )
+        instance = cls(synthetic_path, options=options, auth_resolver=auth_resolver)
+        instance._project_root = project_root
+        instance._yml = config
+        return instance
+
     # -- lazy loaders -------------------------------------------------------
 
     def _load_yml(self) -> MarketplaceYml:
         if self._yml is None:
-            self._yml = load_marketplace_yml(self._yml_path)
+            # Shape-aware load: when the configured path is an apm.yml
+            # file, use the apm.yml loader; otherwise default to the
+            # legacy marketplace.yml loader.  Callers that have already
+            # loaded a config should use ``from_config`` to bypass this.
+            from .yml_schema import load_marketplace_from_apm_yml
+
+            if self._yml_path.name == "apm.yml":
+                self._yml = load_marketplace_from_apm_yml(self._yml_path)
+            else:
+                self._yml = load_marketplace_yml(self._yml_path)
         return self._yml
 
     def _get_resolver(self) -> RefResolver:
@@ -200,16 +237,27 @@ class MarketplaceBuilder:
         if self._options.output_override is not None:
             return self._options.output_override
         yml = self._load_yml()
-        output_path = self._yml_path.parent / yml.output
+        output_path = self._project_root / yml.output
         # Containment guard -- reject output paths that escape the project root.
-        project_root = self._yml_path.parent
-        ensure_path_within(output_path, project_root)
+        ensure_path_within(output_path, self._project_root)
         return output_path
 
     # -- single-entry resolution --------------------------------------------
 
     def _resolve_entry(self, entry: PackageEntry) -> ResolvedPackage:
         """Resolve a single package entry to a concrete tag + SHA."""
+        # Local-path packages skip git resolution entirely.
+        if entry.is_local:
+            return ResolvedPackage(
+                name=entry.name,
+                source_repo="",
+                subdir=entry.source,
+                ref="",
+                sha="",
+                requested_version=entry.version,
+                tags=tuple(entry.tags),
+                is_prerelease=False,
+            )
         yml = self._load_yml()
         resolver = self._get_resolver()
         owner_repo = entry.source
@@ -561,6 +609,7 @@ class MarketplaceBuilder:
 
         Returns a mapping of ``{package_name: {"description": ..., "version": ...}}``
         for successful fetches.  Skipped entirely when ``--offline`` is set.
+        Local-path packages are skipped (they carry their own metadata).
 
         A GitHub token is resolved once before spawning worker threads and
         stored on ``self._github_token`` for the workers to read.
@@ -568,18 +617,20 @@ class MarketplaceBuilder:
         if self._options.offline:
             return {}
 
-        if not resolved:
+        # Filter out local-path entries -- they don't have a remote to fetch from.
+        remote = [pkg for pkg in resolved if pkg.source_repo]
+        if not remote:
             return {}
 
         # Resolve token once -- threads read self._github_token (immutable).
         self._ensure_auth()
 
         results: Dict[str, Dict[str, str]] = {}
-        workers = min(self._options.concurrency, len(resolved))
+        workers = min(self._options.concurrency, len(remote))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             future_to_name = {
                 pool.submit(self._fetch_remote_metadata, pkg): pkg.name
-                for pkg in resolved
+                for pkg in remote
             }
             for future in as_completed(future_to_name):
                 name = future_to_name[future]
@@ -616,10 +667,22 @@ class MarketplaceBuilder:
         # Pre-fetch metadata (description + version) from remote apm.yml
         remote_metadata = self._prefetch_metadata(resolved)
 
+        # Build a name -> entry map so we can reach back for local-package
+        # description / homepage that came from the yml itself.
+        entry_by_name: Dict[str, PackageEntry] = {
+            e.name: e for e in yml.packages
+        }
+
         doc: Dict[str, Any] = OrderedDict()
         doc["name"] = yml.name
-        doc["description"] = yml.description
-        doc["version"] = yml.version
+        # Top-level description / version are emitted only when explicitly
+        # set in the marketplace block (or in a legacy marketplace.yml).
+        # apm.yml-sourced configs that inherit these from the project skip
+        # them so the marketplace.json doesn't drift on unrelated bumps.
+        if yml.description_overridden and yml.description:
+            doc["description"] = yml.description
+        if yml.version_overridden and yml.version:
+            doc["version"] = yml.version
 
         # Owner -- omit empty optional sub-fields
         owner_dict: Dict[str, Any] = OrderedDict()
@@ -639,21 +702,43 @@ class MarketplaceBuilder:
         for pkg in resolved:
             plugin: Dict[str, Any] = OrderedDict()
             plugin["name"] = pkg.name
-            meta = remote_metadata.get(pkg.name, {})
-            if meta.get("description"):
-                plugin["description"] = meta["description"]
-            if meta.get("version"):
-                plugin["version"] = meta["version"]
-            plugin["tags"] = list(pkg.tags)
 
-            source: Dict[str, Any] = OrderedDict()
-            source["type"] = "github"
-            source["repository"] = pkg.source_repo
-            if pkg.subdir:
-                source["path"] = pkg.subdir
-            source["ref"] = pkg.ref
-            source["commit"] = pkg.sha
-            plugin["source"] = source
+            entry = entry_by_name.get(pkg.name)
+            is_local = entry is not None and entry.is_local
+
+            if is_local:
+                # Local packages: description/version come from the yml
+                # entry itself (not a remote fetch).
+                if entry.description:
+                    plugin["description"] = entry.description
+                if entry.version:
+                    plugin["version"] = entry.version
+            else:
+                meta = remote_metadata.get(pkg.name, {})
+                if meta.get("description"):
+                    plugin["description"] = meta["description"]
+                if meta.get("version"):
+                    plugin["version"] = meta["version"]
+
+            if pkg.tags:
+                plugin["tags"] = list(pkg.tags)
+
+            if is_local:
+                # Anthropic spec: local sources are emitted as plain
+                # strings (the path), not the {type, repository, ref,
+                # commit} object used for remote sources.
+                plugin["source"] = entry.source
+                if entry.homepage:
+                    plugin["homepage"] = entry.homepage
+            else:
+                source: Dict[str, Any] = OrderedDict()
+                source["type"] = "github"
+                source["repository"] = pkg.source_repo
+                if pkg.subdir:
+                    source["path"] = pkg.subdir
+                source["ref"] = pkg.ref
+                source["commit"] = pkg.sha
+                plugin["source"] = source
 
             plugins.append(plugin)
 
@@ -664,7 +749,10 @@ class MarketplaceBuilder:
         for p in plugins:
             pname = p["name"]
             src = p.get("source", {})
-            src_label = src.get("path") or src.get("repository", "?")
+            if isinstance(src, str):
+                src_label = src
+            else:
+                src_label = src.get("path") or src.get("repository", "?")
             if pname in seen_names:
                 build_warnings.append(
                     f"Duplicate package name '{pname}': "
@@ -699,6 +787,8 @@ class MarketplaceBuilder:
             src = p.get("source", {})
             if isinstance(src, dict):
                 sha = src.get("commit", "")
+            elif isinstance(src, str):
+                sha = src  # local-path packages: use the path string itself
             old_plugins[name] = sha
 
         new_plugins: Dict[str, str] = {}
@@ -708,6 +798,8 @@ class MarketplaceBuilder:
             src = p.get("source", {})
             if isinstance(src, dict):
                 sha = src.get("commit", "")
+            elif isinstance(src, str):
+                sha = src
             new_plugins[name] = sha
 
         unchanged = 0

@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
+import toml
 import yaml
 
 from apm_cli.integration.mcp_integrator import MCPIntegrator
@@ -952,11 +953,12 @@ class TestDiffAwareSelfDefinedInstall:
         )
         assert "updated" in printed_lines
 
+    @patch("apm_cli.core.null_logger._rich_success")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._check_self_defined_servers_needing_installation")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.integration.mcp_integrator._get_console", return_value=None)
     def test_no_stored_configs_preserves_existing_behavior(
-        self, _console, mock_install_runtime, mock_check,
+        self, _console, mock_install_runtime, mock_check, mock_rich_success,
     ):
         """Without stored configs (first install), behavior unchanged."""
         mock_check.return_value = []
@@ -970,3 +972,197 @@ class TestDiffAwareSelfDefinedInstall:
 
         assert count == 0
         mock_install_runtime.assert_not_called()
+        mock_rich_success.assert_called_once()
+        assert "already configured" in mock_rich_success.call_args.args[0]
+
+
+class TestCodexProjectScopedMCP:
+    """Tests for project-local Codex MCP activation and cleanup."""
+
+    @patch("apm_cli.integration.mcp_integrator._get_console", return_value=None)
+    @patch("apm_cli.integration.mcp_integrator._is_vscode_available", return_value=False)
+    @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
+    @patch("apm_cli.registry.operations.MCPServerOperations")
+    @patch("apm_cli.factory.ClientFactory.create_client")
+    @patch("apm_cli.runtime.manager.RuntimeManager")
+    def test_codex_skipped_when_not_active_project_target(
+        self,
+        mock_manager_cls,
+        mock_create_client,
+        mock_ops_cls,
+        mock_install_runtime,
+        _vscode,
+        _console,
+        tmp_path,
+    ):
+        """Installed Codex should not receive MCP config unless the project targets Codex."""
+        mock_manager = mock_manager_cls.return_value
+        mock_manager.is_runtime_available.side_effect = lambda runtime: runtime == "codex"
+        mock_create_client.return_value = MagicMock()
+
+        mock_ops = mock_ops_cls.return_value
+        mock_ops.validate_servers_exist.return_value = (["ghcr.io/org/new"], [])
+        mock_ops.check_servers_needing_installation.return_value = ["ghcr.io/org/new"]
+        mock_ops.batch_fetch_server_info.return_value = {"ghcr.io/org/new": {}}
+        mock_ops.collect_environment_variables.return_value = {}
+        mock_ops.collect_runtime_variables.return_value = {}
+
+        count = MCPIntegrator.install(
+            ["ghcr.io/org/new"],
+            project_root=tmp_path,
+            apm_config={},
+        )
+
+        assert count == 0
+        mock_install_runtime.assert_not_called()
+
+    @patch("apm_cli.integration.mcp_integrator._get_console", return_value=None)
+    @patch("apm_cli.integration.mcp_integrator._is_vscode_available", return_value=False)
+    @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
+    @patch("apm_cli.registry.operations.MCPServerOperations")
+    @patch("apm_cli.factory.ClientFactory.create_client")
+    @patch("apm_cli.runtime.manager.RuntimeManager")
+    def test_codex_installed_when_explicit_project_target(
+        self,
+        mock_manager_cls,
+        mock_create_client,
+        mock_ops_cls,
+        mock_install_runtime,
+        _vscode,
+        _console,
+        tmp_path,
+    ):
+        """Explicit Codex targeting should install MCP config into the project scope."""
+        mock_manager = mock_manager_cls.return_value
+        mock_manager.is_runtime_available.side_effect = lambda runtime: runtime == "codex"
+        mock_create_client.return_value = MagicMock()
+        mock_install_runtime.return_value = True
+
+        mock_ops = mock_ops_cls.return_value
+        mock_ops.validate_servers_exist.return_value = (["ghcr.io/org/new"], [])
+        mock_ops.check_servers_needing_installation.return_value = ["ghcr.io/org/new"]
+        mock_ops.batch_fetch_server_info.return_value = {"ghcr.io/org/new": {}}
+        mock_ops.collect_environment_variables.return_value = {}
+        mock_ops.collect_runtime_variables.return_value = {}
+
+        count = MCPIntegrator.install(
+            ["ghcr.io/org/new"],
+            project_root=tmp_path,
+            apm_config={"target": "codex"},
+            explicit_target="codex",
+        )
+
+        assert count == 1
+        mock_install_runtime.assert_called_once()
+        assert mock_install_runtime.call_args.kwargs["project_root"] == tmp_path
+        assert mock_install_runtime.call_args.kwargs["user_scope"] is False
+
+    @patch("apm_cli.integration.mcp_integrator._get_console", return_value=None)
+    @patch("apm_cli.integration.mcp_integrator._is_vscode_available", return_value=False)
+    @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
+    @patch("apm_cli.registry.operations.MCPServerOperations")
+    @patch("apm_cli.factory.ClientFactory.create_client")
+    @patch("apm_cli.runtime.manager.RuntimeManager")
+    def test_explicit_codex_runtime_still_requires_active_project_target(
+        self,
+        mock_manager_cls,
+        mock_create_client,
+        mock_ops_cls,
+        mock_install_runtime,
+        _vscode,
+        _console,
+        tmp_path,
+    ):
+        """Explicit runtime selection should not bypass Codex project gating."""
+        mock_manager = mock_manager_cls.return_value
+        mock_manager.is_runtime_available.side_effect = lambda runtime: runtime == "codex"
+        mock_create_client.return_value = MagicMock()
+
+        mock_ops = mock_ops_cls.return_value
+        mock_ops.validate_servers_exist.return_value = (["ghcr.io/org/new"], [])
+        mock_ops.check_servers_needing_installation.return_value = ["ghcr.io/org/new"]
+        mock_ops.batch_fetch_server_info.return_value = {"ghcr.io/org/new": {}}
+        mock_ops.collect_environment_variables.return_value = {}
+        mock_ops.collect_runtime_variables.return_value = {}
+
+        count = MCPIntegrator.install(
+            ["ghcr.io/org/new"],
+            runtime="codex",
+            project_root=tmp_path,
+            apm_config={},
+        )
+
+        assert count == 0
+        mock_install_runtime.assert_not_called()
+
+    @patch("apm_cli.core.null_logger._rich_info")
+    @patch("apm_cli.integration.mcp_integrator._get_console", return_value=None)
+    @patch("apm_cli.integration.mcp_integrator._is_vscode_available", return_value=False)
+    @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
+    @patch("apm_cli.registry.operations.MCPServerOperations")
+    @patch("apm_cli.factory.ClientFactory.create_client")
+    @patch("apm_cli.runtime.manager.RuntimeManager")
+    def test_codex_gating_reports_why_it_was_skipped(
+        self,
+        mock_manager_cls,
+        mock_create_client,
+        mock_ops_cls,
+        mock_install_runtime,
+        _vscode,
+        _console,
+        mock_info,
+        tmp_path,
+    ):
+        """Codex gating should tell the user why project MCP config was skipped."""
+        mock_manager = mock_manager_cls.return_value
+        mock_manager.is_runtime_available.side_effect = lambda runtime: runtime == "codex"
+        mock_create_client.return_value = MagicMock()
+
+        mock_ops = mock_ops_cls.return_value
+        mock_ops.validate_servers_exist.return_value = (["ghcr.io/org/new"], [])
+        mock_ops.check_servers_needing_installation.return_value = ["ghcr.io/org/new"]
+        mock_ops.batch_fetch_server_info.return_value = {"ghcr.io/org/new": {}}
+        mock_ops.collect_environment_variables.return_value = {}
+        mock_ops.collect_runtime_variables.return_value = {}
+
+        count = MCPIntegrator.install(
+            ["ghcr.io/org/new"],
+            runtime="codex",
+            project_root=tmp_path,
+            apm_config={},
+        )
+
+        assert count == 0
+        mock_install_runtime.assert_not_called()
+        mock_info.assert_any_call(
+            "Codex not an active project target -- skipping MCP config "
+            "(create .codex/ or set target: codex in apm.yml)",
+            symbol="info",
+        )
+
+    def test_remove_stale_codex_uses_project_config(self, tmp_path):
+        """Stale cleanup should edit the project .codex/config.toml."""
+        codex_dir = tmp_path / ".codex"
+        codex_dir.mkdir()
+        config_path = codex_dir / "config.toml"
+        config_path.write_text(
+            toml.dumps(
+                {
+                    "mcp_servers": {
+                        "keep": {"command": "npx"},
+                        "stale": {"command": "npx"},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        MCPIntegrator.remove_stale(
+            {"stale"},
+            runtime="codex",
+            project_root=tmp_path,
+        )
+
+        data = toml.loads(config_path.read_text(encoding="utf-8"))
+        assert "keep" in data["mcp_servers"]
+        assert "stale" not in data["mcp_servers"]

@@ -1,47 +1,61 @@
-"""OpenAI Codex CLI implementation of MCP client adapter.
+"""OpenAI Codex CLI implementation of MCP client adapter."""
 
-This adapter implements the Codex CLI-specific handling of MCP server configuration,
-targeting the global ~/.codex/config.toml file as specified in the MCP installation
-architecture specification.
-"""
-
+import logging
 import os
 import toml
 from pathlib import Path
 from .base import MCPClientAdapter
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
+from ...utils.console import _rich_warning
+
+
+_log = logging.getLogger(__name__)
 
 
 class CodexClientAdapter(MCPClientAdapter):
     """Codex CLI implementation of MCP client adapter.
     
     This adapter handles Codex CLI-specific configuration for MCP servers using
-    a global ~/.codex/config.toml file, following the TOML format for
-    MCP server configuration.
+    a scope-resolved config.toml file, following the TOML format for MCP
+    server configuration.
     """
-
     supports_user_scope: bool = True
 
-    def __init__(self, registry_url=None):
+    def __init__(
+        self,
+        registry_url=None,
+        project_root: Path | str | None = None,
+        user_scope: bool = False,
+    ):
         """Initialize the Codex CLI client adapter.
         
         Args:
             registry_url (str, optional): URL of the MCP registry.
                 If not provided, uses the MCP_REGISTRY_URL environment variable
                 or falls back to the default GitHub registry.
+            project_root: Project root used to resolve project-local Codex
+                config paths.
+            user_scope: Whether the adapter should resolve user-scope Codex
+                config paths instead of project-local paths.
         """
+        super().__init__(project_root=project_root, user_scope=user_scope)
         self.registry_client = SimpleRegistryClient(registry_url)
         self.registry_integration = RegistryIntegration(registry_url)
+
+    def _get_codex_dir(self):
+        """Return the root directory used for Codex config in the current scope."""
+        if self.user_scope:
+            return Path.home() / ".codex"
+        return self.project_root / ".codex"
     
     def get_config_path(self):
         """Get the path to the Codex CLI MCP configuration file.
         
         Returns:
-            str: Path to ~/.codex/config.toml
+            str: Path to the scope-resolved Codex config.toml
         """
-        codex_dir = Path.home() / ".codex"
-        return str(codex_dir / "config.toml")
+        return str(self._get_codex_dir() / "config.toml")
     
     def update_config(self, config_updates):
         """Update the Codex CLI MCP configuration.
@@ -49,7 +63,10 @@ class CodexClientAdapter(MCPClientAdapter):
         Args:
             config_updates (dict): Configuration updates to apply.
         """
+        config_path = Path(self.get_config_path())
         current_config = self.get_current_config()
+        if current_config is None:
+            return False
         
         # Ensure mcp_servers section exists
         if "mcp_servers" not in current_config:
@@ -57,21 +74,21 @@ class CodexClientAdapter(MCPClientAdapter):
         
         # Apply updates to mcp_servers section
         current_config["mcp_servers"].update(config_updates)
-        
-        # Write back to file
-        config_path = Path(self.get_config_path())
-        
+
         # Ensure directory exists
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(config_path, 'w') as f:
+
+        with open(config_path, 'w', encoding='utf-8') as f:
             toml.dump(current_config, f)
+        _log.debug("Codex config written to %s", config_path)
+        return True
     
     def get_current_config(self):
         """Get the current Codex CLI MCP configuration.
         
         Returns:
-            dict: Current configuration, or empty dict if file doesn't exist.
+            dict | None: Current configuration, empty dict if file doesn't
+                exist, or None when an existing config cannot be parsed safely.
         """
         config_path = self.get_config_path()
         
@@ -79,10 +96,19 @@ class CodexClientAdapter(MCPClientAdapter):
             return {}
         
         try:
-            with open(config_path, 'r') as f:
+            with open(config_path, 'r', encoding='utf-8') as f:
                 return toml.load(f)
-        except (toml.TomlDecodeError, IOError):
-            return {}
+        except toml.TomlDecodeError as exc:
+            _log.debug("Failed to parse Codex config at %s", config_path, exc_info=True)
+            _rich_warning(
+                f"Could not parse {config_path}: {exc} -- "
+                "skipping config write to avoid data loss",
+                symbol="warning",
+            )
+            return None
+        except IOError:
+            _log.debug("Failed to read Codex config at %s", config_path, exc_info=True)
+            return None
     
     def configure_mcp_server(self, server_url, server_name=None, enabled=True, env_overrides=None, server_info_cache=None, runtime_vars=None):
         """Configure an MCP server in Codex CLI configuration.
@@ -148,7 +174,8 @@ class CodexClientAdapter(MCPClientAdapter):
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             
             # Update configuration using the chosen key
-            self.update_config({config_key: server_config})
+            if not self.update_config({config_key: server_config}):
+                return False
             
             print(f"Successfully configured MCP server '{config_key}' for Codex CLI")
             return True
@@ -180,7 +207,7 @@ class CodexClientAdapter(MCPClientAdapter):
         raw = server_info.get("_raw_stdio")
         if raw:
             config["command"] = raw["command"]
-            config["args"] = raw["args"]
+            config["args"] = [self.normalize_project_arg(arg) for arg in raw["args"]]
             if raw.get("env"):
                 config["env"] = raw["env"]
                 self._warn_input_variables(raw["env"], server_info.get("name", ""), "Codex CLI")
@@ -555,4 +582,3 @@ class CodexClientAdapter(MCPClientAdapter):
         
         # If no priority package found, return the first one
         return packages[0] if packages else None
-
