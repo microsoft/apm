@@ -262,3 +262,165 @@ class TestPatRegression:
         )
         installed = project_dir / "apm_modules" / EXPECTED_PATH_PARTS[0] / EXPECTED_PATH_PARTS[1] / EXPECTED_PATH_PARTS[2]
         assert installed.exists()
+
+
+# ---------------------------------------------------------------------------
+# Issue #1015 regression tests
+# ---------------------------------------------------------------------------
+
+class TestIssue1015BearerInstallRegression:
+    """#1015 bug repro: bearer-only install (no PAT) should succeed."""
+
+    def test_bearer_only_install_succeeds(self, tmp_path):
+        """With ADO_APM_PAT deleted, install via az cli bearer should work."""
+        project_dir = tmp_path / "issue-1015-repro"
+        _init_project(project_dir)
+
+        result = run_apm(
+            f'install --only apm "{ADO_TEST_REPO}"',
+            project_dir,
+            env_overrides={"ADO_APM_PAT": None},
+        )
+
+        assert result.returncode == 0, (
+            f"#1015 regression: bearer-only install failed (exit {result.returncode}).\n"
+            f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
+        )
+
+        installed = (
+            project_dir / "apm_modules"
+            / EXPECTED_PATH_PARTS[0] / EXPECTED_PATH_PARTS[1] / EXPECTED_PATH_PARTS[2]
+        )
+        assert installed.exists(), f"Expected {installed} after bearer-only install"
+
+
+class TestIssue1015DiagnosticOnAuthFailure:
+    """#1015: auth failure surfaces actionable diagnostics, not legacy wording."""
+
+    def test_bogus_pat_no_az_shows_diagnostic(self, tmp_path):
+        """With a bogus PAT and az NOT available, stderr shows diagnostics."""
+        project_dir = tmp_path / "issue-1015-diag"
+        _init_project(project_dir)
+
+        # 52-char PAT-shaped string that ADO will reject, plus clear AZURE_*
+        # vars so az-cli bearer is unavailable for fallback.
+        bogus = "x" * 52
+        result = run_apm(
+            f'install --only apm "{ADO_TEST_REPO}"',
+            project_dir,
+            env_overrides={
+                "ADO_APM_PAT": bogus,
+                # Suppress az cli so bearer fallback also fails
+                "AZURE_CONFIG_DIR": "/nonexistent",
+                "PATH": os.environ.get("PATH", "").replace(
+                    str(Path(_AZ_BIN).parent) if _AZ_BIN else "", ""
+                ),
+            },
+        )
+        combined = result.stdout + result.stderr
+
+        # Must NOT contain the legacy ambiguous wording
+        assert "not accessible or doesn't exist" not in combined.lower(), (
+            f"Legacy wording should not appear. Output:\n{combined}"
+        )
+        # Must NOT contain double-wrapped error
+        assert "Failed to install APM dependencies: Failed to resolve" not in combined, (
+            f"Double-wrapped error should not appear. Output:\n{combined}"
+        )
+        # Should contain auth-related diagnostic markers
+        has_diagnostic = (
+            "ADO_APM_PAT" in combined
+            or "authentication" in combined.lower()
+            or "az login" in combined
+        )
+        assert has_diagnostic, (
+            f"Expected auth diagnostic in output. Output:\n{combined}"
+        )
+        assert result.returncode != 0
+
+
+class TestIssue1015UpdatePreflightAbort:
+    """#1015: apm install --update aborts cleanly on auth failure."""
+
+    def test_update_aborts_no_files_modified(self, tmp_path):
+        """--update with no auth must exit non-zero and not modify files."""
+        import hashlib
+
+        project_dir = tmp_path / "issue-1015-update"
+        _init_project(project_dir)
+
+        # Create a lock file to simulate an existing project
+        lock_path = project_dir / "apm.lock.yaml"
+        lock_path.write_text("# test lockfile\n")
+
+        # Snapshot file contents before the run
+        apm_yml_hash = hashlib.sha256(
+            (project_dir / "apm.yml").read_bytes()
+        ).hexdigest()
+        lock_hash = hashlib.sha256(lock_path.read_bytes()).hexdigest()
+        modules_existed = (project_dir / "apm_modules").exists()
+
+        # Use a made-up ADO repo that the bearer cannot access
+        # and suppress all auth so it fails cleanly.
+        result = run_apm(
+            'install --only apm --update'
+            ' "dev.azure.com/nonexistent-org-xyzzy/fake/_git/fake"',
+            project_dir,
+            env_overrides={
+                "ADO_APM_PAT": None,
+                "AZURE_CONFIG_DIR": "/nonexistent",
+                "PATH": os.environ.get("PATH", "").replace(
+                    str(Path(_AZ_BIN).parent) if _AZ_BIN else "", ""
+                ),
+            },
+        )
+
+        assert result.returncode != 0, (
+            f"Expected non-zero exit on auth failure, got {result.returncode}.\n"
+            f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
+        )
+
+        combined = result.stdout + result.stderr
+        # Verify "No files were modified" message
+        assert "No files were modified" in combined, (
+            f"Expected 'No files were modified' in output. Output:\n{combined}"
+        )
+
+        # Verify files are byte-identical to pre-run state
+        assert hashlib.sha256(
+            (project_dir / "apm.yml").read_bytes()
+        ).hexdigest() == apm_yml_hash, "apm.yml was modified!"
+        assert hashlib.sha256(
+            lock_path.read_bytes()
+        ).hexdigest() == lock_hash, "apm.lock.yaml was modified!"
+        if not modules_existed:
+            assert not (project_dir / "apm_modules").exists(), (
+                "apm_modules/ was created despite auth failure!"
+            )
+
+
+class TestIssue1015PatRegressionExplicit:
+    """#1015: PAT auth_scheme=basic still works after bearer fix."""
+
+    @pytest.mark.skipif(
+        not os.getenv("ADO_APM_PAT"),
+        reason="ADO_APM_PAT not set; PAT regression test requires real PAT",
+    )
+    def test_pat_still_works_after_bearer_fix(self, tmp_path):
+        project_dir = tmp_path / "issue-1015-pat"
+        _init_project(project_dir)
+
+        result = run_apm(
+            f'install --only apm "{ADO_TEST_REPO}"',
+            project_dir,
+            env_overrides={},  # Use real PAT from env
+        )
+        assert result.returncode == 0, (
+            f"PAT install regressed after bearer fix (exit {result.returncode}).\n"
+            f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
+        )
+        installed = (
+            project_dir / "apm_modules"
+            / EXPECTED_PATH_PARTS[0] / EXPECTED_PATH_PARTS[1] / EXPECTED_PATH_PARTS[2]
+        )
+        assert installed.exists()

@@ -1976,7 +1976,7 @@ apm runtime setup llm
 **Default Behavior:**
 - Installs runtime binary from official sources
 - Configures with GitHub Models (free) as APM default
-- Creates configuration file at `~/.codex/config.toml` or similar
+- Creates Codex runtime configuration (global `~/.codex/config.toml`; project MCP config is managed separately in `.codex/config.toml`)
 - Provides clear logging about what's being configured
 
 **Vanilla Behavior (`--vanilla` flag):**

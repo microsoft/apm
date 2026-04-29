@@ -21,14 +21,24 @@ class VSCodeClientAdapter(MCPClientAdapter):
     in the VSCode documentation.
     """
     
-    def __init__(self, registry_url=None):
+    def __init__(
+        self,
+        registry_url=None,
+        project_root: Path | str | None = None,
+        user_scope: bool = False,
+    ):
         """Initialize the VSCode client adapter.
         
         Args:
             registry_url (str, optional): URL of the MCP registry.
                 If not provided, uses the MCP_REGISTRY_URL environment variable
                 or falls back to the default demo registry.
+            project_root: Project root used to resolve the repository-local
+                `.vscode/mcp.json` path.
+            user_scope: Whether to resolve user-scope config paths instead of
+                project-local paths when supported.
         """
+        super().__init__(project_root=project_root, user_scope=user_scope)
         self.registry_client = SimpleRegistryClient(registry_url)
         self.registry_integration = RegistryIntegration(registry_url)
     
@@ -38,8 +48,8 @@ class VSCodeClientAdapter(MCPClientAdapter):
         Returns:
             str: Path to the .vscode/mcp.json file.
         """
-        # Use the current working directory as the repository root
-        repo_root = Path(os.getcwd())
+        # Use the resolved project root, which may be explicitly provided
+        repo_root = self.project_root
         
         # Path to .vscode/mcp.json in the repository
         vscode_dir = repo_root / ".vscode"

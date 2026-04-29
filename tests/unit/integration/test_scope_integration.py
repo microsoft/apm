@@ -196,23 +196,28 @@ class TestOpenCodeScopeResolution:
         ).exists()
 
 
-# -- Codex exclusion at user scope -------------------------------------------
+# -- Codex user-scope behavior ----------------------------------------------
 
 
-class TestCodexScopeExclusion:
-    """Verify Codex is excluded at user scope."""
+class TestCodexUserScope:
+    """Verify Codex participates in user-scope target resolution."""
 
-    def test_for_scope_returns_none(self):
+    def test_for_scope_returns_profile(self):
         codex = KNOWN_TARGETS["codex"]
-        assert codex.user_supported is False
-        assert codex.for_scope(user_scope=True) is None
+        assert codex.user_supported == "partial"
+        resolved = codex.for_scope(user_scope=True)
+        assert resolved is not None
+        assert resolved.root_dir == ".codex"
+        assert "agents" in resolved.primitives
+        assert "skills" in resolved.primitives
+        assert "hooks" in resolved.primitives
 
-    def test_resolve_targets_excludes_codex_at_user_scope(self):
+    def test_resolve_targets_includes_codex_at_user_scope(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             targets = resolve_targets(root, user_scope=True, explicit_target="all")
             names = {t.name for t in targets}
-            assert "codex" not in names
+            assert "codex" in names
 
 
 # -- Claude same-root behavior -----------------------------------------------
@@ -248,8 +253,8 @@ class TestResolveTargetsConsistency:
                 Path(tmp), user_scope=True, explicit_target="all"
             )
             root_map = {t.name: t.root_dir for t in targets}
-            # Codex should be excluded
-            assert "codex" not in root_map
+            # Codex keeps .codex at user scope
+            assert root_map["codex"] == ".codex"
             # Copilot should use .copilot
             if "copilot" in root_map:
                 assert root_map["copilot"] == ".copilot"
