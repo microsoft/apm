@@ -156,7 +156,10 @@ class TestAdoAuthFailureRaisesAuthenticationError:
             )
 
         assert exc_info.value.diagnostic_context != ""
-        assert "dev.azure.com" in str(exc_info.value)
+        # Bounded full-phrase assertion (CodeQL: avoid arbitrary-
+        # position substring match; our tests.instructions.md bans
+        # bare URL/host substring checks).
+        assert str(exc_info.value) == "Authentication failed for dev.azure.com"
 
     @patch("subprocess.run")
     @patch("apm_cli.core.azure_cli.get_bearer_provider")

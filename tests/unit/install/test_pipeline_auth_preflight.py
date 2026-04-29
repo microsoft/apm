@@ -76,7 +76,8 @@ class TestUpdatePreflightRejectsBadAuth:
         with pytest.raises(AuthenticationError) as exc_info:
             _preflight_auth_check(ctx, resolver, verbose=False)
 
-        assert "dev.azure.com" in str(exc_info.value)
+        # Bounded full-phrase assertion (see CodeQL note in test_validation_ado_bearer.py).
+        assert str(exc_info.value) == "Authentication failed for dev.azure.com"
 
 
 class TestUpdatePreflightPassesGoodAuth:

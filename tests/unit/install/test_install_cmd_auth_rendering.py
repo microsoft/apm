@@ -29,7 +29,10 @@ class TestAuthenticationErrorImportedInInstall:
             )
         except AuthenticationError as e:
             assert e.diagnostic_context == diag
-            assert "dev.azure.com" in str(e)
+            # Bounded full-phrase assertion (CodeQL: avoid arbitrary-
+            # position substring match; our tests.instructions.md bans
+            # bare URL/host substring checks).
+            assert str(e) == "Authentication failed for dev.azure.com"
 
     def test_not_caught_by_policy_violation(self):
         """AuthenticationError is NOT a PolicyViolationError subclass."""

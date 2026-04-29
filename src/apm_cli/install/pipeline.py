@@ -298,7 +298,10 @@ def run_install_pipeline(
         # file corruption. One git ls-remote per distinct (host, org).
         # --------------------------------------------------------------
         if update_refs and ctx.deps_to_install:
-            _preflight_auth_check(ctx, auth_resolver, verbose)
+            # Use ctx.auth_resolver: resolve phase guarantees it is set
+            # (resolve.py:91-92), whereas the local ``auth_resolver``
+            # parameter can still be None for callers that omit it.
+            _preflight_auth_check(ctx, ctx.auth_resolver, verbose)
 
         # --------------------------------------------------------------
         # Seam: read phase outputs into locals for remaining code.
