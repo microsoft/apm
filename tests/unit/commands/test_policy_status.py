@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import textwrap
 import unicodedata
 from pathlib import Path
@@ -14,12 +15,11 @@ from click.testing import CliRunner
 from apm_cli.commands.policy import (
     _count_rules,
     _format_age,
-    policy as policy_group,
 )
+from apm_cli.commands.policy import policy as policy_group
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.parser import load_policy
 from apm_cli.policy.schema import ApmPolicy
-
 
 # -- Fixtures -------------------------------------------------------
 
@@ -36,9 +36,7 @@ def _make_policy(yaml_str: str) -> ApmPolicy:
 
 def _rich_policy() -> ApmPolicy:
     """A policy with a non-trivial set of rules across sections."""
-    return _make_policy(
-        textwrap.dedent(
-            """\
+    return _make_policy(textwrap.dedent("""\
             name: test-policy
             version: '1.0'
             enforcement: block
@@ -62,13 +60,24 @@ def _rich_policy() -> ApmPolicy:
               required_fields: [name, version]
             unmanaged_files:
               directories: [.legacy, .scratch]
-            """
-        )
-    )
+            """))
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI/VT100 CSI escape sequences from *text*."""
+    return _ANSI_RE.sub("", text)
 
 
 def _ascii_only(text: str) -> bool:
-    """Return True iff every codepoint is printable ASCII (U+0020-U+007E)."""
+    """Return True iff every codepoint is printable ASCII (U+0020-U+007E).
+
+    ANSI escape sequences emitted by Rich are stripped first; they are an
+    artefact of the terminal renderer, not source-authored text.
+    """
+    text = _strip_ansi(text)
     for ch in text:
         if ch in ("\n", "\r", "\t"):
             continue
@@ -84,9 +93,23 @@ def _ascii_only(text: str) -> bool:
             # text we control.
             if 0x2500 <= cp <= 0x257F:
                 continue
-            if cp in (0x2501, 0x2503, 0x250F, 0x2513, 0x2517, 0x251B, 0x2523,
-                     0x252B, 0x2533, 0x253B, 0x254B, 0x2578, 0x2579,
-                     0x257A, 0x257B):
+            if cp in (
+                0x2501,
+                0x2503,
+                0x250F,
+                0x2513,
+                0x2517,
+                0x251B,
+                0x2523,
+                0x252B,
+                0x2533,
+                0x253B,
+                0x254B,
+                0x2578,
+                0x2579,
+                0x257A,
+                0x257B,
+            ):
                 continue
             return False
     return True
@@ -266,12 +289,13 @@ class TestStatusNoCache:
             source="org:contoso/.github",
             outcome="absent",
         )
-        with patch(
-            "apm_cli.commands.policy.discover_policy",
-            return_value=result_obj,
-        ) as mock_disc, patch(
-            "apm_cli.commands.policy.discover_policy_with_chain"
-        ) as mock_chain:
+        with (
+            patch(
+                "apm_cli.commands.policy.discover_policy",
+                return_value=result_obj,
+            ) as mock_disc,
+            patch("apm_cli.commands.policy.discover_policy_with_chain") as mock_chain,
+        ):
             result = runner.invoke(policy_group, ["status", "--no-cache"])
         assert result.exit_code == 0, result.output
         # --no-cache must bypass the chain helper and call discover_policy
@@ -306,12 +330,13 @@ class TestStatusPolicySourceOverride:
             source="url:https://example.com/p.yml",
             outcome="found",
         )
-        with patch(
-            "apm_cli.commands.policy.discover_policy",
-            return_value=result_obj,
-        ) as mock_disc, patch(
-            "apm_cli.commands.policy.discover_policy_with_chain"
-        ) as mock_chain:
+        with (
+            patch(
+                "apm_cli.commands.policy.discover_policy",
+                return_value=result_obj,
+            ) as mock_disc,
+            patch("apm_cli.commands.policy.discover_policy_with_chain") as mock_chain,
+        ):
             result = runner.invoke(
                 policy_group,
                 ["status", "--policy-source", "https://example.com/p.yml"],
@@ -386,7 +411,9 @@ class TestStatusAsciiOnly:
     )
     def test_renderings_are_ascii_safe(self, runner, outcome, policy_obj, extras):
         result_obj = PolicyFetchResult(
-            outcome=outcome, policy=policy_obj, source="org:contoso/.github",
+            outcome=outcome,
+            policy=policy_obj,
+            source="org:contoso/.github",
             **extras,
         )
         with patch(
@@ -395,12 +422,12 @@ class TestStatusAsciiOnly:
         ):
             table_result = runner.invoke(policy_group, ["status"])
             json_result = runner.invoke(policy_group, ["status", "--json"])
-        assert _ascii_only(table_result.output), (
-            f"non-ASCII output for outcome={outcome}: {table_result.output!r}"
-        )
-        assert _ascii_only(json_result.output), (
-            f"non-ASCII JSON for outcome={outcome}: {json_result.output!r}"
-        )
+        assert _ascii_only(
+            table_result.output
+        ), f"non-ASCII output for outcome={outcome}: {table_result.output!r}"
+        assert _ascii_only(
+            json_result.output
+        ), f"non-ASCII JSON for outcome={outcome}: {json_result.output!r}"
 
 
 class TestStatusCheckFlag:
@@ -457,9 +484,7 @@ class TestStatusCheckFlag:
             "apm_cli.commands.policy.discover_policy_with_chain",
             return_value=result_obj,
         ):
-            result = runner.invoke(
-                policy_group, ["status", "--check", "--json"]
-            )
+            result = runner.invoke(policy_group, ["status", "--check", "--json"])
         assert result.exit_code == 1
         payload = json.loads(result.output)
         assert payload["outcome"] == "absent"
