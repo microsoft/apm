@@ -7,15 +7,26 @@ import traceback
 
 import click
 
+from ...core.command_logger import CommandLogger
+from ...marketplace.errors import GitLsRemoteError, OfflineMissError
+from ...marketplace.ref_resolver import RefResolver
+from ...marketplace.semver import satisfies_range
+from . import (
+    marketplace,
+    _CheckResult,
+    _extract_tag_versions,
+    _load_yml_or_exit,
+    _render_check_table,
+    _require_authoring_flag,
+    _warn_duplicate_names,
+)
 
-from . import (marketplace, _require_authoring_flag, _load_yml_or_exit, _warn_duplicate_names, _CheckResult, _extract_tag_versions, _render_check_table, CommandLogger, OfflineMissError, GitLsRemoteError, satisfies_range)
 
 @marketplace.command(help="Validate marketplace.yml entries are resolvable")
 @click.option("--offline", is_flag=True, help="Schema + cached-ref checks only (no network)")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def check(offline, verbose):
     """Validate marketplace.yml and check each entry is resolvable."""
-    from . import RefResolver
     _require_authoring_flag()
     logger = CommandLogger("marketplace-check", verbose=verbose)
 

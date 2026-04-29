@@ -7,7 +7,15 @@ import sys
 import click
 
 
-from . import (package, _ensure_yml_exists, _parse_tags, _resolve_ref, _SHA_RE, CommandLogger, MarketplaceYmlError)
+from ....core.command_logger import CommandLogger
+from ....marketplace.errors import MarketplaceYmlError
+from . import (
+    package,
+    _ensure_yml_exists,
+    _parse_tags,
+    _resolve_ref,
+    _SHA_RE,
+)
 
 @package.command("set", help="Update a package entry in marketplace.yml")
 @click.argument("name")

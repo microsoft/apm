@@ -8,8 +8,17 @@ from pathlib import Path
 
 import click
 
+from ...core.command_logger import CommandLogger
+from ...marketplace.builder import BuildOptions, MarketplaceBuilder
+from ...marketplace.errors import BuildError, MarketplaceYmlError
+from . import (
+    marketplace,
+    _load_yml_or_exit,
+    _render_build_error,
+    _render_build_table,
+    _require_authoring_flag,
+)
 
-from . import (marketplace, _require_authoring_flag, _load_yml_or_exit, _render_build_error, _render_build_table, CommandLogger, BuildOptions, MarketplaceYmlError, BuildError)
 
 @marketplace.command(help="Build marketplace.json from marketplace.yml")
 @click.option("--dry-run", is_flag=True, help="Preview without writing marketplace.json")
@@ -20,7 +29,6 @@ from . import (marketplace, _require_authoring_flag, _load_yml_or_exit, _render_
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def build(dry_run, offline, include_prerelease, verbose):
     """Resolve packages and compile marketplace.json."""
-    from . import MarketplaceBuilder
     _require_authoring_flag()
     logger = CommandLogger("marketplace-build", verbose=verbose)
     yml_path = Path.cwd() / "marketplace.yml"

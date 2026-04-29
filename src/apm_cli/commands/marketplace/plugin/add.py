@@ -7,7 +7,15 @@ import sys
 import click
 
 
-from . import (package, _ensure_yml_exists, _parse_tags, _resolve_ref, _verify_source, CommandLogger, MarketplaceYmlError)
+from ....core.command_logger import CommandLogger
+from ....marketplace.errors import MarketplaceYmlError
+from . import (
+    package,
+    _ensure_yml_exists,
+    _parse_tags,
+    _resolve_ref,
+    _verify_source,
+)
 
 @package.command(help="Add a package to marketplace.yml")
 @click.argument("source")

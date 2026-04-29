@@ -7,7 +7,13 @@ import sys
 import click
 
 
-from . import (package, _ensure_yml_exists, _is_interactive, CommandLogger, MarketplaceYmlError)
+from ....core.command_logger import CommandLogger
+from ....marketplace.errors import MarketplaceYmlError
+from . import (
+    package,
+    _ensure_yml_exists,
+    _is_interactive,
+)
 
 @package.command(help="Remove a package from marketplace.yml")
 @click.argument("name")

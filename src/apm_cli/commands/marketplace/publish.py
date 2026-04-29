@@ -7,8 +7,19 @@ from pathlib import Path
 
 import click
 
+from ...core.command_logger import CommandLogger
+from ...marketplace.pr_integration import PrIntegrator, PrResult, PrState
+from ...marketplace.publisher import MarketplacePublisher, PublishOutcome
+from .._helpers import _get_console, _is_interactive
+from . import (
+    marketplace,
+    _load_targets_file,
+    _load_yml_or_exit,
+    _render_publish_plan,
+    _render_publish_summary,
+    _require_authoring_flag,
+)
 
-from . import (marketplace, _require_authoring_flag, _load_yml_or_exit, _load_targets_file, _render_publish_plan, _render_publish_summary, _get_console, CommandLogger, PublishOutcome, PrResult, PrState)
 
 @marketplace.command(help="Publish marketplace updates to consumer repositories")
 @click.option(
@@ -44,7 +55,6 @@ def publish(
     verbose,
 ):
     """Publish marketplace updates to consumer repositories."""
-    from . import MarketplacePublisher, PrIntegrator, _is_interactive
     _require_authoring_flag()
     logger = CommandLogger("marketplace-publish", verbose=verbose)
 

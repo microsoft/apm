@@ -10,7 +10,6 @@ import builtins
 import json
 import os
 import re
-import subprocess
 import sys
 import traceback
 from pathlib import Path
@@ -72,7 +71,6 @@ class MarketplaceGroup(click.Group):
         "add",
         "list",
         "browse",
-        "search",
         "update",
         "remove",
         "validate",
@@ -1190,8 +1188,6 @@ def search(expression, limit, verbose):
 
 
 
-marketplace.add_command(search)
-
 from .build import build  # noqa: E402
 from .check import check  # noqa: E402
 from .doctor import doctor  # noqa: E402
@@ -1200,6 +1196,10 @@ from .outdated import outdated  # noqa: E402
 from .publish import publish  # noqa: E402
 from .validate import validate  # noqa: E402
 
+# Public surface: the click group + per-command callables. Domain types are
+# re-exported from canonical sources for backward compatibility with tests
+# and external consumers that patch via this package path. Submodules import
+# their domain types from the canonical sources directly, not from here.
 __all__ = [
     "MarketplaceGroup",
     "marketplace",
@@ -1217,26 +1217,6 @@ __all__ = [
     "doctor",
     "publish",
     "search",
-    "_load_yml_or_exit",
-    "_warn_duplicate_names",
-    "_find_duplicate_names",
-    "_require_authoring_flag",
-    "_check_gitignore_for_marketplace_json",
-    "_render_build_error",
-    "_render_build_table",
-    "_OutdatedRow",
-    "_load_current_versions",
-    "_extract_tag_versions",
-    "_render_outdated_table",
-    "_CheckResult",
-    "_render_check_table",
-    "_DoctorCheck",
-    "_render_doctor_table",
-    "_load_targets_file",
-    "_render_publish_plan",
-    "_render_publish_summary",
-    "_outcome_symbol",
-    "_render_publish_footer",
     "BuildOptions",
     "BuildReport",
     "MarketplaceBuilder",
@@ -1266,7 +1246,5 @@ __all__ = [
     "load_marketplace_yml",
     "PathTraversalError",
     "validate_path_segments",
-    "_get_console",
-    "_is_interactive",
 ]
 

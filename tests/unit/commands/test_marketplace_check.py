@@ -100,7 +100,7 @@ def yml_cwd(tmp_path, monkeypatch):
 
 
 class TestCheckAllOK:
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
     def test_all_entries_pass(self, MockResolver, runner, yml_cwd):
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = [_REFS_GOOD, _REFS_BETA_GOOD]
@@ -110,7 +110,7 @@ class TestCheckAllOK:
         assert result.exit_code == 0
         assert "All 2 entries OK" in result.output
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
     def test_shows_package_names(self, MockResolver, runner, yml_cwd):
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = [_REFS_GOOD, _REFS_BETA_GOOD]
@@ -120,7 +120,7 @@ class TestCheckAllOK:
         assert "pkg-alpha" in result.output
         assert "pkg-beta" in result.output
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
     def test_success_icon_shown(self, MockResolver, runner, yml_cwd):
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = [_REFS_GOOD, _REFS_BETA_GOOD]
@@ -136,7 +136,7 @@ class TestCheckAllOK:
 
 
 class TestCheckExplicitRef:
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
     def test_ref_found(self, MockResolver, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "marketplace.yml").write_text(_YML_WITH_REF, encoding="utf-8")
@@ -150,7 +150,7 @@ class TestCheckExplicitRef:
         assert result.exit_code == 0
         assert "pinned-pkg" in result.output
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
     def test_ref_not_found(self, MockResolver, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("COLUMNS", "200")
@@ -173,7 +173,7 @@ class TestCheckExplicitRef:
 
 
 class TestCheckFailures:
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
     def test_one_failure_exits_1(self, MockResolver, runner, yml_cwd):
         mock_inst = MockResolver.return_value
         # First package OK, second fails
@@ -189,7 +189,7 @@ class TestCheckFailures:
         assert result.exit_code == 1
         assert "1 entries have issues" in result.output
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
     def test_all_failures_exits_1(self, MockResolver, runner, yml_cwd):
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = GitLsRemoteError(
@@ -201,7 +201,7 @@ class TestCheckFailures:
         assert result.exit_code == 1
         assert "2 entries have issues" in result.output
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
     def test_failure_icon_shown(self, MockResolver, runner, yml_cwd):
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = GitLsRemoteError(
@@ -212,7 +212,7 @@ class TestCheckFailures:
         result = runner.invoke(marketplace, ["check"])
         assert "[x]" in result.output
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
     def test_no_matching_version(self, MockResolver, runner, yml_cwd):
         mock_inst = MockResolver.return_value
         # Return tags that don't match the version range
@@ -251,7 +251,7 @@ class TestCheckMissingYml:
 
 
 class TestCheckOffline:
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
     def test_offline_label_shown(self, MockResolver, runner, yml_cwd):
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = OfflineMissError(
@@ -263,7 +263,7 @@ class TestCheckOffline:
         assert "Offline mode" in result.output or "offline" in result.output.lower()
         MockResolver.assert_called_once_with(offline=True)
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
     def test_offline_cache_miss_fails_entry(self, MockResolver, runner, yml_cwd):
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = OfflineMissError(
@@ -281,7 +281,7 @@ class TestCheckOffline:
 
 
 class TestCheckVerbose:
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
     def test_verbose_no_crash(self, MockResolver, runner, yml_cwd):
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = [_REFS_GOOD, _REFS_BETA_GOOD]
@@ -297,7 +297,7 @@ class TestCheckVerbose:
 
 
 class TestCheckResolverCleanup:
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
     def test_resolver_close_called(self, MockResolver, runner, yml_cwd):
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = [_REFS_GOOD, _REFS_BETA_GOOD]
@@ -306,7 +306,7 @@ class TestCheckResolverCleanup:
         runner.invoke(marketplace, ["check"])
         mock_inst.close.assert_called_once()
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
     def test_resolver_close_on_failure(self, MockResolver, runner, yml_cwd):
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = GitLsRemoteError(
@@ -324,7 +324,7 @@ class TestCheckResolverCleanup:
 
 
 class TestCheckEdgeCases:
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
     def test_single_entry_all_ok(self, MockResolver, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "marketplace.yml").write_text(_YML_SINGLE, encoding="utf-8")
@@ -336,7 +336,7 @@ class TestCheckEdgeCases:
         assert result.exit_code == 0
         assert "All 1 entries OK" in result.output
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
     def test_generic_exception_handled(self, MockResolver, runner, yml_cwd):
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = RuntimeError("Unexpected")
@@ -355,7 +355,7 @@ class TestCheckEdgeCases:
 class TestCheckDuplicateNames:
     """Defence-in-depth duplicate name check in the check command."""
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
     @patch("apm_cli.commands.marketplace.load_marketplace_yml")
     def test_duplicate_names_warned(
         self, mock_load, MockResolver, runner, tmp_path, monkeypatch,
@@ -390,7 +390,7 @@ class TestCheckDuplicateNames:
         result = runner.invoke(marketplace, ["check"])
         assert "Duplicate package name 'learning'" in result.output
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
     @patch("apm_cli.commands.marketplace.load_marketplace_yml")
     def test_no_warning_when_unique(
         self, mock_load, MockResolver, runner, tmp_path, monkeypatch,

@@ -7,8 +7,20 @@ import traceback
 
 import click
 
+from ...core.command_logger import CommandLogger
+from ...marketplace.errors import BuildError
+from ...marketplace.ref_resolver import RefResolver
+from ...marketplace.semver import satisfies_range
+from . import (
+    marketplace,
+    _OutdatedRow,
+    _extract_tag_versions,
+    _load_current_versions,
+    _load_yml_or_exit,
+    _render_outdated_table,
+    _require_authoring_flag,
+)
 
-from . import (marketplace, _require_authoring_flag, _load_yml_or_exit, _load_current_versions, _OutdatedRow, _extract_tag_versions, _render_outdated_table, CommandLogger, BuildError, satisfies_range)
 
 @marketplace.command(help="Show packages with available upgrades")
 @click.option("--offline", is_flag=True, help="Use cached refs only (no network)")
@@ -18,7 +30,6 @@ from . import (marketplace, _require_authoring_flag, _load_yml_or_exit, _load_cu
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def outdated(offline, include_prerelease, verbose):
     """Compare installed versions against latest available tags."""
-    from . import RefResolver
     _require_authoring_flag()
     logger = CommandLogger("marketplace-outdated", verbose=verbose)
 

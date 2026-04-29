@@ -7,8 +7,8 @@ import traceback
 
 import click
 
-
-from . import (marketplace, CommandLogger)
+from ...core.command_logger import CommandLogger
+from . import marketplace
 
 @marketplace.command(help="Validate a marketplace manifest")
 @click.argument("name", required=True)

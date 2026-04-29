@@ -2,20 +2,29 @@
 
 from __future__ import annotations
 
-import sys
 import subprocess
+import sys
 from pathlib import Path
 
 import click
 
+from ...core.command_logger import CommandLogger
+from ...marketplace.errors import MarketplaceYmlError
+from ...marketplace.git_stderr import translate_git_stderr
+from ...marketplace.yml_schema import load_marketplace_yml
+from . import (
+    marketplace,
+    _DoctorCheck,
+    _find_duplicate_names,
+    _render_doctor_table,
+    _require_authoring_flag,
+)
 
-from . import (marketplace, _require_authoring_flag, _find_duplicate_names, _DoctorCheck, _render_doctor_table, CommandLogger, MarketplaceYmlError, translate_git_stderr)
 
 @marketplace.command(help="Run environment diagnostics for marketplace builds")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def doctor(verbose):
     """Check git, network, auth, and marketplace.yml readiness."""
-    from . import load_marketplace_yml
     _require_authoring_flag()
     logger = CommandLogger("marketplace-doctor", verbose=verbose)
     checks = []

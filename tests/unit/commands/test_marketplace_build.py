@@ -111,7 +111,7 @@ def yml_cwd(tmp_path, monkeypatch):
 class TestBuildHappyPath:
     """build command -- success scenarios."""
 
-    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    @patch("apm_cli.commands.marketplace.build.MarketplaceBuilder")
     def test_basic_build_success(self, MockBuilder, runner, yml_cwd):
         mock_inst = MockBuilder.return_value
         mock_inst.build.return_value = _make_report()
@@ -121,7 +121,7 @@ class TestBuildHappyPath:
         assert "Built marketplace.json" in result.output
         assert "2 packages" in result.output
 
-    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    @patch("apm_cli.commands.marketplace.build.MarketplaceBuilder")
     def test_build_table_contains_package_names(self, MockBuilder, runner, yml_cwd):
         mock_inst = MockBuilder.return_value
         mock_inst.build.return_value = _make_report()
@@ -131,7 +131,7 @@ class TestBuildHappyPath:
         assert "pkg-alpha" in result.output
         assert "pkg-beta" in result.output
 
-    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    @patch("apm_cli.commands.marketplace.build.MarketplaceBuilder")
     def test_build_table_contains_version_refs(self, MockBuilder, runner, yml_cwd):
         mock_inst = MockBuilder.return_value
         mock_inst.build.return_value = _make_report()
@@ -140,7 +140,7 @@ class TestBuildHappyPath:
         assert "v1.2.0" in result.output
         assert "v2.0.1" in result.output
 
-    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    @patch("apm_cli.commands.marketplace.build.MarketplaceBuilder")
     def test_build_table_shows_sha_prefix(self, MockBuilder, runner, yml_cwd):
         mock_inst = MockBuilder.return_value
         mock_inst.build.return_value = _make_report()
@@ -158,7 +158,7 @@ class TestBuildHappyPath:
 class TestBuildDryRun:
     """build --dry-run scenarios."""
 
-    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    @patch("apm_cli.commands.marketplace.build.MarketplaceBuilder")
     def test_dry_run_message(self, MockBuilder, runner, yml_cwd):
         mock_inst = MockBuilder.return_value
         mock_inst.build.return_value = _make_report(dry_run=True)
@@ -168,7 +168,7 @@ class TestBuildDryRun:
         assert "Dry run" in result.output
         assert "not written" in result.output
 
-    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    @patch("apm_cli.commands.marketplace.build.MarketplaceBuilder")
     def test_dry_run_no_built_message(self, MockBuilder, runner, yml_cwd):
         mock_inst = MockBuilder.return_value
         mock_inst.build.return_value = _make_report(dry_run=True)
@@ -176,7 +176,7 @@ class TestBuildDryRun:
         result = runner.invoke(marketplace, ["build", "--dry-run"])
         assert "Built marketplace.json" not in result.output
 
-    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    @patch("apm_cli.commands.marketplace.build.MarketplaceBuilder")
     def test_dry_run_passes_option_to_builder(self, MockBuilder, runner, yml_cwd):
         mock_inst = MockBuilder.return_value
         mock_inst.build.return_value = _make_report(dry_run=True)
@@ -194,7 +194,7 @@ class TestBuildDryRun:
 class TestBuildFlags:
     """Verify CLI flags are forwarded to BuildOptions."""
 
-    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    @patch("apm_cli.commands.marketplace.build.MarketplaceBuilder")
     def test_offline_flag(self, MockBuilder, runner, yml_cwd):
         mock_inst = MockBuilder.return_value
         mock_inst.build.return_value = _make_report()
@@ -203,7 +203,7 @@ class TestBuildFlags:
         opts = MockBuilder.call_args[1].get("options") or MockBuilder.call_args[0][1]
         assert opts.offline is True
 
-    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    @patch("apm_cli.commands.marketplace.build.MarketplaceBuilder")
     def test_include_prerelease_flag(self, MockBuilder, runner, yml_cwd):
         mock_inst = MockBuilder.return_value
         mock_inst.build.return_value = _make_report()
@@ -212,7 +212,7 @@ class TestBuildFlags:
         opts = MockBuilder.call_args[1].get("options") or MockBuilder.call_args[0][1]
         assert opts.include_prerelease is True
 
-    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    @patch("apm_cli.commands.marketplace.build.MarketplaceBuilder")
     def test_verbose_flag(self, MockBuilder, runner, yml_cwd):
         mock_inst = MockBuilder.return_value
         mock_inst.build.return_value = _make_report()
@@ -266,7 +266,7 @@ class TestBuildSchemaError:
 class TestBuildErrors:
     """build command -- BuildError subclass handling."""
 
-    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    @patch("apm_cli.commands.marketplace.build.MarketplaceBuilder")
     def test_no_matching_version_error(self, MockBuilder, runner, yml_cwd):
         mock_inst = MockBuilder.return_value
         mock_inst.build.side_effect = NoMatchingVersionError(
@@ -277,7 +277,7 @@ class TestBuildErrors:
         assert result.exit_code == 1
         assert "pkg-alpha" in result.output
 
-    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    @patch("apm_cli.commands.marketplace.build.MarketplaceBuilder")
     def test_ref_not_found_error(self, MockBuilder, runner, yml_cwd):
         mock_inst = MockBuilder.return_value
         mock_inst.build.side_effect = RefNotFoundError(
@@ -288,7 +288,7 @@ class TestBuildErrors:
         assert result.exit_code == 1
         assert "not found" in result.output.lower()
 
-    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    @patch("apm_cli.commands.marketplace.build.MarketplaceBuilder")
     def test_git_ls_remote_error(self, MockBuilder, runner, yml_cwd):
         mock_inst = MockBuilder.return_value
         mock_inst.build.side_effect = GitLsRemoteError(
@@ -302,7 +302,7 @@ class TestBuildErrors:
         assert "Authentication failed" in result.output
         assert "GITHUB_TOKEN" in result.output
 
-    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    @patch("apm_cli.commands.marketplace.build.MarketplaceBuilder")
     def test_offline_miss_error(self, MockBuilder, runner, yml_cwd):
         mock_inst = MockBuilder.return_value
         mock_inst.build.side_effect = OfflineMissError(
@@ -313,7 +313,7 @@ class TestBuildErrors:
         assert result.exit_code == 1
         assert "offline" in result.output.lower() or "cache" in result.output.lower()
 
-    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    @patch("apm_cli.commands.marketplace.build.MarketplaceBuilder")
     def test_head_not_allowed_error(self, MockBuilder, runner, yml_cwd):
         mock_inst = MockBuilder.return_value
         mock_inst.build.side_effect = HeadNotAllowedError(
@@ -324,7 +324,7 @@ class TestBuildErrors:
         assert result.exit_code == 1
         assert "main" in result.output
 
-    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    @patch("apm_cli.commands.marketplace.build.MarketplaceBuilder")
     def test_generic_build_error(self, MockBuilder, runner, yml_cwd):
         mock_inst = MockBuilder.return_value
         mock_inst.build.side_effect = BuildError(
@@ -343,7 +343,7 @@ class TestBuildErrors:
 class TestBuildEdgeCases:
     """Edge cases for the build command."""
 
-    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    @patch("apm_cli.commands.marketplace.build.MarketplaceBuilder")
     def test_empty_packages_list(self, MockBuilder, runner, yml_cwd):
         mock_inst = MockBuilder.return_value
         mock_inst.build.return_value = _make_report(resolved=(), added=0)
@@ -352,7 +352,7 @@ class TestBuildEdgeCases:
         assert result.exit_code == 0
         assert "0 packages" in result.output
 
-    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    @patch("apm_cli.commands.marketplace.build.MarketplaceBuilder")
     def test_single_package(self, MockBuilder, runner, yml_cwd):
         single = (
             ResolvedPackage(
@@ -373,7 +373,7 @@ class TestBuildEdgeCases:
         assert result.exit_code == 0
         assert "only-one" in result.output
 
-    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    @patch("apm_cli.commands.marketplace.build.MarketplaceBuilder")
     def test_prerelease_package(self, MockBuilder, runner, yml_cwd):
         pre = (
             ResolvedPackage(
@@ -403,7 +403,7 @@ class TestBuildEdgeCases:
 class TestBuildVerboseTraceback:
     """build --verbose -- traceback on unexpected failure."""
 
-    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    @patch("apm_cli.commands.marketplace.build.MarketplaceBuilder")
     def test_verbose_shows_traceback_on_unexpected_error(
         self, MockBuilder, runner, yml_cwd
     ):
@@ -417,7 +417,7 @@ class TestBuildVerboseTraceback:
         assert "Traceback" in result.output
         assert "unexpected internal failure" in result.output
 
-    @patch("apm_cli.commands.marketplace.MarketplaceBuilder")
+    @patch("apm_cli.commands.marketplace.build.MarketplaceBuilder")
     def test_no_traceback_without_verbose(self, MockBuilder, runner, yml_cwd):
         """Without --verbose the traceback is suppressed."""
         mock_inst = MockBuilder.return_value

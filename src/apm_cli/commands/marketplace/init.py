@@ -7,8 +7,12 @@ from pathlib import Path
 
 import click
 
-
-from . import (marketplace, _require_authoring_flag, _check_gitignore_for_marketplace_json, CommandLogger)
+from ...core.command_logger import CommandLogger
+from . import (
+    marketplace,
+    _check_gitignore_for_marketplace_json,
+    _require_authoring_flag,
+)
 
 @marketplace.command(help="Scaffold a new marketplace.yml in the current directory")
 @click.option("--force", is_flag=True, help="Overwrite existing marketplace.yml")

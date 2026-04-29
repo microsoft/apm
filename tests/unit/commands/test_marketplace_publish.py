@@ -112,8 +112,8 @@ def runner():
 class TestPublishHappyPath:
     """Happy path: publish to 2 targets with PRs opened."""
 
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
     def test_happy_path_exit_0(
         self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
     ):
@@ -142,8 +142,8 @@ class TestPublishHappyPath:
         assert "Published 2/2 targets" in result.output
         assert "publish-state.json" in result.output
 
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
     def test_pr_integrator_called_for_updated_targets(
         self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
     ):
@@ -179,7 +179,7 @@ class TestPublishHappyPath:
 class TestPublishNoPr:
     """--no-pr: publisher runs but PR integrator is not called."""
 
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
     def test_no_pr_skips_pr_integration(
         self, MockPublisher, runner, tmp_path, monkeypatch
     ):
@@ -196,7 +196,7 @@ class TestPublishNoPr:
             _fake_result(targets[1]),
         ]
 
-        with patch("apm_cli.commands.marketplace.PrIntegrator") as MockPr:
+        with patch("apm_cli.commands.marketplace.publish.PrIntegrator") as MockPr:
             result = runner.invoke(marketplace, ["publish", "--yes", "--no-pr"])
             assert result.exit_code == 0, result.output
             # PrIntegrator should not have been instantiated for operations
@@ -212,8 +212,8 @@ class TestPublishNoPr:
 class TestPublishDryRun:
     """--dry-run: publisher.execute with dry_run=True, PR with dry_run=True."""
 
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
     def test_dry_run_passes_flag_to_execute(
         self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
     ):
@@ -242,8 +242,8 @@ class TestPublishDryRun:
             plan, dry_run=True, parallel=4,
         )
 
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
     def test_dry_run_passes_flag_to_pr_integration(
         self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
     ):
@@ -270,8 +270,8 @@ class TestPublishDryRun:
         for c in mock_pr.open_or_update.call_args_list:
             assert c.kwargs.get("dry_run") is True or c[1].get("dry_run") is True
 
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
     def test_dry_run_shows_info_note(
         self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
     ):
@@ -342,8 +342,8 @@ class TestPublishMissingTargets:
         assert "consumer-targets.yml" in result.output
         assert "--targets" in result.output
 
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
     def test_explicit_targets_file(
         self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
     ):
@@ -435,7 +435,7 @@ class TestPublishInvalidTargets:
 
 
 class TestPublishGhAvailability:
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
     def test_gh_not_available_exit_1(
         self, MockPr, runner, tmp_path, monkeypatch
     ):
@@ -452,7 +452,7 @@ class TestPublishGhAvailability:
         assert result.exit_code == 1
         assert "gh" in result.output.lower()
 
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
     def test_gh_not_available_but_no_pr_proceeds(
         self, MockPublisher, runner, tmp_path, monkeypatch
     ):
@@ -478,9 +478,9 @@ class TestPublishGhAvailability:
 
 
 class TestPublishInteractive:
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
-    @patch("apm_cli.commands.marketplace._is_interactive", return_value=False)
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish._is_interactive", return_value=False)
     def test_non_tty_without_yes_exit_1(
         self, mock_interactive, MockPublisher, MockPr, runner, tmp_path, monkeypatch
     ):
@@ -498,9 +498,9 @@ class TestPublishInteractive:
         assert result.exit_code == 1
         assert "Non-interactive session" in result.output
 
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
-    @patch("apm_cli.commands.marketplace._is_interactive", return_value=False)
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish._is_interactive", return_value=False)
     def test_non_tty_with_yes_proceeds(
         self, mock_interactive, MockPublisher, MockPr, runner, tmp_path, monkeypatch
     ):
@@ -522,9 +522,9 @@ class TestPublishInteractive:
         result = runner.invoke(marketplace, ["publish", "--yes"])
         assert result.exit_code == 0, result.output
 
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
-    @patch("apm_cli.commands.marketplace._is_interactive", return_value=True)
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish._is_interactive", return_value=True)
     def test_tty_user_types_n_aborts_gracefully(
         self, mock_interactive, MockPublisher, MockPr, runner, tmp_path, monkeypatch
     ):
@@ -543,9 +543,9 @@ class TestPublishInteractive:
         assert "cancelled" in result.output.lower()
         mock_pub.execute.assert_not_called()
 
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
-    @patch("apm_cli.commands.marketplace._is_interactive", return_value=True)
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish._is_interactive", return_value=True)
     def test_tty_user_types_y_proceeds(
         self, mock_interactive, MockPublisher, MockPr, runner, tmp_path, monkeypatch
     ):
@@ -577,8 +577,8 @@ class TestPublishInteractive:
 
 
 class TestPublishDraft:
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
     def test_draft_passed_to_pr_integrator(
         self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
     ):
@@ -611,8 +611,8 @@ class TestPublishDraft:
 
 
 class TestPublishPlanFlags:
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
     def test_allow_downgrade_passed_to_plan(
         self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
     ):
@@ -636,8 +636,8 @@ class TestPublishPlanFlags:
         _, kwargs = mock_pub.plan.call_args
         assert kwargs.get("allow_downgrade") is True
 
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
     def test_allow_ref_change_passed_to_plan(
         self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
     ):
@@ -668,8 +668,8 @@ class TestPublishPlanFlags:
 
 
 class TestPublishParallel:
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
     def test_parallel_passed_to_execute(
         self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
     ):
@@ -701,8 +701,8 @@ class TestPublishParallel:
 
 
 class TestPublishMixedOutcomes:
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
     def test_mixed_outcomes_exit_1(
         self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
     ):
@@ -744,8 +744,8 @@ class TestPublishMixedOutcomes:
         assert "acme-org/service-b" in result.output
         assert "acme-org/service-c" in result.output
 
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
     def test_summary_table_has_all_outcomes(
         self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
     ):
@@ -793,8 +793,8 @@ class TestPublishMixedOutcomes:
 
 
 class TestPublishVerbose:
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
     def test_verbose_does_not_crash(
         self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
     ):
@@ -823,8 +823,8 @@ class TestPublishVerbose:
 
 
 class TestPublishStateFile:
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
     def test_state_file_path_printed(
         self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
     ):
@@ -853,8 +853,8 @@ class TestPublishStateFile:
 
 
 class TestPublishPlanRendering:
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
     def test_plan_shows_marketplace_name(
         self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
     ):
@@ -884,8 +884,8 @@ class TestPublishPlanRendering:
 
 
 class TestPublishNoChange:
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
     def test_all_no_change_exit_0(
         self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
     ):
@@ -915,7 +915,7 @@ class TestPublishNoChange:
 
 
 class TestPublishDryRunNoPr:
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
     def test_dry_run_no_pr_exit_0(
         self, MockPublisher, runner, tmp_path, monkeypatch
     ):
@@ -977,8 +977,8 @@ class TestPublishEmptyTargets:
 
 
 class TestPublishDefaultFlags:
-    @patch("apm_cli.commands.marketplace.PrIntegrator")
-    @patch("apm_cli.commands.marketplace.MarketplacePublisher")
+    @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
+    @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
     def test_defaults_no_allow_downgrade_no_allow_ref_change(
         self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
     ):
