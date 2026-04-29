@@ -117,7 +117,6 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, verbose):
 
         # Append marketplace authoring block when requested.
         if marketplace_flag:
-            from ..core.experimental import is_enabled
             from ..marketplace.init_template import render_marketplace_block
             apm_yml_path = Path.cwd() / APM_YML_FILENAME
             try:
@@ -133,14 +132,6 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, verbose):
             except OSError as exc:
                 logger.warning(
                     f"Failed to append marketplace block to apm.yml: {exc}",
-                    symbol="warning",
-                )
-
-            if not is_enabled("marketplace_authoring"):
-                logger.warning(
-                    "Marketplace authoring is gated behind the "
-                    "'marketplace_authoring' experimental flag. "
-                    "Enable it with: apm experimental enable marketplace-authoring",
                     symbol="warning",
                 )
 

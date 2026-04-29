@@ -17,7 +17,7 @@ _TEMPLATE = """\
 # APM marketplace descriptor
 #
 # This file (marketplace.yml) is the SOURCE for your marketplace.
-# Run 'apm marketplace build' to compile it to marketplace.json.
+# Run 'apm pack' to compile it to marketplace.json.
 # Both files must be committed to the repository.
 #
 # For the full schema, see:
@@ -88,7 +88,7 @@ def render_marketplace_yml_template(
 
 _MARKETPLACE_BLOCK_TEMPLATE = """\
 # Marketplace authoring config (APM-only).
-# Run 'apm marketplace build' to compile this block to .claude-plugin/marketplace.json.
+# Run 'apm pack' to compile this block to .claude-plugin/marketplace.json.
 #
 # Top-level 'name', 'description', and 'version' are inherited from
 # the project (above) by default.  Override them inside this block when

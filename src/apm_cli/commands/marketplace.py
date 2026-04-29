@@ -70,22 +70,25 @@ class MarketplaceGroup(click.Group):
     """Custom group that organises commands by audience."""
 
     _consumer_commands = ["add", "list", "browse", "update", "remove", "validate"]
-    _authoring_commands = ["init", "build", "check", "outdated", "doctor", "publish", "package"]
+    _authoring_commands = ["init", "check", "outdated", "doctor", "publish", "package"]
 
-    @staticmethod
-    def _authoring_visible() -> bool:
-        """Return True when authoring commands should appear in ``--help``."""
-        try:
-            from ..core.experimental import is_enabled
-
-            return is_enabled("marketplace_authoring")
-        except Exception:  # noqa: BLE001 -- fail-open UI visibility check
-            return True  # fail open — show commands if flag check fails
+    def get_command(self, ctx, cmd_name):
+        # The 'build' subcommand was removed in favour of the unified
+        # 'apm pack' entrypoint. Surface a hard error with a migration
+        # hint rather than silently aliasing.
+        if cmd_name == "build":
+            raise click.UsageError(
+                "'apm marketplace build' was removed. Use 'apm pack' instead.\n"
+                "marketplace.json is now produced by 'apm pack' when "
+                "apm.yml has a 'marketplace:' block."
+            )
+        return super().get_command(ctx, cmd_name)
 
     def format_commands(self, ctx, formatter):
-        sections = [("Consumer commands", self._consumer_commands)]
-        if self._authoring_visible():
-            sections.append(("Authoring commands", self._authoring_commands))
+        sections = [
+            ("Consumer commands", self._consumer_commands),
+            ("Authoring commands", self._authoring_commands),
+        ]
 
         for section_name, cmd_names in sections:
             commands = []
@@ -187,30 +190,6 @@ def _find_duplicate_names(yml):
         return f"Duplicate names: {', '.join(duplicates)}"
     return ""
 
-def _require_authoring_flag():
-    """Exit with enablement hint if marketplace-authoring flag is disabled."""
-    from ..core.experimental import is_enabled
-
-    if not is_enabled("marketplace_authoring"):
-        _rich_warning(
-            "Marketplace authoring commands are experimental.",
-            symbol="warning",
-        )
-        _rich_info(
-            "Enable with: apm experimental enable marketplace-authoring",
-            symbol="info",
-        )
-        _rich_info(
-            "Learn more:  apm experimental list",
-            symbol="info",
-        )
-        _rich_info(
-            "Docs: https://microsoft.github.io/apm/guides/marketplace-authoring/",
-            symbol="info",
-        )
-        sys.exit(1)
-
-
 @click.group(cls=MarketplaceGroup, help="Manage marketplaces for discovery and governance")
 @click.pass_context
 def marketplace(ctx):
@@ -239,7 +218,6 @@ marketplace.add_command(package)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def init(force, no_gitignore_check, name, owner, verbose):
     """Scaffold a 'marketplace:' block in apm.yml (creates apm.yml if absent)."""
-    _require_authoring_flag()
     from ..marketplace.init_template import render_marketplace_block
 
     logger = CommandLogger("marketplace-init", verbose=verbose)
@@ -330,7 +308,7 @@ def init(force, no_gitignore_check, name, owner, verbose):
 
         next_steps = [
             "Edit the 'marketplace:' block in apm.yml to add your packages",
-            "Run 'apm marketplace build' to generate .claude-plugin/marketplace.json",
+            "Run 'apm pack' to generate .claude-plugin/marketplace.json",
             "Commit BOTH apm.yml and the generated marketplace.json",
         ]
 
@@ -877,134 +855,6 @@ def validate(name, check_refs, verbose):
 # ---------------------------------------------------------------------------
 
 
-@marketplace.command(help="Build marketplace.json from marketplace.yml")
-@click.option("--dry-run", is_flag=True, help="Preview without writing marketplace.json")
-@click.option("--offline", is_flag=True, help="Use cached refs only (no network)")
-@click.option(
-    "--include-prerelease", is_flag=True, help="Include prerelease versions"
-)
-@click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
-def build(dry_run, offline, include_prerelease, verbose):
-    """Resolve packages and compile marketplace.json."""
-    _require_authoring_flag()
-    logger = CommandLogger("marketplace-build", verbose=verbose)
-
-    project_root, _config = _load_config_or_exit(logger)
-
-    # Pick the right path for the builder constructor (shape-aware lazy load).
-    apm_path = project_root / "apm.yml"
-    legacy_path = project_root / "marketplace.yml"
-    yml_path = apm_path if _config.source_path == apm_path or \
-        (apm_path.exists() and not legacy_path.exists()) else legacy_path
-
-    try:
-        opts = BuildOptions(
-            dry_run=dry_run,
-            offline=offline,
-            include_prerelease=include_prerelease,
-        )
-        builder = MarketplaceBuilder(yml_path, options=opts)
-        report = builder.build()
-    except MarketplaceYmlError as exc:
-        logger.error(f"marketplace config error: {exc}", symbol="error")
-        sys.exit(2)
-    except BuildError as exc:
-        _render_build_error(logger, exc)
-        logger.verbose_detail(traceback.format_exc())
-        sys.exit(1)
-    except Exception as e:  # noqa: BLE001 -- top-level command catch-all
-        logger.error(f"Build failed: {e}", symbol="error")
-        logger.verbose_detail(traceback.format_exc())
-        sys.exit(1)
-
-    # Render results table
-    _render_build_table(logger, report)
-
-    # Surface duplicate-name warnings from the builder
-    for warn_msg in report.warnings:
-        logger.warning(warn_msg, symbol="warning")
-
-    if dry_run:
-        logger.progress(
-            "Dry run -- marketplace.json not written", symbol="info"
-        )
-    else:
-        logger.success(
-            f"Built marketplace.json ({len(report.resolved)} packages)",
-            symbol="check",
-        )
-
-
-def _render_build_error(logger, exc):
-    """Render a BuildError with actionable hints."""
-    if isinstance(exc, GitLsRemoteError):
-        logger.error(exc.summary_text, symbol="error")
-        if exc.hint:
-            logger.progress(f"Hint: {exc.hint}", symbol="info")
-    elif isinstance(exc, NoMatchingVersionError):
-        logger.error(str(exc), symbol="error")
-        logger.progress(
-            "Check that your version range matches published tags.",
-            symbol="info",
-        )
-    elif isinstance(exc, RefNotFoundError):
-        logger.error(str(exc), symbol="error")
-        logger.progress(
-            "Verify the ref is spelled correctly and the remote is reachable.",
-            symbol="info",
-        )
-    elif isinstance(exc, HeadNotAllowedError):
-        logger.error(str(exc), symbol="error")
-    elif isinstance(exc, OfflineMissError):
-        logger.error(str(exc), symbol="error")
-        logger.progress(
-            "Run a build online first to populate the cache.",
-            symbol="info",
-        )
-    else:
-        logger.error(f"Build failed: {exc}", symbol="error")
-
-
-def _render_build_table(logger, report):
-    """Render the resolved-packages table (Rich with colorama fallback)."""
-    console = _get_console()
-    if not console:
-        # Colorama fallback
-        for pkg in report.resolved:
-            sha_short = pkg.sha[:8] if pkg.sha else "--"
-            ref_kind = "tag" if not pkg.ref.startswith("refs/heads/") else "branch"
-            logger.tree_item(
-                f"  [+] {pkg.name}  {pkg.ref}  {sha_short}  ({ref_kind})"
-            )
-        return
-
-    from rich.table import Table
-    from rich.text import Text
-
-    table = Table(
-        title="Resolved Packages",
-        show_header=True,
-        header_style="bold cyan",
-        border_style="cyan",
-    )
-    table.add_column("Status", style="green", no_wrap=True, width=6)
-    table.add_column("Package", style="bold white", no_wrap=True)
-    table.add_column("Version", style="cyan")
-    table.add_column("Commit", style="dim")
-    table.add_column("Ref Kind", style="white")
-
-    for pkg in report.resolved:
-        sha_short = pkg.sha[:8] if pkg.sha else "--"
-        # Determine ref kind
-        ref_kind = "tag"
-        if pkg.ref and not parse_semver(pkg.ref.lstrip("vV")):
-            ref_kind = "ref"
-        table.add_row(Text("[+]"), pkg.name, pkg.ref, sha_short, ref_kind)
-
-    console.print()
-    console.print(table)
-
-
 # ---------------------------------------------------------------------------
 # marketplace outdated
 # ---------------------------------------------------------------------------
@@ -1018,7 +868,6 @@ def _render_build_table(logger, report):
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def outdated(offline, include_prerelease, verbose):
     """Compare installed versions against latest available tags."""
-    _require_authoring_flag()
     logger = CommandLogger("marketplace-outdated", verbose=verbose)
 
     _, yml = _load_config_or_exit(logger)
@@ -1275,7 +1124,6 @@ def _render_outdated_table(logger, rows):
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def check(offline, verbose):
     """Validate marketplace.yml and check each entry is resolvable."""
-    _require_authoring_flag()
     logger = CommandLogger("marketplace-check", verbose=verbose)
 
     _, yml = _load_config_or_exit(logger)
@@ -1454,7 +1302,6 @@ def _render_check_table(logger, results):
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def doctor(verbose):
     """Check git, network, auth, and marketplace.yml readiness."""
-    _require_authoring_flag()
     logger = CommandLogger("marketplace-doctor", verbose=verbose)
     checks = []
 
@@ -1780,7 +1627,6 @@ def publish(
     verbose,
 ):
     """Publish marketplace updates to consumer repositories."""
-    _require_authoring_flag()
     logger = CommandLogger("marketplace-publish", verbose=verbose)
 
     # ------------------------------------------------------------------
@@ -1794,7 +1640,7 @@ def publish(
     mkt_json_path = Path.cwd() / "marketplace.json"
     if not mkt_json_path.exists():
         logger.error(
-            "marketplace.json not found. Run 'apm marketplace build' first.",
+            "marketplace.json not found. Run 'apm pack' first.",
             symbol="error",
         )
         sys.exit(1)
@@ -2252,7 +2098,6 @@ def search(expression, limit, verbose):
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def migrate(force, dry_run, verbose):
     """One-shot conversion from legacy marketplace.yml to apm.yml block."""
-    _require_authoring_flag()
     logger = CommandLogger("marketplace-migrate", verbose=verbose)
     project_root = Path.cwd()
 

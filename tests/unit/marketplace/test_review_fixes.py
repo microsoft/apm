@@ -165,35 +165,7 @@ class TestMigrateMalformedApmYmlTyped:
 # Followup: apm init --marketplace warns when experimental flag is disabled
 # ---------------------------------------------------------------------------
 
+# Removed: the ``marketplace_authoring`` experimental flag was deleted when
+# marketplace authoring went GA. ``apm init --marketplace`` now appends the
+# block unconditionally, so the disabled-flag warning case no longer exists.
 
-class TestInitMarketplaceFlagWarnsWhenExperimentalDisabled:
-    def test_warns_with_experimental_flag_name(
-        self, tmp_path: Path, monkeypatch
-    ):
-        from unittest.mock import patch as _patch
-
-        from apm_cli.commands.init import init
-
-        runner = CliRunner()
-        monkeypatch.chdir(tmp_path)
-
-        # Force marketplace_authoring=False even though the autouse
-        # marketplace fixture flips it to True for everything else.
-        def _disabled(name: str) -> bool:
-            if name == "marketplace_authoring":
-                return False
-            from apm_cli.core.experimental import is_enabled as real_is
-            return real_is(name)
-
-        with _patch(
-            "apm_cli.core.experimental.is_enabled", side_effect=_disabled
-        ):
-            result = runner.invoke(init, ["my-proj", "--yes", "--marketplace"])
-
-        assert result.exit_code == 0, result.output
-        # Warning text must mention the experimental flag name so the
-        # user knows what to enable.
-        assert "marketplace_authoring" in result.output
-        # And block was still appended (option b: lower friction).
-        text = (tmp_path / "my-proj" / "apm.yml").read_text(encoding="utf-8")
-        assert "marketplace:" in text
