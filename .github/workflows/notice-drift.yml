@@ -124,12 +124,16 @@ jobs:
       # pull_request context (the dep-graph diff is computed from the
       # PR base/head refs, which don't exist in the merge-queue temp
       # branch view).
+      # NOTE: dependency-review-action rejects specifying both
+      # `allow-licenses` and `deny-licenses` ("You cannot specify both"),
+      # so we use the deny-list form. That's the safer choice anyway --
+      # an allow-list would fail closed on every novel-but-permissive
+      # SPDX identifier the upstream metadata throws at us (BlueOak,
+      # 0BSD-variants, dual-licensed `MIT OR Apache-2.0` strings, etc.)
+      # and produce noisy false positives on otherwise-fine PRs.
       - name: License policy check (PR only)
         if: github.event_name == 'pull_request'
         uses: actions/dependency-review-action@v4
         with:
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, SSPL-1.0
-          allow-licenses: >-
-            MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0,
-            Python-2.0, Unlicense, CC0-1.0, PSF-2.0, 0BSD, Zlib
           fail-on-severity: moderate
