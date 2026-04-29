@@ -372,86 +372,22 @@ def add(repo, name, branch, host, verbose):
         from ..marketplace.models import MarketplaceSource
         from ..marketplace.registry import add_marketplace
 
-        # Parse OWNER/REPO, HOST/OWNER/.../REPO, or full HTTPS URL.
-        # Supports GitLab subgroups and any N-segment path.
-        import urllib.parse as _urlparse
-
         from ..utils.github_host import default_host, is_valid_fqdn
+        from ..models.apm_package import DependencyReference
 
-        repo_input = repo
-        resolved_host = None
-
-        if repo_input.lower().startswith(("https://", "http://")):
-            # Full URL: https://gitlab.com/mycompany/myorg/sub/repo[.git]
-            _parsed = _urlparse.urlparse(repo_input)
-            url_host = (_parsed.hostname or "").lower()
-            if not is_valid_fqdn(url_host):
-                logger.error(f"Invalid host in URL: '{url_host}'.")
-                sys.exit(1)
-            if host and host.lower() != url_host:
-                logger.error(
-                    f"Conflicting host: --host '{host}' vs '{url_host}' in URL."
-                )
-                sys.exit(1)
-            resolved_host = url_host
-            _path = _parsed.path.strip("/")
-            if _path.endswith(".git"):
-                _path = _path[:-4]
-            path_parts = [p for p in _path.split("/") if p]
-            if len(path_parts) < 2:
-                logger.error(
-                    f"Invalid URL '{repo_input}': expected at least OWNER/REPO in the path."
-                )
-                sys.exit(1)
-            owner = "/".join(path_parts[:-1])
-            repo_name = path_parts[-1]
-        else:
-            parts = [p for p in repo_input.split("/") if p]
-            if len(parts) < 2:
-                logger.error(
-                    f"Invalid format: '{repo_input}'. Use 'OWNER/REPO' "
-                    f"(e.g., 'acme-org/plugin-marketplace')"
-                )
-                sys.exit(1)
-
-            if len(parts) >= 3 and is_valid_fqdn(parts[0]):
-                # HOST/OWNER/.../REPO (N >= 3 parts, first part is hostname)
-                url_host = parts[0].lower()
-                if host and host.lower() != url_host:
-                    logger.error(
-                        f"Conflicting host: --host '{host}' vs '{parts[0]}' in argument."
-                    )
-                    sys.exit(1)
-                resolved_host = url_host
-                owner = "/".join(parts[1:-1])
-                repo_name = parts[-1]
-            else:
-                # OWNER/.../REPO (no host prefix, any number of segments)
-                owner = "/".join(parts[:-1])
-                repo_name = parts[-1]
-
-        # Security: reject traversal sequences in parsed path components
         try:
-            validate_path_segments(owner, context="owner path")
-            validate_path_segments(repo_name, context="repository name")
-        except PathTraversalError as exc:
-            logger.error(str(exc))
+            dep_ref = DependencyReference.parse(repo)
+            resolved_host = dep_ref.host or default_host()
+            canonical = dep_ref.to_canonical()
+            repo_name = canonical.split("/")[-1]
+            owner = canonical[: -len("/" + repo_name)]
+            logger.verbose_detail(f"Parsed repository reference: host='{resolved_host}', owner='{owner}', repo='{repo_name}'")
+            if not is_valid_fqdn(resolved_host):
+                raise ValueError(f"Host '{resolved_host}' is not a valid FQDN")
+        except ValueError as exc:
+            logger.error(f"Invalid repository reference: {exc}", symbol="error")
             sys.exit(1)
 
-        # Resolve --host flag or fall back to default
-        if resolved_host is None:
-            if host is not None:
-                normalized_host = host.strip().lower()
-                if not is_valid_fqdn(normalized_host):
-                    logger.error(
-                        f"Invalid host: '{host}'. Expected a valid host FQDN "
-                        f"(for example, 'github.com')."
-                    )
-                    sys.exit(1)
-                resolved_host = normalized_host
-            else:
-                resolved_host = default_host()
-        display_name = name or repo_name
 
         # Validate name is identifier-compatible for NAME@MARKETPLACE syntax
         import re
