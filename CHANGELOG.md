@@ -123,6 +123,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Triage-panel themed issues now reach the PGS project board (dispatches `project-sync` directly; same `GITHUB_TOKEN` event-suppression class as #953). (#971)
 - Issue templates use canonical APM labels; `python-architect` agent documents the mermaid `classDiagram :::cssClass` GitHub-render trap. (#958, #970)
 
+### Changed
+
+- `ContextOptimizer` reuses a cached per-directory file list built during project analysis for glob matching, directory matching, and stats, eliminating repeated `os.walk` / `iterdir()` calls and rewriting the stats loop from O(N^2) to O(N). Low-distribution `applyTo` patterns are now placed at their lowest common ancestor instead of the project root. (#871)
+
 ## [0.9.3] - 2026-04-26
 
 ### Added
