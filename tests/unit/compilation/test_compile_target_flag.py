@@ -245,6 +245,21 @@ Use type hints in Python code.
         assert result.success is False
         assert any("Unknown compilation target" in e for e in result.errors)
 
+    def test_unknown_frozenset_target_family_returns_failure(self, temp_project, sample_primitives):
+        """Unknown multi-target family must fail explicitly instead of silently no-oping."""
+        config = CompilationConfig(
+            target=frozenset({"agents", "not-a-real-family"}),
+            dry_run=True,
+            single_agents=True,
+        )
+
+        compiler = AgentsCompiler(str(temp_project))
+        result = compiler.compile(config, sample_primitives)
+
+        assert result.success is False
+        assert any("Unknown compilation target family" in e for e in result.errors)
+        assert any("not-a-real-family" in e for e in result.errors)
+
 
 class TestMergeResults:
     """Tests for _merge_results() method."""

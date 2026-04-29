@@ -31,7 +31,12 @@ TargetType = Literal["vscode", "claude", "cursor", "opencode", "codex", "gemini"
 
 # Compile target: either a single TargetType string or a frozenset of compiler
 # families ({"agents", "claude", "gemini"}) for multi-target lists.
-CompileTargetType = Union[str, frozenset]
+CompileTargetType = Union[str, frozenset[str]]
+
+# Detection reason returned by detect_target() when no integration folder is
+# present. Exported as a constant so consumers can compare with equality
+# instead of substring matching.
+REASON_NO_TARGET_FOLDER = "no target folder found"
 
 # User-facing target values (includes aliases accepted by CLI)
 UserTargetType = Literal["copilot", "vscode", "agents", "claude", "cursor", "opencode", "codex", "gemini", "all", "minimal"]
@@ -124,7 +129,7 @@ def detect_target(
     elif gemini_exists:
         return "gemini", "detected .gemini/ folder"
     else:
-        return "minimal", "no target folder found"
+        return "minimal", REASON_NO_TARGET_FOLDER
 
 
 def should_compile_agents_md(target: CompileTargetType) -> bool:

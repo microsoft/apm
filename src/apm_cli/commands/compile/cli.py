@@ -388,7 +388,11 @@ def compile(
         logger.start("Starting context compilation...", symbol="cogs")
 
         # Auto-detect target if not explicitly provided
-        from ...core.target_detection import detect_target, get_target_description
+        from ...core.target_detection import (
+            REASON_NO_TARGET_FOLDER,
+            detect_target,
+            get_target_description,
+        )
 
         # Get config target from apm.yml if available
         config_target = None
@@ -461,7 +465,11 @@ def compile(
                 logger.progress(
                     f"Compiling for {' + '.join(_parts)} (--target {_target_label})"
                 )
-            elif isinstance(effective_target, str) and effective_target == "vscode" and "no target" in detection_reason:
+            elif (
+                isinstance(effective_target, str)
+                and effective_target == "vscode"
+                and detection_reason == REASON_NO_TARGET_FOLDER
+            ):
                 logger.progress(f"Compiling for AGENTS.md only ({detection_reason})")
                 logger.progress(
                     " Create .github/, .claude/, .codex/, .opencode/ or .cursor/ folder for full integration",
