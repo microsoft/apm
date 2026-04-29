@@ -72,7 +72,7 @@ generated_at: "2026-03-09T14:00:00Z"
 apm_version: "0.7.7"
 
 dependencies:
-  - repo_url: https://github.com/acme-corp/security-baseline
+  - repo_url: https://github.com/acme-corp/security-skills
     resolved_commit: a1b2c3d4e5f6789012345678901234567890abcd
     resolved_ref: v2.1.0
     version: "2.1.0"
@@ -81,12 +81,13 @@ dependencies:
     namespace: acme
     deployed_files:
       - .github/skills/acme/security-review
+      - .github/skills/acme/threat-modeling
 
   - repo_url: https://github.com/acme-corp/common-prompts
     resolved_commit: f6e5d4c3b2a1098765432109876543210fedcba9
     resolved_ref: main
     depth: 2
-    resolved_by: https://github.com/acme-corp/security-baseline
+    resolved_by: https://github.com/acme-corp/security-skills
     package_type: apm_package
     deployed_files:
       - .github/instructions/common-guidelines.instructions.md
