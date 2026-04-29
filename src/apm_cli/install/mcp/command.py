@@ -10,6 +10,9 @@ user-visible install flow:
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Optional, Sequence
+
 import click
 
 from .args import parse_env_pairs, parse_header_pairs
@@ -35,24 +38,24 @@ except ImportError:
 
 def run_mcp_install(
     *,
-    mcp_name,
-    transport,
-    url,
-    env_pairs,
-    header_pairs,
-    mcp_version,
-    command_argv,
-    dev,
-    force,
-    runtime,
-    exclude,
-    verbose,
+    mcp_name: str,
+    transport: Optional[str],
+    url: Optional[str],
+    env_pairs: Optional[Sequence[str]],
+    header_pairs: Optional[Sequence[str]],
+    mcp_version: Optional[str],
+    command_argv: Optional[Sequence[str]],
+    dev: bool,
+    force: bool,
+    runtime: Optional[str],
+    exclude: Optional[str],
+    verbose: bool,
     logger,
-    manifest_path,
-    apm_dir,
-    scope,
-    registry_url=None,
-):
+    manifest_path: Path,
+    apm_dir: Path,
+    scope: Optional[str],
+    registry_url: Optional[str] = None,
+) -> None:
     """Execute the --mcp install path. ``registry_url`` is the validated
     --registry value; the caller resolved precedence vs MCP_REGISTRY_URL."""
     from ...models.dependency.mcp import MCPDependency

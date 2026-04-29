@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import click
 
@@ -17,7 +18,13 @@ from ...constants import APM_YML_FILENAME
 from ...core.null_logger import NullCommandLogger
 
 
-def _diff_entry(old, new) -> list:
+MCPEntry = Union[str, Dict[str, Any]]
+
+
+def _diff_entry(
+    old: Optional[MCPEntry],
+    new: Optional[MCPEntry],
+) -> List[str]:
     """Return a short list of ``key: old -> new`` strings for human display."""
     if isinstance(old, str) and isinstance(new, str):
         if old == new:
@@ -26,7 +33,7 @@ def _diff_entry(old, new) -> list:
     old_d = {"name": old} if isinstance(old, str) else (old or {})
     new_d = {"name": new} if isinstance(new, str) else (new or {})
     keys = list(old_d.keys()) + [k for k in new_d.keys() if k not in old_d]
-    diff: list = []
+    diff: List[str] = []
     for k in keys:
         ov = old_d.get(k, "<absent>")
         nv = new_d.get(k, "<absent>")
@@ -35,8 +42,16 @@ def _diff_entry(old, new) -> list:
     return diff
 
 
-def add_mcp_to_apm_yml(name, entry, *, dev=False, force=False, project_root=None,
-                       manifest_path=None, logger=None):
+def add_mcp_to_apm_yml(
+    name: str,
+    entry: MCPEntry,
+    *,
+    dev: bool = False,
+    force: bool = False,
+    project_root: Optional[Path] = None,
+    manifest_path: Optional[Path] = None,
+    logger=None,
+) -> Tuple[str, Optional[List[str]]]:
     """Persist ``entry`` to ``apm.yml`` under ``dependencies.mcp`` (or
     ``devDependencies.mcp`` when ``dev=True``).
 

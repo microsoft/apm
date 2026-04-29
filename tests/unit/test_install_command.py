@@ -1682,7 +1682,7 @@ class TestInstallMcpFlag:
         with self._chdir_with_apm_yml() as tmp, \
              patch("apm_cli.commands.install._get_invocation_argv",
                    return_value=["apm", "install", "--mcp", ref]), \
-             patch("apm_cli.commands.install.MCPIntegrator"):
+             patch("apm_cli.install.mcp.command.MCPIntegrator"):
             result = self.runner.invoke(cli, ["install", "--mcp", ref])
             assert result.exit_code == 0, result.output
             assert "'str' object has no attribute" not in result.output

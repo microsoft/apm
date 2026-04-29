@@ -8,12 +8,14 @@ turns invalid ``apm install --mcp`` flag combinations into
 
 from __future__ import annotations
 
+from typing import Mapping, Optional, Sequence, Tuple
+
 import click
 
 
 # Mapping for E10: which flags require --mcp.  Keyed by attribute-style
 # name so we can read directly from the Click handler locals.
-MCP_REQUIRED_FLAGS = (
+MCP_REQUIRED_FLAGS: Tuple[Tuple[str, str], ...] = (
     ("transport", "--transport"),
     ("url", "--url"),
     ("env", "--env"),
@@ -24,23 +26,23 @@ MCP_REQUIRED_FLAGS = (
 
 def validate_mcp_conflicts(
     *,
-    mcp_name,
-    packages,
-    pre_dash_packages,
-    transport,
-    url,
-    env,
-    headers,
-    mcp_version,
-    command_argv,
-    global_,
-    only,
-    update,
-    use_ssh,
-    use_https,
-    allow_protocol_fallback,
-    registry_url=None,
-):
+    mcp_name: Optional[str],
+    packages: Sequence[str],
+    pre_dash_packages: Sequence[str],
+    transport: Optional[str],
+    url: Optional[str],
+    env: Mapping[str, str],
+    headers: Mapping[str, str],
+    mcp_version: Optional[str],
+    command_argv: Optional[Sequence[str]],
+    global_: bool,
+    only: Optional[str],
+    update: bool,
+    use_ssh: bool,
+    use_https: bool,
+    allow_protocol_fallback: bool,
+    registry_url: Optional[str] = None,
+) -> None:
     """Apply conflict matrix E1-E15.  Raises ``click.UsageError`` on hit."""
     # E10: flags require --mcp -- run first so users get the right hint.
     if mcp_name is None:
