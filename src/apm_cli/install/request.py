@@ -42,3 +42,5 @@ class InstallRequest:
     protocol_pref: Any = None  # ProtocolPreference (NONE/SSH/HTTPS) for shorthand transport
     allow_protocol_fallback: Optional[bool] = None  # None => read APM_ALLOW_PROTOCOL_FALLBACK env
     no_policy: bool = False  # W2-escape-hatch: skip org policy enforcement
+    skill_subset: Optional[Tuple[str, ...]] = None  # --skill filter for SKILL_BUNDLE packages
+    skill_subset_from_cli: bool = False  # True when user passed --skill (even --skill '*')

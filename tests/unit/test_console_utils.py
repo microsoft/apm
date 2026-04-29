@@ -40,6 +40,14 @@ class TestStatusSymbols:
 class TestGetConsole:
     """Tests for _get_console()."""
 
+    def setup_method(self):
+        from apm_cli.utils.console import _reset_console
+        _reset_console()
+
+    def teardown_method(self):
+        from apm_cli.utils.console import _reset_console
+        _reset_console()
+
     def test_returns_console_when_rich_available(self):
         from apm_cli.utils.console import _get_console
 

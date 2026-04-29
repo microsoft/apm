@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import threading
 from typing import Dict, List, Optional
 
 from .errors import MarketplaceNotFoundError
@@ -14,6 +15,7 @@ _MARKETPLACES_FILENAME = "marketplaces.json"
 
 # Process-lifetime cache --------------------------------------------------
 _registry_cache: Optional[List[MarketplaceSource]] = None
+_registry_lock = threading.Lock()
 
 
 def _marketplaces_path() -> str:
@@ -37,32 +39,31 @@ def _ensure_file() -> str:
 
 def _invalidate_cache() -> None:
     global _registry_cache
-    _registry_cache = None
+    with _registry_lock:
+        _registry_cache = None
 
 
 def _load() -> List[MarketplaceSource]:
     """Load registered marketplaces from disk (cached per-process)."""
     global _registry_cache
-    if _registry_cache is not None:
-        return list(_registry_cache)
-
-    path = _ensure_file()
-    try:
-        with open(path, "r") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Failed to read %s: %s", path, exc)
-        data = {"marketplaces": []}
-
-    sources: List[MarketplaceSource] = []
-    for entry in data.get("marketplaces", []):
+    with _registry_lock:
+        if _registry_cache is not None:
+            return list(_registry_cache)
+        path = _ensure_file()
         try:
-            sources.append(MarketplaceSource.from_dict(entry))
-        except (KeyError, TypeError) as exc:
-            logger.debug("Skipping invalid marketplace entry: %s", exc)
-
-    _registry_cache = sources
-    return list(sources)
+            with open(path, "r") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Failed to read %s: %s", path, exc)
+            data = {"marketplaces": []}
+        sources: List[MarketplaceSource] = []
+        for entry in data.get("marketplaces", []):
+            try:
+                sources.append(MarketplaceSource.from_dict(entry))
+            except (KeyError, TypeError) as exc:
+                logger.debug("Skipping invalid marketplace entry: %s", exc)
+        _registry_cache = sources
+        return list(sources)
 
 
 def _save(sources: List[MarketplaceSource]) -> None:
@@ -74,7 +75,8 @@ def _save(sources: List[MarketplaceSource]) -> None:
     with open(tmp, "w") as f:
         json.dump(data, f, indent=2)
     os.replace(tmp, path)
-    _registry_cache = list(sources)
+    with _registry_lock:
+        _registry_cache = list(sources)
 
 
 # Public API ---------------------------------------------------------------

@@ -577,7 +577,7 @@ class TestRunBaselineChecks:
         )
         result = run_baseline_checks(tmp_path)
         assert result.passed
-        assert len(result.checks) == 7  # all 7 checks ran (incl. includes-consent)
+        assert len(result.checks) == 8  # all 8 checks ran (incl. skill-subset + includes-consent)
 
     def test_mixed_pass_fail(self, tmp_path):
         # Ref mismatch (fail) + missing file (fail) + clean otherwise

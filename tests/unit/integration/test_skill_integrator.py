@@ -3668,3 +3668,223 @@ class TestUninstallPhase2SkillTargets:
 
         assert len(deployed) == 1
         assert (self.project_root / ".github" / "skills" / "my-skill" / "SKILL.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# Cowork additive tests
+# ---------------------------------------------------------------------------
+
+from dataclasses import replace as _dc_replace
+from unittest.mock import MagicMock
+from apm_cli.integration.targets import KNOWN_TARGETS
+
+
+def _make_resolved_cowork_target(cowork_root: Path) -> "TargetProfile":
+    """Return a frozen TargetProfile with resolved_deploy_root set for cowork.
+
+    Args:
+        cowork_root: The resolved cowork skills root directory.
+
+    Returns:
+        A frozen TargetProfile suitable for cowork deployment tests.
+    """
+    from apm_cli.integration.targets import TargetProfile
+    return _dc_replace(KNOWN_TARGETS["copilot-cowork"], resolved_deploy_root=cowork_root)
+
+
+def _make_package_info(install_path: Path) -> MagicMock:
+    """Create a minimal PackageInfo mock for skill integration tests.
+
+    Args:
+        install_path: The package install directory.
+
+    Returns:
+        A MagicMock configured as a PackageInfo.
+    """
+    pkg = MagicMock()
+    pkg.install_path = install_path
+    pkg.dependency_ref = None
+    pkg.content_type = PackageContentType.SKILL
+    pkg.apm_yml = {}
+    pkg.package_type = PackageType.CLAUDE_SKILL
+    pkg.package = MagicMock()
+    pkg.package.name = install_path.name
+    return pkg
+
+
+class TestIntegrateNativeSkillCowork:
+    """Tests for _integrate_native_skill with cowork target."""
+
+    def test_deploys_to_resolved_deploy_root(self, tmp_path: Path) -> None:
+        cowork_root = tmp_path / "cowork-skills"
+        cowork_root.mkdir()
+        pkg_dir = tmp_path / "src" / "my-skill"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "SKILL.md").write_text("# My Skill")
+
+        pkg_info = _make_package_info(pkg_dir)
+        cowork_target = _make_resolved_cowork_target(cowork_root)
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        integrator = SkillIntegrator()
+        with patch.object(
+            integrator, "_build_ownership_maps", return_value=({}, {})
+        ):
+            result = integrator._integrate_native_skill(
+                pkg_info,
+                project_root,
+                pkg_dir / "SKILL.md",
+                targets=[cowork_target],
+            )
+        deployed_skill = cowork_root / "my-skill" / "SKILL.md"
+        assert deployed_skill.exists()
+
+    def test_does_not_deploy_under_project_root(
+        self, tmp_path: Path
+    ) -> None:
+        cowork_root = tmp_path / "cowork-skills"
+        cowork_root.mkdir()
+        pkg_dir = tmp_path / "src" / "my-skill"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "SKILL.md").write_text("# My Skill")
+
+        pkg_info = _make_package_info(pkg_dir)
+        cowork_target = _make_resolved_cowork_target(cowork_root)
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        integrator = SkillIntegrator()
+        with patch.object(
+            integrator, "_build_ownership_maps", return_value=({}, {})
+        ):
+            integrator._integrate_native_skill(
+                pkg_info,
+                project_root,
+                pkg_dir / "SKILL.md",
+                targets=[cowork_target],
+            )
+        assert not (project_root / "copilot-cowork").exists()
+
+    def test_result_target_paths_contain_absolute_path(
+        self, tmp_path: Path
+    ) -> None:
+        cowork_root = tmp_path / "cowork-skills"
+        cowork_root.mkdir()
+        pkg_dir = tmp_path / "src" / "my-skill"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "SKILL.md").write_text("# My Skill")
+
+        pkg_info = _make_package_info(pkg_dir)
+        cowork_target = _make_resolved_cowork_target(cowork_root)
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        integrator = SkillIntegrator()
+        with patch.object(
+            integrator, "_build_ownership_maps", return_value=({}, {})
+        ):
+            result = integrator._integrate_native_skill(
+                pkg_info,
+                project_root,
+                pkg_dir / "SKILL.md",
+                targets=[cowork_target],
+            )
+        assert any(p.is_absolute() for p in result.target_paths)
+        assert any(
+            str(p).startswith(str(cowork_root))
+            for p in result.target_paths
+        )
+
+
+class TestPromoteSubSkillsCowork:
+    """Tests for sub-skill promotion with cowork target."""
+
+    def test_promote_sub_skills_deploys_to_cowork_root(
+        self, tmp_path: Path
+    ) -> None:
+        cowork_root = tmp_path / "cowork-skills"
+        cowork_root.mkdir()
+        pkg_dir = tmp_path / "src" / "parent-pkg"
+        sub_skill = pkg_dir / ".apm" / "skills" / "my-sub"
+        sub_skill.mkdir(parents=True)
+        (sub_skill / "SKILL.md").write_text("# Sub Skill")
+
+        pkg_info = _make_package_info(pkg_dir)
+        # Package without root SKILL.md -> INSTRUCTIONS type
+        pkg_info.package_type = PackageType.APM_PACKAGE
+        cowork_target = _make_resolved_cowork_target(cowork_root)
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        integrator = SkillIntegrator()
+        count, deployed = integrator._promote_sub_skills_standalone(
+            pkg_info,
+            project_root,
+            targets=[cowork_target],
+        )
+        assert count >= 1
+        assert (cowork_root / "my-sub" / "SKILL.md").exists()
+
+    def test_promote_sub_skills_rel_prefix_no_relative_to_crash(
+        self, tmp_path: Path
+    ) -> None:
+        cowork_root = tmp_path / "cowork-skills"
+        cowork_root.mkdir()
+        pkg_dir = tmp_path / "src" / "parent-pkg"
+        sub_skill = pkg_dir / ".apm" / "skills" / "my-sub"
+        sub_skill.mkdir(parents=True)
+        (sub_skill / "SKILL.md").write_text("# Sub Skill")
+
+        pkg_info = _make_package_info(pkg_dir)
+        pkg_info.package_type = PackageType.APM_PACKAGE
+        cowork_target = _make_resolved_cowork_target(cowork_root)
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        # Should NOT raise ValueError from relative_to
+        integrator = SkillIntegrator()
+        count, deployed = integrator._promote_sub_skills_standalone(
+            pkg_info,
+            project_root,
+            targets=[cowork_target],
+        )
+        assert count >= 1
+
+    def test_skill_only_agents_skipped_on_cowork(
+        self, tmp_path: Path
+    ) -> None:
+        cowork_root = tmp_path / "cowork-skills"
+        cowork_root.mkdir()
+        pkg_dir = tmp_path / "src" / "my-skill"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "SKILL.md").write_text("# My Skill")
+        agents_dir = pkg_dir / ".apm" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "foo.agent.md").write_text("# Agent")
+
+        pkg_info = _make_package_info(pkg_dir)
+        cowork_target = _make_resolved_cowork_target(cowork_root)
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        integrator = SkillIntegrator()
+        with patch.object(
+            integrator, "_build_ownership_maps", return_value=({}, {})
+        ):
+            result = integrator._integrate_native_skill(
+                pkg_info,
+                project_root,
+                pkg_dir / "SKILL.md",
+                targets=[cowork_target],
+            )
+        deployed_skill = cowork_root / "my-skill" / "SKILL.md"
+        assert deployed_skill.exists()
+        # .apm dir is excluded via shutil.ignore_patterns('.apm')
+        assert not (cowork_root / "my-skill" / ".apm").exists()
