@@ -261,12 +261,141 @@ VALID_TARGET_VALUES: frozenset[str] = (
 )
 
 
+def parse_target_field(
+    value: Union[str, List[str], None],
+    *,
+    source_path: Optional[Path] = None,
+) -> Union[str, List[str], None]:
+    """Parse, validate, and normalize a target value from any entry point.
+
+    Single source of truth for the ``target`` field, shared by the
+    ``--target`` CLI flag (via :class:`TargetParamType`) and ``apm.yml``'s
+    top-level ``target:`` (via :func:`APMPackage.from_apm_yml`).  The
+    output may differ from the input in case (lowercased), order
+    (preserved but deduplicated), and shape (single-element multi-token
+    inputs collapse to ``str``).  Aliases are resolved for multi-token
+    input only; see the *Returns* section below for the exact rules.
+
+    Accepted input shapes:
+
+    * ``None`` -> ``None`` (auto-detect at consumption time -- this is the
+      "field absent" path; an apm.yml without ``target:`` lands here).
+    * Single token (``"claude"``) -> the same lowercased token as ``str``.
+      Aliases are NOT resolved for solo input -- ``"copilot"`` returns
+      ``"copilot"`` (not the canonical ``"vscode"``) to match the
+      long-standing CLI contract; downstream consumers handle the alias
+      set explicitly.
+    * CSV string (``"claude,copilot"``) -> deduplicated ``List[str]`` with
+      aliases resolved to canonical names. Collapses to a bare ``str`` if
+      after dedup only one canonical token remains.
+    * List input (``["claude", "copilot"]``) goes through the same path as
+      the CSV form -- single-element lists collapse to ``str``.
+    * Literal ``"all"`` -> ``"all"`` (exclusive; cannot be combined).
+
+    Args:
+        value: The raw value -- ``str``, ``List[str]``, or ``None``.
+        source_path: Optional path to the apm.yml that produced ``value``.
+            When supplied, ValueError messages name the file so users can
+            jump to it directly.
+
+    Returns:
+        ``None`` for unset, a ``str`` for a single token (or ``"all"``),
+        or a deduplicated ``List[str]`` for multi-target input.
+
+    Raises:
+        ValueError: When the value is an empty / whitespace-only / commas-only
+            string, an empty list, a non-string non-list type, contains a
+            token that is not in :data:`VALID_TARGET_VALUES`, or mixes
+            ``"all"`` with other targets.  An empty *string* is treated as
+            user error (the "field absent" path is ``None``, supplied by
+            the YAML loader for a missing key).
+    """
+    if value is None:
+        return None
+
+    # ---- collect raw tokens ----
+    if isinstance(value, str):
+        # Empty / whitespace-only / comma-only strings are user error -- a
+        # missing field comes through as ``None`` from the YAML loader, so
+        # an empty *string* means the user typed something invalid.
+        raw_parts = [v.strip().lower() for v in value.split(",") if v.strip()]
+    elif isinstance(value, list):
+        raw_parts = []
+        for item in value:
+            if not isinstance(item, str):
+                raise ValueError(_target_error(
+                    f"each entry must be a string, got {type(item).__name__}",
+                    source_path,
+                ))
+            if item.strip():
+                raw_parts.append(item.strip().lower())
+    else:
+        raise ValueError(_target_error(
+            f"expected string or list of strings, got {type(value).__name__}",
+            source_path,
+        ))
+
+    if not raw_parts:
+        raise ValueError(_target_error("target value must not be empty", source_path))
+
+    # ---- validate every token ----
+    for p in raw_parts:
+        if p not in VALID_TARGET_VALUES:
+            raise ValueError(_target_error(
+                f"'{p}' is not a valid target. "
+                f"Choose from: {', '.join(sorted(VALID_TARGET_VALUES))}",
+                source_path,
+            ))
+
+    # ---- "all" is exclusive ----
+    if "all" in raw_parts:
+        if len(raw_parts) > 1:
+            raise ValueError(_target_error(
+                "'all' cannot be combined with other targets",
+                source_path,
+            ))
+        return "all"
+
+    # Single-token input is returned as-is (no alias resolution).  This
+    # preserves the long-standing CLI contract where ``--target copilot``
+    # yields ``"copilot"`` rather than the canonical ``"vscode"``; every
+    # downstream consumer (active_targets, agents_compiler,
+    # _CROSS_TARGET_MAPS, _TARGET_PREFIXES) already accepts both alias
+    # spellings, so resolving here would be a visible behaviour change
+    # with zero functional benefit and would break the CLI test suite
+    # (~10 ``test_single_*`` cases).  This is the one asymmetry #820's
+    # "shared normalization" intentionally leaves in place; collapsing it
+    # is an independent decision tracked separately from this fix.
+    if len(raw_parts) == 1:
+        return raw_parts[0]
+
+    # Multi-token: resolve aliases + dedupe, preserving input order.
+    seen: set[str] = set()
+    result: List[str] = []
+    for p in raw_parts:
+        canonical = TARGET_ALIASES.get(p, p)
+        if canonical not in seen:
+            seen.add(canonical)
+            result.append(canonical)
+
+    if len(result) == 1:
+        return result[0]
+    return result
+
+
+def _target_error(message: str, source_path: Optional[Path]) -> str:
+    """Format a target validation error, naming the source file when known."""
+    if source_path is not None:
+        return f"Invalid 'target' in {source_path}: {message}"
+    return f"Invalid target: {message}"
+
+
 class TargetParamType(click.ParamType):
     """Click parameter type accepting comma-separated target values.
 
-    Single values and ``"all"`` are returned as plain strings for backward
-    compatibility with existing command handlers.  Multiple comma-separated
-    targets are returned as a deduplicated ``list[str]`` of canonical names.
+    Delegates to :func:`parse_target_field`, which is the shared validator
+    used by ``apm.yml``'s ``target:`` field as well -- so ``--target X`` and
+    ``target: X`` always resolve identically and reject the same inputs.
 
     Examples::
 
@@ -284,50 +413,10 @@ class TargetParamType(click.ParamType):
         param: Optional[click.Parameter],
         ctx: Optional[click.Context],
     ) -> Union[str, List[str], None]:
-        if value is None:
-            return None
-        # If already converted (e.g. from a default), pass through.
-        if isinstance(value, list):
-            return value
-
-        # Split on comma, normalize whitespace & case, drop empty parts.
-        parts = [v.strip().lower() for v in value.split(",") if v.strip()]
-        if not parts:
-            self.fail("target value must not be empty", param, ctx)
-
-        # Validate every token.
-        for p in parts:
-            if p not in VALID_TARGET_VALUES:
-                self.fail(
-                    f"'{p}' is not a valid target. "
-                    f"Choose from: {', '.join(sorted(VALID_TARGET_VALUES))}",
-                    param,
-                    ctx,
-                )
-
-        # "all" is exclusive -- reject combinations like "all,claude".
-        if "all" in parts:
-            if len(parts) > 1:
-                self.fail(
-                    "'all' cannot be combined with other targets",
-                    param,
-                    ctx,
-                )
-            return "all"
-
-        # Single target -> plain string (backward compat).
-        if len(parts) == 1:
-            return parts[0]
-
-        # Multi-target: resolve aliases and deduplicate.
-        seen: set[str] = set()
-        result: List[str] = []
-        for p in parts:
-            canonical = TARGET_ALIASES.get(p, p)
-            if canonical not in seen:
-                seen.add(canonical)
-                result.append(canonical)
-        # If aliases collapsed everything to one target, return a string.
-        if len(result) == 1:
-            return result[0]
-        return result
+        try:
+            return parse_target_field(value)
+        except ValueError as e:
+            # Click idiom: route validation errors through self.fail so the
+            # user sees a clean "Invalid value for '--target': ..." message
+            # rather than a Python traceback.
+            self.fail(str(e), param, ctx)

@@ -1,0 +1,68 @@
+name: Devcontainer Feature - Publish
+
+# Publishes the apm-cli devcontainer feature to GHCR as
+#   ghcr.io/microsoft/apm/apm-cli
+# whenever the feature source changes on main. The official
+# `devcontainers/action@v1` handles OCI tag fan-out (e.g. version "1.0.0"
+# fans out to :1, :1.0, :1.0.0, :latest).
+#
+# Notes:
+# - We set `disable-repo-tagging: 'true'` because microsoft/apm already
+#   uses `v*` git tags for apm-cli releases; letting the action push its
+#   own feature tags would clutter that namespace.
+# - With repo-tagging disabled, `permissions: contents: read` is enough
+#   (`packages: write` is what GHCR push needs).
+# - `concurrency.cancel-in-progress: false` -- a publish run that races
+#   another publish must not be cancelled mid-push, or we leave a partial
+#   manifest in GHCR.
+# - `workflow_dispatch` enables manual republish if the first run fails
+#   before maintainers flip the package to public.
+#
+# First-run ceremony (one-time, by maintainer, after the first successful
+# run): GHCR -> packages -> apm-cli -> Package settings -> change visibility
+# to Public, then "Manage Actions access" -> add microsoft/apm with Write.
+
+# --------------------------------------------------------------------------
+# TEMPORARILY DISABLED auto-publish on push.
+#
+# microsoft org GHCR policy blocks first-time package creation under
+# `ghcr.io/microsoft/apm/*` for both GITHUB_TOKEN and member PATs (read
+# allowed, write returns no WWW-Authenticate). Working on org bootstrap
+# via the microsoft/opensource process.
+#
+# Status: tracked alongside #861 follow-up. Re-enable the `push:` trigger
+# once `ghcr.io/microsoft/apm/apm-cli` is provisioned and linked to this
+# repo. Until then, the only way to publish is `workflow_dispatch`, which
+# also currently fails the same way -- left in place so we can validate
+# the bootstrap with a manual run the moment policy is granted.
+# --------------------------------------------------------------------------
+on:
+  # push:
+  #   branches: [ main ]
+  #   paths:
+  #     - 'devcontainer/src/**'
+  #     - '.github/workflows/devcontainer-feature-publish.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: devcontainer-feature-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to GHCR
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish features
+        uses: devcontainers/action@v1
+        with:
+          publish-features: 'true'
+          base-path-to-features: './devcontainer/src'
+          generate-docs: 'false'
+          disable-repo-tagging: 'true'

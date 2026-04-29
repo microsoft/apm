@@ -379,19 +379,26 @@ def compile(
         # Auto-detect target if not explicitly provided
         from ...core.target_detection import detect_target, get_target_description
 
-        # Get config target from apm.yml if available
-        config_target = None
-        try:
-            from ...models.apm_package import APMPackage
+        # Get config target from apm.yml if available.  When the file is
+        # absent we proceed with auto-detection; when it is present but
+        # malformed we let the parse error surface so users see exactly
+        # what is wrong (e.g. ``target: opencode,bogus`` -> a ValueError
+        # naming the bad token), rather than silently falling through to
+        # auto-detect.  See #820.
+        from ...models.apm_package import APMPackage
 
-            apm_pkg = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
-            config_target = apm_pkg.target
-        except FileNotFoundError:
-            pass
-        except Exception as exc:
-            logger.warning(
-                f"Could not load apm.yml: {exc}. Proceeding with auto-detection."
-            )
+        config_target = None
+        apm_yml_path = Path(APM_YML_FILENAME)
+        if apm_yml_path.exists():
+            try:
+                apm_pkg = APMPackage.from_apm_yml(apm_yml_path)
+                config_target = apm_pkg.target
+            except FileNotFoundError:
+                pass
+            except Exception as exc:
+                logger.warning(
+                    f"Could not load apm.yml: {exc}. Proceeding with auto-detection."
+                )
 
         # Resolve list targets to compiler-understood string
         compile_target = _resolve_compile_target(target)
@@ -475,14 +482,23 @@ def compile(
                 if dry_run:
                     pass
                 else:
-                    _files_written = getattr(result, "files_written", None)
-                    if _files_written is not None and _files_written == 0:
-                        logger.warning(
-                            "Compilation produced no output files. "
-                            "Check that .apm/ contains instruction or chatmode files."
+                    _files_written = sum(
+                        int(v or 0)
+                        for k, v in result.stats.items()
+                        if k.endswith(("_files_written", "_files_generated"))
+                    )
+                    if _files_written > 0:
+                        logger.success(
+                            "Compilation completed successfully!",
+                            symbol="check",
                         )
                     else:
-                        logger.success("Compilation completed successfully!", symbol="check")
+                        logger.warning(
+                            "Compilation completed but produced no output "
+                            "files. Check that target directories exist "
+                            "(e.g. .github/, .claude/) or set 'target:' "
+                            "in apm.yml / pass --target explicitly."
+                        )
 
             else:
                 # Traditional single-file compilation - keep existing logic

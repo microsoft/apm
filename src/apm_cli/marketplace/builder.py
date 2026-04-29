@@ -26,7 +26,10 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from ..core.auth import HostInfo
 
 import yaml
 
@@ -42,6 +45,7 @@ from .ref_resolver import RefResolver, RemoteRef
 from .semver import SemVer, parse_semver, satisfies_range
 from .tag_pattern import build_tag_regex, render_tag
 from ..utils.path_security import ensure_path_within
+from ..utils.github_host import default_host
 from .yml_schema import MarketplaceYml, PackageEntry, load_marketplace_yml
 
 logger = logging.getLogger(__name__)
@@ -151,6 +155,9 @@ class MarketplaceBuilder:
         self._auth_resolver = auth_resolver
         # Resolved once per build, used by worker threads (read-only).
         self._github_token: Optional[str] = None
+        self._host: str = default_host() or "github.com"
+        self._host_info: Optional["HostInfo"] = None
+        self._auth_resolved: bool = False
 
     # -- lazy loaders -------------------------------------------------------
 
@@ -161,11 +168,31 @@ class MarketplaceBuilder:
 
     def _get_resolver(self) -> RefResolver:
         if self._resolver is None:
+            self._ensure_auth()
             self._resolver = RefResolver(
                 timeout_seconds=self._options.timeout_seconds,
                 offline=self._options.offline,
+                host=self._host,
+                token=self._github_token,
             )
         return self._resolver
+
+    def _ensure_auth(self) -> None:
+        """Lazily resolve host classification and GitHub token.
+
+        Short-circuits when already resolved (even if no token was found)
+        or when running in offline mode.  Offline mode is still marked as
+        resolved so repeated calls remain idempotent.  Called by
+        ``_get_resolver()`` so both ``resolve()`` and ``build()`` benefit
+        from authenticated ``git ls-remote`` when available.
+        """
+        if self._auth_resolved:
+            return
+        if self._options.offline:
+            self._auth_resolved = True
+            return
+        self._github_token = self._resolve_github_token()
+        self._auth_resolved = True
 
     # -- output path --------------------------------------------------------
 
@@ -365,6 +392,11 @@ class MarketplaceBuilder:
         results: Dict[int, ResolvedPackage] = {}
         errors: List[Tuple[str, str]] = []
 
+        # Eagerly resolve auth + create the shared RefResolver before
+        # spawning workers -- avoids a race on _ensure_auth() and
+        # matches the pattern used in _prefetch_metadata().
+        self._get_resolver()
+
         with ThreadPoolExecutor(
             max_workers=min(self._options.concurrency, len(entries))
         ) as pool:
@@ -413,16 +445,60 @@ class MarketplaceBuilder:
         When a GitHub token is available (via ``self._github_token``), it
         is included as an ``Authorization`` header so private repos can be
         accessed.
+
+        For non-github.com GitHub-family hosts (GHES, GHE Cloud), uses the
+        GitHub REST API instead of raw.githubusercontent.com (which is only
+        available for github.com).  For non-GitHub hosts, metadata
+        enrichment is skipped.
         """
         try:
             path_prefix = f"{pkg.subdir}/" if pkg.subdir else ""
-            url = (
-                f"https://raw.githubusercontent.com/"
-                f"{pkg.source_repo}/{pkg.sha}/{path_prefix}apm.yml"
-            )
-            req = urllib.request.Request(url)
-            if self._github_token:
-                req.add_header("Authorization", f"token {self._github_token}")
+            file_path = f"{path_prefix}apm.yml"
+
+            # Determine URL strategy based on host kind
+            host_kind = self._host_info.kind if self._host_info else "github"
+
+            if host_kind not in ("github", "ghe_cloud", "ghes"):
+                # Non-GitHub hosts -- skip metadata enrichment
+                logger.debug(
+                    "Skipping metadata fetch for %s (non-GitHub host: %s)",
+                    pkg.name,
+                    self._host,
+                )
+                return None
+
+            if host_kind == "ghe_cloud" and not self._github_token:
+                logger.debug(
+                    "Skipping metadata fetch for %s (GHE Cloud requires auth)",
+                    pkg.name,
+                )
+                return None
+
+            if self._host == "github.com":
+                # github.com -- use fast raw.githubusercontent.com CDN
+                url = (
+                    f"https://raw.githubusercontent.com/"
+                    f"{pkg.source_repo}/{pkg.sha}/{file_path}"
+                )
+                req = urllib.request.Request(url)
+                if self._github_token:
+                    req.add_header("Authorization", f"token {self._github_token}")
+            else:
+                # GHES / GHE Cloud -- use REST API
+                api_base = (
+                    self._host_info.api_base
+                    if self._host_info
+                    else None
+                ) or f"https://{self._host}/api/v3"
+                url = (
+                    f"{api_base}/repos/{pkg.source_repo}/contents/{file_path}"
+                    f"?ref={pkg.sha}"
+                )
+                req = urllib.request.Request(url)
+                req.add_header("Accept", "application/vnd.github.raw")
+                if self._github_token:
+                    req.add_header("Authorization", f"token {self._github_token}")
+
             with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
                 raw = resp.read().decode("utf-8")
             data = yaml.safe_load(raw)
@@ -460,13 +536,17 @@ class MarketplaceBuilder:
         auth failures are logged at debug and silently ignored.
         """
         try:
+            from ..core.auth import AuthResolver  # lazy import
+
             resolver = self._auth_resolver
             if resolver is None:
-                from ..core.auth import AuthResolver  # lazy import
-
                 resolver = AuthResolver()
                 self._auth_resolver = resolver
-            ctx = resolver.resolve("github.com")  # type: ignore[union-attr]
+            # Always classify the host, regardless of token availability,
+            # so _fetch_remote_metadata() can branch on host kind.
+            if self._host_info is None:
+                self._host_info = AuthResolver.classify_host(self._host)
+            ctx = resolver.resolve(self._host)  # type: ignore[union-attr]
             if ctx.token:
                 logger.debug("Resolved GitHub token for metadata fetch (source=%s)", ctx.source)
                 return ctx.token
@@ -492,7 +572,7 @@ class MarketplaceBuilder:
             return {}
 
         # Resolve token once -- threads read self._github_token (immutable).
-        self._github_token = self._resolve_github_token()
+        self._ensure_auth()
 
         results: Dict[str, Dict[str, str]] = {}
         workers = min(self._options.concurrency, len(resolved))

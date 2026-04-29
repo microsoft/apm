@@ -8,8 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Dev Container Feature** `ghcr.io/microsoft/apm/apm-cli` -- one-line install of the APM CLI into any `devcontainer.json`, GitHub Codespace, or JetBrains Gateway workspace. Supports a `version` option (`latest` or pinned semver), declares `installsAfter` for the official Python feature, handles PEP 668 on Ubuntu 24.04+. Ships with 37 bats unit tests and a 6-distro Docker integration matrix (Ubuntu 24.04, Ubuntu 22.04, Debian 12, Alpine 3.20, Fedora 41, plus Python-feature combo). (#861)
+- `shared/apm.md` gh-aw workflow gains an `apps:` array input for cross-org private packages: each entry mints its own GitHub App installation token via `actions/create-github-app-token` and packs only its declared packages, with a matrix fan-out one replica per credential group. The single-app top-level form (`app-id`, `private-key`, `owner`, `repositories`) shipped earlier in this cycle is preserved as the canonical shorthand for one-org users; `apps[]` is purely additive. Multi-bundle restore uses the `bundles-file:` input from `microsoft/apm-action@v1.5.0` (microsoft/apm-action#30, microsoft/apm-action#29).
+- `shared/apm.md` gh-aw workflow now accepts `app-id`, `private-key`, `owner`, and `repositories` inputs to mint a GitHub App installation token for fetching cross-org private APM packages, restoring parity with the deprecated `dependencies.github-app` form. The default `GH_AW_PLUGINS_TOKEN || GH_AW_GITHUB_TOKEN || GITHUB_TOKEN` cascade still applies when no app-id is supplied.
+
 ### Changed
 
+- **Manifest contract: invalid `target:` values now raise a parse error.** Previously, an unknown token (or a CSV string like `target: opencode,claude,copilot,agents` instead of the YAML list `target: [opencode, claude, copilot, agents]`) was silently ignored, leaving `apm install` and `apm compile` to exit 0 while deploying nothing. The shared parser used by `--target` now also validates `apm.yml`'s `target:`, so the same input resolves the same way at every entry point. **Migration:** three previously-silent inputs now fail loud -- (1) unknown tokens (`target: bogus` -> fix the typo), (2) empty values (`target: ""`, `target: []` -> remove the line if you meant auto-detect), (3) `all` mixed with other targets (`target: [all, claude]` -> use `all` alone). Omitting `target:` entirely still triggers auto-detection. (#820)
 - Cursor adapter: refactor `_format_server_config` from a ~100-line copy-paste fork to a `super()` + transform pattern (~15 lines). This restores header env-var resolution, `_warn_input_variables`, and `_apm_tools_override` that were silently dropped in the initial Cursor integration. For security, resolved Bearer tokens are replaced with `${env:GITHUB_TOKEN}` references so credentials never touch the repo-local `.cursor/mcp.json` file. Fixes #844.
 - Cursor adapter: update module and class docstrings to document the delegate-then-transform pattern (matching `OpenCodeClientAdapter`), and replace non-ASCII em dashes with ASCII.
 - Policy parser: catch `ValueError` alongside `OSError` in `load_policy()` `Path.is_file()` guard to tolerate invalid path strings (e.g. embedded NUL bytes) without crashing. Closes #848.
@@ -18,8 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` and `apm compile` no longer exit 0 with success messages when `target:` in `apm.yml` is a CSV string -- the value now parses identically to the same input on `--target`, and zero-target resolution surfaces a warning instead of a silent no-op. (#820)
 - Remove redundant `seen` set from `_scan_patterns()` discovery walk (#918)
 - CI docs: clarify that branch-protection ruleset must store the check-run name (`gate`), not the workflow display string (`Merge Gate / gate`); document the merge-gate aggregator in `cicd.instructions.md` and mark the legacy stub workflow as deprecated.
+- `apm marketplace build` now respects `GITHUB_HOST` for GitHub Enterprise repos -- ref resolution, token lookup, and metadata fetch all use the configured host instead of hardcoded `github.com`. `git ls-remote` is authenticated so private repos work without separate credential setup. (#1008)
+- `apm marketplace build` now accepts multiple Git URL forms (GitHub, GHES, GitLab, Bitbucket, ADO, SSH) for `type: url` parsing via `DependencyReference.parse()`. Host resolution is still driven by `GITHUB_HOST`, so non-`github.com` hosts require `GITHUB_HOST` to be set accordingly. (#1008)
 
 ## [0.10.0] - 2026-04-27
 

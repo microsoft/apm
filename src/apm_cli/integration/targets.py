@@ -3,6 +3,17 @@
 Each target tool (Copilot, Claude, Cursor, ...) describes where APM
 primitives should land.  Adding a new target means adding an entry to
 ``KNOWN_TARGETS`` -- no new classes required.
+
+Resolver invariant (#820): both :func:`active_targets` and
+:func:`active_targets_user_scope` accept ``Union[str, List[str]]`` for
+``explicit_target`` but treat the two shapes identically -- string inputs
+are wrapped to a one-element list before the resolution loop.  Validity
+is enforced *upstream* by
+:func:`apm_cli.core.target_detection.parse_target_field`, which is the
+shared gatekeeper for both ``--target`` and ``apm.yml``'s ``target:``
+field.  Unknown tokens never reach these functions in normal flow; if
+one does, it falls through the loop without matching any profile and
+the result is an empty list (no silent ``[copilot]`` fallback).
 """
 
 from __future__ import annotations
@@ -474,9 +485,11 @@ def active_targets_user_scope(
 
     Resolution order:
 
-    1. **Explicit target** (``--target``): returns the matching profile
-       if it supports user scope.  ``"all"`` returns every user-capable
-       target.  A list of names returns all matching user-capable profiles.
+    1. **Explicit target** (``--target``): returns the matching profile(s)
+       that support user scope.  ``"all"`` returns every user-capable
+       target.  Validity is enforced upstream by
+       :func:`apm_cli.core.target_detection.parse_target_field`; this
+       function does not silently fall back when given unknown tokens.
     2. **Directory detection**: profiles whose ``effective_root(user_scope=True)``
        directory exists under ``~/``.
     3. **Fallback**: ``[copilot]`` -- same default as project scope.
@@ -487,37 +500,22 @@ def active_targets_user_scope(
 
     # --- explicit target ---
     if explicit_target:
-        if isinstance(explicit_target, list):
-            profiles: list = []
-            seen: set = set()
-            for t in explicit_target:
-                canonical = t
-                if canonical in ("copilot", "vscode", "agents"):
-                    canonical = "copilot"
-                if canonical == "all":
-                    return [
-                        p for p in KNOWN_TARGETS.values()
-                        if p.user_supported and _flag_gated(p)
-                    ]
-                profile = KNOWN_TARGETS.get(canonical)
-                if profile and profile.user_supported and _flag_gated(profile) and profile.name not in seen:
-                    seen.add(profile.name)
-                    profiles.append(profile)
-            return profiles if profiles else []
-
-        # single string (existing behavior)
-        canonical = explicit_target
-        if canonical in ("copilot", "vscode", "agents"):
-            canonical = "copilot"
-        if canonical == "all":
-            return [
-                p for p in KNOWN_TARGETS.values()
-                if p.user_supported and _flag_gated(p)
-            ]
-        profile = KNOWN_TARGETS.get(canonical)
-        if profile and profile.user_supported and _flag_gated(profile):
-            return [profile]
-        return []
+        # See module docstring on the parse_target_field gate-keeping contract.
+        raw = [explicit_target] if isinstance(explicit_target, str) else list(explicit_target)
+        profiles: list = []
+        seen: set = set()
+        for t in raw:
+            canonical = "copilot" if t in ("copilot", "vscode", "agents") else t
+            if canonical == "all":
+                return [
+                    p for p in KNOWN_TARGETS.values()
+                    if p.user_supported and _flag_gated(p)
+                ]
+            profile = KNOWN_TARGETS.get(canonical)
+            if profile and profile.user_supported and _flag_gated(profile) and profile.name not in seen:
+                seen.add(profile.name)
+                profiles.append(profile)
+        return profiles
 
     # --- auto-detect by directory presence at ~/ ---
     # Targets with detect_by_dir=False (cowork) are never auto-detected.
@@ -544,8 +542,11 @@ def active_targets(
     Resolution order:
 
     1. **Explicit target** (``--target`` flag or ``apm.yml target:``):
-       returns only the matching profile(s).  ``"all"`` returns every
-       known target.  A list of names returns all matching profiles.
+       returns the matching profile(s).  ``"all"`` returns every known
+       target.  Validity is enforced upstream by
+       :func:`apm_cli.core.target_detection.parse_target_field`; unknown
+       tokens never reach here, so this branch never silently falls back
+       to ``[copilot]``.
     2. **Directory detection**: profiles whose ``root_dir`` already
        exists under *project_root*.
     3. **Fallback**: when nothing is detected, returns ``[copilot]``
@@ -562,35 +563,22 @@ def active_targets(
 
     # --- explicit target ---
     if explicit_target:
-        if isinstance(explicit_target, list):
-            profiles: list = []
-            seen: set = set()
-            for t in explicit_target:
-                canonical = t
-                if canonical in ("copilot", "vscode", "agents"):
-                    canonical = "copilot"
-                if canonical == "all":
-                    # Return all targets regardless of flag gating.
-                    # The project-scope gate in phases/targets.py and
-                    # for_scope() handle user-observable blocking.
-                    return list(KNOWN_TARGETS.values())
-                profile = KNOWN_TARGETS.get(canonical)
-                if profile and _flag_gated(profile) and profile.name not in seen:
-                    seen.add(profile.name)
-                    profiles.append(profile)
-            return profiles if profiles else [KNOWN_TARGETS["copilot"]]
-
-        # single string (existing behavior)
-        canonical = explicit_target
-        if canonical in ("copilot", "vscode", "agents"):
-            canonical = "copilot"
-        if canonical == "all":
-            # Return all targets regardless of flag gating.
-            return list(KNOWN_TARGETS.values())
-        profile = KNOWN_TARGETS.get(canonical)
-        if profile and _flag_gated(profile):
-            return [profile]
-        return []
+        # See module docstring on the parse_target_field gate-keeping contract.
+        raw = [explicit_target] if isinstance(explicit_target, str) else list(explicit_target)
+        profiles: list = []
+        seen: set = set()
+        for t in raw:
+            canonical = "copilot" if t in ("copilot", "vscode", "agents") else t
+            if canonical == "all":
+                # Return all targets regardless of flag gating.
+                # The project-scope gate in phases/targets.py and
+                # for_scope() handle user-observable blocking.
+                return list(KNOWN_TARGETS.values())
+            profile = KNOWN_TARGETS.get(canonical)
+            if profile and _flag_gated(profile) and profile.name not in seen:
+                seen.add(profile.name)
+                profiles.append(profile)
+        return profiles
 
     # --- auto-detect by directory presence ---
     # Targets with detect_by_dir=False (cowork) are never auto-detected.

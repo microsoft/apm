@@ -115,27 +115,27 @@ def run(ctx: "InstallContext") -> None:
                 )
             raise SystemExit(1)
 
-    # Log target detection results
-    _scope_label = "global" if _is_user else "project"
-    if ctx.logger and _targets:
-        _target_names = ", ".join(
-            f"{t.name} (~/{t.root_dir}/)" if _is_user else t.name
-            for t in _targets
-        )
-        ctx.logger.verbose_detail(
-            f"Active {_scope_label} targets: {_target_names}"
-        )
-        if _is_user:
-            from apm_cli.deps.lockfile import get_lockfile_path
-
-            ctx.logger.verbose_detail(
-                f"Lockfile: {get_lockfile_path(ctx.apm_dir)}"
+    if ctx.logger:
+        _scope_label = "global" if _is_user else "project"
+        if _targets:
+            _target_names = ", ".join(
+                f"{t.name} (~/{t.root_dir}/)" if _is_user else t.name
+                for t in _targets
             )
-    elif ctx.logger and not _targets:
-        ctx.logger.warning(
-            f"No {_scope_label} targets resolved -- nothing will be deployed. "
-            f"Check 'target:' in apm.yml or use --target."
-        )
+            ctx.logger.verbose_detail(
+                f"Active {_scope_label} targets: {_target_names}"
+            )
+            if _is_user:
+                from apm_cli.deps.lockfile import get_lockfile_path
+
+                ctx.logger.verbose_detail(
+                    f"Lockfile: {get_lockfile_path(ctx.apm_dir)}"
+                )
+        else:
+            ctx.logger.warning(
+                f"No {_scope_label} targets resolved -- nothing will be "
+                f"deployed. Check 'target:' in apm.yml or use --target."
+            )
 
     for _t in _targets:
         # When the user passes --target (or apm.yml sets target=) we honour
