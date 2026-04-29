@@ -11,7 +11,7 @@ import click
 from ...core.command_logger import CommandLogger
 from ...marketplace.errors import MarketplaceYmlError
 from ...marketplace.migration import migrate_marketplace_yml
-from . import marketplace, _require_authoring_flag
+from . import marketplace
 
 
 @marketplace.command(help="Fold marketplace.yml into apm.yml's 'marketplace:' block")
@@ -31,7 +31,6 @@ from . import marketplace, _require_authoring_flag
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def migrate(force, dry_run, verbose):
     """Convert legacy marketplace.yml to an apm.yml marketplace block."""
-    _require_authoring_flag()
     logger = CommandLogger("marketplace-migrate", verbose=verbose)
     project_root = Path.cwd()
 

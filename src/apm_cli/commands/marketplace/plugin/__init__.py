@@ -188,9 +188,6 @@ def _resolve_ref(
 @click.group(help="Manage packages in marketplace authoring config")
 def package():
     """Add, update, or remove packages in marketplace authoring config."""
-    from .. import _require_authoring_flag
-
-    _require_authoring_flag()
 
 
 

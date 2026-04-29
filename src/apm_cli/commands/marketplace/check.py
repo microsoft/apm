@@ -17,7 +17,6 @@ from . import (
     _extract_tag_versions,
     _load_config_or_exit,
     _render_check_table,
-    _require_authoring_flag,
     _warn_duplicate_names,
 )
 
@@ -27,7 +26,6 @@ from . import (
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def check(offline, verbose):
     """Validate marketplace.yml and check each entry is resolvable."""
-    _require_authoring_flag()
     logger = CommandLogger("marketplace-check", verbose=verbose)
 
     _, yml = _load_config_or_exit(logger)

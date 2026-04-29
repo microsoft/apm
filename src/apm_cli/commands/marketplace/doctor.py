@@ -21,7 +21,6 @@ from . import (
     _DoctorCheck,
     _find_duplicate_names,
     _render_doctor_table,
-    _require_authoring_flag,
 )
 
 
@@ -29,7 +28,6 @@ from . import (
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def doctor(verbose):
     """Check git, network, auth, and marketplace config readiness."""
-    _require_authoring_flag()
     logger = CommandLogger("marketplace-doctor", verbose=verbose)
     checks = []
 

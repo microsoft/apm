@@ -17,7 +17,6 @@ from . import (
     _load_config_or_exit,
     _render_publish_plan,
     _render_publish_summary,
-    _require_authoring_flag,
 )
 
 
@@ -55,7 +54,6 @@ def publish(
     verbose,
 ):
     """Publish marketplace updates to consumer repositories."""
-    _require_authoring_flag()
     logger = CommandLogger("marketplace-publish", verbose=verbose)
 
     # ------------------------------------------------------------------

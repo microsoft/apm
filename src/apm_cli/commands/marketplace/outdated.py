@@ -18,7 +18,6 @@ from . import (
     _load_current_versions,
     _load_config_or_exit,
     _render_outdated_table,
-    _require_authoring_flag,
 )
 
 
@@ -30,7 +29,6 @@ from . import (
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def outdated(offline, include_prerelease, verbose):
     """Compare installed versions against latest available tags."""
-    _require_authoring_flag()
     logger = CommandLogger("marketplace-outdated", verbose=verbose)
 
     _, yml = _load_config_or_exit(logger)

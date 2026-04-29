@@ -197,10 +197,6 @@ def _find_duplicate_names(yml):
         return f"Duplicate names: {', '.join(duplicates)}"
     return ""
 
-def _require_authoring_flag():
-    """Compatibility no-op for extracted command modules."""
-    return None
-
 @click.group(cls=MarketplaceGroup, help="Manage marketplaces for discovery and governance")
 @click.pass_context
 def marketplace(ctx):
@@ -233,8 +229,8 @@ def _check_gitignore_for_marketplace_json(logger):
         if stripped in patterns:
             logger.warning(
                 "Your .gitignore ignores marketplace.json. "
-                "Both marketplace.yml and marketplace.json must be tracked "
-                "in git. Remove the .gitignore rule.",
+                "Both apm.yml and the generated marketplace.json must be "
+                "tracked in git. Remove the .gitignore rule.",
                 symbol="warning",
             )
             return

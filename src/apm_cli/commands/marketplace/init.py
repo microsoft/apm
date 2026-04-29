@@ -12,10 +12,9 @@ from ...core.command_logger import CommandLogger
 from . import (
     marketplace,
     _check_gitignore_for_marketplace_json,
-    _require_authoring_flag,
 )
 
-@marketplace.command(help="Add a 'marketplace:' block to apm.yml")
+@marketplace.command(help="Add a 'marketplace:' block to apm.yml (scaffolds apm.yml if missing)")
 @click.option(
     "--force",
     is_flag=True,
@@ -30,8 +29,7 @@ from . import (
 @click.option("--owner", default=None, help="Owner name for the marketplace")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def init(force, no_gitignore_check, name, owner, verbose):
-    """Scaffold a ``marketplace:`` block in apm.yml."""
-    _require_authoring_flag()
+    """Scaffold a ``marketplace:`` block in apm.yml (creates apm.yml if absent)."""
     from ruamel.yaml import YAML
 
     from ...marketplace.init_template import render_marketplace_block
