@@ -21,7 +21,7 @@ from .template_builder import (
 )
 from .link_resolver import resolve_markdown_links, validate_link_targets
 from ..utils.paths import portable_relpath
-from ..core.target_detection import should_compile_agents_md, should_compile_claude_md, should_compile_gemini_md
+from ..core.target_detection import should_compile_agents_md, should_compile_claude_md, should_compile_gemini_md, CompileTargetType
 
 _logger = logging.getLogger(__name__)
 
@@ -32,6 +32,11 @@ _VSCODE_TARGET_ALIASES = ("copilot", "agents")
 _KNOWN_TARGETS = (
     "vscode", "claude", "cursor", "opencode", "codex", "gemini", "all", "minimal",
 ) + _VSCODE_TARGET_ALIASES
+
+# Compiler families allowed inside a multi-target frozenset (built by
+# _resolve_compile_target() from CLI-validated target names). Kept narrow
+# because the frozenset path bypasses _KNOWN_TARGETS validation.
+_KNOWN_COMPILE_FAMILIES = frozenset({"agents", "claude", "gemini"})
 
 
 @dataclass
@@ -47,7 +52,8 @@ class CompilationConfig:
     # "vscode" or "agents" -> AGENTS.md + .github/
     # "claude" -> CLAUDE.md + .claude/
     # "all" -> both targets
-    target: str = "all"
+    # frozenset({"agents","claude"}) -> AGENTS.md + CLAUDE.md (multi-target)
+    target: CompileTargetType = "all"
     
     # Distributed compilation settings (Task 7)
     strategy: str = "distributed"  # "distributed" or "single-file"
@@ -214,23 +220,46 @@ class AgentsCompiler:
             # Use target_detection helpers as the single source of truth so
             # new targets (codex, opencode, cursor, minimal, ...) route
             # correctly without touching this method again.
-            routing_target = (
-                "vscode" if config.target in _VSCODE_TARGET_ALIASES else config.target
-            )
+            if isinstance(config.target, frozenset):
+                # Multi-target lists are normalized by _resolve_compile_target()
+                # into compiler families only. Validate defensively for direct
+                # API callers so invalid families do not silently produce
+                # partial output or a successful no-op.
+                invalid_families = config.target - _KNOWN_COMPILE_FAMILIES
+                if invalid_families:
+                    self.errors.append(
+                        "Unknown compilation target family in multi-target set: "
+                        f"{', '.join(sorted(invalid_families))}. "
+                        "Expected subset of: "
+                        f"{', '.join(sorted(_KNOWN_COMPILE_FAMILIES))}"
+                    )
+                    return CompilationResult(
+                        success=False,
+                        output_path="",
+                        content="",
+                        warnings=self.warnings.copy(),
+                        errors=self.errors.copy(),
+                        stats={},
+                    )
+                routing_target = config.target
+            else:
+                routing_target = (
+                    "vscode" if config.target in _VSCODE_TARGET_ALIASES else config.target
+                )
 
-            if routing_target not in _KNOWN_TARGETS and config.target not in _KNOWN_TARGETS:
-                self.errors.append(
-                    f"Unknown compilation target: {config.target!r}. "
-                    f"Expected one of: {', '.join(sorted(set(_KNOWN_TARGETS)))}"
-                )
-                return CompilationResult(
-                    success=False,
-                    output_path="",
-                    content="",
-                    warnings=self.warnings.copy(),
-                    errors=self.errors.copy(),
-                    stats={},
-                )
+                if routing_target not in _KNOWN_TARGETS and config.target not in _KNOWN_TARGETS:
+                    self.errors.append(
+                        f"Unknown compilation target: {config.target!r}. "
+                        f"Expected one of: {', '.join(sorted(set(_KNOWN_TARGETS)))}"
+                    )
+                    return CompilationResult(
+                        success=False,
+                        output_path="",
+                        content="",
+                        warnings=self.warnings.copy(),
+                        errors=self.errors.copy(),
+                        stats={},
+                    )
 
             results: List[CompilationResult] = []
 
