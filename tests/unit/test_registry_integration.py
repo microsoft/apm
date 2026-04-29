@@ -250,6 +250,51 @@ class TestMCPServerOperationsValidation(unittest.TestCase):
         self.assertEqual(sorted(valid), ["flaky", "found"])
         self.assertEqual(invalid, ["missing"])
 
+    def test_check_servers_needing_installation_reads_each_runtime_once(self):
+        """Installed server IDs are cached per runtime across server checks."""
+        ops = self._make_ops()
+
+        def find_server(ref):
+            return {"id": f"id-{ref}", "name": ref}
+
+        ops.registry_client.find_server_by_reference.side_effect = find_server
+        ops._get_installed_server_ids = mock.MagicMock(
+            side_effect=[
+                {"id-s1"},
+                set(),
+            ]
+        )
+
+        result = ops.check_servers_needing_installation(
+            ["codex", "cursor"],
+            ["s1", "s2"],
+        )
+
+        self.assertEqual(sorted(result), ["s1", "s2"])
+        self.assertEqual(ops._get_installed_server_ids.call_count, 2)
+        self.assertEqual(
+            [call.args[0] for call in ops._get_installed_server_ids.call_args_list],
+            [["codex"], ["cursor"]],
+        )
+
+    @mock.patch("apm_cli.factory.ClientFactory.create_client")
+    def test_get_installed_server_ids_reads_vscode_servers_key(self, mock_create_client):
+        """VS Code installed IDs should be read from .vscode/mcp.json's servers key."""
+        from apm_cli.registry.operations import MCPServerOperations
+
+        ops = MCPServerOperations.__new__(MCPServerOperations)
+        mock_client = mock.MagicMock()
+        mock_client.get_current_config.return_value = {
+            "servers": {
+                "example": {"id": "server-123"},
+            }
+        }
+        mock_create_client.return_value = mock_client
+
+        installed = ops._get_installed_server_ids(["vscode"])
+
+        self.assertEqual(installed, {"server-123"})
+
 
 class TestCheckServersNeedingInstallation(unittest.TestCase):
     """Tests for MCPServerOperations.check_servers_needing_installation caching."""
@@ -283,8 +328,16 @@ class TestCheckServersNeedingInstallation(unittest.TestCase):
 
         # _get_installed_server_ids called exactly once per runtime
         self.assertEqual(ops._get_installed_server_ids.call_count, 2)
-        ops._get_installed_server_ids.assert_any_call(["r1"])
-        ops._get_installed_server_ids.assert_any_call(["r2"])
+        ops._get_installed_server_ids.assert_any_call(
+            ["r1"],
+            project_root=None,
+            user_scope=False,
+        )
+        ops._get_installed_server_ids.assert_any_call(
+            ["r2"],
+            project_root=None,
+            user_scope=False,
+        )
 
         # All three need installation because none are installed in *all* runtimes:
         #   srv-a: installed in r1 but missing from r2 → needs install
