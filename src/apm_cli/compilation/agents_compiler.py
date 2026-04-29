@@ -33,6 +33,11 @@ _KNOWN_TARGETS = (
     "vscode", "claude", "cursor", "opencode", "codex", "gemini", "all", "minimal",
 ) + _VSCODE_TARGET_ALIASES
 
+# Compiler families allowed inside a multi-target frozenset (built by
+# _resolve_compile_target() from CLI-validated target names). Kept narrow
+# because the frozenset path bypasses _KNOWN_TARGETS validation.
+_KNOWN_COMPILE_FAMILIES = frozenset({"agents", "claude", "gemini"})
+
 
 @dataclass
 class CompilationConfig:
@@ -216,6 +221,26 @@ class AgentsCompiler:
             # new targets (codex, opencode, cursor, minimal, ...) route
             # correctly without touching this method again.
             if isinstance(config.target, frozenset):
+                # Multi-target lists are normalized by _resolve_compile_target()
+                # into compiler families only. Validate defensively for direct
+                # API callers so invalid families do not silently produce
+                # partial output or a successful no-op.
+                invalid_families = config.target - _KNOWN_COMPILE_FAMILIES
+                if invalid_families:
+                    self.errors.append(
+                        "Unknown compilation target family in multi-target set: "
+                        f"{', '.join(sorted(invalid_families))}. "
+                        "Expected subset of: "
+                        f"{', '.join(sorted(_KNOWN_COMPILE_FAMILIES))}"
+                    )
+                    return CompilationResult(
+                        success=False,
+                        output_path="",
+                        content="",
+                        warnings=self.warnings.copy(),
+                        errors=self.errors.copy(),
+                        stats={},
+                    )
                 routing_target = config.target
             else:
                 routing_target = (

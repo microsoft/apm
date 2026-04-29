@@ -245,6 +245,21 @@ Use type hints in Python code.
         assert result.success is False
         assert any("Unknown compilation target" in e for e in result.errors)
 
+    def test_unknown_frozenset_target_family_returns_failure(self, temp_project, sample_primitives):
+        """Unknown multi-target family must fail explicitly instead of silently no-oping."""
+        config = CompilationConfig(
+            target=frozenset({"agents", "not-a-real-family"}),
+            dry_run=True,
+            single_agents=True,
+        )
+
+        compiler = AgentsCompiler(str(temp_project))
+        result = compiler.compile(config, sample_primitives)
+
+        assert result.success is False
+        assert any("Unknown compilation target family" in e for e in result.errors)
+        assert any("not-a-real-family" in e for e in result.errors)
+
 
 class TestMergeResults:
     """Tests for _merge_results() method."""
@@ -1175,3 +1190,55 @@ class TestMultiTargetDoesNotGenerateUnrequestedFiles:
         assert should_compile_agents_md("gemini") is True
         assert should_compile_claude_md("gemini") is False
         assert should_compile_gemini_md("gemini") is True
+
+
+class TestMultiTargetLogOutput:
+    """Regression tests for the 'Compiling for ...' log line on multi-target compiles."""
+
+    @pytest.fixture
+    def runner(self):
+        return CliRunner()
+
+    @pytest.fixture
+    def empty_project(self):
+        temp_dir = tempfile.mkdtemp()
+        temp_path = Path(temp_dir)
+        (temp_path / "apm.yml").write_text("name: test-project\nversion: 0.1.0\n")
+        apm_dir = temp_path / ".apm" / "instructions"
+        apm_dir.mkdir(parents=True)
+        (apm_dir / "good.instructions.md").write_text(
+            "---\napplyTo: '**/*.py'\n---\nFollow PEP 8.\n"
+        )
+        yield temp_path
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_cli_multi_target_log_message(self, runner, empty_project):
+        original_dir = os.getcwd()
+        try:
+            os.chdir(empty_project)
+            result = runner.invoke(
+                cli, ["compile", "--target", "claude,codex", "--dry-run"]
+            )
+            assert "Compiling for" in result.output
+            assert "AGENTS.md" in result.output and "CLAUDE.md" in result.output
+            assert "GEMINI.md" not in result.output.split("Compiling for", 1)[1].split("\n", 1)[0]
+            assert "--target claude,codex" in result.output
+        finally:
+            os.chdir(original_dir)
+
+    def test_config_multi_target_log_message_does_not_say_unknown(self, runner, empty_project):
+        """Regression: apm.yml multi-target list must not log 'unknown target'."""
+        (empty_project / "apm.yml").write_text(
+            "name: test-project\nversion: 0.1.0\ntarget: [claude, codex]\n"
+        )
+        original_dir = os.getcwd()
+        try:
+            os.chdir(empty_project)
+            result = runner.invoke(cli, ["compile", "--dry-run"])
+            assert "unknown target" not in result.output.lower(), (
+                f"Config-driven multi-target should not log 'unknown target'. Got:\n{result.output}"
+            )
+            assert "Compiling for" in result.output
+            assert "AGENTS.md" in result.output and "CLAUDE.md" in result.output
+        finally:
+            os.chdir(original_dir)

@@ -388,7 +388,11 @@ def compile(
         logger.start("Starting context compilation...", symbol="cogs")
 
         # Auto-detect target if not explicitly provided
-        from ...core.target_detection import detect_target, get_target_description
+        from ...core.target_detection import (
+            REASON_NO_TARGET_FOLDER,
+            detect_target,
+            get_target_description,
+        )
 
         # Get config target from apm.yml if available.  When the file is
         # absent we proceed with auto-detection; when it is present but
@@ -418,10 +422,13 @@ def compile(
             effective_target = compile_config_target
             detection_reason = "apm.yml target"
         else:
+            # Pass config_target only when it's a string -- detect_target() is
+            # typed for Optional[str], and a frozenset config_target is already
+            # handled by the branch above.
             detected_target, detection_reason = detect_target(
                 project_root=Path("."),
                 explicit_target=compile_target,
-                config_target=compile_config_target,
+                config_target=compile_config_target if isinstance(compile_config_target, str) else None,
             )
             # Map 'minimal' to 'vscode' for the compiler (AGENTS.md only, no folder integration)
             effective_target = detected_target if detected_target != "minimal" else "vscode"
@@ -446,9 +453,15 @@ def compile(
             # Show target-aware message with detection reason. Use
             # get_target_description() so any future target added to
             # target_detection shows up here automatically.
-            if isinstance(target, list):
-                # Multi-target list: show what the compiler will produce
-                _target_label = ",".join(target)
+            if isinstance(effective_target, frozenset):
+                # Multi-target compile (from CLI `--target a,b` OR apm.yml
+                # `target: [a, b]`): show what the compiler will produce.
+                if isinstance(target, list):
+                    _target_label = f"--target {','.join(target)}"
+                elif isinstance(config_target, list):
+                    _target_label = f"apm.yml target: [{', '.join(config_target)}]"
+                else:
+                    _target_label = "multi-target"
                 from ...core.target_detection import (
                     should_compile_agents_md,
                     should_compile_claude_md,
@@ -462,9 +475,13 @@ def compile(
                 if should_compile_gemini_md(effective_target):
                     _parts.append("GEMINI.md")
                 logger.progress(
-                    f"Compiling for {' + '.join(_parts)} (--target {_target_label})"
+                    f"Compiling for {' + '.join(_parts)} ({_target_label})"
                 )
-            elif isinstance(effective_target, str) and effective_target == "vscode" and "no target" in detection_reason:
+            elif (
+                isinstance(effective_target, str)
+                and effective_target == "vscode"
+                and detection_reason == REASON_NO_TARGET_FOLDER
+            ):
                 logger.progress(f"Compiling for AGENTS.md only ({detection_reason})")
                 logger.progress(
                     " Create .github/, .claude/, .codex/, .opencode/ or .cursor/ folder for full integration",
