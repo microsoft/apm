@@ -31,32 +31,44 @@ Security gates (round-2 panel findings)
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import re
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import git
 import requests
 from git.exc import GitCommandError
 
 from ..config import get_apm_temp_dir
-from ..utils.file_ops import robust_rmtree
 from ..utils.github_host import (
     build_authorization_header_git_env,
     default_host,
     is_github_hostname,
 )
-from ..utils.path_security import PathTraversalError, validate_path_segments
+from ..utils.path_security import (
+    PathTraversalError,
+    safe_rmtree,
+    validate_path_segments,
+)
 
 if TYPE_CHECKING:
-    from .dependency_reference import DependencyReference
+    from ..models.dependency.reference import DependencyReference
     from .github_downloader import GitHubPackageDownloader
 
 
 _SHA_RE = re.compile(r"[0-9a-fA-F]{7,40}")
+
+
+class AttemptSpec(NamedTuple):
+    """A single (label, url, env) attempt in the auth-chain."""
+
+    label: str
+    url: str
+    env: dict
 
 
 def _is_sha_pin(ref: str) -> bool:
@@ -167,26 +179,29 @@ def validate_virtual_package_exists(
         # whose API auth is stricter than their git auth.  Only kicks in
         # with an explicit ref -- without one, strict validation keeps
         # path typos failing fast on the default branch.
-        if dep_ref.reference is not None and _ref_exists_via_ls_remote(
-            downloader, dep_ref, ref, _log
-        ):
-            # SECURITY (round-2 finding 6): close the fail-open.  ls-remote
-            # only confirms the ref exists; we MUST also confirm the
-            # subdirectory exists at that ref via a shallow-fetch +
-            # ls-tree probe, otherwise a typo'd vpath silently passes
-            # validation.
-            if _path_exists_in_tree_at_ref(downloader, dep_ref, vpath, ref, _log):
-                _log(f'  [+] "{vpath}@{ref}" confirmed via shallow-fetch + ls-tree')
-                if warn_callback is not None:
-                    warn_callback(
-                        f"Path '{vpath}@{ref}' validated via git fallback "
-                        "(API probe was inconclusive). To fix the API gap: "
-                        "verify your token's Contents-API scope, or run "
-                        "'apm install --verbose' to see the probe chain."
-                    )
-                return True
-            _log(f'  [i] ref "{ref}" resolves but "{vpath}" not present in the tree at that ref')
-            return False
+        if dep_ref.reference is not None:
+            ref_ok, winning_attempt = _ref_exists_via_ls_remote(downloader, dep_ref, ref, _log)
+            if ref_ok and winning_attempt is not None:
+                # SECURITY (round-2 finding 6): close the fail-open.  ls-remote
+                # only confirms the ref exists; we MUST also confirm the
+                # subdirectory exists at that ref via a shallow-fetch +
+                # ls-tree probe, otherwise a typo'd vpath silently passes
+                # validation.  Reuse the WINNING attempt (panel round-3
+                # auth-chain bug fix) so we don't fall back to attempts[0].
+                if _path_exists_in_tree_at_ref(
+                    downloader, dep_ref, vpath, ref, _log, winning_attempt
+                ):
+                    _log(f'  [+] "{vpath}@{ref}" confirmed via shallow-fetch + ls-tree')
+                    if warn_callback is not None:
+                        warn_callback(
+                            f"Validated {dep_ref.to_canonical()} via git fallback "
+                            "(API check skipped). Run with --verbose for details."
+                        )
+                    return True
+                _log(
+                    f'  [!] ref "{ref}" resolves but "{vpath}" not present in the tree at that ref'
+                )
+                return False
         return False
 
     return _probe(vpath)
@@ -267,18 +282,30 @@ def _build_validation_attempts(
     downloader: GitHubPackageDownloader,
     dep_ref: DependencyReference,
     log: Callable[[str], None],
-) -> list[tuple[str, str, dict]]:
-    """Return the (label, url, env) attempts for a probe against ``dep_ref``.
+) -> list[AttemptSpec]:
+    """Return the AttemptSpec chain for a probe against ``dep_ref``.
 
     Mirrors the auth chain in ``_clone_with_fallback`` and centralises the
-    ADO header-injection switch so both ``ls-remote`` and the shallow-fetch
+    header-injection switch so both ``ls-remote`` and the shallow-fetch
     path probe reuse it.
 
-    SECURITY (round-2 finding 8): for Azure DevOps we inject the token via
-    ``http.extraheader`` (``Authorization: Bearer ...``) regardless of
-    whether the resolved scheme is ``basic`` (PAT) or ``bearer`` (AAD JWT).
-    This keeps tokens out of the OS process table, git's own logs, and the
-    URLs that ``_sanitize_git_error`` would otherwise need to scrub.
+    SECURITY (panel round-3 finding): for ALL HTTPS attempts (ADO and
+    non-ADO) we inject credentials via ``http.extraheader`` rather than
+    embedding them in the URL.  This keeps tokens out of the OS process
+    table, git's own logs, and any temp ``.git/config`` written by the
+    shallow-fetch probe.
+
+    Auth scheme handling (panel round-3 ADO Basic finding):
+      * ADO + ``auth_scheme == "basic"`` (PAT): ``Authorization: Basic
+        base64(":" + PAT)`` per ADO's HTTP Basic convention.  A raw
+        ``Bearer <PAT>`` is rejected with 401.
+      * ADO + ``auth_scheme == "bearer"`` (AAD JWT): ``Authorization:
+        Bearer <token>``.
+      * Non-ADO with ``auth_scheme == "bearer"``: ``Authorization: Bearer
+        <token>`` (matches GitHub recommendation for OAuth/App tokens).
+      * Non-ADO with ``auth_scheme == "basic"`` (legacy classic PAT):
+        ``Authorization: Bearer <token>`` -- GitHub accepts both forms;
+        Bearer keeps the token out of any URL component.
     """
     if dep_ref.is_artifactory():
         return []
@@ -289,40 +316,36 @@ def _build_validation_attempts(
     is_insecure: bool = bool(getattr(dep_ref, "is_insecure", False))
     is_ado: bool = dep_ref.is_azure_devops()
 
-    attempts: list[tuple[str, str, dict]] = []
+    attempts: list[AttemptSpec] = []
 
-    # Attempt 1: explicit token, locked-down env. Skipped when no token.
+    # Attempt 1: explicit token, header-injected. Skipped when no token.
     if dep_token:
-        if is_ado:
-            # ADO: ALWAYS use header injection, never URL embedding.
-            token_env = {
-                **downloader.git_env,
-                **build_authorization_header_git_env("Bearer", dep_token),
-            }
-            token_url = downloader._build_repo_url(
-                dep_ref.repo_url,
-                use_ssh=False,
-                dep_ref=dep_ref,
-                token="",  # tokenless URL
-                auth_scheme="bearer",
-            )
-            attempts.append(("ADO authenticated HTTPS (bearer header)", token_url, token_env))
+        if is_ado and dep_auth_scheme == "basic":
+            # ADO PAT requires HTTP Basic with base64(":PAT"). A raw
+            # Bearer header would 401 every ADO PAT user.
+            encoded = base64.b64encode(f":{dep_token}".encode()).decode("ascii")
+            auth_env = build_authorization_header_git_env("Basic", encoded)
+            label = "ADO authenticated HTTPS (basic header)"
+        elif is_ado:  # bearer (AAD JWT)
+            auth_env = build_authorization_header_git_env("Bearer", dep_token)
+            label = "ADO authenticated HTTPS (bearer header)"
         else:
-            token_env = (
-                dep_auth_ctx.git_env
-                if dep_auth_scheme == "bearer" and dep_auth_ctx is not None
-                else downloader.git_env
-            )
-            token_url = downloader._build_repo_url(
-                dep_ref.repo_url,
-                use_ssh=False,
-                dep_ref=dep_ref,
-                token=dep_token,
-                auth_scheme=dep_auth_scheme,
-            )
-            attempts.append(("authenticated HTTPS", token_url, token_env))
+            # Non-ADO: header injection rather than URL embedding so the
+            # token never appears in argv or temp .git/config.
+            auth_env = build_authorization_header_git_env("Bearer", dep_token)
+            label = "authenticated HTTPS (header)"
 
-    # Attempt 2: plain HTTPS w/ credential helper (no token).
+        token_env = {**downloader.git_env, **auth_env}
+        token_url = downloader._build_repo_url(
+            dep_ref.repo_url,
+            use_ssh=False,
+            dep_ref=dep_ref,
+            token="",  # tokenless URL: credentials live in the env header
+            auth_scheme=dep_auth_scheme if is_ado else "basic",
+        )
+        attempts.append(AttemptSpec(label, token_url, token_env))
+
+    # Attempt 2: plain HTTPS w/ credential helper (no token, no header).
     plain_env = downloader._build_noninteractive_git_env(
         preserve_config_isolation=is_insecure,
         suppress_credential_helpers=is_insecure,
@@ -333,9 +356,11 @@ def _build_validation_attempts(
         dep_ref=dep_ref,
         token="",
     )
-    attempts.append(("plain HTTPS w/ credential helper", plain_url, plain_env))
+    attempts.append(AttemptSpec("plain HTTPS w/ credential helper", plain_url, plain_env))
 
-    # Attempt 3 (SSH): only when allowed.
+    # Attempt 3 (SSH): only when allowed. StrictHostKeyChecking is
+    # intentionally inherited from the user's ssh config; do NOT add
+    # `-o StrictHostKeyChecking=no` thinking it's safer -- it isn't.
     if not is_insecure and _ssh_attempt_allowed(downloader):
         try:
             ssh_url = downloader._build_repo_url(
@@ -345,9 +370,9 @@ def _build_validation_attempts(
             )
             ssh_env = dict(plain_env)
             ssh_env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes -o ConnectTimeout=10"
-            attempts.append(("SSH", ssh_url, ssh_env))
+            attempts.append(AttemptSpec("SSH", ssh_url, ssh_env))
         except Exception as exc:
-            log(f"  [i] SSH URL build skipped: {exc}")
+            log(f"  [!] SSH URL build skipped: {exc}")
 
     return attempts
 
@@ -357,7 +382,7 @@ def _ref_exists_via_ls_remote(
     dep_ref: DependencyReference,
     ref: str,
     log: Callable[[str], None],
-) -> bool:
+) -> tuple[bool, AttemptSpec | None]:
     """Check if ``ref`` exists in the remote repo via ``git ls-remote``.
 
     Lenient fallback for when the Contents API rejects a path with 404
@@ -370,17 +395,23 @@ def _ref_exists_via_ls_remote(
     ``--heads --tags`` because those filters silently drop commit SHAs
     -- the full ref list is scanned for a SHA-prefix match instead.
 
-    Returns ``True`` on the first attempt that resolves the ref;
-    ``False`` if every attempt fails.
+    Returns:
+        ``(True, winning_attempt)`` on the first attempt that resolves
+        the ref; ``(False, None)`` if every attempt fails. Callers MUST
+        reuse ``winning_attempt`` for any follow-up probe at the same
+        ref so the auth-chain promise holds end-to-end (panel round-3:
+        if ls-remote succeeded via SSH but the follow-up probe used the
+        rejected PAT, the fallback would silently false-reject).
     """
     attempts = _build_validation_attempts(downloader, dep_ref, log)
     if not attempts:
-        return False
+        return False, None
 
     is_sha = _is_sha_pin(ref)
     ref_lc = ref.lower()
     g = git.cmd.Git()
-    for label, url, env in attempts:
+    for attempt in attempts:
+        label, url, env = attempt
         try:
             if is_sha:
                 # SHA pins: scan the full advertised-refs list.  The
@@ -392,19 +423,19 @@ def _ref_exists_via_ls_remote(
                     for line in output.splitlines()
                     if line
                 ):
-                    log(f"  [+] ls-remote ok via {label} (SHA match)")
-                    return True
-                log(f"  [i] ls-remote returned no SHA match via {label}")
+                    log(f"  [+] ls-remote ok via {label}")
+                    return True, attempt
+                log(f"  [!] ls-remote returned no SHA match via {label}")
             else:
                 output = g.ls_remote("--heads", "--tags", url, ref, env=env)
                 if output and output.strip():
                     log(f"  [+] ls-remote ok via {label}")
-                    return True
-                log(f"  [i] ls-remote returned no matching refs via {label}")
+                    return True, attempt
+                log(f"  [!] ls-remote returned no matching refs via {label}")
         except (GitCommandError, OSError) as exc:
             log(f"  [x] ls-remote failed via {label}: {downloader._sanitize_git_error(str(exc))}")
 
-    return False
+    return False, None
 
 
 def _path_exists_in_tree_at_ref(
@@ -413,6 +444,7 @@ def _path_exists_in_tree_at_ref(
     vpath: str,
     ref: str,
     log: Callable[[str], None],
+    winning_attempt: AttemptSpec,
 ) -> bool:
     """Confirm ``vpath`` exists at ``ref`` via shallow fetch + ``ls-tree``.
 
@@ -423,18 +455,18 @@ def _path_exists_in_tree_at_ref(
     cheap), and then runs ``ls-tree`` to assert the path is present in
     the resolved tree.  Cleans up the temp dir regardless of outcome.
 
+    Args:
+        winning_attempt: The AttemptSpec returned by
+            ``_ref_exists_via_ls_remote`` -- MUST be reused so the same
+            credential that proved the ref exists is the one used to
+            fetch the tree.  Panel round-3 closed the
+            ``attempts[0]``-only bug here.
+
     Returns:
         True iff the shallow fetch succeeded AND ``ls-tree`` reported
         at least one entry for ``vpath`` at the resolved ref.
     """
-    attempts = _build_validation_attempts(downloader, dep_ref, log)
-    if not attempts:
-        return False
-
-    # Pick the first attempt that has a token (or fall back to the plain
-    # attempt) -- we don't need the full chain here since the ls-remote
-    # caller already proved at least one of these works.
-    label, url, env = attempts[0]
+    label, url, env = winning_attempt
 
     base_temp = get_apm_temp_dir()
     tmpdir = Path(tempfile.mkdtemp(prefix="apm-validate-", dir=base_temp))
@@ -470,11 +502,13 @@ def _path_exists_in_tree_at_ref(
         if output and output.strip():
             log(f"  [+] {vpath}@{ref} present in tree")
             return True
-        log(f"  [i] {vpath} not present in tree at {ref}")
+        log(f"  [!] {vpath} not present in tree at {ref}")
         return False
     finally:
+        # safe_rmtree wraps robust_rmtree with an ensure_path_within
+        # containment assertion -- never call robust_rmtree directly.
         with contextlib.suppress(Exception):
-            robust_rmtree(tmpdir)
+            safe_rmtree(tmpdir, base_temp)
 
 
 def _ssh_attempt_allowed(downloader: GitHubPackageDownloader) -> bool:

@@ -78,7 +78,7 @@ class TestVirtualPathTraversalRejection:
             raw_mock.side_effect = RuntimeError("404")
             with (
                 patch.object(gdv, "_directory_exists_at_ref", return_value=False),
-                patch.object(gdv, "_ref_exists_via_ls_remote", return_value=False),
+                patch.object(gdv, "_ref_exists_via_ls_remote", return_value=(False, None)),
             ):
                 ok = gdv.validate_virtual_package_exists(downloader, dep_ref)
 
@@ -108,11 +108,12 @@ class TestLsRemoteFailOpenClose:
         """
         downloader = GitHubPackageDownloader()
         dep_ref = _make_subdir_dep(vpath="skills/typo-not-real", ref="main")
+        winning = gdv.AttemptSpec("plain HTTPS w/ credential helper", "https://x", {})
 
         with (
             self._patch_marker_misses(downloader),
             patch.object(gdv, "_directory_exists_at_ref", return_value=False),
-            patch.object(gdv, "_ref_exists_via_ls_remote", return_value=True),
+            patch.object(gdv, "_ref_exists_via_ls_remote", return_value=(True, winning)),
             patch.object(gdv, "_path_exists_in_tree_at_ref", return_value=False) as path_probe,
         ):
             ok = gdv.validate_virtual_package_exists(downloader, dep_ref)
@@ -122,17 +123,23 @@ class TestLsRemoteFailOpenClose:
             "the subdirectory is absent from the tree."
         )
         path_probe.assert_called_once()
+        # Round-3: the winning attempt MUST be threaded through to the
+        # tree probe (positional or keyword) -- never attempts[0].
+        kwargs = path_probe.call_args.kwargs
+        args = path_probe.call_args.args
+        assert winning in args or kwargs.get("winning_attempt") is winning
 
     def test_ls_remote_plus_path_probe_validates(self) -> None:
         """Both gates pass -> validation succeeds, with a deferred-probe warning."""
         downloader = GitHubPackageDownloader()
         dep_ref = _make_subdir_dep(vpath="skills/exists", ref="v1.0.0")
         warnings: list[str] = []
+        winning = gdv.AttemptSpec("authenticated HTTPS (header)", "https://x", {})
 
         with (
             self._patch_marker_misses(downloader),
             patch.object(gdv, "_directory_exists_at_ref", return_value=False),
-            patch.object(gdv, "_ref_exists_via_ls_remote", return_value=True),
+            patch.object(gdv, "_ref_exists_via_ls_remote", return_value=(True, winning)),
             patch.object(gdv, "_path_exists_in_tree_at_ref", return_value=True),
         ):
             ok = gdv.validate_virtual_package_exists(
@@ -141,21 +148,27 @@ class TestLsRemoteFailOpenClose:
 
         assert ok is True
         assert len(warnings) == 1, "expected exactly one deferred-probe warning"
-        # Round-2 finding 3: warning text must NOT include literal '[!]'
-        # (the logger prepends the symbol).
+        # Warning text must NOT include literal '[!]' (the logger
+        # prepends the symbol).
         assert "[!]" not in warnings[0]
-        # Round-2 finding 4: warning must end with an actionable next step.
-        assert "To fix" in warnings[0] or "to fix" in warnings[0].lower()
+        # Round-3: warning must name the dep and use '#' (CLI canonical),
+        # not '@' (the version-pin separator from npm/pip/cargo).
+        assert "owner/repo" in warnings[0]
+        assert "#v1.0.0" in warnings[0]
+        assert "@v1.0.0" not in warnings[0]
 
     def test_ls_remote_only_runs_when_explicit_ref(self) -> None:
         """Without an explicit ``#ref`` the lenient fallback is skipped."""
         downloader = GitHubPackageDownloader()
         dep_ref = _make_subdir_dep(vpath="skills/x", ref=None)
+        winning = gdv.AttemptSpec("plain HTTPS w/ credential helper", "https://x", {})
 
         with (
             self._patch_marker_misses(downloader),
             patch.object(gdv, "_directory_exists_at_ref", return_value=False),
-            patch.object(gdv, "_ref_exists_via_ls_remote", return_value=True) as ls_remote_mock,
+            patch.object(
+                gdv, "_ref_exists_via_ls_remote", return_value=(True, winning)
+            ) as ls_remote_mock,
             patch.object(gdv, "_path_exists_in_tree_at_ref", return_value=True) as path_mock,
         ):
             ok = gdv.validate_virtual_package_exists(downloader, dep_ref)
@@ -185,8 +198,8 @@ class TestAdoBearerHeaderInjection:
             ado_repo="myrepo",
         )
 
-    def test_ado_token_injected_as_header_not_url_in_validation(self) -> None:
-        """The token must appear in the env's GIT_CONFIG_VALUE_0, not the URL."""
+    def test_ado_basic_pat_injected_as_basic_header_not_url(self) -> None:
+        """ADO PAT (auth_scheme=basic) must use Basic base64(:PAT) header."""
         downloader = GitHubPackageDownloader()
         dep_ref = self._make_ado_dep()
         secret = "ADO_PAT_SECRET_VALUE_DO_NOT_LEAK"
@@ -212,41 +225,45 @@ class TestAdoBearerHeaderInjection:
             attempts = gdv._build_validation_attempts(downloader, dep_ref, log=lambda _m: None)
 
         assert attempts, "expected at least the token attempt"
-        labels = [label for label, _url, _env in attempts]
-        # First attempt is the ADO header-injected one.
-        assert any("bearer header" in label.lower() for label in labels), labels
+        labels = [a.label for a in attempts]
+        # Round-3 ADO Basic finding: PAT -> Basic header, NOT raw Bearer.
+        assert any("basic header" in label.lower() for label in labels), labels
 
-        # Find the ADO attempt and assert: token NOT in URL, token IN env header.
-        ado_attempts = [a for a in attempts if "bearer header" in a[0].lower()]
+        ado_attempts = [a for a in attempts if "basic header" in a.label.lower()]
         assert len(ado_attempts) == 1
         _label, url, env = ado_attempts[0]
 
-        assert secret not in url, (
-            "ADO token must NOT be embedded in the clone URL "
-            "(round-2 finding 8 -- prevents leakage to process table / git logs)."
-        )
-
-        # The env must carry the token via the http.extraheader mechanism.
+        assert secret not in url, "ADO PAT must not appear in the URL"
+        # The env must carry the Basic header.
         assert env.get("GIT_CONFIG_KEY_0") == "http.extraheader"
         header_value = env.get("GIT_CONFIG_VALUE_0", "")
-        assert header_value.startswith("Authorization: Bearer ")
-        assert secret in header_value, (
-            "Token must travel as an HTTP Authorization header, not via URL."
-        )
+        assert header_value.startswith("Authorization: Basic "), header_value
+        # base64(":<PAT>") must contain the expected encoded form.
+        import base64
 
-    def test_non_ado_path_unchanged(self) -> None:
-        """GitHub deps still use the existing auth chain (no ADO header overlay)."""
+        expected = base64.b64encode(f":{secret}".encode()).decode("ascii")
+        assert expected in header_value, "PAT must be base64-encoded as ':<PAT>'"
+        # Raw PAT must NOT appear in plaintext anywhere in the env value
+        # (only the base64-encoded form is permitted).
+        assert secret not in header_value
+
+    def test_ado_bearer_aad_injected_as_bearer_header(self) -> None:
+        """ADO + auth_scheme=bearer (AAD JWT) uses raw Bearer header."""
         downloader = GitHubPackageDownloader()
-        dep_ref = _make_subdir_dep(repo_url="owner/repo", host="github.com")
-        secret = "GH_PAT_SECRET"
+        dep_ref = self._make_ado_dep()
+        secret = "fake-aad-jwt-token"
+
+        ado_mock_ctx = MagicMock()
+        ado_mock_ctx.auth_scheme = "bearer"
+        ado_mock_ctx.git_env = {}
 
         with (
             patch.object(downloader, "_resolve_dep_token", return_value=secret),
-            patch.object(downloader, "_resolve_dep_auth_ctx", return_value=None),
+            patch.object(downloader, "_resolve_dep_auth_ctx", return_value=ado_mock_ctx),
             patch.object(
                 downloader,
                 "_build_repo_url",
-                return_value=f"https://x-access-token:{secret}@github.com/owner/repo.git",
+                return_value="https://dev.azure.com/myorg/myproj/_git/myrepo",
             ),
             patch.object(
                 downloader,
@@ -256,10 +273,61 @@ class TestAdoBearerHeaderInjection:
         ):
             attempts = gdv._build_validation_attempts(downloader, dep_ref, log=lambda _m: None)
 
-        labels = [label for label, _u, _e in attempts]
-        assert "authenticated HTTPS" in labels
-        # Crucially: no ADO bearer-header attempt for non-ADO deps.
-        assert not any("bearer header" in lbl.lower() for lbl in labels)
+        ado_attempts = [a for a in attempts if "bearer header" in a.label.lower()]
+        assert len(ado_attempts) == 1
+        _label, url, env = ado_attempts[0]
+        assert secret not in url
+        header_value = env.get("GIT_CONFIG_VALUE_0", "")
+        assert header_value == f"Authorization: Bearer {secret}"
+
+    def test_non_ado_token_uses_header_not_url(self) -> None:
+        """GitHub deps now also use header injection (round-3 security finding).
+
+        Round-3 closed the gap where non-ADO tokens were embedded in the
+        clone URL, leaking via the OS process table and into the temp
+        bare repo's .git/config during the shallow-fetch path probe.
+        """
+        downloader = GitHubPackageDownloader()
+        dep_ref = _make_subdir_dep(repo_url="owner/repo", host="github.com")
+        secret = "GH_PAT_SECRET"
+
+        captured_token_args: list[str] = []
+
+        def _capture_build_repo_url(*args, **kwargs):
+            # Capture the token positional or kwarg so we can assert it
+            # is empty for the authenticated attempt.
+            captured_token_args.append(kwargs.get("token", ""))
+            return "https://github.com/owner/repo.git"
+
+        with (
+            patch.object(downloader, "_resolve_dep_token", return_value=secret),
+            patch.object(downloader, "_resolve_dep_auth_ctx", return_value=None),
+            patch.object(downloader, "_build_repo_url", side_effect=_capture_build_repo_url),
+            patch.object(
+                downloader,
+                "_build_noninteractive_git_env",
+                return_value={},
+            ),
+        ):
+            attempts = gdv._build_validation_attempts(downloader, dep_ref, log=lambda _m: None)
+
+        # The token MUST NOT be passed into the URL builder for the
+        # authenticated attempt -- it travels in the env header instead.
+        assert all(t == "" for t in captured_token_args), (
+            "Round-3 security: non-ADO token must not be embedded in the URL"
+        )
+
+        labels = [a.label for a in attempts]
+        # Header label, no longer the bare 'authenticated HTTPS'.
+        assert any(lbl == "authenticated HTTPS (header)" for lbl in labels), labels
+
+        auth_attempts = [a for a in attempts if a.label == "authenticated HTTPS (header)"]
+        assert len(auth_attempts) == 1
+        _label, url, env = auth_attempts[0]
+        assert secret not in url
+        # Header carries the token.
+        header_value = env.get("GIT_CONFIG_VALUE_0", "")
+        assert header_value == f"Authorization: Bearer {secret}"
 
 
 # ---------------------------------------------------------------------------
@@ -296,3 +364,219 @@ class TestSplitOwnerRepoGuard:
             downloader, dep_ref, "skills/x", "main", log=lambda _m: None
         )
         assert ok is False
+
+
+# ---------------------------------------------------------------------------
+# Round-3 regression tests
+# ---------------------------------------------------------------------------
+
+
+class TestRound3PathTreeProbeUsesWinningAttempt:
+    """Round-3: ``_path_exists_in_tree_at_ref`` must reuse the winning attempt.
+
+    Previously it used ``attempts[0]`` unconditionally, breaking the
+    auth-chain promise when ls-remote succeeded via SSH or plain HTTPS
+    but the leading PAT attempt would fail the shallow fetch.
+    """
+
+    @pytest.mark.parametrize(
+        "winning_label,winning_url",
+        [
+            ("SSH", "git@github.com:owner/repo.git"),
+            ("plain HTTPS w/ credential helper", "https://github.com/owner/repo.git"),
+        ],
+    )
+    def test_tree_probe_uses_winning_attempt_not_attempts_zero(
+        self, winning_label: str, winning_url: str
+    ) -> None:
+        """The shallow-fetch must use the URL/env from the winning ls-remote attempt."""
+        downloader = GitHubPackageDownloader()
+        dep_ref = _make_subdir_dep(vpath="skills/x", ref="main")
+        winning_env = {"GIT_SSH_COMMAND": "ssh -o BatchMode=yes"} if "SSH" in winning_label else {}
+        winning = gdv.AttemptSpec(winning_label, winning_url, winning_env)
+
+        with (
+            patch.object(downloader, "download_raw_file", side_effect=RuntimeError("404")),
+            patch.object(gdv, "_directory_exists_at_ref", return_value=False),
+            patch.object(gdv, "_ref_exists_via_ls_remote", return_value=(True, winning)),
+            patch.object(gdv, "_path_exists_in_tree_at_ref", return_value=True) as path_probe,
+        ):
+            ok = gdv.validate_virtual_package_exists(downloader, dep_ref)
+
+        assert ok is True
+        path_probe.assert_called_once()
+        # The winning AttemptSpec must be passed positionally or by kw.
+        args = path_probe.call_args.args
+        kwargs = path_probe.call_args.kwargs
+        assert winning in args or kwargs.get("winning_attempt") is winning, (
+            "Path probe must receive the winning attempt -- not attempts[0]."
+        )
+
+
+class TestRound3NonAdoTokenNotInProcessArgv:
+    """Round-3: non-ADO HTTPS token MUST NOT appear in subprocess argv."""
+
+    def test_non_ado_token_not_in_url_or_argv(self) -> None:
+        downloader = GitHubPackageDownloader()
+        dep_ref = _make_subdir_dep(repo_url="owner/repo", host="github.com")
+        secret = "GH_PAT_NEVER_IN_ARGV"
+
+        with (
+            patch.object(downloader, "_resolve_dep_token", return_value=secret),
+            patch.object(downloader, "_resolve_dep_auth_ctx", return_value=None),
+            patch.object(
+                downloader,
+                "_build_repo_url",
+                return_value="https://github.com/owner/repo.git",
+            ),
+            patch.object(downloader, "_build_noninteractive_git_env", return_value={}),
+        ):
+            attempts = gdv._build_validation_attempts(downloader, dep_ref, log=lambda _m: None)
+
+        for attempt in attempts:
+            assert secret not in attempt.url, f"Token leaked into URL for attempt '{attempt.label}'"
+        # Header injection: the auth attempt env must contain a Bearer header.
+        auth_attempt = next(a for a in attempts if "header" in a.label)
+        assert auth_attempt.env.get("GIT_CONFIG_KEY_0") == "http.extraheader"
+        assert auth_attempt.env["GIT_CONFIG_VALUE_0"] == f"Authorization: Bearer {secret}"
+
+
+class TestRound3SafeRmtreeNotRobustRmtreeDirect:
+    """Round-3: cleanup MUST go through safe_rmtree (containment gate)."""
+
+    def test_safe_rmtree_called_not_robust_rmtree_direct(self) -> None:
+        downloader = GitHubPackageDownloader()
+        dep_ref = _make_subdir_dep(vpath="skills/x", ref="main")
+        winning = gdv.AttemptSpec("plain HTTPS w/ credential helper", "https://x", {})
+
+        # Patch git.cmd.Git so init/fetch/ls_tree don't actually run.
+        with (
+            patch("apm_cli.deps.github_downloader_validation.safe_rmtree") as safe_rm_mock,
+            patch("apm_cli.deps.github_downloader_validation.git.cmd.Git") as MockGit,
+        ):
+            MockGit.return_value.init = MagicMock()
+            MockGit.return_value.remote = MagicMock()
+            MockGit.return_value.fetch = MagicMock()
+            MockGit.return_value.ls_tree = MagicMock(return_value="100644 blob abc\tskills/x")
+            ok = gdv._path_exists_in_tree_at_ref(
+                downloader,
+                dep_ref,
+                "skills/x",
+                "main",
+                log=lambda _m: None,
+                winning_attempt=winning,
+            )
+
+        assert ok is True
+        safe_rm_mock.assert_called_once()
+        # Containment: first arg is the tmpdir, second is the base.
+        call_args = safe_rm_mock.call_args.args
+        assert len(call_args) == 2, "safe_rmtree must be called with (path, base_dir)"
+
+
+class TestRound3WarnMessage:
+    """Round-3: warn message names dep with '#' separator and is verbose-gated."""
+
+    def test_warn_message_uses_hash_separator_and_names_dep(self) -> None:
+        downloader = GitHubPackageDownloader()
+        dep_ref = _make_subdir_dep(vpath="skills/cool", ref="v2.0.0")
+        warnings: list[str] = []
+        winning = gdv.AttemptSpec("authenticated HTTPS (header)", "https://x", {})
+
+        with (
+            patch.object(downloader, "download_raw_file", side_effect=RuntimeError("404")),
+            patch.object(gdv, "_directory_exists_at_ref", return_value=False),
+            patch.object(gdv, "_ref_exists_via_ls_remote", return_value=(True, winning)),
+            patch.object(gdv, "_path_exists_in_tree_at_ref", return_value=True),
+        ):
+            ok = gdv.validate_virtual_package_exists(
+                downloader, dep_ref, warn_callback=warnings.append
+            )
+
+        assert ok is True
+        assert len(warnings) == 1
+        msg = warnings[0]
+        # Names the dep (canonical form).
+        assert "owner/repo" in msg
+        assert "skills/cool" in msg
+        # Uses '#' (CLI canonical), not '@' (the npm/pip version-pin separator).
+        assert "#v2.0.0" in msg
+        assert "@v2.0.0" not in msg
+        # Avoids the bogus 'Contents-API scope' jargon flagged by growth.
+        assert "Contents-API scope" not in msg
+
+
+class TestRound3WarnSuppressedOnHappyPath:
+    """Round-3: _warn in install/validation.py suppresses on the happy path."""
+
+    def test_warn_suppressed_on_happy_path_unless_verbose(self) -> None:
+        """Default-verbosity install must not surface the deferred-probe warning."""
+        from unittest.mock import MagicMock
+
+        from apm_cli.install import validation as install_validation
+
+        # Build a fake logger that records .warning() calls.
+        logger = MagicMock()
+        # Stub auth_resolver.resolve_for_dep so we don't hit real env.
+        auth_resolver = MagicMock()
+        ctx = MagicMock()
+        ctx.source = "env"
+        ctx.token_type = "pat"
+        auth_resolver.resolve_for_dep.return_value = ctx
+
+        # Capture the _warn callable by patching the downloader's
+        # validate_virtual_package_exists so we can invoke it ourselves.
+        captured = {}
+
+        def fake_validate(self, dep_ref, verbose_callback=None, warn_callback=None):
+            captured["warn"] = warn_callback
+            # Simulate the fallback path firing.
+            if warn_callback is not None:
+                warn_callback("Validated owner/repo/sub#v1 via git fallback")
+            return True
+
+        with patch(
+            "apm_cli.deps.github_downloader.GitHubPackageDownloader.validate_virtual_package_exists",
+            new=fake_validate,
+        ):
+            ok = install_validation._validate_package_exists(
+                "owner/repo/sub#v1",
+                verbose=False,
+                auth_resolver=auth_resolver,
+                logger=logger,
+            )
+
+        assert ok is True
+        # Happy path with verbose=False: logger.warning MUST NOT have fired.
+        logger.warning.assert_not_called()
+
+    def test_warn_emits_when_verbose(self) -> None:
+        from unittest.mock import MagicMock
+
+        from apm_cli.install import validation as install_validation
+
+        logger = MagicMock()
+        auth_resolver = MagicMock()
+        ctx = MagicMock()
+        ctx.source = "env"
+        ctx.token_type = "pat"
+        auth_resolver.resolve_for_dep.return_value = ctx
+
+        def fake_validate(self, dep_ref, verbose_callback=None, warn_callback=None):
+            if warn_callback is not None:
+                warn_callback("Validated owner/repo/sub#v1 via git fallback")
+            return True
+
+        with patch(
+            "apm_cli.deps.github_downloader.GitHubPackageDownloader.validate_virtual_package_exists",
+            new=fake_validate,
+        ):
+            ok = install_validation._validate_package_exists(
+                "owner/repo/sub#v1",
+                verbose=True,
+                auth_resolver=auth_resolver,
+                logger=logger,
+            )
+
+        assert ok is True
+        logger.warning.assert_called_once()

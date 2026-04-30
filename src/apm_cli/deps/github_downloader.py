@@ -1274,10 +1274,16 @@ class GitHubPackageDownloader:
         ref: str,
         log: Callable[[str], None],
     ) -> bool:
-        """Backward-compat shim -- delegates to the validation module."""
+        """Backward-compat shim -- delegates to the validation module.
+
+        Returns ``bool`` (success only); the underlying impl now also
+        returns the winning AttemptSpec, but legacy callers only need
+        the success flag.
+        """
         from .github_downloader_validation import _ref_exists_via_ls_remote as _impl
 
-        return _impl(self, dep_ref, ref, log)
+        ok, _winning = _impl(self, dep_ref, ref, log)
+        return ok
 
     def _ssh_attempt_allowed(self) -> bool:
         """Backward-compat shim -- delegates to the validation module."""
