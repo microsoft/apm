@@ -157,7 +157,7 @@ class TestTargetProfileUserScope:
     """Validate user-scope metadata on TargetProfile in KNOWN_TARGETS."""
 
     def test_all_known_targets_present(self):
-        expected = {"copilot", "claude", "cursor", "opencode", "codex", "gemini", "copilot-cowork"}
+        expected = {"copilot", "claude", "cursor", "opencode", "codex", "gemini", "windsurf", "copilot-cowork"}
         assert set(KNOWN_TARGETS.keys()) == expected
 
     def test_each_target_has_user_supported(self):
@@ -226,6 +226,25 @@ class TestTargetProfileUserScope:
         assert KNOWN_TARGETS["opencode"].supports_at_user_scope("commands") is True
         assert KNOWN_TARGETS["opencode"].supports_at_user_scope("hooks") is False
 
+    def test_windsurf_is_partially_supported(self):
+        assert KNOWN_TARGETS["windsurf"].user_supported == "partial"
+        assert KNOWN_TARGETS["windsurf"].user_root_dir == ".codeium/windsurf"
+        assert "instructions" in KNOWN_TARGETS["windsurf"].unsupported_user_primitives
+
+    def test_supports_at_user_scope_windsurf_partial(self):
+        # Windsurf supports skills, commands, hooks, agents at user scope but not instructions
+        assert KNOWN_TARGETS["windsurf"].supports_at_user_scope("skills") is True
+        assert KNOWN_TARGETS["windsurf"].supports_at_user_scope("commands") is True
+        assert KNOWN_TARGETS["windsurf"].supports_at_user_scope("hooks") is True
+        assert KNOWN_TARGETS["windsurf"].supports_at_user_scope("agents") is True
+        assert KNOWN_TARGETS["windsurf"].supports_at_user_scope("instructions") is False
+
+    def test_windsurf_effective_root_project_scope(self):
+        assert KNOWN_TARGETS["windsurf"].effective_root(user_scope=False) == ".windsurf"
+
+    def test_windsurf_effective_root_user_scope(self):
+        assert KNOWN_TARGETS["windsurf"].effective_root(user_scope=True) == ".codeium/windsurf"
+
     def test_unsupported_targets_have_no_user_root(self):
         for name, profile in KNOWN_TARGETS.items():
             if profile.user_supported is False:
@@ -271,6 +290,8 @@ class TestScopeWarnings:
         assert "cursor (instructions)" in msg
         # OpenCode excludes hooks
         assert "opencode (hooks)" in msg
+        # Windsurf excludes instructions
+        assert "windsurf (instructions)" in msg
 
 
 # ---------------------------------------------------------------------------

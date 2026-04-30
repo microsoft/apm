@@ -37,6 +37,7 @@ class CopilotClientAdapter(MCPClientAdapter):
     """
 
     supports_user_scope: bool = True
+    _client_label: str = "Copilot CLI"
 
     def __init__(
         self,
@@ -171,7 +172,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             # Update configuration using the chosen key
             self.update_config({config_key: server_config})
 
-            print(f"Successfully configured MCP server '{config_key}' for Copilot CLI")
+            print(f"Successfully configured MCP server '{config_key}' for {self._client_label}")
             return True
 
         except Exception as e:

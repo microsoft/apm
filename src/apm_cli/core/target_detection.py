@@ -27,7 +27,7 @@ from typing import List, Literal, Optional, Tuple, Union  # noqa: F401, UP035
 import click
 
 # Valid target values (internal canonical form)
-TargetType = Literal["vscode", "claude", "cursor", "opencode", "codex", "gemini", "all", "minimal"]
+TargetType = Literal["vscode", "claude", "cursor", "opencode", "codex", "gemini", "windsurf", "all", "minimal"]
 
 # Compiler families used inside a multi-target frozenset. Narrower than
 # TargetType because the families are produced by _resolve_compile_target()
@@ -53,6 +53,7 @@ UserTargetType = Literal[
     "opencode",
     "codex",
     "gemini",
+    "windsurf",
     "all",
     "minimal",
 ]
@@ -89,6 +90,8 @@ def detect_target(  # noqa: PLR0911
             return "codex", "explicit --target flag"
         elif explicit_target == "gemini":
             return "gemini", "explicit --target flag"
+        elif explicit_target == "windsurf":
+            return "windsurf", "explicit --target flag"
         elif explicit_target == "all":
             return "all", "explicit --target flag"
 
@@ -106,6 +109,8 @@ def detect_target(  # noqa: PLR0911
             return "codex", "apm.yml target"
         elif config_target == "gemini":
             return "gemini", "apm.yml target"
+        elif config_target == "windsurf":
+            return "windsurf", "apm.yml target"
         elif config_target == "all":
             return "all", "apm.yml target"
 
@@ -116,6 +121,7 @@ def detect_target(  # noqa: PLR0911
     opencode_exists = (project_root / ".opencode").is_dir()
     codex_exists = (project_root / ".codex").is_dir()
     gemini_exists = (project_root / ".gemini").is_dir()
+    windsurf_exists = (project_root / ".windsurf").is_dir()
     detected = []
     if github_exists:
         detected.append(".github/")
@@ -129,6 +135,8 @@ def detect_target(  # noqa: PLR0911
         detected.append(".codex/")
     if gemini_exists:
         detected.append(".gemini/")
+    if windsurf_exists:
+        detected.append(".windsurf/")
 
     if len(detected) >= 2:
         return "all", f"detected {' and '.join(detected)} folders"
@@ -144,6 +152,8 @@ def detect_target(  # noqa: PLR0911
         return "codex", "detected .codex/ folder"
     elif gemini_exists:
         return "gemini", "detected .gemini/ folder"
+    elif windsurf_exists:
+        return "windsurf", "detected .windsurf/ folder"
     else:
         return "minimal", REASON_NO_TARGET_FOLDER
 
@@ -163,7 +173,7 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
     """
     if isinstance(target, frozenset):
         return "agents" in target or "gemini" in target
-    return target in ("vscode", "opencode", "codex", "gemini", "all", "minimal")
+    return target in ("vscode", "opencode", "codex", "gemini", "windsurf", "all", "minimal")
 
 
 def should_compile_claude_md(target: CompileTargetType) -> bool:
@@ -216,7 +226,8 @@ def get_target_description(target: UserTargetType) -> str:
         "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .opencode/skills/",
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
         "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
-        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .agents/",
+        "windsurf": "AGENTS.md + .windsurf/rules/ (instructions) + .windsurf/skills/ (agents + skills) + .windsurf/workflows/ + .windsurf/hooks.json",
+        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .agents/",
         "minimal": "AGENTS.md only (create a target folder for full integration)",
     }
     return descriptions.get(normalized, "unknown target")
@@ -228,7 +239,7 @@ def get_target_description(target: UserTargetType) -> str:
 
 #: The complete set of real (non-pseudo) canonical targets.
 #: "minimal" is intentionally excluded -- it is a fallback pseudo-target.
-ALL_CANONICAL_TARGETS = frozenset({"vscode", "claude", "cursor", "opencode", "codex", "gemini"})
+ALL_CANONICAL_TARGETS = frozenset({"vscode", "claude", "cursor", "opencode", "codex", "gemini", "windsurf"})
 
 #: Targets that the parser must accept but that are gated at runtime by
 #: ``is_enabled()`` in ``core/experimental.py`` and ``_flag_gated()`` in

@@ -145,17 +145,35 @@ class TestActiveTargets:
         names = {t.name for t in targets}
         assert names == {"gemini", "claude"}
 
-    def test_all_six_dirs_returns_all_six(self):
-        for d in (".github", ".claude", ".cursor", ".opencode", ".codex", ".gemini"):
+    def test_all_seven_dirs_returns_all_seven(self):
+        for d in (".github", ".claude", ".cursor", ".opencode", ".codex", ".gemini", ".windsurf"):
             (self.root / d).mkdir()
         targets = active_targets(self.root)
-        assert len(targets) == 6
+        assert len(targets) == 7
 
     def test_all_five_dirs_returns_all_five(self):
         for d in (".github", ".claude", ".cursor", ".opencode", ".codex"):
             (self.root / d).mkdir()
         targets = active_targets(self.root)
         assert len(targets) == 5
+
+    # -- windsurf detection --
+
+    def test_only_windsurf_returns_windsurf(self):
+        (self.root / ".windsurf").mkdir()
+        targets = active_targets(self.root)
+        assert [t.name for t in targets] == ["windsurf"]
+
+    def test_explicit_windsurf(self):
+        targets = active_targets(self.root, explicit_target="windsurf")
+        assert [t.name for t in targets] == ["windsurf"]
+
+    def test_windsurf_and_github_returns_both(self):
+        (self.root / ".windsurf").mkdir()
+        (self.root / ".github").mkdir()
+        targets = active_targets(self.root)
+        names = {t.name for t in targets}
+        assert names == {"windsurf", "copilot"}
 
     # -- explicit list of targets --
 

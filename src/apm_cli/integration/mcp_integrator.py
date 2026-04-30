@@ -458,7 +458,7 @@ class MCPIntegrator:
             return
 
         # Determine which runtimes to clean, mirroring install-time logic.
-        all_runtimes = {"vscode", "copilot", "codex", "cursor", "opencode", "gemini"}
+        all_runtimes = {"vscode", "copilot", "codex", "cursor", "opencode", "gemini", "windsurf"}
         if runtime:  # noqa: SIM108
             target_runtimes = {runtime}
         else:
@@ -617,6 +617,33 @@ class MCPIntegrator:
                 except Exception:
                     _log.debug(
                         "Failed to clean stale MCP servers from opencode.json",
+                        exc_info=True,
+                    )
+
+        # Clean ~/.codeium/windsurf/mcp_config.json
+        if "windsurf" in target_runtimes:
+            windsurf_mcp = Path.home() / ".codeium" / "windsurf" / "mcp_config.json"
+            if windsurf_mcp.exists():
+                try:
+                    import json as _json
+
+                    config = _json.loads(windsurf_mcp.read_text(encoding="utf-8"))
+                    servers = config.get("mcpServers", {})
+                    removed = [n for n in expanded_stale if n in servers]
+                    for name in removed:
+                        del servers[name]
+                    if removed:
+                        windsurf_mcp.write_text(
+                            _json.dumps(config, indent=2), encoding="utf-8"
+                        )
+                        for name in removed:
+                            _rich_success(
+                                f"Removed stale MCP server '{name}' from Windsurf config",
+                                symbol="check",
+                            )
+                except Exception:
+                    _log.debug(
+                        "Failed to clean stale MCP servers from Windsurf config",
                         exc_info=True,
                     )
 
@@ -948,7 +975,7 @@ class MCPIntegrator:
                 manager = RuntimeManager()
                 installed_runtimes = []
 
-                for runtime_name in ["copilot", "codex", "vscode", "cursor", "opencode", "gemini"]:
+                for runtime_name in ["copilot", "codex", "vscode", "cursor", "opencode", "gemini", "windsurf"]:
                     try:
                         if runtime_name == "vscode":
                             if _is_vscode_available(project_root=project_root_path):
@@ -967,6 +994,11 @@ class MCPIntegrator:
                         elif runtime_name == "gemini":
                             # Gemini CLI is opt-in: only target when .gemini/ exists
                             if (Path.cwd() / ".gemini").is_dir():
+                                ClientFactory.create_client(runtime_name)
+                                installed_runtimes.append(runtime_name)
+                        elif runtime_name == "windsurf":
+                            # Windsurf is opt-in: only target when .windsurf/ exists
+                            if (project_root_path / ".windsurf").is_dir():
                                 ClientFactory.create_client(runtime_name)
                                 installed_runtimes.append(runtime_name)
                         else:  # noqa: PLR5501
@@ -991,6 +1023,9 @@ class MCPIntegrator:
                 # Gemini CLI is directory-presence based
                 if (Path.cwd() / ".gemini").is_dir():
                     installed_runtimes.append("gemini")
+                # Windsurf is directory-presence based
+                if (project_root_path / ".windsurf").is_dir():
+                    installed_runtimes.append("windsurf")
 
             # Step 2: Get runtimes referenced in apm.yml scripts
             script_runtimes = MCPIntegrator._detect_runtimes(
