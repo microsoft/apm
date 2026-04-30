@@ -453,9 +453,7 @@ class TestMarketplaceAdd:
         # Rich console may soft-wrap long lines; collapse whitespace before
         # asserting the runnable command appears intact.
         normalized = " ".join(result.output.split())
-        assert (
-            "apm marketplace add https://github.com/acme/plugin-marketplace" in normalized
-        )
+        assert "apm marketplace add https://github.com/acme/plugin-marketplace" in normalized
 
 
 class TestMarketplaceList:

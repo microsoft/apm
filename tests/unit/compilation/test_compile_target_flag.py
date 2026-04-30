@@ -657,9 +657,9 @@ Use type hints in Python code.
             "dry-run must surface the skip the real run would record"
         )
         assert result.stats["copilot_root_instructions_unchanged"] == 0
-        assert any(
-            "hand-authored file will not be overwritten" in w for w in result.warnings
-        ), "dry-run must surface the same warning a real run would emit"
+        assert any("hand-authored file will not be overwritten" in w for w in result.warnings), (
+            "dry-run must surface the same warning a real run would emit"
+        )
 
     def test_generated_footer_uses_apm_compile_not_specify(self, temp_project):
         """Generated footer must read `apm compile`, not `specify apm compile`."""
