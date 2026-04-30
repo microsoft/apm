@@ -10,7 +10,11 @@ from urllib.parse import urlparse
 
 import pytest
 
-from apm_cli.compilation.link_resolver import LinkResolutionContext, UnifiedLinkResolver, _resolve_path
+from apm_cli.compilation.link_resolver import (
+    LinkResolutionContext,
+    UnifiedLinkResolver,
+    _resolve_path,
+)
 from apm_cli.primitives.models import Context, PrimitiveCollection
 
 
