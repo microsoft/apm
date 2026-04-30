@@ -384,8 +384,10 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     ),
     # Windsurf/Cascade -- .windsurf/ is the workspace config directory.
     # Rules are markdown files with trigger/globs frontmatter under .windsurf/rules/.
+    # Agents are deployed as skills under .windsurf/skills/<name>/SKILL.md
+    # (Cascade auto-invokes them when the description matches the task).
     # Skills use the standard SKILL.md format under .windsurf/skills/.
-    # Workflows (≈ commands) are markdown files under .windsurf/workflows/.
+    # Workflows (~= commands) are markdown files under .windsurf/workflows/.
     # Hooks are configured in .windsurf/hooks.json.
     # At user scope, ~/.codeium/windsurf/ is used.  Global rules use a single
     # file (~/.codeium/windsurf/memories/global_rules.md) with a different

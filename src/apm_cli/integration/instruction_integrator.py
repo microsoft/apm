@@ -99,6 +99,9 @@ class InstructionIntegrator(BaseIntegrator):
         target_paths: list[Path] = []
         total_links_resolved = 0
 
+        # Security: reject paths that escape project_root (package-controlled stem).
+        from apm_cli.utils.path_security import ensure_path_within
+
         for source_file in instruction_files:
             if needs_rename:
                 stem = source_file.name
@@ -109,6 +112,8 @@ class InstructionIntegrator(BaseIntegrator):
                 target_name = source_file.name
 
             target_path = deploy_dir / target_name
+            ensure_path_within(target_path, project_root)
+
             rel_path = portable_relpath(target_path, project_root)
 
             if self.check_collision(
@@ -340,7 +345,6 @@ class InstructionIntegrator(BaseIntegrator):
         """
         body = content
         apply_to = ""
-        description = ""
 
         # Parse existing frontmatter
         fm_match = re.match(r'^---\s*\n(.*?)\n---\s*\n?', content, re.DOTALL)
@@ -352,14 +356,15 @@ class InstructionIntegrator(BaseIntegrator):
                 line_stripped = line.strip()
                 if line_stripped.startswith("applyTo:"):
                     apply_to = line_stripped[len("applyTo:"):].strip().strip("'\"")
-                elif line_stripped.startswith("description:"):
-                    description = line_stripped[len("description:"):].strip().strip("'\"")
 
         # Build Windsurf rules frontmatter
         parts = ["---"]
         if apply_to:
+            # Sanitize: strip newlines to prevent frontmatter injection
+            # via crafted applyTo values (e.g. "**\ntrigger: always_on").
+            safe_apply_to = apply_to.replace("\n", " ").replace("\r", " ").strip()
             parts.append("trigger: glob")
-            parts.append(f"globs: {apply_to}")
+            parts.append(f"globs: {safe_apply_to}")
         else:
             parts.append("trigger: always_on")
         parts.append("---")
@@ -372,10 +377,10 @@ class InstructionIntegrator(BaseIntegrator):
         Converts ``applyTo:`` to ``trigger: glob`` + ``globs:`` frontmatter
         and resolves links.
         """
-        content = source.read_text(encoding='utf-8')
+        content = source.read_text(encoding="utf-8")
         content = self._convert_to_windsurf_rules(content)
         content, links_resolved = self.resolve_links(content, source, target)
-        target.write_text(content, encoding='utf-8')
+        target.write_text(content, encoding="utf-8")
         return links_resolved
 
     # ------------------------------------------------------------------

@@ -226,7 +226,7 @@ def get_target_description(target: UserTargetType) -> str:
         "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .opencode/skills/",
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
         "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
-        "windsurf": "AGENTS.md + .windsurf/rules/ + .windsurf/skills/ + .windsurf/workflows/",
+        "windsurf": "AGENTS.md + .windsurf/rules/ (instructions) + .windsurf/skills/ (agents + skills) + .windsurf/workflows/ + .windsurf/hooks.json",
         "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .agents/",
         "minimal": "AGENTS.md only (create a target folder for full integration)",
     }

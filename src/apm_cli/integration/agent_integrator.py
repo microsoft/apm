@@ -11,6 +11,8 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List  # noqa: F401, UP035
 
+import yaml
+
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.utils.paths import portable_relpath
 
@@ -150,6 +152,9 @@ class AgentIntegrator(BaseIntegrator):
             if mapping.format_id == "codex_agent":
                 self._write_codex_agent(source_file, target_path)
                 links_resolved = 0
+            elif mapping.format_id == "windsurf_agent_skill":
+                self._write_windsurf_agent_skill(source_file, target_path)
+                links_resolved = 0
             else:
                 links_resolved = self.copy_agent(source_file, target_path)
             total_links_resolved += links_resolved
@@ -199,6 +204,61 @@ class AgentIntegrator(BaseIntegrator):
     # Kept for backward compatibility with external consumers.
     # Do NOT add new per-target methods here.
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Windsurf agent-skill transformer (agent.md -> skills/<name>/SKILL.md)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _write_windsurf_agent_skill(source: Path, target: Path) -> None:
+        """Transform an ``.agent.md`` file to a Windsurf Skill (``SKILL.md``).
+
+        Windsurf Skills are the closest equivalent to a specialist persona:
+        - Invocable with ``@skill-name`` (like ``@agent-name`` in Copilot)
+        - Auto-invoked by Cascade when the description matches the task
+        - Support a directory with supplementary resource files
+
+        The conversion:
+        - Keeps ``name`` (or derives from filename) and ``description``.
+        - Strips agent-specific keys (``model``, ``tools``).
+        - Preserves the markdown body verbatim.
+        """
+        content = source.read_text(encoding="utf-8")
+
+        stem = source.name
+        if stem.endswith(".agent.md"):
+            stem = stem[:-9]
+        elif stem.endswith(".chatmode.md"):
+            stem = stem[:-12]
+        else:
+            stem = Path(stem).stem
+
+        fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
+        if fm_match:
+            body = content[fm_match.end():]
+            try:
+                fm = yaml.safe_load(fm_match.group(1)) or {}
+            except Exception:
+                fm = {}
+        else:
+            body = content
+            fm = {}
+
+        name = fm.get("name", stem)
+        description = fm.get("description", "")
+
+        # Use yaml.dump to safely serialize values -- prevents YAML key
+        # injection via multi-line name/description strings.
+
+        fm_data: dict = {"name": name}
+        if description:
+            fm_data["description"] = description
+        fm_yaml = yaml.dump(fm_data, default_flow_style=False, allow_unicode=False).rstrip("\n")
+
+        result = f"---\n{fm_yaml}\n---\n" + body
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(result, encoding="utf-8")
+
 
     # DEPRECATED: use get_target_filename_for_target(KNOWN_TARGETS["copilot"], ...) instead.
     def get_target_filename(self, source_file: Path, package_name: str) -> str:
@@ -256,8 +316,6 @@ class AgentIntegrator(BaseIntegrator):
         if fm_match:
             body = content[fm_match.end() :]
             try:
-                import yaml
-
                 fm = yaml.safe_load(fm_match.group(1)) or {}
                 name = fm.get("name", name)
                 description = fm.get("description", description)

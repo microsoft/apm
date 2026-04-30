@@ -644,7 +644,6 @@ dependencies:
 The following IDE integrations are planned for future releases:
 
 - **JetBrains IDE support**: Native integration with IntelliJ, PyCharm, WebStorm, and other JetBrains IDEs
-- **Windsurf support**: Integration with the Windsurf AI coding environment
 - **Cursor deeper integration**: Enhanced Cursor support including rule versioning and conflict resolution
 
 ## Related Resources

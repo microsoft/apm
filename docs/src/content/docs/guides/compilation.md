@@ -4,7 +4,7 @@ sidebar:
   order: 1
 ---
 
-Compilation is **optional for some users**. If your team uses GitHub Copilot, Claude, or Cursor, `apm install` deploys all primitives in their native format -- you can skip this guide entirely. For Gemini, `apm install` deploys commands, skills, and hooks, but instructions require `apm compile` to generate `GEMINI.md`. For OpenCode and Codex, `apm install` deploys agents, commands, skills, and hooks, but instructions require `apm compile` to generate `AGENTS.md`.
+Compilation is **optional for some users**. If your team uses GitHub Copilot, Claude, or Cursor, `apm install` deploys all primitives in their native format -- you can skip this guide entirely. For Gemini, `apm install` deploys commands, skills, and hooks, but instructions require `apm compile` to generate `GEMINI.md`. For OpenCode, Codex, and Windsurf, `apm install` deploys agents, commands, skills, and hooks, but instructions require `apm compile` to generate `AGENTS.md`.
 
 **Solving the AI agent scalability problem through constraint satisfaction optimization**
 
@@ -24,6 +24,7 @@ When you run `apm compile` without specifying a target, APM automatically detect
 | `.claude/` folder only | `claude` | CLAUDE.md (instructions only) |
 | `.codex/` folder exists | `codex` | AGENTS.md (instructions only) |
 | `.gemini/` folder exists | `gemini` | GEMINI.md (instructions only) |
+| `.windsurf/` folder exists | `windsurf` | AGENTS.md (instructions only) |
 | Multiple folders exist | `all` | AGENTS.md + CLAUDE.md + GEMINI.md |
 | Neither folder exists | `minimal` | AGENTS.md only (universal format) |
 
@@ -33,6 +34,7 @@ apm compile --target copilot   # Force GitHub Copilot, Cursor
 apm compile --target claude    # Force Claude Code, Claude Desktop
 apm compile --target gemini    # Force Gemini CLI
 apm compile --target codex     # Force Codex CLI
+apm compile --target windsurf  # Force Windsurf/Cascade
 apm compile -t claude,copilot  # Multiple targets (comma-separated)
 ```
 
@@ -57,6 +59,7 @@ target: [claude, copilot]  # multiple targets -- only these are compiled
 | `claude` | `CLAUDE.md` | Claude Code, Claude Desktop |
 | `gemini` | `GEMINI.md` | Gemini CLI |
 | `codex` | `AGENTS.md` | Codex CLI |
+| `windsurf` | `AGENTS.md` | Windsurf/Cascade |
 | `all` | `AGENTS.md` + `CLAUDE.md` + `GEMINI.md` | Universal compatibility |
 | `minimal` | `AGENTS.md` only | Works everywhere, no folder integration |
 
@@ -451,8 +454,9 @@ Different AI tools get different levels of support from `apm install` vs `apm co
 | OpenCode | `.opencode/agents/`, `.opencode/commands/`, `.opencode/skills/`, `opencode.json` (MCP) | Via `AGENTS.md` | **Full** |
 | Codex CLI | `.agents/skills/`, `.codex/agents/`, `.codex/hooks.json` | `AGENTS.md` (instructions) | **Full** |
 | Gemini | `.gemini/commands/`, `.gemini/skills/`, `.gemini/settings.json` (MCP, hooks) | `GEMINI.md` (instructions) | **Full** |
+| Windsurf | `.windsurf/rules/`, `.windsurf/skills/`, `.windsurf/workflows/`, `.windsurf/hooks.json` | `AGENTS.md` (instructions) | **Full** |
 
-For Copilot, Claude, and Cursor users, `apm install` handles everything natively. Gemini, OpenCode, and Codex users should also run `apm compile` to generate their instruction roll-up (`GEMINI.md` or `AGENTS.md`).
+For Copilot, Claude, and Cursor users, `apm install` handles everything natively. Gemini, OpenCode, Codex, and Windsurf users should also run `apm compile` to generate their instruction roll-up (`GEMINI.md` or `AGENTS.md`).
 
 ## Theoretical Foundations
 

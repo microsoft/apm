@@ -72,6 +72,7 @@ hooks:
 | `*-claude-hooks.json` | Claude Code only |
 | `*-codex-hooks.json` | Codex CLI only |
 | `*-gemini-hooks.json` | Gemini CLI only |
+| `*-windsurf-hooks.json` | Windsurf only |
 | Any other name (e.g. `hooks.json`, `telemetry-hooks.json`) | All targets |
 
 Example directory tree for a multi-target hook package:
@@ -101,10 +102,10 @@ silently fall through to auto-detect.
 
 | Form | Behaviour |
 |------|-----------|
-| `target: copilot` | Single token; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `all` |
+| `target: copilot` | Single token; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `all` |
 | `target: [claude, copilot]` | List form; only listed targets are compiled/installed |
 | `target: claude,copilot` | CSV-string form; parses identically to the list form (the shared validator splits on `,`). Before #820 was fixed, this silently produced zero deployment |
-| `target:` omitted entirely | Auto-detect from project folders (`.github/`, `.claude/`, `.codex/`) |
+| `target:` omitted entirely | Auto-detect from project folders (`.github/`, `.claude/`, `.codex/`, `.windsurf/`, etc.) |
 | `target: bogus` (unknown token) | **Parse error** -- fix the typo |
 | `target: ""` or `target: []` (empty) | **Parse error** -- remove the line if you meant auto-detect |
 | `target: [all, claude]` (`all` mixed with other targets) | **Parse error** -- use `all` alone |

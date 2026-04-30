@@ -332,6 +332,7 @@ class TestWindsurfScopeResolution:
         resolved = windsurf.for_scope(user_scope=False)
         assert resolved.root_dir == ".windsurf"
         assert "instructions" in resolved.primitives
+        assert "agents" in resolved.primitives
 
     def test_user_scope_uses_codeium_windsurf_root(self):
         windsurf = KNOWN_TARGETS["windsurf"]
@@ -350,6 +351,7 @@ class TestWindsurfScopeResolution:
         assert "skills" in resolved.primitives
         assert "commands" in resolved.primitives
         assert "hooks" in resolved.primitives
+        assert "agents" in resolved.primitives
 
     def test_project_scope_deploys_instructions(self):
         """At project scope, instructions deploy to .windsurf/rules/."""

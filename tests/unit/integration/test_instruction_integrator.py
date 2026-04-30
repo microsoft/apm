@@ -1214,7 +1214,7 @@ class TestWindsurfRulesIntegration:
         assert "# Python rules" in content
 
     def test_filename_strips_instructions_md_suffix(self):
-        """Converts python.instructions.md → python.md."""
+        """Converts python.instructions.md -> python.md."""
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         (self.project_root / ".windsurf").mkdir()

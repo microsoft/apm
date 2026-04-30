@@ -998,7 +998,7 @@ class MCPIntegrator:
                                 installed_runtimes.append(runtime_name)
                         elif runtime_name == "windsurf":
                             # Windsurf is opt-in: only target when .windsurf/ exists
-                            if (Path.cwd() / ".windsurf").is_dir():
+                            if (project_root_path / ".windsurf").is_dir():
                                 ClientFactory.create_client(runtime_name)
                                 installed_runtimes.append(runtime_name)
                         else:  # noqa: PLR5501
@@ -1024,7 +1024,7 @@ class MCPIntegrator:
                 if (Path.cwd() / ".gemini").is_dir():
                     installed_runtimes.append("gemini")
                 # Windsurf is directory-presence based
-                if (Path.cwd() / ".windsurf").is_dir():
+                if (project_root_path / ".windsurf").is_dir():
                     installed_runtimes.append("windsurf")
 
             # Step 2: Get runtimes referenced in apm.yml scripts
