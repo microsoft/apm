@@ -1,9 +1,11 @@
 # Setup script for Codex runtime (Windows)
 # Downloads Codex binary from GitHub releases and configures with GitHub Models
 
+# Pin to a known stable release for security and reproducibility (#662).
+# Users can override with: apm runtime setup codex --version <version> (e.g. 'latest')
 param(
     [switch]$Vanilla,
-    [string]$Version = "latest"
+    [string]$Version = "rust-v0.118.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,7 +43,7 @@ function Install-Codex {
 
     Initialize-ApmRuntimeDir
 
-    $runtimeDir = Join-Path $env:USERPROFILE ".apm" "runtimes"
+    $runtimeDir = Join-Path (Join-Path $env:USERPROFILE ".apm") "runtimes"
     $codexBinary = Join-Path $runtimeDir "codex.exe"
     $codexConfigDir = Join-Path $env:USERPROFILE ".codex"
     $codexConfig = Join-Path $codexConfigDir "config.toml"
@@ -161,10 +163,12 @@ model = "openai/gpt-4o"
 name = "GitHub Models"
 base_url = "https://models.github.ai/inference/"
 env_key = "$githubTokenVar"
-wire_api = "chat"
+wire_api = "responses"
 "@ | Set-Content -Path $codexConfig -Encoding UTF8
 
         Write-Success "Codex configuration created at $codexConfig"
+        Write-Info "Using Codex $Version."
+        Write-Info "Override with: apm runtime setup codex --version <version> (e.g. 'latest')"
     } else {
         Write-Info "Vanilla mode: Skipping APM configuration"
     }

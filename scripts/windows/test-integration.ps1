@@ -60,14 +60,14 @@ function Get-BinaryName {
 function Find-ExistingBinary {
     param([string]$BinaryName)
 
-    $binaryPath = Join-Path "." "dist" $BinaryName "apm.exe"
+    $binaryPath = Join-Path (Join-Path (Join-Path "." "dist") $BinaryName) "apm.exe"
     if (Test-Path $binaryPath) {
         Write-Info "Found existing binary: $binaryPath (CI mode)"
         return $true
     }
 
     # Also check for directory-style artifact (download-artifact extracts flat)
-    $flatPath = Join-Path "." $BinaryName "apm.exe"
+    $flatPath = Join-Path (Join-Path "." $BinaryName) "apm.exe"
     if (Test-Path $flatPath) {
         Write-Info "Found existing binary: $flatPath (CI mode)"
         return $true
@@ -90,7 +90,7 @@ function Build-Binary {
     Write-Info "Building binary with PyInstaller..."
     uv run pyinstaller build/apm.spec --noconfirm
 
-    $binaryPath = Join-Path "." "dist" $BinaryName "apm.exe"
+    $binaryPath = Join-Path (Join-Path (Join-Path "." "dist") $BinaryName) "apm.exe"
     if (-not (Test-Path $binaryPath)) {
         Write-ErrorText "Binary not found after build: $binaryPath"
         exit 1
@@ -104,7 +104,7 @@ function Initialize-BinaryForTesting {
 
     Write-Info "=== Setting up binary for testing ==="
 
-    $binaryDir = Join-Path (Get-Location) "dist" $BinaryName
+    $binaryDir = Join-Path (Join-Path (Get-Location) "dist") $BinaryName
     if (-not (Test-Path (Join-Path $binaryDir "apm.exe"))) {
         # Check flat layout from download-artifact
         $binaryDir = Join-Path (Get-Location) $BinaryName
@@ -147,7 +147,7 @@ function Initialize-Runtimes {
     if ($LASTEXITCODE -ne 0) { Write-ErrorText "Failed to set up LLM runtime"; exit 1 }
 
     # Add runtime paths to session
-    $runtimeDir = Join-Path $env:USERPROFILE ".apm" "runtimes"
+    $runtimeDir = Join-Path (Join-Path $env:USERPROFILE ".apm") "runtimes"
     $env:PATH = "$runtimeDir;$env:PATH"
 
     Write-Success "All runtimes configured (Copilot, Codex, LLM)"

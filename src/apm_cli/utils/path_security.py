@@ -33,6 +33,7 @@ def validate_path_segments(
     *,
     context: str = "path",
     reject_empty: bool = False,
+    allow_current_dir: bool = False,
 ) -> None:
     """Reject path strings containing traversal sequences.
 
@@ -48,23 +49,40 @@ def validate_path_segments(
         Human-readable label for error messages.
     reject_empty : bool
         If *True*, also reject empty segments.
+    allow_current_dir : bool
+        If *True*, ``.`` segments are accepted (e.g. for shell command
+        strings like ``./bin/my-server`` where "here" is meaningful).
+        ``..`` is still rejected.  Defaults to *False* so the strict
+        rule applies to the dependency / virtual-path call sites.
 
     Raises
     ------
     PathTraversalError
         If any segment fails validation.
     """
+    reject = {".."} if allow_current_dir else {".", ".."}
     for segment in path_str.replace("\\", "/").split("/"):
-        if segment in (".", ".."):
+        if segment in reject:
             raise PathTraversalError(
-                f"Invalid {context} '{path_str}': "
-                f"segment '{segment}' is a traversal sequence"
+                f"Invalid {context} '{path_str}': segment '{segment}' is a traversal sequence"
             )
         if reject_empty and not segment:
             raise PathTraversalError(
-                f"Invalid {context} '{path_str}': "
-                f"path segments must not be empty"
+                f"Invalid {context} '{path_str}': path segments must not be empty"
             )
+
+
+def _strip_extended_prefix(p: Path) -> Path:
+    """Strip the ``\\\\?\\`` extended-length prefix that Windows' resolve() may add.
+
+    On Windows, ``Path.resolve()`` can inconsistently add the prefix to
+    one path but not another, making ``is_relative_to`` fail even when
+    both paths share the same physical root (#886).
+    """
+    s = str(p)
+    if s.startswith("\\\\?\\"):
+        return Path(s[4:])
+    return p
 
 
 def ensure_path_within(path: Path, base_dir: Path) -> Path:
@@ -76,8 +94,8 @@ def ensure_path_within(path: Path, base_dir: Path) -> Path:
     This is intentionally strict: symlinks are resolved so that a link
     pointing outside the base is caught as well.
     """
-    resolved = path.resolve()
-    resolved_base = base_dir.resolve()
+    resolved = _strip_extended_prefix(path.resolve())
+    resolved_base = _strip_extended_prefix(base_dir.resolve())
     try:
         if not resolved.is_relative_to(resolved_base):
             raise PathTraversalError(

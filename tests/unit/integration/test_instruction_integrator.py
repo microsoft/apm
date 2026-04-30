@@ -1,15 +1,16 @@
 """Tests for instruction integration functionality."""
 
-import pytest
-import tempfile
 import shutil
+import tempfile
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock
-from datetime import datetime
 
-from apm_cli.integration.instruction_integrator import InstructionIntegrator
+import pytest  # noqa: F401
+
 from apm_cli.integration.base_integrator import IntegrationResult
-from apm_cli.models.apm_package import PackageInfo, APMPackage, ResolvedReference, GitReferenceType
+from apm_cli.integration.instruction_integrator import InstructionIntegrator
+from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
 
 
 def _make_package_info(package_dir, name="test-pkg"):
@@ -75,7 +76,9 @@ class TestInstructionIntegrator:
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
-        (inst_dir / "python.instructions.md").write_text("---\napplyTo: '**/*.py'\n---\n# Python rules")
+        (inst_dir / "python.instructions.md").write_text(
+            "---\napplyTo: '**/*.py'\n---\n# Python rules"
+        )
         (inst_dir / "readme.md").write_text("# Not an instruction")
 
         files = self.integrator.find_instruction_files(pkg)
@@ -114,7 +117,9 @@ class TestInstructionIntegrator:
         """Frontmatter with applyTo is preserved exactly."""
         source = self.project_root / "source.instructions.md"
         target = self.project_root / "target.instructions.md"
-        content = "---\napplyTo: 'src/**/*.ts'\ndescription: TypeScript guidelines\n---\n\n# TS Rules"
+        content = (
+            "---\napplyTo: 'src/**/*.ts'\ndescription: TypeScript guidelines\n---\n\n# TS Rules"
+        )
         source.write_text(content)
 
         self.integrator.copy_instruction(source, target)
@@ -297,7 +302,10 @@ class TestInstructionIntegrator:
         assert len(result.target_paths) == 1
         tp = result.target_paths[0]
         assert tp.is_absolute()
-        assert tp.relative_to(self.project_root).as_posix() == ".github/instructions/python.instructions.md"
+        assert (
+            tp.relative_to(self.project_root).as_posix()
+            == ".github/instructions/python.instructions.md"
+        )
 
 
 class TestInstructionSyncIntegration:
@@ -323,9 +331,11 @@ class TestInstructionSyncIntegration:
             ".github/instructions/testing.instructions.md",
         }
         apm_package = Mock()
-        result = self.integrator.sync_integration(apm_package, self.project_root, managed_files=managed)
+        result = self.integrator.sync_integration(
+            apm_package, self.project_root, managed_files=managed
+        )
 
-        assert result['files_removed'] == 2
+        assert result["files_removed"] == 2
         assert not (target_dir / "python.instructions.md").exists()
         assert not (target_dir / "testing.instructions.md").exists()
 
@@ -338,9 +348,11 @@ class TestInstructionSyncIntegration:
 
         managed = {".github/instructions/python.instructions.md"}
         apm_package = Mock()
-        result = self.integrator.sync_integration(apm_package, self.project_root, managed_files=managed)
+        result = self.integrator.sync_integration(
+            apm_package, self.project_root, managed_files=managed
+        )
 
-        assert result['files_removed'] == 1
+        assert result["files_removed"] == 1
         assert not (target_dir / "python.instructions.md").exists()
         assert (target_dir / "my-custom.instructions.md").exists()
 
@@ -352,9 +364,11 @@ class TestInstructionSyncIntegration:
         (target_dir / "testing.instructions.md").write_text("# Testing")
 
         apm_package = Mock()
-        result = self.integrator.sync_integration(apm_package, self.project_root, managed_files=None)
+        result = self.integrator.sync_integration(
+            apm_package, self.project_root, managed_files=None
+        )
 
-        assert result['files_removed'] == 2
+        assert result["files_removed"] == 2
 
     def test_sync_legacy_preserves_non_instruction_files(self):
         """Legacy glob only matches *.instructions.md — other files preserved."""
@@ -365,9 +379,11 @@ class TestInstructionSyncIntegration:
         (target_dir / "notes.txt").write_text("notes")
 
         apm_package = Mock()
-        result = self.integrator.sync_integration(apm_package, self.project_root, managed_files=None)
+        result = self.integrator.sync_integration(
+            apm_package, self.project_root, managed_files=None
+        )
 
-        assert result['files_removed'] == 1
+        assert result["files_removed"] == 1
         assert (target_dir / "README.md").exists()
         assert (target_dir / "notes.txt").exists()
 
@@ -376,8 +392,8 @@ class TestInstructionSyncIntegration:
         apm_package = Mock()
         result = self.integrator.sync_integration(apm_package, self.project_root)
 
-        assert result['files_removed'] == 0
-        assert result['errors'] == 0
+        assert result["files_removed"] == 0
+        assert result["errors"] == 0
 
     def test_sync_empty_managed_files_removes_nothing(self):
         """Empty managed_files set removes nothing."""
@@ -386,9 +402,11 @@ class TestInstructionSyncIntegration:
         (target_dir / "python.instructions.md").write_text("# Python")
 
         apm_package = Mock()
-        result = self.integrator.sync_integration(apm_package, self.project_root, managed_files=set())
+        result = self.integrator.sync_integration(
+            apm_package, self.project_root, managed_files=set()
+        )
 
-        assert result['files_removed'] == 0
+        assert result["files_removed"] == 0
         assert (target_dir / "python.instructions.md").exists()
 
     def test_sync_skips_files_not_on_disk(self):
@@ -398,9 +416,11 @@ class TestInstructionSyncIntegration:
 
         managed = {".github/instructions/nonexistent.instructions.md"}
         apm_package = Mock()
-        result = self.integrator.sync_integration(apm_package, self.project_root, managed_files=managed)
+        result = self.integrator.sync_integration(
+            apm_package, self.project_root, managed_files=managed
+        )
 
-        assert result['files_removed'] == 0
+        assert result["files_removed"] == 0
 
 
 class TestInstructionNameCollision:
@@ -733,7 +753,9 @@ class TestCursorRulesSyncIntegration:
             ".cursor/rules/testing.mdc",
         }
         apm_package = Mock()
-        result = self.integrator.sync_integration_cursor(apm_package, self.project_root, managed_files=managed)
+        result = self.integrator.sync_integration_cursor(
+            apm_package, self.project_root, managed_files=managed
+        )
 
         assert result["files_removed"] == 2
         assert not (rules_dir / "python.mdc").exists()
@@ -747,7 +769,9 @@ class TestCursorRulesSyncIntegration:
 
         managed = {".cursor/rules/python.mdc"}
         apm_package = Mock()
-        result = self.integrator.sync_integration_cursor(apm_package, self.project_root, managed_files=managed)
+        result = self.integrator.sync_integration_cursor(
+            apm_package, self.project_root, managed_files=managed
+        )
 
         assert result["files_removed"] == 1
         assert (rules_dir / "my-custom.mdc").exists()
@@ -759,13 +783,347 @@ class TestCursorRulesSyncIntegration:
         (rules_dir / "testing.mdc").write_text("# Testing")
 
         apm_package = Mock()
-        result = self.integrator.sync_integration_cursor(apm_package, self.project_root, managed_files=None)
+        result = self.integrator.sync_integration_cursor(
+            apm_package, self.project_root, managed_files=None
+        )
 
         assert result["files_removed"] == 2
 
     def test_sync_handles_missing_rules_dir(self):
         apm_package = Mock()
         result = self.integrator.sync_integration_cursor(apm_package, self.project_root)
+
+        assert result["files_removed"] == 0
+        assert result["errors"] == 0
+
+
+# ======================================================================
+# Claude Code Rules (.md with paths: frontmatter)
+# ======================================================================
+
+
+class TestConvertToClaudeRules:
+    """Test the _convert_to_claude_rules() frontmatter conversion helper."""
+
+    def test_maps_apply_to_to_paths(self):
+        content = "---\napplyTo: 'src/**/*.py'\n---\n\n# Python rules"
+        result = InstructionIntegrator._convert_to_claude_rules(content)
+        assert "paths:" in result
+        assert '  - "src/**/*.py"' in result
+        assert "applyTo" not in result
+
+    def test_preserves_body(self):
+        content = "---\napplyTo: '**/*.ts'\n---\n\n# TypeScript\n\nUse strict mode."
+        result = InstructionIntegrator._convert_to_claude_rules(content)
+        assert "# TypeScript" in result
+        assert "Use strict mode." in result
+
+    def test_no_frontmatter_returns_body_only(self):
+        content = "# Simple rules\n\nJust some guidelines."
+        result = InstructionIntegrator._convert_to_claude_rules(content)
+        # No paths key when no applyTo
+        assert "paths:" not in result
+        assert "---" not in result
+        assert "# Simple rules" in result
+        assert "Just some guidelines." in result
+
+    def test_no_apply_to_omits_paths(self):
+        content = "---\ndescription: General rules\n---\n\n# Rules"
+        result = InstructionIntegrator._convert_to_claude_rules(content)
+        assert "paths:" not in result
+        # Frontmatter stripped, body returned
+        assert "# Rules" in result
+
+    def test_description_field_stripped_from_frontmatter(self):
+        """Claude rules use paths: only; description is not a valid key."""
+        content = "---\napplyTo: '**/*.py'\ndescription: Python guidelines\n---\n\n# Python"
+        result = InstructionIntegrator._convert_to_claude_rules(content)
+        assert "paths:" in result
+        assert '  - "**/*.py"' in result
+        # description should NOT appear in Claude frontmatter
+        assert "description:" not in result
+
+    def test_empty_apply_to_returns_body(self):
+        content = "---\napplyTo: ''\n---\n\n# Rules"
+        result = InstructionIntegrator._convert_to_claude_rules(content)
+        assert "paths:" not in result
+        assert "# Rules" in result
+
+    def test_quoted_apply_to_double(self):
+        content = '---\napplyTo: "src/api/**/*.ts"\n---\n\n# API rules'
+        result = InstructionIntegrator._convert_to_claude_rules(content)
+        assert '  - "src/api/**/*.ts"' in result
+
+
+class TestClaudeRulesIntegration:
+    """Test integrate_package_instructions_claude()."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.project_root = Path(self.temp_dir)
+        self.integrator = InstructionIntegrator()
+
+    def teardown_method(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_skips_when_no_claude_dir(self):
+        """Returns empty result when .claude/ doesn't exist."""
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "python.instructions.md").write_text("# Python")
+
+        pkg_info = _make_package_info(pkg)
+        result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
+
+        assert result.files_integrated == 0
+        assert result.target_paths == []
+
+    def test_deploys_when_claude_dir_exists(self):
+        """Deploys .md files when .claude/ exists."""
+        (self.project_root / ".claude").mkdir()
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "python.instructions.md").write_text(
+            "---\napplyTo: '**/*.py'\n---\n\n# Python rules"
+        )
+
+        pkg_info = _make_package_info(pkg)
+        result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
+
+        assert result.files_integrated == 1
+        target = self.project_root / ".claude" / "rules" / "python.md"
+        assert target.exists()
+        content = target.read_text()
+        assert "paths:" in content
+        assert '  - "**/*.py"' in content
+        assert "# Python rules" in content
+
+    def test_creates_rules_subdirectory(self):
+        """Creates .claude/rules/ if it doesn't exist."""
+        (self.project_root / ".claude").mkdir()
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "test.instructions.md").write_text("# Test")
+
+        pkg_info = _make_package_info(pkg)
+        self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
+
+        assert (self.project_root / ".claude" / "rules").is_dir()
+
+    def test_filename_strips_instructions_md_adds_md(self):
+        """Converts python.instructions.md -> python.md."""
+        (self.project_root / ".claude").mkdir()
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "security.instructions.md").write_text("# Security")
+
+        pkg_info = _make_package_info(pkg)
+        result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
+
+        assert len(result.target_paths) == 1
+        assert result.target_paths[0].name == "security.md"
+
+    def test_multiple_files(self):
+        """Integrates multiple instruction files as .md rules."""
+        (self.project_root / ".claude").mkdir()
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "python.instructions.md").write_text("# Python")
+        (inst_dir / "testing.instructions.md").write_text("# Testing")
+
+        pkg_info = _make_package_info(pkg)
+        result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
+
+        assert result.files_integrated == 2
+        rules_dir = self.project_root / ".claude" / "rules"
+        assert (rules_dir / "python.md").exists()
+        assert (rules_dir / "testing.md").exists()
+
+    def test_returns_empty_when_no_instruction_files(self):
+        (self.project_root / ".claude").mkdir()
+        pkg = self.project_root / "package"
+        pkg.mkdir()
+
+        pkg_info = _make_package_info(pkg)
+        result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
+
+        assert result.files_integrated == 0
+        assert result.target_paths == []
+
+    def test_collision_detection_skips_user_file(self):
+        """Skips user-authored .md file when not in managed_files."""
+        (self.project_root / ".claude").mkdir()
+        rules_dir = self.project_root / ".claude" / "rules"
+        rules_dir.mkdir()
+        (rules_dir / "python.md").write_text("# User rules")
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "python.instructions.md").write_text("# APM rules")
+
+        pkg_info = _make_package_info(pkg)
+        result = self.integrator.integrate_package_instructions_claude(
+            pkg_info, self.project_root, managed_files=set()
+        )
+
+        assert result.files_integrated == 0
+        assert result.files_skipped == 1
+        assert (rules_dir / "python.md").read_text() == "# User rules"
+
+    def test_overwrites_managed_file(self):
+        """Overwrites file when it's in managed_files."""
+        (self.project_root / ".claude").mkdir()
+        rules_dir = self.project_root / ".claude" / "rules"
+        rules_dir.mkdir()
+        (rules_dir / "python.md").write_text("# Old version")
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "python.instructions.md").write_text("# Updated")
+
+        pkg_info = _make_package_info(pkg)
+        managed = {".claude/rules/python.md"}
+        result = self.integrator.integrate_package_instructions_claude(
+            pkg_info, self.project_root, managed_files=managed
+        )
+
+        assert result.files_integrated == 1
+
+    def test_target_paths_are_absolute(self):
+        (self.project_root / ".claude").mkdir()
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "python.instructions.md").write_text("# Python")
+
+        pkg_info = _make_package_info(pkg)
+        result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
+
+        assert len(result.target_paths) == 1
+        tp = result.target_paths[0]
+        assert tp.is_absolute()
+        assert tp.relative_to(self.project_root).as_posix() == ".claude/rules/python.md"
+
+    def test_frontmatter_conversion_in_deployed_file(self):
+        """End-to-end: applyTo converts to paths in deployed .md."""
+        (self.project_root / ".claude").mkdir()
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "ts.instructions.md").write_text(
+            "---\napplyTo: 'src/**/*.ts'\ndescription: TypeScript rules\n---\n\n# TypeScript\n\nUse strict mode."
+        )
+
+        pkg_info = _make_package_info(pkg)
+        self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
+
+        deployed = (self.project_root / ".claude" / "rules" / "ts.md").read_text()
+        assert "paths:" in deployed
+        assert '  - "src/**/*.ts"' in deployed
+        assert "applyTo" not in deployed
+        # description is NOT in Claude rules frontmatter
+        assert "description:" not in deployed
+        assert "# TypeScript" in deployed
+        assert "Use strict mode." in deployed
+
+    def test_unconditional_rule_has_no_frontmatter(self):
+        """Instructions without applyTo become unconditional rules."""
+        (self.project_root / ".claude").mkdir()
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "general.instructions.md").write_text(
+            "---\ndescription: General guidelines\n---\n\n# General\n\nAlways lint."
+        )
+
+        pkg_info = _make_package_info(pkg)
+        self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
+
+        deployed = (self.project_root / ".claude" / "rules" / "general.md").read_text()
+        assert "---" not in deployed
+        assert "# General" in deployed
+        assert "Always lint." in deployed
+
+
+class TestClaudeRulesSyncIntegration:
+    """Test sync_integration_claude (manifest-based removal)."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.project_root = Path(self.temp_dir)
+        self.integrator = InstructionIntegrator()
+
+    def teardown_method(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_sync_removes_managed_md_files(self):
+        rules_dir = self.project_root / ".claude" / "rules"
+        rules_dir.mkdir(parents=True)
+        (rules_dir / "python.md").write_text("# Python")
+        (rules_dir / "testing.md").write_text("# Testing")
+
+        managed = {
+            ".claude/rules/python.md",
+            ".claude/rules/testing.md",
+        }
+        apm_package = Mock()
+        result = self.integrator.sync_integration_claude(
+            apm_package, self.project_root, managed_files=managed
+        )
+
+        assert result["files_removed"] == 2
+        assert not (rules_dir / "python.md").exists()
+        assert not (rules_dir / "testing.md").exists()
+
+    def test_sync_preserves_unmanaged_files(self):
+        rules_dir = self.project_root / ".claude" / "rules"
+        rules_dir.mkdir(parents=True)
+        (rules_dir / "python.md").write_text("# APM")
+        (rules_dir / "my-custom.md").write_text("# User-authored")
+
+        managed = {".claude/rules/python.md"}
+        apm_package = Mock()
+        result = self.integrator.sync_integration_claude(
+            apm_package, self.project_root, managed_files=managed
+        )
+
+        assert result["files_removed"] == 1
+        assert (rules_dir / "my-custom.md").exists()
+
+    def test_sync_legacy_fallback_preserves_user_files(self):
+        """Legacy fallback (managed_files=None) does NOT glob-delete .md files
+        under .claude/rules/ because that would destroy user-authored rules."""
+        rules_dir = self.project_root / ".claude" / "rules"
+        rules_dir.mkdir(parents=True)
+        (rules_dir / "python.md").write_text("# Python")
+        (rules_dir / "testing.md").write_text("# Testing")
+
+        apm_package = Mock()
+        result = self.integrator.sync_integration_claude(
+            apm_package, self.project_root, managed_files=None
+        )
+
+        assert result["files_removed"] == 0
+        assert (rules_dir / "python.md").exists()
+        assert (rules_dir / "testing.md").exists()
+
+    def test_sync_handles_missing_rules_dir(self):
+        apm_package = Mock()
+        result = self.integrator.sync_integration_claude(apm_package, self.project_root)
 
         assert result["files_removed"] == 0
         assert result["errors"] == 0

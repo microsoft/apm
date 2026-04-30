@@ -1,0 +1,7 @@
+# Fixture 12: Extends a non-existent parent
+# Tests: discovery returns error when parent cannot be fetched;
+#         falls to outcome #4 (fail-open) or #5 (fail-closed) per config
+name: extends-missing-parent-policy
+version: "1.0.0"
+extends: nonexistent-org/nonexistent-policy-repo
+enforcement: warn

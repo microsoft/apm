@@ -1,0 +1,10 @@
+# Fixture 14: Compilation target restriction
+# Tests: compilation.target.allow filters install by effective target;
+#         target-sensitive check runs AFTER targets.run(ctx) (rubber-duck I6)
+name: target-restriction-policy
+version: "1.0.0"
+enforcement: block
+
+compilation:
+  target:
+    allow: [vscode]

@@ -1,0 +1,10 @@
+# Fixture 1: Allow-list policy (enforcement=warn)
+# Tests: dependencies.allow pattern matching; warn-mode diagnostics
+name: allow-list-policy
+version: "1.0.0"
+enforcement: warn
+
+dependencies:
+  allow:
+    - "DevExpGbb/*"
+    - "microsoft/*"

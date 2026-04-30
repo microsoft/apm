@@ -124,9 +124,10 @@ dependencies:
 **Lock.** `apm.lock.yaml` pins every dependency to an exact commit. Two developers
 running `apm install` on the same lock file get identical setups.
 
-**Build.** `apm compile` produces optimized output files for each AI tool —
+**Build.** `apm compile` produces optimized output files for each AI tool --
 `AGENTS.md` for Copilot, Cursor, and Codex; `CLAUDE.md` for Claude.
-`apm pack` creates self-contained bundles for portable distribution.
+`apm pack` creates a Claude Code plugin directory by default, or a portable
+APM bundle (`--format apm`) for restore-mode distribution.
 
 ```bash
 apm compile
@@ -149,8 +150,8 @@ supported tool:
 | Claude | `.claude/` commands, skills, MCP | `CLAUDE.md` | **Full** |
 | Cursor | `.cursor/rules/`, `.cursor/agents/`, skills, hooks, MCP | `.cursor/rules/` (also via compile) | **Full** |
 | OpenCode | `.opencode/agents/`, `.opencode/commands/`, skills, MCP | Via `AGENTS.md` | **Full** |
-| Codex CLI | — | `AGENTS.md` | Instructions via compile |
-| Gemini | — | `GEMINI.md` | Instructions via compile |
+| Codex CLI | -- | `AGENTS.md` | Instructions via compile |
+| Gemini | `.gemini/commands/`, `.gemini/skills/`, `.gemini/settings.json` (MCP, hooks) | `GEMINI.md` (instructions) | **Full** |
 
 For tools with **Full** support, `apm install` deploys all primitives in their
 native format — no additional steps needed. For other tools, `apm compile`
@@ -222,6 +223,7 @@ APM:
 
 - Your `AGENTS.md` still works with Copilot and Codex
 - Your `CLAUDE.md` still works with Claude
+- Your `GEMINI.md` still works with Gemini
 - Your `.cursor/rules/` still work with Cursor
 - Your `.opencode/` files still work with OpenCode
 - Your `.github/prompts/` still work with Copilot

@@ -1,0 +1,9 @@
+# Chain root: no parent
+name: depth-level-0
+version: "1.0.0"
+enforcement: block
+
+dependencies:
+  allow:
+    - "contoso-*/*"
+    - "microsoft/*"

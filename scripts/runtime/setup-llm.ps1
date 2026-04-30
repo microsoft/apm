@@ -15,7 +15,7 @@ function Install-Llm {
 
     Initialize-ApmRuntimeDir
 
-    $runtimeDir = Join-Path $env:USERPROFILE ".apm" "runtimes"
+    $runtimeDir = Join-Path (Join-Path $env:USERPROFILE ".apm") "runtimes"
     $llmVenv = Join-Path $runtimeDir "llm-venv"
     $llmWrapper = Join-Path $runtimeDir "llm.cmd"
 
@@ -30,8 +30,8 @@ function Install-Llm {
     Write-Info "Creating Python virtual environment for LLM..."
     python -m venv $llmVenv
 
-    $pipExe = Join-Path $llmVenv "Scripts" "pip.exe"
-    $llmExe = Join-Path $llmVenv "Scripts" "llm.exe"
+    $pipExe = Join-Path (Join-Path $llmVenv "Scripts") "pip.exe"
+    $llmExe = Join-Path (Join-Path $llmVenv "Scripts") "llm.exe"
 
     # Install LLM
     Write-Info "Installing LLM library..."

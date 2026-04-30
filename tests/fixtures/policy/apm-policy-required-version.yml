@@ -1,0 +1,11 @@
+# Fixture 4: Required dep with version pin + project-wins resolution
+# Tests: version-pin mismatch downgraded to warn under project-wins;
+#         missing required dep still blocks (rubber-duck I7)
+name: required-version-pin-policy
+version: "1.0.0"
+enforcement: block
+
+dependencies:
+  require:
+    - "DevExpGbb/required-standards#v2.0.0"
+  require_resolution: project-wins

@@ -1,11 +1,17 @@
 """Tests for the APM lock file module."""
 
-import pytest
-from pathlib import Path
+from pathlib import Path  # noqa: F401
 from unittest.mock import Mock
+
+import pytest  # noqa: F401
 import yaml
 
-from apm_cli.deps.lockfile import LockedDependency, LockFile, get_lockfile_path, migrate_lockfile_if_needed
+from apm_cli.deps.lockfile import (
+    LockedDependency,
+    LockFile,
+    get_lockfile_path,
+    migrate_lockfile_if_needed,
+)
 from apm_cli.models.apm_package import DependencyReference
 
 
@@ -17,7 +23,9 @@ class TestLockedDependency:
         assert dep.get_unique_key() == "owner/repo"
 
     def test_get_unique_key_virtual(self):
-        dep = LockedDependency(repo_url="owner/repo", virtual_path="prompts/file.md", is_virtual=True)
+        dep = LockedDependency(
+            repo_url="owner/repo", virtual_path="prompts/file.md", is_virtual=True
+        )
         assert dep.get_unique_key() == "owner/repo/prompts/file.md"
 
     def test_to_dict_minimal(self):
@@ -36,6 +44,80 @@ class TestLockedDependency:
         locked = LockedDependency.from_dependency_ref(dep_ref, "abc123", 1, None)
         assert locked.repo_url == "owner/repo"
         assert locked.resolved_commit == "abc123"
+
+    def test_port_round_trip_ssh(self):
+        """Custom SSH port survives to_dict → from_dict."""
+        dep = LockedDependency(
+            repo_url="team/repo",
+            host="bitbucket.example.com",
+            port=7999,
+        )
+        data = dep.to_dict()
+        assert data["port"] == 7999
+        restored = LockedDependency.from_dict(data)
+        assert restored.port == 7999
+        assert restored.host == "bitbucket.example.com"
+
+    def test_port_round_trip_https(self):
+        """Custom HTTPS port survives to_dict → from_dict."""
+        dep = LockedDependency(
+            repo_url="team/repo",
+            host="git.internal",
+            port=8443,
+        )
+        data = dep.to_dict()
+        assert data["port"] == 8443
+        restored = LockedDependency.from_dict(data)
+        assert restored.port == 8443
+
+    def test_port_omitted_when_none(self):
+        """port should not appear in the serialized dict when unset."""
+        dep = LockedDependency(repo_url="owner/repo", host="github.com")
+        data = dep.to_dict()
+        assert "port" not in data
+
+    def test_port_defensive_cast_invalid(self):
+        """Garbage port values in a lockfile are rejected (defensive read)."""
+        # Non-numeric string
+        dep = LockedDependency.from_dict({"repo_url": "o/r", "port": "not-a-port"})
+        assert dep.port is None
+        # Out-of-range
+        dep = LockedDependency.from_dict({"repo_url": "o/r", "port": 99999})
+        assert dep.port is None
+        dep = LockedDependency.from_dict({"repo_url": "o/r", "port": 0})
+        assert dep.port is None
+        dep = LockedDependency.from_dict({"repo_url": "o/r", "port": -1})
+        assert dep.port is None
+
+    def test_port_from_dependency_ref(self):
+        """from_dependency_ref carries port through."""
+        dep_ref = DependencyReference(
+            repo_url="team/repo",
+            host="bitbucket.example.com",
+            port=7999,
+        )
+        locked = LockedDependency.from_dependency_ref(dep_ref, "abc123", 1, None)
+        assert locked.port == 7999
+
+    def test_deployed_file_hashes_round_trip(self):
+        dep = LockedDependency(
+            repo_url="owner/repo",
+            deployed_files=["a.md", "b.md"],
+            deployed_file_hashes={"b.md": "sha256:dead", "a.md": "sha256:beef"},
+        )
+        d = dep.to_dict()
+        # Serialised deterministically (sorted by key).
+        assert list(d["deployed_file_hashes"].keys()) == ["a.md", "b.md"]
+        assert LockedDependency.from_dict(d).deployed_file_hashes == dep.deployed_file_hashes
+
+    def test_deployed_file_hashes_omitted_when_empty(self):
+        """Backward compat: legacy dicts without the field stay clean."""
+        dep = LockedDependency(repo_url="owner/repo")
+        assert "deployed_file_hashes" not in dep.to_dict()
+
+    def test_from_dict_missing_hashes_defaults_empty(self):
+        loaded = LockedDependency.from_dict({"repo_url": "owner/repo"})
+        assert loaded.deployed_file_hashes == {}
 
 
 class TestLockFile:
@@ -77,7 +159,6 @@ class TestLockFile:
         lock.add_dependency(LockedDependency(repo_url="owner/repo"))
         lock_path = tmp_path / "apm.lock"
         lock.write(lock_path)
-
         loaded = LockFile.read(lock_path)
         assert loaded is not None
         assert loaded.mcp_servers == ["acme-kb", "atlassian", "github"]  # sorted
@@ -88,13 +169,27 @@ class TestLockFile:
         yaml_str = lock.to_yaml()
         assert "mcp_servers" not in yaml_str  # omitted when empty
 
+    def test_local_deployed_file_hashes_round_trip(self, tmp_path):
+        """local_deployed_file_hashes must survive a write -> read cycle."""
+        lock = LockFile()
+        lock.local_deployed_files = ["a.md", "b.md"]
+        lock.local_deployed_file_hashes = {"a.md": "sha256:1", "b.md": "sha256:2"}
+        path = tmp_path / "apm.lock"
+        lock.write(path)
+        loaded = LockFile.read(path)
+        assert loaded is not None
+        assert loaded.local_deployed_file_hashes == {
+            "a.md": "sha256:1",
+            "b.md": "sha256:2",
+        }
+
+    def test_local_deployed_file_hashes_omitted_when_empty(self):
+        lock = LockFile()
+        assert "local_deployed_file_hashes" not in lock.to_yaml()
+
     def test_mcp_servers_from_yaml(self):
         yaml_str = (
-            'lockfile_version: "1"\n'
-            'dependencies: []\n'
-            'mcp_servers:\n'
-            '  - github\n'
-            '  - acme-kb\n'
+            'lockfile_version: "1"\ndependencies: []\nmcp_servers:\n  - github\n  - acme-kb\n'
         )
         lock = LockFile.from_yaml(yaml_str)
         assert lock.mcp_servers == ["github", "acme-kb"]
@@ -127,23 +222,18 @@ class TestLockFile:
     def test_mcp_configs_from_yaml(self):
         yaml_str = (
             'lockfile_version: "1"\n'
-            'dependencies: []\n'
-            'mcp_configs:\n'
-            '  github:\n'
-            '    name: github\n'
-            '    transport: stdio\n'
+            "dependencies: []\n"
+            "mcp_configs:\n"
+            "  github:\n"
+            "    name: github\n"
+            "    transport: stdio\n"
         )
         lock = LockFile.from_yaml(yaml_str)
         assert lock.mcp_configs == {"github": {"name": "github", "transport": "stdio"}}
 
     def test_mcp_configs_backward_compat_missing(self):
         """Old lockfiles without mcp_configs should get an empty dict."""
-        yaml_str = (
-            'lockfile_version: "1"\n'
-            'dependencies: []\n'
-            'mcp_servers:\n'
-            '  - github\n'
-        )
+        yaml_str = 'lockfile_version: "1"\ndependencies: []\nmcp_servers:\n  - github\n'
         lock = LockFile.from_yaml(yaml_str)
         assert lock.mcp_servers == ["github"]
         assert lock.mcp_configs == {}
@@ -152,8 +242,8 @@ class TestLockFile:
         """Lockfiles with mcp_configs: (null) should get an empty dict, not raise TypeError."""
         yaml_str = (
             'lockfile_version: "1"\n'
-            'dependencies: []\n'
-            'mcp_configs:\n'  # YAML null value
+            "dependencies: []\n"
+            "mcp_configs:\n"  # YAML null value
         )
         lock = LockFile.from_yaml(yaml_str)
         assert lock.mcp_configs == {}
@@ -228,9 +318,13 @@ class TestLockFileSemanticEquivalence:
             generated_at="2025-01-01T00:00:00+00:00",
             apm_version="0.8.5",
         )
-        lock.add_dependency(LockedDependency(
-            repo_url="owner/repo", resolved_commit="abc123", depth=0,
-        ))
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="owner/repo",
+                resolved_commit="abc123",
+                depth=0,
+            )
+        )
         for k, v in overrides.items():
             setattr(lock, k, v)
         return lock

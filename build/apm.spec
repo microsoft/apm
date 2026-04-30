@@ -13,9 +13,73 @@ def is_upx_available():
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
 
+def should_use_upx():
+    """Enable UPX only on non-Windows platforms where it is available.
+
+    UPX-compressed PE binaries trigger ML-based AV false positives
+    (e.g. Trojan:Win32/Bearfoos.B!ml) on Windows Defender.
+    """
+    if sys.platform == 'win32':
+        return False
+    return is_upx_available()
+
 # Get the directory where this spec file is located
 spec_dir = Path(SPECPATH)
 repo_root = spec_dir.parent
+
+# --- Windows PE version info (reduces AV false positives) ---
+# Anonymous executables without metadata score poorly in AV ML models.
+# Embedding company, product, and version info into the PE header provides
+# positive trust signals to heuristic scanners like Windows Defender.
+def _read_version_from_pyproject(repo_root):
+    """Read version string from pyproject.toml and return as 4-tuple."""
+    import re
+    pyproject = repo_root / 'pyproject.toml'
+    if not pyproject.exists():
+        return (0, 0, 0, 0)
+    content = pyproject.read_text(encoding='utf-8')
+    match = re.search(r'version\s*=\s*["\']([^"\']+)["\']', content)
+    if not match:
+        return (0, 0, 0, 0)
+    parts = re.match(r'(\d+)\.(\d+)\.(\d+)', match.group(1))
+    if not parts:
+        return (0, 0, 0, 0)
+    return (int(parts.group(1)), int(parts.group(2)), int(parts.group(3)), 0)
+
+_win_version_info = None
+if sys.platform == 'win32':
+    try:
+        from PyInstaller.utils.win32 import versioninfo as vi
+        _ver = _read_version_from_pyproject(repo_root)
+        _ver_str = f'{_ver[0]}.{_ver[1]}.{_ver[2]}'
+        _win_version_info = vi.VSVersionInfo(
+            ffi=vi.FixedFileInfo(
+                filevers=_ver,
+                prodvers=_ver,
+                mask=0x3f,
+                flags=0x0,
+                OS=0x40004,    # VOS_NT_WINDOWS32
+                fileType=0x1,  # VFT_APP
+                subtype=0x0,
+            ),
+            kids=[
+                vi.StringFileInfo([vi.StringTable('040904B0', [  # Lang: US English (0409), Charset: Unicode (04B0)
+                    vi.StringStruct('CompanyName', 'Microsoft'),
+                    vi.StringStruct('FileDescription',
+                                    'APM - Agent Package Manager'),
+                    vi.StringStruct('FileVersion', _ver_str),
+                    vi.StringStruct('InternalName', 'apm'),
+                    vi.StringStruct('LegalCopyright',
+                                    'Copyright (c) Microsoft Corporation'),
+                    vi.StringStruct('OriginalFilename', 'apm.exe'),
+                    vi.StringStruct('ProductName', 'APM'),
+                    vi.StringStruct('ProductVersion', _ver_str),
+                ])]),
+                vi.VarFileInfo([vi.VarStruct('Translation', [1033, 1200])]),  # LCID 1033 = en-US, Codepage 1200 = UTF-16
+            ],
+        )
+    except ImportError:
+        _win_version_info = None
 
 # APM CLI entry point
 entry_point = repo_root / 'src' / 'apm_cli' / 'cli.py'
@@ -240,7 +304,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=_strip,  # Strip debug symbols (Unix only; corrupts Windows DLLs)
-    upx=is_upx_available(),  # Enable UPX compression only if available
+    upx=should_use_upx(),  # Enable UPX compression only if available (disabled on Windows)
     upx_exclude=[],
     runtime_tmpdir=None,
     console=True,
@@ -249,6 +313,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    version=_win_version_info,
 )
 
 coll = COLLECT(
@@ -257,7 +322,7 @@ coll = COLLECT(
     a.zipfiles,
     a.datas,
     strip=_strip,
-    upx=is_upx_available(),
+    upx=should_use_upx(),
     upx_exclude=[],
     name='apm'
 )

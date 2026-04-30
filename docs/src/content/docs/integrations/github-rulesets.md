@@ -58,36 +58,45 @@ Once configured, any PR that introduces content issues detected by `apm audit` w
 
 ## What It Catches
 
-`apm audit` detects the following content issues:
+`apm audit` operates in three modes, each adding more checks:
 
-- **Hidden Unicode characters** — tag characters, bidi overrides, and variation selectors embedded in prompt files.
-- **Zero-width and invisible characters** — characters that could alter agent behavior without visible changes.
+**Content scanning** (`apm audit`):
+- **Critical: Hidden Unicode characters** -- tag characters (U+E0001-E007F), bidi overrides (U+202A-202E, U+2066-2069), and SMP variation selectors. Exit code **1**.
+- **Warning: Zero-width and invisible characters** -- zero-width spaces/joiners, mid-file BOM, soft hyphens. Exit code **2**. These are suspicious but not attack vectors.
 
-When issues are detected, the command exits with a non-zero status code (1 = critical, 2 = warnings) and the check fails.
+**CI baseline checks** (`apm audit --ci`) -- adds lockfile verification on top of content scanning. See [policy-reference: Check reference](../../enterprise/policy-reference/#check-reference) for the canonical list of baseline and policy checks. In `--ci` mode, exit codes are binary: **0** = pass, **1** = fail. Warning-level characters do not fail CI.
+
+**Policy enforcement** (`apm audit --ci --policy org`) -- adds organizational rules:
+- **Approved/denied sources** -- restrict which repositories packages can come from
+- **MCP transport controls** -- allow/deny transport types, trust settings for transitive MCP
+- **Manifest requirements** -- enforce required fields, content types, scripts
+- **Compilation rules** -- target and strategy constraints
+- **Unmanaged file detection** -- flag files in integration directories not tracked by the lockfile
+
+For full setup instructions, see the [CI Policy Enforcement](../../guides/ci-policy-setup/) guide. For the complete policy schema, see the [Policy Reference](../../enterprise/policy-reference/).
 
 ## Governance Levels
 
-APM's integration with GitHub governance is evolving:
-
 | Level | Description | Status |
 |-------|-------------|--------|
-| 1 | `apm audit` as a required status check (content scanning via exit codes) | Available now |
-| 1+ | `apm audit --ci` with lockfile consistency checking | Planned |
-| 2 | GitHub recommends apm-action for agent governance | Future |
-| 3 | Native Rulesets UI for agent configuration policy | Future |
+| 1 | `apm audit` as a required status check (content scanning: critical=exit 1, warning=exit 2) | Available |
+| 2 | `apm audit --ci` with lockfile verification (binary pass/fail, warnings do not block) | Available |
+| 3 | `apm audit --ci --policy org` with organization policy enforcement | Available |
+| 4 | GitHub recommends apm-action for agent governance | Future |
+| 5 | Native Rulesets UI for agent configuration policy | Future |
 
-Level 1 is fully functional today using `apm audit` exit codes. Level 1+ (lockfile consistency) and Levels 2–3 represent deeper integration that would reduce setup friction.
+Levels 1-3 are fully functional today. See the [CI Policy Enforcement](../../guides/ci-policy-setup/) guide for step-by-step setup. Levels 4-5 represent deeper GitHub platform integration that would reduce setup friction.
 
 ## Combining with Other Checks
 
-APM audit complements your existing CI checks — it does not replace them. A typical PR pipeline might include:
+APM audit complements your existing CI checks -- it does not replace them. A typical PR pipeline might include:
 
-- **Linting and formatting** — code style enforcement
-- **Unit and integration tests** — functional correctness
-- **Security scanning** — vulnerability detection
-- **APM audit** — hidden Unicode scanning with CI reporting
+- **Linting and formatting** -- code style enforcement
+- **Unit and integration tests** -- functional correctness
+- **Security scanning** -- vulnerability detection
+- **APM audit** -- content scanning, lockfile verification, and policy enforcement
 
-Each check has a distinct purpose. APM audit focuses on detecting hidden Unicode characters that could embed invisible instructions in prompt files.
+Each check has a distinct purpose. APM audit focuses on AI agent configuration integrity -- from hidden Unicode detection to organizational policy compliance.
 
 ## Customizing the Workflow
 
@@ -113,7 +122,7 @@ jobs:
 
 ### Separate Jobs for Granular Status
 
-If your project uses `apm compile` (for Codex, Gemini, or other tools without native APM integration), you can add audit and compile as separate required checks:
+If your project uses `apm compile` (for Codex, Gemini, or other tools whose instructions require compilation), you can add audit and compile as separate required checks:
 
 ```yaml
 jobs:
@@ -150,5 +159,8 @@ The status check name must match the **job name** in your workflow file (e.g., `
 
 ## Related
 
-- [CI/CD Pipelines](../ci-cd/) — full CI integration guide
-- [Manifest Schema](../../reference/manifest-schema/) — manifest and lock file reference
+- [CI Policy Enforcement](../../guides/ci-policy-setup/) -- step-by-step CI setup for policy enforcement
+- [Governance](../../enterprise/governance-guide/) -- conceptual overview, bypass contract, and rollout playbook
+- [Policy Reference](../../enterprise/policy-reference/) -- full `apm-policy.yml` schema reference
+- [CI/CD Pipelines](../ci-cd/) -- general CI integration guide
+- [Manifest Schema](../../reference/manifest-schema/) -- manifest and lock file reference

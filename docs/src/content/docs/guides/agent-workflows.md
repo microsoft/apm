@@ -2,7 +2,7 @@
 title: "Agent Workflows (Experimental)"
 description: "Run agentic workflows locally using APM scripts and AI runtimes."
 sidebar:
-  order: 8
+  order: 9
 ---
 
 :::caution[Experimental Feature]

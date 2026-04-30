@@ -1,0 +1,9 @@
+# Fixture 2: Deny-list policy (enforcement=block)
+# Tests: dependencies.deny blocks install before integration
+name: deny-list-policy
+version: "1.0.0"
+enforcement: block
+
+dependencies:
+  deny:
+    - "test-blocked/*"

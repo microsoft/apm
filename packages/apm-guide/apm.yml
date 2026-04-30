@@ -1,0 +1,6 @@
+name: apm-guide
+version: 1.0.0
+description: Teach AI agents how to use APM (Agent Package Manager)
+author: Microsoft
+license: MIT
+type: skill

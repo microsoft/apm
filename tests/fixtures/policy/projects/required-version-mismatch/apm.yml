@@ -1,0 +1,12 @@
+# Project that has the required dep but at a wrong version.
+# Against apm-policy-required-version.yml: requires DevExpGbb/required-standards#v2.0.0
+# This project pins v1.0.0 instead.
+# Expected under project-wins: version mismatch downgraded to warn (I7);
+#           under policy-wins/block: install blocked.
+name: required-version-mismatch-project
+version: "1.0.0"
+description: Project with version-mismatched required dependency
+
+dependencies:
+  apm:
+    - DevExpGbb/required-standards#v1.0.0

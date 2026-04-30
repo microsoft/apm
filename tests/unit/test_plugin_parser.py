@@ -1,7 +1,7 @@
 """Unit tests for plugin_parser.py and find_plugin_json helper."""
 
 import json
-import os
+import os  # noqa: F401
 from pathlib import Path
 
 import pytest
@@ -211,7 +211,9 @@ class TestMapPluginArtifacts:
         assert (apm_dir / "agents" / "real.md").exists()
         # _ignore_symlinks callback causes copytree to skip symlinks entirely
         copied_linked = apm_dir / "agents" / "linked"
-        assert not copied_linked.exists(), "Symlinked directory should be skipped entirely by _ignore_symlinks"
+        assert not copied_linked.exists(), (
+            "Symlinked directory should be skipped entirely by _ignore_symlinks"
+        )
 
     # ---- Custom component paths from plugin.json ----
 
@@ -243,7 +245,8 @@ class TestMapPluginArtifacts:
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
         _map_plugin_artifacts(
-            plugin_dir, apm_dir,
+            plugin_dir,
+            apm_dir,
             manifest={"skills": ["skills/", "extra-skills/"]},
         )
 
@@ -269,7 +272,13 @@ class TestMapPluginArtifacts:
         """Manifest hooks as a file path copies it to .apm/hooks/hooks.json."""
         plugin_dir = tmp_path / "plugin"
         plugin_dir.mkdir()
-        hooks_data = {"hooks": {"PreToolUse": [{"matcher": "bash", "hooks": [{"type": "command", "command": "echo ok"}]}]}}
+        hooks_data = {
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "bash", "hooks": [{"type": "command", "command": "echo ok"}]}
+                ]
+            }
+        }
         (plugin_dir / "my-hooks.json").write_text(json.dumps(hooks_data))
 
         apm_dir = plugin_dir / ".apm"
@@ -284,7 +293,11 @@ class TestMapPluginArtifacts:
         """Manifest hooks as an inline object writes .apm/hooks/hooks.json."""
         plugin_dir = tmp_path / "plugin"
         plugin_dir.mkdir()
-        hooks_obj = {"hooks": {"Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "echo done"}]}]}}
+        hooks_obj = {
+            "hooks": {
+                "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "echo done"}]}]
+            }
+        }
 
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
@@ -320,7 +333,8 @@ class TestMapPluginArtifacts:
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
         _map_plugin_artifacts(
-            plugin_dir, apm_dir,
+            plugin_dir,
+            apm_dir,
             manifest={"agents": "does-not-exist/", "skills": ["also-missing/"]},
         )
 
@@ -341,7 +355,8 @@ class TestMapPluginArtifacts:
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
         _map_plugin_artifacts(
-            plugin_dir, apm_dir,
+            plugin_dir,
+            apm_dir,
             manifest={"agents": ["./agents/planner.md", "./agents/coder.md"]},
         )
 
@@ -358,7 +373,8 @@ class TestMapPluginArtifacts:
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
         _map_plugin_artifacts(
-            plugin_dir, apm_dir,
+            plugin_dir,
+            apm_dir,
             manifest={"skills": ["my-skill.md"]},
         )
 
@@ -373,7 +389,8 @@ class TestMapPluginArtifacts:
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
         _map_plugin_artifacts(
-            plugin_dir, apm_dir,
+            plugin_dir,
+            apm_dir,
             manifest={"commands": ["deploy.md"]},
         )
 
@@ -391,7 +408,8 @@ class TestMapPluginArtifacts:
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
         _map_plugin_artifacts(
-            plugin_dir, apm_dir,
+            plugin_dir,
+            apm_dir,
             manifest={"agents": ["./agents", "extra-agent.md"]},
         )
 
@@ -416,15 +434,17 @@ class TestMapPluginArtifacts:
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
         _map_plugin_artifacts(
-            plugin_dir, apm_dir,
+            plugin_dir,
+            apm_dir,
             manifest={"agents": ["./agents"]},
         )
 
         # Files should be directly in .apm/agents/, NOT .apm/agents/agents/
         assert (apm_dir / "agents" / "context-architect.md").read_text() == "# Context Architect"
         assert (apm_dir / "agents" / "planner.md").read_text() == "# Planner"
-        assert not (apm_dir / "agents" / "agents").exists(), \
+        assert not (apm_dir / "agents" / "agents").exists(), (
             "Should not create nested agents/agents/ directory"
+        )
 
 
 class TestGenerateApmYml:
@@ -838,3 +858,112 @@ class TestSynthesizeMCPIntegration:
         assert len(mcp_deps) == 1
         assert mcp_deps[0]["name"] == "web-srv"
         assert mcp_deps[0]["transport"] == "http"
+
+
+class TestPathTraversalProtection:
+    """Regression tests for GHSA path-traversal advisory.
+
+    A malicious plugin must not be able to use absolute paths or ``..``
+    traversal in manifest fields (agents/skills/commands/hooks) to copy
+    arbitrary host files into ``.apm/``.
+    """
+
+    def _make_outside_secret(self, tmp_path: Path) -> Path:
+        outside = tmp_path / "outside" / "secret.md"
+        outside.parent.mkdir(parents=True, exist_ok=True)
+        outside.write_text("# STOLEN VIA APM INSTALL\n")
+        return outside
+
+    def _make_plugin(self, tmp_path: Path) -> tuple[Path, Path]:
+        plugin = tmp_path / "evil-plugin"
+        plugin.mkdir()
+        apm_dir = tmp_path / "victim" / ".apm"
+        apm_dir.mkdir(parents=True)
+        return plugin, apm_dir
+
+    def test_commands_absolute_path_rejected(self, tmp_path):
+        secret = self._make_outside_secret(tmp_path)
+        plugin, apm_dir = self._make_plugin(tmp_path)
+        manifest = {"name": "evil", "commands": str(secret)}
+
+        _map_plugin_artifacts(plugin, apm_dir, manifest)
+
+        prompts_dir = apm_dir / "prompts"
+        assert not prompts_dir.exists() or not list(prompts_dir.iterdir()), (
+            "Absolute commands path must not produce any prompts files"
+        )
+
+    def test_commands_traversal_path_rejected(self, tmp_path):
+        self._make_outside_secret(tmp_path)
+        plugin, apm_dir = self._make_plugin(tmp_path)
+        manifest = {"name": "evil", "commands": "../outside/secret.md"}
+
+        _map_plugin_artifacts(plugin, apm_dir, manifest)
+
+        prompts_dir = apm_dir / "prompts"
+        assert not prompts_dir.exists() or not list(prompts_dir.iterdir())
+
+    def test_agents_traversal_in_list_rejected(self, tmp_path):
+        outside_dir = tmp_path / "outside_agents"
+        outside_dir.mkdir()
+        (outside_dir / "evil.md").write_text("# evil")
+        plugin, apm_dir = self._make_plugin(tmp_path)
+        manifest = {"name": "evil", "agents": ["../outside_agents"]}
+
+        _map_plugin_artifacts(plugin, apm_dir, manifest)
+
+        agents_dir = apm_dir / "agents"
+        assert not agents_dir.exists() or not list(agents_dir.iterdir())
+
+    def test_skills_absolute_path_in_list_rejected(self, tmp_path):
+        outside_skill = tmp_path / "outside_skills" / "leak"
+        outside_skill.mkdir(parents=True)
+        (outside_skill / "SKILL.md").write_text("# leak")
+        plugin, apm_dir = self._make_plugin(tmp_path)
+        manifest = {"name": "evil", "skills": [str(outside_skill)]}
+
+        _map_plugin_artifacts(plugin, apm_dir, manifest)
+
+        skills_dir = apm_dir / "skills"
+        assert not skills_dir.exists() or not list(skills_dir.iterdir())
+
+    def test_hooks_string_traversal_rejected(self, tmp_path):
+        outside_hook = tmp_path / "outside" / "hooks.json"
+        outside_hook.parent.mkdir(parents=True, exist_ok=True)
+        outside_hook.write_text('{"hooks": {}}')
+        plugin, apm_dir = self._make_plugin(tmp_path)
+        manifest = {"name": "evil", "hooks": "../outside/hooks.json"}
+
+        _map_plugin_artifacts(plugin, apm_dir, manifest)
+
+        hooks_dir = apm_dir / "hooks"
+        assert not hooks_dir.exists() or not list(hooks_dir.iterdir())
+
+    def test_in_root_paths_still_accepted(self, tmp_path):
+        """Sanity check: legitimate manifest paths must still work."""
+        plugin, apm_dir = self._make_plugin(tmp_path)
+        custom = plugin / "custom_cmds"
+        custom.mkdir()
+        (custom / "hello.md").write_text("# hello")
+        manifest = {"name": "good", "commands": "custom_cmds"}
+
+        _map_plugin_artifacts(plugin, apm_dir, manifest)
+
+        assert (apm_dir / "prompts" / "hello.prompt.md").read_text() == "# hello"
+
+    def test_default_component_dir_as_symlink_rejected(self, tmp_path):
+        """Default 'agents'/'skills'/etc dirs must be rejected if they're symlinks
+        pointing outside the plugin root (no manifest override needed)."""
+        outside = tmp_path / "outside_target"
+        outside.mkdir()
+        (outside / "leak.md").write_text("# leak")
+        plugin, apm_dir = self._make_plugin(tmp_path)
+        (plugin / "agents").symlink_to(outside, target_is_directory=True)
+        manifest = {"name": "evil"}  # no custom paths -> default branch is taken
+
+        _map_plugin_artifacts(plugin, apm_dir, manifest)
+
+        agents_dir = apm_dir / "agents"
+        assert not agents_dir.exists() or not list(agents_dir.iterdir()), (
+            "Symlinked default component dir must not be copied"
+        )

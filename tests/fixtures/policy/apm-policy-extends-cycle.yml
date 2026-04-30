@@ -1,0 +1,11 @@
+# Fixture 10a: Extends cycle -- A extends B (rubber-duck I10)
+# Tests: detect_cycle() catches A -> B -> A before infinite loop
+# Sibling: apm-policy-extends-cycle-parent.yml (extends back to this)
+name: cycle-policy-a
+version: "1.0.0"
+extends: cycle-policy-b
+enforcement: warn
+
+dependencies:
+  deny:
+    - "test-blocked/*"

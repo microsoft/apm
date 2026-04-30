@@ -366,6 +366,17 @@ run_e2e_tests() {
         log_error "MCP registry tests failed!"
         exit 1
     fi
+
+    # Run MCP env-var headers E2E tests (regression guard for ${VAR} -> ${env:VAR})
+    log_info "Running MCP env-var headers E2E tests..."
+    echo "Command: pytest tests/integration/test_mcp_env_var_headers_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_mcp_env_var_headers_e2e.py -v -s --tb=short; then
+        log_success "MCP env-var headers tests passed!"
+    else
+        log_error "MCP env-var headers tests failed!"
+        exit 1
+    fi
     
     # Run APM Dependencies integration tests (NEW - Task 8A)
     log_info "Running APM Dependencies integration tests with real repositories..."
@@ -378,6 +389,30 @@ run_e2e_tests() {
         exit 1
     fi
     
+    # Run Transport Selection integration tests (issue #778)
+    # Always-on cases use HTTPS against a public repo. SSH cases auto-skip
+    # when no usable SSH key is available for git@github.com.
+    log_info "Running Transport Selection integration tests..."
+    echo "Command: APM_RUN_INTEGRATION_TESTS=1 pytest tests/integration/test_transport_selection_integration.py -v -s --tb=short"
+
+    if APM_RUN_INTEGRATION_TESTS=1 pytest tests/integration/test_transport_selection_integration.py -v -s --tb=short; then
+        log_success "Transport Selection integration tests passed!"
+    else
+        log_error "Transport Selection integration tests failed!"
+        exit 1
+    fi
+
+    # Run global-scope (--global / -g) E2E tests -- offline, no tokens needed
+    log_info "Running global-scope E2E tests..."
+    echo "Command: pytest tests/integration/test_global_scope_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_global_scope_e2e.py -v -s --tb=short; then
+        log_success "Global-scope E2E tests passed!"
+    else
+        log_error "Global-scope E2E tests failed!"
+        exit 1
+    fi
+
     # Run Azure DevOps E2E tests (requires ADO_APM_PAT)
     if [[ -n "${ADO_APM_PAT:-}" ]]; then
         log_info "Running Azure DevOps E2E tests..."

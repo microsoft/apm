@@ -4,7 +4,7 @@ These functions are stateless and side-effect-free, making them easy to test
 in isolation and to reuse from multiple call sites in ``install.py`` without
 duplicating logic.
 
-Three kinds of drift are detected:
+Four kinds of drift are detected:
 
 * **Ref drift** — the ``ref`` pinned in ``apm.yml`` differs from what the
   lockfile recorded as ``resolved_ref``.  This includes transitions such as
@@ -18,6 +18,11 @@ Three kinds of drift are detected:
 * **Config drift** — an already-installed dependency's serialised configuration
   differs from the baseline stored in the lockfile.  (Currently only MCP
   servers; extendable to other integrator types.)
+
+* **Stale-file drift** -- files previously deployed for a still-present
+  package that are no longer produced by the current install (e.g. a
+  rename or removal inside the package).  The now-unused paths should be
+  removed.  See :func:`detect_stale_files`.
 
 Scope / non-goals
 -----------------
@@ -33,23 +38,24 @@ Scope / non-goals
   formatting-only change that produces the same unique key and is correctly
   treated as no drift.
 
-* **Source/host changes** — *not* detected.  If a user changes the host of
-  an otherwise identical package (e.g. adding an enterprise FQDN prefix), the
-  unique key (``repo_url``, host-blind for the default host) may not change
-  and ``detect_ref_change()`` will not signal a re-download.  Host-level
-  changes require the user to ``apm remove`` + ``apm install`` the package, or
-  use ``--update``.
+* **Host changes** — *not* detected.  If a user changes the host of an otherwise
+  identical package, the unique key may not change and ``detect_ref_change()``
+  will not signal a re-download.  Host-level changes still require the user to
+  ``apm remove`` + ``apm install`` the package, or use ``--update``.
+* **HTTP transport flips** — detected.  Switching between HTTPS and insecure
+  HTTP toggles ``is_insecure`` and forces a re-download even when the package
+  identity and ref are otherwise unchanged.
 """
 
 from __future__ import annotations
 
 import builtins
 from dataclasses import replace as _dataclass_replace
-from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Set
+from pathlib import Path  # noqa: F401
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set  # noqa: F401, UP035
 
 if TYPE_CHECKING:
-    from apm_cli.deps.lockfile import LockFile, LockedDependency
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.models.apm_package import DependencyReference
 
 
@@ -57,9 +63,10 @@ if TYPE_CHECKING:
 # Ref drift
 # ---------------------------------------------------------------------------
 
+
 def detect_ref_change(
-    dep_ref: "DependencyReference",
-    locked_dep: "Optional[LockedDependency]",
+    dep_ref: DependencyReference,
+    locked_dep: LockedDependency | None,
     *,
     update_refs: bool = False,
     logger=None,
@@ -91,15 +98,21 @@ def detect_ref_change(
         return False  # new package — not drift, just a first install
     # Direct comparison: handles None→value, value→None, and value→value.
     # No truthiness guard on locked_dep.resolved_ref — None != "v1.0.0" is True.
-    return dep_ref.reference != locked_dep.resolved_ref
+    if dep_ref.reference != locked_dep.resolved_ref:
+        return True
+
+    return (getattr(dep_ref, "is_insecure", False) is True) != (
+        getattr(locked_dep, "is_insecure", False) is True
+    )
 
 
 # ---------------------------------------------------------------------------
 # Orphan drift
 # ---------------------------------------------------------------------------
 
+
 def detect_orphans(
-    existing_lockfile: "Optional[LockFile]",
+    existing_lockfile: LockFile | None,
     intended_dep_keys: builtins.set,
     *,
     only_packages: builtins.list,
@@ -134,12 +147,44 @@ def detect_orphans(
 
 
 # ---------------------------------------------------------------------------
+# File-level stale detection (intra-package)
+# ---------------------------------------------------------------------------
+
+
+def detect_stale_files(
+    old_deployed: builtins.list,
+    new_deployed: builtins.list,
+) -> builtins.set:
+    """Return the set of paths that were deployed previously but are no longer produced.
+
+    Complements :func:`detect_orphans`, which operates at the *package* level
+    (a whole package left the manifest).  This helper operates at the *file*
+    level *inside* a still-present package: if a package renamed or removed a
+    file between installs, the now-unused path is flagged as stale.
+
+    Pure set-difference semantics: ``set(old_deployed) - set(new_deployed)``.
+    The function does not touch the filesystem; the caller is responsible for
+    actually removing the files.
+
+    Args:
+        old_deployed: Paths recorded in the previous lockfile's
+                      ``deployed_files`` for this package.
+        new_deployed: Paths produced by the current install for this package.
+
+    Returns:
+        Workspace-relative path strings that should no longer exist on disk.
+    """
+    return builtins.set(old_deployed) - builtins.set(new_deployed)
+
+
+# ---------------------------------------------------------------------------
 # Config drift (integrator-agnostic)
 # ---------------------------------------------------------------------------
 
+
 def detect_config_drift(
-    current_configs: Dict[str, dict],
-    stored_configs: Dict[str, dict],
+    current_configs: dict[str, dict],
+    stored_configs: dict[str, dict],
     logger=None,
 ) -> builtins.set:
     """Return names of entries whose current config differs from the stored baseline.
@@ -169,14 +214,15 @@ def detect_config_drift(
 # Download ref construction
 # ---------------------------------------------------------------------------
 
+
 def build_download_ref(
-    dep_ref: "DependencyReference",
-    existing_lockfile: "Optional[LockFile]",
+    dep_ref: DependencyReference,
+    existing_lockfile: LockFile | None,
     *,
     update_refs: bool,
     ref_changed: bool,
     logger=None,
-) -> "DependencyReference":
+) -> DependencyReference:
     """Build the dependency reference passed to the package downloader.
 
     Returns a :class:`DependencyReference` (not a flat string) so that
@@ -201,6 +247,36 @@ def build_download_ref(
     """
     if existing_lockfile and not update_refs and not ref_changed:
         locked_dep = existing_lockfile.get_dependency(dep_ref.get_unique_key())
-        if locked_dep and locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
-            return _dataclass_replace(dep_ref, reference=locked_dep.resolved_commit)
+        if locked_dep:
+            overrides: dict[str, Any] = {}
+
+            # Prefer the lockfile host so re-installs fetch from the exact same
+            # source (proxy host preserved) — fixes air-gapped reproducibility.
+            # When registry_prefix is set, also restore the artifactory_prefix
+            # field on dep_ref so the downloader takes the proxy code-path and
+            # uses PROXY_REGISTRY_TOKEN for auth instead of the GitHub PAT.
+            if locked_dep.registry_prefix and locked_dep.host:
+                overrides["host"] = locked_dep.host
+                overrides["artifactory_prefix"] = locked_dep.registry_prefix
+            elif (
+                isinstance(getattr(locked_dep, "host", None), str)
+                and locked_dep.host != dep_ref.host
+            ):
+                overrides["host"] = locked_dep.host
+
+            if getattr(locked_dep, "is_insecure", False) is True:
+                overrides["is_insecure"] = True
+                overrides["allow_insecure"] = getattr(locked_dep, "allow_insecure", False)
+
+            # Use locked commit SHA for byte-for-byte reproducibility.
+            if locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
+                overrides["reference"] = locked_dep.resolved_commit
+            # For proxy deps without a commit SHA (Artifactory zip archives),
+            # preserve the locked ref so we download the same ref on replay.
+            elif locked_dep.registry_prefix and locked_dep.resolved_ref and not dep_ref.reference:
+                overrides["reference"] = locked_dep.resolved_ref
+
+            if overrides:
+                return _dataclass_replace(dep_ref, **overrides)
+
     return dep_ref

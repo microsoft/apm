@@ -14,11 +14,10 @@ Uses real packages from GitHub:
 import os
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 import yaml
-from pathlib import Path
-
 
 # Skip all tests if no GitHub token is available
 pytestmark = pytest.mark.skipif(
@@ -51,7 +50,7 @@ def temp_project(tmp_path):
 def _run_apm(apm_command, args, cwd, timeout=180):
     """Run an apm CLI command and return the result."""
     return subprocess.run(
-        [apm_command] + args,
+        [apm_command] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -106,6 +105,7 @@ def _collect_deployed_files(project_dir, dep_entry):
 # Scenario 1: Package removed from manifest — apm install cleans up
 # ---------------------------------------------------------------------------
 
+
 class TestPackageRemovedFromManifest:
     """When a package is removed from apm.yml, apm install should clean up
     its deployed files and remove it from the lockfile."""
@@ -125,9 +125,7 @@ class TestPackageRemovedFromManifest:
         dep_before = _get_locked_dep(lockfile_before, "microsoft/apm-sample-package")
         assert dep_before is not None, "Package not in lockfile after install"
         deployed_before = _collect_deployed_files(temp_project, dep_before)
-        assert len(deployed_before) > 0, (
-            "No deployed files found on disk — cannot verify cleanup"
-        )
+        assert len(deployed_before) > 0, "No deployed files found on disk — cannot verify cleanup"
 
         # ── Step 3: remove the package from manifest ──
         _write_apm_yml(temp_project, [])
@@ -167,17 +165,18 @@ class TestPackageRemovedFromManifest:
         lockfile_after = _read_lockfile(temp_project)
         if lockfile_after and lockfile_after.get("dependencies"):
             dep_after = _get_locked_dep(lockfile_after, "microsoft/apm-sample-package")
-            assert dep_after is None, (
-                "Removed package still present in apm.lock after apm install"
-            )
+            assert dep_after is None, "Removed package still present in apm.lock after apm install"
 
     def test_remaining_package_unaffected_by_removal(self, temp_project, apm_command):
         """Files from packages still in the manifest are untouched."""
         # ── Install two packages ──
-        _write_apm_yml(temp_project, [
-            "microsoft/apm-sample-package",
-            "github/awesome-copilot/skills/aspire",
-        ])
+        _write_apm_yml(
+            temp_project,
+            [
+                "microsoft/apm-sample-package",
+                "github/awesome-copilot/skills/aspire",
+            ],
+        )
         result1 = _run_apm(apm_command, ["install"], temp_project)
         assert result1.returncode == 0, (
             f"Initial install failed:\nSTDOUT: {result1.stdout}\nSTDERR: {result1.stderr}"
@@ -196,7 +195,7 @@ class TestPackageRemovedFromManifest:
         )
 
         # ── apm-sample-package files should be gone ──
-        for rel_path in (sample_dep.get("deployed_files") or []):
+        for rel_path in sample_dep.get("deployed_files") or []:
             # The files that were deployed should no longer exist
             assert not (temp_project / rel_path).exists(), (
                 f"Removed package file {rel_path} still on disk"
@@ -206,6 +205,7 @@ class TestPackageRemovedFromManifest:
 # ---------------------------------------------------------------------------
 # Scenario 2: Package ref changed — apm install re-downloads
 # ---------------------------------------------------------------------------
+
 
 class TestPackageRefChangedInManifest:
     """When the ref in apm.yml changes, apm install re-downloads without --update."""
@@ -232,9 +232,10 @@ class TestPackageRefChangedInManifest:
         # This differs from the lockfile's resolved_ref (which may be None/default).
         # For the test to be meaningful we pick a known ref that EXISTS in the repo.
         # We use "main" — the primary branch — which definitely exists.
-        _write_apm_yml(temp_project, [
-            {"git": "https://github.com/microsoft/apm-sample-package.git", "ref": "main"}
-        ])
+        _write_apm_yml(
+            temp_project,
+            [{"git": "https://github.com/microsoft/apm-sample-package.git", "ref": "main"}],
+        )
 
         # ── Step 3: run install WITHOUT --update ──
         result2 = _run_apm(apm_command, ["install", "--only=apm"], temp_project)
@@ -283,14 +284,14 @@ class TestPackageRefChangedInManifest:
 
         if commit_before and commit_after:
             assert commit_before == commit_after, (
-                f"Lockfile SHA changed without a ref change: "
-                f"{commit_before} → {commit_after}"
+                f"Lockfile SHA changed without a ref change: {commit_before} → {commit_after}"
             )
 
 
 # ---------------------------------------------------------------------------
 # Scenario 3: Full install is idempotent when manifest unchanged
 # ---------------------------------------------------------------------------
+
 
 class TestFullInstallIdempotent:
     """Running apm install multiple times without manifest changes is safe."""

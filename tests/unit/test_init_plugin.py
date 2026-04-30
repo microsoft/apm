@@ -9,13 +9,12 @@ import os
 import tempfile
 from pathlib import Path
 
-import pytest
+import pytest  # noqa: F401
 import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.commands._helpers import _validate_plugin_name
-
 
 # ---------------------------------------------------------------------------
 # CLI integration tests
@@ -68,7 +67,7 @@ class TestInitPlugin:
                 result = self.runner.invoke(cli, ["init", "--plugin", "--yes"])
                 assert result.exit_code == 0, result.output
 
-                with open("plugin.json") as f:
+                with open("plugin.json", encoding="utf-8") as f:
                     data = json.load(f)
 
                 assert data["name"] == "my-plugin"
@@ -90,7 +89,7 @@ class TestInitPlugin:
                 result = self.runner.invoke(cli, ["init", "--plugin", "--yes"])
                 assert result.exit_code == 0, result.output
 
-                with open("apm.yml") as f:
+                with open("apm.yml", encoding="utf-8") as f:
                     config = yaml.safe_load(f)
 
                 assert "devDependencies" in config
@@ -179,7 +178,7 @@ class TestInitPlugin:
                 assert Path("apm.yml").exists()
                 assert Path("plugin.json").exists()
 
-                with open("apm.yml") as f:
+                with open("apm.yml", encoding="utf-8") as f:
                     config = yaml.safe_load(f)
                 # --yes + --plugin uses 0.1.0 version
                 assert config["version"] == "0.1.0"
@@ -197,7 +196,7 @@ class TestInitPlugin:
                 assert Path("apm.yml").exists()
                 assert not Path("plugin.json").exists()
 
-                with open("apm.yml") as f:
+                with open("apm.yml", encoding="utf-8") as f:
                     config = yaml.safe_load(f)
                 assert "devDependencies" not in config
             finally:
@@ -212,11 +211,11 @@ class TestInitPlugin:
             try:
                 self.runner.invoke(cli, ["init", "--plugin", "--yes"])
 
-                with open("plugin.json") as f:
+                with open("plugin.json", encoding="utf-8") as f:
                     data = json.load(f)
                 assert data["version"] == "0.1.0"
 
-                with open("apm.yml") as f:
+                with open("apm.yml", encoding="utf-8") as f:
                     config = yaml.safe_load(f)
                 assert config["version"] == "0.1.0"
             finally:
@@ -231,7 +230,7 @@ class TestInitPlugin:
             try:
                 self.runner.invoke(cli, ["init", "--plugin", "--yes"])
 
-                with open("plugin.json") as f:
+                with open("plugin.json", encoding="utf-8") as f:
                     data = json.load(f)
                 assert isinstance(data["author"], dict)
                 assert "name" in data["author"]
@@ -256,16 +255,14 @@ class TestInitPlugin:
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
-                result = self.runner.invoke(
-                    cli, ["init", "cool-plugin", "--plugin", "--yes"]
-                )
+                result = self.runner.invoke(cli, ["init", "cool-plugin", "--plugin", "--yes"])
                 assert result.exit_code == 0, result.output
 
                 project_path = Path(tmp_dir) / "cool-plugin"
                 assert (project_path / "apm.yml").exists()
                 assert (project_path / "plugin.json").exists()
 
-                with open(project_path / "plugin.json") as f:
+                with open(project_path / "plugin.json", encoding="utf-8") as f:
                     data = json.load(f)
                 assert data["name"] == "cool-plugin"
             finally:
@@ -284,6 +281,19 @@ class TestInitPlugin:
             finally:
                 os.chdir(self.original_dir)
 
+    def test_plugin_does_not_create_start_prompt(self):
+        """start.prompt.md is NOT created in plugin mode."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            project_dir = Path(tmp_dir) / "my-plugin"
+            project_dir.mkdir()
+            os.chdir(project_dir)
+            try:
+                result = self.runner.invoke(cli, ["init", "--plugin", "--yes"])
+                assert result.exit_code == 0, result.output
+                assert not Path("start.prompt.md").exists()
+            finally:
+                os.chdir(self.original_dir)
+
     def test_plugin_apm_yml_has_dependencies(self):
         """apm.yml created with --plugin still has regular dependencies section."""
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -293,7 +303,7 @@ class TestInitPlugin:
             try:
                 self.runner.invoke(cli, ["init", "--plugin", "--yes"])
 
-                with open("apm.yml") as f:
+                with open("apm.yml", encoding="utf-8") as f:
                     config = yaml.safe_load(f)
                 assert "dependencies" in config
                 assert config["dependencies"] == {"apm": [], "mcp": []}

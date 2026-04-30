@@ -121,7 +121,9 @@ APM accepts dependencies in two forms:
 **String format** (simple cases):
 - **Shorthand** (`owner/repo`) — defaults to GitHub
 - **HTTPS URL** (`https://host/owner/repo.git`) — any git host, whole repo
+  - Custom port: `https://host:8443/owner/repo.git` — port is preserved in clone URLs
 - **SSH URL** (`git@host:owner/repo.git`) — any git host, whole repo
+  - Custom port: `ssh://git@host:7999/owner/repo.git` — use the `ssh://` form to specify a port (SCP shorthand `git@host:...` cannot carry a port)
 - **FQDN shorthand** (`host/owner/repo`) — any host, supports nested groups
   - GitLab nested groups: `gitlab.com/group/subgroup/repo`
   - Virtual paths on simple repos: `gitlab.com/owner/repo/file.prompt.md`
@@ -139,9 +141,26 @@ dependencies:
     - git: git@bitbucket.org:team/rules.git
       path: prompts/review.prompt.md
       alias: review                      # local alias (controls install directory name)
+    - git: ssh://git@bitbucket.example.com:7999/project/repo.git  # Bitbucket Datacenter (custom SSH port)
+      ref: v1.0
 ```
 
-Fields: `git` (required), `path`, `ref`, `alias` (all optional). The `git` value is any HTTPS or SSH clone URL.
+Fields: `git` (required), `path`, `ref`, `alias` (all optional). The `git` value is any HTTPS, HTTP or SSH clone URL.
+
+Explicit URL schemes are honored exactly -- see [Transport selection](#transport-selection-ssh-vs-https) for the full contract. Custom ports are preserved across every attempt (including any cross-protocol fallback enabled with `--allow-protocol-fallback`), so `ssh://host:7999/...` retried over HTTPS becomes `https://host:7999/...`.
+
+:::caution
+Use HTTP dependencies only on trusted private networks. Declare them with
+`git: http://...` and `allow_insecure: true` in `apm.yml`. Installing them
+still requires `apm install --allow-insecure`.
+
+HTTP has no transport authentication, so anyone who can intercept the
+connection can swap the package contents in transit. APM warns on every
+`http://` fetch, allows same-host transitive HTTP dependencies when you
+already passed `--allow-insecure` for a direct HTTP dependency on that host,
+and otherwise requires `--allow-insecure-host <hostname>` for each additional
+transitive host you want to allow.
+:::
 
 > **Nested groups (GitLab, Gitea, etc.):** APM treats all path segments after the host as the repo path, so `gitlab.com/group/subgroup/repo` resolves to a repo at `group/subgroup/repo`. Virtual paths on simple 2-segment repos work with shorthand (`gitlab.com/owner/repo/file.prompt.md`). But for **nested-group repos + virtual paths**, use the object format — the shorthand is ambiguous:
 >
@@ -204,17 +223,22 @@ apm install --only=apm
 apm install --dry-run
 ```
 
+`apm install` also deploys the project's own `.apm/` content (instructions, prompts, agents, skills, hooks, commands) to target directories alongside dependency content. Local content takes priority over dependencies on collision. This works even with zero dependencies -- just `apm.yml` and a `.apm/` directory is enough. See the [CLI reference](../../reference/cli-commands/#apm-install---install-dependencies-and-deploy-local-content) for details and exceptions.
+
 ### 3. Verify Installation
 
 ```bash
 # List installed packages
 apm deps list
 
+# Show only installed HTTP-backed packages
+apm deps list --insecure
+
 # Show dependency tree
 apm deps tree
 
 # Get package details
-apm deps info apm-sample-package
+apm view apm-sample-package
 ```
 
 ### 4. Use Dependencies in Compilation
@@ -243,7 +267,9 @@ devDependencies:
     - source: owner/test-helpers
 ```
 
-Dev dependencies install to `apm_modules/` like production deps but are excluded from `apm pack --format plugin` output. See [Pack & Distribute](../pack-distribute/) for details.
+Dev dependencies install to `apm_modules/` like production deps but are excluded from `apm pack` plugin output. See [Pack & Distribute](../pack-distribute/) for details.
+
+**Important:** plain `apm install` (no flag) deploys both `dependencies` and `devDependencies` -- there is currently no `--omit=dev` flag. The dev/prod separation kicks in at `apm pack` (plugin format, the default). Maintainer-only primitives that you author yourself MUST live outside `.apm/` to be excluded from plugin bundles, because the local-content scanner operates on `.apm/` regardless of the devDep marker. See [Dev-only Primitives](../dev-only-primitives/) for the canonical pattern.
 
 ## Local Path Dependencies
 
@@ -279,7 +305,68 @@ dependencies:
 
 **Pack guard:** `apm pack` rejects packages with local path dependencies — replace them with remote references before distributing.
 
+**User-scope guard:** Local path dependencies are **not supported** with `--global` (`-g`). Relative paths resolve against `cwd`, which is meaningless at user scope where packages deploy to `~/.apm/`. Use remote references (`owner/repo`) for global installs.
+
+## Global (User-Scope) Installation
+
+By default, `apm install` targets the **current project** -- manifest, modules, and lockfile live in
+the working directory and deployed primitives go to `.github/`, `.claude/`, `.cursor/`, `.opencode/`.
+
+Pass `--global` (or `-g`) to install to your **home directory** instead, making packages available
+across every project on the machine:
+
+```bash
+apm install -g microsoft/apm-sample-package
+apm uninstall -g microsoft/apm-sample-package
+apm deps list -g       # user-scope packages only
+apm deps list --all    # project + user-scope packages
+```
+
+| Item | Project scope (default) | User scope (`-g`) |
+|------|------------------------|-------------------|
+| Manifest | `./apm.yml` | `~/.apm/apm.yml` |
+| Modules | `./apm_modules/` | `~/.apm/apm_modules/` |
+| Lockfile | `./apm.lock.yaml` | `~/.apm/apm.lock.yaml` |
+| Deployed primitives | `./.github/`, `./.claude/`, ... | `~/.copilot/`, `~/.claude/`, `~/.cursor/`, `~/.config/opencode/` |
+
+### Per-target support
+
+Coverage varies by target and primitive type:
+
+| Target | Status | User-level dir | Primitives | Not supported |
+|--------|--------|---------------|------------|---------------|
+| Claude Code | Supported | `~/.claude/` (or `$CLAUDE_CONFIG_DIR`) | Skills, agents, commands, hooks, instructions | -- |
+| Copilot CLI | Partial | `~/.copilot/` | Skills, agents, hooks | Prompts, instructions |
+| Cursor | Partial | `~/.cursor/` | Skills, agents, hooks | Rules |
+| OpenCode | Partial | `~/.config/opencode/` | Skills, agents, commands | Hooks |
+
+Target detection mirrors project scope: APM auto-detects by `~/.<target>/` directory presence,
+falling back to Copilot. Security scanning runs for global installs.
+
+For Claude Code, if `CLAUDE_CONFIG_DIR` is set (and points inside `$HOME`), `apm install -g --target claude` deploys there instead of `~/.claude/` so primitives land where Claude Code reads them.
+
+### When to use each scope
+
+| Use case | Scope |
+|----------|-------|
+| Team-shared instructions and prompts | Project (`apm install`) |
+| Personal commands, agents, or skills | User (`apm install -g`) |
+| CI/CD reproducible setup | Project |
+| Cross-project coding standards | User |
+
+:::note
+MCP servers at user scope (`--global`) are installed only to runtimes with global config paths (Copilot CLI, Codex CLI). Workspace-only runtimes (VS Code, Cursor, OpenCode) are skipped.
+:::
+
+:::caution
+Local path dependencies (`./path`, `../path`, `/abs/path`) are rejected at user scope. Relative paths resolve against `cwd`, which differs from the user-scope deploy root (`~/.apm/`). Use remote references for `apm install -g`.
+:::
+
 ## MCP Dependency Formats
+
+:::tip[Quick start]
+For the CLI-first walkthrough (`apm install --mcp ...`), see the [MCP Servers guide](../mcp-servers/). This section covers the `apm.yml` manifest format in depth.
+:::
 
 MCP dependencies support three forms: string references, overlay objects, and self-defined servers.
 
@@ -311,7 +398,7 @@ mcp:
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | string | Server reference (required) |
-| `transport` | string | `stdio`, `sse`, `http`, or `streamable-http` |
+| `transport` | string | `stdio`, `sse`, `http`, or `streamable-http` (MCP transport names, not URL schemes -- remote variants connect over HTTPS) |
 | `env` | dict | Environment variable overrides |
 | `args` | list or dict | Runtime argument overrides |
 | `version` | string | Pin server version |
@@ -365,6 +452,83 @@ apm install --trust-transitive-mcp
 
 Run `apm install --dry-run` to preview MCP dependency configuration without writing any files. Self-defined deps are validated for required fields and transport values; overlay deps are loaded as-is and unknown fields are ignored.
 
+## Transport selection (SSH vs HTTPS)
+
+APM picks SSH or HTTPS per dependency using a strict, predictable contract.
+
+:::caution[Breaking change in APM 0.8.13]
+APM versions before 0.8.13 silently retried failed clones across protocols.
+Starting in 0.8.13 the behavior is **strict by default**: explicit URL schemes are honored exactly,
+and shorthand uses HTTPS unless `git config url.<base>.insteadOf` rewrites it
+to SSH. To restore the legacy permissive chain temporarily (e.g. while
+migrating CI), set `APM_ALLOW_PROTOCOL_FALLBACK=1` or pass
+`--allow-protocol-fallback`.
+:::
+
+| Dependency form | What APM tries |
+|-----------------|----------------|
+| `ssh://...` or `git@host:...` | SSH only |
+| `https://...` or `http://...` | HTTP(S) only |
+| Shorthand (`owner/repo`, `host/owner/repo`) with `git config url.<base>.insteadOf` rewriting to SSH | SSH only |
+| Shorthand without a matching `insteadOf` rewrite | HTTPS only |
+
+A failed clone fails loudly, naming the URL and the protocol attempted. APM
+no longer downgrades `ssh://` to HTTPS or vice-versa.
+
+### Honoring `git config insteadOf`
+
+If your machine rewrites HTTPS to SSH for a host, APM matches `git clone`'s
+behavior on that machine. Example:
+
+```bash
+git config --global url."git@github.com:".insteadOf "https://github.com/"
+apm install owner/repo        # APM clones over SSH
+```
+
+No CLI flag is needed. `insteadOf` is consulted only for shorthand
+dependencies; explicit URLs in `apm.yml` are not rewritten.
+
+### Forcing the initial protocol for shorthand
+
+```bash
+apm install owner/repo --ssh        # force SSH for shorthand
+apm install owner/repo --https      # force HTTPS for shorthand
+export APM_GIT_PROTOCOL=ssh         # session default
+```
+
+`--ssh` and `--https` are mutually exclusive and apply only to shorthand
+dependencies. URLs with an explicit scheme ignore them.
+
+### Restoring the legacy permissive chain
+
+```bash
+apm install --allow-protocol-fallback
+export APM_ALLOW_PROTOCOL_FALLBACK=1   # CI / migration window
+```
+
+When fallback runs, each cross-protocol retry emits a `[!]` warning naming
+both protocols. Use this to unblock a pipeline while you fix the root
+cause -- not as a long-term setting.
+
+:::caution[Cross-protocol fallback reuses the same port]
+Fallback reuses the dependency's custom port for both schemes. On
+servers that use different ports per protocol (e.g. Bitbucket
+Datacenter: SSH 7999, HTTPS 7990), the off-protocol URL will be
+wrong. APM emits a `[!]` warning before the first clone attempt when
+a custom port is set and fallback is enabled. To avoid cross-protocol
+retries entirely, leave `--allow-protocol-fallback` disabled (strict
+mode) and pin the dependency with an explicit `ssh://...` or
+`https://...` URL in `apm.yml`. If fallback is enabled, APM may still
+try the other protocol even when the URL uses an explicit scheme --
+pinning only hard-stops cross-protocol retries in strict mode.
+:::
+
+For SSH key selection (ssh-agent, `~/.ssh/config`) and HTTPS token
+resolution, see
+[Authentication](../../getting-started/authentication/#choosing-transport-ssh-vs-https).
+For the CLI flag and env var reference, see
+[`apm install`](../../reference/cli-commands/#apm-install---install-dependencies-and-deploy-local-content).
+
 ## GitHub Authentication Setup
 
 For GitHub and GitHub Enterprise repositories, set up a personal access token:
@@ -404,7 +568,7 @@ If authentication fails, you'll see an error with guidance on token setup.
 For non-GitHub repositories, APM delegates authentication to git — it never sends GitHub tokens to non-GitHub hosts:
 
 - **Public repos**: Work without authentication via HTTPS
-- **Private repos via SSH**: Configure SSH keys for your host — APM falls back to SSH automatically
+- **Private repos via SSH**: Configure SSH keys for your host. Use an `ssh://` or `git@host:` URL, or set up `git config url.<base>.insteadOf` to rewrite shorthand to SSH (see [Transport selection](#transport-selection-ssh-vs-https))
 - **Private repos via HTTPS**: Configure a [git credential helper](https://git-scm.com/docs/gitcredentials) — APM allows credential helpers for non-GitHub hosts
 
 ```bash
@@ -554,11 +718,17 @@ dependencies:
 ### Updating Dependencies
 
 ```bash
-# Update all dependencies to latest versions
+# Update all dependencies to latest refs
 apm deps update
 
-# Update specific dependency  
-apm deps update apm-sample-package
+# Update specific dependency (use the owner/repo form from apm.yml)
+apm deps update owner/apm-sample-package
+
+# Update with verbose output
+apm deps update --verbose
+
+# Update user-scope dependencies
+apm deps update -g
 
 # Install with updates (equivalent to update)
 apm install --update
@@ -607,7 +777,7 @@ The `mcp_servers` field records the MCP dependency references (e.g. `io.github.g
 
 1. **First install**: APM resolves dependencies, downloads packages, and writes `apm.lock.yaml`
 2. **Subsequent installs**: APM reads `apm.lock.yaml` and uses locked commits for exact reproducibility. If the local checkout already matches the locked commit SHA, the download is skipped entirely.
-3. **Updating**: Use `--update` to re-resolve dependencies and generate a fresh lockfile
+3. **Updating**: Use `--update` to re-resolve dependencies and generate a fresh lockfile. This re-resolves all dependencies, including transitive ones, so stale locked SHAs are never reused.
 
 ### Version Control
 
@@ -740,7 +910,7 @@ curl -H "Authorization: token $GITHUB_CLI_PAT" https://api.github.com/user
 
 ```bash
 # Show detailed package information
-apm deps info package-name
+apm view package-name
 
 # Show full dependency tree
 apm deps tree

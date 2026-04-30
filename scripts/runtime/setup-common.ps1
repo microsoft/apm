@@ -24,7 +24,7 @@ function Get-Platform {
 
 # Create APM runtime directory
 function Initialize-ApmRuntimeDir {
-    $runtimeDir = Join-Path $env:USERPROFILE ".apm" "runtimes"
+    $runtimeDir = Join-Path (Join-Path $env:USERPROFILE ".apm") "runtimes"
     if (-not (Test-Path $runtimeDir)) {
         Write-Info "Creating APM runtime directory: $runtimeDir"
         New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
@@ -33,7 +33,7 @@ function Initialize-ApmRuntimeDir {
 
 # Add APM runtimes to user PATH if not already present
 function Update-UserPath {
-    $runtimeDir = Join-Path $env:USERPROFILE ".apm" "runtimes"
+    $runtimeDir = Join-Path (Join-Path $env:USERPROFILE ".apm") "runtimes"
 
     # Update current session PATH
     if ($env:PATH -notlike "*$runtimeDir*") {

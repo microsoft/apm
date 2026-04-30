@@ -99,39 +99,52 @@ Reference script inputs using the `${input:name}` syntax:
 - Start time: ${input:start_time}
 ```
 
-## MCP Tool Integration (Phase 2 - Coming Soon)
+### Input formats
 
-> **Note**: MCP integration is planned work. Currently, prompts work with natural language instructions only.
-
-**Future capability** - Prompts will be able to use MCP servers for external tools:
+The `input:` frontmatter key accepts several formats:
 
 ```yaml
----
-description: Future MCP-enabled prompt
-mcp:
-  - kubernetes-mcp    # For cluster access
-  - github-mcp        # For repository operations  
-  - slack-mcp         # For team communication
----
+# Simple list (most common)
+input:
+  - service_name
+  - environment
+
+# Object list with descriptions
+input:
+  - service_name: "Name of the service to analyze"
+  - environment: "Target environment (prod, staging)"
+
+# Bare dictionary
+input:
+  service_name: "Name of the service"
+  environment: "Target environment"
+
+# Single string (one parameter)
+input: service_name
 ```
 
-**Current workaround**: Use detailed natural language instructions:
-```markdown
----
-description: Current approach without MCP tools
----
+### Target-specific mapping
 
-# Kubernetes Analysis
+When APM installs a prompt as a Claude Code slash command, it maps `input:` to Claude's native `arguments:` frontmatter. The `${input:name}` references in the prompt body are converted to `$name` placeholders, and an `argument-hint` is auto-generated if one is not already set.
 
-Please analyze the Kubernetes cluster by:
-1. Examining the deployment configurations I'll provide
-2. Reviewing resource usage patterns
-3. Suggesting optimization opportunities
+```yaml
+# APM prompt frontmatter
+input:
+  - feature_name
+  - priority
 
-[Include relevant data in the prompt or as context]
+# Becomes Claude command frontmatter
+arguments:
+  - feature_name
+  - priority
+argument-hint: <feature_name> <priority>
 ```
 
-See [MCP Integration](../../integrations/ide-tool-integration/#mcp-model-context-protocol-integration) for MCP server configuration and usage.
+This mapping is automatic during `apm install` -- no extra configuration is needed. If you set an explicit `argument-hint:` in the prompt frontmatter, APM preserves it instead of generating one.
+
+## MCP servers in prompts
+
+Prompts can declare MCP server dependencies in their frontmatter under the `mcp:` key (see the deployment-health-check example below). To add an MCP server to your project, see the [MCP Servers guide](../mcp-servers/).
 
 ## Writing Effective Prompts
 

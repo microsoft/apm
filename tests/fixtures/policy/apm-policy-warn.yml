@@ -1,0 +1,5 @@
+# Fixture 6: Minimal warn-mode policy
+# Tests: default enforcement behaviour; diagnostics rendered but install proceeds
+name: warn-mode-policy
+version: "1.0.0"
+enforcement: warn

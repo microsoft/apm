@@ -11,3 +11,15 @@
 #   uv run pytest tests/unit tests/test_console.py -x   # CI-equivalent fast run
 #   uv run pytest                                         # Full suite
 #   uv run pytest -m benchmark                            # Benchmarks only
+
+import pytest
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _validate_primitive_coverage():
+    """Fail fast if KNOWN_TARGETS has primitives without dispatch handlers."""
+    from apm_cli.integration.coverage import check_primitive_coverage
+    from apm_cli.integration.dispatch import get_dispatch_table
+
+    dispatch = get_dispatch_table()
+    check_primitive_coverage(dispatch)

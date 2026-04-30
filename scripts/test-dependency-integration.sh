@@ -64,10 +64,10 @@ EOF
     echo "--- OUTPUT START ---"
     echo "$deps_output"
     echo "--- OUTPUT END ---"
-    if echo "$deps_output" | grep -q "No APM dependencies installed yet"; then
+    if echo "$deps_output" | grep -q "No APM dependencies installed"; then
         log_success "Correctly shows no dependencies installed"
     else
-        log_error "Expected 'No APM dependencies installed yet' message"
+        log_error "Expected 'No APM dependencies installed' message"
         log_error "Got: $deps_output"
         return 1
     fi
@@ -256,7 +256,7 @@ test_dependency_cleanup() {
     echo "--- OUTPUT START ---"
     echo "$deps_output_after_cleanup"
     echo "--- OUTPUT END ---"
-    if echo "$deps_output_after_cleanup" | grep -q "No APM dependencies installed yet"; then
+    if echo "$deps_output_after_cleanup" | grep -q "No APM dependencies installed"; then
         log_success "Correctly shows no dependencies after cleanup"
     else
         log_error "Expected no dependencies after cleanup"

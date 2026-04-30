@@ -1,0 +1,4 @@
+# Fixture 5: Malformed policy -- invalid enforcement value
+# Tests: PolicyValidationError raised; outcome #5 (fail-closed always)
+name: malformed-policy
+enforcement: nonsense_level

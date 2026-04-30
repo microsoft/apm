@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import errno
 from pathlib import Path
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union  # noqa: F401, UP035
 
 import yaml
 
@@ -22,6 +23,7 @@ from .schema import (
 
 # Valid enum values for schema fields
 _VALID_ENFORCEMENT = {"warn", "block", "off"}
+_VALID_FETCH_FAILURE = {"warn", "block"}
 _VALID_REQUIRE_RESOLUTION = {"project-wins", "policy-wins", "block"}
 _VALID_SELF_DEFINED = {"deny", "warn", "allow"}
 _VALID_SCRIPTS = {"allow", "deny"}
@@ -35,6 +37,7 @@ _KNOWN_TOP_LEVEL_KEYS = {
     "version",
     "extends",
     "enforcement",
+    "fetch_failure",
     "cache",
     "dependencies",
     "mcp",
@@ -47,18 +50,18 @@ _KNOWN_TOP_LEVEL_KEYS = {
 class PolicyValidationError(Exception):
     """Raised when policy YAML is malformed or violates schema constraints."""
 
-    def __init__(self, errors: List[str]):
+    def __init__(self, errors: list[str]):
         self.errors = errors
         super().__init__(f"Policy validation failed: {'; '.join(errors)}")
 
 
-def validate_policy(data: dict) -> Tuple[List[str], List[str]]:
+def validate_policy(data: dict) -> tuple[list[str], list[str]]:
     """Validate a raw dict against the policy schema.
 
     Returns (errors, warnings) where each is a list of strings.
     """
-    errors: List[str] = []
-    warnings: List[str] = []
+    errors: list[str] = []
+    warnings: list[str] = []
 
     if not isinstance(data, dict):
         errors.append("Policy must be a YAML mapping")
@@ -77,6 +80,17 @@ def validate_policy(data: dict) -> Tuple[List[str], List[str]]:
     if enforcement is not None and enforcement not in _VALID_ENFORCEMENT:
         errors.append(
             f"enforcement must be one of {sorted(_VALID_ENFORCEMENT)}, got '{enforcement}'"
+        )
+
+    # fetch_failure (closes #829): controls fail-closed behavior on
+    # policy fetch / parse failure. Default "warn" (back-compat).
+    fetch_failure = data.get("fetch_failure")
+    if isinstance(fetch_failure, bool):
+        fetch_failure = _YAML_BOOL_COERCE.get(fetch_failure, str(fetch_failure))
+        data["fetch_failure"] = fetch_failure
+    if fetch_failure is not None and fetch_failure not in _VALID_FETCH_FAILURE:
+        errors.append(
+            f"fetch_failure must be one of {sorted(_VALID_FETCH_FAILURE)}, got '{fetch_failure}'"
         )
 
     # cache.ttl
@@ -101,13 +115,9 @@ def validate_policy(data: dict) -> Tuple[List[str], List[str]]:
         md = deps.get("max_depth")
         if md is not None:
             if not isinstance(md, int) or isinstance(md, bool):
-                errors.append(
-                    f"dependencies.max_depth must be a positive integer, got '{md}'"
-                )
+                errors.append(f"dependencies.max_depth must be a positive integer, got '{md}'")
             elif md <= 0:
-                errors.append(
-                    f"dependencies.max_depth must be a positive integer, got {md}"
-                )
+                errors.append(f"dependencies.max_depth must be a positive integer, got {md}")
 
     # mcp.self_defined
     mcp = data.get("mcp")
@@ -126,6 +136,9 @@ def validate_policy(data: dict) -> Tuple[List[str], List[str]]:
             errors.append(
                 f"manifest.scripts must be one of {sorted(_VALID_SCRIPTS)}, got '{scripts}'"
             )
+        rei = manifest.get("require_explicit_includes")
+        if rei is not None and not isinstance(rei, bool):
+            errors.append(f"manifest.require_explicit_includes must be a boolean, got '{rei}'")
 
     # unmanaged_files.action
     uf = data.get("unmanaged_files")
@@ -155,9 +168,7 @@ def _build_policy(data: dict) -> ApmPolicy:
         allow=_parse_allow(deps_data.get("allow")),
         deny=_parse_tuple(deps_data.get("deny")),
         require=_parse_tuple(deps_data.get("require")),
-        require_resolution=deps_data.get(
-            "require_resolution", DependencyPolicy.require_resolution
-        ),
+        require_resolution=deps_data.get("require_resolution", DependencyPolicy.require_resolution),
         max_depth=deps_data.get("max_depth", DependencyPolicy.max_depth),
     )
 
@@ -170,9 +181,7 @@ def _build_policy(data: dict) -> ApmPolicy:
             allow=_parse_allow(transport_data.get("allow")),
         ),
         self_defined=mcp_data.get("self_defined", McpPolicy.self_defined),
-        trust_transitive=mcp_data.get(
-            "trust_transitive", McpPolicy.trust_transitive
-        ),
+        trust_transitive=mcp_data.get("trust_transitive", McpPolicy.trust_transitive),
     )
 
     comp_data = data.get("compilation") or {}
@@ -196,6 +205,7 @@ def _build_policy(data: dict) -> ApmPolicy:
         required_fields=_parse_tuple(manifest_data.get("required_fields")),
         scripts=manifest_data.get("scripts", ManifestPolicy.scripts),
         content_types=manifest_data.get("content_types"),
+        require_explicit_includes=bool(manifest_data.get("require_explicit_includes", False)),
     )
 
     uf_data = data.get("unmanaged_files") or {}
@@ -209,6 +219,7 @@ def _build_policy(data: dict) -> ApmPolicy:
         version=data.get("version", "") or "",
         extends=data.get("extends"),
         enforcement=data.get("enforcement", ApmPolicy.enforcement),
+        fetch_failure=data.get("fetch_failure", ApmPolicy.fetch_failure),
         cache=cache,
         dependencies=dependencies,
         mcp=mcp,
@@ -218,18 +229,49 @@ def _build_policy(data: dict) -> ApmPolicy:
     )
 
 
-def load_policy(source: Union[str, Path]) -> Tuple[ApmPolicy, List[str]]:
+def _looks_like_yaml_content(source: str) -> bool:
+    """Return True when a string is more likely inline YAML than a file path.
+
+    This avoids probing the filesystem for large YAML payloads, which can raise
+    platform-specific path errors such as ENAMETOOLONG on macOS.
+    """
+    stripped = source.lstrip()
+
+    if "\n" in source or "\r" in source:
+        return True
+
+    if stripped.startswith(("{", "[", "---", "- ")):
+        return True
+
+    first_line = stripped.splitlines()[0] if stripped else ""
+    return ": " in first_line or first_line.endswith(":")
+
+
+def load_policy(source: str | Path) -> tuple[ApmPolicy, list[str]]:
     """Load and validate an apm-policy.yml from a file path or YAML string.
 
     Returns (policy, warnings). Raises PolicyValidationError on invalid input.
     """
-    path = Path(source) if not isinstance(source, Path) else source
+    raw: str
 
-    if path.is_file():
-        raw = path.read_text(encoding="utf-8")
+    if isinstance(source, Path):
+        raw = source.read_text(encoding="utf-8") if source.is_file() else str(source)
+    elif _looks_like_yaml_content(source):
+        raw = source
     else:
-        # Treat source as a YAML string
-        raw = str(source)
+        path = Path(source)
+        try:
+            is_file = path.is_file()
+        except OSError as exc:
+            if exc.errno == errno.ENAMETOOLONG:
+                is_file = False
+            else:
+                raise
+
+        if is_file:  # noqa: SIM108
+            raw = path.read_text(encoding="utf-8")
+        else:
+            raw = source
 
     try:
         data = yaml.safe_load(raw)
@@ -249,7 +291,7 @@ def load_policy(source: Union[str, Path]) -> Tuple[ApmPolicy, List[str]]:
     return _build_policy(data), warnings
 
 
-def _parse_allow(val: Any) -> Optional[Tuple[str, ...]]:
+def _parse_allow(val: Any) -> tuple[str, ...] | None:
     """Parse an allow-list field.
 
     * Key absent (``val is None``) -> ``None`` ("no opinion").
@@ -262,7 +304,7 @@ def _parse_allow(val: Any) -> Optional[Tuple[str, ...]]:
     return None
 
 
-def _parse_tuple(val: Any) -> Tuple[str, ...]:
+def _parse_tuple(val: Any) -> tuple[str, ...]:
     """Parse a deny/require/directories field into a tuple."""
     if isinstance(val, list):
         return tuple(val)

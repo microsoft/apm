@@ -23,7 +23,9 @@ source "$SCRIPT_DIR/setup-common.sh"
 
 # Configuration
 CODEX_REPO="openai/codex"
-CODEX_VERSION="latest"  # Default version
+# Pin to a known stable release for security and reproducibility (#662).
+# Users can override with: apm runtime setup codex --version <version> (e.g. 'latest')
+CODEX_VERSION="rust-v0.118.0"
 VANILLA_MODE=false
 
 # Parse command line arguments
@@ -204,10 +206,12 @@ model = "openai/gpt-4o"
 name = "GitHub Models"
 base_url = "https://models.github.ai/inference/"
 env_key = "$github_token_var"
-wire_api = "chat"
+wire_api = "responses"
 EOF
         
         log_success "Codex configuration created at $codex_config"
+        log_info "Using Codex $CODEX_VERSION."
+        log_info "Override with: apm runtime setup codex --version <version> (e.g. 'latest')"
         log_info "APM configured Codex with GitHub Models as default provider"
         log_info "Use 'apm install' to configure MCP servers for your projects"
     else

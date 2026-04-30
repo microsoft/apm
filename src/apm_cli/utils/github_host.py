@@ -3,7 +3,7 @@
 import os
 import re
 import urllib.parse
-from typing import Optional
+from typing import Optional  # noqa: F401
 
 
 def default_host() -> str:
@@ -11,9 +11,9 @@ def default_host() -> str:
     return os.environ.get("GITHUB_HOST", "github.com")
 
 
-def is_azure_devops_hostname(hostname: Optional[str]) -> bool:
+def is_azure_devops_hostname(hostname: str | None) -> bool:
     """Return True if hostname is Azure DevOps (cloud or server).
-    
+
     Accepts:
     - dev.azure.com (Azure DevOps Services)
     - *.visualstudio.com (legacy Azure DevOps URLs)
@@ -24,16 +24,16 @@ def is_azure_devops_hostname(hostname: Optional[str]) -> bool:
     h = hostname.lower()
     if h == "dev.azure.com":
         return True
-    if h.endswith(".visualstudio.com"):
+    if h.endswith(".visualstudio.com"):  # noqa: SIM103
         return True
     return False
 
 
-def is_github_hostname(hostname: Optional[str]) -> bool:
+def is_github_hostname(hostname: str | None) -> bool:
     """Return True if hostname should be treated as GitHub (cloud or enterprise).
 
     Accepts 'github.com' and hosts that end with '.ghe.com'.
-    
+
     Note: This is primarily for internal hostname classification.
     APM accepts any Git host via FQDN syntax without validation.
     """
@@ -42,14 +42,14 @@ def is_github_hostname(hostname: Optional[str]) -> bool:
     h = hostname.lower()
     if h == "github.com":
         return True
-    if h.endswith(".ghe.com"):
+    if h.endswith(".ghe.com"):  # noqa: SIM103
         return True
     return False
 
 
-def is_supported_git_host(hostname: Optional[str]) -> bool:
+def is_supported_git_host(hostname: str | None) -> bool:
     """Return True if hostname is a supported Git hosting platform.
-    
+
     Supports:
     - GitHub.com
     - GitHub Enterprise (*.ghe.com)
@@ -60,43 +60,43 @@ def is_supported_git_host(hostname: Optional[str]) -> bool:
     """
     if not hostname:
         return False
-    
+
     # Check GitHub hosts
     if is_github_hostname(hostname):
         return True
-    
+
     # Check Azure DevOps hosts
     if is_azure_devops_hostname(hostname):
         return True
-    
+
     # Accept the configured default host (supports custom Azure DevOps Server, etc.)
     configured_host = os.environ.get("GITHUB_HOST", "").lower()
     if configured_host and hostname.lower() == configured_host:
         return True
-    
+
     # Accept any valid FQDN as a generic git host (GitLab, Bitbucket, self-hosted, etc.)
-    if is_valid_fqdn(hostname):
+    if is_valid_fqdn(hostname):  # noqa: SIM103
         return True
-    
+
     return False
 
 
-def unsupported_host_error(hostname: str, context: Optional[str] = None) -> str:
+def unsupported_host_error(hostname: str, context: str | None = None) -> str:
     """Generate an actionable error message for unsupported Git hosts.
-    
+
     Args:
         hostname: The hostname that was rejected
         context: Optional context message (e.g., "Protocol-relative URLs are not supported")
-    
+
     Returns:
         str: A user-friendly error message with fix instructions
     """
     current_host = os.environ.get("GITHUB_HOST", "")
-    
+
     msg = ""
     if context:
         msg += f"{context}\n\n"
-    
+
     msg += f"Invalid Git host: '{hostname}'.\n"
     msg += "\n"
     msg += "APM supports any valid FQDN as a Git host, including:\n"
@@ -105,27 +105,27 @@ def unsupported_host_error(hostname: str, context: Optional[str] = None) -> str:
     msg += "  * dev.azure.com, *.visualstudio.com (Azure DevOps)\n"
     msg += "  * gitlab.com, bitbucket.org, or any self-hosted Git server\n"
     msg += "\n"
-    
+
     if current_host:
         msg += f"Your GITHUB_HOST is set to: '{current_host}'\n"
         msg += f"But you're trying to use: '{hostname}'\n"
         msg += "\n"
-    
+
     msg += f"To use '{hostname}', set the GITHUB_HOST environment variable:\n"
     msg += "\n"
-    msg += f"  # Linux/macOS:\n"
+    msg += "  # Linux/macOS:\n"
     msg += f"  export GITHUB_HOST={hostname}\n"
     msg += "\n"
-    msg += f"  # Windows (PowerShell):\n"
+    msg += "  # Windows (PowerShell):\n"
     msg += f'  $env:GITHUB_HOST = "{hostname}"\n'
     msg += "\n"
-    msg += f"  # Windows (Command Prompt):\n"
+    msg += "  # Windows (Command Prompt):\n"
     msg += f"  set GITHUB_HOST={hostname}\n"
-    
+
     return msg
 
 
-from urllib.parse import quote as url_quote
+from urllib.parse import quote as url_quote  # noqa: E402
 
 
 def build_raw_content_url(owner: str, repo: str, ref: str, file_path: str) -> str:
@@ -146,70 +146,139 @@ def build_raw_content_url(owner: str, repo: str, ref: str, file_path: str) -> st
     Returns:
         str: ``https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{file_path}``
     """
-    encoded_ref = url_quote(ref, safe='')
+    encoded_ref = url_quote(ref, safe="")
     return f"https://raw.githubusercontent.com/{owner}/{repo}/{encoded_ref}/{file_path}"
 
 
-def build_ssh_url(host: str, repo_ref: str) -> str:
-    """Build an SSH clone URL for the given host and repo_ref (owner/repo)."""
+def build_ssh_url(host: str, repo_ref: str, port: int | None = None) -> str:
+    """Build an SSH clone URL for the given host and repo_ref (owner/repo).
+
+    When ``port`` is set, emit the explicit ``ssh://`` form because SCP
+    shorthand (``git@host:path``) cannot carry a port — the ``:`` is the path
+    separator. Without a port, keep the compact SCP shorthand (no behavioural
+    change for the common case).
+    """
+    if port:
+        return f"ssh://git@{host}:{port}/{repo_ref}.git"
     return f"git@{host}:{repo_ref}.git"
 
 
-def build_https_clone_url(host: str, repo_ref: str, token: Optional[str] = None) -> str:
+def build_https_clone_url(
+    host: str,
+    repo_ref: str,
+    token: str | None = None,
+    port: int | None = None,
+) -> str:
     """Build an HTTPS clone URL. If token provided, use x-access-token format (no escaping done).
+
+    ``port`` is embedded in the netloc (``host:port``) when set so custom
+    HTTPS ports (e.g. self-hosted Git servers on 8443) are preserved.
 
     Note: callers must avoid logging raw token-bearing URLs.
     """
+    netloc = f"{host}:{port}" if port else host
     if token:
         # Use x-access-token format which is compatible with GitHub Enterprise and GH Actions
-        return f"https://x-access-token:{token}@{host}/{repo_ref}.git"
-    return f"https://{host}/{repo_ref}"
+        return f"https://x-access-token:{token}@{netloc}/{repo_ref}.git"
+    return f"https://{netloc}/{repo_ref}"
 
 
 # Azure DevOps URL builders
 
-def build_ado_https_clone_url(org: str, project: str, repo: str, token: Optional[str] = None, host: str = "dev.azure.com") -> str:
+
+def build_ado_https_clone_url(
+    org: str, project: str, repo: str, token: str | None = None, host: str = "dev.azure.com"
+) -> str:
     """Build Azure DevOps HTTPS clone URL.
-    
+
     Azure DevOps accepts PAT as password with any username, or as bearer token.
     The standard format is: https://dev.azure.com/{org}/{project}/_git/{repo}
-    
+
     Args:
         org: Azure DevOps organization name
         project: Azure DevOps project name
         repo: Repository name
         token: Optional Personal Access Token for authentication
         host: Azure DevOps host (default: dev.azure.com)
-    
+
     Returns:
         str: HTTPS clone URL for Azure DevOps
     """
-    quoted_project = urllib.parse.quote(project, safe='')
+    quoted_project = urllib.parse.quote(project, safe="")
     if token:
         # ADO uses PAT as password with empty username
         return f"https://{token}@{host}/{org}/{quoted_project}/_git/{repo}"
     return f"https://{host}/{org}/{quoted_project}/_git/{repo}"
 
 
+def build_authorization_header_git_env(scheme: str, credential: str) -> dict:
+    """Build env vars to inject an HTTP Authorization header into git operations.
+
+    Uses git's GIT_CONFIG_COUNT/KEY_N/VALUE_N mechanism to set
+    ``http.extraheader`` via the environment, NOT via a ``-c`` command-line
+    flag.  Command-line flags appear in the OS process table and may be
+    captured by host-level monitoring; environment variables are private
+    to the spawned process.
+
+    The returned dict is intended to be merged into a base env (e.g.
+    ``os.environ.copy()``) before being passed to ``Repo.clone_from(env=...)``
+    or ``subprocess.run(..., env=...)``.
+
+    Args:
+        scheme: HTTP auth scheme, e.g. ``"Bearer"`` or ``"Basic"``.
+        credential: The credential value (token or base64-encoded user:pass).
+
+    Returns:
+        dict: ``{GIT_CONFIG_COUNT, GIT_CONFIG_KEY_0, GIT_CONFIG_VALUE_0}``.
+
+    Note:
+        Callers MUST NOT log the returned dict.  ``GIT_CONFIG_VALUE_0``
+        contains the credential.
+    """
+    return {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.extraheader",
+        "GIT_CONFIG_VALUE_0": f"Authorization: {scheme} {credential}",
+    }
+
+
+def build_ado_bearer_git_env(bearer_token: str) -> dict:
+    """Build env vars to authenticate to Azure DevOps with an Entra ID bearer.
+
+    Azure DevOps accepts AAD bearer tokens anywhere a PAT is accepted.  AAD
+    JWTs are typically 1.5-2.5KB which exceeds safe URL-embedding limits
+    and would leak into git's own logs and the OS process table.  Header
+    injection avoids both issues.
+
+    Args:
+        bearer_token: An AAD JWT scoped to the ADO resource GUID
+            ``499b84ac-1321-427f-aa17-267ca6975798``.
+
+    Returns:
+        dict: env-var overlay for the spawned git subprocess.
+    """
+    return build_authorization_header_git_env("Bearer", bearer_token)
+
+
 def build_ado_ssh_url(org: str, project: str, repo: str, host: str = "ssh.dev.azure.com") -> str:
     """Build Azure DevOps SSH clone URL for cloud or server.
-    
+
     For Azure DevOps Services (cloud):
         git@ssh.dev.azure.com:v3/{org}/{project}/{repo}
-    
+
     For Azure DevOps Server (on-premises):
         ssh://git@{host}/{org}/{project}/_git/{repo}
-    
+
     Args:
         org: Azure DevOps organization name
-        project: Azure DevOps project name  
+        project: Azure DevOps project name
         repo: Repository name
         host: SSH host (default: ssh.dev.azure.com for cloud; set to your server for on-prem)
-    
+
     Returns:
         str: SSH clone URL for Azure DevOps
     """
-    quoted_project = urllib.parse.quote(project, safe='')
+    quoted_project = urllib.parse.quote(project, safe="")
     if host == "ssh.dev.azure.com":
         # Cloud format
         return f"git@ssh.dev.azure.com:v3/{org}/{quoted_project}/{repo}"
@@ -218,11 +287,13 @@ def build_ado_ssh_url(org: str, project: str, repo: str, host: str = "ssh.dev.az
         return f"ssh://git@{host}/{org}/{quoted_project}/_git/{repo}"
 
 
-def build_ado_api_url(org: str, project: str, repo: str, path: str, ref: str = "main", host: str = "dev.azure.com") -> str:
+def build_ado_api_url(
+    org: str, project: str, repo: str, path: str, ref: str = "main", host: str = "dev.azure.com"
+) -> str:
     """Build Azure DevOps REST API URL for file contents.
-    
+
     API format: https://dev.azure.com/{org}/{project}/_apis/git/repositories/{repo}/items
-    
+
     Args:
         org: Azure DevOps organization name
         project: Azure DevOps project name
@@ -230,12 +301,12 @@ def build_ado_api_url(org: str, project: str, repo: str, path: str, ref: str = "
         path: Path to file within the repository
         ref: Git reference (branch, tag, or commit). Defaults to "main"
         host: Azure DevOps host (default: dev.azure.com)
-    
+
     Returns:
         str: API URL for retrieving file contents
     """
-    encoded_path = urllib.parse.quote(path, safe='')
-    quoted_project = urllib.parse.quote(project, safe='')
+    encoded_path = urllib.parse.quote(path, safe="")
+    quoted_project = urllib.parse.quote(project, safe="")
     return (
         f"https://{host}/{org}/{quoted_project}/_apis/git/repositories/{repo}/items"
         f"?path={encoded_path}&versionDescriptor.version={ref}&api-version=7.0"
@@ -248,8 +319,7 @@ def is_artifactory_path(path_segments: list) -> bool:
     Artifactory VCS paths follow the pattern: artifactory/{repo-key}/{owner}/{repo}
     Detection: first segment is 'artifactory' and there are at least 4 segments.
     """
-    return (len(path_segments) >= 4
-            and path_segments[0].lower() == 'artifactory')
+    return len(path_segments) >= 4 and path_segments[0].lower() == "artifactory"
 
 
 def parse_artifactory_path(path_segments: list) -> tuple:
@@ -270,17 +340,26 @@ def parse_artifactory_path(path_segments: list) -> tuple:
     prefix = f"artifactory/{repo_key}"
     owner = remaining[0]
     repo = remaining[1]
-    virtual_path = '/'.join(remaining[2:]) if len(remaining) > 2 else None
+    virtual_path = "/".join(remaining[2:]) if len(remaining) > 2 else None
     return (prefix, owner, repo, virtual_path)
 
 
-def build_artifactory_archive_url(host: str, prefix: str, owner: str, repo: str, ref: str = "main", scheme: str = "https") -> tuple:
+def build_artifactory_archive_url(
+    host: str, prefix: str, owner: str, repo: str, ref: str = "main", scheme: str = "https"
+) -> tuple:
     """Build Artifactory VCS archive download URLs.
 
     Returns a tuple of URLs to try in order.  Because Artifactory proxies
-    the upstream server's native URL scheme, we attempt both GitHub-style
-    and GitLab-style archive paths so the caller does not need to know
-    what sits behind the Artifactory remote repository.
+    the upstream server's native URL scheme, we attempt GitHub-style,
+    GitLab-style, and codeload.github.com-style archive paths so the caller
+    does not need to know what sits behind the Artifactory remote repository.
+
+    Organizations using private GitHub repositories must configure their
+    Artifactory upstream as ``codeload.github.com`` (instead of ``github.com``)
+    because Artifactory cannot follow GitHub's cross-host redirect (which
+    carries short-lived tokens) to codeload.  When the upstream is
+    ``codeload.github.com``, the required archive path is
+    ``/{owner}/{repo}/zip/refs/heads/{ref}`` (no ``.zip`` extension).
 
     Args:
         host: Artifactory hostname (e.g., 'artifactory.example.com')
@@ -301,6 +380,12 @@ def build_artifactory_archive_url(host: str, prefix: str, owner: str, repo: str,
         f"{base}/-/archive/{ref}/{repo}-{ref}.zip",
         # GitHub-style tags fallback
         f"{base}/archive/refs/tags/{ref}.zip",
+        # codeload.github.com-style: /zip/refs/heads/{ref}
+        # Required when Artifactory upstream is configured as codeload.github.com
+        # (workaround for private repos where github.com redirects to codeload with tokens
+        # that Artifactory cannot follow across hosts)
+        f"{base}/zip/refs/heads/{ref}",
+        f"{base}/zip/refs/tags/{ref}",
     )
 
 
@@ -321,19 +406,21 @@ def is_valid_fqdn(hostname: str) -> bool:
     """
     if not hostname:
         return False
-    
-    hostname = hostname.split('/')[0]  # Remove any path components
-    
+
+    hostname = hostname.split("/")[0]  # Remove any path components
+
     # Single regex to validate all FQDN rules:
     # - Starts with alphanumeric
     # - Labels only contain alphanumeric and hyphens
     # - Labels don't start/end with hyphens
     # - At least two labels (one dot)
-    pattern = r"^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)+$"
+    pattern = (
+        r"^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)+$"
+    )
     return bool(re.match(pattern, hostname))
 
 
-def sanitize_token_url_in_message(message: str, host: Optional[str] = None) -> str:
+def sanitize_token_url_in_message(message: str, host: str | None = None) -> str:
     """Sanitize occurrences of token-bearing https URLs for the given host in message.
 
     If host is None, default_host() is used. Replaces https://<anything>@host with https://***@host

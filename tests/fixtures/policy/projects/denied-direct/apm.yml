@@ -1,0 +1,10 @@
+# Project that directly depends on a denied package.
+# Against apm-policy-deny.yml: test-blocked/forbidden-package matches deny pattern.
+# Expected: install blocked (block mode) or warned (warn mode).
+name: denied-direct-project
+version: "1.0.0"
+description: Project with a directly denied dependency
+
+dependencies:
+  apm:
+    - test-blocked/forbidden-package

@@ -72,3 +72,5 @@ apm_modules/
 build/tmp/
 scout-pipeline-result.png
 .copilot/
+.playwright-mcp/
+server.pid

@@ -1,11 +1,10 @@
 """Utility helpers for APM dependency commands."""
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict  # noqa: F401, UP035
 
-from ...constants import APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
+from ...constants import APM_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from ...models.apm_package import APMPackage
-from ...deps.github_downloader import GitHubPackageDownloader
 
 
 def _scan_installed_packages(apm_modules_dir: Path) -> list:
@@ -42,21 +41,21 @@ def _is_nested_under_package(candidate: Path, apm_modules_path: Path) -> bool:
     a standalone package.
     """
     parent = candidate.parent
-    while parent != apm_modules_path and parent != parent.parent:
+    while parent != apm_modules_path and parent != parent.parent:  # noqa: PLR1714
         if (parent / APM_YML_FILENAME).exists():
             return True
         parent = parent.parent
     return False
 
 
-def _count_primitives(package_path: Path) -> Dict[str, int]:
+def _count_primitives(package_path: Path) -> dict[str, int]:
     """Count primitives by type in a package.
-    
+
     Returns:
         dict: Counts for 'prompts', 'instructions', 'agents', 'skills'
     """
-    counts = {'prompts': 0, 'instructions': 0, 'agents': 0, 'skills': 0, 'hooks': 0}
-    
+    counts = {"prompts": 0, "instructions": 0, "agents": 0, "skills": 0, "hooks": 0}
+
     apm_dir = package_path / APM_DIR
     if apm_dir.exists():
         for subdir, key, pattern in [
@@ -67,30 +66,35 @@ def _count_primitives(package_path: Path) -> Dict[str, int]:
             path = apm_dir / subdir
             if path.exists() and path.is_dir():
                 counts[key] += len(list(path.glob(pattern)))
-        
+
         skills_path = apm_dir / "skills"
         if skills_path.exists() and skills_path.is_dir():
-            counts['skills'] += len([d for d in skills_path.iterdir() 
-                                     if d.is_dir() and (d / SKILL_MD_FILENAME).exists()])
-    
+            counts["skills"] += len(
+                [
+                    d
+                    for d in skills_path.iterdir()
+                    if d.is_dir() and (d / SKILL_MD_FILENAME).exists()
+                ]
+            )
+
     # Also count root-level .prompt.md files
-    counts['prompts'] += len(list(package_path.glob("*.prompt.md")))
-    
+    counts["prompts"] += len(list(package_path.glob("*.prompt.md")))
+
     # Count root-level SKILL.md as a skill
     if (package_path / SKILL_MD_FILENAME).exists():
-        counts['skills'] += 1
-    
+        counts["skills"] += 1
+
     # Count hooks (.json files in hooks/ or .apm/hooks/)
     for hooks_dir in [package_path / "hooks", apm_dir / "hooks" if apm_dir.exists() else None]:
         if hooks_dir and hooks_dir.exists() and hooks_dir.is_dir():
-            counts['hooks'] += len(list(hooks_dir.glob("*.json")))
-    
+            counts["hooks"] += len(list(hooks_dir.glob("*.json")))
+
     return counts
 
 
 def _count_package_files(package_path: Path) -> tuple[int, int]:
     """Count context files and workflows in a package.
-    
+
     Returns:
         tuple: (context_count, workflow_count)
     """
@@ -99,24 +103,24 @@ def _count_package_files(package_path: Path) -> tuple[int, int]:
         # Also check root directory for .prompt.md files
         workflow_count = len(list(package_path.glob("*.prompt.md")))
         return 0, workflow_count
-    
+
     context_count = 0
-    context_dirs = ['instructions', 'chatmodes', 'contexts']
-    
+    context_dirs = ["instructions", "chatmodes", "context"]
+
     for context_dir in context_dirs:
         context_path = apm_dir / context_dir
         if context_path.exists() and context_path.is_dir():
             context_count += len(list(context_path.glob("*.md")))
-    
+
     # Count workflows in both .apm/prompts and root directory
     workflow_count = 0
     prompts_path = apm_dir / "prompts"
     if prompts_path.exists() and prompts_path.is_dir():
         workflow_count += len(list(prompts_path.glob("*.prompt.md")))
-    
+
     # Also check root directory for .prompt.md files
     workflow_count += len(list(package_path.glob("*.prompt.md")))
-    
+
     return context_count, workflow_count
 
 
@@ -126,19 +130,19 @@ def _count_workflows(package_path: Path) -> int:
     return workflow_count
 
 
-def _get_detailed_context_counts(package_path: Path) -> Dict[str, int]:
+def _get_detailed_context_counts(package_path: Path) -> dict[str, int]:
     """Get detailed context file counts by type."""
     apm_dir = package_path / APM_DIR
     if not apm_dir.exists():
-        return {'instructions': 0, 'chatmodes': 0, 'contexts': 0}
-    
+        return {"instructions": 0, "chatmodes": 0, "contexts": 0}
+
     counts = {}
     context_directories = {
-        'instructions': 'instructions',
-        'chatmodes': 'chatmodes', 
-        'contexts': 'context'  # Note: directory is 'context', not 'contexts'
+        "instructions": "instructions",
+        "chatmodes": "chatmodes",
+        "contexts": "context",  # Note: directory is 'context', not 'contexts'
     }
-    
+
     for context_type, directory_name in context_directories.items():
         count = 0
         context_path = apm_dir / directory_name
@@ -146,11 +150,11 @@ def _get_detailed_context_counts(package_path: Path) -> Dict[str, int]:
             # Count all .md files in the directory regardless of specific naming
             count = len(list(context_path.glob("*.md")))
         counts[context_type] = count
-    
+
     return counts
 
 
-def _get_package_display_info(package_path: Path) -> Dict[str, str]:
+def _get_package_display_info(package_path: Path) -> dict[str, str]:
     """Get package display information."""
     try:
         apm_yml_path = package_path / APM_YML_FILENAME
@@ -158,25 +162,25 @@ def _get_package_display_info(package_path: Path) -> Dict[str, str]:
             package = APMPackage.from_apm_yml(apm_yml_path)
             version_info = f"@{package.version}" if package.version else "@unknown"
             return {
-                'display_name': f"{package.name}{version_info}",
-                'name': package.name,
-                'version': package.version or 'unknown'
+                "display_name": f"{package.name}{version_info}",
+                "name": package.name,
+                "version": package.version or "unknown",
             }
         else:
             return {
-                'display_name': f"{package_path.name}@unknown",
-                'name': package_path.name,
-                'version': 'unknown'
+                "display_name": f"{package_path.name}@unknown",
+                "name": package_path.name,
+                "version": "unknown",
             }
     except Exception:
         return {
-            'display_name': f"{package_path.name}@error",
-            'name': package_path.name,
-            'version': 'error'
+            "display_name": f"{package_path.name}@error",
+            "name": package_path.name,
+            "version": "error",
         }
 
 
-def _get_detailed_package_info(package_path: Path) -> Dict[str, Any]:
+def _get_detailed_package_info(package_path: Path) -> dict[str, Any]:
     """Get detailed package information for the info command."""
     try:
         apm_yml_path = package_path / APM_YML_FILENAME
@@ -184,143 +188,54 @@ def _get_detailed_package_info(package_path: Path) -> Dict[str, Any]:
             package = APMPackage.from_apm_yml(apm_yml_path)
             context_count, workflow_count = _count_package_files(package_path)
             primitives = _count_primitives(package_path)
+            # HYBRID-aware description rendering: when apm.yml omits its
+            # tagline but a SKILL.md sits alongside, surface the empty
+            # apm.yml.description as `--` plus an inline annotation. The
+            # SKILL.md description is intentionally NOT borrowed -- it is
+            # an agent invocation matcher, not a human tagline.
+            is_hybrid = (package_path / "SKILL.md").exists()
+            if package.description:
+                desc = package.description
+            elif is_hybrid:
+                desc = (
+                    "--  (set 'description' in apm.yml; SKILL.md description is for agent runtime)"
+                )
+            else:
+                desc = "No description"
             return {
-                'name': package.name,
-                'version': package.version or 'unknown',
-                'description': package.description or 'No description',
-                'author': package.author or 'Unknown',
-                'source': package.source or 'local',
-                'install_path': str(package_path.resolve()),
-                'context_files': _get_detailed_context_counts(package_path),
-                'workflows': workflow_count,
-                'hooks': primitives.get('hooks', 0)
+                "name": package.name,
+                "version": package.version or "unknown",
+                "description": desc,
+                "author": package.author or "Unknown",
+                "source": package.source or "local",
+                "install_path": str(package_path.resolve()),
+                "context_files": _get_detailed_context_counts(package_path),
+                "workflows": workflow_count,
+                "hooks": primitives.get("hooks", 0),
             }
         else:
-            context_count, workflow_count = _count_package_files(package_path)
+            context_count, workflow_count = _count_package_files(package_path)  # noqa: RUF059
             primitives = _count_primitives(package_path)
             return {
-                'name': package_path.name,
-                'version': 'unknown',
-                'description': 'No apm.yml found',
-                'author': 'Unknown',
-                'source': 'unknown',
-                'install_path': str(package_path.resolve()),
-                'context_files': _get_detailed_context_counts(package_path),
-                'workflows': workflow_count,
-                'hooks': primitives.get('hooks', 0)
+                "name": package_path.name,
+                "version": "unknown",
+                "description": "No apm.yml found",
+                "author": "Unknown",
+                "source": "unknown",
+                "install_path": str(package_path.resolve()),
+                "context_files": _get_detailed_context_counts(package_path),
+                "workflows": workflow_count,
+                "hooks": primitives.get("hooks", 0),
             }
     except Exception as e:
         return {
-            'name': package_path.name,
-            'version': 'error',
-            'description': f'Error loading package: {e}',
-            'author': 'Unknown',
-            'source': 'unknown',
-            'install_path': str(package_path.resolve()),
-            'context_files': {'instructions': 0, 'chatmodes': 0, 'contexts': 0},
-            'workflows': 0,
-            'hooks': 0
+            "name": package_path.name,
+            "version": "error",
+            "description": f"Error loading package: {e}",
+            "author": "Unknown",
+            "source": "unknown",
+            "install_path": str(package_path.resolve()),
+            "context_files": {"instructions": 0, "chatmodes": 0, "contexts": 0},
+            "workflows": 0,
+            "hooks": 0,
         }
-
-
-def _update_single_package(package_name: str, project_deps: List, apm_modules_path: Path, logger=None):
-    """Update a specific package."""
-    if logger is None:
-        from ...core.command_logger import CommandLogger
-        logger = CommandLogger("deps-update")
-
-    # Find the dependency reference for this package
-    target_dep = None
-    for dep in project_deps:
-        if dep.get_display_name() == package_name or dep.repo_url.split('/')[-1] == package_name:
-            target_dep = dep
-            break
-    
-    if not target_dep:
-        logger.error(f"Package '{package_name}' not found in apm.yml dependencies")
-        return
-    
-    # Find the installed package directory using namespaced structure
-    # GitHub: owner/repo (2 parts)
-    # Azure DevOps: org/project/repo (3 parts)
-    package_dir = None
-    if target_dep.alias:
-        package_dir = apm_modules_path / target_dep.alias
-    else:
-        # Parse path from repo_url
-        repo_parts = target_dep.repo_url.split('/')
-        if target_dep.is_azure_devops() and len(repo_parts) >= 3:
-            # ADO structure: apm_modules/org/project/repo
-            package_dir = apm_modules_path / repo_parts[0] / repo_parts[1] / repo_parts[2]
-        elif len(repo_parts) >= 2:
-            package_dir = apm_modules_path / repo_parts[0] / repo_parts[1]
-        else:
-            # Fallback to simple name matching
-            package_dir = apm_modules_path / package_name
-        
-    if not package_dir.exists():
-        logger.error(f"Package '{package_name}' not installed in apm_modules/")
-        logger.progress(f"Run 'apm install' to install it first")
-        return
-    
-    try:
-        downloader = GitHubPackageDownloader()
-        logger.progress(f"Updating {target_dep.repo_url}...")
-        
-        # Download latest version
-        package_info = downloader.download_package(target_dep, package_dir)
-        
-        logger.success(f"Updated {target_dep.repo_url}")
-        
-    except Exception as e:
-        logger.error(f"Failed to update {package_name}: {e}")
-
-
-def _update_all_packages(project_deps: List, apm_modules_path: Path, logger=None):
-    """Update all packages."""
-    if logger is None:
-        from ...core.command_logger import CommandLogger
-        logger = CommandLogger("deps-update")
-
-    if not project_deps:
-        logger.progress("No APM dependencies to update")
-        return
-        
-    logger.start(f"Updating {len(project_deps)} APM dependencies...")
-    
-    downloader = GitHubPackageDownloader()
-    updated_count = 0
-    
-    for dep in project_deps:
-        # Determine package directory using namespaced structure
-        # GitHub: apm_modules/owner/repo (2 parts)
-        # Azure DevOps: apm_modules/org/project/repo (3 parts)
-        if dep.alias:
-            package_dir = apm_modules_path / dep.alias
-        else:
-            # Parse path from repo_url
-            repo_parts = dep.repo_url.split('/')
-            if dep.is_azure_devops() and len(repo_parts) >= 3:
-                # ADO structure
-                package_dir = apm_modules_path / repo_parts[0] / repo_parts[1] / repo_parts[2]
-            elif len(repo_parts) >= 2:
-                package_dir = apm_modules_path / repo_parts[0] / repo_parts[1]
-            else:
-                # Fallback to simple repo name (shouldn't happen)
-                package_dir = apm_modules_path / dep.repo_url
-            
-        if not package_dir.exists():
-            logger.warning(f"{dep.repo_url} not installed - skipping")
-            continue
-            
-        try:
-            logger.verbose_detail(f"  Updating {dep.repo_url}...")
-            package_info = downloader.download_package(dep, package_dir)
-            updated_count += 1
-            logger.success(f"  {dep.repo_url}")
-            
-        except Exception as e:
-            logger.error(f"  Failed to update {dep.repo_url}: {e}")
-            continue
-    
-    logger.success(f"Updated {updated_count} of {len(project_deps)} packages")

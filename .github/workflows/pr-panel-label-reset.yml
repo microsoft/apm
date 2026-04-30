@@ -1,0 +1,43 @@
+name: PR Panel Label Reset
+
+# Purpose: when a PR with a panel verdict label gets a new commit pushed,
+# strip both verdict labels (panel-approved, panel-rejected) so the verdict
+# does not lie. This is a deterministic operation - no judgement, no LLM.
+# Per genesis S7 DETERMINISTIC TOOL BRIDGE: facts-that-must-be-true with
+# zero judgement do not belong in an LLM container.
+#
+# The companion gh-aw workflow pr-review-panel.md handles the smart side
+# (panel orchestration, verdict derivation, label application). This file
+# handles the dumb side (verdict invalidation on new push).
+#
+# This workflow does NOT remove the panel-review trigger label. That is
+# done inside pr-review-panel.md after the panel completes (so the
+# trigger label stays idempotent: re-add to re-run).
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove stale panel verdict labels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          for label in panel-approved panel-rejected; do
+            # Best-effort removal: silently succeed when the label is
+            # not currently applied (gh exits non-zero in that case).
+            if gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "$label" 2>&1; then
+              echo "Removed label '$label' (or it was not present)."
+            else
+              echo "Label '$label' not present - nothing to do."
+            fi
+          done

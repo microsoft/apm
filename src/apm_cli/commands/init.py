@@ -19,9 +19,9 @@ from ._helpers import (
     _create_plugin_json,
     _get_console,
     _get_default_config,
-    _lazy_confirm,
     _rich_blank_line,
     _validate_plugin_name,
+    _validate_project_name,
 )
 
 
@@ -33,19 +33,34 @@ from ._helpers import (
 @click.option(
     "--plugin", is_flag=True, help="Initialize as plugin author (creates plugin.json + apm.yml)"
 )
+@click.option(
+    "--marketplace",
+    "marketplace_flag",
+    is_flag=True,
+    help="Seed apm.yml with a 'marketplace:' authoring block",
+)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.pass_context
-def init(ctx, project_name, yes, plugin, verbose):
+def init(ctx, project_name, yes, plugin, marketplace_flag, verbose):
     """Initialize a new APM project (like npm init).
 
     Creates a minimal apm.yml with auto-detected metadata.
     With --plugin, also creates plugin.json for plugin authors.
+    With --marketplace, also seeds apm.yml with a marketplace authoring block.
     """
     logger = CommandLogger("init", verbose=verbose)
     try:
         # Handle explicit current directory
         if project_name == ".":
             project_name = None
+
+        # Reject names containing path separators before any filesystem use
+        if project_name and not _validate_project_name(project_name):
+            logger.error(
+                f"Invalid project name '{project_name}': "
+                "project names must not contain path separators ('/' or '\\\\') or be '..'."
+            )
+            sys.exit(1)
 
         # Determine project directory and name
         if project_name:
@@ -75,14 +90,7 @@ def init(ctx, project_name, yes, plugin, verbose):
             logger.warning("apm.yml already exists")
 
             if not yes:
-                Confirm = _lazy_confirm()
-                if Confirm:
-                    try:
-                        confirm = Confirm.ask("Continue and overwrite?")
-                    except Exception:
-                        confirm = click.confirm("Continue and overwrite?")
-                else:
-                    confirm = click.confirm("Continue and overwrite?")
+                confirm = click.confirm("Continue and overwrite?")
 
                 if not confirm:
                     logger.progress("Initialization cancelled.")
@@ -110,6 +118,27 @@ def init(ctx, project_name, yes, plugin, verbose):
         if plugin:
             _create_plugin_json(config)
 
+        # Append marketplace authoring block when requested.
+        if marketplace_flag:
+            from ..marketplace.init_template import render_marketplace_block
+
+            apm_yml_path = Path.cwd() / APM_YML_FILENAME
+            try:
+                existing = apm_yml_path.read_text(encoding="utf-8")
+                if not existing.endswith("\n"):
+                    existing += "\n"
+                # Owner is intentionally left to the template default
+                # (acme-org placeholder). Deriving it from the project
+                # name produced misleading https://github.com/<project>
+                # URLs; the user is expected to edit the placeholder.
+                block = render_marketplace_block()
+                apm_yml_path.write_text(existing + "\n" + block, encoding="utf-8")
+            except OSError as exc:
+                logger.warning(
+                    f"Failed to append marketplace block to apm.yml: {exc}",
+                    symbol="warning",
+                )
+
         logger.success("APM project initialized successfully!")
 
         # Display created file info
@@ -135,14 +164,14 @@ def init(ctx, project_name, yes, plugin, verbose):
         if plugin:
             next_steps = [
                 "Add dev dependencies:    apm install --dev <owner>/<repo>",
-                "Pack as plugin:          apm pack --format plugin",
+                "Pack as plugin:          apm pack",
             ]
         else:
             next_steps = [
-                "Install a runtime:       apm runtime setup copilot",
-                "Add APM dependencies:    apm install <owner>/<repo>",
-                "Compile agent context:   apm compile",
-                "Run your first workflow: apm run start",
+                "Install a skill:                apm install github/awesome-copilot/skills/documentation-writer",
+                "Install a marketplace plugin:   apm install frontend-web-dev@awesome-copilot",
+                "Install a versioned package:    apm install microsoft/apm-sample-package#v1.0.0",
+                "Author your own plugin:         apm pack",
             ]
 
         try:
@@ -156,6 +185,25 @@ def init(ctx, project_name, yes, plugin, verbose):
             for step in next_steps:
                 click.echo(f"  * {step}")
 
+        # Footer with links
+        try:
+            console = _get_console()
+            if console:
+                console.print(
+                    "  Docs: https://microsoft.github.io/apm  |  "
+                    "Star: https://github.com/microsoft/apm",
+                    style="dim",
+                )
+            else:
+                click.echo(
+                    "  Docs: https://microsoft.github.io/apm  |  "
+                    "Star: https://github.com/microsoft/apm"
+                )
+        except (ImportError, NameError):
+            click.echo(
+                "  Docs: https://microsoft.github.io/apm  |  Star: https://github.com/microsoft/apm"
+            )
+
     except Exception as e:
         logger.error(f"Error initializing project: {e}")
         sys.exit(1)
@@ -163,7 +211,7 @@ def init(ctx, project_name, yes, plugin, verbose):
 
 def _interactive_project_setup(default_name, logger):
     """Interactive setup for new APM projects with auto-detection."""
-    from ._helpers import _auto_detect_author, _auto_detect_description
+    from ._helpers import _auto_detect_author, _auto_detect_description, _validate_project_name
 
     # Get auto-detected defaults
     auto_author = _auto_detect_author()
@@ -179,7 +227,15 @@ def _interactive_project_setup(default_name, logger):
         console.print("\n[info]Setting up your APM project...[/info]")
         console.print("[muted]Press ^C at any time to quit.[/muted]\n")
 
-        name = Prompt.ask("Project name", default=default_name).strip()
+        while True:
+            name = Prompt.ask("Project name", default=default_name).strip()
+            if _validate_project_name(name):
+                break
+            console.print(
+                f"[error]Invalid project name '{name}': "
+                "project names must not contain path separators ('/' or '\\\\') or be '..'.[/error]"
+            )
+
         version = Prompt.ask("Version", default="1.0.0").strip()
         description = Prompt.ask("Description", default=auto_description).strip()
         author = Prompt.ask("Author", default=auto_author).strip()
@@ -188,9 +244,7 @@ def _interactive_project_setup(default_name, logger):
 version: {version}
 description: {description}
 author: {author}"""
-        console.print(
-            Panel(summary_content, title="About to create", border_style="cyan")
-        )
+        console.print(Panel(summary_content, title="About to create", border_style="cyan"))
 
         if not Confirm.ask("\nIs this OK?", default=True):
             console.print("[info]Aborted.[/info]")
@@ -201,7 +255,15 @@ author: {author}"""
         logger.progress("Setting up your APM project...")
         logger.progress("Press ^C at any time to quit.")
 
-        name = click.prompt("Project name", default=default_name).strip()
+        while True:
+            name = click.prompt("Project name", default=default_name).strip()
+            if _validate_project_name(name):
+                break
+            click.echo(
+                f"{ERROR}Invalid project name '{name}': "
+                f"project names must not contain path separators ('/' or '\\\\') or be '..'.{RESET}"
+            )
+
         version = click.prompt("Version", default="1.0.0").strip()
         description = click.prompt("Description", default=auto_description).strip()
         author = click.prompt("Author", default=auto_author).strip()

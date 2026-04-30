@@ -1,0 +1,19 @@
+{
+  "id": "apm-cli",
+  "version": "1.0.0",
+  "name": "APM (Agent Package Manager) CLI",
+  "description": "Installs the APM CLI - a manifest-driven dependency manager for AI agents. Lets you declare agent skills, plugins, and MCP servers in apm.yml and reproduce them across environments.",
+  "documentationURL": "https://github.com/microsoft/apm/tree/main/devcontainer/src/apm-cli",
+  "licenseURL": "https://github.com/microsoft/apm/blob/main/LICENSE",
+  "keywords": ["apm", "apm-cli", "ai", "agents", "mcp", "claude", "copilot"],
+  "options": {
+    "version": {
+      "type": "string",
+      "default": "latest",
+      "description": "Version of apm-cli to install (e.g. '0.8.11'). Use 'latest' for the newest release."
+    }
+  },
+  "installsAfter": [
+    "ghcr.io/devcontainers/features/python"
+  ]
+}

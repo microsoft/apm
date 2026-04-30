@@ -60,10 +60,10 @@ scripts:
         Write-Host "--- OUTPUT START ---"
         Write-Host $depsOutput
         Write-Host "--- OUTPUT END ---"
-        if ($depsOutput -match "No APM dependencies installed yet") {
+        if ($depsOutput -match "No APM dependencies installed") {
             Write-DepSuccess "Correctly shows no dependencies installed"
         } else {
-            Write-DepError "Expected 'No APM dependencies installed yet' message"
+            Write-DepError "Expected 'No APM dependencies installed' message"
             Write-DepError "Got: $depsOutput"
             return $false
         }
@@ -282,7 +282,7 @@ function Test-DependencyCleanup {
         Write-Host "--- OUTPUT START ---"
         Write-Host $depsOutput
         Write-Host "--- OUTPUT END ---"
-        if ($depsOutput -match "No APM dependencies installed yet") {
+        if ($depsOutput -match "No APM dependencies installed") {
             Write-DepSuccess "Correctly shows no dependencies after cleanup"
         } else {
             Write-DepError "Expected no dependencies after cleanup"

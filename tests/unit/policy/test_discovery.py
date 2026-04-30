@@ -13,7 +13,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from apm_cli.policy.discovery import (
+    CACHE_SCHEMA_VERSION,  # noqa: F401
     DEFAULT_CACHE_TTL,
+    MAX_STALE_TTL,  # noqa: F401
     PolicyFetchResult,
     _auto_discover,
     _cache_key,
@@ -28,11 +30,17 @@ from apm_cli.policy.discovery import (
     _write_cache,
     discover_policy,
 )
-from apm_cli.policy.parser import PolicyValidationError
+from apm_cli.policy.parser import PolicyValidationError, load_policy  # noqa: F401
 from apm_cli.policy.schema import ApmPolicy
 
 # Minimal valid YAML that produces a valid ApmPolicy
 VALID_POLICY_YAML = "name: test-policy\nversion: '1.0'\nenforcement: warn\n"
+
+
+def _make_test_policy(yaml_str: str = VALID_POLICY_YAML) -> ApmPolicy:
+    """Parse YAML string into an ApmPolicy for test setup."""
+    policy, _ = load_policy(yaml_str)
+    return policy
 
 
 class TestParseRemoteUrl(unittest.TestCase):
@@ -47,15 +55,11 @@ class TestParseRemoteUrl(unittest.TestCase):
         self.assertEqual(result, ("contoso", "github.com"))
 
     def test_https_ghe(self):
-        result = _parse_remote_url(
-            "https://github.example.com/contoso/my-project.git"
-        )
+        result = _parse_remote_url("https://github.example.com/contoso/my-project.git")
         self.assertEqual(result, ("contoso", "github.example.com"))
 
     def test_ado(self):
-        result = _parse_remote_url(
-            "https://dev.azure.com/contoso/project/_git/repo"
-        )
+        result = _parse_remote_url("https://dev.azure.com/contoso/project/_git/repo")
         self.assertEqual(result, ("contoso", "dev.azure.com"))
 
     def test_ssh_no_git_suffix(self):
@@ -106,6 +110,7 @@ class TestExtractOrgFromGitRemote(unittest.TestCase):
             ["git", "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=Path("/fake"),
             timeout=5,
         )
@@ -166,7 +171,7 @@ class TestCacheReadWrite(unittest.TestCase):
             root = Path(tmpdir)
             repo_ref = "contoso/.github"
 
-            _write_cache(repo_ref, VALID_POLICY_YAML, root)
+            _write_cache(repo_ref, _make_test_policy(), root)
 
             result = _read_cache(repo_ref, root)
             self.assertIsNotNone(result)
@@ -179,7 +184,7 @@ class TestCacheReadWrite(unittest.TestCase):
             root = Path(tmpdir)
             repo_ref = "contoso/.github"
 
-            _write_cache(repo_ref, VALID_POLICY_YAML, root)
+            _write_cache(repo_ref, _make_test_policy(), root)
 
             # Backdate the metadata to make it expired
             cache_dir = _get_cache_dir(root)
@@ -202,7 +207,7 @@ class TestCacheReadWrite(unittest.TestCase):
             root = Path(tmpdir)
             repo_ref = "contoso/.github"
 
-            _write_cache(repo_ref, VALID_POLICY_YAML, root)
+            _write_cache(repo_ref, _make_test_policy(), root)
 
             # Corrupt the meta file
             cache_dir = _get_cache_dir(root)
@@ -225,7 +230,9 @@ class TestCacheReadWrite(unittest.TestCase):
 
     def test_get_cache_dir(self):
         root = Path("/fake/project")
-        expected = root / "apm_modules" / ".policy-cache"
+        # _get_cache_dir resolves project_root (#886), compare
+        # against the resolved form
+        expected = root.resolve() / "apm_modules" / ".policy-cache"
         self.assertEqual(_get_cache_dir(root), expected)
 
 
@@ -349,14 +356,10 @@ class TestFetchGithubContents(unittest.TestCase):
         mock_resp.status_code = 404
         mock_requests.get.return_value = mock_resp
 
-        _fetch_github_contents(
-            "ghe.example.com/contoso/.github", "apm-policy.yml"
-        )
+        _fetch_github_contents("ghe.example.com/contoso/.github", "apm-policy.yml")
 
         call_url = mock_requests.get.call_args[0][0]
-        self.assertTrue(
-            call_url.startswith("https://ghe.example.com/api/v3/repos/")
-        )
+        self.assertTrue(call_url.startswith("https://ghe.example.com/api/v3/repos/"))
 
 
 class TestFetchFromRepo(unittest.TestCase):
@@ -378,9 +381,7 @@ class TestFetchFromRepo(unittest.TestCase):
         mock_fetch.return_value = (None, "404: Policy file not found")
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = _fetch_from_repo(
-                "contoso/.github", Path(tmpdir), no_cache=True
-            )
+            result = _fetch_from_repo("contoso/.github", Path(tmpdir), no_cache=True)
             self.assertFalse(result.found)
             self.assertIsNone(result.error)  # 404 is not an error
 
@@ -389,9 +390,7 @@ class TestFetchFromRepo(unittest.TestCase):
         mock_fetch.return_value = (None, "Connection error fetching policy")
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = _fetch_from_repo(
-                "contoso/.github", Path(tmpdir), no_cache=True
-            )
+            result = _fetch_from_repo("contoso/.github", Path(tmpdir), no_cache=True)
             self.assertFalse(result.found)
             self.assertIsNotNone(result.error)
 
@@ -400,9 +399,7 @@ class TestFetchFromRepo(unittest.TestCase):
         mock_fetch.return_value = ("enforcement: bogus\n", None)
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = _fetch_from_repo(
-                "contoso/.github", Path(tmpdir), no_cache=True
-            )
+            result = _fetch_from_repo("contoso/.github", Path(tmpdir), no_cache=True)
             self.assertFalse(result.found)
             self.assertIn("Invalid policy", result.error)
 
@@ -410,7 +407,7 @@ class TestFetchFromRepo(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             repo_ref = "contoso/.github"
-            _write_cache(repo_ref, VALID_POLICY_YAML, root)
+            _write_cache(repo_ref, _make_test_policy(), root)
 
             # Should hit cache, no API call needed
             result = _fetch_from_repo(repo_ref, root, no_cache=False)
@@ -430,9 +427,7 @@ class TestFetchFromUrl(unittest.TestCase):
         mock_requests.exceptions = __import__("requests").exceptions
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = _fetch_from_url(
-                "https://example.com/policy.yml", Path(tmpdir), no_cache=True
-            )
+            result = _fetch_from_url("https://example.com/policy.yml", Path(tmpdir), no_cache=True)
             self.assertTrue(result.found)
             self.assertEqual(result.source, "url:https://example.com/policy.yml")
 
@@ -444,9 +439,7 @@ class TestFetchFromUrl(unittest.TestCase):
         mock_requests.exceptions = __import__("requests").exceptions
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = _fetch_from_url(
-                "https://example.com/policy.yml", Path(tmpdir), no_cache=True
-            )
+            result = _fetch_from_url("https://example.com/policy.yml", Path(tmpdir), no_cache=True)
             self.assertFalse(result.found)
             self.assertIn("404", result.error)
 
@@ -458,9 +451,7 @@ class TestFetchFromUrl(unittest.TestCase):
         mock_requests.get.side_effect = real_requests.exceptions.Timeout()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = _fetch_from_url(
-                "https://example.com/policy.yml", Path(tmpdir), no_cache=True
-            )
+            result = _fetch_from_url("https://example.com/policy.yml", Path(tmpdir), no_cache=True)
             self.assertFalse(result.found)
             self.assertIn("Timeout", result.error)
 
@@ -473,9 +464,7 @@ class TestFetchFromUrl(unittest.TestCase):
         mock_requests.exceptions = __import__("requests").exceptions
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = _fetch_from_url(
-                "https://example.com/policy.yml", Path(tmpdir), no_cache=True
-            )
+            result = _fetch_from_url("https://example.com/policy.yml", Path(tmpdir), no_cache=True)
             self.assertFalse(result.found)
             self.assertIn("Invalid policy", result.error)
 
@@ -487,9 +476,7 @@ class TestDiscoverPolicy(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             p = Path(tmpdir) / "override-policy.yml"
             p.write_text(VALID_POLICY_YAML, encoding="utf-8")
-            result = discover_policy(
-                Path("/fake"), policy_override=str(p)
-            )
+            result = discover_policy(Path("/fake"), policy_override=str(p))
             self.assertTrue(result.found)
             self.assertIn("file:", result.source)
 
@@ -533,9 +520,7 @@ class TestDiscoverPolicy(unittest.TestCase):
         mock_fetch.return_value = (VALID_POLICY_YAML, None)
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = discover_policy(
-                Path(tmpdir), policy_override="org", no_cache=True
-            )
+            result = discover_policy(Path(tmpdir), policy_override="org", no_cache=True)
             self.assertTrue(result.found)
             mock_fetch.assert_called_once()
 
@@ -573,7 +558,7 @@ class TestDiscoverPolicy(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             # Pre-populate cache
-            _write_cache("contoso/.github", VALID_POLICY_YAML, root)
+            _write_cache("contoso/.github", _make_test_policy(), root)
 
             result = discover_policy(root, no_cache=False)
             self.assertTrue(result.found)
@@ -592,9 +577,7 @@ class TestDiscoverPolicy(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             result = discover_policy(Path(tmpdir), no_cache=True)
             self.assertTrue(result.found)
-            self.assertEqual(
-                result.source, "org:ghe.example.com/contoso/.github"
-            )
+            self.assertEqual(result.source, "org:ghe.example.com/contoso/.github")
 
 
 class TestAutoDiscover(unittest.TestCase):
@@ -611,7 +594,7 @@ class TestAutoDiscover(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             result = _auto_discover(Path(tmpdir), no_cache=True)
             mock_fetch.assert_called_once_with(
-                "contoso/.github", Path(tmpdir), no_cache=True
+                "contoso/.github", Path(tmpdir), no_cache=True, expected_hash=None
             )
             self.assertTrue(result.found)
 
@@ -629,6 +612,7 @@ class TestAutoDiscover(unittest.TestCase):
                 "ghe.example.com/contoso/.github",
                 Path(tmpdir),
                 no_cache=True,
+                expected_hash=None,
             )
 
     @patch("apm_cli.policy.discovery._extract_org_from_git_remote")

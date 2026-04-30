@@ -2,7 +2,7 @@
 title: "Security Model"
 description: "How APM handles supply chain security for AI agents — attack surface boundaries, content scanning, dependency provenance, path safety, and MCP trust."
 sidebar:
-  order: 3
+  order: 4
 ---
 
 This page documents APM's security posture for enterprise security reviews, compliance audits, and supply chain assessments.
@@ -60,6 +60,28 @@ The `resolved_commit` field is a full 40-character SHA, not a branch name or tag
 ### No registry
 
 APM does not use a package registry. Dependencies are specified as git repository URLs in `apm.yml`. This eliminates the registry compromise vector entirely — there is no centralized service that can be poisoned to redirect installs.
+
+### HTTP (insecure) dependencies
+
+APM supports `http://` git dependencies for private mirrors and air-gapped
+environments, but only behind explicit approval on both the manifest and CLI
+surfaces:
+
+- `allow_insecure: true` on the dependency entry records that the project
+  intentionally permits HTTP for that dependency.
+- `apm install --allow-insecure` approves direct HTTP dependencies for the
+  current install run.
+- Transitive HTTP dependencies inherit approval only when they come from the
+  same host as an approved direct HTTP dependency. Additional transitive hosts
+  require `--allow-insecure-host HOSTNAME`.
+
+These controls make the decision visible, but they do **not** make HTTP safe:
+
+- HTTP has no transport encryption or server authentication. A machine-in-the-middle can modify repository contents or refs in transit.
+- On the first HTTP fetch (or any update fetched over HTTP), the lockfile's `resolved_commit` and `content_hash` come from that same untrusted channel. They improve replay detection later, but they do not establish trustworthy provenance for the initial fetch.
+- APM explicitly suppresses git credential helpers for HTTP clone and `ls-remote` operations so stored tokens from Keychain, Credential Manager, `gh auth`, or other helpers are not sent over plaintext HTTP.
+
+For routing all dependency traffic through an enterprise proxy (Artifactory or compatible), see [Registry Proxy & Air-gapped](../registry-proxy/).
 
 ## Content scanning
 
@@ -175,12 +197,16 @@ A path must pass all three checks. Failure on any check prevents the file from b
 
 ### Symlink handling
 
-Symlinks are never followed during artifact operations:
+Symlinks are never followed during file discovery or artifact operations:
 
-- **Tree copy operations** skip symlinks entirely — they are excluded from the copy via an ignore filter.
+- **Primitive discovery** (instructions, agents, prompts, contexts, skills) rejects symlinked files during glob-based file enumeration. Symlinks are silently skipped.
+- **Prompt resolution** (`apm preview`, `apm run`) rejects symlinked `.prompt.md` files with an explicit error message.
+- **Integrator file discovery** (agents, instructions, prompts, skills, hooks) rejects symlinked files via `is_symlink()` checks in `find_files_by_glob` and `find_hook_files`.
+- **Tree copy operations** skip symlinks entirely -- they are excluded from the copy via an ignore filter.
 - **MCP configuration files** that are symlinks are rejected with a warning and not parsed.
 - **Manifest parsing** requires files to pass both `.is_file()` and `not .is_symlink()` checks.
-- **Archive creation** — `apm pack` excludes symlinks from bundled archives. Packaged artifacts contain no symbolic links, preventing symlink-based escape attacks in distributed bundles.
+- **Manifest integrity** -- a malformed `apm.yml` (invalid YAML or non-mapping content) triggers a failing `manifest-parse` audit check. Policy and baseline CI checks never silently pass when the manifest cannot be parsed. If this check fires, fix the YAML syntax error in your `apm.yml` and re-run the audit.
+- **Archive creation** -- `apm pack` excludes symlinks from bundled archives. Packaged artifacts contain no symbolic links, preventing symlink-based escape attacks in distributed bundles.
 
 This prevents symlink-based attacks that could escape allowed directories or cause APM to read or write outside the project root.
 
@@ -197,7 +223,7 @@ When APM deploys a file, it checks whether a file already exists at the target p
 APM separates production and development dependencies:
 
 - **Production dependencies** (`dependencies.apm`) are included in plugin bundles and shared packages.
-- **Development dependencies** (`devDependencies.apm`, installed via `apm install --dev`) are resolved and cached locally but **excluded** from `apm pack --format plugin` output.
+- **Development dependencies** (`devDependencies.apm`, installed via `apm install --dev`) are resolved and cached locally but **excluded** from `apm pack` output (both plugin format -- the default -- and `--format apm`).
 
 This prevents transitive inclusion of development-only packages (test fixtures, linting rules, internal helpers) in distributed artifacts. The lockfile marks dev dependencies with `is_dev: true` for explicit tracking. See the [Lock File Specification](../../reference/lockfile-spec/#42-dependency-entries) for field details.
 
@@ -230,8 +256,20 @@ APM authenticates to git hosts using personal access tokens (PATs) read from env
 - **Never stored in files.** Tokens are read from the environment at runtime. They are never written to `apm.yml`, `apm.lock.yaml`, or any generated file.
 - **Never logged.** Token values are not included in console output, error messages, or debug logs.
 - **Scoped to their git host.** A GitHub token is only sent to GitHub. An Azure DevOps token is only sent to Azure DevOps. Tokens are never transmitted to any other endpoint.
+- **Injected via transient git config.** APM passes credentials with `http.extraheader` for the duration of a single git invocation; tokens are never embedded in URLs and are not visible in `ps` or process listings.
 
 For GitHub, a fine-grained PAT with read-only `Contents` permission on the repositories you depend on is sufficient.
+
+### Azure DevOps AAD bearer tokens
+
+When `ADO_APM_PAT` is unset, APM can authenticate to Azure DevOps with a Microsoft Entra ID bearer token issued on demand by the Azure CLI (`az account get-access-token`). The posture:
+
+- **Short-lived.** Tokens expire in roughly 60 minutes, are acquired per resolution, and are never persisted by APM.
+- **No new secrets in manifests.** Nothing is written to `apm.yml` or `apm.lock.yaml`. The token never crosses the `apm.yml`/lockfile boundary.
+- **Compatible with managed-identity / service-account-only orgs.** Works in environments where PAT creation is disabled, including WIF-backed pipelines.
+- **Same transport rules as PATs.** Bearer values are injected via `http.extraheader`, scoped to ADO hosts only, and never logged.
+
+See [Authentication: AAD bearer tokens](../../getting-started/authentication/#authenticating-with-microsoft-entra-id-aad-bearer-tokens) for the resolution precedence and CI patterns.
 
 ## Attack surface comparison
 
@@ -243,6 +281,7 @@ For GitHub, a fine-grained PAT with read-only `Contents` permission on the repos
 | Typosquatting | Similar package names on registry | Dependencies are full git URLs |
 | Build-time injection | Malicious build steps execute | No build step — files are copied |
 | Hidden content injection | Not applicable (binary packages) | Pre-deploy scan blocks critical hidden Unicode; `apm audit` for on-demand checks |
+| Compromised policy intermediary | Not applicable (no policy layer) | A malicious mirror or MITM returns valid YAML with relaxed rules. Mitigated by [`policy.hash` consumer-side pin](../policy-reference/#96-hash-pin-policyhash-consumer-side-verification) which verifies raw bytes against a project-pinned digest. |
 
 ## Frequently asked questions
 

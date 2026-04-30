@@ -1,0 +1,22 @@
+# APM org policy starter -- minimal allowlist for 1-10 repo orgs.
+#
+# Quick start:
+#   1. Copy this file to <your-org>/.github/apm-policy.yml
+#   2. Replace 'your-org' in dependencies.allow with your GitHub org name
+#   3. Commit on a PR with security-team reviewers (CODEOWNERS recommended)
+#   4. Wire `apm audit --ci --policy org` into your CI workflow
+#       (see docs/guides/ci-policy-setup.md)
+#   5. Start in `enforcement: warn` mode; flip to `block` once SARIF backlog is clean
+#
+# Full guide: docs/src/content/docs/enterprise/governance-guide.md
+# Schema reference: docs/src/content/docs/enterprise/policy-reference.md
+
+name: "Starter policy"
+version: "1.0.0"
+enforcement: warn
+dependencies:
+  allow:
+    - "your-org/*"        # REPLACE: your GitHub org name
+mcp:
+  allow:
+    - "microsoft/*"

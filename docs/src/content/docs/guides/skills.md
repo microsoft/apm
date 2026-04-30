@@ -51,7 +51,8 @@ APM copies skills to every detected target directory:
 | **No SKILL.md and no primitives** | No skill folder created |
 
 **Target Detection:**
-- Recognized directories: `.github/`, `.claude/`, `.cursor/`, `.opencode/`
+- Recognized directories: `.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.codex/`
+- Codex skills deploy to `.agents/skills/` (agent skills standard directory), not `.codex/skills/`
 - If none exist, `.github/` is created as the fallback
 - Override with `--target`
 
@@ -252,6 +253,25 @@ my-package/
 
 On install, APM promotes each sub-skill to a top-level `.github/skills/` entry alongside the parent — see [Sub-skill Promotion](#sub-skill-promotion) below.
 
+### Option 5: Maintainer-only Skill (Dev-only)
+
+For skills you want during authoring but not shipped to consumers (release-checklist skills, internal debugging skills), author them OUTSIDE `.apm/` and reference them via a local-path devDependency:
+
+```
+your-package/
++-- apm.yml
++-- .apm/skills/...                          # public skills
++-- dev/skills/release-checklist/SKILL.md    # maintainer-only
+```
+
+```yaml
+devDependencies:
+  apm:
+    - path: ./dev/skills/release-checklist
+```
+
+`apm install --dev` deploys the skill locally; `apm pack` excludes it from plugin output. See [Dev-only Primitives](../dev-only-primitives/) for the full pattern.
+
 ### Sub-skill Promotion
 
 When a package contains sub-skills in `.apm/skills/*/` subdirectories, APM promotes each to a top-level entry under `.github/skills/`. This ensures Copilot can discover them independently, since it only scans direct children of `.github/skills/`.
@@ -273,6 +293,8 @@ apm_modules/org/repo/my-package/
     └── SKILL.md
 ```
 
+The same promotion applies to the project's own `.apm/skills/` directory. When you run `apm install`, skills in your local `.apm/skills/*/` are deployed to `.github/skills/` (and other detected targets) alongside dependency skills. Local skills take priority on collision. The root `SKILL.md` is not treated as a local skill -- it describes the project itself.
+
 ## Package Detection
 
 APM automatically detects package types:
@@ -286,7 +308,7 @@ APM automatically detects package types:
 
 ## Target Detection
 
-APM deploys skills to every target directory that already exists: `.github/`, `.claude/`, `.cursor/`, `.opencode/`. If none exist, `.github/` is created as the fallback.
+APM deploys skills to every target directory that already exists: `.github/`, `.claude/`, `.cursor/`, `.opencode/`. For Codex (`.codex/`), skills deploy to `.agents/skills/` instead. If no target directories exist, `.github/` is created as the fallback.
 
 Override with:
 ```bash

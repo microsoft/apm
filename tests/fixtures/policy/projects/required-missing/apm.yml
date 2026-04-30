@@ -1,0 +1,11 @@
+# Project that omits a required dependency.
+# Against apm-policy-required.yml: DevExpGbb/required-standards is required.
+# Expected: install blocked (block mode); missing required dep always blocks
+#           even under project-wins resolution (rubber-duck I7).
+name: required-missing-project
+version: "1.0.0"
+description: Project missing a required dependency
+
+dependencies:
+  apm:
+    - DevExpGbb/some-other-package

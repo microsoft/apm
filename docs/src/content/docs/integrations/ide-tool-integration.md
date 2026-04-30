@@ -34,7 +34,7 @@ When using Spec-kit for Specification-Driven Development (SDD), APM automaticall
 # 1. Set up APM contextual foundation
 apm init my-project && apm install
 
-# 2. Optional: compile for tools without native integration (Codex, Gemini)
+# 2. Optional: compile for Codex/OpenCode instructions, Gemini, etc.
 # Spec-kit constitution is automatically included in compiled AGENTS.md
 apm compile
 
@@ -51,11 +51,13 @@ apm compile
 
 For running agentic workflows locally, see the [Agent Workflows guide](../../guides/agent-workflows/).
 
+> **User-scope deployment**: `apm install -g` deploys primitives to user-level directories (`~/.copilot/`, `~/.claude/`, etc.), making packages available across all projects. See [Global Installation](../../guides/dependencies/#global-user-scope-installation) for per-target coverage. For Microsoft 365 Copilot Cowork custom skills, enable `copilot-cowork` with `apm experimental enable copilot-cowork` and use `apm install --target copilot-cowork --global`. See [Microsoft 365 Copilot Cowork](../copilot-cowork/).
+
 ## VS Code Integration
 
 APM works natively with VS Code's GitHub Copilot implementation.
 
-> **Auto-Detection**: VS Code integration is automatically enabled when a `.github/` folder exists in your project. If neither `.github/` nor `.claude/` exists, `apm install` skips folder integration (packages are still installed to `apm_modules/`).
+> **Auto-Detection**: VS Code integration is automatically enabled when a `.github/` folder exists in your project. If neither `.github/` nor `.claude/` exists, `apm install` skips folder integration (packages are still installed to `apm_modules/`). To force integration regardless of folder presence, pass an explicit target (e.g. `apm install --target copilot`) or set `target:` in `apm.yml` -- the target's root folder will be created automatically.
 
 ### Native VS Code Primitives
 
@@ -148,7 +150,7 @@ apm install microsoft/apm-sample-package
 
 ### Optional: Compiled Context with AGENTS.md
 
-For tools that do not support granular primitive discovery (such as Codex or Gemini), `apm compile` produces an `AGENTS.md` file that merges instructions into a single document. This is not needed for GitHub Copilot, Claude, or Cursor, which read per-file instructions natively. OpenCode also reads `AGENTS.md`, so run `apm compile` to deploy instructions there.
+For tools that do not support granular primitive discovery, `apm compile` produces an `AGENTS.md` file that merges instructions into a single document. This is not needed for GitHub Copilot, Claude, or Cursor, which read per-file instructions natively. OpenCode and Codex also read `AGENTS.md`, so run `apm compile` to deploy instructions there.
 
 ```bash
 # Compile all local and dependency instructions into AGENTS.md
@@ -165,7 +167,9 @@ AGENTS.md aggregates instructions, context, and optionally the Spec-kit constitu
 
 APM provides first-class support for Claude Code and Claude Desktop through native format generation.
 
-> **Auto-Detection**: Claude integration is automatically enabled when a `.claude/` folder exists in your project. If neither `.github/` nor `.claude/` exists, `apm install` skips folder integration (packages are still installed to `apm_modules/`).
+> **Auto-Detection**: Claude integration is automatically enabled when a `.claude/` folder exists in your project. If neither `.github/` nor `.claude/` exists, `apm install` skips folder integration (packages are still installed to `apm_modules/`). To force integration regardless of folder presence, pass an explicit target (e.g. `apm install --target claude`) or set `target: claude` in `apm.yml` -- `.claude/` will be created automatically.
+
+> **User-scope `CLAUDE_CONFIG_DIR`**: At user scope (`apm install -g --target claude`), APM honors the `CLAUDE_CONFIG_DIR` environment variable that Claude Code itself reads. If set (and inside `$HOME`), primitives deploy to that directory instead of `~/.claude/`. Values outside `$HOME` are not normalized.
 
 ### Optional: Compiled Output for Claude
 
@@ -179,6 +183,7 @@ When you run `apm install`, APM integrates package primitives into Claude's nati
 
 | Location | Purpose |
 |----------|---------|
+| `.claude/rules/*.md` | Instructions converted to Claude rules format (`applyTo:` mapped to `paths:` frontmatter) |
 | `.claude/agents/*.md` | Sub-agents from installed packages (from `.agent.md` files) |
 | `.claude/commands/*.md` | Slash commands from installed packages (from `.prompt.md` files) |
 | `.claude/skills/{folder}/` | Skills from packages with `SKILL.md` or `.apm/` primitives |
@@ -210,6 +215,31 @@ APM natively integrates with OpenCode when a `.opencode/` directory exists in yo
 | `.cursor/hooks.json` (hooks key) | Hooks from installed packages (merged into config) |
 | `.cursor/hooks/{pkg}/` | Referenced hook scripts |
 | `.cursor/mcp.json` | MCP server configurations |
+
+#### Codex CLI (`.codex/`)
+
+| APM Primitive | Codex Destination | Format |
+|---|---|---|
+| Skills (`SKILL.md`) | `.agents/skills/{name}/SKILL.md` | Identical (agentskills.io standard) |
+| Agents (`.agent.md`) | `.codex/agents/*.toml` | Converted from Markdown to TOML |
+| Hooks (`.json`) | `.codex/hooks.json` + `.codex/hooks/{pkg}/` | Merged JSON config with `_apm_source` markers |
+| Instructions | Via `AGENTS.md` | Compile-only (`apm compile --target codex`) |
+
+**Setup**: Create a `.codex/` directory in your project root, then run `apm install`. APM detects the directory and deploys automatically.
+
+> **Note**: Skills deploy to `.agents/skills/` (the cross-tool agent skills standard directory), not `.codex/skills/`. Agents are transformed from `.agent.md` Markdown to `.toml` format.
+
+#### Gemini CLI (`.gemini/`)
+
+| APM Primitive | Gemini Destination | Format |
+|---|---|---|
+| Commands (`.prompt.md`) | `.gemini/commands/*.toml` | Converted from Markdown to TOML |
+| Skills (`SKILL.md`) | `.gemini/skills/{name}/` | Verbatim copy |
+| Hooks (`.json`) | `.gemini/settings.json` | Merged into `hooks` key |
+| MCP servers | `.gemini/settings.json` | Merged into `mcpServers` key |
+| Instructions | Via `GEMINI.md` | Compile-only (`apm compile --target gemini`) |
+
+**Setup**: Create a `.gemini/` directory in your project root, then run `apm install`. APM detects the directory and deploys commands, skills, hooks, and MCP configuration automatically. For instructions, run `apm compile --target gemini` to generate `GEMINI.md` (a stub that imports `AGENTS.md`).
 
 ### Automatic Agent Integration
 
@@ -244,7 +274,37 @@ apm install microsoft/apm-sample-package
 **How it works:**
 1. `apm install` detects `.prompt.md` files in the package
 2. Converts each to Claude command format in `.claude/commands/`
-3. `apm uninstall` automatically removes the package's commands
+3. Maps APM `input:` frontmatter to Claude `arguments:` frontmatter
+4. Converts `${input:name}` references to `$name` placeholders
+5. Auto-generates `argument-hint` from input names (unless one is already set)
+6. `apm uninstall` automatically removes the package's commands
+
+**Input-to-arguments mapping example:**
+
+```yaml
+# APM prompt (.prompt.md)
+---
+description: Review a feature
+input:
+  - feature_name
+  - priority
+---
+Review ${input:feature_name} with priority ${input:priority}.
+```
+
+Becomes:
+
+```yaml
+# Claude command (.claude/commands/review.md)
+---
+description: Review a feature
+arguments:
+  - feature_name
+  - priority
+argument-hint: <feature_name> <priority>
+---
+Review $feature_name with priority $priority.
+```
 
 ### Automatic Skills Integration
 
@@ -270,7 +330,7 @@ apm install ComposioHQ/awesome-claude-skills/mcp-builder
 
 ### Automatic Hook Integration
 
-APM automatically integrates hooks from installed packages. Hooks define lifecycle event handlers (e.g., `PreToolUse`, `PostToolUse`, `Stop`) supported by VS Code Copilot, Claude Code, and Cursor.
+APM automatically integrates hooks from installed packages. Hooks define lifecycle event handlers (e.g., `PreToolUse`, `PostToolUse`, `Stop`) supported by VS Code Copilot, Claude Code, Cursor, and Gemini.
 
 > **Note:** Hook packages must be authored in the target platform's native format. APM handles path rewriting and file placement but does not translate between hook schema formats (e.g., Claude's `command` key vs GitHub Copilot's `bash`/`powershell` keys, or event name casing differences).
 
@@ -296,13 +356,15 @@ apm install anthropics/claude-plugins-official/plugins/hookify
 2. For VS Code: copies hook JSON to `.github/hooks/` and rewrites script paths
 3. For Claude: merges hook definitions into `.claude/settings.json` under the `hooks` key
 4. For Cursor: merges hook definitions into `.cursor/hooks.json` under the `hooks` key (only when `.cursor/` exists)
-5. Copies referenced scripts to the target location
-6. Rewrites `${CLAUDE_PLUGIN_ROOT}` and relative script paths for the target platform
-7. `apm uninstall` removes hook files and cleans up merged settings
+5. For Codex: merges hook definitions into `.codex/hooks.json` under the `hooks` key (only when `.codex/` exists)
+6. For Gemini: merges hook definitions into `.gemini/settings.json` under the `hooks` key (only when `.gemini/` exists)
+7. Copies referenced scripts to the target location
+8. Rewrites `${CLAUDE_PLUGIN_ROOT}` and relative script paths for the target platform
+9. `apm uninstall` removes hook files and cleans up merged settings
 
 ### Optional: Target-Specific Compilation
 
-Compilation is optional for Copilot, Claude, and Cursor, which read per-file instructions natively. For OpenCode, run `apm compile` to generate `AGENTS.md` (OpenCode's instruction source). Also use it when targeting Codex or Gemini:
+Compilation is optional for Copilot, Claude, and Cursor, which read per-file instructions natively. For OpenCode, Codex, and Gemini, run `apm compile` to generate instruction files:
 
 ```bash
 # Generate all formats (default)
@@ -315,6 +377,10 @@ apm compile --target claude
 # Generate only VS Code/Copilot formats  
 apm compile --target copilot
 # Creates: AGENTS.md (instructions only)
+
+# Generate only Gemini formats
+apm compile --target gemini
+# Creates: GEMINI.md (imports AGENTS.md)
 ```
 
 > **Remember**: `apm compile` generates instruction files only. Use `apm install` to integrate prompts, agents, instructions, commands, and skills from packages.
@@ -362,9 +428,9 @@ Claude Desktop can use `CLAUDE.md` as its project instructions file. Optionally 
 
 APM maintains synchronization between packages and Claude primitives:
 
-- **Install**: Adds agents, commands, and skills for new packages, tracked via `deployed_files` in `apm.lock.yaml`
-- **Uninstall**: Removes only that package's agents, commands, and skill directories (as tracked in `apm.lock.yaml`). User-authored files are preserved.
-- **Update**: Refreshes agents, commands, and skills when package version changes
+- **Install**: Adds rules, agents, commands, and skills for new packages, tracked via `deployed_files` in `apm.lock.yaml`
+- **Uninstall**: Removes only that package's rules, agents, commands, and skill directories (as tracked in `apm.lock.yaml`). User-authored files are preserved.
+- **Update**: Refreshes rules, agents, commands, and skills when package version changes
 - **Virtual Packages**: Individual files and skills (e.g., `github/awesome-copilot/skills/review-and-refactor`) are tracked via `apm.lock.yaml` and removed correctly on uninstall
 
 ## Other IDE Support
@@ -413,6 +479,10 @@ apm compile --watch
 
 ## MCP (Model Context Protocol) Integration
 
+:::tip[New: declarative install]
+Use `apm install --mcp NAME` (or its alias `apm mcp install NAME`) to add servers from the command line in one step. See the [MCP Servers guide](../../guides/mcp-servers/) for the full workflow. This page covers per-IDE config-file locations and runtime targeting.
+:::
+
 APM provides first-class support for MCP servers, including registry-based servers that publish stdio packages (npm, pypi, docker) or HTTP/SSE remote endpoints.
 
 ### Auto-Discovery from Packages
@@ -451,11 +521,17 @@ APM configures MCP servers in the native config format for each supported client
 |--------|----------------|--------|
 | VS Code | `.vscode/mcp.json` | JSON `servers` object |
 | GitHub Copilot CLI | `~/.copilot/mcp-config.json` | JSON `mcpServers` object |
-| Codex CLI | `~/.codex/config.toml` | TOML `mcp_servers` section |
+| Codex CLI (project) | `.codex/config.toml` | TOML `mcp_servers` section |
+| Codex CLI (`--global`) | `~/.codex/config.toml` | TOML `mcp_servers` section |
+| Claude | `.claude/settings.json` | JSON `mcpServers` object |
+| Cursor | `.cursor/mcp.json` | JSON `mcpServers` object |
+| Gemini CLI | `.gemini/settings.json` | JSON `mcpServers` object |
 
 **Runtime targeting**: APM detects which runtimes are installed and configures MCP servers for all of them. Use `--runtime <name>` or `--exclude <name>` to control which clients receive configuration.
 
-> **VS Code detection**: APM considers VS Code available when either the `code` CLI command is on PATH **or** a `.vscode/` directory exists in the current working directory. This means VS Code MCP configuration works even when `code` is not on PATH — common on macOS and Linux when "Install 'code' command in PATH" has not been run from the VS Code command palette, or when VS Code was installed via a method that doesn't register the CLI (e.g. `.tar.gz`, Flatpak, or a non-standard macOS install location).
+**Codex CLI**: Project installs write MCP configuration to `.codex/config.toml` only when Codex is an active project target. `--global` installs write to `~/.codex/config.toml`.
+
+> **VS Code detection**: APM considers VS Code available when either the `code` CLI command is on PATH **or** a `.vscode/` directory exists in the resolved project root (defaulting to the current working directory when no explicit project root is provided). This means VS Code MCP configuration works even when `code` is not on PATH — common on macOS and Linux when "Install 'code' command in PATH" has not been run from the VS Code command palette, or when VS Code was installed via a method that doesn't register the CLI (e.g. `.tar.gz`, Flatpak, or a non-standard macOS install location).
 
 ```bash
 # Install MCP dependencies for all detected runtimes
@@ -504,11 +580,11 @@ When installing registry MCP servers, APM selects the best available package for
 dependencies:
   mcp:
     # Simple registry references (resolved via MCP registry)
-    - ghcr.io/github/github-mcp-server
-    - ghcr.io/modelcontextprotocol/filesystem-server
+    - io.github.github/github-mcp-server
+    - io.github.modelcontextprotocol/filesystem-server
 
     # Registry server with overlays
-    - name: ghcr.io/modelcontextprotocol/postgres-server
+    - name: io.github.modelcontextprotocol/postgres-server
       transport: stdio
       package: npm
       args: ["--connection-string", "postgresql://localhost/mydb"]
@@ -531,7 +607,7 @@ apm install
 apm mcp search github
 
 # Show server details
-apm mcp info ghcr.io/github/github-mcp-server
+apm mcp show io.github.github/github-mcp-server
 
 # List available MCP servers
 apm mcp list
@@ -559,9 +635,9 @@ dependencies:
 
 | Runtime | `${input:...}` support |
 |---------|----------------------|
-| VS Code | ✅ Prompts user at runtime |
-| Copilot CLI | ❌ Use environment variables instead |
-| Codex | ❌ Use environment variables instead |
+| VS Code | Yes -- prompts user at runtime |
+| Copilot CLI | No -- use environment variables instead |
+| Codex | No -- use environment variables instead |
 
 ## Roadmap
 

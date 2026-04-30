@@ -6,19 +6,18 @@ Covers:
 - Integration with DependencyReference.parse / parse_from_dict / get_install_path
 """
 
-import shutil
+import shutil  # noqa: F401
 from pathlib import Path
 
 import pytest
 
+from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
     safe_rmtree,
     validate_path_segments,
 )
-from apm_cli.models.dependency import DependencyReference
-
 
 # ---------------------------------------------------------------------------
 # ensure_path_within
@@ -192,6 +191,18 @@ class TestValidatePathSegments:
         with pytest.raises(PathTraversalError):
             validate_path_segments("..")
 
+    def test_allow_current_dir_accepts_dot_segments(self):
+        # ./bin/server pattern for shell command call sites
+        validate_path_segments("./bin/server", allow_current_dir=True)
+        validate_path_segments(".", allow_current_dir=True)
+        validate_path_segments("a/./b", allow_current_dir=True)
+
+    def test_allow_current_dir_still_rejects_dotdot(self):
+        with pytest.raises(PathTraversalError):
+            validate_path_segments("../escape", allow_current_dir=True)
+        with pytest.raises(PathTraversalError):
+            validate_path_segments("a/../b", allow_current_dir=True)
+
     def test_empty_string_with_reject_empty(self):
         with pytest.raises(PathTraversalError):
             validate_path_segments("", reject_empty=True)
@@ -336,9 +347,7 @@ class TestGetInstallPathContainment:
     def test_ado_normal_path(self, tmp_path):
         base = tmp_path / "apm_modules"
         base.mkdir()
-        dep = DependencyReference.parse(
-            "https://dev.azure.com/myorg/myproject/_git/myrepo"
-        )
+        dep = DependencyReference.parse("https://dev.azure.com/myorg/myproject/_git/myrepo")
         path = dep.get_install_path(base)
         assert "myorg" in str(path)
         assert path.resolve().is_relative_to(base.resolve())

@@ -11,7 +11,7 @@ extends: values:
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 from .schema import (
     ApmPolicy,
@@ -25,7 +25,6 @@ from .schema import (
     PolicyCache,
     UnmanagedFilesPolicy,
 )
-
 
 MAX_CHAIN_DEPTH = 5
 
@@ -63,13 +62,11 @@ def merge_policies(parent: ApmPolicy, child: ApmPolicy) -> ApmPolicy:
         mcp=_merge_mcp(parent.mcp, child.mcp),
         compilation=_merge_compilation(parent.compilation, child.compilation),
         manifest=_merge_manifest(parent.manifest, child.manifest),
-        unmanaged_files=_merge_unmanaged_files(
-            parent.unmanaged_files, child.unmanaged_files
-        ),
+        unmanaged_files=_merge_unmanaged_files(parent.unmanaged_files, child.unmanaged_files),
     )
 
 
-def resolve_policy_chain(policies: List[ApmPolicy]) -> ApmPolicy:
+def resolve_policy_chain(policies: list[ApmPolicy]) -> ApmPolicy:
     """Merge an ordered policy list [root, ..., leaf] left-to-right.
 
     Raises ``PolicyInheritanceError`` if the chain exceeds
@@ -87,7 +84,7 @@ def resolve_policy_chain(policies: List[ApmPolicy]) -> ApmPolicy:
     return result
 
 
-def validate_chain_depth(chain: List[str]) -> None:
+def validate_chain_depth(chain: list[str]) -> None:
     """Raise ``PolicyInheritanceError`` if *chain* exceeds ``MAX_CHAIN_DEPTH``."""
     if len(chain) > MAX_CHAIN_DEPTH:
         raise PolicyInheritanceError(
@@ -95,7 +92,7 @@ def validate_chain_depth(chain: List[str]) -> None:
         )
 
 
-def detect_cycle(visited: List[str], next_ref: str) -> bool:
+def detect_cycle(visited: list[str], next_ref: str) -> bool:
     """Return ``True`` if *next_ref* would create a cycle."""
     return next_ref in visited
 
@@ -105,7 +102,7 @@ def detect_cycle(visited: List[str], next_ref: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _escalate(levels: Dict[str, int], parent_val: str, child_val: str) -> str:
+def _escalate(levels: dict[str, int], parent_val: str, child_val: str) -> str:
     """Return the stricter of two values on an escalation ladder.
 
     Raises ``PolicyInheritanceError`` for unknown values -- validated
@@ -113,13 +110,9 @@ def _escalate(levels: Dict[str, int], parent_val: str, child_val: str) -> str:
     silently downgrading enforcement.
     """
     if parent_val not in levels:
-        raise PolicyInheritanceError(
-            f"Unknown escalation value: {parent_val!r}"
-        )
+        raise PolicyInheritanceError(f"Unknown escalation value: {parent_val!r}")
     if child_val not in levels:
-        raise PolicyInheritanceError(
-            f"Unknown escalation value: {child_val!r}"
-        )
+        raise PolicyInheritanceError(f"Unknown escalation value: {child_val!r}")
     p = levels[parent_val]
     c = levels[child_val]
     target = max(p, c)
@@ -142,9 +135,7 @@ def _merge_cache(parent: PolicyCache, child: PolicyCache) -> PolicyCache:
     return PolicyCache(ttl=min(parent.ttl, child.ttl))
 
 
-def _merge_dependencies(
-    parent: DependencyPolicy, child: DependencyPolicy
-) -> DependencyPolicy:
+def _merge_dependencies(parent: DependencyPolicy, child: DependencyPolicy) -> DependencyPolicy:
     return DependencyPolicy(
         deny=_union(parent.deny, child.deny),
         allow=_intersect_allow(parent.allow, child.allow),
@@ -168,9 +159,7 @@ def _merge_mcp(parent: McpPolicy, child: McpPolicy) -> McpPolicy:
     )
 
 
-def _merge_compilation(
-    parent: CompilationPolicy, child: CompilationPolicy
-) -> CompilationPolicy:
+def _merge_compilation(parent: CompilationPolicy, child: CompilationPolicy) -> CompilationPolicy:
     return CompilationPolicy(
         target=CompilationTargetPolicy(
             allow=_intersect_allow(parent.target.allow, child.target.allow),
@@ -189,9 +178,11 @@ def _merge_manifest(parent: ManifestPolicy, child: ManifestPolicy) -> ManifestPo
     merged_ct_allow = _intersect_allow(parent_ct_allow, child_ct_allow)
 
     # Preserve content_types structure only if at least one side defined it.
-    merged_content_types: Optional[Dict] = None
+    merged_content_types: dict | None = None
     if parent.content_types is not None or child.content_types is not None:
-        merged_content_types = {"allow": list(merged_ct_allow) if merged_ct_allow is not None else []}
+        merged_content_types = {
+            "allow": list(merged_ct_allow) if merged_ct_allow is not None else []
+        }
 
     return ManifestPolicy(
         required_fields=_union(parent.required_fields, child.required_fields),
@@ -214,10 +205,10 @@ def _merge_unmanaged_files(
 # ---------------------------------------------------------------------------
 
 
-def _union(a: Tuple[str, ...], b: Tuple[str, ...]) -> Tuple[str, ...]:
+def _union(a: tuple[str, ...], b: tuple[str, ...]) -> tuple[str, ...]:
     """Deduplicated union preserving first-seen order."""
     seen: set[str] = set()
-    result: List[str] = []
+    result: list[str] = []
     for item in (*a, *b):
         if item not in seen:
             seen.add(item)
@@ -226,9 +217,9 @@ def _union(a: Tuple[str, ...], b: Tuple[str, ...]) -> Tuple[str, ...]:
 
 
 def _intersect_allow(
-    parent: Optional[Tuple[str, ...]],
-    child: Optional[Tuple[str, ...]],
-) -> Optional[Tuple[str, ...]]:
+    parent: tuple[str, ...] | None,
+    child: tuple[str, ...] | None,
+) -> tuple[str, ...] | None:
     """Intersect two allow-lists (tighten-only).
 
     * ``None`` means "no opinion" (transparent in merge).
@@ -248,7 +239,7 @@ def _intersect_allow(
     return tuple(item for item in parent if item in child_set)
 
 
-def _extract_ct_allow(content_types: Optional[Dict]) -> Optional[Tuple[str, ...]]:
+def _extract_ct_allow(content_types: dict | None) -> tuple[str, ...] | None:
     """Extract allow list from a content_types dict, preserving None semantics."""
     if content_types is None:
         return None

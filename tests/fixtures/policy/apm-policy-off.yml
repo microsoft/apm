@@ -1,0 +1,6 @@
+# Fixture 8: Enforcement off -- should never block
+# Tests: YAML 1.1 boolean coercion (bare off -> False -> "off");
+#         verbose-only policy_resolved line; no enforcement applied
+name: enforcement-off-policy
+version: "1.0.0"
+enforcement: off

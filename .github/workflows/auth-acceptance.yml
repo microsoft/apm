@@ -34,6 +34,13 @@ on:
       git_url_public_repo:
         description: 'Public repo for git: URL object format (owner/repo, optional)'
         required: false
+      ado_bearer:
+        description: 'Run ADO AAD bearer-token tests (requires AZURE_* WIF secrets)'
+        type: boolean
+        default: false
+      ado_bearer_repo:
+        description: 'ADO repo for bearer tests (dev.azure.com/org/project/_git/repo)'
+        required: false
 
 env:
   PYTHON_VERSION: '3.12'
@@ -88,3 +95,70 @@ jobs:
           else
             ./scripts/test-auth-acceptance.sh
           fi
+
+  # ADO AAD bearer-token tests (#852).
+  #
+  # This job exercises the bearer code path against a real ADO repo using a
+  # short-lived AAD token acquired via `az` from a Workload Identity
+  # Federation (WIF) service connection. To enable:
+  #
+  #   1. Provision a WIF federated credential in your Entra tenant that
+  #      trusts this repo's GitHub Actions OIDC issuer.
+  #   2. Grant the resulting service principal "Reader" (or higher)
+  #      access to the test ADO org/repo.
+  #   3. Configure these secrets in the `auth-acceptance` environment:
+  #        AZURE_CLIENT_ID    -- WIF app/service-principal client id
+  #        AZURE_TENANT_ID    -- Entra tenant id that owns the ADO org
+  #        AZURE_SUBSCRIPTION_ID -- any subscription the SP can read
+  #   4. Trigger the workflow with `ado_bearer: true` and a value for
+  #      `ado_bearer_repo`.
+  #
+  # Until WIF is provisioned this job is gated to manual runs only and
+  # will be skipped on the default trigger.
+  ado-bearer-tests:
+    name: ADO AAD Bearer Tests (Linux)
+    runs-on: ubuntu-latest
+    environment: auth-acceptance
+    if: ${{ inputs.ado_bearer == true }}
+    permissions:
+      id-token: write   # required for azure/login@v2 OIDC federation
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Install APM in dev mode
+        run: uv run pip install -e .
+
+      - name: Azure login (Workload Identity Federation)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify az session has ADO bearer access
+        run: |
+          az account show
+          az account get-access-token \
+            --resource 499b84ac-1321-427f-aa17-267ca6975798 \
+            --query expiresOn -o tsv
+
+      - name: Run ADO bearer integration tests (PAT unset)
+        env:
+          APM_TEST_ADO_BEARER: '1'
+          APM_TEST_ADO_REPO: ${{ inputs.ado_bearer_repo }}
+          # Deliberately do NOT set ADO_APM_PAT for the bearer-only test.
+        run: |
+          uv run pytest tests/integration/test_ado_bearer_e2e.py -v

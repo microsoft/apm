@@ -246,7 +246,17 @@ Always do Task 7 (Update Monthly Activity Summary Issue) every run. In all comme
 
 Maintain a single open issue titled `[Test Improver] Monthly Activity {YYYY}-{MM}` as a rolling summary of all Test Improver activity for the current month.
 
-1. Search for an open `[Test Improver] Monthly Activity` issue with label `testing`. If it's for the current month, update it. If for a previous month, close it and create a new one. Read any maintainer comments - they may contain instructions or priorities; note them in memory.
+1. **Find the existing monthly issue (MANDATORY before any create)**:
+   - Determine the current month string as `YYYY-MM` (e.g. `2025-04`).
+   - Search for open issues using: `gh search issues --repo ${{ github.repository }} --state open --label testing "[Test Improver] Monthly Activity" --json number,title`
+   - From the results, collect all open issues whose title **contains** the current `YYYY-MM` string.
+   - **If exactly one matching issue for the current month exists: UPDATE it. Do NOT create a new issue.**
+   - **If multiple matching issues for the current month exist: treat the lowest-numbered issue as the canonical monthly issue, UPDATE it, and close every other current-month match as a duplicate of that canonical issue.**
+   - Before closing duplicate current-month issues, read any maintainer comments on each of them and preserve any instructions or priorities in memory, then consolidate any still-relevant details into the canonical issue update.
+   - If no matching issue exists for the current month but one exists for a previous month: close the old one, then create a new issue for the current month.
+   - If no matching issue exists at all: create a new issue for the current month.
+   - Read any maintainer comments on the canonical issue - they may contain instructions or priorities; note them in memory.
+   - **NEVER create a new issue if any open issue with the current month's `YYYY-MM` already exists in its title; update the canonical issue and close duplicates instead.**
 2. **Issue body format** - use **exactly** this structure:
 
    ```markdown

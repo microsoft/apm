@@ -5,7 +5,7 @@ This module must NOT import from any command module.
 
 import builtins
 import os
-import tempfile
+import sys
 from pathlib import Path
 
 import click
@@ -14,15 +14,17 @@ from colorama import init as colorama_init
 
 from ..constants import (
     APM_DIR,
-    APM_LOCK_FILENAME,
+    APM_LOCK_FILENAME,  # noqa: F401
     APM_MODULES_DIR,
     APM_MODULES_GITIGNORE_PATTERN,
     APM_YML_FILENAME,
     GITIGNORE_FILENAME,
 )
+from ..update_policy import get_update_hint_message, is_self_update_enabled
+from ..utils.atomic_io import atomic_write_text as _atomic_write  # noqa: F401
 from ..utils.console import _rich_echo, _rich_info, _rich_warning
-from ..version import get_build_sha, get_version
 from ..utils.version_checker import check_for_updates
+from ..version import get_build_sha, get_version
 
 # CRITICAL: Shadow Click commands at module level to prevent namespace collision
 # When Click commands like 'config set' are defined, calling set() can invoke the command
@@ -42,6 +44,17 @@ INFO = f"{Fore.BLUE}"
 WARNING = f"{Fore.YELLOW}"
 HIGHLIGHT = f"{Fore.MAGENTA}{Style.BRIGHT}"
 RESET = Style.RESET_ALL
+
+
+# -------------------------------------------------------------------
+# TTY detection
+# -------------------------------------------------------------------
+
+
+def _is_interactive():
+    """Return True when both stdin and stdout are attached to a TTY."""
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
 
 # Lazy loading for Rich components to improve startup performance
 _console = None
@@ -87,7 +100,7 @@ def _lazy_yaml():
 
         return yaml
     except ImportError:
-        raise ImportError("PyYAML is required but not installed")
+        raise ImportError("PyYAML is required but not installed")  # noqa: B904
 
 
 def _lazy_prompt():
@@ -114,6 +127,7 @@ def _lazy_confirm():
 # Shared orphan-detection helpers
 # ------------------------------------------------------------------
 
+
 def _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir: Path) -> set:
     """Build expected package paths under *apm_modules_dir*.
 
@@ -121,8 +135,6 @@ def _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir: Path
     (depth > 1 from ``apm.lock``), using ``get_install_path()`` for
     consistency with how packages are actually installed.
     """
-    from ..models.apm_package import DependencyReference
-
     expected = builtins.set()
     for dep in declared_deps:
         install_path = dep.get_install_path(apm_modules_dir)
@@ -133,14 +145,9 @@ def _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir: Path
             expected.add(str(install_path))
 
     if lockfile:
-        for dep in lockfile.get_all_dependencies():
+        for dep in lockfile.get_package_dependencies():
             if dep.depth is not None and dep.depth > 1:
-                dep_ref = DependencyReference(
-                    repo_url=dep.repo_url,
-                    host=dep.host,
-                    virtual_path=dep.virtual_path,
-                    is_virtual=dep.is_virtual,
-                )
+                dep_ref = dep.to_dependency_ref()
                 install_path = dep_ref.get_install_path(apm_modules_dir)
                 try:
                     relative_path = install_path.relative_to(apm_modules_dir)
@@ -192,8 +199,8 @@ def _check_orphaned_packages():
             return []
 
         try:
-            from ..models.apm_package import APMPackage
             from ..deps.lockfile import LockFile, get_lockfile_path
+            from ..models.apm_package import APMPackage
 
             apm_package = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
             declared_deps = apm_package.get_apm_dependencies()
@@ -220,18 +227,34 @@ def print_version(ctx, param, value):
 
     console = _get_console()
     if console:
-        from rich.panel import Panel  # type: ignore
-        from rich.text import Text  # type: ignore
-
-        version_text = Text()
-        version_text.append("Agent Package Manager (APM) CLI", style="bold cyan")
-        version_text.append(f" version {version_str}", style="white")
-        console.print(Panel(version_text, border_style="cyan", padding=(0, 1)))
+        try:
+            console.print(
+                f"[bold cyan]Agent Package Manager (APM) CLI[/bold cyan] version {version_str}"
+            )
+        except Exception:
+            click.echo(f"{TITLE}Agent Package Manager (APM) CLI{RESET} version {version_str}")
     else:
         # Graceful fallback when Rich isn't available (e.g., stripped automation environment)
-        click.echo(
-            f"{TITLE}Agent Package Manager (APM) CLI{RESET} version {version_str}"
-        )
+        click.echo(f"{TITLE}Agent Package Manager (APM) CLI{RESET} version {version_str}")
+
+    # Gated verbose-version output (experimental flag)
+    try:
+        from ..core.experimental import is_enabled
+
+        if is_enabled("verbose_version"):
+            import platform
+            import sys
+
+            python_ver = platform.python_version()
+            plat = f"{sys.platform}-{platform.machine()}"
+            install_path = str(Path(__file__).resolve().parent.parent)
+
+            _rich_echo(f"  {'Python:':<14}{python_ver}", color="dim")
+            _rich_echo(f"  {'Platform:':<14}{plat}", color="dim")
+            _rich_echo(f"  {'Install path:':<14}{install_path}", color="dim")
+    except Exception:
+        # Never let experimental flag logic break --version
+        pass
 
     ctx.exit()
 
@@ -239,6 +262,10 @@ def print_version(ctx, param, value):
 def _check_and_notify_updates():
     """Check for updates and notify user non-blockingly."""
     try:
+        # Skip notifications when self-update is disabled by distribution policy.
+        if not is_self_update_enabled():
+            return
+
         # Skip version check in E2E test mode to avoid interfering with tests
         if os.environ.get("APM_E2E_TESTS", "").lower() in ("1", "true", "yes"):
             return
@@ -259,28 +286,13 @@ def _check_and_notify_updates():
             )
 
             # Show update command using helper for consistency
-            _rich_echo("Run apm update to upgrade", color="yellow", bold=True)
+            _rich_echo(get_update_hint_message(), color="yellow", bold=True)
 
             # Add a blank line for visual separation
             click.echo()
     except Exception:
         # Silently fail - version checking should never block CLI usage
         pass
-
-
-def _atomic_write(path: Path, data: str) -> None:
-    """Atomically write text data to path (best-effort)."""
-    fd, tmp_name = tempfile.mkstemp(prefix="apm-write-", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(data)
-        os.replace(tmp_name, path)
-    except Exception:
-        try:
-            os.unlink(tmp_name)
-        except OSError:
-            pass
-        raise
 
 
 def _update_gitignore_for_apm_modules(logger=None):
@@ -292,7 +304,7 @@ def _update_gitignore_for_apm_modules(logger=None):
     current_content = []
     if gitignore_path.exists():
         try:
-            with open(gitignore_path, "r", encoding="utf-8") as f:
+            with open(gitignore_path, encoding="utf-8") as f:
                 current_content = [line.rstrip("\n\r") for line in f.readlines()]
         except Exception as e:
             if logger:
@@ -328,10 +340,12 @@ def _update_gitignore_for_apm_modules(logger=None):
 # Script / config helpers (shared by run, list, config commands)
 # ------------------------------------------------------------------
 
+
 def _load_apm_config():
     """Load configuration from apm.yml."""
     if Path(APM_YML_FILENAME).exists():
         from ..utils.yaml_io import load_yaml
+
         return load_yaml(APM_YML_FILENAME)
     return None
 
@@ -356,13 +370,18 @@ def _list_available_scripts():
 # Init helpers (shared by init and install commands)
 # ------------------------------------------------------------------
 
+
 def _auto_detect_author():
     """Auto-detect author from git config."""
     import subprocess
 
     try:
         result = subprocess.run(
-            ["git", "config", "user.name"], capture_output=True, text=True, timeout=5
+            ["git", "config", "user.name"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=5,
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
@@ -381,6 +400,7 @@ def _auto_detect_description(project_name):
             ["git", "config", "--get", "remote.origin.url"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
         )
         if result.returncode == 0 and result.stdout.strip():
@@ -412,6 +432,22 @@ def _validate_plugin_name(name):
     return bool(re.match(r"^[a-z][a-z0-9-]{0,63}$", name))
 
 
+def _validate_project_name(name):
+    """Validate that a project name is safe to use as a directory name.
+
+    Project names are used directly as directory names and must not contain
+    '/' or '\' so the name is not interpreted as a filesystem path,
+    and must not be '..' to prevent directory traversal.
+
+    Returns True if valid, False otherwise.
+    """
+    if "/" in name or "\\" in name:
+        return False
+    if name == "..":  # noqa: SIM103
+        return False
+    return True
+
+
 def _create_plugin_json(config):
     """Create plugin.json file with package metadata.
 
@@ -432,12 +468,13 @@ def _create_plugin_json(config):
         f.write(json.dumps(plugin_data, indent=2) + "\n")
 
 
-def _create_minimal_apm_yml(config, plugin=False):
+def _create_minimal_apm_yml(config, plugin=False, target_path=None):
     """Create minimal apm.yml file with auto-detected metadata.
 
     Args:
         config: dict with name, version, description, author keys.
         plugin: if True, include a devDependencies section.
+        target_path: explicit file path to write (defaults to cwd/apm.yml).
     """
     # Create minimal apm.yml structure
     apm_yml_data = {
@@ -446,6 +483,12 @@ def _create_minimal_apm_yml(config, plugin=False):
         "description": config["description"],
         "author": config["author"],
         "dependencies": {"apm": [], "mcp": []},
+        # Issue #887: scaffold with explicit consent for local content
+        # deployment so day-2 audit doesn't surprise the maintainer with
+        # an "includes not declared" advisory the moment they drop a
+        # primitive in .apm/.  Override with an explicit path list to
+        # gate what gets deployed.
+        "includes": "auto",
     }
 
     if plugin:
@@ -455,4 +498,6 @@ def _create_minimal_apm_yml(config, plugin=False):
 
     # Write apm.yml
     from ..utils.yaml_io import dump_yaml
-    dump_yaml(apm_yml_data, APM_YML_FILENAME)
+
+    out_path = target_path or APM_YML_FILENAME
+    dump_yaml(apm_yml_data, out_path)

@@ -1,0 +1,12 @@
+# Fixture 11: Deep extends chain (>5 levels)
+# Tests: validate_chain_depth() rejects chains exceeding MAX_CHAIN_DEPTH=5
+# Chain: depth-0 <- depth-1 <- ... <- depth-5 <- THIS (7 policies total)
+# Supporting chain files in chains/ subdirectory
+name: depth-leaf-policy
+version: "1.0.0"
+extends: contoso-depth-5/policy
+enforcement: warn
+
+dependencies:
+  deny:
+    - "untrusted/*"

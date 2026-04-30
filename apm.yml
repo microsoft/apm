@@ -1,0 +1,13 @@
+name: apm
+version: 0.10.0
+description: APM (Agent Package Manager) -- ship and govern AI agent context
+includes: auto
+author: Microsoft
+license: MIT
+
+# No external deps -- microsoft/apm is the package source itself.
+dependencies:
+  apm: []
+  mcp: []
+
+scripts: {}
