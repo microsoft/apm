@@ -171,18 +171,18 @@ curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR=$HOME/.local/bin sh
 
 ### Binary install fails on older Linux (devcontainers, Debian-based images)
 
-On systems with a glibc version older than what the pre-built binary requires, the
-binary will fail to run. This commonly affects Debian Bookworm-based devcontainers
-(glibc 2.36) since the binary is built on Ubuntu 24.04 (glibc 2.39). The installer
+On systems with a glibc version older than the minimum required by the pre-built
+binary (currently glibc 2.35), the binary will fail to run. The installer
 automatically detects incompatible glibc versions and falls back to
 `pip install --user apm-cli`.
 
 This installs the `apm` command into your user `bin` directory (commonly `~/.local/bin`).
 If `apm` is not found after installation, ensure that this directory is on your `PATH`.
 
-**Recommended fix for devcontainers:** switch your base image from `bookworm` to
-`trixie` (e.g., `mcr.microsoft.com/devcontainers/universal:24-trixie`), which ships
-glibc 2.40+ and runs the pre-built binary directly.
+**Recommended fix for devcontainers on very old base images:** switch to a base
+image with glibc 2.35 or newer (e.g., the Debian `trixie` family, or
+`mcr.microsoft.com/devcontainers/universal:24-trixie`), which runs the pre-built
+binary directly without the pip fallback.
 
 If you prefer to install via pip directly:
 
