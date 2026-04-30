@@ -25,9 +25,7 @@ from .base import _ENV_VAR_RE, MCPClientAdapter
 # resolved values are NOT re-scanned, so a token whose literal text contains
 # ``${...}`` does not get recursively expanded. Module-level compile avoids
 # per-call cost. ``${input:...}`` is intentionally not matched here.
-_COPILOT_ENV_RE = re.compile(
-    r'<([A-Z_][A-Z0-9_]*)>|' + _ENV_VAR_RE.pattern
-)
+_COPILOT_ENV_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>|" + _ENV_VAR_RE.pattern)
 
 
 class CopilotClientAdapter(MCPClientAdapter):

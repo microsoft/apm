@@ -160,8 +160,9 @@ class TestCopilotEnvVarResolutionInHeaders(unittest.TestCase):
     """
 
     def _adapter(self):
-        with patch("apm_cli.adapters.client.copilot.SimpleRegistryClient"), patch(
-            "apm_cli.adapters.client.copilot.RegistryIntegration"
+        with (
+            patch("apm_cli.adapters.client.copilot.SimpleRegistryClient"),
+            patch("apm_cli.adapters.client.copilot.RegistryIntegration"),
         ):
             return CopilotClientAdapter()
 

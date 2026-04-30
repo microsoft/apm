@@ -527,21 +527,15 @@ class TestTranslateEnvVarsForVscode(unittest.TestCase):
     """
 
     def test_translates_bare_dollar_brace(self):
-        out = VSCodeClientAdapter._translate_env_vars_for_vscode(
-            {"H": "Bearer ${MY_TOKEN}"}
-        )
+        out = VSCodeClientAdapter._translate_env_vars_for_vscode({"H": "Bearer ${MY_TOKEN}"})
         self.assertEqual(out["H"], "Bearer ${env:MY_TOKEN}")
 
     def test_preserves_existing_env_prefix(self):
-        out = VSCodeClientAdapter._translate_env_vars_for_vscode(
-            {"H": "Bearer ${env:MY_TOKEN}"}
-        )
+        out = VSCodeClientAdapter._translate_env_vars_for_vscode({"H": "Bearer ${env:MY_TOKEN}"})
         self.assertEqual(out["H"], "Bearer ${env:MY_TOKEN}")
 
     def test_preserves_input_variables(self):
-        out = VSCodeClientAdapter._translate_env_vars_for_vscode(
-            {"H": "Bearer ${input:my-token}"}
-        )
+        out = VSCodeClientAdapter._translate_env_vars_for_vscode({"H": "Bearer ${input:my-token}"})
         self.assertEqual(out["H"], "Bearer ${input:my-token}")
 
     def test_idempotent(self):
@@ -567,9 +561,7 @@ class TestTranslateEnvVarsForVscode(unittest.TestCase):
 
     def test_non_string_values_pass_through(self):
         """Non-string values (int, bool, None) must not raise."""
-        out = VSCodeClientAdapter._translate_env_vars_for_vscode(
-            {"n": 42, "b": True, "x": None}
-        )
+        out = VSCodeClientAdapter._translate_env_vars_for_vscode({"n": 42, "b": True, "x": None})
         self.assertEqual(out, {"n": 42, "b": True, "x": None})
 
 

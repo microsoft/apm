@@ -122,8 +122,7 @@ class TestMcpEnvVarHeadersVSCode:
         )
         # ${env:VAR} syntax MUST be preserved
         assert headers.get("X-Api-Key") == "${env:MY_API_KEY}", (
-            f"${{env:VAR}} syntax must be preserved verbatim.\n"
-            f"Got: {headers!r}"
+            f"${{env:VAR}} syntax must be preserved verbatim.\nGot: {headers!r}"
         )
 
         # CRITICAL: literal env values from the host must NOT appear in mcp.json
