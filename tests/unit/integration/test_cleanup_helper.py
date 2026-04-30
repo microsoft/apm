@@ -355,3 +355,140 @@ def test_result_dataclass_defaults():
     assert r.skipped_user_edit == []
     assert r.skipped_unmanaged == []
     assert r.deleted_targets == []
+
+
+# ---------------------------------------------------------------------------
+# Cowork cleanup tests (PR #926 -- remove_stale_deployed_files)
+# ---------------------------------------------------------------------------
+
+
+def test_cowork_stale_entry_deletes_real_file(tmp_path, diagnostics):
+    """Happy path: cowork:// stale entry with a real file in a temp cowork
+    root -> file deleted, lockfile entry removed (in result.deleted)."""
+    from unittest.mock import patch
+
+    cowork_root = tmp_path / "cowork-skills"
+    cowork_root.mkdir()
+    skill_md = cowork_root / "my-skill" / "SKILL.md"
+    skill_md.parent.mkdir(parents=True)
+    skill_md.write_text("# My Skill\n", encoding="ascii")
+    assert skill_md.exists()
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    with patch(
+        "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+        return_value=cowork_root,
+    ):
+        result = remove_stale_deployed_files(
+            ["cowork://skills/my-skill/SKILL.md"],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+        )
+
+    assert not skill_md.exists(), "File should have been deleted"
+    assert "cowork://skills/my-skill/SKILL.md" in result.deleted
+    assert not result.failed
+    assert not result.skipped_unmanaged
+
+
+def test_cowork_stale_entry_resolver_returns_none(tmp_path, diagnostics):
+    """Resolver returns None -> file NOT deleted, lockfile entry retained
+    in result.failed, one-time warning emitted."""
+    from unittest.mock import patch
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    with patch(
+        "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+        return_value=None,
+    ):
+        result = remove_stale_deployed_files(
+            ["cowork://skills/my-skill/SKILL.md"],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+        )
+
+    assert result.deleted == []
+    assert "cowork://skills/my-skill/SKILL.md" in result.failed
+    # One-time warning about missing OneDrive path.
+    msgs = [d.message for d in diagnostics._diagnostics]
+    assert any("OneDrive path not detected" in m for m in msgs)
+    assert any("APM_COPILOT_COWORK_SKILLS_DIR" in m for m in msgs)
+
+
+def test_cowork_stale_entry_file_already_gone(tmp_path, diagnostics):
+    """Cowork root resolves but file is already missing -> lockfile entry
+    is removed (not in failed), no error. Idempotent cleanup."""
+    from unittest.mock import patch
+
+    cowork_root = tmp_path / "cowork-skills"
+    cowork_root.mkdir()
+    # Do NOT create the skill file -- it is already gone.
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    with patch(
+        "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+        return_value=cowork_root,
+    ):
+        result = remove_stale_deployed_files(
+            ["cowork://skills/my-skill/SKILL.md"],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+        )
+
+    # Not in deleted (nothing was on disk), not in failed (no error),
+    # not in skipped_unmanaged (path was valid).
+    assert result.deleted == []
+    assert result.failed == []
+    assert result.skipped_unmanaged == []
+
+
+def test_cowork_stale_entry_from_lockfile_error_retains_in_failed(
+    tmp_path, diagnostics
+):
+    """from_lockfile_path raises after validation passes -> entry
+    retained in result.failed, warning emitted."""
+    from unittest.mock import patch
+
+    cowork_root = tmp_path / "cowork-skills"
+    cowork_root.mkdir()
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    # Use a valid-looking cowork path so it passes validate_deploy_path.
+    stale = "cowork://skills/bad-skill/SKILL.md"
+
+    def _boom(_path, _root):
+        raise ValueError("simulated resolution failure")
+
+    with patch(
+        "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+        return_value=cowork_root,
+    ), patch(
+        "apm_cli.integration.copilot_cowork_paths.from_lockfile_path",
+        side_effect=_boom,
+    ):
+        result = remove_stale_deployed_files(
+            [stale],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+        )
+
+    assert result.deleted == []
+    assert stale in result.failed
+    msgs = [d.message for d in diagnostics._diagnostics]
+    assert any("failed path resolution" in m for m in msgs)

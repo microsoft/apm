@@ -210,6 +210,29 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
         self.assertTrue(mock_install.called)
         self.assertEqual(mock_install.call_args_list[0].args[0], "copilot")
 
+    def test_scope_user_overrides_false_user_scope_flag(self):
+        """USER scope should force user-scope path resolution even if the boolean disagrees."""
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        with patch.object(
+            MCPIntegrator, "_install_for_runtime", return_value=True
+        ) as mock_install, patch(
+            "apm_cli.registry.operations.MCPServerOperations"
+        ) as mock_ops_cls:
+            mock_ops = MagicMock()
+            mock_ops.validate_servers_exist.return_value = (["test/server"], [])
+            mock_ops.check_servers_needing_installation.return_value = ["test/server"]
+            mock_ops_cls.return_value = mock_ops
+
+            MCPIntegrator.install(
+                mcp_deps=["test/server"],
+                runtime="copilot",
+                scope=InstallScope.USER,
+                user_scope=False,
+            )
+
+        assert mock_install.call_args.kwargs["user_scope"] is True
+
     def test_scope_none_treated_as_project(self):
         """When scope is None, all runtimes are eligible (backward compat)."""
         from apm_cli.integration.mcp_integrator import MCPIntegrator

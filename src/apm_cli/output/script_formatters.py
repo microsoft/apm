@@ -7,8 +7,6 @@ try:
     from rich.console import Console
     from rich.text import Text
     from rich.panel import Panel
-    from rich.tree import Tree
-    from rich import box
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
@@ -40,9 +38,9 @@ class ScriptExecutionFormatter:
         
         # Main header
         if self.use_color:
-            lines.append(self._styled(f" Running script: {script_name}", "cyan bold"))
+            lines.append(self._styled(f"[>] Running script: {script_name}", "cyan bold"))
         else:
-            lines.append(f" Running script: {script_name}")
+            lines.append(f"[>] Running script: {script_name}")
         
         # Parameters tree if any exist
         if params:
@@ -173,7 +171,7 @@ class ScriptExecutionFormatter:
                 panel_output = capture.get()
                 if panel_output.strip():
                     lines.extend(panel_output.split('\n'))
-            except:
+            except Exception:
                 # Fallback to simple formatting
                 lines.append("-" * 50)
                 lines.append(content_preview)
@@ -323,17 +321,17 @@ class ScriptExecutionFormatter:
             try:
                 text = Text()
                 text.append("[i] Auto-discovered: ", style="cyan")
-                text.append(str(prompt_file), style="bold white")
+                text.append(prompt_file.as_posix(), style="bold white")
                 text.append(f" (runtime: {runtime})", style="dim")
                 
                 with self.console.capture() as capture:
                     self.console.print(text)
                 return capture.get().rstrip('\n')
-            except:
+            except Exception:
                 # Fallback to simple formatting
-                return f"[i] Auto-discovered: {prompt_file} (runtime: {runtime})"
+                return f"[i] Auto-discovered: {prompt_file.as_posix()} (runtime: {runtime})"
         else:
-            return f"[i] Auto-discovered: {prompt_file} (runtime: {runtime})"
+            return f"[i] Auto-discovered: {prompt_file.as_posix()} (runtime: {runtime})"
     
     def _styled(self, text: str, style: str) -> str:
         """Apply styling to text with rich fallback."""

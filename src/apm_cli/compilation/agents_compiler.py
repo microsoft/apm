@@ -5,6 +5,7 @@ full content assembly. This keeps repeated compiles byte-identical when source
 primitives & constitution are unchanged.
 """
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -20,7 +21,9 @@ from .template_builder import (
 )
 from .link_resolver import resolve_markdown_links, validate_link_targets
 from ..utils.paths import portable_relpath
-from ..core.target_detection import should_compile_agents_md, should_compile_claude_md, should_compile_gemini_md
+from ..core.target_detection import should_compile_agents_md, should_compile_claude_md, should_compile_gemini_md, CompileTargetType
+
+_logger = logging.getLogger(__name__)
 
 
 # User-facing target aliases that map to the canonical "vscode" target.
@@ -29,6 +32,11 @@ _VSCODE_TARGET_ALIASES = ("copilot", "agents")
 _KNOWN_TARGETS = (
     "vscode", "claude", "cursor", "opencode", "codex", "gemini", "all", "minimal",
 ) + _VSCODE_TARGET_ALIASES
+
+# Compiler families allowed inside a multi-target frozenset (built by
+# _resolve_compile_target() from CLI-validated target names). Kept narrow
+# because the frozenset path bypasses _KNOWN_TARGETS validation.
+_KNOWN_COMPILE_FAMILIES = frozenset({"agents", "claude", "gemini"})
 
 
 @dataclass
@@ -44,7 +52,8 @@ class CompilationConfig:
     # "vscode" or "agents" -> AGENTS.md + .github/
     # "claude" -> CLAUDE.md + .claude/
     # "all" -> both targets
-    target: str = "all"
+    # frozenset({"agents","claude"}) -> AGENTS.md + CLAUDE.md (multi-target)
+    target: CompileTargetType = "all"
     
     # Distributed compilation settings (Task 7)
     strategy: str = "distributed"  # "distributed" or "single-file"
@@ -125,9 +134,8 @@ class CompilationConfig:
                         # Support single pattern as string
                         config.exclude = [exclude_patterns]
                 
-        except Exception:
-            # If config loading fails, use defaults
-            pass
+        except Exception as exc:
+            _logger.debug("Config loading failed, using defaults: %s", exc)
         
         # Apply command-line overrides (highest priority)
         for key, value in overrides.items():
@@ -212,23 +220,46 @@ class AgentsCompiler:
             # Use target_detection helpers as the single source of truth so
             # new targets (codex, opencode, cursor, minimal, ...) route
             # correctly without touching this method again.
-            routing_target = (
-                "vscode" if config.target in _VSCODE_TARGET_ALIASES else config.target
-            )
+            if isinstance(config.target, frozenset):
+                # Multi-target lists are normalized by _resolve_compile_target()
+                # into compiler families only. Validate defensively for direct
+                # API callers so invalid families do not silently produce
+                # partial output or a successful no-op.
+                invalid_families = config.target - _KNOWN_COMPILE_FAMILIES
+                if invalid_families:
+                    self.errors.append(
+                        "Unknown compilation target family in multi-target set: "
+                        f"{', '.join(sorted(invalid_families))}. "
+                        "Expected subset of: "
+                        f"{', '.join(sorted(_KNOWN_COMPILE_FAMILIES))}"
+                    )
+                    return CompilationResult(
+                        success=False,
+                        output_path="",
+                        content="",
+                        warnings=self.warnings.copy(),
+                        errors=self.errors.copy(),
+                        stats={},
+                    )
+                routing_target = config.target
+            else:
+                routing_target = (
+                    "vscode" if config.target in _VSCODE_TARGET_ALIASES else config.target
+                )
 
-            if routing_target not in _KNOWN_TARGETS and config.target not in _KNOWN_TARGETS:
-                self.errors.append(
-                    f"Unknown compilation target: {config.target!r}. "
-                    f"Expected one of: {', '.join(sorted(set(_KNOWN_TARGETS)))}"
-                )
-                return CompilationResult(
-                    success=False,
-                    output_path="",
-                    content="",
-                    warnings=self.warnings.copy(),
-                    errors=self.errors.copy(),
-                    stats={},
-                )
+                if routing_target not in _KNOWN_TARGETS and config.target not in _KNOWN_TARGETS:
+                    self.errors.append(
+                        f"Unknown compilation target: {config.target!r}. "
+                        f"Expected one of: {', '.join(sorted(set(_KNOWN_TARGETS)))}"
+                    )
+                    return CompilationResult(
+                        success=False,
+                        output_path="",
+                        content="",
+                        warnings=self.warnings.copy(),
+                        errors=self.errors.copy(),
+                        stats={},
+                    )
 
             results: List[CompilationResult] = []
 
@@ -526,8 +557,8 @@ class AgentsCompiler:
                             with_constitution=True,
                             output_path=claude_path
                         )
-                    except Exception:
-                        pass  # Use original content if injection fails
+                    except Exception as exc:
+                        _logger.debug("Constitution injection failed for %s: %s", claude_path, exc)
                 
                 # Defense-in-depth: scan compiled output before writing
                 verdict = SecurityGate.scan_text(
@@ -858,9 +889,8 @@ class AgentsCompiler:
                         with_constitution=True, 
                         output_path=agents_path
                     )
-                except Exception:
-                    # If constitution injection fails, use original content
-                    pass
+                except Exception as exc:
+                    _logger.debug("Constitution injection failed for %s: %s", agents_path, exc)
             
             # Create directory if it doesn't exist
             agents_path.parent.mkdir(parents=True, exist_ok=True)

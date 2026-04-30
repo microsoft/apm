@@ -38,7 +38,7 @@ class CursorClientAdapter(CopilotClientAdapter):
         ``.cursor/`` directory is *not* created automatically — APM only
         writes here when the directory already exists.
         """
-        cursor_dir = Path(os.getcwd()) / ".cursor"
+        cursor_dir = self.project_root / ".cursor"
         return str(cursor_dir / "mcp.json")
 
     # ------------------------------------------------------------------ #
@@ -102,7 +102,7 @@ class CursorClientAdapter(CopilotClientAdapter):
             return False
 
         # Opt-in: skip silently when .cursor/ does not exist
-        cursor_dir = Path(os.getcwd()) / ".cursor"
+        cursor_dir = self.project_root / ".cursor"
         if not cursor_dir.exists():
             return True  # nothing to do, not an error
 

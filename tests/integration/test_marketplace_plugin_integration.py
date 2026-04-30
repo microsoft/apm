@@ -350,11 +350,12 @@ class TestPluginIntegration:
         assert apm_dir.exists()
 
     def test_plugin_without_plugin_json(self, tmp_path):
-        """Any directory with standard component dirs and no apm.yml/SKILL.md is a Claude plugin."""
+        """A directory with .claude-plugin/ dir but no plugin.json is still a Claude plugin."""
         plugin_dir = tmp_path / "no-manifest-plugin"
         plugin_dir.mkdir()
 
-        # Only standard component directories — no plugin.json at all
+        # .claude-plugin/ directory acts as plugin manifest marker
+        (plugin_dir / ".claude-plugin").mkdir()
         (plugin_dir / "commands").mkdir()
         (plugin_dir / "commands" / "do-something.md").write_text("# Do Something")
         (plugin_dir / "agents").mkdir()
@@ -376,6 +377,8 @@ class TestPluginIntegration:
 
         mcp_config = {"mcpServers": {"my-server": {"command": "node", "args": ["index.js"]}}}
         (plugin_dir / ".mcp.json").write_text(json.dumps(mcp_config))
+        # plugin.json is the manifest marker
+        (plugin_dir / "plugin.json").write_text(json.dumps({"name": "mcp-plugin"}))
         (plugin_dir / "commands").mkdir()
         (plugin_dir / "commands" / "run.md").write_text("# Run")
 

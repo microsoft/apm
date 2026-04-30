@@ -64,6 +64,9 @@ class DependencyReference:
     is_insecure: bool = False  # True when the dependency URL uses http://
     allow_insecure: bool = False  # True if this HTTP dep is explicitly allowed
 
+    # SKILL_BUNDLE subset selection (persisted in apm.yml `skills:` field)
+    skill_subset: Optional[List[str]] = None  # Sorted skill names, or None = all
+
     # Supported file extensions for virtual packages
     VIRTUAL_FILE_EXTENSIONS = (
         ".prompt.md",
@@ -539,6 +542,33 @@ class DependencyReference:
             dep.virtual_path = sub_path
             dep.is_virtual = True
 
+        # Parse skills: field (SKILL_BUNDLE subset selection)
+        skills_raw = entry.get("skills")
+        if skills_raw is not None:
+            if not isinstance(skills_raw, (list,)):
+                raise ValueError(
+                    "'skills' field must be a list of skill names"
+                )
+            if len(skills_raw) == 0:
+                raise ValueError(
+                    "skills: must contain at least one name; "
+                    "remove the field to install all skills in the bundle."
+                )
+            seen: set = set()
+            validated: list = []
+            for name in skills_raw:
+                if not isinstance(name, str) or not name.strip():
+                    raise ValueError(
+                        "Each entry in 'skills' must be a non-empty string"
+                    )
+                name = name.strip()
+                # Path safety: reject traversal sequences
+                validate_path_segments(name, context="skills/<name>")
+                if name not in seen:
+                    seen.add(name)
+                    validated.append(name)
+            dep.skill_subset = sorted(validated)
+
         return dep
 
     @classmethod
@@ -719,144 +749,151 @@ class DependencyReference:
         return host, None, repo_url, reference, alias
 
     @classmethod
-    def _parse_standard_url(
-        cls, dependency_str: str, is_virtual_package: bool, virtual_path, validated_host
-    ):
-        """Parse a non-SSH dependency string (HTTPS, FQDN, or shorthand).
+    def _resolve_virtual_shorthand_repo(cls, repo_url, validated_host):
+        """Narrow a virtual-package shorthand to just the base repo path.
+
+        When a virtual package is given without a URL scheme
+        (e.g. ``github.com/owner/repo/path/file.prompt.md``), this strips
+        the virtual suffix so the downstream shorthand resolver only sees
+        the ``owner/repo`` (or ``org/project/repo`` for ADO) portion.
 
         Returns:
-            ``(host, port, repo_url, reference, alias)``
+            ``(host, repo_url)`` where *host* may be ``None``.
         """
+        parts = repo_url.split("/")
+
+        if "_git" in parts:
+            git_idx = parts.index("_git")
+            parts = parts[:git_idx] + parts[git_idx + 1 :]
+
         host = None
-        port: Optional[int] = None
+        if len(parts) >= 3 and is_supported_git_host(parts[0]):
+            host = parts[0]
+            if is_azure_devops_hostname(parts[0]):
+                if len(parts) < 5:
+                    raise ValueError(
+                        "Invalid Azure DevOps virtual package format: must be dev.azure.com/org/project/repo/path"
+                    )
+                repo_url = "/".join(parts[1:4])
+            elif is_artifactory_path(parts[1:]):
+                art_result = parse_artifactory_path(parts[1:])
+                if art_result:
+                    repo_url = f"{art_result[1]}/{art_result[2]}"
+            else:
+                repo_url = "/".join(parts[1:3])
+        elif len(parts) >= 2:
+            if not host:
+                host = default_host()
+            if validated_host and is_azure_devops_hostname(validated_host):
+                if len(parts) < 4:
+                    raise ValueError(
+                        "Invalid Azure DevOps virtual package format: expected at least org/project/repo/path"
+                    )
+                repo_url = "/".join(parts[:3])
+            else:
+                repo_url = "/".join(parts[:2])
 
-        alias = None
+        return host, repo_url
 
-        reference = None
-        if "#" in dependency_str:
-            repo_part, reference = dependency_str.rsplit("#", 1)
-            reference = reference.strip()
-        else:
-            repo_part = dependency_str
+    @classmethod
+    def _resolve_shorthand_to_parsed_url(cls, repo_url, host):
+        """Resolve a non-URL shorthand path into a ``urllib``-parsed URL.
 
-        repo_url = repo_part.strip()
+        Handles ``user/repo``, ``github.com/user/repo``,
+        ``dev.azure.com/org/project/repo``, and Artifactory VCS paths.
+        Validates path components before returning.
 
-        # For virtual packages, extract just the owner/repo part (or org/project/repo for ADO)
-        repo_url_lower = repo_url.lower()
+        Returns:
+            ``(parsed_url, host)``
+        """
+        parts = repo_url.split("/")
 
-        if is_virtual_package and not repo_url_lower.startswith(("https://", "http://")):
-            parts = repo_url.split("/")
+        if "_git" in parts:
+            git_idx = parts.index("_git")
+            parts = parts[:git_idx] + parts[git_idx + 1 :]
 
-            if "_git" in parts:
-                git_idx = parts.index("_git")
-                parts = parts[:git_idx] + parts[git_idx + 1 :]
-
-            if len(parts) >= 3 and is_supported_git_host(parts[0]):
-                host = parts[0]
-                if is_azure_devops_hostname(parts[0]):
-                    if len(parts) < 5:
-                        raise ValueError(
-                            "Invalid Azure DevOps virtual package format: must be dev.azure.com/org/project/repo/path"
-                        )
-                    repo_url = "/".join(parts[1:4])
-                elif is_artifactory_path(parts[1:]):
+        if len(parts) >= 3 and is_supported_git_host(parts[0]):
+            host = parts[0]
+            if is_azure_devops_hostname(host) and len(parts) >= 4:
+                user_repo = "/".join(parts[1:4])
+            elif not is_github_hostname(host) and not is_azure_devops_hostname(
+                host
+            ):
+                if is_artifactory_path(parts[1:]):
                     art_result = parse_artifactory_path(parts[1:])
                     if art_result:
-                        repo_url = f"{art_result[1]}/{art_result[2]}"
-                else:
-                    repo_url = "/".join(parts[1:3])
-            elif len(parts) >= 2:
-                if not host:
-                    host = default_host()
-                if validated_host and is_azure_devops_hostname(validated_host):
-                    if len(parts) < 4:
-                        raise ValueError(
-                            "Invalid Azure DevOps virtual package format: expected at least org/project/repo/path"
-                        )
-                    repo_url = "/".join(parts[:3])
-                else:
-                    repo_url = "/".join(parts[:2])
-
-        # Normalize to URL format for secure parsing
-        if repo_url_lower.startswith(("https://", "http://")):
-            parsed_url = urllib.parse.urlparse(repo_url)
-            host = parsed_url.hostname or ""
-            port = parsed_url.port  # capture :PORT from https://host:8443/...
-        else:
-            parts = repo_url.split("/")
-
-            if "_git" in parts:
-                git_idx = parts.index("_git")
-                parts = parts[:git_idx] + parts[git_idx + 1 :]
-
-            if len(parts) >= 3 and is_supported_git_host(parts[0]):
-                host = parts[0]
-                if is_azure_devops_hostname(host) and len(parts) >= 4:
-                    user_repo = "/".join(parts[1:4])
-                elif not is_github_hostname(host) and not is_azure_devops_hostname(
-                    host
-                ):
-                    if is_artifactory_path(parts[1:]):
-                        art_result = parse_artifactory_path(parts[1:])
-                        if art_result:
-                            user_repo = f"{art_result[1]}/{art_result[2]}"
-                        else:
-                            user_repo = "/".join(parts[1:])
+                        user_repo = f"{art_result[1]}/{art_result[2]}"
                     else:
                         user_repo = "/".join(parts[1:])
                 else:
-                    user_repo = "/".join(parts[1:3])
-            elif len(parts) >= 2 and "." not in parts[0]:
-                if not host:
-                    host = default_host()
-                if is_azure_devops_hostname(host) and len(parts) >= 3:
-                    user_repo = "/".join(parts[:3])
-                elif (
-                    host
-                    and not is_github_hostname(host)
-                    and not is_azure_devops_hostname(host)
-                ):
-                    user_repo = "/".join(parts)
-                else:
-                    user_repo = "/".join(parts[:2])
+                    user_repo = "/".join(parts[1:])
             else:
+                user_repo = "/".join(parts[1:3])
+        elif len(parts) >= 2 and "." not in parts[0]:
+            if not host:
+                host = default_host()
+            if is_azure_devops_hostname(host) and len(parts) >= 3:
+                user_repo = "/".join(parts[:3])
+            elif (
+                host
+                and not is_github_hostname(host)
+                and not is_azure_devops_hostname(host)
+            ):
+                user_repo = "/".join(parts)
+            else:
+                user_repo = "/".join(parts[:2])
+        else:
+            raise ValueError(
+                f"Use 'user/repo' or 'github.com/user/repo' or 'dev.azure.com/org/project/repo' format"
+            )
+
+        if not user_repo or "/" not in user_repo:
+            raise ValueError(
+                f"Invalid repository format: {repo_url}. Expected 'user/repo' or 'org/project/repo'"
+            )
+
+        uparts = user_repo.split("/")
+        is_ado_host = host and is_azure_devops_hostname(host)
+
+        if is_ado_host:
+            if len(uparts) < 3:
                 raise ValueError(
-                    f"Use 'user/repo' or 'github.com/user/repo' or 'dev.azure.com/org/project/repo' format"
+                    f"Invalid Azure DevOps repository format: {repo_url}. Expected 'org/project/repo'"
+                )
+        else:
+            if len(uparts) < 2:
+                raise ValueError(
+                    f"Invalid repository format: {repo_url}. Expected 'user/repo'"
                 )
 
-            if not user_repo or "/" not in user_repo:
-                raise ValueError(
-                    f"Invalid repository format: {repo_url}. Expected 'user/repo' or 'org/project/repo'"
-                )
+        allowed_pattern = (
+            r"^[a-zA-Z0-9._\- ]+$" if is_ado_host else r"^[a-zA-Z0-9._-]+$"
+        )
+        validate_path_segments(
+            "/".join(uparts), context="repository path"
+        )
+        for part in uparts:
+            if not re.match(allowed_pattern, part.rstrip(".git")):
+                raise ValueError(f"Invalid repository path component: {part}")
 
-            uparts = user_repo.split("/")
-            is_ado_host = host and is_azure_devops_hostname(host)
+        quoted_repo = "/".join(urllib.parse.quote(p, safe="") for p in uparts)
+        github_url = urllib.parse.urljoin(f"https://{host}/", quoted_repo)
+        parsed_url = urllib.parse.urlparse(github_url)
 
-            if is_ado_host:
-                if len(uparts) < 3:
-                    raise ValueError(
-                        f"Invalid Azure DevOps repository format: {repo_url}. Expected 'org/project/repo'"
-                    )
-            else:
-                if len(uparts) < 2:
-                    raise ValueError(
-                        f"Invalid repository format: {repo_url}. Expected 'user/repo'"
-                    )
+        return parsed_url, host
 
-            allowed_pattern = (
-                r"^[a-zA-Z0-9._\- ]+$" if is_ado_host else r"^[a-zA-Z0-9._-]+$"
-            )
-            validate_path_segments(
-                "/".join(uparts), context="repository path"
-            )
-            for part in uparts:
-                if not re.match(allowed_pattern, part.rstrip(".git")):
-                    raise ValueError(f"Invalid repository path component: {part}")
+    @classmethod
+    def _validate_url_repo_path(cls, parsed_url):
+        """Validate and normalise the repository path from a parsed URL.
 
-            quoted_repo = "/".join(urllib.parse.quote(p, safe="") for p in uparts)
-            github_url = urllib.parse.urljoin(f"https://{host}/", quoted_repo)
-            parsed_url = urllib.parse.urlparse(github_url)
+        Checks host support, strips ``.git`` suffixes, removes ``_git``
+        segments, and validates each path component against the allowed
+        character set for the detected host type.
 
+        Returns:
+            repo_url (str): Normalised repository path
+                (e.g. ``owner/repo`` or ``org/project/repo``).
+        """
         hostname = parsed_url.hostname or ""
         if not is_supported_git_host(hostname):
             raise ValueError(unsupported_host_error(hostname or parsed_url.netloc))
@@ -904,12 +941,119 @@ class DependencyReference:
             if not re.match(allowed_pattern, part):
                 raise ValueError(f"Invalid repository path component: {part}")
 
-        repo_url = "/".join(path_parts)
+        return "/".join(path_parts)
+
+    @classmethod
+    def _parse_standard_url(
+        cls, dependency_str: str, is_virtual_package: bool, virtual_path, validated_host
+    ):
+        """Parse a non-SSH dependency string (HTTPS, FQDN, or shorthand).
+
+        Detects scheme vs shorthand, delegates host-specific resolution to
+        helpers, then validates the resulting URL path.
+
+        Returns:
+            ``(host, port, repo_url, reference, alias)``
+        """
+        host = None
+        port = None
+        alias = None
+
+        reference = None
+        if "#" in dependency_str:
+            repo_part, reference = dependency_str.rsplit("#", 1)
+            reference = reference.strip()
+        else:
+            repo_part = dependency_str
+
+        repo_url = repo_part.strip()
+
+        # Lowercase copy for scheme detection -- kept from the original
+        # repo_url so the URL-vs-shorthand check below still works after
+        # the virtual shorthand resolver has narrowed repo_url.
+        repo_url_lower = repo_url.lower()
+
+        # For virtual packages without a URL scheme, narrow to just owner/repo
+        if is_virtual_package and not repo_url_lower.startswith(("https://", "http://")):
+            host, repo_url = cls._resolve_virtual_shorthand_repo(
+                repo_url, validated_host
+            )
+
+        # Normalize to URL format for secure parsing
+        if repo_url_lower.startswith(("https://", "http://")):
+            parsed_url = urllib.parse.urlparse(repo_url)
+            host = parsed_url.hostname or ""
+            port = parsed_url.port  # capture :PORT from https://host:8443/...
+        else:
+            parsed_url, host = cls._resolve_shorthand_to_parsed_url(repo_url, host)
+
+        repo_url = cls._validate_url_repo_path(parsed_url)
 
         if not host:
             host = default_host()
 
         return host, port, repo_url, reference, alias
+
+    @classmethod
+    def _validate_final_repo_fields(cls, host, repo_url):
+        """Validate the final repo_url and extract ADO organisation fields.
+
+        Performs character-set and segment-count validation appropriate for
+        the detected host type (Azure DevOps vs generic git host).
+
+        Returns:
+            ``(ado_organization, ado_project, ado_repo)`` -- all ``None``
+            for non-ADO hosts.
+        """
+        is_ado_final = host and is_azure_devops_hostname(host)
+        if is_ado_final:
+            if not re.match(
+                r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._\- ]+/[a-zA-Z0-9._\- ]+$", repo_url
+            ):
+                raise ValueError(
+                    f"Invalid Azure DevOps repository format: {repo_url}. Expected 'org/project/repo'"
+                )
+            ado_parts = repo_url.split("/")
+            validate_path_segments(
+                repo_url, context="Azure DevOps repository path"
+            )
+            return ado_parts[0], ado_parts[1], ado_parts[2]
+
+        segments = repo_url.split("/")
+        if len(segments) < 2:
+            raise ValueError(
+                f"Invalid repository format: {repo_url}. Expected 'user/repo'"
+            )
+        if not all(re.match(r"^[a-zA-Z0-9._-]+$", s) for s in segments):
+            raise ValueError(
+                f"Invalid repository format: {repo_url}. Contains invalid characters"
+            )
+        validate_path_segments(repo_url, context="repository path")
+        for seg in segments:
+            if any(seg.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
+                raise ValueError(
+                    f"Invalid repository format: '{repo_url}' contains a virtual file extension. "
+                    f"Use the dict format with 'path:' for virtual packages in SSH/HTTPS URLs"
+                )
+        return None, None, None
+
+    @staticmethod
+    def _extract_artifactory_prefix(dependency_str, host):
+        """Extract the Artifactory VCS prefix from the original dependency string.
+
+        Returns:
+            The prefix string (e.g. ``"artifactory/github"``) or ``None``.
+        """
+        _art_str = dependency_str.split("#")[0].split("@")[0]
+        # Strip scheme if present (e.g., https://host/artifactory/...)
+        if "://" in _art_str:
+            _art_str = _art_str.split("://", 1)[1]
+        _art_segs = _art_str.replace(f"{host}/", "", 1).split("/")
+        if is_artifactory_path(_art_segs):
+            art_result = parse_artifactory_path(_art_segs)
+            if art_result:
+                return art_result[0]
+        return None
 
     @classmethod
     def parse(cls, dependency_str: str) -> "DependencyReference":
@@ -981,8 +1125,8 @@ class DependencyReference:
             dependency_str
         )
 
-        # Phase 2: parse SSH (ssh:// URL first — it preserves port; then SCP shorthand),
-        # otherwise fall back to HTTPS/shorthand parsing.
+        # Phase 2: parse SSH (ssh:// URL first -- it preserves port; then SCP
+        # shorthand), otherwise fall back to HTTPS/shorthand parsing.
         explicit_scheme: Optional[str] = None
         ssh_proto_result = cls._parse_ssh_protocol_url(dependency_str)
         if ssh_proto_result:
@@ -1004,41 +1148,9 @@ class DependencyReference:
                     explicit_scheme = "http"
 
         # Phase 3: final validation and ADO field extraction
-        is_ado_final = host and is_azure_devops_hostname(host)
-        if is_ado_final:
-            if not re.match(
-                r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._\- ]+/[a-zA-Z0-9._\- ]+$", repo_url
-            ):
-                raise ValueError(
-                    f"Invalid Azure DevOps repository format: {repo_url}. Expected 'org/project/repo'"
-                )
-            ado_parts = repo_url.split("/")
-            validate_path_segments(
-                repo_url, context="Azure DevOps repository path"
-            )
-            ado_organization = ado_parts[0]
-            ado_project = ado_parts[1]
-            ado_repo = ado_parts[2]
-        else:
-            segments = repo_url.split("/")
-            if len(segments) < 2:
-                raise ValueError(
-                    f"Invalid repository format: {repo_url}. Expected 'user/repo'"
-                )
-            if not all(re.match(r"^[a-zA-Z0-9._-]+$", s) for s in segments):
-                raise ValueError(
-                    f"Invalid repository format: {repo_url}. Contains invalid characters"
-                )
-            validate_path_segments(repo_url, context="repository path")
-            for seg in segments:
-                if any(seg.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
-                    raise ValueError(
-                        f"Invalid repository format: '{repo_url}' contains a virtual file extension. "
-                        f"Use the dict format with 'path:' for virtual packages in SSH/HTTPS URLs"
-                    )
-            ado_organization = None
-            ado_project = None
-            ado_repo = None
+        ado_organization, ado_project, ado_repo = cls._validate_final_repo_fields(
+            host, repo_url
+        )
 
         if alias and not re.match(r"^[a-zA-Z0-9._-]+$", alias):
             raise ValueError(
@@ -1046,17 +1158,12 @@ class DependencyReference:
             )
 
         # Extract Artifactory prefix from the original path if applicable
+        is_ado_final = host and is_azure_devops_hostname(host)
         artifactory_prefix = None
         if host and not is_ado_final:
-            _art_str = dependency_str.split("#")[0].split("@")[0]
-            # Strip scheme if present (e.g., https://host/artifactory/...)
-            if "://" in _art_str:
-                _art_str = _art_str.split("://", 1)[1]
-            _art_segs = _art_str.replace(f"{host}/", "", 1).split("/")
-            if is_artifactory_path(_art_segs):
-                art_result = parse_artifactory_path(_art_segs)
-                if art_result:
-                    artifactory_prefix = art_result[0]
+            artifactory_prefix = cls._extract_artifactory_prefix(
+                dependency_str, host
+            )
 
         return cls(
             repo_url=repo_url,
@@ -1078,10 +1185,11 @@ class DependencyReference:
         """Return the entry to store in apm.yml.
 
         For HTTP (insecure) deps, returns a dict with 'git' and 'allow_insecure' keys.
+        For deps with skill_subset, returns a dict with 'git' and 'skills' keys.
         For all other deps, returns the canonical string (same as to_canonical()).
 
         Returns:
-            str or dict: String for HTTPS/SSH/local deps; dict for HTTP deps.
+            str or dict: String for simple deps; dict for HTTP or skill-subset deps.
         """
         if self.is_insecure:
             host = self.host or default_host()
@@ -1091,6 +1199,16 @@ class DependencyReference:
             if self.alias:
                 entry["alias"] = self.alias
             entry["allow_insecure"] = self.allow_insecure
+            if self.skill_subset:
+                entry["skills"] = sorted(self.skill_subset)
+            return entry
+        if self.skill_subset:
+            entry = {"git": self.get_identity()}
+            if self.reference:
+                entry["ref"] = self.reference
+            if self.alias:
+                entry["alias"] = self.alias
+            entry["skills"] = sorted(self.skill_subset)
             return entry
         return self.to_canonical()
 

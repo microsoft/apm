@@ -37,7 +37,8 @@ Hook JSON format (Cursor  -- flat arrays with command key):
     }
 
 Script path handling:
-    - ${CLAUDE_PLUGIN_ROOT}/path -> resolved relative to package root, rewritten for target
+    - ${CLAUDE_PLUGIN_ROOT}/path, ${CURSOR_PLUGIN_ROOT}/path, ${PLUGIN_ROOT}/path
+      -> resolved relative to package root, rewritten for target
     - ./path -> relative path, resolved from hook file's parent directory, rewritten for target
     - System commands (no path separators) -> passed through unchanged
 """
@@ -89,6 +90,11 @@ class _MergeHookConfig:
 # Copilot (camelCase) or Claude (PascalCase) names; targets that use
 # different conventions get their events renamed during merge.
 _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
+    "claude": {
+        # Copilot camelCase -> Claude PascalCase
+        "preToolUse": "PreToolUse",
+        "postToolUse": "PostToolUse",
+    },
     "gemini": {
         # Copilot / Claude -> Gemini
         "PreToolUse": "BeforeTool",
@@ -165,6 +171,53 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
         require_dir=True,
     ),
 }
+
+
+# Mapping from hook-file stem suffix to the set of target keys that
+# should receive the file.  Files whose stem does not match any
+# suffix are treated as universal and deployed to every target.
+_HOOK_FILE_TARGET_SUFFIXES: dict[str, set[str]] = {
+    "copilot-hooks": {"copilot", "vscode"},
+    "cursor-hooks": {"cursor"},
+    "claude-hooks": {"claude"},
+    "codex-hooks": {"codex"},
+    "gemini-hooks": {"gemini"},
+}
+
+
+def _filter_hook_files_for_target(
+    hook_files: List[Path],
+    target_key: str,
+) -> List[Path]:
+    """Return only hook files intended for *target_key*.
+
+    Routing is based on the file stem (case-insensitive):
+      - Stems ending with a known ``-<target>-hooks`` suffix are
+        restricted to matching targets.
+      - All other stems (e.g. ``hooks``, ``my-custom-hooks``) are
+        universal and pass through for every target.
+
+    Args:
+        hook_files: All discovered hook JSON files.
+        target_key: Lowercase target name (e.g. ``"claude"``, ``"cursor"``).
+
+    Returns:
+        Filtered list preserving original order.
+    """
+    result: List[Path] = []
+    for hf in hook_files:
+        stem_lower = hf.stem.lower()
+        matched_suffix: str | None = None
+        for suffix, allowed_targets in _HOOK_FILE_TARGET_SUFFIXES.items():
+            if stem_lower == suffix or stem_lower.endswith(f"-{suffix}"):
+                matched_suffix = suffix
+                if target_key in allowed_targets:
+                    result.append(hf)
+                break
+        if matched_suffix is None:
+            # Universal file -- deploy to all targets
+            result.append(hf)
+    return result
 
 
 class HookIntegrator(BaseIntegrator):
@@ -295,10 +348,10 @@ class HookIntegrator(BaseIntegrator):
             base_root = root_dir or ".claude"
             scripts_base = f"{base_root}/hooks/{package_name}"
 
-        # Handle ${CLAUDE_PLUGIN_ROOT} references (always relative to package root)
+        # Handle plugin root variable references (always relative to package root)
         # Match both forward-slash and backslash separators (Windows hook JSON
         # may use backslashes: ${CLAUDE_PLUGIN_ROOT}\scripts\scan.ps1)
-        plugin_root_pattern = r'\$\{CLAUDE_PLUGIN_ROOT\}([\\/][^\s]+)'
+        plugin_root_pattern = r'\$\{(?:CLAUDE_PLUGIN_ROOT|CURSOR_PLUGIN_ROOT|PLUGIN_ROOT)\}([\\/][^\s]+)'
         for match in re.finditer(plugin_root_pattern, command):
             full_var = match.group(0)
             # Normalize backslashes to forward slashes before Path construction
@@ -452,6 +505,7 @@ class HookIntegrator(BaseIntegrator):
             HookIntegrationResult: Results of the integration operation
         """
         hook_files = self.find_hook_files(package_info.install_path)
+        hook_files = _filter_hook_files_for_target(hook_files, "copilot")
 
         if not hook_files:
             return HookIntegrationResult(
@@ -547,6 +601,7 @@ class HookIntegrator(BaseIntegrator):
             return _empty
 
         hook_files = self.find_hook_files(package_info.install_path)
+        hook_files = _filter_hook_files_for_target(hook_files, config.target_key)
         if not hook_files:
             return _empty
 
@@ -556,7 +611,7 @@ class HookIntegrator(BaseIntegrator):
         target_paths: List[Path] = []
         # Events whose prior-owned entries have already been cleared on
         # this install run. Packages can contribute to the same event
-        # from multiple hook files — we must only strip once so earlier
+        # from multiple hook files -- we must only strip once so earlier
         # files' fresh entries aren't wiped by later iterations.
         cleared_events: set = set()
 
@@ -589,6 +644,12 @@ class HookIntegrator(BaseIntegrator):
             # Merge hooks into config (additive)
             hooks = rewritten.get("hooks", {})
             event_map = _HOOK_EVENT_MAP.get(config.target_key, {})
+
+            # Build reverse map: normalised name -> set of source aliases
+            reverse_map: dict[str, set[str]] = {}
+            for source_name, norm_name in event_map.items():
+                reverse_map.setdefault(norm_name, set()).add(source_name)
+
             for raw_event_name, entries in hooks.items():
                 if not isinstance(entries, list):
                     continue
@@ -609,17 +670,52 @@ class HookIntegrator(BaseIntegrator):
                 # package before appending fresh ones. Without this, every
                 # `apm install` re-run duplicates the package's hooks
                 # because `.extend()` is unconditional. See microsoft/apm#708.
-                # Only strip once per event per install run — a package
+                # Only strip once per event per install run -- a package
                 # with multiple hook files targeting the same event
                 # contributes each file's entries in turn, and stripping
                 # on every iteration would erase earlier files' work.
                 if event_name not in cleared_events:
+                    # Clear from the normalised event
                     json_config["hooks"][event_name] = [
                         e for e in json_config["hooks"][event_name]
                         if not (isinstance(e, dict) and e.get("_apm_source") == package_name)
                     ]
+                    # Also clear from any alias events that map to
+                    # this normalised name (handles migration from
+                    # corrupted installs with mixed-case event keys).
+                    for alias in reverse_map.get(event_name, set()):
+                        if alias != event_name and alias in json_config["hooks"]:
+                            json_config["hooks"][alias] = [
+                                e for e in json_config["hooks"][alias]
+                                if not (isinstance(e, dict) and e.get("_apm_source") == package_name)
+                            ]
+                            # Remove the alias key entirely if now empty
+                            if not json_config["hooks"][alias]:
+                                del json_config["hooks"][alias]
                     cleared_events.add(event_name)
                 json_config["hooks"][event_name].extend(entries)
+
+                # Deduplicate same-package entries by content.
+                # Safety net for edge cases where multiple source files
+                # produce semantically identical entries.
+                seen_content: list[dict] = []
+                deduped: list = []
+                for entry in json_config["hooks"][event_name]:
+                    if not isinstance(entry, dict):
+                        deduped.append(entry)
+                        continue
+                    # Build comparison key (all fields except _apm_source)
+                    cmp = {k: v for k, v in sorted(entry.items()) if k != "_apm_source"}
+                    source = entry.get("_apm_source")
+                    is_dup = False
+                    for seen in seen_content:
+                        if seen.get("_source") == source and seen.get("_cmp") == cmp:
+                            is_dup = True
+                            break
+                    if not is_dup:
+                        seen_content.append({"_source": source, "_cmp": cmp})
+                        deduped.append(entry)
+                json_config["hooks"][event_name] = deduped
 
             hooks_integrated += 1
 

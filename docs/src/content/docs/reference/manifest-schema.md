@@ -57,7 +57,10 @@ devDependencies:
   mcp:         <list<McpDependency>>
 compilation:   <CompilationConfig>
 policy:        <PolicyConfig>
+marketplace:   <MarketplaceConfig>           # OPTIONAL; marketplace authoring
 ```
+
+`marketplace:` is the source for `apm pack`'s marketplace output and is OPTIONAL. Repositories that do not publish a marketplace omit it entirely. The block, its schema, and the build flow are documented in the [Authoring a marketplace guide](../../guides/marketplace-authoring/). Within `marketplace:`, the inheritable fields `name`, `description`, and `version` default to the top-level values above and SHOULD be omitted unless an override is required.
 
 ---
 
@@ -113,7 +116,7 @@ policy:        <PolicyConfig>
 | **Default** | Auto-detect: `vscode` if `.github/` exists, `claude` if `.claude/` exists, `codex` if `.codex/` exists, `all` if multiple target folders exist, `minimal` if none |
 | **Allowed values** | `vscode` · `agents` · `copilot` · `claude` · `cursor` · `opencode` · `codex` · `all` |
 
-Controls which output targets are generated during compilation and installation. Accepts a single string or a list of strings. When unset, a conforming resolver SHOULD auto-detect based on folder presence. Unknown values MUST be silently ignored (auto-detection takes over).
+Controls which output targets are generated during compilation and installation. Accepts a single string or a list of strings. When unset, a conforming resolver SHOULD auto-detect based on folder presence. Unknown values MUST raise a parse error pointing at the offending token. Auto-detection applies only when `target:` is unset.
 
 ```yaml
 # Single target
@@ -192,6 +195,8 @@ includes: auto
 #   - .apm/instructions/
 #   - .apm/skills/my-skill/
 ```
+
+**`includes:` is allow-list only.** There is no `exclude:` form. The field controls which `.apm/` content the project consents to publish; it cannot be used to fence off subdirectories of `.apm/` from the scanner. To keep maintainer-only primitives out of shipped artifacts, author them OUTSIDE `.apm/` and reference them via a local-path devDependency -- see [Dev-only Primitives](../../guides/dev-only-primitives/).
 
 When `policy.manifest.require_explicit_includes` is `true` (see [Governance guide](../../enterprise/governance-guide/)), only form 3 passes the policy check; `auto` and undeclared are rejected at install/audit time by the `explicit-includes` policy check (not at YAML parse time).
 
@@ -443,6 +448,16 @@ Created automatically by `apm init --plugin`. Use [`apm install --dev`](../cli-c
 
 ```bash
 apm install --dev owner/test-helpers
+```
+
+Plain `apm install` (no flag) deploys both `dependencies` and `devDependencies`. There is currently no `--omit=dev` flag -- the dev/prod separation kicks in at `apm pack --format plugin` time. The local-content scanner that builds plugin bundles also operates on `.apm/` only and does not consult the devDep marker. To keep maintainer-only primitives out of shipped artifacts, author them outside `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../../guides/dev-only-primitives/).
+
+Local-path devDependency example:
+
+```yaml
+devDependencies:
+  apm:
+    - path: ./dev/skills/release-checklist
 ```
 
 ---

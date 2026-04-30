@@ -44,7 +44,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
 
     def get_config_path(self):
         """Return the path to ``opencode.json`` in the repository root."""
-        return str(Path(os.getcwd()) / "opencode.json")
+        return str(self.project_root / "opencode.json")
 
     def update_config(self, config_updates, enabled=True):
         """Merge *config_updates* into the ``mcp`` section of ``opencode.json``.
@@ -55,7 +55,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         Translates Copilot-format entries (``command``/``args``/``env``) into
         OpenCode format (``command`` array / ``environment``).
         """
-        opencode_dir = Path(os.getcwd()) / ".opencode"
+        opencode_dir = self.project_root / ".opencode"
         if not opencode_dir.is_dir():
             return
 
@@ -99,7 +99,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
             print("Error: server_url cannot be empty")
             return False
 
-        opencode_dir = Path(os.getcwd()) / ".opencode"
+        opencode_dir = self.project_root / ".opencode"
         if not opencode_dir.is_dir():
             return False
 

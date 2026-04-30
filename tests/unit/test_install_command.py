@@ -904,13 +904,40 @@ class TestGenericHostSshFirstValidation:
         )
 
     @patch("subprocess.run")
-    def test_generic_host_falls_back_to_https_when_ssh_fails(self, mock_run):
-        """HTTPS fallback is used for generic hosts when SSH ls-remote fails."""
+    def test_explicit_ssh_url_does_not_fall_back_to_https(self, mock_run):
+        """Strict-by-default (issue #992): explicit SSH URLs must NOT silently
+        fall back to HTTPS, mirroring ``_clone_with_fallback`` semantics. The
+        legacy permissive chain stays available behind
+        ``APM_ALLOW_PROTOCOL_FALLBACK=1``."""
+        from apm_cli.commands.install import _validate_package_exists
+
+        # SSH probe fails; previously this would have silently retried HTTPS.
+        mock_run.return_value = self._make_completed_process(
+            returncode=128, stderr="ssh: connect to host"
+        )
+
+        result = _validate_package_exists(
+            "git@git.example.org:org/group/repo.git", verbose=False
+        )
+
+        assert result is False
+        assert mock_run.call_count == 1, (
+            "explicit ssh:// must be strict; got "
+            f"{[c[0][0] for c in mock_run.call_args_list]!r}"
+        )
+        first_cmd = mock_run.call_args_list[0][0][0]
+        assert any("git@git.example.org:" in arg for arg in first_cmd), (
+            f"Expected SSH URL in only call, got: {first_cmd}"
+        )
+
+    @patch.dict(os.environ, {"APM_ALLOW_PROTOCOL_FALLBACK": "1"})
+    @patch("subprocess.run")
+    def test_explicit_ssh_falls_back_to_https_with_allow_fallback_env(self, mock_run):
+        """Legacy permissive chain restored when the env opt-in is set."""
         from urllib.parse import urlsplit
 
         from apm_cli.commands.install import _validate_package_exists
 
-        # SSH probe fails, HTTPS succeeds
         mock_run.side_effect = [
             self._make_completed_process(returncode=128, stderr="ssh: connect to host"),
             self._make_completed_process(returncode=0),
@@ -922,28 +949,21 @@ class TestGenericHostSshFirstValidation:
 
         assert result is True
         assert mock_run.call_count == 2
-        # First call: SSH (SCP-style URLs are not parseable by urlsplit, so
-        # keep the substring check scoped to the SSH prefix form git@host:).
         first_cmd = mock_run.call_args_list[0][0][0]
-        assert any("git@git.example.org:" in arg for arg in first_cmd), (
-            f"Expected SSH URL in first call, got: {first_cmd}"
-        )
-        # Second call: HTTPS -- parse scheme + netloc explicitly to avoid
-        # substring false-positives.
+        assert any("git@git.example.org:" in arg for arg in first_cmd)
         second_cmd = mock_run.call_args_list[1][0][0]
-        https_arg_found = False
-        for arg in second_cmd:
-            parts = urlsplit(arg)
-            if parts.scheme == "https" and parts.netloc == "git.example.org":
-                https_arg_found = True
-                break
+        https_arg_found = any(
+            urlsplit(arg).scheme == "https"
+            and urlsplit(arg).netloc == "git.example.org"
+            for arg in second_cmd
+        )
         assert https_arg_found, (
             f"Expected https://git.example.org URL in second call, got: {second_cmd}"
         )
 
     @patch("subprocess.run")
-    def test_generic_host_returns_false_when_both_transports_fail(self, mock_run):
-        """Validation returns False when both SSH and HTTPS fail for a generic host."""
+    def test_generic_host_returns_false_when_explicit_ssh_fails(self, mock_run):
+        """Strict mode: a single failed SSH probe is the only attempt."""
         from apm_cli.commands.install import _validate_package_exists
 
         mock_run.return_value = self._make_completed_process(
@@ -955,7 +975,7 @@ class TestGenericHostSshFirstValidation:
         )
 
         assert result is False
-        assert mock_run.call_count == 2  # tried SSH then HTTPS
+        assert mock_run.call_count == 1  # strict: SSH only, no HTTPS retry
 
     @patch("subprocess.run")
     def test_explicit_http_generic_host_tries_http_first(self, mock_run):
@@ -1654,6 +1674,44 @@ class TestInstallMcpFlag:
             data = yaml.safe_load((tmp / "apm.yml").read_text())
             assert data["dependencies"]["mcp"][0]["headers"] == {"X-A": "1", "X-B": "2"}
 
+    def test_mcp_registry_shorthand_no_overlays_persists_bare_string(self):
+        # Bare registry shorthand (no --transport, --url, --mcp-version,
+        # --registry, post-`--` argv) is a documented happy path; the
+        # builder returns ``str``, and the install path must not introspect
+        # the entry as a dict.
+        ref = "io.github.github/github-mcp-server"
+        with self._chdir_with_apm_yml() as tmp, \
+             patch("apm_cli.commands.install._get_invocation_argv",
+                   return_value=["apm", "install", "--mcp", ref]), \
+             patch("apm_cli.install.mcp.command.MCPIntegrator"):
+            result = self.runner.invoke(cli, ["install", "--mcp", ref])
+            assert result.exit_code == 0, result.output
+            assert "'str' object has no attribute" not in result.output
+            data = yaml.safe_load((tmp / "apm.yml").read_text())
+            # Bare-string serialization is the apm.yml UX contract for
+            # shorthand-with-no-overlays; do not silently promote to a dict.
+            assert data["dependencies"]["mcp"] == [ref]
+
+    def test_mcp_integration_failure_exits_1_with_redacted_message(self):
+        """Partial-failure (apm.yml mutated, integrator raised) must exit 1
+        with an actionable string -- not exit 0 with a warning that includes
+        a raw exception. CI must see a red run on this code path."""
+        ref = "io.github.example/srv"
+        boom = RuntimeError("internal token=ghp_SECRET path=/tmp/x.yml")
+        with self._chdir_with_apm_yml() as tmp, \
+             patch("apm_cli.commands.install._get_invocation_argv",
+                   return_value=["apm", "install", "--mcp", ref]), \
+             patch("apm_cli.install.mcp.command.MCPIntegrator") as mock_integ:
+            mock_integ.install.side_effect = boom
+            result = self.runner.invoke(cli, ["install", "--mcp", ref])
+            assert result.exit_code != 0, result.output
+            # Raw exception details must NOT appear at default log level.
+            assert "ghp_SECRET" not in result.output
+            assert "/tmp/x.yml" not in result.output
+            # Actionable fixed string is shown instead.
+            assert "tool integration failed" in result.output
+            assert "--verbose" in result.output
+
     # --- Conflict matrix E1-E14 ---
 
     def test_e1_mcp_with_positional_packages(self):
@@ -1820,7 +1878,8 @@ class TestInstallMcpFlag:
              patch("apm_cli.commands.install._get_invocation_argv",
                    return_value=["apm", "install", "--mcp", "srv",
                                  "--registry", "https://mcp.internal.example.com"]), \
-             patch("apm_cli.commands.install.MCPIntegrator"):
+             patch("apm_cli.commands.install.MCPIntegrator"), \
+             patch("apm_cli.install.mcp.command.MCPIntegrator"):
             result = self.runner.invoke(
                 cli, ["install", "--mcp", "srv",
                       "--registry", "https://mcp.internal.example.com"],
@@ -1838,7 +1897,8 @@ class TestInstallMcpFlag:
              patch("apm_cli.commands.install._get_invocation_argv",
                    return_value=["apm", "install", "--mcp", "srv",
                                  "--registry", "http://mcp.internal.local"]), \
-             patch("apm_cli.commands.install.MCPIntegrator"):
+             patch("apm_cli.commands.install.MCPIntegrator"), \
+             patch("apm_cli.install.mcp.command.MCPIntegrator"):
             result = self.runner.invoke(
                 cli, ["install", "--mcp", "srv",
                       "--registry", "http://mcp.internal.local"],
@@ -1853,7 +1913,8 @@ class TestInstallMcpFlag:
              patch("apm_cli.commands.install._get_invocation_argv",
                    return_value=["apm", "install", "--mcp", "srv",
                                  "--registry", "https://mcp.example.com/"]), \
-             patch("apm_cli.commands.install.MCPIntegrator"):
+             patch("apm_cli.commands.install.MCPIntegrator"), \
+             patch("apm_cli.install.mcp.command.MCPIntegrator"):
             result = self.runner.invoke(
                 cli, ["install", "--mcp", "srv",
                       "--registry", "https://mcp.example.com/"],
@@ -1964,6 +2025,7 @@ class TestInstallMcpFlag:
                    return_value=["apm", "install", "--mcp", "srv",
                                  "--registry", "https://flag.example.com"]), \
              patch("apm_cli.commands.install.MCPIntegrator"), \
+             patch("apm_cli.install.mcp.command.MCPIntegrator"), \
              patch.dict(os.environ, {"MCP_REGISTRY_URL": "https://env.example.com"}):
             result = self.runner.invoke(
                 cli, ["install", "--mcp", "srv", "--verbose",
@@ -1980,7 +2042,8 @@ class TestInstallMcpFlag:
                    return_value=["apm", "install", "--mcp", "srv",
                                  "--mcp-version", "1.2.3",
                                  "--registry", "https://mcp.example.com"]), \
-             patch("apm_cli.commands.install.MCPIntegrator"):
+             patch("apm_cli.commands.install.MCPIntegrator"), \
+             patch("apm_cli.install.mcp.command.MCPIntegrator"):
             result = self.runner.invoke(
                 cli, ["install", "--mcp", "srv",
                       "--mcp-version", "1.2.3",

@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "id": "docs-only",
+  "summary": "Markdown-only PR adding a quickstart guide. The skill must keep TL;DR, Problem, Validation, How-to-test sections even though the PR is 'trivial' (per SKILL.md gotcha).",
+  "scenario": {
+    "branch": "docs/quickstart",
+    "base": "main",
+    "files_changed": [
+      "A docs/src/content/docs/guides/quickstart.md",
+      "M docs/src/content/docs/index.md"
+    ],
+    "commits": [
+      "docs(quickstart): add 5-minute getting-started guide",
+      "docs(index): link quickstart from landing page"
+    ],
+    "linked_issue": "#640 -- new contributors bounce after install; need a 5-minute happy path",
+    "validation_evidence": "npm run --prefix docs build  ->  built in 4.2s, no broken links\napm audit --ci  ->  0 findings"
+  },
+  "rubric": [
+    {"id": "tldr-present", "pattern": "(?im)^\\s*##?\\s*TL;DR\\b", "weight": 1, "description": "TL;DR present even on docs-only PR"},
+    {"id": "problem-section", "pattern": "(?im)^\\s*##?\\s*Problem\\b", "weight": 1, "description": "Problem section present even on docs-only PR (per SKILL.md gotcha)"},
+    {"id": "anchored-quote", "pattern": "\\[\"[^\"]{8,}\"\\]\\(https?://", "weight": 2, "description": "At least one verbatim anchored quote"},
+    {"id": "validation-section", "pattern": "(?im)^\\s*##?\\s*Validation\\b", "weight": 1, "description": "Validation section present"},
+    {"id": "validation-build", "pattern": "(?im)npm run|build|broken link", "weight": 1, "description": "Real validation evidence (build/link check) shown"},
+    {"id": "how-to-test", "pattern": "(?im)^\\s*##?\\s*How to test\\b", "weight": 1, "description": "How to test present"},
+    {"id": "trailer", "pattern": "Co-authored-by: Copilot <223556219", "weight": 1, "description": "Copilot co-author trailer present"},
+    {"id": "no-trivial-skip", "pattern": "(?i)the PR is trivial|too small to need", "weight": -2, "description": "PENALTY: skipping sections because PR is small"},
+    {"id": "no-marketing-tone", "pattern": "(?i)significantly enhances|best-in-class|game-changing", "weight": -2, "description": "PENALTY: marketing tone detected"}
+  ],
+  "fixtures": {
+    "with_skill": "../fixtures/docs-only__with_skill.md",
+    "without_skill": "../fixtures/docs-only__without_skill.md"
+  }
+}

@@ -2,7 +2,7 @@
 title: "apm experimental"
 description: "Manage opt-in experimental feature flags. Evaluate new or changing behaviour without affecting APM defaults."
 sidebar:
-  order: 5
+  order: 6
   label: "Experimental Flags"
 ---
 
@@ -167,11 +167,13 @@ apm experimental reset verbose-version
 
 ## Available flags
 
-| Name              | Description                                                                      |
-|-------------------|----------------------------------------------------------------------------------|
-| `verbose-version` | Show Python version, platform, and install path in `apm --version`.              |
+| Name                  | Description                                                                      |
+|-----------------------|----------------------------------------------------------------------------------|
+| `verbose-version`     | Show Python version, platform, and install path in `apm --version`.              |
+| `copilot-cowork`      | Deploy APM skills to Microsoft 365 Copilot Cowork via OneDrive.                  |
 
 New flags are proposed via [CONTRIBUTING.md](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md#how-to-add-an-experimental-feature-flag) and graduate to default when stable. See the contributor recipe for the full lifecycle.
+See also: [Cowork integration](../integrations/copilot-cowork/).
 
 ## Storage and scope
 
