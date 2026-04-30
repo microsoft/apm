@@ -4015,3 +4015,52 @@ class TestPromoteSubSkillsCowork:
         assert deployed_skill.exists()
         # .apm dir is excluded via shutil.ignore_patterns('.apm')
         assert not (cowork_root / "my-skill" / ".apm").exists()
+
+
+# =============================================================================
+# Path-containment guard (PR #1028 round 4 — supply-chain-security finding)
+# =============================================================================
+
+
+class TestSkillDirContainmentGuard:
+    """Regression tests for the runtime path-containment check inside
+    ``_skill_dir``. Parse-time regex validation rejects traversal in the
+    namespace value itself; this guard catches symlink-based escapes that
+    resolve only at runtime (e.g. a symlink planted at
+    ``skills/<namespace>`` by a prior malicious install)."""
+
+    def test_skill_dir_returns_namespaced_path_when_safe(self, tmp_path: Path) -> None:
+        from apm_cli.integration.skill_integrator import _skill_dir
+
+        skills_root = tmp_path / "skills"
+        skills_root.mkdir()
+        result = _skill_dir(skills_root, "my-skill", "acme")
+        assert result == skills_root / "acme" / "my-skill"
+
+    def test_skill_dir_returns_flat_path_when_no_namespace(self, tmp_path: Path) -> None:
+        from apm_cli.integration.skill_integrator import _skill_dir
+
+        skills_root = tmp_path / "skills"
+        skills_root.mkdir()
+        result = _skill_dir(skills_root, "my-skill", None)
+        assert result == skills_root / "my-skill"
+
+    def test_skill_dir_rejects_symlink_namespace_escaping_root(self, tmp_path: Path) -> None:
+        """If a previous install planted ``skills/<namespace>`` as a symlink
+        pointing outside the skills root, ``_skill_dir`` must raise
+        ``PathTraversalError`` so ``shutil.copytree`` cannot follow it and
+        write outside the deploy root."""
+        import pytest
+
+        from apm_cli.integration.skill_integrator import _skill_dir
+        from apm_cli.utils.path_security import PathTraversalError
+
+        skills_root = tmp_path / "skills"
+        skills_root.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        # Plant a malicious symlink at skills/evil -> outside
+        (skills_root / "evil").symlink_to(outside, target_is_directory=True)
+
+        with pytest.raises(PathTraversalError):
+            _skill_dir(skills_root, "my-skill", "evil")

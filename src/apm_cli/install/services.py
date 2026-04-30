@@ -263,15 +263,14 @@ def integrate_package_primitives(
             # path instead of the legacy flat layout.
             _skill_name = skill_result.skill_path.parent.name
             _log_integration(
-                f"  |-- skill {_pkg_namespace}/{_skill_name} integrated -> {_skill_target_str}"
+                f"  |-- Skill {_pkg_namespace}/{_skill_name} integrated -> {_skill_target_str}"
             )
         else:
             _log_integration(f"  |-- Skill integrated -> {_skill_target_str}")
     if skill_result.sub_skills_promoted > 0:
         result["sub_skills"] += skill_result.sub_skills_promoted
-        _ns_suffix = f" (namespace: {_pkg_namespace})" if _pkg_namespace else ""
         _log_integration(
-            f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_target_str}{_ns_suffix}"
+            f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_target_str}"
         )
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))

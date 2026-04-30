@@ -161,10 +161,22 @@ def _package_namespace(package_info) -> str | None:
 
 
 def _skill_dir(target_skills_root: Path, skill_name: str, namespace: str | None) -> Path:
-    """Build a deployed skill directory, optionally under a namespace."""
+    """Build a deployed skill directory, optionally under a namespace.
+
+    Applies a runtime path-containment check so that a symlink planted at
+    ``target_skills_root/<namespace>`` (e.g. by a prior malicious install)
+    cannot redirect ``shutil.copytree`` outside the skills root. Parse-time
+    regex validation rejects traversal in the namespace value itself; this
+    chokepoint catches symlink-based escapes that resolve at runtime.
+    """
+    from apm_cli.utils.path_security import ensure_path_within
+
     if namespace:
-        return target_skills_root / namespace / skill_name
-    return target_skills_root / skill_name
+        path = target_skills_root / namespace / skill_name
+    else:
+        path = target_skills_root / skill_name
+    ensure_path_within(path, target_skills_root)
+    return path
 
 
 def _skill_owner_key(skill_name: str, namespace: str | None) -> str:
