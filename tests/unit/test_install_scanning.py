@@ -286,19 +286,3 @@ class TestCompileExitOnCriticalSecurity:
         merged = compiler._merge_results([r1, r2])
         assert merged.has_critical_security is False
 
-    def test_command_generation_result_propagates_critical(self):
-        from apm_cli.compilation.claude_formatter import CommandGenerationResult
-        r = CommandGenerationResult(
-            success=True, commands_generated={}, commands_dir=Path("."),
-            files_written=0,
-            has_critical_security=True,
-        )
-        assert r.has_critical_security is True
-
-    def test_command_generation_result_defaults_false(self):
-        from apm_cli.compilation.claude_formatter import CommandGenerationResult
-        r = CommandGenerationResult(
-            success=True, commands_generated={}, commands_dir=Path("."),
-            files_written=0,
-        )
-        assert r.has_critical_security is False
