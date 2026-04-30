@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-APM is additive. It never deletes, overwrites, or modifies your existing configuration files. Your current `.github/copilot-instructions.md`, `AGENTS.md`, `.claude/` config, `.cursor-rules` — all stay exactly where they are, untouched.
+APM is additive. It never deletes, overwrites, or modifies your existing configuration files. Your current `.github/copilot-instructions.md`, `AGENTS.md`, `.claude/` config, `.cursor-rules` -- all stay exactly where they are, untouched.
 
 ## Add APM in three steps
 
@@ -80,7 +80,7 @@ apm install vercel-labs/agent-skills --skill '*'   # back to full bundle
 ```
 
 Any public repo that works with `npx skills add owner/repo` also works with
-`apm install owner/repo`. APM recognises bare `skills/<name>/SKILL.md`
+`apm install owner/repo`. APM recognizes bare `skills/<name>/SKILL.md`
 layouts (the [agentskills.io](https://agentskills.io) convention) as a
 first-class package type; `apm.yml` is optional.
 
@@ -89,7 +89,7 @@ skill collection layout reference.
 
 ## Next steps
 
-- [Quick start](../quick-start/) — first-time setup walkthrough
-- [Dependencies](../../guides/dependencies/) — managing external packages
-- [Manifest schema](../../reference/manifest-schema/) — full `apm.yml` reference
-- [CLI commands](../../reference/cli-commands/) — complete command reference
+- [Quick start](../quick-start/) -- first-time setup walkthrough
+- [Dependencies](../../guides/dependencies/) -- managing external packages
+- [Manifest schema](../../reference/manifest-schema/) -- full `apm.yml` reference
+- [CLI commands](../../reference/cli-commands/) -- complete command reference
