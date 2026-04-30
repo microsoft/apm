@@ -2030,6 +2030,47 @@ class TestRefExistsViaLsRemote:
         finally:
             self._exit(ctxs)
 
+    def test_ls_remote_failure_log_scrubs_token_from_url(self):
+        """Verbose log MUST NOT leak embedded tokens from a failing ls-remote URL.
+
+        If git surfaces the full ``https://ghp_xxx@github.com/owner/repo.git``
+        URL in its error (which it does for basic-auth URLs), the verbose log
+        must route it through ``_sanitize_git_error`` so the token is masked.
+        Pins the token-leakage guard for the new ls-remote fallback chain.
+        """
+        from git.exc import GitCommandError
+
+        downloader = GitHubPackageDownloader()
+        dep_ref = self._make_dep_ref()
+        ctxs = [
+            patch.object(downloader, "_resolve_dep_token", return_value="ghp_supersecret"),
+            patch.object(downloader, "_resolve_dep_auth_ctx", return_value=None),
+        ]
+        self._enter(ctxs)
+        try:
+            def _always_fail(*args, **kwargs):
+                raise GitCommandError(
+                    ["git", "ls-remote", "https://ghp_supersecret@github.com/owner/repo.git", "main"],
+                    128,
+                    b"fatal: Authentication failed for 'https://ghp_supersecret@github.com/owner/repo.git/'",
+                    b"",
+                )
+
+            captured: list[str] = []
+            with patch("git.cmd.Git") as MockGit:
+                MockGit.return_value.ls_remote = _always_fail
+
+                downloader._ref_exists_via_ls_remote(
+                    dep_ref, "main", log=captured.append,
+                )
+
+            joined = "\n".join(captured)
+            assert "ghp_supersecret" not in joined, (
+                f"Token leaked into verbose log: {joined!r}"
+            )
+        finally:
+            self._exit(ctxs)
+
 
 if __name__ == '__main__':
     pytest.main([__file__])

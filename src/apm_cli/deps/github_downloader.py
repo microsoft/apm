@@ -1947,7 +1947,7 @@ class GitHubPackageDownloader:
                     return True
                 log(f"  [x] ls-remote returned no matching refs via {label}")
             except (GitCommandError, OSError) as exc:
-                log(f"  [x] ls-remote failed via {label}: {exc}")
+                log(f"  [x] ls-remote failed via {label}: {self._sanitize_git_error(str(exc))}")
 
         return False
 
