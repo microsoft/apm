@@ -7,11 +7,18 @@ https://code.visualstudio.com/docs/copilot/chat/mcp-servers
 
 import json
 import os  # noqa: F401
+import re
 from pathlib import Path
 
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
-from .base import _INPUT_VAR_RE, MCPClientAdapter
+from ...utils.console import _rich_warning
+from .base import _ENV_VAR_RE, _INPUT_VAR_RE, MCPClientAdapter
+
+# Legacy ``<VAR>`` placeholder (Copilot CLI / Codex only). VS Code does not
+# resolve angle-bracket placeholders, so emitting them produces literal
+# ``<VAR>`` text in headers / env values -- silently breaking auth at runtime.
+_LEGACY_ANGLE_VAR_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>")
 
 
 class VSCodeClientAdapter(MCPClientAdapter):
@@ -242,9 +249,16 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 "args": raw["args"],
             }
             if raw.get("env"):
-                server_config["env"] = raw["env"]
+                # Translate bare ${VAR} -> ${env:VAR} so VS Code's runtime env
+                # interpolation resolves them at server-start. ${input:...}
+                # references are preserved for input-variable extraction below.
+                self._warn_on_legacy_angle_vars(
+                    raw["env"], server_info.get("name", "unknown"), "env"
+                )
+                env_translated = self._translate_env_vars_for_vscode(raw["env"])
+                server_config["env"] = env_translated
                 input_vars.extend(
-                    self._extract_input_variables(raw["env"], server_info.get("name", ""))
+                    self._extract_input_variables(env_translated, server_info.get("name", ""))
                 )
             return server_config, input_vars
 
@@ -361,6 +375,13 @@ class VSCodeClientAdapter(MCPClientAdapter):
                         headers = {
                             h["name"]: h["value"] for h in headers if "name" in h and "value" in h
                         }
+                    # Translate bare ${VAR} -> ${env:VAR} so VS Code resolves
+                    # them from the host environment at runtime, instead of
+                    # sending the literal placeholder as the header value.
+                    self._warn_on_legacy_angle_vars(
+                        headers, server_info.get("name", "unknown"), "headers"
+                    )
+                    headers = self._translate_env_vars_for_vscode(headers)
                     server_config = {
                         "type": transport,
                         "url": remote["url"].strip(),
@@ -388,6 +409,56 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 )
 
         return server_config, input_vars
+
+    @staticmethod
+    def _translate_env_vars_for_vscode(mapping):
+        """Normalize ``${VAR}`` and ``${env:VAR}`` references to ``${env:VAR}``.
+
+        VS Code's mcp.json natively resolves ``${env:VAR}`` from the host
+        environment at server-start time. Bare ``${VAR}`` is *not* part of the
+        mcp.json grammar, so VS Code would otherwise pass the literal text
+        through (silently breaking auth headers, env vars, etc.).
+
+        This translation is purely textual and idempotent:
+        - ``${VAR}``      -> ``${env:VAR}``
+        - ``${env:VAR}``  -> ``${env:VAR}`` (no change)
+        - ``${input:X}``  -> ``${input:X}`` (no change; handled separately)
+        - non-string values pass through
+
+        A new dict is returned so callers may continue to use the original
+        for input-variable extraction without ordering concerns.
+        """
+        if not mapping:
+            return mapping
+        return {
+            k: (_ENV_VAR_RE.sub(r"${env:\1}", v) if isinstance(v, str) else v)
+            for k, v in mapping.items()
+        }
+
+    @staticmethod
+    def _warn_on_legacy_angle_vars(mapping, server_name, field):
+        """Emit a warning when legacy ``<VAR>`` placeholders appear in *mapping*.
+
+        VS Code does not resolve ``<VAR>`` placeholders, so they would render
+        as literal ``<VAR>`` text in the generated mcp.json -- silently
+        breaking auth headers / env values at server-start. Surface this as
+        an explicit warning so authors can switch to the cross-harness
+        ``${VAR}`` / ``${env:VAR}`` syntax (see manifest-schema reference).
+        """
+        if not mapping:
+            return
+        offenders = []
+        for value in mapping.values():
+            if isinstance(value, str):
+                offenders.extend(_LEGACY_ANGLE_VAR_RE.findall(value))
+        if offenders:
+            unique = sorted(set(offenders))
+            _rich_warning(
+                f"Server '{server_name}' {field} use legacy <VAR> placeholder(s) "
+                f"({', '.join('<' + n + '>' for n in unique)}) which VS Code "
+                f"cannot resolve. Use ${{VAR}} or ${{env:VAR}} instead so the "
+                f"value resolves at runtime."
+            )
 
     def _extract_input_variables(self, mapping, server_name):
         """Scan dict values for ${input:...} references and return input variable definitions.

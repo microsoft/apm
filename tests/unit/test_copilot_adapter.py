@@ -149,6 +149,131 @@ class TestCopilotRemoteTransportValidation(unittest.TestCase):
         self.assertEqual(config["url"], "https://good.example.com/sse")
 
 
+class TestCopilotEnvVarResolutionInHeaders(unittest.TestCase):
+    """Issue #944: ``${VAR}`` and ``${env:VAR}`` in headers are install-time resolved.
+
+    Copilot CLI's mcp-config.json has no runtime env interpolation, so APM bakes
+    the actual value in. The legacy ``<VAR>`` syntax already worked; these tests
+    cover the new ``${VAR}`` and ``${env:VAR}`` syntaxes added for #944. Together
+    with the existing ``<VAR>`` path, the three syntaxes share the same
+    env_overrides -> os.environ -> prompt resolution flow.
+    """
+
+    def _adapter(self):
+        with (
+            patch("apm_cli.adapters.client.copilot.SimpleRegistryClient"),
+            patch("apm_cli.adapters.client.copilot.RegistryIntegration"),
+        ):
+            return CopilotClientAdapter()
+
+    def test_resolves_bare_dollar_brace_var(self):
+        adapter = self._adapter()
+        with patch.dict(os.environ, {"MY_TOKEN": "secret-xyz"}, clear=False):
+            result = adapter._resolve_env_variable(
+                "Authorization", "Bearer ${MY_TOKEN}", env_overrides=None
+            )
+        self.assertEqual(result, "Bearer secret-xyz")
+
+    def test_resolves_env_prefixed_var(self):
+        """``${env:VAR}`` (VS Code-flavored) also resolves to the host env value."""
+        adapter = self._adapter()
+        with patch.dict(os.environ, {"MY_TOKEN": "secret-xyz"}, clear=False):
+            result = adapter._resolve_env_variable(
+                "Authorization", "Bearer ${env:MY_TOKEN}", env_overrides=None
+            )
+        self.assertEqual(result, "Bearer secret-xyz")
+
+    def test_legacy_angle_bracket_still_works(self):
+        """Regression: ``<VAR>`` legacy syntax must keep functioning."""
+        adapter = self._adapter()
+        with patch.dict(os.environ, {"MY_TOKEN": "secret-xyz"}, clear=False):
+            result = adapter._resolve_env_variable(
+                "Authorization", "Bearer <MY_TOKEN>", env_overrides=None
+            )
+        self.assertEqual(result, "Bearer secret-xyz")
+
+    def test_env_overrides_take_precedence(self):
+        """``env_overrides`` wins over ``os.environ``, identical to legacy behavior."""
+        adapter = self._adapter()
+        with patch.dict(os.environ, {"MY_TOKEN": "from-env"}, clear=False):
+            result = adapter._resolve_env_variable(
+                "Authorization",
+                "Bearer ${MY_TOKEN}",
+                env_overrides={"MY_TOKEN": "from-overrides"},
+            )
+        self.assertEqual(result, "Bearer from-overrides")
+
+    def test_unresolvable_passes_through(self):
+        """Unset vars survive verbatim in non-interactive (env_overrides supplied) mode."""
+        adapter = self._adapter()
+        # Make sure target var is not in env
+        with patch.dict(os.environ, {}, clear=True):
+            result = adapter._resolve_env_variable(
+                "Authorization",
+                "Bearer ${MISSING_VAR}",
+                env_overrides={"OTHER": "x"},  # presence forces non-interactive path
+            )
+        self.assertEqual(result, "Bearer ${MISSING_VAR}")
+
+    def test_input_syntax_is_not_resolved(self):
+        """``${input:...}`` must NOT be resolved here -- it's runtime-prompted by VS Code."""
+        adapter = self._adapter()
+        with patch.dict(os.environ, {"input": "should-not-match"}, clear=False):
+            result = adapter._resolve_env_variable(
+                "Authorization",
+                "Bearer ${input:my-token}",
+                env_overrides={"OTHER": "x"},
+            )
+        self.assertEqual(result, "Bearer ${input:my-token}")
+
+    def test_github_actions_template_is_not_touched(self):
+        """``${{ secrets.X }}`` (GHA template) must pass through unchanged."""
+        adapter = self._adapter()
+        result = adapter._resolve_env_variable(
+            "Authorization",
+            "Bearer ${{ secrets.GITHUB_TOKEN }}",
+            env_overrides={"OTHER": "x"},
+        )
+        self.assertEqual(result, "Bearer ${{ secrets.GITHUB_TOKEN }}")
+
+    def test_resolved_value_is_not_recursively_expanded(self):
+        """Regression guard: a resolved value containing placeholder-like text
+        must NOT be re-scanned for further substitution.
+
+        Mirrors the original ``<VAR>``-only semantics where each placeholder is
+        resolved exactly once. Important for tokens/values that legitimately
+        contain ``${...}`` literal text (e.g. regex patterns, templated strings).
+        """
+        adapter = self._adapter()
+        with patch.dict(
+            os.environ,
+            {"OUTER": "literal-${INNER}", "INNER": "should-not-appear"},
+            clear=False,
+        ):
+            # Test all three placeholder syntaxes for symmetry.
+            for syntax in ("<OUTER>", "${OUTER}", "${env:OUTER}"):
+                with self.subTest(syntax=syntax):
+                    result = adapter._resolve_env_variable(
+                        "Authorization", syntax, env_overrides={"OTHER": "x"}
+                    )
+                    self.assertEqual(result, "literal-${INNER}")
+
+    def test_mixed_syntaxes_in_one_value(self):
+        """A header may mix legacy and new placeholders; all should resolve."""
+        adapter = self._adapter()
+        with patch.dict(
+            os.environ,
+            {"OLD": "old-val", "NEW": "new-val", "ENV_PREFIXED": "env-val"},
+            clear=False,
+        ):
+            result = adapter._resolve_env_variable(
+                "X-Mixed",
+                "old=<OLD> new=${NEW} env=${env:ENV_PREFIXED}",
+                env_overrides=None,
+            )
+        self.assertEqual(result, "old=old-val new=new-val env=env-val")
+
+
 class TestCopilotSelectRemoteWithUrl(unittest.TestCase):
     """Direct unit tests for the ``_select_remote_with_url`` helper."""
 

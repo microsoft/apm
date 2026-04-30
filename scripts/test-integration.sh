@@ -366,6 +366,17 @@ run_e2e_tests() {
         log_error "MCP registry tests failed!"
         exit 1
     fi
+
+    # Run MCP env-var headers E2E tests (regression guard for ${VAR} -> ${env:VAR})
+    log_info "Running MCP env-var headers E2E tests..."
+    echo "Command: pytest tests/integration/test_mcp_env_var_headers_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_mcp_env_var_headers_e2e.py -v -s --tb=short; then
+        log_success "MCP env-var headers tests passed!"
+    else
+        log_error "MCP env-var headers tests failed!"
+        exit 1
+    fi
     
     # Run APM Dependencies integration tests (NEW - Task 8A)
     log_info "Running APM Dependencies integration tests with real repositories..."

@@ -7,6 +7,7 @@ architecture specification.
 
 import json
 import os
+import re
 from pathlib import Path
 
 from ...core.docker_args import DockerArgsProcessor
@@ -14,7 +15,17 @@ from ...core.token_manager import GitHubTokenManager
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.github_host import is_github_hostname
-from .base import MCPClientAdapter
+from .base import _ENV_VAR_RE, MCPClientAdapter
+
+# Combined env-var placeholder regex covering all three syntaxes Copilot accepts:
+#   <VARNAME>          legacy APM (group 1, uppercase only)
+#   ${VARNAME}         POSIX shell (group 2)
+#   ${env:VARNAME}     VS Code-flavored (group 2)
+# A single-pass substitution preserves the original ``<VAR>`` semantics:
+# resolved values are NOT re-scanned, so a token whose literal text contains
+# ``${...}`` does not get recursively expanded. Module-level compile avoids
+# per-call cost. ``${input:...}`` is intentionally not matched here.
+_COPILOT_ENV_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>|" + _ENV_VAR_RE.pattern)
 
 
 class CopilotClientAdapter(MCPClientAdapter):
@@ -461,8 +472,6 @@ class CopilotClientAdapter(MCPClientAdapter):
         Returns:
             str: Resolved environment variable value.
         """
-        import os
-        import re
         import sys
 
         from rich.prompt import Prompt
@@ -480,28 +489,26 @@ class CopilotClientAdapter(MCPClientAdapter):
         if not is_interactive:
             skip_prompting = True
 
-        # Check if value contains environment variable reference
-        env_pattern = r"<([A-Z_][A-Z0-9_]*)>"
-        matches = re.findall(env_pattern, value)
+        # Three accepted placeholder syntaxes (see _COPILOT_ENV_RE at module
+        # top), all resolved against env_overrides -> os.environ -> optional
+        # interactive prompt. Single-pass substitution preserves the legacy
+        # ``<VAR>`` semantics: resolved values are not re-scanned for further
+        # placeholder expansion.
+        def _replace(match):
+            # Group 1 = legacy <VAR>; group 2 = ${VAR} / ${env:VAR}.
+            env_name = match.group(1) or match.group(2)
+            env_value = env_overrides.get(env_name) or os.getenv(env_name)
+            if not env_value and not skip_prompting:
+                prompt_text = f"Enter value for {env_name}"
+                env_value = Prompt.ask(
+                    prompt_text,
+                    password=True  # noqa: SIM210
+                    if "token" in env_name.lower() or "key" in env_name.lower()
+                    else False,
+                )
+            return env_value if env_value else match.group(0)
 
-        if matches:
-            for env_name in matches:
-                # First check overrides, then environment
-                env_value = env_overrides.get(env_name) or os.getenv(env_name)
-                if not env_value and not skip_prompting:
-                    # Only prompt if not in managed mode
-                    prompt_text = f"Enter value for {env_name}"
-                    env_value = Prompt.ask(
-                        prompt_text,
-                        password=True  # noqa: SIM210
-                        if "token" in env_name.lower() or "key" in env_name.lower()
-                        else False,
-                    )
-
-                if env_value:
-                    value = value.replace(f"<{env_name}>", env_value)
-
-        return value
+        return _COPILOT_ENV_RE.sub(_replace, value)
 
     def _inject_env_vars_into_docker_args(self, docker_args, env_vars):
         """Inject environment variables into Docker arguments following registry template.

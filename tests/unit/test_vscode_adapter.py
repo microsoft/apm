@@ -436,6 +436,134 @@ class TestVSCodeClientAdapter(unittest.TestCase):
         self.assertTrue(len(inputs) > 0)
         self.assertEqual(inputs[0]["id"], "auth-token")
 
+    @patch("apm_cli.adapters.client.vscode.VSCodeClientAdapter.get_config_path")
+    def test_format_server_config_translates_bare_env_var_in_headers(self, mock_get_path):
+        """Bare ${VAR} in remote headers must be translated to ${env:VAR}.
+
+        Issue #944: VS Code's mcp.json grammar only resolves ``${env:VAR}`` and
+        ``${input:VAR}``. Without translation a bare ``${MY_TOKEN}`` is sent as
+        the literal string ``Bearer ${MY_TOKEN}`` to the MCP server, silently
+        breaking auth.
+        """
+        mock_get_path.return_value = self.temp_path
+        adapter = VSCodeClientAdapter()
+
+        server_info = {
+            "name": "bare-env-srv",
+            "remotes": [
+                {
+                    "transport_type": "http",
+                    "url": "https://example.com/mcp",
+                    "headers": [
+                        {"name": "Authorization", "value": "Bearer ${MY_SECRET_TOKEN}"},
+                    ],
+                }
+            ],
+        }
+        config, inputs = adapter._format_server_config(server_info)
+
+        self.assertEqual(
+            config["headers"]["Authorization"],
+            "Bearer ${env:MY_SECRET_TOKEN}",
+        )
+        # Translation must not fabricate input variables
+        self.assertEqual(inputs, [])
+
+    @patch("apm_cli.adapters.client.vscode.VSCodeClientAdapter.get_config_path")
+    def test_format_server_config_preserves_env_and_input_syntax(self, mock_get_path):
+        """Existing ``${env:...}`` and ``${input:...}`` references must round-trip."""
+        mock_get_path.return_value = self.temp_path
+        adapter = VSCodeClientAdapter()
+
+        server_info = {
+            "name": "mixed-srv",
+            "remotes": [
+                {
+                    "transport_type": "http",
+                    "url": "https://example.com/mcp",
+                    "headers": [
+                        {"name": "X-Mixed", "value": "raw=${RAW} env=${env:E} input=${input:i}"},
+                    ],
+                }
+            ],
+        }
+        config, inputs = adapter._format_server_config(server_info)
+
+        # Only the bare ${RAW} should change; ${env:E} and ${input:i} pass through.
+        self.assertEqual(
+            config["headers"]["X-Mixed"],
+            "raw=${env:RAW} env=${env:E} input=${input:i}",
+        )
+        # ${input:i} is still extracted as an input variable.
+        ids = [v["id"] for v in inputs]
+        self.assertIn("i", ids)
+
+    @patch("apm_cli.adapters.client.vscode.VSCodeClientAdapter.get_config_path")
+    def test_format_server_config_translates_bare_env_var_in_stdio_env(self, mock_get_path):
+        """Self-defined stdio env values get the same ${VAR} -> ${env:VAR} fix."""
+        mock_get_path.return_value = self.temp_path
+        adapter = VSCodeClientAdapter()
+
+        server_info = {
+            "name": "stdio-env-srv",
+            "_raw_stdio": {
+                "command": "python",
+                "args": ["-m", "my_server"],
+                "env": {"API_KEY": "${MY_KEY}"},
+            },
+        }
+        config, inputs = adapter._format_server_config(server_info)
+
+        self.assertEqual(config["env"]["API_KEY"], "${env:MY_KEY}")
+        self.assertEqual(inputs, [])
+
+
+class TestTranslateEnvVarsForVscode(unittest.TestCase):
+    """Direct unit tests for the ``_translate_env_vars_for_vscode`` helper.
+
+    Mirrors the dedicated-class style of ``TestExtractInputVariables`` and
+    ``TestWarnInputVariables``, isolating helper behavior from full-adapter
+    integration tests above.
+    """
+
+    def test_translates_bare_dollar_brace(self):
+        out = VSCodeClientAdapter._translate_env_vars_for_vscode({"H": "Bearer ${MY_TOKEN}"})
+        self.assertEqual(out["H"], "Bearer ${env:MY_TOKEN}")
+
+    def test_preserves_existing_env_prefix(self):
+        out = VSCodeClientAdapter._translate_env_vars_for_vscode({"H": "Bearer ${env:MY_TOKEN}"})
+        self.assertEqual(out["H"], "Bearer ${env:MY_TOKEN}")
+
+    def test_preserves_input_variables(self):
+        out = VSCodeClientAdapter._translate_env_vars_for_vscode({"H": "Bearer ${input:my-token}"})
+        self.assertEqual(out["H"], "Bearer ${input:my-token}")
+
+    def test_idempotent(self):
+        """Re-running translation on already-translated values is a no-op."""
+        once = VSCodeClientAdapter._translate_env_vars_for_vscode(
+            {"H": "raw=${RAW} env=${env:E} input=${input:i}"}
+        )
+        twice = VSCodeClientAdapter._translate_env_vars_for_vscode(once)
+        self.assertEqual(once, twice)
+
+    def test_does_not_match_github_actions_template(self):
+        """``${{ secrets.X }}`` (GHA template) must not be touched."""
+        out = VSCodeClientAdapter._translate_env_vars_for_vscode(
+            {"X": "value=${{ secrets.GITHUB_TOKEN }}"}
+        )
+        self.assertEqual(out["X"], "value=${{ secrets.GITHUB_TOKEN }}")
+
+    def test_empty_mapping(self):
+        self.assertEqual(VSCodeClientAdapter._translate_env_vars_for_vscode({}), {})
+
+    def test_none_mapping(self):
+        self.assertIsNone(VSCodeClientAdapter._translate_env_vars_for_vscode(None))
+
+    def test_non_string_values_pass_through(self):
+        """Non-string values (int, bool, None) must not raise."""
+        out = VSCodeClientAdapter._translate_env_vars_for_vscode({"n": 42, "b": True, "x": None})
+        self.assertEqual(out, {"n": 42, "b": True, "x": None})
+
 
 class TestVSCodeSelectBestPackage(unittest.TestCase):
     """Test cases for _select_best_package logic."""
@@ -1106,6 +1234,51 @@ class TestWarnInputVariables(unittest.TestCase):
             MCPClientAdapter._warn_input_variables({}, "s", "Codex CLI")
             MCPClientAdapter._warn_input_variables(None, "s", "Codex CLI")
         mock_print.assert_not_called()
+
+
+class TestWarnOnLegacyAngleVars(unittest.TestCase):
+    """VS Code cannot resolve <VAR> placeholders -- the warning surfaces this."""
+
+    def test_warning_emitted_for_legacy_var_in_headers(self):
+        mapping = {"Authorization": "Bearer <MY_TOKEN>"}
+        with patch("apm_cli.adapters.client.vscode._rich_warning") as mock_warn:
+            VSCodeClientAdapter._warn_on_legacy_angle_vars(mapping, "my-server", "headers")
+        mock_warn.assert_called_once()
+        msg = mock_warn.call_args[0][0]
+        assert "<MY_TOKEN>" in msg
+        assert "my-server" in msg
+        assert "headers" in msg
+        assert "${VAR}" in msg or "${env:VAR}" in msg
+
+    def test_warning_lists_multiple_unique_vars(self):
+        mapping = {
+            "X-A": "<TOKEN_A>",
+            "X-B": "<TOKEN_B> and <TOKEN_A>",  # duplicate of A should dedupe
+        }
+        with patch("apm_cli.adapters.client.vscode._rich_warning") as mock_warn:
+            VSCodeClientAdapter._warn_on_legacy_angle_vars(mapping, "s", "headers")
+        mock_warn.assert_called_once()
+        msg = mock_warn.call_args[0][0]
+        assert "<TOKEN_A>" in msg and "<TOKEN_B>" in msg
+
+    def test_no_warning_for_modern_syntax(self):
+        for value in ("Bearer ${MY_TOKEN}", "Bearer ${env:MY_TOKEN}", "Bearer ${input:tok}"):
+            with patch("apm_cli.adapters.client.vscode._rich_warning") as mock_warn:
+                VSCodeClientAdapter._warn_on_legacy_angle_vars({"H": value}, "s", "headers")
+            mock_warn.assert_not_called()
+
+    def test_no_warning_for_empty_or_none_mapping(self):
+        with patch("apm_cli.adapters.client.vscode._rich_warning") as mock_warn:
+            VSCodeClientAdapter._warn_on_legacy_angle_vars({}, "s", "headers")
+            VSCodeClientAdapter._warn_on_legacy_angle_vars(None, "s", "headers")
+        mock_warn.assert_not_called()
+
+    def test_no_warning_for_non_string_values(self):
+        with patch("apm_cli.adapters.client.vscode._rich_warning") as mock_warn:
+            VSCodeClientAdapter._warn_on_legacy_angle_vars(
+                {"n": 42, "b": True, "x": None}, "s", "env"
+            )
+        mock_warn.assert_not_called()
 
 
 if __name__ == "__main__":
