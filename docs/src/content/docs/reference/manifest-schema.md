@@ -414,6 +414,7 @@ Values in `headers` and `env` may contain three placeholder syntaxes. APM resolv
 - **VS Code** has native `${env:VAR}` and `${input:VAR}` interpolation, so APM emits placeholders rather than baking secrets into `mcp.json`. Bare `${VAR}` is normalized to `${env:VAR}` for you.
 - **Copilot CLI** has no runtime interpolation, so APM resolves `${VAR}`, `${env:VAR}`, and the legacy `<VAR>` at install time using `os.environ` (or an interactive prompt when missing). Resolved values are not re-scanned, so a value containing literal `${...}` text is preserved.
 - **Codex** currently resolves only the legacy `<VAR>` placeholder at install time; `${VAR}` / `${env:VAR}` are passed through verbatim in the Codex adapter today.
+- **Recommended:** Use `${VAR}` or `${env:VAR}` in all new manifests — they work on every target that supports remote MCP servers. `<VAR>` is legacy and only resolved by Copilot CLI and Codex; in VS Code it would silently render as literal text in the generated config.
 - **Registry-backed servers** — APM auto-generates input prompts from registry metadata for `${input:...}`.
 - **Self-defined servers** — APM detects `${input:...}` patterns in `apm.yml` and generates matching input definitions automatically.
 

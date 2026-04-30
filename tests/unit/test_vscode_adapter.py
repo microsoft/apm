@@ -1236,5 +1236,50 @@ class TestWarnInputVariables(unittest.TestCase):
         mock_print.assert_not_called()
 
 
+class TestWarnOnLegacyAngleVars(unittest.TestCase):
+    """VS Code cannot resolve <VAR> placeholders -- the warning surfaces this."""
+
+    def test_warning_emitted_for_legacy_var_in_headers(self):
+        mapping = {"Authorization": "Bearer <MY_TOKEN>"}
+        with patch("apm_cli.adapters.client.vscode._rich_warning") as mock_warn:
+            VSCodeClientAdapter._warn_on_legacy_angle_vars(mapping, "my-server", "headers")
+        mock_warn.assert_called_once()
+        msg = mock_warn.call_args[0][0]
+        assert "<MY_TOKEN>" in msg
+        assert "my-server" in msg
+        assert "headers" in msg
+        assert "${VAR}" in msg or "${env:VAR}" in msg
+
+    def test_warning_lists_multiple_unique_vars(self):
+        mapping = {
+            "X-A": "<TOKEN_A>",
+            "X-B": "<TOKEN_B> and <TOKEN_A>",  # duplicate of A should dedupe
+        }
+        with patch("apm_cli.adapters.client.vscode._rich_warning") as mock_warn:
+            VSCodeClientAdapter._warn_on_legacy_angle_vars(mapping, "s", "headers")
+        mock_warn.assert_called_once()
+        msg = mock_warn.call_args[0][0]
+        assert "<TOKEN_A>" in msg and "<TOKEN_B>" in msg
+
+    def test_no_warning_for_modern_syntax(self):
+        for value in ("Bearer ${MY_TOKEN}", "Bearer ${env:MY_TOKEN}", "Bearer ${input:tok}"):
+            with patch("apm_cli.adapters.client.vscode._rich_warning") as mock_warn:
+                VSCodeClientAdapter._warn_on_legacy_angle_vars({"H": value}, "s", "headers")
+            mock_warn.assert_not_called()
+
+    def test_no_warning_for_empty_or_none_mapping(self):
+        with patch("apm_cli.adapters.client.vscode._rich_warning") as mock_warn:
+            VSCodeClientAdapter._warn_on_legacy_angle_vars({}, "s", "headers")
+            VSCodeClientAdapter._warn_on_legacy_angle_vars(None, "s", "headers")
+        mock_warn.assert_not_called()
+
+    def test_no_warning_for_non_string_values(self):
+        with patch("apm_cli.adapters.client.vscode._rich_warning") as mock_warn:
+            VSCodeClientAdapter._warn_on_legacy_angle_vars(
+                {"n": 42, "b": True, "x": None}, "s", "env"
+            )
+        mock_warn.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
