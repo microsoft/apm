@@ -212,7 +212,7 @@ class ClaudeFormatter:
         dependencies = []
         apm_modules_dir = self.base_dir / "apm_modules"
 
-        if not apm_modules_dir.exists():
+        if not apm_modules_dir.is_dir():
             return dependencies
 
         # Scan for CLAUDE.md files in apm_modules
