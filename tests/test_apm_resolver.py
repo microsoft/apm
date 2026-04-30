@@ -493,5 +493,403 @@ class TestDependencyGraphDataStructures(unittest.TestCase):
         assert not summary["is_valid"]
 
 
+class TestSourcePathField(unittest.TestCase):
+    """APMPackage.source_path field exists and is independent of package_path."""
+
+    def test_source_path_default_is_none(self):
+        pkg = APMPackage(name="x", version="1.0.0")
+        assert pkg.source_path is None
+
+    def test_source_path_can_be_set(self):
+        pkg = APMPackage(name="x", version="1.0.0", source_path=Path("/some/dir"))
+        assert pkg.source_path == Path("/some/dir")
+
+
+class TestComputeDepSourcePath(unittest.TestCase):
+    """``_compute_dep_source_path`` anchors local-relative deps correctly (#857)."""
+
+    def setUp(self):
+        self.resolver = APMDependencyResolver()
+        self.resolver._project_root = Path("/proj")
+
+    def _local_ref(self, local_path: str):
+        return DependencyReference.parse(local_path)
+
+    def test_remote_dep_returns_install_path(self):
+        ref = DependencyReference(repo_url="user/repo", is_local=False)
+        install = Path("/proj/apm_modules/user/repo")
+        result = self.resolver._compute_dep_source_path(ref, install, parent_pkg=None)
+        assert result == install.resolve()
+
+    def test_local_absolute_path_returns_resolved(self):
+        ref = self._local_ref("/abs/path/pkg")
+        install = Path("/proj/apm_modules/_local/pkg")
+        result = self.resolver._compute_dep_source_path(ref, install, parent_pkg=None)
+        assert result == Path("/abs/path/pkg").resolve()
+
+    def test_local_relative_path_uses_parent_source_path(self):
+        # The bug: ``../editorial-pipeline`` declared inside a transitive
+        # package must resolve against that package's directory, not the
+        # root consumer.
+        ref = self._local_ref("../editorial-pipeline")
+        install = Path("/proj/apm_modules/_local/editorial-pipeline")
+        parent = APMPackage(
+            name="handbook-agents",
+            version="1.0.0",
+            source_path=Path("/proj/packages/handbook-agents"),
+        )
+        result = self.resolver._compute_dep_source_path(ref, install, parent_pkg=parent)
+        assert result == Path("/proj/packages/editorial-pipeline").resolve()
+
+    def test_local_relative_path_falls_back_to_project_root_when_no_parent(self):
+        # Direct deps from root: parent_pkg is None, anchor is project_root.
+        ref = self._local_ref("./packages/foo")
+        install = Path("/proj/apm_modules/_local/foo")
+        result = self.resolver._compute_dep_source_path(ref, install, parent_pkg=None)
+        assert result == Path("/proj/packages/foo").resolve()
+
+    def test_local_relative_path_falls_back_to_project_root_when_parent_has_no_source_path(self):
+        # Backwards compat: a parent package created before source_path
+        # was added (still None) shouldn't break resolution -- fall back
+        # to the project root rather than crashing.
+        ref = self._local_ref("./packages/foo")
+        install = Path("/proj/apm_modules/_local/foo")
+        legacy_parent = APMPackage(name="legacy", version="1.0.0")
+        result = self.resolver._compute_dep_source_path(
+            ref, install, parent_pkg=legacy_parent
+        )
+        assert result == Path("/proj/packages/foo").resolve()
+
+
+class TestResolverSetsRootSourcePath(unittest.TestCase):
+    """``resolve_dependencies`` populates ``source_path`` on the root package."""
+
+    def test_root_package_has_source_path_after_resolve(self):
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            (project_root / "apm.yml").write_text(
+                "name: root-pkg\nversion: 1.0.0\n"
+            )
+            graph = APMDependencyResolver().resolve_dependencies(project_root)
+            assert graph.root_package.source_path == project_root.resolve()
+
+
+class TestDownloadCallbackReceivesParent(unittest.TestCase):
+    """The download callback is invoked with ``parent_pkg`` for transitive deps."""
+
+    def test_callback_called_with_parent_package(self):
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_modules = project_root / "apm_modules"
+            apm_modules.mkdir()
+            (project_root / "apm.yml").write_text(
+                "name: root-pkg\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n    - user/dep1\n"
+            )
+
+            received_calls = []
+
+            def fake_download(dep_ref, modules_dir, parent_chain="", parent_pkg=None):
+                received_calls.append((dep_ref.get_unique_key(), parent_pkg))
+                return None  # Simulate download miss; we only care about args
+
+            resolver = APMDependencyResolver(
+                apm_modules_dir=apm_modules,
+                download_callback=fake_download,
+            )
+            resolver.resolve_dependencies(project_root)
+
+            # The first (and only) download attempt is for the direct dep.
+            # parent_pkg is None for direct deps -- the assert below pins
+            # the contract that the callback receives the parameter (and
+            # would receive a real parent for any transitive deps).
+            assert received_calls, "download_callback was never invoked"
+            _, parent_pkg = received_calls[0]
+            assert parent_pkg is None  # direct dep from root
+
+    def test_callback_receives_parent_for_transitive_dep(self):
+        """Transitive deps invoke the callback with the *declaring* package
+        as ``parent_pkg`` so its ``source_path`` can anchor relative local
+        paths (#857)."""
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_modules = project_root / "apm_modules"
+            apm_modules.mkdir()
+
+            # Root depends on a local sibling that itself declares a
+            # transitive remote dep. We satisfy the local dep by hand so
+            # its apm.yml is loaded and its sub-deps get resolved (which
+            # is when the callback should fire with parent_pkg=mid-pkg).
+            mid_install = apm_modules / "_local" / "mid"
+            mid_install.mkdir(parents=True)
+            (mid_install / "apm.yml").write_text(
+                "name: mid-pkg\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n    - user/leaf-dep\n"
+            )
+
+            mid_src = project_root / "packages" / "mid"
+            mid_src.mkdir(parents=True)
+            (mid_src / "apm.yml").write_text(
+                "name: mid-pkg\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n    - user/leaf-dep\n"
+            )
+
+            (project_root / "apm.yml").write_text(
+                "name: root-pkg\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n    - ./packages/mid\n"
+            )
+
+            received_calls = []
+
+            def fake_download(dep_ref, apm_modules_dir, parent_chain="", parent_pkg=None):
+                received_calls.append(
+                    (dep_ref.get_unique_key(), parent_pkg, parent_chain)
+                )
+                return None
+
+            resolver = APMDependencyResolver(
+                apm_modules_dir=apm_modules,
+                download_callback=fake_download,
+            )
+            resolver.resolve_dependencies(project_root)
+
+            # The transitive ``user/leaf-dep`` invocation must carry the
+            # mid-pkg APMPackage as parent_pkg.
+            leaf_calls = [c for c in received_calls if "leaf-dep" in c[0]]
+            assert leaf_calls, (
+                f"expected a callback call for the transitive leaf-dep, "
+                f"got: {received_calls}"
+            )
+            _, parent_pkg, _ = leaf_calls[0]
+            assert parent_pkg is not None, "transitive dep should have parent_pkg"
+            assert parent_pkg.name == "mid-pkg"
+            # source_path must be set so future relative resolution would work.
+            assert parent_pkg.source_path is not None
+
+
+class TestLegacyDownloadCallbackCompatibility(unittest.TestCase):
+    """Callbacks that predate #857 (no ``parent_pkg`` parameter) still work."""
+
+    def test_legacy_callback_signature_is_called(self):
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_modules = project_root / "apm_modules"
+            apm_modules.mkdir()
+            (project_root / "apm.yml").write_text(
+                "name: root-pkg\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n    - user/dep1\n"
+            )
+
+            invocations = []
+
+            # Legacy 3-arg callback -- no ``parent_pkg``. Pre-#857 this is
+            # the only signature that exists; if the resolver tried to call
+            # with a 4th positional arg it would raise TypeError and the
+            # download would be silently skipped.
+            def legacy_download(dep_ref, apm_modules_dir, parent_chain=""):
+                invocations.append(dep_ref.get_unique_key())
+                return None
+
+            resolver = APMDependencyResolver(
+                apm_modules_dir=apm_modules,
+                download_callback=legacy_download,  # type: ignore[arg-type]
+            )
+            resolver.resolve_dependencies(project_root)
+
+            assert invocations, (
+                "legacy callback should still be invoked; resolver must "
+                "detect missing parent_pkg parameter via signature inspection"
+            )
+
+    def test_modern_callback_detected_as_parent_pkg_aware(self):
+        def modern(dep_ref, apm_modules_dir, parent_chain="", parent_pkg=None):
+            return None
+        assert APMDependencyResolver._signature_accepts_parent_pkg(modern) is True
+
+    def test_legacy_callback_detected_as_not_parent_pkg_aware(self):
+        def legacy(dep_ref, apm_modules_dir, parent_chain=""):
+            return None
+        assert APMDependencyResolver._signature_accepts_parent_pkg(legacy) is False
+
+    def test_kwargs_callback_detected_as_parent_pkg_aware(self):
+        def varargs(dep_ref, apm_modules_dir, parent_chain="", **kwargs):
+            return None
+        assert APMDependencyResolver._signature_accepts_parent_pkg(varargs) is True
+
+
+class TestDownloadDedupKey(unittest.TestCase):
+    """Per-resolution download dedup key disambiguates identical local_path
+    literals declared by different parents (#857)."""
+
+    def test_remote_dep_uses_get_unique_key(self):
+        resolver = APMDependencyResolver()
+        dep = DependencyReference(repo_url="user/repo")
+        assert resolver._download_dedup_key(dep, parent_pkg=None) == dep.get_unique_key()
+
+    def test_local_dep_keys_include_resolved_path(self):
+        resolver = APMDependencyResolver()
+        dep = DependencyReference(
+            repo_url="../common", is_local=True, local_path="../common"
+        )
+        parent_a = APMPackage(
+            name="a", version="1.0.0", source="local",
+            source_path=Path("/proj/packages/team-x/handbook").resolve(),
+        )
+        parent_b = APMPackage(
+            name="b", version="1.0.0", source="local",
+            source_path=Path("/proj/packages/team-y/handbook").resolve(),
+        )
+        key_a = resolver._download_dedup_key(dep, parent_pkg=parent_a)
+        key_b = resolver._download_dedup_key(dep, parent_pkg=parent_b)
+        assert key_a != key_b, (
+            "same local_path literal under different parents must dedup separately"
+        )
+        assert "team-x" in key_a
+        assert "team-y" in key_b
+
+
+class TestEffectiveBaseDir(unittest.TestCase):
+    """``_effective_base_dir`` centralizes the parent-or-project-root choice
+    used by ``_download_dedup_key`` and ``_compute_dep_source_path`` (#940)."""
+
+    def test_uses_parent_source_path_when_set(self):
+        resolver = APMDependencyResolver()
+        resolver._project_root = Path("/proj")
+        parent = APMPackage(
+            name="p", version="1.0.0",
+            source_path=Path("/proj/packages/handbook"),
+        )
+        assert resolver._effective_base_dir(parent) == Path("/proj/packages/handbook")
+
+    def test_falls_back_to_project_root_when_parent_is_none(self):
+        resolver = APMDependencyResolver()
+        resolver._project_root = Path("/proj")
+        assert resolver._effective_base_dir(None) == Path("/proj")
+
+    def test_falls_back_to_project_root_when_parent_has_no_source_path(self):
+        resolver = APMDependencyResolver()
+        resolver._project_root = Path("/proj")
+        legacy_parent = APMPackage(name="legacy", version="1.0.0")
+        assert resolver._effective_base_dir(legacy_parent) == Path("/proj")
+
+    def test_returns_none_when_neither_parent_nor_project_root(self):
+        resolver = APMDependencyResolver()
+        # _project_root left as None
+        assert resolver._effective_base_dir(None) is None
+
+
+class TestRejectsLocalPathInRemoteParent(unittest.TestCase):
+    """Relative ``local_path`` declared inside a remotely-fetched package is
+    rejected as a path-traversal vector (#940)."""
+
+    def test_remote_parent_with_relative_local_dep_returns_none(self):
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_modules = project_root / "apm_modules"
+            apm_modules.mkdir()
+            remote_pkg_dir = apm_modules / "evil-pkg"
+            remote_pkg_dir.mkdir()
+
+            resolver = APMDependencyResolver()
+            resolver._project_root = project_root
+            resolver._apm_modules_dir = apm_modules
+
+            remote_parent = APMPackage(
+                name="evil-pkg", version="1.0.0",
+                source_path=remote_pkg_dir,
+            )
+            dep = DependencyReference(
+                repo_url="../../etc/passwd",
+                is_local=True,
+                local_path="../../etc/passwd",
+            )
+            result = resolver._try_load_dependency_package(
+                dep, parent_chain="root > evil-pkg", parent_pkg=remote_parent
+            )
+            assert result is None
+
+    def test_root_project_relative_local_dep_is_allowed(self):
+        # Sanity check: rejection only fires for *remote* parents. A direct
+        # local dep declared by the root project (parent_pkg is None) must
+        # still be processed normally -- here it just won't find anything
+        # on disk and returns None for that reason, not for rejection.
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_modules = project_root / "apm_modules"
+            apm_modules.mkdir()
+            resolver = APMDependencyResolver()
+            resolver._project_root = project_root
+            resolver._apm_modules_dir = apm_modules
+            dep = DependencyReference(
+                repo_url="./packages/foo", is_local=True,
+                local_path="./packages/foo",
+            )
+            # No download_callback set, so it returns None without raising.
+            result = resolver._try_load_dependency_package(
+                dep, parent_chain="", parent_pkg=None
+            )
+            assert result is None  # not found, but reached the install_path branch
+
+    def test_remote_parent_with_absolute_local_dep_not_rejected_by_this_guard(self):
+        # The reject guard only targets *relative* local paths; absolute
+        # paths bypass the relative-anchor ambiguity (the path-traversal
+        # vector this guard addresses) and are handled by the existing
+        # install-path lookup (will return None if not on disk).
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_modules = project_root / "apm_modules"
+            apm_modules.mkdir()
+            remote_pkg_dir = apm_modules / "remote-pkg"
+            remote_pkg_dir.mkdir()
+            resolver = APMDependencyResolver()
+            resolver._project_root = project_root
+            resolver._apm_modules_dir = apm_modules
+            remote_parent = APMPackage(
+                name="remote-pkg", version="1.0.0", source_path=remote_pkg_dir,
+            )
+            dep = DependencyReference(
+                repo_url="/abs/missing", is_local=True, local_path="/abs/missing",
+            )
+            # Should reach the install_path lookup and return None for
+            # "not found" rather than for rejection.
+            result = resolver._try_load_dependency_package(
+                dep, parent_chain="root > remote-pkg", parent_pkg=remote_parent,
+            )
+            assert result is None
+
+
+class TestSilentDownloadFailureLogsWarning(unittest.TestCase):
+    """Failed transitive downloads no longer fail silently -- the underlying
+    error is surfaced via the stdlib logger so ``--verbose`` makes the skip
+    diagnosable (#940)."""
+
+    def test_download_callback_exception_logs_warning(self):
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_modules = project_root / "apm_modules"
+            apm_modules.mkdir()
+
+            def boom(*args, **kwargs):
+                raise RuntimeError("simulated network failure")
+
+            resolver = APMDependencyResolver(download_callback=boom)
+            resolver._project_root = project_root
+            resolver._apm_modules_dir = apm_modules
+
+            dep = DependencyReference(repo_url="user/repo")
+
+            from src.apm_cli.deps import apm_resolver as _resolver_mod
+            with self.assertLogs(
+                _resolver_mod._logger.name, level="WARNING"
+            ) as captured:
+                result = resolver._try_load_dependency_package(
+                    dep, parent_chain="root", parent_pkg=None
+                )
+            assert result is None
+            joined = "\n".join(captured.output)
+            assert "simulated network failure" in joined
+            assert "user/repo" in joined or "user_repo" in joined or "repo" in joined
+
+
 if __name__ == '__main__':
     unittest.main()

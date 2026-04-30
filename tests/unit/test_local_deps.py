@@ -533,3 +533,53 @@ class TestCopyLocalPackage:
         # The symlink should be preserved as a symlink, NOT followed
         link = install_path / "escape"
         assert link.is_symlink(), "Symlink was followed instead of preserved"
+
+    def test_copy_local_package_rejects_target_outside_project_root(self, tmp_path):
+        """When project_root is supplied, sources resolving outside it are
+        refused to block path-traversal in transitive ``local_path`` deps (#940)."""
+        from apm_cli.commands.install import _copy_local_package
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        # An attacker-controlled path that resolves outside project_root.
+        outside_pkg = tmp_path / "outside" / "evil-pkg"
+        outside_pkg.mkdir(parents=True)
+        (outside_pkg / "apm.yml").write_text(yaml.dump({
+            "name": "evil-pkg", "version": "1.0.0",
+        }))
+
+        dep_ref = DependencyReference.parse("../outside/evil-pkg")
+        dep_ref.local_path = "../outside/evil-pkg"
+        install_path = project_root / "apm_modules" / "_local" / "evil-pkg"
+
+        # base_dir = project_root would resolve to outside/evil-pkg, which
+        # escapes project_root: must be rejected.
+        result = _copy_local_package(
+            dep_ref, install_path, project_root,
+            project_root=project_root,
+        )
+        assert result is None
+        assert not install_path.exists(), "no copy should have happened"
+
+    def test_copy_local_package_allows_target_inside_project_root(self, tmp_path):
+        """Containment guard does not block legitimate within-project deps."""
+        from apm_cli.commands.install import _copy_local_package
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        sub_pkg = project_root / "packages" / "shared"
+        sub_pkg.mkdir(parents=True)
+        (sub_pkg / "apm.yml").write_text(yaml.dump({
+            "name": "shared", "version": "1.0.0",
+        }))
+
+        dep_ref = DependencyReference.parse("./packages/shared")
+        dep_ref.local_path = "./packages/shared"
+        install_path = project_root / "apm_modules" / "_local" / "shared"
+
+        result = _copy_local_package(
+            dep_ref, install_path, project_root,
+            project_root=project_root,
+        )
+        assert result is not None
+        assert (result / "apm.yml").exists()

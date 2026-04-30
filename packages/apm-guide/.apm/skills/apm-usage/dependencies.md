@@ -35,6 +35,14 @@ dependencies:
     - ../sibling-repo/my-package
 ```
 
+Relative `local_path` entries (`./...`, `../...`) anchor on the directory of
+the `apm.yml` that *declares* them, not on the root project. So a transitive
+package at `packages/handbook-agents/apm.yml` declaring `../editorial-pipeline`
+resolves to `packages/editorial-pipeline/`, matching what a developer reading
+the file would expect. Relative `local_path` declarations found inside
+remotely-fetched packages are rejected -- only the root project's `apm.yml`
+may use them.
+
 ### Custom git ports
 
 Non-default git ports are preserved on `https://`, `http://`, and `ssh://` URLs

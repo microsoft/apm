@@ -454,10 +454,11 @@ class TestTransitiveDepParentChain:
         # Track what the callback receives
         callback_calls = []
 
-        def tracking_callback(dep_ref, mods_dir, parent_chain=""):
+        def tracking_callback(dep_ref, mods_dir, parent_chain="", parent_pkg=None):
             callback_calls.append({
                 "dep": dep_ref.get_display_name(),
                 "parent_chain": parent_chain,
+                "parent_pkg": parent_pkg,
             })
             if "leaf-pkg" in dep_ref.get_display_name():
                 # Simulate what the real callback does: catch internal error,

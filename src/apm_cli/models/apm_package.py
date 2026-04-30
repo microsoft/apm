@@ -74,6 +74,12 @@ class APMPackage:
     dev_dependencies: Optional[Dict[str, List[Union[DependencyReference, str, dict]]]] = None
     scripts: Optional[Dict[str, str]] = None
     package_path: Optional[Path] = None  # Local path to package
+    # Absolute on-disk directory holding this package's apm.yml. Used to
+    # resolve relative ``local_path`` dependencies declared in this package's
+    # apm.yml (#857). For local deps this is the *original* source directory,
+    # not the apm_modules/_local/ copy. For remote deps and the root project
+    # this matches package_path.
+    source_path: Optional[Path] = None
     target: Optional[Union[str, List[str]]] = None  # Target agent(s): single string or list (applies to compile and install)
     type: Optional[PackageContentType] = None  # Package content type: instructions, skill, hybrid, or prompts
     includes: Optional[Union[str, List[str]]] = None  # Include-only manifest: 'auto' or list of repo paths

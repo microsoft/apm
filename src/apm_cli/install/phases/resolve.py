@@ -121,7 +121,7 @@ def run(ctx: "InstallContext") -> None:
     logger = ctx.logger
     verbose = ctx.verbose
 
-    def download_callback(dep_ref, modules_dir, parent_chain=""):
+    def download_callback(dep_ref, modules_dir, parent_chain="", parent_pkg=None):
         """Download a package during dependency resolution.
 
         Args:
@@ -129,6 +129,13 @@ def run(ctx: "InstallContext") -> None:
             modules_dir: Target apm_modules directory.
             parent_chain: Human-readable breadcrumb (e.g. "root > mid")
                 showing which dependency path led to this transitive dep.
+            parent_pkg: The APMPackage that declared *dep_ref* (None for
+                direct deps from the root project). For local deps, the
+                parent's ``source_path`` becomes the base directory for
+                resolving the relative path -- so a transitive dep like
+                ``../sibling`` declared inside a package nested several
+                directories deep resolves against the package's own
+                location, not the root consumer (#857).
         """
         install_path = dep_ref.get_install_path(modules_dir)
         if install_path.exists():
@@ -142,8 +149,18 @@ def run(ctx: "InstallContext") -> None:
                     # so use .add() rather than dict-style assignment.
                     callback_failures.add(dep_ref.get_unique_key())
                     return None
+                # Anchor relative paths on the *declaring* package's source
+                # directory when available (#857). Falls back to
+                # ``project_root`` for direct deps and for parents that
+                # predate the source_path field.
+                base_dir = (
+                    parent_pkg.source_path
+                    if parent_pkg is not None and parent_pkg.source_path is not None
+                    else project_root
+                )
                 result_path = _copy_local_package(
-                    dep_ref, install_path, project_root, logger=logger
+                    dep_ref, install_path, base_dir, logger=logger,
+                    project_root=project_root,
                 )
                 if result_path:
                     callback_downloaded[dep_ref.get_unique_key()] = None
