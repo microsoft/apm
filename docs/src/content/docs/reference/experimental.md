@@ -171,7 +171,6 @@ apm experimental reset verbose-version
 |-----------------------|----------------------------------------------------------------------------------|
 | `verbose-version`     | Show Python version, platform, and install path in `apm --version`.              |
 | `copilot-cowork`      | Deploy APM skills to Microsoft 365 Copilot Cowork via OneDrive.                  |
-| `marketplace-authoring`| Enable marketplace authoring commands (init, build, publish, etc.).              |
 
 New flags are proposed via [CONTRIBUTING.md](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md#how-to-add-an-experimental-feature-flag) and graduate to default when stable. See the contributor recipe for the full lifecycle.
 See also: [Cowork integration](../integrations/copilot-cowork/).

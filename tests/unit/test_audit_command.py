@@ -1,15 +1,19 @@
 """Tests for the ``apm audit`` command."""
 
 import textwrap
-from pathlib import Path
+from pathlib import Path  # noqa: F401
 
 import pytest
 from click.testing import CliRunner
 
-from apm_cli.commands.audit import audit, _scan_single_file, _apply_strip, _preview_strip
+from apm_cli.commands.audit import (
+    _apply_strip,
+    _preview_strip,  # noqa: F401
+    _scan_single_file,
+    audit,
+)
 from apm_cli.core.command_logger import CommandLogger
 from apm_cli.security.content_scanner import ContentScanner
-
 
 # ── Fixtures ────────────────────────────────────────────────────────
 
@@ -34,7 +38,7 @@ def warning_file(tmp_path):
     """A file containing zero-width spaces (warning-level)."""
     p = tmp_path / "warning.md"
     p.write_text(
-        "Hello\u200Bworld\nSecond\u200Dline\n",
+        "Hello\u200bworld\nSecond\u200dline\n",
         encoding="utf-8",
     )
     return p
@@ -46,7 +50,7 @@ def critical_file(tmp_path):
     p = tmp_path / "critical.md"
     # U+E0001 = LANGUAGE TAG, U+E0068 = TAG LATIN SMALL LETTER H
     p.write_text(
-        "Normal text\U000E0001\U000E0068\U000E0065\U000E006Cmore text\n",
+        "Normal text\U000e0001\U000e0068\U000e0065\U000e006cmore text\n",
         encoding="utf-8",
     )
     return p
@@ -57,7 +61,7 @@ def mixed_file(tmp_path):
     """A file with both critical and warning characters."""
     p = tmp_path / "mixed.md"
     p.write_text(
-        "line one\u200B\nline two\U000E0041\n",
+        "line one\u200b\nline two\U000e0041\n",
         encoding="utf-8",
     )
     return p
@@ -67,7 +71,7 @@ def mixed_file(tmp_path):
 def info_only_file(tmp_path):
     """A file with only info-level findings (NBSP)."""
     p = tmp_path / "info.md"
-    p.write_text("Hello\u00A0world\n", encoding="utf-8")
+    p.write_text("Hello\u00a0world\n", encoding="utf-8")
     return p
 
 
@@ -94,7 +98,7 @@ def lockfile_project(tmp_path):
         "Clean prompt content\n", encoding="utf-8"
     )
     (tmp_path / ".github" / "instructions" / "guide.md").write_text(
-        "Guide with hidden\u200Bchar\n", encoding="utf-8"
+        "Guide with hidden\u200bchar\n", encoding="utf-8"
     )
 
     return tmp_path
@@ -117,7 +121,7 @@ def lockfile_project_critical(tmp_path):
 
     (tmp_path / ".github" / "prompts").mkdir(parents=True)
     (tmp_path / ".github" / "prompts" / "evil.md").write_text(
-        "Looks normal\U000E0001hidden\n", encoding="utf-8"
+        "Looks normal\U000e0001hidden\n", encoding="utf-8"
     )
 
     return tmp_path
@@ -140,9 +144,7 @@ def lockfile_project_with_dir(tmp_path):
 
     skill_dir = tmp_path / ".github" / "skills" / "my-skill"
     skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text(
-        "skill with hidden\u200Bchar\n", encoding="utf-8"
-    )
+    (skill_dir / "SKILL.md").write_text("skill with hidden\u200bchar\n", encoding="utf-8")
     (skill_dir / "helper.md").write_text("clean helper\n", encoding="utf-8")
 
     return tmp_path
@@ -231,7 +233,7 @@ class TestFileMode:
     def test_verbose_shows_info(self, runner, tmp_path):
         """--verbose includes info-level findings."""
         p = tmp_path / "info.md"
-        p.write_text("Hello\u00A0world\n", encoding="utf-8")  # NBSP = info
+        p.write_text("Hello\u00a0world\n", encoding="utf-8")  # NBSP = info
         result = runner.invoke(audit, ["--file", str(p), "--verbose"])
         # Info findings should appear in verbose output
         assert "U+00A0" in result.output
@@ -300,7 +302,10 @@ class TestLockfileMode:
         assert result.exit_code == 2
 
     def test_critical_findings_exit_one(
-        self, runner, lockfile_project_critical, monkeypatch,
+        self,
+        runner,
+        lockfile_project_critical,
+        monkeypatch,
     ):
         monkeypatch.chdir(lockfile_project_critical)
         result = runner.invoke(audit, [])
@@ -320,7 +325,10 @@ class TestLockfileMode:
         assert "not found" in result.output.lower()
 
     def test_dir_entries_scanned_recursively(
-        self, runner, lockfile_project_with_dir, monkeypatch,
+        self,
+        runner,
+        lockfile_project_with_dir,
+        monkeypatch,
     ):
         """Skill directories recorded in deployed_files should be scanned."""
         monkeypatch.chdir(lockfile_project_with_dir)
@@ -358,8 +366,8 @@ class TestStripMode:
         assert result.exit_code == 0
         # File should now be clean
         content = warning_file.read_text(encoding="utf-8")
-        assert "\u200B" not in content
-        assert "\u200D" not in content
+        assert "\u200b" not in content
+        assert "\u200d" not in content
 
     def test_strip_removes_critical(self, runner, critical_file):
         result = runner.invoke(audit, ["--file", str(critical_file), "--strip"])
@@ -367,14 +375,14 @@ class TestStripMode:
         assert result.exit_code == 0
         content = critical_file.read_text(encoding="utf-8")
         # Critical tag chars should be removed
-        assert "\U000E0001" not in content
+        assert "\U000e0001" not in content
 
     def test_strip_mixed_removes_all_dangerous(self, runner, mixed_file):
         result = runner.invoke(audit, ["--file", str(mixed_file), "--strip"])
         assert result.exit_code == 0  # all dangerous chars removed
         content = mixed_file.read_text(encoding="utf-8")
-        assert "\u200B" not in content  # warning stripped
-        assert "\U000E0041" not in content  # critical stripped
+        assert "\u200b" not in content  # warning stripped
+        assert "\U000e0041" not in content  # critical stripped
 
     def test_strip_clean_file_noop(self, runner, clean_file):
         original = clean_file.read_text(encoding="utf-8")
@@ -401,7 +409,7 @@ class TestStripMode:
         # The warning char in guide.md should be stripped
         guide = lockfile_project / ".github" / "instructions" / "guide.md"
         content = guide.read_text(encoding="utf-8")
-        assert "\u200B" not in content
+        assert "\u200b" not in content
 
     def test_strip_vs_warning_removes(self, runner, vs_warning_file):
         """Strip removes BMP variation selector (warning-level)."""
@@ -424,7 +432,7 @@ class TestStripMode:
         assert "dry run" in result.output.lower()
         # File should NOT be modified
         content = warning_file.read_text(encoding="utf-8")
-        assert "\u200B" in content  # zero-width space still present
+        assert "\u200b" in content  # zero-width space still present
 
     def test_dry_run_critical_shows_preview(self, runner, critical_file):
         """--strip --dry-run shows critical chars that would be removed."""
@@ -433,7 +441,7 @@ class TestStripMode:
         assert "dry run" in result.output.lower()
         # File should NOT be modified
         content = critical_file.read_text(encoding="utf-8")
-        assert "\U000E0001" in content  # tag char still present
+        assert "\U000e0001" in content  # tag char still present
 
     def test_dry_run_clean_file(self, runner, clean_file):
         """--strip --dry-run on clean file says nothing to clean."""
@@ -468,7 +476,7 @@ class TestScanSingleFile:
         findings, count = _scan_single_file(warning_file, _logger)
         assert count == 1
         assert len(findings) == 1
-        key = list(findings.keys())[0]
+        key = list(findings.keys())[0]  # noqa: RUF015
         assert str(warning_file.resolve()) == key
 
 
@@ -489,13 +497,13 @@ class TestApplyStrip:
         # File has only critical findings → should be modified (dangerous chars stripped)
         assert modified == 1
         content = critical_file.read_text(encoding="utf-8")
-        assert "\U000E0001" not in content
+        assert "\U000e0001" not in content
 
     def test_rejects_path_outside_root(self, tmp_path):
         """_apply_strip must not write files outside project root."""
         evil_path = tmp_path / "outside" / "evil.md"
         evil_path.parent.mkdir(parents=True)
-        evil_path.write_text("Hello\u200Bworld\n", encoding="utf-8")
+        evil_path.write_text("Hello\u200bworld\n", encoding="utf-8")
 
         findings = ContentScanner.scan_file(evil_path)
         # Use a relative path that tries to escape

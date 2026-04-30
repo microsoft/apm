@@ -4,7 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ..utils.constitution_fixtures import temp_project_with_constitution, DEFAULT_CONSTITUTION
+from ..utils.constitution_fixtures import DEFAULT_CONSTITUTION, temp_project_with_constitution
 
 CLI = [sys.executable, "-m", "apm_cli.cli", "compile", "--single-agents"]
 
@@ -33,10 +33,10 @@ def test_injects_block_when_constitution_present():
         try:
             blank_index = lines.index("")
         except ValueError:
-            raise AssertionError("Header separator blank line missing")
+            raise AssertionError("Header separator blank line missing")  # noqa: B904
         # Constitution begin should appear after that blank line
         begin_index = None
-        for i, l in enumerate(lines):
+        for i, l in enumerate(lines):  # noqa: E741
             if l.strip() == "<!-- SPEC-KIT CONSTITUTION: BEGIN -->":
                 begin_index = i
                 break
@@ -51,6 +51,7 @@ def test_injects_block_when_constitution_present():
         hash_line = lines[begin_index + 1]
         assert hash_line.startswith("hash:"), "Hash line missing after constitution begin"
 
+
 def test_header_then_block_ordering_idempotent():
     """Ensure ordering (header -> block -> body) remains stable across runs."""
     with temp_project_with_constitution(constitution_text=DEFAULT_CONSTITUTION) as proj:
@@ -63,7 +64,11 @@ def test_header_then_block_ordering_idempotent():
         assert first == second
         # Structural assertions
         assert first[0] == "# AGENTS.md"
-        begin_positions = [i for i,l in enumerate(first) if l.strip()=="<!-- SPEC-KIT CONSTITUTION: BEGIN -->"]
+        begin_positions = [
+            i
+            for i, l in enumerate(first)  # noqa: E741
+            if l.strip() == "<!-- SPEC-KIT CONSTITUTION: BEGIN -->"
+        ]
         assert begin_positions, "Missing constitution block"
         # Ensure block is not before header lines
         assert begin_positions[0] > 2, "Constitution block unexpectedly before header metadata"
@@ -85,7 +90,9 @@ def test_updates_when_constitution_changes():
         run_cli(proj)
         original = read_agents(proj)
         # Modify constitution
-        (proj / ".specify" / "memory" / "constitution.md").write_text(DEFAULT_CONSTITUTION + "\nNew Principle X\n", encoding="utf-8")
+        (proj / ".specify" / "memory" / "constitution.md").write_text(
+            DEFAULT_CONSTITUTION + "\nNew Principle X\n", encoding="utf-8"
+        )
         run_cli(proj)
         updated = read_agents(proj)
         assert original != updated
@@ -98,11 +105,11 @@ def test_skips_with_flag_no_constitution():
         run_cli(proj)
         first = read_agents(proj)
         assert "<!-- SPEC-KIT CONSTITUTION: BEGIN -->" in first
-        
+
         # Re-run with skip flag
         run_cli(proj, "--no-constitution")
         second = read_agents(proj)
-        
+
         # Constitution block should be removed when --no-constitution flag is used
         assert "<!-- SPEC-KIT CONSTITUTION: BEGIN -->" not in second
         # But basic structure should remain

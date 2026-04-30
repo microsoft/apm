@@ -27,18 +27,16 @@ Design notes
 from __future__ import annotations
 
 import json
-import os
-import tempfile
+import os  # noqa: F401
+import tempfile  # noqa: F401
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict  # noqa: F401, UP035
 from unittest.mock import patch
 
 import pytest
-
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -47,7 +45,7 @@ from apm_cli.cli import cli
 _MINIMAL_APM_YML = "name: test\ndescription: test\nversion: 0.0.1\n"
 
 # Env additions applied to every CliRunner.invoke call in this module.
-_BASE_ENV: Dict[str, str] = {"APM_E2E_TESTS": "1"}
+_BASE_ENV: dict[str, str] = {"APM_E2E_TESTS": "1"}
 
 
 def _write_minimal_apm_yml(apm_dir: Path) -> None:
@@ -55,7 +53,7 @@ def _write_minimal_apm_yml(apm_dir: Path) -> None:
     (apm_dir / "apm.yml").write_text(_MINIMAL_APM_YML, encoding="ascii")
 
 
-def _write_config_json(apm_dir: Path, cfg: Dict[str, Any]) -> None:
+def _write_config_json(apm_dir: Path, cfg: dict[str, Any]) -> None:
     """Write *cfg* as JSON to ``<apm_dir>/config.json``."""
     (apm_dir / "config.json").write_text(json.dumps(cfg), encoding="ascii")
 
@@ -224,16 +222,12 @@ class TestCoworkParserE2E:
         assert (
             "no OneDrive path detected" in combined
             or "Cowork has no auto-detection on Linux" in combined
-        ), (
-            "Expected cowork resolver error in output.\n"
-            f"Output:\n{combined}"
-        )
+        ), f"Expected cowork resolver error in output.\nOutput:\n{combined}"
 
         # The command must have failed (sys.exit(1) in targets phase).
         # Note: CliRunner wraps SystemExit -- exit_code reflects the code.
         assert result.exit_code != 0, (
-            "Expected non-zero exit when OneDrive resolver returns None.\n"
-            f"Output:\n{combined}"
+            f"Expected non-zero exit when OneDrive resolver returns None.\nOutput:\n{combined}"
         )
 
     # ------------------------------------------------------------------ #
@@ -284,14 +278,12 @@ class TestCoworkParserE2E:
 
         # Parser must NOT reject at parse time.
         assert "is not a valid target" not in combined, (
-            f"Parser rejected 'cowork' -- fix may have been reverted.\n"
-            f"Output:\n{combined}"
+            f"Parser rejected 'cowork' -- fix may have been reverted.\nOutput:\n{combined}"
         )
 
         # The project-scope error from phases/targets.py should mention --global.
         assert "--global" in combined, (
-            "Expected '--global' hint in project-scope error output.\n"
-            f"Output:\n{combined}"
+            f"Expected '--global' hint in project-scope error output.\nOutput:\n{combined}"
         )
 
 
@@ -311,9 +303,7 @@ class TestCoworkCleanupSyncRemove:
     every cowork:// path, silently skipping deletion.
     """
 
-    def test_cowork_skill_deleted_via_sync_remove_with_targets_none(
-        self, tmp_path: Path
-    ) -> None:
+    def test_cowork_skill_deleted_via_sync_remove_with_targets_none(self, tmp_path: Path) -> None:
         """The exact scenario that triggers the regression:
 
         1. A lockfile has a cowork://skills/foo entry.
@@ -367,9 +357,7 @@ class TestCoworkCleanupOrphanFlow:
     instead of resolving the URI to the actual OneDrive path.
     """
 
-    def test_orphan_cleanup_deletes_cowork_skill_directory(
-        self, tmp_path: Path
-    ) -> None:
+    def test_orphan_cleanup_deletes_cowork_skill_directory(self, tmp_path: Path) -> None:
         """Simulate uninstalling a package that deployed a cowork skill:
 
         1. A lockfile has cowork://skills/demo-skill entries.
@@ -387,9 +375,7 @@ class TestCoworkCleanupOrphanFlow:
         skill_dir = cowork_root / "demo-skill"
         skill_dir.mkdir()
         skill_md = skill_dir / "SKILL.md"
-        skill_md.write_text(
-            "---\nname: demo-skill\n---\n# Demo\n", encoding="ascii"
-        )
+        skill_md.write_text("---\nname: demo-skill\n---\n# Demo\n", encoding="ascii")
         assert skill_md.exists()
 
         project_root = tmp_path / "project"
@@ -440,9 +426,7 @@ class TestCoworkUninstallSyncIntegration:
     leaving orphaned skill directories on disk in OneDrive forever.
     """
 
-    def test_uninstall_deletes_cowork_skill_directory(
-        self, tmp_path: Path
-    ) -> None:
+    def test_uninstall_deletes_cowork_skill_directory(self, tmp_path: Path) -> None:
         """Simulate the uninstall flow via SkillIntegrator.sync_integration:
 
         1. A cowork://skills/demo-skill entry is in managed_files.
@@ -451,8 +435,9 @@ class TestCoworkUninstallSyncIntegration:
         4. The skill directory MUST be deleted (was silently skipped before).
         """
         from unittest.mock import MagicMock
+
         from apm_cli.integration.skill_integrator import SkillIntegrator
-        from apm_cli.integration.targets import TargetProfile, PrimitiveMapping
+        from apm_cli.integration.targets import PrimitiveMapping, TargetProfile
 
         # -- setup: cowork skills dir with a skill ---
         cowork_root = tmp_path / "cowork-skills"
@@ -460,9 +445,7 @@ class TestCoworkUninstallSyncIntegration:
         skill_dir = cowork_root / "demo-skill"
         skill_dir.mkdir()
         skill_md = skill_dir / "SKILL.md"
-        skill_md.write_text(
-            "---\nname: demo-skill\n---\n# Demo\n", encoding="ascii"
-        )
+        skill_md.write_text("---\nname: demo-skill\n---\n# Demo\n", encoding="ascii")
         assert skill_md.exists()
 
         # -- setup: project root (unrelated to cowork) ---
@@ -509,13 +492,12 @@ class TestCoworkUninstallSyncIntegration:
         assert result["files_removed"] == 1
         assert result["errors"] == 0
 
-    def test_uninstall_cowork_with_resolver_none_skips_gracefully(
-        self, tmp_path: Path
-    ) -> None:
+    def test_uninstall_cowork_with_resolver_none_skips_gracefully(self, tmp_path: Path) -> None:
         """When OneDrive is unavailable, cowork entries are skipped (not error)."""
         from unittest.mock import MagicMock
+
         from apm_cli.integration.skill_integrator import SkillIntegrator
-        from apm_cli.integration.targets import TargetProfile, PrimitiveMapping
+        from apm_cli.integration.targets import PrimitiveMapping, TargetProfile
 
         project_root = tmp_path / "project"
         project_root.mkdir()
@@ -559,4 +541,3 @@ class TestCoworkUninstallSyncIntegration:
 
         # Warning must have been emitted.
         mock_warn.assert_called_once()
-

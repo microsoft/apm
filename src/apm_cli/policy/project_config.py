@@ -33,7 +33,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional  # noqa: F401, UP035
 
 import yaml
 
@@ -106,7 +106,7 @@ def _read_or_default(project_root: Path, default: str) -> str:
     policy_block = data.get("policy")
     if not isinstance(policy_block, dict):
         return default
-    value: Optional[object] = policy_block.get("fetch_failure_default")
+    value: object | None = policy_block.get("fetch_failure_default")
     if isinstance(value, str) and value in _VALID_FETCH_FAILURE_DEFAULT:
         return value
     return default
@@ -135,8 +135,8 @@ def _strip_algo_prefix(value: str, declared_algo: str) -> str:
 
 
 def parse_project_policy_hash_pin(
-    raw: Optional[Dict[str, Any]],
-) -> Optional[ProjectPolicyHashPin]:
+    raw: dict[str, Any] | None,
+) -> ProjectPolicyHashPin | None:
     """Extract a :class:`ProjectPolicyHashPin` from the apm.yml policy block.
 
     Returns ``None`` when the block is absent, empty, or simply does not
@@ -148,21 +148,16 @@ def parse_project_policy_hash_pin(
     if raw is None:
         return None
     if not isinstance(raw, dict):
-        raise ProjectPolicyConfigError(
-            "policy: block in apm.yml must be a mapping"
-        )
+        raise ProjectPolicyConfigError("policy: block in apm.yml must be a mapping")
 
     algo_raw = raw.get("hash_algorithm", _DEFAULT_HASH_ALGORITHM)
     if not isinstance(algo_raw, str):
-        raise ProjectPolicyConfigError(
-            "policy.hash_algorithm in apm.yml must be a string"
-        )
+        raise ProjectPolicyConfigError("policy.hash_algorithm in apm.yml must be a string")
     algo = algo_raw.strip().lower()
     if algo not in ALLOWED_HASH_ALGORITHMS:
         allowed = ", ".join(ALLOWED_HASH_ALGORITHMS)
         raise ProjectPolicyConfigError(
-            f"policy.hash_algorithm '{algo_raw}' is not supported. "
-            f"Allowed: {allowed}"
+            f"policy.hash_algorithm '{algo_raw}' is not supported. Allowed: {allowed}"
         )
 
     hash_raw = raw.get("hash")
@@ -170,8 +165,7 @@ def parse_project_policy_hash_pin(
         return None
     if not isinstance(hash_raw, str):
         raise ProjectPolicyConfigError(
-            "policy.hash in apm.yml must be a string of the form "
-            "'sha256:<hex>' or '<hex>'"
+            "policy.hash in apm.yml must be a string of the form 'sha256:<hex>' or '<hex>'"
         )
     candidate = _strip_algo_prefix(hash_raw.strip(), algo).lower()
     expected_len = _HASH_HEX_LEN[algo]
@@ -185,7 +179,7 @@ def parse_project_policy_hash_pin(
 
 def read_project_policy_hash_pin(
     project_root: Path,
-) -> Optional[ProjectPolicyHashPin]:
+) -> ProjectPolicyHashPin | None:
     """Read ``policy.hash`` from ``<project_root>/apm.yml``.
 
     Returns ``None`` when the manifest is missing / unreadable / lacks a
@@ -208,9 +202,7 @@ def read_project_policy_hash_pin(
     return parse_project_policy_hash_pin(policy_block)
 
 
-def compute_policy_hash(
-    content: str, algorithm: str = _DEFAULT_HASH_ALGORITHM
-) -> str:
+def compute_policy_hash(content: str, algorithm: str = _DEFAULT_HASH_ALGORITHM) -> str:
     """Compute the digest of fetched policy content under *algorithm*.
 
     The hash is computed on the **UTF-8 bytes of the raw policy text** --
@@ -222,8 +214,7 @@ def compute_policy_hash(
 
     if algorithm not in ALLOWED_HASH_ALGORITHMS:
         raise ProjectPolicyConfigError(
-            f"Refusing to compute policy hash with unsupported algorithm "
-            f"'{algorithm}'"
+            f"Refusing to compute policy hash with unsupported algorithm '{algorithm}'"
         )
     digest = hashlib.new(algorithm)
     digest.update(content.encode("utf-8"))

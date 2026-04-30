@@ -15,7 +15,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-
 pytestmark = pytest.mark.skipif(
     not os.environ.get("GITHUB_APM_PAT") and not os.environ.get("GITHUB_TOKEN"),
     reason="GITHUB_APM_PAT or GITHUB_TOKEN required for GitHub API access",
@@ -43,7 +42,7 @@ def temp_project(tmp_path):
 
 def _run_apm(apm_command, args, cwd, timeout=180):
     return subprocess.run(
-        [apm_command] + args,
+        [apm_command] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,

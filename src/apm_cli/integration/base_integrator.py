@@ -1,10 +1,9 @@
 """Base integrator with shared collision detection and sync logic."""
 
 import re
+from dataclasses import dataclass, field  # noqa: F401
 from pathlib import Path
-from typing import Dict, List, Optional, Set
-
-from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Set  # noqa: F401, UP035
 
 from apm_cli.compilation.link_resolver import UnifiedLinkResolver
 from apm_cli.primitives.discovery import discover_primitives
@@ -24,7 +23,7 @@ class IntegrationResult:
     files_integrated: int
     files_updated: int  # Kept for CLI compat, always 0 today
     files_skipped: int
-    target_paths: List[Path]
+    target_paths: list[Path]
     links_resolved: int = 0
 
     # Hook-specific (default 0 when not applicable)
@@ -44,13 +43,13 @@ class BaseIntegrator:
     """
 
     def __init__(self):
-        self.link_resolver: Optional[UnifiedLinkResolver] = None
+        self.link_resolver: UnifiedLinkResolver | None = None
 
     # ------------------------------------------------------------------
     # Common behaviour  -- subclasses inherit directly
     # ------------------------------------------------------------------
 
-    def should_integrate(self, project_root: Path) -> bool:  # noqa: ARG002
+    def should_integrate(self, project_root: Path) -> bool:
         """Check if integration should be performed (always True)."""
         return True
 
@@ -62,7 +61,7 @@ class BaseIntegrator:
     def check_collision(
         target_path: Path,
         rel_path: str,
-        managed_files: Optional[Set[str]],
+        managed_files: set[str] | None,
         force: bool,
         diagnostics=None,
     ) -> bool:
@@ -100,7 +99,7 @@ class BaseIntegrator:
         return True
 
     @staticmethod
-    def normalize_managed_files(managed_files: Optional[Set[str]]) -> Optional[Set[str]]:
+    def normalize_managed_files(managed_files: set[str] | None) -> set[str] | None:
         """Normalize path separators once for O(1) lookups."""
         if managed_files is None:
             return None
@@ -111,6 +110,7 @@ class BaseIntegrator:
     @staticmethod
     def _get_integration_prefixes(targets=None) -> tuple:
         from apm_cli.integration.targets import get_integration_prefixes
+
         return get_integration_prefixes(targets=targets)
 
     @staticmethod
@@ -152,6 +152,7 @@ class BaseIntegrator:
                     from_lockfile_path,
                     resolve_copilot_cowork_skills_dir,
                 )
+
                 cowork_root = resolve_copilot_cowork_skills_dir()
                 if cowork_root is None:
                     return False
@@ -175,7 +176,7 @@ class BaseIntegrator:
     # the bucket names that existing callers expect.  Shared between
     # ``partition_managed_files`` and ``partition_bucket_key`` so the
     # mapping is defined exactly once.
-    _BUCKET_ALIASES: dict = {
+    _BUCKET_ALIASES: dict = {  # noqa: RUF012
         "prompts_copilot": "prompts",
         "agents_copilot": "agents_github",
         "commands_claude": "commands",
@@ -197,7 +198,7 @@ class BaseIntegrator:
 
     @staticmethod
     def partition_managed_files(
-        managed_files: Set[str],
+        managed_files: set[str],
         targets=None,
     ) -> dict:
         """Partition *managed_files* by integration prefix in a single pass.
@@ -235,19 +236,22 @@ class BaseIntegrator:
                 if target.resolved_deploy_root is not None:
                     if prim_name == "skills":
                         from apm_cli.integration.copilot_cowork_paths import COWORK_LOCKFILE_PREFIX
+
                         skill_prefixes.append(COWORK_LOCKFILE_PREFIX)
                     continue
                 effective_root = mapping.deploy_root or target.root_dir
-                prefix = f"{effective_root}/{mapping.subdir}/" if mapping.subdir else f"{effective_root}/"
+                prefix = (
+                    f"{effective_root}/{mapping.subdir}/"
+                    if mapping.subdir
+                    else f"{effective_root}/"
+                )
                 if prim_name == "skills":
                     skill_prefixes.append(prefix)
                 elif prim_name == "hooks":
                     hook_prefixes.append(prefix)
                 else:
                     raw_key = f"{prim_name}_{target.name}"
-                    bucket_key = BaseIntegrator._BUCKET_ALIASES.get(
-                        raw_key, raw_key
-                    )
+                    bucket_key = BaseIntegrator._BUCKET_ALIASES.get(raw_key, raw_key)
                     if bucket_key not in buckets:
                         buckets[bucket_key] = set()
                     prefix_map[prefix] = bucket_key
@@ -302,7 +306,7 @@ class BaseIntegrator:
 
     @staticmethod
     def cleanup_empty_parents(
-        deleted_paths: List[Path],
+        deleted_paths: list[Path],
         stop_at: Path,
     ) -> None:
         """Remove empty parent directories in a single bottom-up pass.
@@ -369,7 +373,7 @@ class BaseIntegrator:
         if resolved == content:
             return content, 0
 
-        link_pattern = re.compile(r'\]\(([^)]+)\)')
+        link_pattern = re.compile(r"\]\(([^)]+)\)")
         original_links = set(link_pattern.findall(content))
         resolved_links = set(link_pattern.findall(resolved))
         return resolved, len(original_links - resolved_links)
@@ -381,13 +385,13 @@ class BaseIntegrator:
     @staticmethod
     def sync_remove_files(
         project_root: Path,
-        managed_files: Optional[Set[str]],
+        managed_files: set[str] | None,
         prefix: str,
-        legacy_glob_dir: Optional[Path] = None,
-        legacy_glob_pattern: Optional[str] = None,
+        legacy_glob_dir: Path | None = None,
+        legacy_glob_pattern: str | None = None,
         targets=None,
         logger=None,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """Remove APM-managed files matching *prefix* from *managed_files*.
 
         Falls back to a legacy glob when *managed_files* is ``None``.
@@ -408,12 +412,12 @@ class BaseIntegrator:
         Returns:
             ``{"files_removed": int, "errors": int}``
         """
-        stats: Dict[str, int] = {"files_removed": 0, "errors": 0}
+        stats: dict[str, int] = {"files_removed": 0, "errors": 0}
 
         if managed_files is not None:
             # Lazy-resolve cowork root at most once per invocation.
             _cowork_root_resolved: bool = False
-            _cowork_root_cached: Optional[Path] = None
+            _cowork_root_cached: Path | None = None
             _cowork_orphans_skipped: int = 0
 
             for rel_path in managed_files:
@@ -424,12 +428,14 @@ class BaseIntegrator:
                     continue
                 # Resolve cowork:// paths to absolute before filesystem ops.
                 from apm_cli.integration.copilot_cowork_paths import COWORK_URI_SCHEME
+
                 if rel_path.startswith(COWORK_URI_SCHEME):
                     try:
                         if not _cowork_root_resolved:
                             from apm_cli.integration.copilot_cowork_paths import (
                                 resolve_copilot_cowork_skills_dir,
                             )
+
                             _cowork_root_cached = resolve_copilot_cowork_skills_dir()
                             _cowork_root_resolved = True
                         if _cowork_root_cached is None:
@@ -438,8 +444,9 @@ class BaseIntegrator:
                         from apm_cli.integration.copilot_cowork_paths import (
                             from_lockfile_path,
                         )
+
                         target = from_lockfile_path(rel_path, _cowork_root_cached)
-                    except Exception:
+                    except Exception:  # noqa: S112
                         continue
                 else:
                     target = project_root / rel_path
@@ -482,8 +489,8 @@ class BaseIntegrator:
     def find_files_by_glob(
         package_path: Path,
         pattern: str,
-        subdirs: Optional[List[str]] = None,
-    ) -> List[Path]:
+        subdirs: list[str] | None = None,
+    ) -> list[Path]:
         """Search *package_path* (and optional subdirectories) for *pattern*.
 
         Symlinks are rejected outright to prevent traversal attacks.
@@ -497,7 +504,7 @@ class BaseIntegrator:
         Returns:
             De-duplicated list of matching ``Path`` objects.
         """
-        results: List[Path] = []
+        results: list[Path] = []
         seen: set = set()
 
         dirs = [package_path]

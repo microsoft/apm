@@ -2,7 +2,7 @@
 
 import subprocess
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from apm_cli.version import get_build_sha
 

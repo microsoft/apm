@@ -29,15 +29,7 @@ EXPECTED_FORM_TOKENS = ("'org'", "owner/repo", "https://", "file path")
 DOCS_FORM_TOKENS = ("`org`", "`owner/repo`", "`https://`", "file path")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DOCS_PATH = (
-    REPO_ROOT
-    / "docs"
-    / "src"
-    / "content"
-    / "docs"
-    / "reference"
-    / "cli-commands.md"
-)
+DOCS_PATH = REPO_ROOT / "docs" / "src" / "content" / "docs" / "reference" / "cli-commands.md"
 
 
 def _normalize_help_output(text: str) -> str:
@@ -107,9 +99,7 @@ def _bullet_starting_with(text: str, marker: str) -> str:
     """
     idx = text.find(marker)
     if idx < 0:
-        raise AssertionError(
-            f"Could not find bullet starting with {marker!r} in {DOCS_PATH.name}"
-        )
+        raise AssertionError(f"Could not find bullet starting with {marker!r} in {DOCS_PATH.name}")
     end = text.find("\n", idx)
     return text[idx:end] if end >= 0 else text[idx:]
 

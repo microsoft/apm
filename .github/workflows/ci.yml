@@ -17,6 +17,60 @@ permissions:
   contents: read
 
 jobs:
+  # Fast lint gate -- runs in ~3s using Astral's ruff-action (no Python/uv setup needed).
+  # Fails fast on style, import, and complexity violations before the heavier build-and-test job.
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: astral-sh/setup-uv@v6
+
+    - name: Ruff lint
+      run: uv run --extra dev ruff check src/ tests/
+
+    - name: Ruff format check
+      run: uv run --extra dev ruff format --check src/ tests/
+
+    - name: Check YAML encoding safety
+      run: |
+        # Ensure YAML file I/O goes through yaml_io helpers.
+        # Catches yaml.dump/safe_dump writing to a file handle outside yaml_io.py.
+        VIOLATIONS=$(grep -rn --include='*.py' -P \
+          'yaml\.(safe_)?dump\(.+,\s*[a-zA-Z_]\w*\b' src/apm_cli/ \
+          | grep -v 'utils/yaml_io.py' \
+          | grep -v '# yaml-io-exempt' \
+          || true)
+        if [ -n "$VIOLATIONS" ]; then
+          echo "::error::Direct yaml.dump() to file handle detected. Use yaml_io.dump_yaml() instead:"
+          echo "$VIOLATIONS"
+          exit 1
+        fi
+
+    - name: File length guardrail
+      run: |
+        # Ruff has no max-module-lines rule. This check prevents new files from
+        # exceeding the current worst case. Tighten the threshold over time.
+        MAX_LINES=2400   # current max: 2316 (github_downloader.py)
+        VIOLATIONS=$(find src/ -name '*.py' -print0 | xargs -0 -I{} awk -v max="$MAX_LINES" \
+          'END { if (NR > max) printf "%s: %d lines (max %d)\n", FILENAME, NR, max }' {})
+        if [ -n "$VIOLATIONS" ]; then
+          echo "::error::Source files exceed $MAX_LINES-line limit:"
+          echo "$VIOLATIONS"
+          exit 1
+        fi
+
+    - name: Lint - no raw str(relative_to) patterns
+      run: |
+        # Fail if any code uses str(x.relative_to(y)) instead of portable_relpath()
+        if grep -rn --include="*.py" -P 'str\([^)]*\.relative_to\(' src/apm_cli/ | grep -v portable_relpath | grep -v '\.pyc'; then
+          echo "::error::Found raw str(path.relative_to()) calls. Use portable_relpath() from apm_cli.utils.paths instead."
+          exit 1
+        fi
+
   # Linux-only for PR feedback. Full platform matrix (incl. macOS + Windows) runs post-merge in build-release.yml.
   # Combines unit tests + binary build into a single job to eliminate runner re-provisioning overhead.
   build-and-test:
@@ -41,31 +95,8 @@ jobs:
     - name: Install dependencies
       run: uv sync --extra dev --extra build
 
-    - name: Check YAML encoding safety
-      run: |
-        # Ensure YAML file I/O goes through yaml_io helpers.
-        # Catches yaml.dump/safe_dump writing to a file handle outside yaml_io.py.
-        VIOLATIONS=$(grep -rn --include='*.py' -P \
-          'yaml\.(safe_)?dump\(.+,\s*[a-zA-Z_]\w*\b' src/apm_cli/ \
-          | grep -v 'utils/yaml_io.py' \
-          | grep -v '# yaml-io-exempt' \
-          || true)
-        if [ -n "$VIOLATIONS" ]; then
-          echo "::error::Direct yaml.dump() to file handle detected. Use yaml_io.dump_yaml() instead:"
-          echo "$VIOLATIONS"
-          exit 1
-        fi
-
     - name: Run tests
       run: uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal
-
-    - name: Lint - no raw str(relative_to) patterns
-      run: |
-        # Fail if any code uses str(x.relative_to(y)) instead of portable_relpath()
-        if grep -rn --include="*.py" -P 'str\([^)]*\.relative_to\(' src/apm_cli/ | grep -v portable_relpath | grep -v '\.pyc'; then
-          echo "::error::Found raw str(path.relative_to()) calls. Use portable_relpath() from apm_cli.utils.paths instead."
-          exit 1
-        fi
 
     - name: Install UPX
       run: |

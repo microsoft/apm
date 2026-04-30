@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 TARGET_CHECK_IDS = frozenset({"compilation-target"})
 
 
-def run(ctx: "InstallContext") -> None:
+def run(ctx: InstallContext) -> None:
     """Run target-aware policy checks after the targets phase.
 
     Skips entirely when:
@@ -109,6 +109,5 @@ def run(ctx: "InstallContext") -> None:
 
     if has_blocking:
         raise PolicyViolationError(
-            "Install blocked by org policy (compilation target) "
-            "-- see violations above"
+            "Install blocked by org policy (compilation target) -- see violations above"
         )

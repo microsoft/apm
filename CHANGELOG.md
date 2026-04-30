@@ -7,27 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [Unreleased]
-### Added
-
-- Codex CLI MCP config is now project-local (`.codex/config.toml`) during project installs and gated to active project targets; Codex user-scope primitive deployment is also supported. (#803)
-- **Dev Container Feature** `ghcr.io/microsoft/apm/apm-cli` -- one-line install of the APM CLI into any `devcontainer.json`, GitHub Codespace, or JetBrains Gateway workspace. Supports a `version` option (`latest` or pinned semver), declares `installsAfter` for the official Python feature, handles PEP 668 on Ubuntu 24.04+. Ships with 37 bats unit tests and a 6-distro Docker integration matrix (Ubuntu 24.04, Ubuntu 22.04, Debian 12, Alpine 3.20, Fedora 41, plus Python-feature combo). (#861)
-- `shared/apm.md` gh-aw workflow gains an `apps:` array input for cross-org private packages: each entry mints its own GitHub App installation token via `actions/create-github-app-token` and packs only its declared packages, with a matrix fan-out one replica per credential group. The single-app top-level form (`app-id`, `private-key`, `owner`, `repositories`) shipped earlier in this cycle is preserved as the canonical shorthand for one-org users; `apps[]` is purely additive. Multi-bundle restore uses the `bundles-file:` input from `microsoft/apm-action@v1.5.0` (microsoft/apm-action#30, microsoft/apm-action#29).
-- `shared/apm.md` gh-aw workflow now accepts `app-id`, `private-key`, `owner`, and `repositories` inputs to mint a GitHub App installation token for fetching cross-org private APM packages, restoring parity with the deprecated `dependencies.github-app` form. The default `GH_AW_PLUGINS_TOKEN || GH_AW_GITHUB_TOKEN || GITHUB_TOKEN` cascade still applies when no app-id is supplied.
 
 ### Changed
 
-- **Manifest contract: invalid `target:` values now raise a parse error.** Previously, an unknown token (or a CSV string like `target: opencode,claude,copilot,agents` instead of the YAML list `target: [opencode, claude, copilot, agents]`) was silently ignored, leaving `apm install` and `apm compile` to exit 0 while deploying nothing. The shared parser used by `--target` now also validates `apm.yml`'s `target:`, so the same input resolves the same way at every entry point. **Migration:** three previously-silent inputs now fail loud -- (1) unknown tokens (`target: bogus` -> fix the typo), (2) empty values (`target: ""`, `target: []` -> remove the line if you meant auto-detect), (3) `all` mixed with other targets (`target: [all, claude]` -> use `all` alone). Omitting `target:` entirely still triggers auto-detection. (#820)
-- Rename `DownloadStrategyManager` to `DownloadDelegate` to better reflect Facade/Delegate pattern (#918)
-- Fix incorrect double-checked locking in marketplace registry `_load()` -- hold lock across full check+read+set (#918)
+- **BREAKING: `apm pack` now produces a Claude Code plugin directory by default — zero extra flags, schema-validated `plugin.json`, convention dirs auto-discovered.** The legacy APM bundle layout is preserved under `--format apm`. Migration: CI workflows and scripts that consume the legacy bundle must add `--format apm` (the [`microsoft/apm-action`](https://github.com/microsoft/apm-action) wrapper has been updated accordingly). (#1061)
+- **Plugin manifest schema conformance.** The synthesized/written `plugin.json` no longer emits `agents`/`skills`/`commands`/`instructions` keys pointing at the convention directories — these are auto-discovered by Claude Code, and per the [official schema](https://json.schemastore.org/claude-code-plugin.json) those array entries must be `./*.md` paths to *additional* files. The convention dirs themselves are still copied to disk. When stripping such keys from an authored `plugin.json`, `apm pack` now emits a warning so authors can clean up their source. (#1061)
+
+### Added
+
+- **`apm pack` marketplace builder hardening.** Local source paths are now emitted relative to `metadata.pluginRoot` (fixes double-prefix bug). New pass-through fields: `author`, `license`, `repository`, `keywords` (alias for `tags`). Curator-wins override semantics for `description`/`version` on remote entries. Security guards reject path traversal and absolute paths post-subtraction. (#1061)
+- **Plugin manifest schema-conformance tests.** `tests/unit/test_plugin_exporter_schema.py` validates every shape of `plugin.json` produced by `apm pack` (synthesized, authored, and authored-with-stale-keys) against the vendored official schema. Companion marketplace conformance lives in `tests/unit/marketplace/test_schema_conformance.py`. (#1061)
+- Slash commands installed from APM packages now surface argument hints in Claude Code -- `apm install` automatically maps prompt `input:` to Claude's `arguments:` front-matter, rewrites `${input:name}` references to `$name`, and auto-generates `argument-hint`. Argument names are validated against an allowlist to prevent YAML injection from third-party packages, and the mapping is reported at install time. (#1039)
+
+## [0.11.0] - 2026-04-29
+
+### Added
+
+- **`apm pack` is now the single command for marketplace builds** -- with an `apm.yml` `marketplace:` block it emits `.claude-plugin/marketplace.json` directly. New flags: `--offline`, `--include-prerelease`, `--marketplace-output PATH`. (#722)
+- **Author marketplaces from `apm.yml`.** New top-level `marketplace:` block, `apm marketplace migrate` to consolidate legacy `marketplace.yml`, `apm init --marketplace` to scaffold, and first-class `source: ./local/path` package sources. (#1038)
+- **Codex CLI installs are now project-scoped.** MCP config lands in `.codex/config.toml` for project installs (no more polluting the user-global file); user-scope primitive deployment is also supported. (#803)
+- **Cross-org private packages in `shared/apm.md`** via a new `apps:` array (one GitHub App per credential group, matrix fan-out). The single-app shorthand (`app-id` / `private-key` / `owner` / `repositories`) is preserved. (#982)
+
+### Changed
+
+- **`apm marketplace add` preserves the upstream alias** -- now defaults to the `name` declared in the fetched `marketplace.json` instead of the repo name, so install instructions in third-party READMEs work verbatim. (#1032)
+- **`--policy` / `--policy-source` help is unified** across CLI and docs, with lockstep tests pinning all surfaces against drift. (#1000, closes #998 #994)
+- **BREAKING: invalid `target:` values now fail loud.** CSV strings (`target: a,b,c`), unknown tokens, empty values, and `all` mixed with other targets used to silently no-op `apm install` / `apm compile`; they now raise a parse error. Omitting `target:` still auto-detects. (#820)
+- Rename `DownloadStrategyManager` -> `DownloadDelegate` and fix double-checked-locking bug in marketplace registry `_load()`. (#918)
+
+### Removed
+
+- **BREAKING: `apm marketplace build` removed** -- `apm pack` is the replacement; the old verb exits 2 with a migration hint. The `marketplace_authoring` experimental flag is also gone (authoring is GA). (#722)
+
+### Deprecated
+
+- Standalone `marketplace.yml` -- still loaded with a deprecation warning, removal slated for v0.13. (#1038)
 
 ### Fixed
 
-- `apm install` and `apm compile` no longer exit 0 with success messages when `target:` in `apm.yml` is a CSV string -- the value now parses identically to the same input on `--target`, and zero-target resolution surfaces a warning instead of a silent no-op. (#820)
-- Remove redundant `seen` set from `_scan_patterns()` discovery walk (#918)
-- `apm marketplace build` now respects `GITHUB_HOST` for GitHub Enterprise repos -- ref resolution, token lookup, and metadata fetch all use the configured host instead of hardcoded `github.com`. `git ls-remote` is authenticated so private repos work without separate credential setup. (#1008)
-- `apm marketplace build` now accepts multiple Git URL forms (GitHub, GHES, GitLab, Bitbucket, ADO, SSH) for `type: url` parsing via `DependencyReference.parse()`. Host resolution is still driven by `GITHUB_HOST`, so non-`github.com` hosts require `GITHUB_HOST` to be set accordingly. (#1008)
-- **ADO Entra ID auth path no longer silently fails.** Bearer tokens from `az account get-access-token` are now correctly plumbed through validation (auth scheme, git env). Auth failures raise a typed `AuthenticationError` with an actionable 4-case diagnostic instead of the ambiguous "not accessible or doesn't exist" message. `apm install --update` runs a pre-flight auth check before modifying any files -- on failure it aborts with "No files were modified". (#1015)
+- **`shared/apm.md` single-credential-group runs no longer fail validation** with a spurious `missing APM bundles: apm-default` -- a normalisation step recreates the per-group subdir layout that `actions/download-artifact@v5+` flattens away. (#1051)
+- **`apm pack` works against GitHub Enterprise and other Git hosts** -- honors `GITHUB_HOST` for GHES auth and accepts GitHub / GHES / GitLab / Bitbucket / ADO / SSH URL forms. (#1008)
+- **ADO Entra ID auth no longer silently fails.** Bearer tokens from `az account get-access-token` are plumbed through, errors are typed + actionable (4-case diagnostic), and `apm install --update` pre-flights auth before touching files. (#1015)
 - `apm marketplace add` now uses the `name` field from the fetched `marketplace.json` as the default local alias, falling back to the repo name only when the manifest omits it or declares an invalid value. This restores parity with Claude Code install instructions (e.g. `addyosmani/agent-skills` registers as `addy-agent-skills` as that repo's README documents). Existing marketplace entries are unaffected; use `--name` to override explicitly. (#1032)
+- `GEMINI.md` is now only created when explicitly targeted. (#1019)
+- Windows-friendly: auto-discovery CLI output uses POSIX paths so `apm install` / `apm compile` output is readable on Windows. (#1018)
+- Generated-file footer no longer prints stray `specify` before `apm compile`. (#996)
+- CodeQL `clear-text-storage` false-positive resolved (variable rename). (#1002)
 
 ## [0.10.0] - 2026-04-27
 

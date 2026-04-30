@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional  # noqa: F401
 
 __all__ = [
     "SemVer",
@@ -114,7 +114,7 @@ class SemVer:
 # ---------------------------------------------------------------------------
 
 
-def parse_semver(text: str) -> Optional[SemVer]:
+def parse_semver(text: str) -> SemVer | None:
     """Parse a semver string into a ``SemVer`` instance.
 
     Returns ``None`` when *text* does not match the semver grammar.
@@ -184,11 +184,7 @@ def _satisfies_single(version: SemVer, spec: str) -> bool:
             return version >= base and version.major == base.major
         if base.minor != 0:
             # ^0.2.3 := >=0.2.3 <0.3.0
-            return (
-                version >= base
-                and version.major == 0
-                and version.minor == base.minor
-            )
+            return version >= base and version.major == 0 and version.minor == base.minor
         # ^0.0.3 := >=0.0.3 <0.0.4
         return (
             version >= base
@@ -203,11 +199,7 @@ def _satisfies_single(version: SemVer, spec: str) -> bool:
         if base is None:
             return False
         # ~1.2.3 := >=1.2.3 <1.3.0
-        return (
-            version >= base
-            and version.major == base.major
-            and version.minor == base.minor
-        )
+        return version >= base and version.major == base.major and version.minor == base.minor
 
     # Comparison operators
     if spec.startswith(">="):

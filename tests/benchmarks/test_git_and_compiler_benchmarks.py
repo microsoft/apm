@@ -11,30 +11,30 @@ Run with: uv run pytest tests/benchmarks/test_git_and_compiler_benchmarks.py -v 
 
 import hashlib
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field  # noqa: F401
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional  # noqa: F401, UP035
 
 import pytest
 
-from apm_cli.deps.github_downloader import GitHubPackageDownloader
-from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 from apm_cli.compilation.distributed_compiler import (
     DirectoryMap,
     DistributedAgentsCompiler,
 )
-from apm_cli.primitives.models import Instruction
+from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.models.apm_package import clear_apm_yml_cache
-
+from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
+from apm_cli.primitives.models import Instruction
 
 # ---------------------------------------------------------------------------
 # Helpers -- synthetic git ls-remote output
 # ---------------------------------------------------------------------------
 
+
 def _make_sha(index: int) -> str:
     """Generate a deterministic 40-hex-char SHA for a given index."""
-    return hashlib.sha1(f"ref-{index}".encode()).hexdigest()
+    return hashlib.sha1(f"ref-{index}".encode()).hexdigest()  # noqa: S324
 
 
 def _generate_ls_remote_output(ref_count: int) -> str:
@@ -46,7 +46,7 @@ def _generate_ls_remote_output(ref_count: int) -> str:
 
     Every 3rd tag includes an annotated tag pair (tag object + deref ``^{}``).
     """
-    lines: List[str] = []
+    lines: list[str] = []
     tag_count = int(ref_count * 0.6)
     branch_count = ref_count - tag_count
 
@@ -104,7 +104,7 @@ def _create_directory_tree(base: Path, dir_count: int) -> None:
         (subdir / "README.md").write_text(f"# Module {i}\n")
 
 
-def _write_apm_yml_with_mcp(path: Path, pkg_name: str, mcp_servers: List[str]) -> Path:
+def _write_apm_yml_with_mcp(path: Path, pkg_name: str, mcp_servers: list[str]) -> Path:
     """Write an apm.yml with MCP dependencies and return its path."""
     lines = [
         f"name: {pkg_name}",
@@ -120,9 +120,7 @@ def _write_apm_yml_with_mcp(path: Path, pkg_name: str, mcp_servers: List[str]) -
     return apm_yml
 
 
-def _setup_mcp_modules(
-    tmp_path: Path, pkg_count: int, servers_per_pkg: int = 2
-) -> Path:
+def _setup_mcp_modules(tmp_path: Path, pkg_count: int, servers_per_pkg: int = 2) -> Path:
     """Create an apm_modules layout with ``pkg_count`` packages.
 
     Each package has ``servers_per_pkg`` MCP server entries.  A minimal
@@ -162,6 +160,7 @@ def _setup_mcp_modules(
 # ---------------------------------------------------------------------------
 # P1 #1: _parse_ls_remote_output() + _sort_remote_refs()
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.benchmark
 class TestParseLsRemoteThroughput:
@@ -304,12 +303,7 @@ class TestParseLsRemoteCorrectness:
 
     def test_blank_lines_skipped(self):
         """Blank lines and whitespace-only lines are ignored."""
-        output = (
-            "\n"
-            "   \n"
-            "aaaa000000000000000000000000000000000000\trefs/tags/v1.0.0\n"
-            "\n"
-        )
+        output = "\n   \naaaa000000000000000000000000000000000000\trefs/tags/v1.0.0\n\n"
         refs = GitHubPackageDownloader._parse_ls_remote_output(output)
         assert len(refs) == 1
 
@@ -332,6 +326,7 @@ class TestParseLsRemoteCorrectness:
 # P1 #2: DistributedAgentsCompiler.analyze_directory_structure()
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.benchmark
 class TestAnalyzeDirectoryStructureThroughput:
     """Benchmark analyze_directory_structure() with varying project sizes."""
@@ -344,9 +339,7 @@ class TestAnalyzeDirectoryStructureThroughput:
             (200, 25.0),
         ],
     )
-    def test_throughput_by_project_size(
-        self, tmp_path: Path, dir_count: int, ceiling: float
-    ):
+    def test_throughput_by_project_size(self, tmp_path: Path, dir_count: int, ceiling: float):
         """analyze_directory_structure with N directories within ceiling."""
         _create_directory_tree(tmp_path, dir_count)
 
@@ -355,16 +348,10 @@ class TestAnalyzeDirectoryStructureThroughput:
         for i in range(min(dir_count, 20)):
             group = f"group-{i // 10}"
             pattern = f"{group}/module-{i}/**/*.py"
-            instructions.append(
-                _make_instruction(f"instr-{i}", pattern, tmp_path)
-            )
+            instructions.append(_make_instruction(f"instr-{i}", pattern, tmp_path))
         # Add a few global patterns
-        instructions.append(
-            _make_instruction("global-md", "**/*.md", tmp_path)
-        )
-        instructions.append(
-            _make_instruction("root-py", "*.py", tmp_path)
-        )
+        instructions.append(_make_instruction("global-md", "**/*.md", tmp_path))
+        instructions.append(_make_instruction("root-py", "*.py", tmp_path))
 
         compiler = DistributedAgentsCompiler(base_dir=str(tmp_path))
 
@@ -482,6 +469,7 @@ class TestAnalyzeDirectoryStructureCorrectness:
 # P1 #3: MCPIntegrator.collect_transitive()
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.benchmark
 class TestCollectTransitiveThroughput:
     """Benchmark MCPIntegrator.collect_transitive() at various scales.
@@ -501,9 +489,7 @@ class TestCollectTransitiveThroughput:
             (50, 25.0),
         ],
     )
-    def test_throughput_by_dependency_count(
-        self, tmp_path: Path, pkg_count: int, ceiling: float
-    ):
+    def test_throughput_by_dependency_count(self, tmp_path: Path, pkg_count: int, ceiling: float):
         """collect_transitive with N packages (2 MCP servers each) within ceiling."""
         servers_per_pkg = 2
         apm_modules = _setup_mcp_modules(tmp_path, pkg_count, servers_per_pkg)
@@ -549,9 +535,7 @@ class TestCollectTransitiveCorrectness:
         pkg_dir = apm_modules / "org" / "no-mcp-pkg"
         pkg_dir.mkdir(parents=True)
         # Write apm.yml without MCP deps
-        (pkg_dir / "apm.yml").write_text(
-            "name: no-mcp-pkg\nversion: 1.0.0\n"
-        )
+        (pkg_dir / "apm.yml").write_text("name: no-mcp-pkg\nversion: 1.0.0\n")
 
         # No lockfile: falls back to rglob scan
         result = MCPIntegrator.collect_transitive(

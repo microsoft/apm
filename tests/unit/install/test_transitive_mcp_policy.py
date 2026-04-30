@@ -19,11 +19,11 @@ Scenarios:
 
 from __future__ import annotations
 
-import os
-import sys
+import os  # noqa: F401
+import sys  # noqa: F401
 from pathlib import Path
-from typing import Optional
-from unittest.mock import MagicMock, call, patch
+from typing import Optional  # noqa: F401
+from unittest.mock import MagicMock, call, patch  # noqa: F401
 
 import pytest
 
@@ -34,10 +34,9 @@ from apm_cli.policy.install_preflight import (
     PolicyBlockError,
     run_policy_preflight,
 )
-from apm_cli.policy.models import CIAuditResult, CheckResult
+from apm_cli.policy.models import CheckResult, CIAuditResult  # noqa: F401
 from apm_cli.policy.parser import load_policy
 from apm_cli.policy.schema import ApmPolicy
-
 
 # -- Fixtures / helpers -----------------------------------------------
 
@@ -52,7 +51,7 @@ def _load_mcp_policy() -> ApmPolicy:
 
 
 def _make_fetch_result(
-    policy: Optional[ApmPolicy] = None,
+    policy: ApmPolicy | None = None,
     outcome: str = "found",
     source: str = "org:test-org/.github",
 ) -> PolicyFetchResult:
@@ -66,9 +65,9 @@ def _make_fetch_result(
 
 def _make_mcp_dep(
     name: str,
-    transport: Optional[str] = None,
+    transport: str | None = None,
     registry=None,
-    url: Optional[str] = None,
+    url: str | None = None,
 ) -> MCPDependency:
     return MCPDependency(
         name=name,
@@ -99,7 +98,7 @@ def _make_install_result(**overrides):
     result.installed_count = overrides.get("installed_count", 1)
     result.prompts_integrated = overrides.get("prompts_integrated", 0)
     result.agents_integrated = overrides.get("agents_integrated", 0)
-    result.diagnostics = overrides.get("diagnostics", None)
+    result.diagnostics = overrides.get("diagnostics")
     return result
 
 
@@ -114,57 +113,46 @@ class TestTransitiveMCPBlock:
         never called and the process exits non-zero."""
         policy = _load_mcp_policy()  # enforcement=block
         fetch = _make_fetch_result(policy=policy)
-        evil_dep = _make_mcp_dep(
-            "io.github.untrusted/evil-transitive", transport="stdio"
-        )
+        evil_dep = _make_mcp_dep("io.github.untrusted/evil-transitive", transport="stdio")
 
         logger = _make_logger()
-        with _patch_discover(fetch):
-            with pytest.raises(PolicyBlockError):
-                run_policy_preflight(
-                    project_root=Path("/fake/project"),
-                    mcp_deps=[evil_dep],
-                    no_policy=False,
-                    logger=logger,
-                    dry_run=False,
-                )
+        with _patch_discover(fetch), pytest.raises(PolicyBlockError):
+            run_policy_preflight(
+                project_root=Path("/fake/project"),
+                mcp_deps=[evil_dep],
+                no_policy=False,
+                logger=logger,
+                dry_run=False,
+            )
 
     def test_transitive_preflight_uses_merged_mcp_set(self):
         """The second preflight receives the *merged* (direct + transitive)
         MCP set, not just the transitive portion."""
         policy = _load_mcp_policy()
         fetch = _make_fetch_result(policy=policy)
-        direct_dep = _make_mcp_dep(
-            "io.github.github/github-mcp-server", transport="stdio"
-        )
-        transitive_dep = _make_mcp_dep(
-            "io.github.untrusted/evil-transitive", transport="stdio"
-        )
+        direct_dep = _make_mcp_dep("io.github.github/github-mcp-server", transport="stdio")
+        transitive_dep = _make_mcp_dep("io.github.untrusted/evil-transitive", transport="stdio")
         merged = [direct_dep, transitive_dep]
 
         logger = _make_logger()
-        with _patch_discover(fetch):
-            with pytest.raises(PolicyBlockError):
-                run_policy_preflight(
-                    project_root=Path("/fake/project"),
-                    mcp_deps=merged,
-                    no_policy=False,
-                    logger=logger,
-                    dry_run=False,
-                )
+        with _patch_discover(fetch), pytest.raises(PolicyBlockError):
+            run_policy_preflight(
+                project_root=Path("/fake/project"),
+                mcp_deps=merged,
+                no_policy=False,
+                logger=logger,
+                dry_run=False,
+            )
 
     def test_transitive_block_emits_violation_diagnostic(self):
         """Block-severity violations from transitive MCP are emitted via
         logger.policy_violation with severity='block'."""
         policy = _load_mcp_policy()
         fetch = _make_fetch_result(policy=policy)
-        dep = _make_mcp_dep(
-            "io.github.untrusted/evil-transitive", transport="stdio"
-        )
+        dep = _make_mcp_dep("io.github.untrusted/evil-transitive", transport="stdio")
 
         logger = _make_logger()
-        with _patch_discover(fetch), \
-             patch.object(logger, "policy_violation") as mock_violation:
+        with _patch_discover(fetch), patch.object(logger, "policy_violation") as mock_violation:
             with pytest.raises(PolicyBlockError):
                 run_policy_preflight(
                     project_root=Path("/fake/project"),
@@ -194,13 +182,11 @@ class TestTransitiveMCPWarn:
             dependencies=policy_base.dependencies,
         )
         fetch = _make_fetch_result(policy=policy)
-        dep = _make_mcp_dep(
-            "io.github.untrusted/evil-transitive", transport="stdio"
-        )
+        dep = _make_mcp_dep("io.github.untrusted/evil-transitive", transport="stdio")
 
         logger = _make_logger()
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(
+            result, active = run_policy_preflight(  # noqa: RUF059
                 project_root=Path("/fake/project"),
                 mcp_deps=[dep],
                 no_policy=False,
@@ -218,13 +204,10 @@ class TestTransitiveMCPWarn:
             dependencies=policy_base.dependencies,
         )
         fetch = _make_fetch_result(policy=policy)
-        dep = _make_mcp_dep(
-            "io.github.untrusted/evil-transitive", transport="stdio"
-        )
+        dep = _make_mcp_dep("io.github.untrusted/evil-transitive", transport="stdio")
 
         logger = _make_logger()
-        with _patch_discover(fetch), \
-             patch.object(logger, "policy_violation") as mock_violation:
+        with _patch_discover(fetch), patch.object(logger, "policy_violation") as mock_violation:
             run_policy_preflight(
                 project_root=Path("/fake/project"),
                 mcp_deps=[dep],
@@ -248,9 +231,7 @@ class TestTransitiveMCPAllowed:
         """Allowed transitive MCP passes through the preflight cleanly."""
         policy = _load_mcp_policy()
         fetch = _make_fetch_result(policy=policy)
-        dep = _make_mcp_dep(
-            "io.github.github/github-mcp-server", transport="stdio"
-        )
+        dep = _make_mcp_dep("io.github.github/github-mcp-server", transport="stdio")
 
         logger = _make_logger()
         with _patch_discover(fetch):
@@ -269,13 +250,10 @@ class TestTransitiveMCPAllowed:
         """No policy_violation calls when all MCP pass."""
         policy = _load_mcp_policy()
         fetch = _make_fetch_result(policy=policy)
-        dep = _make_mcp_dep(
-            "io.github.modelcontextprotocol/test-server", transport="stdio"
-        )
+        dep = _make_mcp_dep("io.github.modelcontextprotocol/test-server", transport="stdio")
 
         logger = _make_logger()
-        with _patch_discover(fetch), \
-             patch.object(logger, "policy_violation") as mock_violation:
+        with _patch_discover(fetch), patch.object(logger, "policy_violation") as mock_violation:
             run_policy_preflight(
                 project_root=Path("/fake/project"),
                 mcp_deps=[dep],
@@ -299,9 +277,7 @@ class TestTransitiveEscapeHatches:
         with patch.object(logger, "policy_disabled") as mock_disabled:
             result, active = run_policy_preflight(
                 project_root=Path("/fake/project"),
-                mcp_deps=[
-                    _make_mcp_dep("io.github.untrusted/evil", transport="stdio")
-                ],
+                mcp_deps=[_make_mcp_dep("io.github.untrusted/evil", transport="stdio")],
                 no_policy=True,
                 logger=logger,
                 dry_run=False,
@@ -317,9 +293,7 @@ class TestTransitiveEscapeHatches:
         with patch.object(logger, "policy_disabled") as mock_disabled:
             result, active = run_policy_preflight(
                 project_root=Path("/fake/project"),
-                mcp_deps=[
-                    _make_mcp_dep("io.github.untrusted/evil", transport="stdio")
-                ],
+                mcp_deps=[_make_mcp_dep("io.github.untrusted/evil", transport="stdio")],
                 no_policy=False,
                 logger=logger,
                 dry_run=False,
@@ -356,7 +330,7 @@ class TestNoTransitiveMCP:
         fetch = _make_fetch_result(policy=policy)
 
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(
+            result, active = run_policy_preflight(  # noqa: RUF059
                 project_root=Path("/fake/project"),
                 mcp_deps=[],
                 no_policy=False,
@@ -373,7 +347,7 @@ class TestNoTransitiveMCP:
 
         logger = _make_logger()
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(
+            result, active = run_policy_preflight(  # noqa: RUF059
                 project_root=Path("/fake/project"),
                 mcp_deps=None,
                 no_policy=False,
@@ -395,32 +369,27 @@ class TestDirectMCPNotAffected:
         """Direct --mcp install of a denied server still raises."""
         policy = _load_mcp_policy()
         fetch = _make_fetch_result(policy=policy)
-        dep = _make_mcp_dep(
-            "io.github.untrusted/evil-direct", transport="stdio"
-        )
+        dep = _make_mcp_dep("io.github.untrusted/evil-direct", transport="stdio")
 
         logger = _make_logger()
-        with _patch_discover(fetch):
-            with pytest.raises(PolicyBlockError):
-                run_policy_preflight(
-                    project_root=Path("/fake/project"),
-                    mcp_deps=[dep],
-                    no_policy=False,
-                    logger=logger,
-                    dry_run=False,
-                )
+        with _patch_discover(fetch), pytest.raises(PolicyBlockError):
+            run_policy_preflight(
+                project_root=Path("/fake/project"),
+                mcp_deps=[dep],
+                no_policy=False,
+                logger=logger,
+                dry_run=False,
+            )
 
     def test_direct_mcp_preflight_still_allows_good_server(self):
         """Direct --mcp install of an allowed server passes."""
         policy = _load_mcp_policy()
         fetch = _make_fetch_result(policy=policy)
-        dep = _make_mcp_dep(
-            "io.github.github/github-mcp-server", transport="stdio"
-        )
+        dep = _make_mcp_dep("io.github.github/github-mcp-server", transport="stdio")
 
         logger = _make_logger()
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(
+            result, active = run_policy_preflight(  # noqa: RUF059
                 project_root=Path("/fake/project"),
                 mcp_deps=[dep],
                 no_policy=False,
@@ -444,17 +413,13 @@ class TestInstallPyIntegration:
 
     @patch(f"{_INSTALL_MOD}.MCPIntegrator")
     @patch(f"{_INSTALL_MOD}._install_apm_dependencies")
-    def test_transitive_mcp_triggers_second_preflight(
-        self, mock_apm_install, mock_mcp_cls
-    ):
+    def test_transitive_mcp_triggers_second_preflight(self, mock_apm_install, mock_mcp_cls):
         """When collect_transitive returns deps, run_policy_preflight
         is called a second time with the merged MCP set."""
         # Setup mocks
         mock_apm_install.return_value = _make_install_result()
 
-        evil_dep = _make_mcp_dep(
-            "io.github.untrusted/evil-transitive", transport="stdio"
-        )
+        evil_dep = _make_mcp_dep("io.github.untrusted/evil-transitive", transport="stdio")
         mock_mcp_cls.collect_transitive.return_value = [evil_dep]
         mock_mcp_cls.deduplicate.side_effect = lambda x: x
         mock_mcp_cls.install.return_value = 0
@@ -464,9 +429,7 @@ class TestInstallPyIntegration:
         # We patch run_policy_preflight at the install module level to
         # verify it is called.  The import is lazy (inside the if block),
         # so we patch the module that install.py imports from.
-        with patch(
-            "apm_cli.policy.install_preflight.run_policy_preflight"
-        ) as mock_preflight:
+        with patch("apm_cli.policy.install_preflight.run_policy_preflight") as mock_preflight:
             mock_preflight.return_value = (None, False)
             # The actual call goes through the lazy import in install.py.
             # We verify the import path is correct by checking the mock

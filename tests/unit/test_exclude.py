@@ -1,12 +1,12 @@
 """Tests for the shared exclude-pattern matching utility."""
 
-import tempfile
 import shutil
+import tempfile
 import unittest
 from pathlib import Path
 
 from apm_cli.utils.exclude import (
-    _match_double_star,
+    _match_double_star,  # noqa: F401
     _match_glob_recursive,
     _matches_pattern,
     should_exclude,
@@ -103,9 +103,7 @@ class TestMatchGlobRecursive(unittest.TestCase):
         self.assertTrue(_match_glob_recursive(["a", "foo.md"], ["a", "*.md"]))
 
     def test_double_star_matches_multiple(self):
-        self.assertTrue(
-            _match_glob_recursive(["a", "b", "c", "d"], ["a", "**", "d"])
-        )
+        self.assertTrue(_match_glob_recursive(["a", "b", "c", "d"], ["a", "**", "d"]))
 
     def test_double_star_matches_zero(self):
         self.assertTrue(_match_glob_recursive(["a", "d"], ["a", "**", "d"]))
@@ -115,9 +113,7 @@ class TestMatchGlobRecursive(unittest.TestCase):
 
     def test_trailing_empty_part_from_slash(self):
         # Pattern "foo/" splits to ["foo", ""]
-        self.assertTrue(
-            _match_glob_recursive(["foo", "bar"], ["foo", "**"])
-        )
+        self.assertTrue(_match_glob_recursive(["foo", "bar"], ["foo", "**"]))
 
 
 class TestShouldExclude(unittest.TestCase):
@@ -150,7 +146,8 @@ class TestShouldExclude(unittest.TestCase):
         self.assertFalse(should_exclude(f, self.base, ["docs/**"]))
 
     def test_path_outside_base_not_excluded(self):
-        import os
+        import os  # noqa: F401
+
         outside = Path(tempfile.mkdtemp())
         try:
             f = outside / "secret.md"
@@ -187,6 +184,7 @@ class TestDoubleStarDoSGuard(unittest.TestCase):
 
     def test_normal_patterns_fast(self):
         import time
+
         patterns = validate_exclude_patterns(["docs/**/*.md"])
         start = time.monotonic()
         for _ in range(1000):

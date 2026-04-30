@@ -1,17 +1,18 @@
 """Unit tests for local filesystem path dependency support."""
 
+from pathlib import Path  # noqa: F401
+from unittest.mock import Mock  # noqa: F401
+
 import pytest
 import yaml
-from pathlib import Path
-from unittest.mock import Mock
 
-from apm_cli.models.apm_package import DependencyReference, APMPackage
 from apm_cli.deps.lockfile import LockedDependency, LockFile
-
+from apm_cli.models.apm_package import APMPackage, DependencyReference
 
 # ===========================================================================
 # DependencyReference.is_local_path()
 # ===========================================================================
+
 
 class TestIsLocalPath:
     """Test local path detection logic."""
@@ -75,6 +76,7 @@ class TestIsLocalPath:
 # ===========================================================================
 # DependencyReference.parse() with local paths
 # ===========================================================================
+
 
 class TestParseLocalPath:
     """Test parsing local filesystem paths into DependencyReference."""
@@ -150,6 +152,7 @@ class TestParseLocalPath:
 # DependencyReference methods for local deps
 # ===========================================================================
 
+
 class TestLocalDepMethods:
     """Test DependencyReference methods with local dependencies."""
 
@@ -189,6 +192,7 @@ class TestLocalDepMethods:
 # ===========================================================================
 # LockedDependency with local source
 # ===========================================================================
+
 
 class TestLockedDependencyLocal:
     """Test LockedDependency serialization for local path dependencies."""
@@ -236,17 +240,21 @@ class TestLockedDependencyLocal:
     def test_round_trip(self, tmp_path):
         """Write and read back a lockfile with local dependencies."""
         lock = LockFile()
-        lock.add_dependency(LockedDependency(
-            repo_url="_local/my-skills",
-            source="local",
-            local_path="./packages/my-skills",
-            deployed_files=[".github/instructions/my-skill.instructions.md"],
-        ))
-        lock.add_dependency(LockedDependency(
-            repo_url="owner/remote-pkg",
-            resolved_commit="abc123",
-            deployed_files=[".github/instructions/remote.instructions.md"],
-        ))
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="_local/my-skills",
+                source="local",
+                local_path="./packages/my-skills",
+                deployed_files=[".github/instructions/my-skill.instructions.md"],
+            )
+        )
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="owner/remote-pkg",
+                resolved_commit="abc123",
+                deployed_files=[".github/instructions/remote.instructions.md"],
+            )
+        )
 
         lock_path = tmp_path / "apm.lock"
         lock.write(lock_path)
@@ -280,18 +288,23 @@ class TestLockedDependencyLocal:
 # APMPackage.from_apm_yml with local deps
 # ===========================================================================
 
+
 class TestAPMPackageLocalDeps:
     """Test APMPackage loading with local path dependencies in apm.yml."""
 
     def test_apm_yml_with_local_string_dep(self, tmp_path):
         apm_yml = tmp_path / "apm.yml"
-        apm_yml.write_text(yaml.dump({
-            "name": "test-project",
-            "version": "1.0.0",
-            "dependencies": {
-                "apm": ["./packages/my-skills"],
-            },
-        }))
+        apm_yml.write_text(
+            yaml.dump(
+                {
+                    "name": "test-project",
+                    "version": "1.0.0",
+                    "dependencies": {
+                        "apm": ["./packages/my-skills"],
+                    },
+                }
+            )
+        )
         pkg = APMPackage.from_apm_yml(apm_yml)
         deps = pkg.get_apm_dependencies()
         assert len(deps) == 1
@@ -300,13 +313,17 @@ class TestAPMPackageLocalDeps:
 
     def test_apm_yml_with_local_dict_dep(self, tmp_path):
         apm_yml = tmp_path / "apm.yml"
-        apm_yml.write_text(yaml.dump({
-            "name": "test-project",
-            "version": "1.0.0",
-            "dependencies": {
-                "apm": [{"path": "./packages/my-skills"}],
-            },
-        }))
+        apm_yml.write_text(
+            yaml.dump(
+                {
+                    "name": "test-project",
+                    "version": "1.0.0",
+                    "dependencies": {
+                        "apm": [{"path": "./packages/my-skills"}],
+                    },
+                }
+            )
+        )
         pkg = APMPackage.from_apm_yml(apm_yml)
         deps = pkg.get_apm_dependencies()
         assert len(deps) == 1
@@ -315,17 +332,21 @@ class TestAPMPackageLocalDeps:
 
     def test_mixed_local_and_remote_deps(self, tmp_path):
         apm_yml = tmp_path / "apm.yml"
-        apm_yml.write_text(yaml.dump({
-            "name": "test-project",
-            "version": "1.0.0",
-            "dependencies": {
-                "apm": [
-                    "microsoft/apm-sample-package",
-                    "./packages/my-local-skills",
-                    "/absolute/path/to/pkg",
-                ],
-            },
-        }))
+        apm_yml.write_text(
+            yaml.dump(
+                {
+                    "name": "test-project",
+                    "version": "1.0.0",
+                    "dependencies": {
+                        "apm": [
+                            "microsoft/apm-sample-package",
+                            "./packages/my-local-skills",
+                            "/absolute/path/to/pkg",
+                        ],
+                    },
+                }
+            )
+        )
         pkg = APMPackage.from_apm_yml(apm_yml)
         deps = pkg.get_apm_dependencies()
         assert len(deps) == 3
@@ -338,13 +359,17 @@ class TestAPMPackageLocalDeps:
     def test_invalid_dict_path_rejected(self, tmp_path):
         """Dict-form paths that don't look like filesystem paths should be rejected."""
         apm_yml = tmp_path / "apm.yml"
-        apm_yml.write_text(yaml.dump({
-            "name": "test-project",
-            "version": "1.0.0",
-            "dependencies": {
-                "apm": [{"path": "not-a-local-path"}],
-            },
-        }))
+        apm_yml.write_text(
+            yaml.dump(
+                {
+                    "name": "test-project",
+                    "version": "1.0.0",
+                    "dependencies": {
+                        "apm": [{"path": "not-a-local-path"}],
+                    },
+                }
+            )
+        )
         with pytest.raises(ValueError, match="local filesystem path"):
             APMPackage.from_apm_yml(apm_yml)
 
@@ -352,6 +377,7 @@ class TestAPMPackageLocalDeps:
 # ===========================================================================
 # Pack guard: reject local deps
 # ===========================================================================
+
 
 class TestPackGuardLocalDeps:
     """Test that packing rejects packages with local dependencies."""
@@ -361,21 +387,27 @@ class TestPackGuardLocalDeps:
 
         # Set up project with local dep
         apm_yml = tmp_path / "apm.yml"
-        apm_yml.write_text(yaml.dump({
-            "name": "test-project",
-            "version": "1.0.0",
-            "dependencies": {
-                "apm": ["./packages/my-local-pkg"],
-            },
-        }))
+        apm_yml.write_text(
+            yaml.dump(
+                {
+                    "name": "test-project",
+                    "version": "1.0.0",
+                    "dependencies": {
+                        "apm": ["./packages/my-local-pkg"],
+                    },
+                }
+            )
+        )
 
         # Create a lockfile so pack_bundle doesn't fail on missing lockfile
         lock = LockFile()
-        lock.add_dependency(LockedDependency(
-            repo_url="_local/my-local-pkg",
-            source="local",
-            local_path="./packages/my-local-pkg",
-        ))
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="_local/my-local-pkg",
+                source="local",
+                local_path="./packages/my-local-pkg",
+            )
+        )
         lock.write(tmp_path / "apm.lock")
 
         with pytest.raises(ValueError, match="local path dependency"):
@@ -386,13 +418,17 @@ class TestPackGuardLocalDeps:
 
         # Set up project with only remote dep
         apm_yml = tmp_path / "apm.yml"
-        apm_yml.write_text(yaml.dump({
-            "name": "test-project",
-            "version": "1.0.0",
-            "dependencies": {
-                "apm": ["owner/repo"],
-            },
-        }))
+        apm_yml.write_text(
+            yaml.dump(
+                {
+                    "name": "test-project",
+                    "version": "1.0.0",
+                    "dependencies": {
+                        "apm": ["owner/repo"],
+                    },
+                }
+            )
+        )
 
         # Create an empty lockfile
         lock = LockFile()
@@ -410,6 +446,7 @@ class TestPackGuardLocalDeps:
 # Copy local package helper
 # ===========================================================================
 
+
 class TestCopyLocalPackage:
     """Test the _copy_local_package helper from the install module."""
 
@@ -419,10 +456,14 @@ class TestCopyLocalPackage:
         # Create a local package
         local_pkg = tmp_path / "my-local-pkg"
         local_pkg.mkdir()
-        (local_pkg / "apm.yml").write_text(yaml.dump({
-            "name": "my-local-pkg",
-            "version": "1.0.0",
-        }))
+        (local_pkg / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "my-local-pkg",
+                    "version": "1.0.0",
+                }
+            )
+        )
         instr_dir = local_pkg / ".apm" / "instructions"
         instr_dir.mkdir(parents=True)
         (instr_dir / "test.instructions.md").write_text("# Test")
@@ -484,10 +525,14 @@ class TestCopyLocalPackage:
         # Create a local package
         local_pkg = tmp_path / "my-pkg"
         local_pkg.mkdir()
-        (local_pkg / "apm.yml").write_text(yaml.dump({
-            "name": "my-pkg",
-            "version": "1.0.0",
-        }))
+        (local_pkg / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "my-pkg",
+                    "version": "1.0.0",
+                }
+            )
+        )
         (local_pkg / "data.txt").write_text("original")
 
         dep_ref = DependencyReference.parse(f"./{local_pkg.name}")
@@ -517,10 +562,14 @@ class TestCopyLocalPackage:
         # Create a local package with a symlink pointing outside
         local_pkg = tmp_path / "evil-pkg"
         local_pkg.mkdir()
-        (local_pkg / "apm.yml").write_text(yaml.dump({
-            "name": "evil-pkg",
-            "version": "1.0.0",
-        }))
+        (local_pkg / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "evil-pkg",
+                    "version": "1.0.0",
+                }
+            )
+        )
         (local_pkg / "escape").symlink_to(secret_dir)
 
         dep_ref = DependencyReference.parse(f"./{local_pkg.name}")

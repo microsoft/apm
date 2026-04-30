@@ -6,12 +6,13 @@ import shutil
 import subprocess
 import sys
 import time
-import yaml
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional  # noqa: F401, UP035
 
-from .token_manager import setup_runtime_environment
+import yaml  # noqa: F401
+
 from ..output.script_formatters import ScriptExecutionFormatter
+from .token_manager import setup_runtime_environment
 
 
 class ScriptRunner:
@@ -27,7 +28,7 @@ class ScriptRunner:
         self.compiler = compiler or PromptCompiler()
         self.formatter = ScriptExecutionFormatter(use_color=use_color)
 
-    def run_script(self, script_name: str, params: Dict[str, str]) -> bool:
+    def run_script(self, script_name: str, params: dict[str, str]) -> bool:
         """Run a script from apm.yml with parameter substitution.
 
         Execution priority:
@@ -55,7 +56,7 @@ class ScriptRunner:
         if not config:
             if is_virtual_package:
                 # Create minimal config for zero-config virtual package execution
-                print(f"  [i]  Creating minimal apm.yml for zero-config execution...")
+                print(f"  [i]  Creating minimal apm.yml for zero-config execution...")  # noqa: F541
                 self._create_minimal_config()
                 config = self._load_config()
             else:
@@ -91,7 +92,7 @@ class ScriptRunner:
                 if discovered_prompt:
                     # Signal successful install before attempting runtime detection
                     # This allows E2E tests to validate auto-install without requiring runtime
-                    print(f"\n* Package installed and ready to run\n")
+                    print(f"\n* Package installed and ready to run\n")  # noqa: F541
                     runtime = self._detect_installed_runtime()
                     command = self._generate_runtime_command(runtime, discovered_prompt)
                     return self._execute_script_command(command, params)
@@ -108,15 +109,15 @@ class ScriptRunner:
         # Build helpful error message
         error_msg = f"Script or prompt '{script_name}' not found.\n"
         error_msg += f"Available scripts in apm.yml: {available}\n"
-        error_msg += f"\nTo find available prompts, check:\n"
-        error_msg += f"  - Local: .apm/prompts/, .github/prompts/, or project root\n"
-        error_msg += f"  - Dependencies: apm_modules/*/.apm/prompts/\n"
-        error_msg += f"\nOr install a prompt package:\n"
-        error_msg += f"  apm install <owner>/<repo>/path/to/prompt.prompt.md\n"
+        error_msg += f"\nTo find available prompts, check:\n"  # noqa: F541
+        error_msg += f"  - Local: .apm/prompts/, .github/prompts/, or project root\n"  # noqa: F541
+        error_msg += f"  - Dependencies: apm_modules/*/.apm/prompts/\n"  # noqa: F541
+        error_msg += f"\nOr install a prompt package:\n"  # noqa: F541
+        error_msg += f"  apm install <owner>/<repo>/path/to/prompt.prompt.md\n"  # noqa: F541
 
         raise RuntimeError(error_msg)
 
-    def _execute_script_command(self, command: str, params: Dict[str, str]) -> bool:
+    def _execute_script_command(self, command: str, params: dict[str, str]) -> bool:
         """Execute a script command (from apm.yml or auto-generated).
 
         This is the existing run_script logic, extracted for reuse.
@@ -130,15 +131,13 @@ class ScriptRunner:
         """
 
         # Auto-compile any .prompt.md files in the command
-        compiled_command, compiled_prompt_files, runtime_content = (
-            self._auto_compile_prompts(command, params)
+        compiled_command, compiled_prompt_files, runtime_content = self._auto_compile_prompts(
+            command, params
         )
 
         # Show compilation progress if needed
         if compiled_prompt_files:
-            compilation_lines = self.formatter.format_compilation_progress(
-                compiled_prompt_files
-            )
+            compilation_lines = self.formatter.format_compilation_progress(compiled_prompt_files)
             for line in compilation_lines:
                 print(line)
 
@@ -165,15 +164,13 @@ class ScriptRunner:
 
             # Show environment setup if relevant
             env_vars_set = []
-            if "GITHUB_TOKEN" in env and env["GITHUB_TOKEN"]:
+            if env.get("GITHUB_TOKEN"):
                 env_vars_set.append("GITHUB_TOKEN")
-            if "GITHUB_APM_PAT" in env and env["GITHUB_APM_PAT"]:
+            if env.get("GITHUB_APM_PAT"):
                 env_vars_set.append("GITHUB_APM_PAT")
 
             if env_vars_set:
-                env_lines = self.formatter.format_environment_setup(
-                    runtime, env_vars_set
-                )
+                env_lines = self.formatter.format_environment_setup(runtime, env_vars_set)
                 for line in env_lines:
                     print(line)
 
@@ -183,22 +180,16 @@ class ScriptRunner:
             # Check if this command needs subprocess execution (has compiled content)
             if runtime_content is not None:
                 # Use argument list approach for all runtimes to avoid shell parsing issues
-                result = self._execute_runtime_command(
-                    compiled_command, runtime_content, env
-                )
+                result = self._execute_runtime_command(compiled_command, runtime_content, env)
             else:
                 # Use regular shell execution for other commands
                 # (shell=True works cross-platform: bash on Unix, cmd.exe on Windows)
-                result = subprocess.run(
-                    compiled_command, shell=True, check=True, env=env
-                )
+                result = subprocess.run(compiled_command, shell=True, check=True, env=env)
 
             execution_time = time.time() - start_time
 
             # Show success message
-            success_lines = self.formatter.format_execution_success(
-                runtime, execution_time
-            )
+            success_lines = self.formatter.format_execution_success(runtime, execution_time)
             for line in success_lines:
                 print(line)
 
@@ -212,9 +203,9 @@ class ScriptRunner:
             for line in error_lines:
                 print(line)
 
-            raise RuntimeError(f"Script execution failed with exit code {e.returncode}")
+            raise RuntimeError(f"Script execution failed with exit code {e.returncode}")  # noqa: B904
 
-    def list_scripts(self) -> Dict[str, str]:
+    def list_scripts(self) -> dict[str, str]:
         """List all available scripts from apm.yml.
 
         Returns:
@@ -223,17 +214,18 @@ class ScriptRunner:
         config = self._load_config()
         return config.get("scripts", {}) if config else {}
 
-    def _load_config(self) -> Optional[Dict]:
+    def _load_config(self) -> dict | None:
         """Load apm.yml from current directory."""
         config_path = Path("apm.yml")
         if not config_path.exists():
             return None
 
         from ..utils.yaml_io import load_yaml
+
         return load_yaml(config_path)
 
     def _auto_compile_prompts(
-        self, command: str, params: Dict[str, str]
+        self, command: str, params: dict[str, str]
     ) -> tuple[str, list[str], str]:
         """Auto-compile .prompt.md files and transform runtime commands.
 
@@ -256,7 +248,7 @@ class ScriptRunner:
             compiled_prompt_files.append(prompt_file)
 
             # Read the compiled content
-            with open(compiled_path, "r", encoding="utf-8") as f:
+            with open(compiled_path, encoding="utf-8") as f:
                 compiled_content = f.read().strip()
 
             # Check if this is a runtime command before transformation
@@ -300,18 +292,16 @@ class ScriptRunner:
         # Try matching with env-var prefix (e.g. "ENV=val codex args file.prompt.md")
         for runtime_cmd in runtime_commands:
             runtime_pattern = f" {runtime_cmd} "
-            if runtime_pattern in command and re.search(
-                re.escape(prompt_file), command
-            ):
+            if runtime_pattern in command and re.search(re.escape(prompt_file), command):
                 parts = command.split(runtime_pattern, 1)
                 potential_env_part = parts[0]
                 runtime_part = runtime_cmd + " " + parts[1]
 
-                if "=" in potential_env_part and not potential_env_part.startswith(
-                    runtime_cmd
-                ):
+                if "=" in potential_env_part and not potential_env_part.startswith(runtime_cmd):
                     result = self._parse_and_build_runtime_command(
-                        runtime_cmd, runtime_part, prompt_file,
+                        runtime_cmd,
+                        runtime_part,
+                        prompt_file,
                         env_prefix=potential_env_part,
                     )
                     if result is not None:
@@ -319,11 +309,11 @@ class ScriptRunner:
 
         # Try individual runtime patterns without environment variables
         for runtime_cmd in runtime_commands:
-            if re.search(
-                r"^" + runtime_cmd + r"\s+.*" + re.escape(prompt_file), command
-            ):
+            if re.search(r"^" + runtime_cmd + r"\s+.*" + re.escape(prompt_file), command):
                 result = self._parse_and_build_runtime_command(
-                    runtime_cmd, command, prompt_file,
+                    runtime_cmd,
+                    command,
+                    prompt_file,
                 )
                 if result is not None:
                     return result
@@ -336,9 +326,12 @@ class ScriptRunner:
         return command.replace(prompt_file, compiled_path)
 
     def _parse_and_build_runtime_command(
-        self, runtime_cmd: str, command_part: str, prompt_file: str,
-        env_prefix: str = None,
-    ) -> Optional[str]:
+        self,
+        runtime_cmd: str,
+        command_part: str,
+        prompt_file: str,
+        env_prefix: str = None,  # noqa: RUF013
+    ) -> str | None:
         """Parse arguments around the prompt file and delegate to a per-runtime builder.
 
         Args:
@@ -377,7 +370,10 @@ class ScriptRunner:
         return None
 
     def _build_codex_command(
-        self, args_before: str, args_after: str, env_prefix: Optional[str] = None,
+        self,
+        args_before: str,
+        args_after: str,
+        env_prefix: str | None = None,
     ) -> str:
         """Build a codex command from parsed arguments.
 
@@ -398,7 +394,10 @@ class ScriptRunner:
         return result
 
     def _build_copilot_command(
-        self, args_before: str, args_after: str, env_prefix: Optional[str] = None,
+        self,
+        args_before: str,
+        args_after: str,
+        env_prefix: str | None = None,
     ) -> str:
         """Build a copilot command from parsed arguments.
 
@@ -425,7 +424,10 @@ class ScriptRunner:
         return result
 
     def _build_llm_command(
-        self, args_before: str, args_after: str, env_prefix: Optional[str] = None,
+        self,
+        args_before: str,
+        args_after: str,
+        env_prefix: str | None = None,
     ) -> str:
         """Build an llm command from parsed arguments.
 
@@ -446,7 +448,10 @@ class ScriptRunner:
         return result
 
     def _build_gemini_command(
-        self, args_before: str, args_after: str, env_prefix: Optional[str] = None,
+        self,
+        args_before: str,
+        args_after: str,
+        env_prefix: str | None = None,
     ) -> str:
         """Build a gemini command from parsed arguments.
 
@@ -461,7 +466,7 @@ class ScriptRunner:
         prefix = f"{env_prefix} " if env_prefix else ""
         result = f"{prefix}gemini"
         if args_before:
-            cleaned_args = re.sub(r'(^|\s)-p(?=\s|$)', '', args_before).strip()
+            cleaned_args = re.sub(r"(^|\s)-p(?=\s|$)", "", args_before).strip()
             if cleaned_args:
                 result += f" {cleaned_args}"
         if args_after:
@@ -562,9 +567,7 @@ class ScriptRunner:
                 if key not in env:
                     extracted_env_vars.append(f"{key}={value}")
             if extracted_env_vars:
-                env_lines = self.formatter.format_environment_setup(
-                    "command", extracted_env_vars
-                )
+                env_lines = self.formatter.format_environment_setup("command", extracted_env_vars)
                 for line in env_lines:
                     print(line)
 
@@ -577,7 +580,7 @@ class ScriptRunner:
                 actual_command_args[0] = resolved
         return subprocess.run(actual_command_args, check=True, env=env_vars)
 
-    def _discover_prompt_file(self, name: str) -> Optional[Path]:
+    def _discover_prompt_file(self, name: str) -> Path | None:
         """Discover prompt files by name across local and dependencies.
 
         Supports both simple names and qualified paths:
@@ -605,7 +608,7 @@ class ScriptRunner:
             return self._discover_qualified_prompt(name)
 
         # Ensure name doesn't already have .prompt.md extension
-        if name.endswith(".prompt.md"):
+        if name.endswith(".prompt.md"):  # noqa: SIM108
             search_name = name
         else:
             search_name = f"{name}.prompt.md"
@@ -647,7 +650,7 @@ class ScriptRunner:
 
         return None
 
-    def _discover_qualified_prompt(self, qualified_path: str) -> Optional[Path]:
+    def _discover_qualified_prompt(self, qualified_path: str) -> Path | None:
         """Discover prompt using qualified path (owner/repo/name format).
 
         Args:
@@ -757,7 +760,7 @@ class ScriptRunner:
             else:
                 error_msg += f"  - {match}\n"
 
-        error_msg += f"\nPlease specify using qualified path:\n"
+        error_msg += f"\nPlease specify using qualified path:\n"  # noqa: F541
 
         # Suggest qualified paths based on matches
         for match in matches:
@@ -769,8 +772,8 @@ class ScriptRunner:
                     pkg = path_parts[idx + 2]
                     error_msg += f"  apm run {owner}/{pkg}/{name}\n"
 
-        error_msg += f"\nOr add an explicit script to apm.yml:\n"
-        error_msg += f"  scripts:\n"
+        error_msg += f"\nOr add an explicit script to apm.yml:\n"  # noqa: F541
+        error_msg += f"  scripts:\n"  # noqa: F541
         error_msg += f'    my-{name}: "copilot -p <path-to-preferred-prompt>"\n'
 
         raise RuntimeError(error_msg)
@@ -816,8 +819,8 @@ class ScriptRunner:
             True if installation succeeded, False otherwise
         """
         try:
-            from ..models.apm_package import DependencyReference
             from ..deps.github_downloader import GitHubPackageDownloader
+            from ..models.apm_package import DependencyReference
 
             # Parse the reference as-is  -- no extension guessing
             dep_ref = DependencyReference.parse(package_ref)
@@ -843,22 +846,14 @@ class ScriptRunner:
             print(f"   Downloading from {dep_ref.to_github_url()}")
 
             if dep_ref.is_virtual_collection():
-                package_info = downloader.download_virtual_collection_package(
-                    dep_ref, target_path
-                )
+                package_info = downloader.download_virtual_collection_package(dep_ref, target_path)
             elif dep_ref.is_virtual_subdirectory():
-                package_info = downloader.download_subdirectory_package(
-                    dep_ref, target_path
-                )
+                package_info = downloader.download_subdirectory_package(dep_ref, target_path)
             else:
-                package_info = downloader.download_virtual_file_package(
-                    dep_ref, target_path
-                )
+                package_info = downloader.download_virtual_file_package(dep_ref, target_path)
 
             # PackageInfo has a 'package' attribute which is an APMPackage
-            print(
-                f"  [+] Installed {package_info.package.name} v{package_info.package.version}"
-            )
+            print(f"  [+] Installed {package_info.package.name} v{package_info.package.version}")
 
             # Update apm.yml to include this dependency
             self._add_dependency_to_config(package_ref)
@@ -882,7 +877,8 @@ class ScriptRunner:
             return
 
         # Load current config
-        from ..utils.yaml_io import load_yaml, dump_yaml
+        from ..utils.yaml_io import dump_yaml, load_yaml
+
         config = load_yaml(config_path) or {}
 
         # Ensure dependencies.apm section exists
@@ -912,9 +908,10 @@ class ScriptRunner:
         }
 
         from ..utils.yaml_io import dump_yaml
+
         dump_yaml(minimal_config, "apm.yml")
 
-        print(f"  [i]  Created minimal apm.yml for zero-config execution")
+        print(f"  [i]  Created minimal apm.yml for zero-config execution")  # noqa: F541
 
     def _detect_installed_runtime(self) -> str:
         """Detect installed runtime with priority order.
@@ -957,7 +954,9 @@ class ScriptRunner:
             Full command string with runtime-specific defaults
         """
         if runtime == "copilot":
-            return f"copilot --log-level all --log-dir copilot-logs --allow-all-tools -p {prompt_file}"
+            return (
+                f"copilot --log-level all --log-dir copilot-logs --allow-all-tools -p {prompt_file}"
+            )
         elif runtime == "codex":
             return f"codex -s workspace-write --skip-git-repo-check {prompt_file}"
         elif runtime == "gemini":
@@ -975,7 +974,7 @@ class PromptCompiler:
         """Initialize compiler."""
         self.compiled_dir = self.DEFAULT_COMPILED_DIR
 
-    def compile(self, prompt_file: str, params: Dict[str, str]) -> str:
+    def compile(self, prompt_file: str, params: dict[str, str]) -> str:
         """Compile a .prompt.md file with parameter substitution.
 
         Args:
@@ -991,7 +990,7 @@ class PromptCompiler:
         # Now ensure compiled directory exists
         self.compiled_dir.mkdir(parents=True, exist_ok=True)
 
-        with open(prompt_path, "r", encoding="utf-8") as f:
+        with open(prompt_path, encoding="utf-8") as f:
             content = f.read()
 
         # Parse frontmatter and content
@@ -999,7 +998,7 @@ class PromptCompiler:
             # Split frontmatter and content
             parts = content.split("---", 2)
             if len(parts) >= 3:
-                frontmatter = parts[1].strip()
+                frontmatter = parts[1].strip()  # noqa: F841
                 main_content = parts[2].strip()
             else:
                 main_content = content
@@ -1091,7 +1090,10 @@ class PromptCompiler:
         return result
 
     def _raise_prompt_not_found(
-        self, prompt_file: str, prompt_path: Path, dep_dirs: list,
+        self,
+        prompt_file: str,
+        prompt_path: Path,
+        dep_dirs: list,
     ) -> None:
         """Build and raise a helpful FileNotFoundError for a missing prompt.
 
@@ -1112,18 +1114,16 @@ class PromptCompiler:
         if dep_dirs:
             searched_locations.append("Dependencies:")
             for org_name, repo_name, _repo_dir in dep_dirs:
-                searched_locations.append(
-                    f"  - {org_name}/{repo_name}/{prompt_file}"
-                )
+                searched_locations.append(f"  - {org_name}/{repo_name}/{prompt_file}")
 
         raise FileNotFoundError(
             f"Prompt file '{prompt_file}' not found.\n"
             f"Searched in:\n"
             + "\n".join(searched_locations)
-            + f"\n\nTip: Run 'apm install' to ensure dependencies are installed."
+            + f"\n\nTip: Run 'apm install' to ensure dependencies are installed."  # noqa: F541
         )
 
-    def _substitute_parameters(self, content: str, params: Dict[str, str]) -> str:
+    def _substitute_parameters(self, content: str, params: dict[str, str]) -> str:
         """Substitute parameters in content.
 
         Args:

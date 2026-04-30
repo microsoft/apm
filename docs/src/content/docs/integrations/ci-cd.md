@@ -157,6 +157,8 @@ Use `apm pack` in CI to build a distributable bundle once, then consume it in do
 
 ### Pack in CI (build once)
 
+`apm-action@v1` with `pack: true` emits an APM-format bundle (`--format apm --archive`) so downstream jobs can restore it via `tar xzf` or the action's restore mode.
+
 ```yaml
 - uses: microsoft/apm-action@v1
   with:
@@ -170,15 +172,17 @@ Use `apm pack` in CI to build a distributable bundle once, then consume it in do
 ### Pack as standalone plugin
 
 ```yaml
-# Export as standalone plugin
-- run: apm pack --format plugin
+# Export as a Claude Code plugin directory (default format)
+- run: apm pack
 - uses: actions/upload-artifact@v4
   with:
     name: plugin-bundle
-    path: build/*.tar.gz
+    path: build/
 ```
 
 ### Consume in another job (no APM needed)
+
+The APM bundle layout below assumes the upstream job ran `apm-action@v1` with `pack: true` (or `apm pack --format apm --archive`). Plugin-format output cannot be restored this way because it does not carry the install-time directory tree.
 
 ```yaml
 - uses: actions/download-artifact@v4

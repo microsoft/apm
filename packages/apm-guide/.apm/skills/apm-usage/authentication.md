@@ -86,7 +86,7 @@ modified -- on failure you see `No files were modified`.
 export GITHUB_HOST=github.company.com
 export GITHUB_APM_PAT_MYORG=ghp_ghes_token
 apm install myorg/internal-package       # resolves to github.company.com
-apm marketplace build                    # also resolves to github.company.com
+apm pack                                 # marketplace.json also resolves against github.company.com
 ```
 
 ## GHE Cloud data residency (*.ghe.com)

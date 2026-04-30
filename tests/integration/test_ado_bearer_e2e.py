@@ -24,8 +24,8 @@ Refs: microsoft/apm#852
 """
 
 import os
-import shutil
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -44,12 +44,22 @@ _BEARER_REACHABLE = False
 if _AZ_AVAILABLE and os.getenv("APM_TEST_ADO_BEARER") == "1":
     try:
         _probe = subprocess.run(
-            [_AZ_BIN, "account", "get-access-token",
-             "--resource", "499b84ac-1321-427f-aa17-267ca6975798",
-             "--query", "accessToken", "-o", "tsv"],
-            capture_output=True, text=True, timeout=30,
+            [
+                _AZ_BIN,
+                "account",
+                "get-access-token",
+                "--resource",
+                "499b84ac-1321-427f-aa17-267ca6975798",
+                "--query",
+                "accessToken",
+                "-o",
+                "tsv",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
-        _BEARER_REACHABLE = (_probe.returncode == 0 and _probe.stdout.startswith("eyJ"))
+        _BEARER_REACHABLE = _probe.returncode == 0 and _probe.stdout.startswith("eyJ")
     except Exception:
         _BEARER_REACHABLE = False
 
@@ -59,7 +69,9 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def run_apm(cmd: str, cwd: Path, env_overrides: dict, timeout: int = 90) -> subprocess.CompletedProcess:
+def run_apm(
+    cmd: str, cwd: Path, env_overrides: dict, timeout: int = 90
+) -> subprocess.CompletedProcess:
     """Run apm with a controlled env dict.
 
     env_overrides is merged into a copy of os.environ; values of None DELETE
@@ -68,11 +80,10 @@ def run_apm(cmd: str, cwd: Path, env_overrides: dict, timeout: int = 90) -> subp
     apm_on_path = shutil.which("apm")
     if apm_on_path:
         apm_path = apm_on_path
+    elif sys.platform == "win32":
+        apm_path = str(Path(__file__).parent.parent.parent / ".venv" / "Scripts" / "apm.exe")
     else:
-        if sys.platform == "win32":
-            apm_path = str(Path(__file__).parent.parent.parent / ".venv" / "Scripts" / "apm.exe")
-        else:
-            apm_path = str(Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm")
+        apm_path = str(Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm")
 
     env = {**os.environ}
     for k, v in env_overrides.items():
@@ -97,11 +108,15 @@ def run_apm(cmd: str, cwd: Path, env_overrides: dict, timeout: int = 90) -> subp
 
 def _init_project(project_dir: Path) -> None:
     project_dir.mkdir(parents=True, exist_ok=True)
-    (project_dir / "apm.yml").write_text(yaml.dump({
-        "name": "test-project",
-        "version": "1.0.0",
-        "dependencies": {"apm": [], "mcp": []},
-    }))
+    (project_dir / "apm.yml").write_text(
+        yaml.dump(
+            {
+                "name": "test-project",
+                "version": "1.0.0",
+                "dependencies": {"apm": [], "mcp": []},
+            }
+        )
+    )
 
 
 def _expected_path_parts_from_repo(repo: str) -> tuple[str, str, str]:
@@ -122,15 +137,11 @@ def _expected_path_parts_from_repo(repo: str) -> tuple[str, str, str]:
     host = parts[0]
     if host == "dev.azure.com":
         if len(parts) < 5 or parts[3] != "_git":
-            raise ValueError(
-                f"Expected dev.azure.com/<org>/<project>/_git/<repo>, got {repo!r}"
-            )
+            raise ValueError(f"Expected dev.azure.com/<org>/<project>/_git/<repo>, got {repo!r}")
         return (parts[1], parts[2], parts[4])
     if host.endswith(".visualstudio.com"):
         if len(parts) < 4 or parts[2] != "_git":
-            raise ValueError(
-                f"Expected <org>.visualstudio.com/<project>/_git/<repo>, got {repo!r}"
-            )
+            raise ValueError(f"Expected <org>.visualstudio.com/<project>/_git/<repo>, got {repo!r}")
         org = host.split(".", 1)[0]
         return (org, parts[1], parts[3])
     raise ValueError(f"Unrecognised ADO host {host!r} in {repo!r}")
@@ -148,6 +159,7 @@ EXPECTED_PATH_PARTS = _expected_path_parts_from_repo(ADO_TEST_REPO)
 # ---------------------------------------------------------------------------
 # T3H: bearer-only (no PAT, az logged in)
 # ---------------------------------------------------------------------------
+
 
 class TestBearerOnly:
     """Install an ADO package with NO ADO_APM_PAT set; bearer is the only path."""
@@ -167,7 +179,13 @@ class TestBearerOnly:
             f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
         )
 
-        installed = project_dir / "apm_modules" / EXPECTED_PATH_PARTS[0] / EXPECTED_PATH_PARTS[1] / EXPECTED_PATH_PARTS[2]
+        installed = (
+            project_dir
+            / "apm_modules"
+            / EXPECTED_PATH_PARTS[0]
+            / EXPECTED_PATH_PARTS[1]
+            / EXPECTED_PATH_PARTS[2]
+        )
         assert installed.exists(), f"Expected {installed} to exist after bearer install"
 
     def test_verbose_shows_bearer_source(self, tmp_path):
@@ -190,6 +208,7 @@ class TestBearerOnly:
 # T3I: stale PAT fallback to bearer
 # ---------------------------------------------------------------------------
 
+
 class TestStalePatFallback:
     """A bogus PAT triggers 401, then bearer fallback succeeds with a [!] warning."""
 
@@ -211,13 +230,20 @@ class TestStalePatFallback:
             f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
         )
 
-        installed = project_dir / "apm_modules" / EXPECTED_PATH_PARTS[0] / EXPECTED_PATH_PARTS[1] / EXPECTED_PATH_PARTS[2]
+        installed = (
+            project_dir
+            / "apm_modules"
+            / EXPECTED_PATH_PARTS[0]
+            / EXPECTED_PATH_PARTS[1]
+            / EXPECTED_PATH_PARTS[2]
+        )
         assert installed.exists(), "Bearer fallback should have completed the install"
 
         combined = result.stdout + result.stderr
         # The stale-PAT diagnostic should have surfaced
-        assert ("rejected" in combined.lower() and "az cli bearer" in combined.lower()) \
-            or "ADO_APM_PAT" in combined, (
+        assert (
+            "rejected" in combined.lower() and "az cli bearer" in combined.lower()
+        ) or "ADO_APM_PAT" in combined, (
             f"Expected stale-PAT warning in output.\nOutput:\n{combined}"
         )
 
@@ -229,6 +255,7 @@ class TestStalePatFallback:
 # It is documented but skipped in CI. Manual reproduction steps live in the
 # PR test report under session-state/files/.
 
+
 @pytest.mark.skip(reason="Requires manual tenant switch; reproduced manually in PR report")
 class TestWrongTenant:
     def test_wrong_tenant_renders_case_2_error(self, tmp_path):
@@ -238,6 +265,7 @@ class TestWrongTenant:
 # ---------------------------------------------------------------------------
 # T3K: PAT regression (PAT path must be unchanged)
 # ---------------------------------------------------------------------------
+
 
 class TestPatRegression:
     """With a valid PAT set, ADO_APM_PAT path must work exactly as before."""
@@ -260,13 +288,20 @@ class TestPatRegression:
             f"PAT install regressed (exit {result.returncode}).\n"
             f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
         )
-        installed = project_dir / "apm_modules" / EXPECTED_PATH_PARTS[0] / EXPECTED_PATH_PARTS[1] / EXPECTED_PATH_PARTS[2]
+        installed = (
+            project_dir
+            / "apm_modules"
+            / EXPECTED_PATH_PARTS[0]
+            / EXPECTED_PATH_PARTS[1]
+            / EXPECTED_PATH_PARTS[2]
+        )
         assert installed.exists()
 
 
 # ---------------------------------------------------------------------------
 # Issue #1015 regression tests
 # ---------------------------------------------------------------------------
+
 
 class TestIssue1015BearerInstallRegression:
     """#1015 bug repro: bearer-only install (no PAT) should succeed."""
@@ -288,8 +323,11 @@ class TestIssue1015BearerInstallRegression:
         )
 
         installed = (
-            project_dir / "apm_modules"
-            / EXPECTED_PATH_PARTS[0] / EXPECTED_PATH_PARTS[1] / EXPECTED_PATH_PARTS[2]
+            project_dir
+            / "apm_modules"
+            / EXPECTED_PATH_PARTS[0]
+            / EXPECTED_PATH_PARTS[1]
+            / EXPECTED_PATH_PARTS[2]
         )
         assert installed.exists(), f"Expected {installed} after bearer-only install"
 
@@ -333,9 +371,7 @@ class TestIssue1015DiagnosticOnAuthFailure:
             or "authentication" in combined.lower()
             or "az login" in combined
         )
-        assert has_diagnostic, (
-            f"Expected auth diagnostic in output. Output:\n{combined}"
-        )
+        assert has_diagnostic, f"Expected auth diagnostic in output. Output:\n{combined}"
         assert result.returncode != 0
 
 
@@ -354,17 +390,14 @@ class TestIssue1015UpdatePreflightAbort:
         lock_path.write_text("# test lockfile\n")
 
         # Snapshot file contents before the run
-        apm_yml_hash = hashlib.sha256(
-            (project_dir / "apm.yml").read_bytes()
-        ).hexdigest()
+        apm_yml_hash = hashlib.sha256((project_dir / "apm.yml").read_bytes()).hexdigest()
         lock_hash = hashlib.sha256(lock_path.read_bytes()).hexdigest()
         modules_existed = (project_dir / "apm_modules").exists()
 
         # Use a made-up ADO repo that the bearer cannot access
         # and suppress all auth so it fails cleanly.
         result = run_apm(
-            'install --only apm --update'
-            ' "dev.azure.com/nonexistent-org-xyzzy/fake/_git/fake"',
+            'install --only apm --update "dev.azure.com/nonexistent-org-xyzzy/fake/_git/fake"',
             project_dir,
             env_overrides={
                 "ADO_APM_PAT": None,
@@ -387,12 +420,12 @@ class TestIssue1015UpdatePreflightAbort:
         )
 
         # Verify files are byte-identical to pre-run state
-        assert hashlib.sha256(
-            (project_dir / "apm.yml").read_bytes()
-        ).hexdigest() == apm_yml_hash, "apm.yml was modified!"
-        assert hashlib.sha256(
-            lock_path.read_bytes()
-        ).hexdigest() == lock_hash, "apm.lock.yaml was modified!"
+        assert hashlib.sha256((project_dir / "apm.yml").read_bytes()).hexdigest() == apm_yml_hash, (
+            "apm.yml was modified!"
+        )
+        assert hashlib.sha256(lock_path.read_bytes()).hexdigest() == lock_hash, (
+            "apm.lock.yaml was modified!"
+        )
         if not modules_existed:
             assert not (project_dir / "apm_modules").exists(), (
                 "apm_modules/ was created despite auth failure!"
@@ -420,7 +453,10 @@ class TestIssue1015PatRegressionExplicit:
             f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
         )
         installed = (
-            project_dir / "apm_modules"
-            / EXPECTED_PATH_PARTS[0] / EXPECTED_PATH_PARTS[1] / EXPECTED_PATH_PARTS[2]
+            project_dir
+            / "apm_modules"
+            / EXPECTED_PATH_PARTS[0]
+            / EXPECTED_PATH_PARTS[1]
+            / EXPECTED_PATH_PARTS[2]
         )
         assert installed.exists()

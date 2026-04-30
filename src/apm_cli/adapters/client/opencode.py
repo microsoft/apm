@@ -76,9 +76,9 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         if not os.path.exists(config_path):
             return {}
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             return {}
 
     def configure_mcp_server(
@@ -120,14 +120,10 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
             else:
                 config_key = server_url
 
-            server_config = self._format_server_config(
-                server_info, env_overrides, runtime_vars
-            )
+            server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             self.update_config({config_key: server_config}, enabled=enabled)
 
-            print(
-                f"Successfully configured MCP server '{config_key}' for OpenCode"
-            )
+            print(f"Successfully configured MCP server '{config_key}' for OpenCode")
             return True
 
         except Exception as e:
@@ -147,7 +143,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         cmd = copilot_entry.get("command", "")
         args = copilot_entry.get("args", [])
         if cmd:
-            entry["command"] = [cmd] + list(args)
+            entry["command"] = [cmd] + list(args)  # noqa: RUF005
         elif "url" in copilot_entry:
             entry["type"] = "remote"
             entry["url"] = copilot_entry["url"]

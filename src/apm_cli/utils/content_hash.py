@@ -2,7 +2,7 @@
 
 import hashlib
 from pathlib import Path
-from typing import Optional
+from typing import Optional  # noqa: F401
 
 # Directories excluded from hashing (not relevant to package content)
 _EXCLUDED_DIRS = {".git", "__pycache__"}

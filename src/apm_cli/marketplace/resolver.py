@@ -10,20 +10,19 @@ The ``@`` disambiguation rule:
 
 import logging
 import re
-from typing import Callable, Optional, Tuple
+from collections.abc import Callable
+from typing import Optional, Tuple  # noqa: F401, UP035
 
-from ..utils.path_security import PathTraversalError, validate_path_segments
 from ..models.dependency.reference import DependencyReference
+from ..utils.path_security import PathTraversalError, validate_path_segments
 from .client import fetch_or_cache
-from .errors import MarketplaceFetchError, PluginNotFoundError
+from .errors import MarketplaceFetchError, PluginNotFoundError  # noqa: F401
 from .models import MarketplacePlugin
 from .registry import get_marketplace_by_name
 
 logger = logging.getLogger(__name__)
 
-_MARKETPLACE_RE = re.compile(
-    r"^([a-zA-Z0-9._-]+)@([a-zA-Z0-9._-]+)(?:#(.+))?$"
-)
+_MARKETPLACE_RE = re.compile(r"^([a-zA-Z0-9._-]+)@([a-zA-Z0-9._-]+)(?:#(.+))?$")
 
 # Characters that signal a semver range rather than a raw git ref
 _SEMVER_RANGE_CHARS = re.compile(r"[~^<>=!]")
@@ -31,7 +30,7 @@ _SEMVER_RANGE_CHARS = re.compile(r"[~^<>=!]")
 
 def parse_marketplace_ref(
     specifier: str,
-) -> Optional[Tuple[str, str, Optional[str]]]:
+) -> tuple[str, str, str | None] | None:
     """Parse a ``NAME@MARKETPLACE[#ref]`` specifier.
 
     The optional ``#ref`` suffix carries a raw git ref (tag, branch, or
@@ -77,9 +76,7 @@ def _resolve_github_source(source: dict) -> str:
     ref = source.get("ref", "")
     path = source.get("path", "").strip("/")
     if not repo or "/" not in repo:
-        raise ValueError(
-            f"Invalid github source: 'repo' field must be 'owner/repo', got '{repo}'"
-        )
+        raise ValueError(f"Invalid github source: 'repo' field must be 'owner/repo', got '{repo}'")
     if path:
         try:
             validate_path_segments(path, context="github source path")
@@ -108,13 +105,9 @@ def _resolve_url_source(source: dict) -> str:
     try:
         dep = DependencyReference.parse(url)
     except ValueError as exc:
-        raise ValueError(
-            f"Cannot resolve URL source '{url}': {exc}"
-        ) from exc
+        raise ValueError(f"Cannot resolve URL source '{url}': {exc}") from exc
     if dep.is_local:
-        raise ValueError(
-            f"URL source '{url}' resolves to a local path, not a Git coordinate."
-        )
+        raise ValueError(f"URL source '{url}' resolves to a local path, not a Git coordinate.")
     if dep.reference:
         return f"{dep.repo_url}#{dep.reference}"
     return dep.repo_url
@@ -126,9 +119,7 @@ def _resolve_git_subdir_source(source: dict) -> str:
     ref = source.get("ref", "")
     subdir = (source.get("subdir", "") or source.get("path", "")).strip("/")
     if not repo or "/" not in repo:
-        raise ValueError(
-            f"Invalid git-subdir source: 'repo' must be 'owner/repo', got '{repo}'"
-        )
+        raise ValueError(f"Invalid git-subdir source: 'repo' must be 'owner/repo', got '{repo}'")
     if subdir:
         try:
             validate_path_segments(subdir, context="git-subdir source path")
@@ -231,19 +222,17 @@ def resolve_plugin_source(
             f"Consider asking the marketplace maintainer to add a 'github' source."
         )
     else:
-        raise ValueError(
-            f"Plugin '{plugin.name}' has unsupported source type: '{source_type}'"
-        )
+        raise ValueError(f"Plugin '{plugin.name}' has unsupported source type: '{source_type}'")
 
 
 def resolve_marketplace_plugin(
     plugin_name: str,
     marketplace_name: str,
     *,
-    version_spec: Optional[str] = None,
-    auth_resolver: Optional[object] = None,
-    warning_handler: Optional[Callable[[str], None]] = None,
-) -> Tuple[str, MarketplacePlugin]:
+    version_spec: str | None = None,
+    auth_resolver: object | None = None,
+    warning_handler: Callable[[str], None] | None = None,
+) -> tuple[str, MarketplacePlugin]:
     """Resolve a marketplace plugin reference to a canonical string.
 
     When *version_spec* is given it is treated as a raw git ref override
@@ -319,12 +308,14 @@ def resolve_marketplace_plugin(
         from .version_pins import check_ref_pin, record_ref_pin
 
         previous_ref = check_ref_pin(
-            marketplace_name, plugin_name, current_ref,
+            marketplace_name,
+            plugin_name,
+            current_ref,
             version=plugin_version,
         )
         if previous_ref is not None:
             _emit_warning(
-                "Plugin %s@%s ref changed: was '%s', now '%s'. "
+                "Plugin %s@%s ref changed: was '%s', now '%s'. "  # noqa: UP031
                 "This may indicate a ref swap attack."
                 % (
                     plugin_name,
@@ -334,7 +325,9 @@ def resolve_marketplace_plugin(
                 )
             )
         record_ref_pin(
-            marketplace_name, plugin_name, current_ref,
+            marketplace_name,
+            plugin_name,
+            current_ref,
             version=plugin_version,
         )
 
@@ -353,12 +346,10 @@ def resolve_marketplace_plugin(
     try:
         from .shadow_detector import detect_shadows
 
-        shadows = detect_shadows(
-            plugin_name, marketplace_name, auth_resolver=auth_resolver
-        )
+        shadows = detect_shadows(plugin_name, marketplace_name, auth_resolver=auth_resolver)
         for shadow in shadows:
             _emit_warning(
-                "Plugin '%s' also found in marketplace '%s'. "
+                "Plugin '%s' also found in marketplace '%s'. "  # noqa: UP031
                 "Verify you are installing from the intended source."
                 % (plugin_name, shadow.marketplace_name)
             )

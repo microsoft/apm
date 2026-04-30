@@ -8,7 +8,7 @@ import urllib.parse
 from collections import OrderedDict
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional  # noqa: F401, UP035
 from unittest.mock import patch
 
 import pytest
@@ -19,19 +19,18 @@ from apm_cli.marketplace.builder import (
     MarketplaceBuilder,
     ResolvedPackage,
 )
-from apm_cli.marketplace.semver import (
-    SemVer,
-    parse_semver,
-    satisfies_range,
-)
 from apm_cli.marketplace.errors import (
-    BuildError,
+    BuildError,  # noqa: F401
     HeadNotAllowedError,
     NoMatchingVersionError,
     RefNotFoundError,
 )
 from apm_cli.marketplace.ref_resolver import RemoteRef
-
+from apm_cli.marketplace.semver import (
+    SemVer,  # noqa: F401
+    parse_semver,
+    satisfies_range,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -43,10 +42,7 @@ _SHA_C = "c" * 40
 _SHA_D = "d" * 40
 
 _GOLDEN_PATH = (
-    Path(__file__).resolve().parent.parent.parent
-    / "fixtures"
-    / "marketplace"
-    / "golden.json"
+    Path(__file__).resolve().parent.parent.parent / "fixtures" / "marketplace" / "golden.json"
 )
 
 # Standard marketplace.yml for many tests
@@ -82,13 +78,13 @@ def _write_yml(tmp_path: Path, content: str) -> Path:
     return p
 
 
-def _make_refs(*tags: str, branches: Optional[List[str]] = None) -> List[RemoteRef]:
+def _make_refs(*tags: str, branches: list[str] | None = None) -> list[RemoteRef]:
     """Build a list of RemoteRef for testing.
 
     Tags are assigned SHAs starting from 'a' * 40, 'b' * 40, etc.
     """
     sha_chars = "abcdef0123456789"
-    refs: List[RemoteRef] = []
+    refs: list[RemoteRef] = []
     for i, tag in enumerate(tags):
         ch = sha_chars[i % len(sha_chars)]
         refs.append(RemoteRef(name=f"refs/tags/{tag}", sha=ch * 40))
@@ -102,10 +98,10 @@ def _make_refs(*tags: str, branches: Optional[List[str]] = None) -> List[RemoteR
 class _MockRefResolver:
     """In-process mock for RefResolver -- no subprocess calls."""
 
-    def __init__(self, refs_by_remote: Optional[Dict[str, List[RemoteRef]]] = None):
+    def __init__(self, refs_by_remote: dict[str, list[RemoteRef]] | None = None):
         self._refs = refs_by_remote or {}
 
-    def list_remote_refs(self, owner_repo: str) -> List[RemoteRef]:
+    def list_remote_refs(self, owner_repo: str) -> list[RemoteRef]:
         if owner_repo not in self._refs:
             from apm_cli.marketplace.errors import GitLsRemoteError
 
@@ -123,8 +119,8 @@ class _MockRefResolver:
 def _build_with_mock(
     tmp_path: Path,
     yml_content: str,
-    refs_by_remote: Dict[str, List[RemoteRef]],
-    options: Optional[BuildOptions] = None,
+    refs_by_remote: dict[str, list[RemoteRef]],
+    options: BuildOptions | None = None,
 ) -> BuildReport:
     """Build using a mock ref resolver.
 
@@ -381,7 +377,7 @@ class TestBuilderHappyPath:
 class TestFieldStripping:
     """Verify APM-only fields are stripped from output."""
 
-    _APM_ONLY_KEYS = {"version", "ref", "subdir", "tag_pattern", "include_prerelease", "build"}
+    _APM_ONLY_KEYS = {"version", "ref", "subdir", "tag_pattern", "include_prerelease", "build"}  # noqa: RUF012
 
     def test_no_apm_keys_in_top_level(self, tmp_path: Path) -> None:
         refs = {
@@ -638,7 +634,7 @@ class TestNoMatch:
             version: "^5.0.0"
         """
         refs = {"acme/pkg": _make_refs("v1.0.0", "v2.0.0")}
-        with pytest.raises(NoMatchingVersionError, match="5.0.0"):
+        with pytest.raises(NoMatchingVersionError, match="5.0.0"):  # noqa: RUF043
             _build_with_mock(tmp_path, yml, refs)
 
 
@@ -1028,7 +1024,8 @@ class TestComposeMarketplaceJson:
         result = builder.compose_marketplace_json(resolved)
         assert isinstance(result, OrderedDict)
         assert result["name"] == "acme-tools"
-        assert result["plugins"][0]["source"]["type"] == "github"
+        assert result["plugins"][0]["source"]["source"] == "github"
+        assert result["plugins"][0]["source"]["repo"] == "acme/test-pkg"
 
     def test_empty_packages(self, tmp_path: Path) -> None:
         yml = """\
@@ -1172,7 +1169,9 @@ class TestDuplicateNameWarnings:
 
     def test_duplicate_names_produce_warning(self, tmp_path: Path) -> None:
         """Bypass yml_schema by feeding resolved packages directly."""
-        yml_path = _write_yml(tmp_path, """\
+        yml_path = _write_yml(
+            tmp_path,
+            """\
         name: test-mkt
         description: Test
         version: 1.0.0
@@ -1182,7 +1181,8 @@ class TestDuplicateNameWarnings:
           - name: alpha
             source: acme/alpha
             version: "^1.0.0"
-        """)
+        """,
+        )
         refs = {"acme/alpha": _make_refs("v1.0.0")}
         builder = MarketplaceBuilder(yml_path, BuildOptions(offline=True))
         builder._resolver = _MockRefResolver(refs)  # type: ignore[assignment]
@@ -1218,10 +1218,13 @@ class TestDuplicateNameWarnings:
         assert "special/learning" in warnings[0]
 
     def test_duplicate_names_without_subdir_uses_repository(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """When subdir is absent, the warning should reference the repository."""
-        yml_path = _write_yml(tmp_path, """\
+        yml_path = _write_yml(
+            tmp_path,
+            """\
         name: test-mkt
         description: Test
         version: 1.0.0
@@ -1231,11 +1234,14 @@ class TestDuplicateNameWarnings:
           - name: alpha
             source: acme/alpha
             version: "^1.0.0"
-        """)
+        """,
+        )
         builder = MarketplaceBuilder(yml_path, BuildOptions(offline=True))
-        builder._resolver = _MockRefResolver({  # type: ignore[assignment]
-            "acme/alpha": _make_refs("v1.0.0"),
-        })
+        builder._resolver = _MockRefResolver(
+            {  # type: ignore[assignment]
+                "acme/alpha": _make_refs("v1.0.0"),
+            }
+        )
 
         dupes = [
             ResolvedPackage(
@@ -1297,7 +1303,7 @@ class TestFetchRemoteMetadata:
         *,
         name: str = "my-tool",
         source_repo: str = "acme/my-tool",
-        subdir: Optional[str] = None,
+        subdir: str | None = None,
         sha: str = _SHA_A,
     ) -> ResolvedPackage:
         return ResolvedPackage(
@@ -1391,7 +1397,11 @@ class TestFetchRemoteMetadata:
         with patch(
             "apm_cli.marketplace.builder.urllib.request.urlopen",
             side_effect=urllib.error.HTTPError(
-                url="", code=404, msg="Not Found", hdrs=None, fp=None  # type: ignore[arg-type]
+                url="",
+                code=404,
+                msg="Not Found",
+                hdrs=None,
+                fp=None,  # type: ignore[arg-type]
             ),
         ):
             result = builder._fetch_remote_metadata(pkg)
@@ -1537,7 +1547,8 @@ class TestMetadataEnrichment:
         assert result["plugins"][0]["version"] == "1.2.3"
 
     def test_remote_fetch_failure_leaves_no_description_or_version(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """When remote fetch returns None, plugin has no description or version."""
         yml_path = _write_yml(tmp_path, _BASIC_YML)
@@ -1707,7 +1718,8 @@ class TestResolveGitHubToken:
         assert builder._auth_resolver is not None
 
     def test_prefetch_metadata_resolves_token_before_fetching(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """_prefetch_metadata resolves the token once, then workers use it."""
         from unittest.mock import MagicMock
@@ -1802,7 +1814,7 @@ class TestFetchRemoteMetadataGHEHost:
         *,
         name: str = "test-pkg",
         source_repo: str = "acme/tools",
-        subdir: Optional[str] = None,
+        subdir: str | None = None,
         sha: str = _SHA_A,
     ) -> ResolvedPackage:
         return ResolvedPackage(
@@ -1936,3 +1948,165 @@ class TestEnsureAuth:
 
         resolver = builder._get_resolver()
         assert resolver._token == "ghp_wired"
+
+
+# ---------------------------------------------------------------------------
+# New fields & override semantics tests (#1061)
+# ---------------------------------------------------------------------------
+
+
+class TestRemoteOverrideSemantics:
+    """Entry-level description/version override remote-fetched values."""
+
+    def _make_remote_builder(self, tmp_path, entry_fields=""):
+        from apm_cli.marketplace.builder import BuildOptions, ResolvedPackage
+        from apm_cli.marketplace.migration import load_marketplace_config
+
+        content = textwrap.dedent(f"""\
+            name: test
+            description: x
+            version: 1.0.0
+            marketplace:
+              owner:
+                name: ACME
+              packages:
+                - name: remote-tool
+                  source: acme/remote-tool
+                  ref: v1.0.0
+                  {entry_fields}
+        """)
+        (tmp_path / "apm.yml").write_text(content, encoding="utf-8")
+        config = load_marketplace_config(tmp_path)
+        builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+        resolved = [
+            ResolvedPackage(
+                name="remote-tool",
+                source_repo="acme/remote-tool",
+                subdir=None,
+                ref="v1.0.0",
+                sha="a" * 40,
+                requested_version=None,
+                tags=(),
+                is_prerelease=False,
+            )
+        ]
+        return builder, resolved
+
+    def test_remote_entry_override_description_version(self, tmp_path):
+        builder, resolved = self._make_remote_builder(
+            tmp_path, 'description: "custom"\n                  version: "3.0.0"'
+        )
+        builder._prefetch_metadata = lambda r: {
+            "remote-tool": {"description": "remote desc", "version": "1.0.0"}
+        }
+        doc = builder.compose_marketplace_json(resolved)
+        plugin = doc["plugins"][0]
+        assert plugin["description"] == "custom"
+        assert plugin["version"] == "3.0.0"
+
+    def test_remote_entry_no_override_uses_fetched(self, tmp_path):
+        builder, resolved = self._make_remote_builder(tmp_path)
+        builder._prefetch_metadata = lambda r: {
+            "remote-tool": {"description": "remote desc", "version": "1.0.0"}
+        }
+        doc = builder.compose_marketplace_json(resolved)
+        plugin = doc["plugins"][0]
+        assert plugin["description"] == "remote desc"
+        assert plugin["version"] == "1.0.0"
+
+    def test_author_license_repository_emitted_for_local(self, tmp_path):
+        from apm_cli.marketplace.builder import BuildOptions
+        from apm_cli.marketplace.migration import load_marketplace_config
+
+        content = textwrap.dedent("""\
+            name: test
+            description: x
+            version: 1.0.0
+            marketplace:
+              owner:
+                name: ACME
+              packages:
+                - name: local-tool
+                  source: ./plugins/local-tool
+                  author: "ACME Inc"
+                  license: "MIT"
+                  repository: "https://github.com/acme/tool"
+        """)
+        (tmp_path / "apm.yml").write_text(content, encoding="utf-8")
+        config = load_marketplace_config(tmp_path)
+        builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+        local_entry = next(e for e in config.packages if e.is_local)
+        resolved = [builder._resolve_entry(local_entry)]
+        doc = builder.compose_marketplace_json(resolved)
+        plugin = doc["plugins"][0]
+        # Per Claude Code plugin manifest schema, author must be an object.
+        assert plugin["author"] == {"name": "ACME Inc"}
+        assert plugin["license"] == "MIT"
+        assert plugin["repository"] == "https://github.com/acme/tool"
+
+    def test_author_license_repository_emitted_for_remote(self, tmp_path):
+        builder, resolved = self._make_remote_builder(
+            tmp_path,
+            'author: "ACME"\n                  license: "Apache-2.0"\n                  repository: "https://github.com/acme/remote"',
+        )
+        doc = builder.compose_marketplace_json(resolved)
+        plugin = doc["plugins"][0]
+        assert plugin["author"] == {"name": "ACME"}
+        assert plugin["license"] == "Apache-2.0"
+        assert plugin["repository"] == "https://github.com/acme/remote"
+
+    def test_author_object_form_preserved(self, tmp_path):
+        builder, resolved = self._make_remote_builder(
+            tmp_path,
+            'author:\n                    name: "ACME"\n                    email: "team@acme.example"\n                    url: "https://acme.example"',
+        )
+        doc = builder.compose_marketplace_json(resolved)
+        plugin = doc["plugins"][0]
+        assert plugin["author"] == {
+            "name": "ACME",
+            "email": "team@acme.example",
+            "url": "https://acme.example",
+        }
+
+    def test_serialization_order(self, tmp_path):
+        from apm_cli.marketplace.builder import BuildOptions
+        from apm_cli.marketplace.migration import load_marketplace_config
+
+        content = textwrap.dedent("""\
+            name: test
+            description: x
+            version: 1.0.0
+            marketplace:
+              owner:
+                name: ACME
+              packages:
+                - name: local-tool
+                  source: ./plugins/local-tool
+                  description: "A tool"
+                  version: "1.0.0"
+                  author: "ACME"
+                  license: "MIT"
+                  repository: "https://github.com/acme/tool"
+                  tags: [ai]
+                  homepage: "https://acme.com"
+        """)
+        (tmp_path / "apm.yml").write_text(content, encoding="utf-8")
+        config = load_marketplace_config(tmp_path)
+        builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+        local_entry = next(e for e in config.packages if e.is_local)
+        resolved = [builder._resolve_entry(local_entry)]
+        doc = builder.compose_marketplace_json(resolved)
+        plugin = doc["plugins"][0]
+        keys = list(plugin.keys())
+        # Expected order: name, description, version, author, license, repository, tags, homepage, source
+        assert keys == [
+            "name",
+            "description",
+            "version",
+            "author",
+            "license",
+            "repository",
+            "tags",
+            "homepage",
+            "source",
+        ]

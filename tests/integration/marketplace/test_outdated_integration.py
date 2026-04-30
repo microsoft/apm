@@ -17,12 +17,11 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
+import pytest  # noqa: F401
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import outdated
 from apm_cli.marketplace.ref_resolver import RemoteRef
-
 
 # ---------------------------------------------------------------------------
 # Fixtures / YAML content
@@ -92,6 +91,7 @@ def _run_outdated(tmp_path: Path, extra_args=(), yml_content=_OUTDATED_YML):
         # Symlink the written marketplace.yml into the isolated FS CWD
         import os
         import shutil
+
         cwd = Path(os.getcwd())
         shutil.copy(str(yml), str(cwd / "marketplace.yml"))
         with patch(
@@ -121,19 +121,20 @@ def _run_outdated_cwd(extra_args=()):
 class TestOutdatedVersionRanges:
     """Verify upgrade classification for version-range entries."""
 
-    def test_exit_code_always_zero(self, tmp_path: Path):
-        """outdated must exit 0 regardless of upgrade availability."""
+    def test_exit_code_one_when_upgradable(self, tmp_path: Path):
+        """outdated must exit 1 when upgradable packages exist."""
         runner = CliRunner()
         (tmp_path / "marketplace.yml").write_text(_OUTDATED_YML, encoding="utf-8")
         with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
             import shutil
+
             shutil.copy(str(tmp_path / "marketplace.yml"), cwd + "/marketplace.yml")
             with patch(
                 "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
                 side_effect=_side_effect,
             ):
                 result = runner.invoke(outdated, [], catch_exceptions=False)
-        assert result.exit_code == 0
+        assert result.exit_code == 1
 
     def test_package_names_appear_in_output(self, tmp_path: Path):
         """Output must mention every package entry."""
@@ -141,6 +142,7 @@ class TestOutdatedVersionRanges:
         (tmp_path / "marketplace.yml").write_text(_OUTDATED_YML, encoding="utf-8")
         with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
             import shutil
+
             shutil.copy(str(tmp_path / "marketplace.yml"), cwd + "/marketplace.yml")
             with patch(
                 "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
@@ -158,6 +160,7 @@ class TestOutdatedVersionRanges:
         (tmp_path / "marketplace.yml").write_text(_OUTDATED_YML, encoding="utf-8")
         with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
             import shutil
+
             shutil.copy(str(tmp_path / "marketplace.yml"), cwd + "/marketplace.yml")
             with patch(
                 "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
@@ -167,7 +170,7 @@ class TestOutdatedVersionRanges:
         combined = result.output
         # Skipped entries should show [i] or "Pinned" in the table
         assert "pinned" in combined
-        assert ("[i]" in combined or "Pinned" in combined or "skipped" in combined.lower())
+        assert "[i]" in combined or "Pinned" in combined or "skipped" in combined.lower()
 
     def test_upgrade_available_in_range(self, tmp_path: Path):
         """alpha ^1.0.0 has v1.1.0 available in range; output must show [!] or similar."""
@@ -175,6 +178,7 @@ class TestOutdatedVersionRanges:
         (tmp_path / "marketplace.yml").write_text(_OUTDATED_YML, encoding="utf-8")
         with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
             import shutil
+
             shutil.copy(str(tmp_path / "marketplace.yml"), cwd + "/marketplace.yml")
             with patch(
                 "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
@@ -191,6 +195,7 @@ class TestOutdatedVersionRanges:
         (tmp_path / "marketplace.yml").write_text(_OUTDATED_YML, encoding="utf-8")
         with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
             import shutil
+
             shutil.copy(str(tmp_path / "marketplace.yml"), cwd + "/marketplace.yml")
             with patch(
                 "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
@@ -221,6 +226,7 @@ class TestOutdatedOffline:
         (tmp_path / "marketplace.yml").write_text(_OUTDATED_YML, encoding="utf-8")
         with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
             import shutil
+
             shutil.copy(str(tmp_path / "marketplace.yml"), cwd + "/marketplace.yml")
             result = runner.invoke(outdated, ["--offline"], catch_exceptions=False)
         # Offline miss is reported per-row; exit code should still be 0 or 1, not 2

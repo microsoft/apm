@@ -6,17 +6,16 @@ blanket-skipping all MCP installation at user scope.
 """
 
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from apm_cli.adapters.client.base import MCPClientAdapter
-from apm_cli.adapters.client.copilot import CopilotClientAdapter
 from apm_cli.adapters.client.codex import CodexClientAdapter
-from apm_cli.adapters.client.vscode import VSCodeClientAdapter
+from apm_cli.adapters.client.copilot import CopilotClientAdapter
 from apm_cli.adapters.client.cursor import CursorClientAdapter
 from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
+from apm_cli.adapters.client.vscode import VSCodeClientAdapter
 from apm_cli.core.scope import InstallScope
 from apm_cli.factory import ClientFactory
-
 
 # ---------------------------------------------------------------------------
 # 1. Adapter supports_user_scope attribute
@@ -109,11 +108,10 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
         mock_ops.check_servers_needing_installation.return_value = ["test/server"]
         mock_ops_cls.return_value = mock_ops
 
-        with patch.object(
-            MCPIntegrator, "_detect_runtimes", return_value=set()
-        ), patch(
-            "apm_cli.runtime.manager.RuntimeManager"
-        ) as mock_mgr_cls:
+        with (
+            patch.object(MCPIntegrator, "_detect_runtimes", return_value=set()),
+            patch("apm_cli.runtime.manager.RuntimeManager") as mock_mgr_cls,
+        ):
             mock_mgr = MagicMock()
             mock_mgr.is_runtime_available.return_value = True
             mock_mgr_cls.return_value = mock_mgr
@@ -128,9 +126,7 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
 
         # Only copilot/codex should have been called (global-capable),
         # not vscode/cursor/opencode
-        called_runtimes = {
-            call.args[0] for call in mock_install_rt.call_args_list
-        }
+        called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
         workspace_only = {"vscode", "cursor", "opencode"}
         self.assertFalse(
             called_runtimes & workspace_only,
@@ -154,11 +150,10 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
         mock_ops.check_servers_needing_installation.return_value = ["test/server"]
         mock_ops_cls.return_value = mock_ops
 
-        with patch.object(
-            MCPIntegrator, "_detect_runtimes", return_value=set()
-        ), patch(
-            "apm_cli.runtime.manager.RuntimeManager"
-        ) as mock_mgr_cls:
+        with (
+            patch.object(MCPIntegrator, "_detect_runtimes", return_value=set()),
+            patch("apm_cli.runtime.manager.RuntimeManager") as mock_mgr_cls,
+        ):
             mock_mgr = MagicMock()
             mock_mgr.is_runtime_available.return_value = True
             mock_mgr_cls.return_value = mock_mgr
@@ -169,9 +164,7 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
                 scope=InstallScope.PROJECT,
             )
 
-        called_runtimes = {
-            call.args[0] for call in mock_install_rt.call_args_list
-        }
+        called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
         # vscode should be included at PROJECT scope
         self.assertIn("vscode", called_runtimes)
 
@@ -190,11 +183,10 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
         """--global --runtime copilot should NOT be filtered out."""
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
-        with patch.object(
-            MCPIntegrator, "_install_for_runtime", return_value=True
-        ) as mock_install, patch(
-            "apm_cli.registry.operations.MCPServerOperations"
-        ) as mock_ops_cls:
+        with (
+            patch.object(MCPIntegrator, "_install_for_runtime", return_value=True) as mock_install,
+            patch("apm_cli.registry.operations.MCPServerOperations") as mock_ops_cls,
+        ):
             mock_ops = MagicMock()
             mock_ops.validate_servers_exist.return_value = (["test/server"], [])
             mock_ops.check_servers_needing_installation.return_value = ["test/server"]
@@ -214,11 +206,10 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
         """USER scope should force user-scope path resolution even if the boolean disagrees."""
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
-        with patch.object(
-            MCPIntegrator, "_install_for_runtime", return_value=True
-        ) as mock_install, patch(
-            "apm_cli.registry.operations.MCPServerOperations"
-        ) as mock_ops_cls:
+        with (
+            patch.object(MCPIntegrator, "_install_for_runtime", return_value=True) as mock_install,
+            patch("apm_cli.registry.operations.MCPServerOperations") as mock_ops_cls,
+        ):
             mock_ops = MagicMock()
             mock_ops.validate_servers_exist.return_value = (["test/server"], [])
             mock_ops.check_servers_needing_installation.return_value = ["test/server"]
@@ -237,16 +228,15 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
         """When scope is None, all runtimes are eligible (backward compat)."""
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
-        with patch.object(
-            MCPIntegrator, "_install_for_runtime", return_value=True
-        ) as mock_install, patch(
-            "apm_cli.integration.mcp_integrator._is_vscode_available",
-            return_value=True,
-        ), patch(
-            "apm_cli.runtime.manager.RuntimeManager"
-        ) as mock_mgr_cls, patch(
-            "apm_cli.registry.operations.MCPServerOperations"
-        ) as mock_ops_cls:
+        with (
+            patch.object(MCPIntegrator, "_install_for_runtime", return_value=True) as mock_install,
+            patch(
+                "apm_cli.integration.mcp_integrator._is_vscode_available",
+                return_value=True,
+            ),
+            patch("apm_cli.runtime.manager.RuntimeManager") as mock_mgr_cls,
+            patch("apm_cli.registry.operations.MCPServerOperations") as mock_ops_cls,
+        ):
             mock_mgr = MagicMock()
             mock_mgr.is_runtime_available.return_value = True
             mock_mgr_cls.return_value = mock_mgr
@@ -254,17 +244,13 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
             mock_ops.validate_servers_exist.return_value = (["test/server"], [])
             mock_ops.check_servers_needing_installation.return_value = ["test/server"]
             mock_ops_cls.return_value = mock_ops
-            with patch.object(
-                MCPIntegrator, "_detect_runtimes", return_value=set()
-            ):
+            with patch.object(MCPIntegrator, "_detect_runtimes", return_value=set()):
                 MCPIntegrator.install(
                     mcp_deps=["test/server"],
                     scope=None,
                 )
 
-        called_runtimes = {
-            call.args[0] for call in mock_install.call_args_list
-        }
+        called_runtimes = {call.args[0] for call in mock_install.call_args_list}
         # vscode should be present (not filtered)
         self.assertIn("vscode", called_runtimes)
 
@@ -309,9 +295,7 @@ class TestInstallCommandMCPScope(unittest.TestCase):
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator.install", return_value=0)
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator.remove_stale")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator.update_lockfile")
-    def test_install_passes_scope_to_mcp_integrator(
-        self, _update_lock, mock_remove, mock_install
-    ):
+    def test_install_passes_scope_to_mcp_integrator(self, _update_lock, mock_remove, mock_install):
         """MCPIntegrator.install() receives scope=USER when --global is used."""
         # Directly call MCPIntegrator.install with USER scope and verify
         # the filtering logic works end-to-end (the install command wiring
@@ -319,30 +303,22 @@ class TestInstallCommandMCPScope(unittest.TestCase):
         # MCPIntegrator scope filtering already tested above).
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
-        with patch(
-            "apm_cli.registry.operations.MCPServerOperations"
-        ) as mock_ops_cls:
+        with patch("apm_cli.registry.operations.MCPServerOperations") as mock_ops_cls:
             mock_ops = mock_ops_cls.return_value
             mock_ops.validate_servers_exist.return_value = (
                 [{"name": "test-server"}],
                 [],
             )
-            mock_ops.check_servers_needing_installation.return_value = [
-                "test-server"
-            ]
+            mock_ops.check_servers_needing_installation.return_value = ["test-server"]
 
-            with patch(
-                "apm_cli.runtime.manager.RuntimeManager"
-            ) as mock_rm_cls:
+            with patch("apm_cli.runtime.manager.RuntimeManager") as mock_rm_cls:
                 mock_rm = mock_rm_cls.return_value
                 mock_rm.get_installed_runtimes.return_value = [
                     "copilot",
                     "vscode",
                 ]
 
-                with patch(
-                    "apm_cli.factory.ClientFactory.create_client"
-                ) as mock_cc:
+                with patch("apm_cli.factory.ClientFactory.create_client") as mock_cc:
                     copilot_adapter = MagicMock()
                     copilot_adapter.supports_user_scope = True
                     vscode_adapter = MagicMock()

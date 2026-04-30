@@ -58,6 +58,38 @@ my-package/
         resource2.md
 ```
 
+## Hook files
+
+Packages can ship hooks (pre/post tool-use scripts) by placing JSON
+files under `hooks/` or `.apm/hooks/`.  When a package targets multiple
+tools, use target-specific filenames so each tool receives only its own
+hooks:
+
+| Filename pattern | Deployed to |
+|---|---|
+| `*-copilot-hooks.json` | GitHub Copilot only |
+| `*-cursor-hooks.json` | Cursor only |
+| `*-claude-hooks.json` | Claude Code only |
+| `*-codex-hooks.json` | Codex CLI only |
+| `*-gemini-hooks.json` | Gemini CLI only |
+| Any other name (e.g. `hooks.json`, `telemetry-hooks.json`) | All targets |
+
+Example directory tree for a multi-target hook package:
+
+```
+my-hooks-pkg/
+  hooks/
+    hooks.json              # deployed to all targets
+    copilot-hooks.json      # Copilot only
+    cursor-hooks.json       # Cursor only
+    claude-hooks.json       # Claude Code only
+```
+
+APM automatically normalises event names per target (e.g. `postToolUse`
+becomes `PostToolUse` in Claude) and rewrites path variables
+(`${PLUGIN_ROOT}`, `${CURSOR_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`) to
+the correct target-specific form.
+
 ## Manifest fields: `target:` validation contract
 
 The `target:` field in `apm.yml` controls which output runtimes the package
@@ -122,18 +154,22 @@ applyTo: "**/*"
 
 ### 4. Prompt / Agent Workflow (`*.prompt.md`)
 
-Executable workflows with parameters.
+Executable workflows with parameters. Use the `input:` key to declare
+parameters, and `${input:name}` to reference them in the prompt body.
 
 ```yaml
 ---
 description: "Code review workflow"
-model: "gpt-4"
-parameters:
-  - name: pr_url
-    description: "GitHub PR URL"
-    required: true
+input:
+  - pr_url
+  - focus_areas
 ---
+Review ${input:pr_url} focusing on ${input:focus_areas}.
 ```
+
+When installed as a Claude Code slash command, APM maps `input:` to
+Claude's `arguments:` frontmatter and converts `${input:name}` to `$name`
+placeholders. An `argument-hint` is auto-generated unless one is already set.
 
 ### 5. Agent (`*.agent.md`)
 
@@ -195,61 +231,100 @@ apm install org/my-package#v1.0.0
 
 ## Marketplace authoring
 
-A **marketplace** is a curated index of packages (plugins) that consumers
-install via `apm install <name>@<marketplace>`. Maintainers author a
-`marketplace.yml` source file and compile it to an Anthropic-compliant
-`marketplace.json` with `apm marketplace build`. Both files are committed.
+A **marketplace** is a curated index of plugins that consumers install via
+`apm install <name>@<marketplace>`. Maintainers declare the marketplace in a
+`marketplace:` block inside `apm.yml`; running `apm pack` builds an
+Anthropic-compliant `.claude-plugin/marketplace.json`. Both files are committed.
 
 ### When to run `apm marketplace init`
 
 - The user is setting up a new marketplace repository.
 - The user wants to convert an ad-hoc list of plugins into a proper index.
 
-Do NOT run `init` inside an existing package directory; a marketplace
-repository is a separate repo whose job is to list plugins, not to be one.
+`apm marketplace init` appends a `marketplace:` block to the project's
+`apm.yml` and creates `.claude-plugin/`. It does NOT scaffold a standalone
+`marketplace.yml`. Use `apm init --marketplace` when starting a brand-new
+project that will publish its own marketplace.
 
-### marketplace.yml shape
+### apm.yml `marketplace:` block
 
 ```yaml
-name: my-marketplace
-description: Short summary
+name: my-project
 version: 0.1.0
-owner:
-  name: acme-org
-  url: https://github.com/acme-org
-build:                       # APM-only, stripped at compile time
-  tagPattern: "v{version}"
-metadata:                    # pass-through, copied verbatim to marketplace.json
-  homepage: https://example.com
-packages:
-  - name: example-package
-    description: What this package does
-    source: acme-org/example-package   # <owner>/<repo>
-    version: "^1.0.0"                  # semver range OR 'ref:' below
-    # ref: 3f2a9b1c                    # explicit SHA/tag/branch; overrides version
-    # subdir: tools/x                  # optional subdirectory
-    # tag_pattern: "{name}-v{version}" # optional per-package override
-    # include_prerelease: false        # optional
+description: Short summary
+
+marketplace:
+  # name / description / version inherit from apm.yml top level
+  # (omit unless you need to override).
+  owner:
+    name: acme-org
+    url: https://github.com/acme-org
+  build:                       # APM-only, stripped at compile time
+    tagPattern: "v{version}"
+  metadata:                    # pass-through, copied verbatim
+    homepage: https://example.com
+  plugins:
+    - name: example-plugin
+      description: What this plugin does
+      source: acme-org/example-plugin    # owner/repo (remote)
+      version: "^1.0.0"                  # semver range OR 'ref:' below
+      # ref: 3f2a9b1c                    # explicit SHA/tag/branch
+      # subdir: tools/x                  # optional subdirectory
+      # tag_pattern: "{name}-v{version}" # optional per-plugin override
+      # include_prerelease: false        # optional
+
+    - name: local-tool
+      description: Plugin shipped alongside this repo
+      source: ./plugins/local-tool       # local path (no remote fetch)
+      version: 0.1.0
 ```
 
 Schema rules:
-- `name`, `description`, `version`, `owner.name` are required.
-- Each package needs either `version` (a semver range) or `ref` (explicit).
+- `owner.name` is required. `name`, `description`, `version` are
+  optional inside the block (inherited from apm.yml top level).
+- Each remote plugin needs either `version` or `ref`.
 - `ref` takes precedence over `version`.
+- `source: ./...` marks a local-path entry: skips git resolution,
+  emits the path verbatim into `marketplace.json`.
 - Unknown keys raise a schema error -- do not invent fields.
 
 ### Build semantics
 
-`apm marketplace build` runs `git ls-remote` against each package source,
-picks the highest tag satisfying the range (under the applicable
-`tagPattern`), and writes `marketplace.json`. The compiler:
+`apm pack` runs `git ls-remote` against each remote plugin source, picks the
+highest tag satisfying the range (under the applicable `tagPattern`), leaves
+local-path entries untouched, and writes `.claude-plugin/marketplace.json`.
+The compiler:
 
 1. Emits `plugins:` verbatim (Anthropic's key name).
 2. Copies `metadata:` byte-for-byte.
-3. Strips `build:`, per-package `version`, `tag_pattern`, `include_prerelease`.
-4. Does not emit `versions[]` -- each plugin carries a single resolved ref.
+3. Strips `build:`, per-plugin `version`, `tag_pattern`, `include_prerelease`.
+4. Omits empty `tags:` and inherited top-level `description`/`version`
+   from the output (matches Anthropic's canonical hand-authored shape,
+   e.g. microsoft/azure-skills).
+5. Does not emit `versions[]` -- each plugin carries a single resolved ref.
+
+`apm pack` also produces a bundle if `apm.yml` declares `dependencies:`. With
+only a `marketplace:` block present, bundle flags (`--archive`, `-o`, `--format`,
+`--target`, `--force`) are silent no-ops.
+
+Marketplace-relevant flags on `apm pack`: `--dry-run`, `--offline`,
+`--include-prerelease`, `--marketplace-output PATH`, `-v`.
 
 Exit codes: `0` success, `1` build error, `2` schema error.
+
+### Migrating from legacy `marketplace.yml`
+
+Earlier APM versions stored this configuration in a standalone
+`marketplace.yml`. That file is deprecated; `apm marketplace init` no longer
+creates one. Run the one-shot migration:
+
+```bash
+apm marketplace migrate --dry-run    # preview the apm.yml change
+apm marketplace migrate --yes        # apply: rewrite apm.yml, delete marketplace.yml
+```
+
+`--force`, `--yes`, and `-y` are equivalent. Both files present at once
+is a hard error -- run `migrate` to consolidate.
 
 ### Full guide
 

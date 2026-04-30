@@ -27,7 +27,7 @@ external callers keep working.
 
 from __future__ import annotations
 
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional  # noqa: F401
 
 if TYPE_CHECKING:  # pragma: no cover - import for type hints only
     from apm_cli.policy.models import CIAuditResult
@@ -82,7 +82,7 @@ class PolicyViolationError(RuntimeError):
         self,
         message: str,
         *,
-        audit_result: "Optional[CIAuditResult]" = None,
+        audit_result: CIAuditResult | None = None,
         policy_source: str = "",
     ):
         super().__init__(message)

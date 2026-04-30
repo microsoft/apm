@@ -1,15 +1,16 @@
 """Tests for instruction integration functionality."""
 
-import pytest
-import tempfile
 import shutil
+import tempfile
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock
-from datetime import datetime
 
-from apm_cli.integration.instruction_integrator import InstructionIntegrator
+import pytest  # noqa: F401
+
 from apm_cli.integration.base_integrator import IntegrationResult
-from apm_cli.models.apm_package import PackageInfo, APMPackage, ResolvedReference, GitReferenceType
+from apm_cli.integration.instruction_integrator import InstructionIntegrator
+from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
 
 
 def _make_package_info(package_dir, name="test-pkg"):
@@ -75,7 +76,9 @@ class TestInstructionIntegrator:
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
-        (inst_dir / "python.instructions.md").write_text("---\napplyTo: '**/*.py'\n---\n# Python rules")
+        (inst_dir / "python.instructions.md").write_text(
+            "---\napplyTo: '**/*.py'\n---\n# Python rules"
+        )
         (inst_dir / "readme.md").write_text("# Not an instruction")
 
         files = self.integrator.find_instruction_files(pkg)
@@ -114,7 +117,9 @@ class TestInstructionIntegrator:
         """Frontmatter with applyTo is preserved exactly."""
         source = self.project_root / "source.instructions.md"
         target = self.project_root / "target.instructions.md"
-        content = "---\napplyTo: 'src/**/*.ts'\ndescription: TypeScript guidelines\n---\n\n# TS Rules"
+        content = (
+            "---\napplyTo: 'src/**/*.ts'\ndescription: TypeScript guidelines\n---\n\n# TS Rules"
+        )
         source.write_text(content)
 
         self.integrator.copy_instruction(source, target)
@@ -297,7 +302,10 @@ class TestInstructionIntegrator:
         assert len(result.target_paths) == 1
         tp = result.target_paths[0]
         assert tp.is_absolute()
-        assert tp.relative_to(self.project_root).as_posix() == ".github/instructions/python.instructions.md"
+        assert (
+            tp.relative_to(self.project_root).as_posix()
+            == ".github/instructions/python.instructions.md"
+        )
 
 
 class TestInstructionSyncIntegration:
@@ -323,9 +331,11 @@ class TestInstructionSyncIntegration:
             ".github/instructions/testing.instructions.md",
         }
         apm_package = Mock()
-        result = self.integrator.sync_integration(apm_package, self.project_root, managed_files=managed)
+        result = self.integrator.sync_integration(
+            apm_package, self.project_root, managed_files=managed
+        )
 
-        assert result['files_removed'] == 2
+        assert result["files_removed"] == 2
         assert not (target_dir / "python.instructions.md").exists()
         assert not (target_dir / "testing.instructions.md").exists()
 
@@ -338,9 +348,11 @@ class TestInstructionSyncIntegration:
 
         managed = {".github/instructions/python.instructions.md"}
         apm_package = Mock()
-        result = self.integrator.sync_integration(apm_package, self.project_root, managed_files=managed)
+        result = self.integrator.sync_integration(
+            apm_package, self.project_root, managed_files=managed
+        )
 
-        assert result['files_removed'] == 1
+        assert result["files_removed"] == 1
         assert not (target_dir / "python.instructions.md").exists()
         assert (target_dir / "my-custom.instructions.md").exists()
 
@@ -352,9 +364,11 @@ class TestInstructionSyncIntegration:
         (target_dir / "testing.instructions.md").write_text("# Testing")
 
         apm_package = Mock()
-        result = self.integrator.sync_integration(apm_package, self.project_root, managed_files=None)
+        result = self.integrator.sync_integration(
+            apm_package, self.project_root, managed_files=None
+        )
 
-        assert result['files_removed'] == 2
+        assert result["files_removed"] == 2
 
     def test_sync_legacy_preserves_non_instruction_files(self):
         """Legacy glob only matches *.instructions.md — other files preserved."""
@@ -365,9 +379,11 @@ class TestInstructionSyncIntegration:
         (target_dir / "notes.txt").write_text("notes")
 
         apm_package = Mock()
-        result = self.integrator.sync_integration(apm_package, self.project_root, managed_files=None)
+        result = self.integrator.sync_integration(
+            apm_package, self.project_root, managed_files=None
+        )
 
-        assert result['files_removed'] == 1
+        assert result["files_removed"] == 1
         assert (target_dir / "README.md").exists()
         assert (target_dir / "notes.txt").exists()
 
@@ -376,8 +392,8 @@ class TestInstructionSyncIntegration:
         apm_package = Mock()
         result = self.integrator.sync_integration(apm_package, self.project_root)
 
-        assert result['files_removed'] == 0
-        assert result['errors'] == 0
+        assert result["files_removed"] == 0
+        assert result["errors"] == 0
 
     def test_sync_empty_managed_files_removes_nothing(self):
         """Empty managed_files set removes nothing."""
@@ -386,9 +402,11 @@ class TestInstructionSyncIntegration:
         (target_dir / "python.instructions.md").write_text("# Python")
 
         apm_package = Mock()
-        result = self.integrator.sync_integration(apm_package, self.project_root, managed_files=set())
+        result = self.integrator.sync_integration(
+            apm_package, self.project_root, managed_files=set()
+        )
 
-        assert result['files_removed'] == 0
+        assert result["files_removed"] == 0
         assert (target_dir / "python.instructions.md").exists()
 
     def test_sync_skips_files_not_on_disk(self):
@@ -398,9 +416,11 @@ class TestInstructionSyncIntegration:
 
         managed = {".github/instructions/nonexistent.instructions.md"}
         apm_package = Mock()
-        result = self.integrator.sync_integration(apm_package, self.project_root, managed_files=managed)
+        result = self.integrator.sync_integration(
+            apm_package, self.project_root, managed_files=managed
+        )
 
-        assert result['files_removed'] == 0
+        assert result["files_removed"] == 0
 
 
 class TestInstructionNameCollision:
@@ -733,7 +753,9 @@ class TestCursorRulesSyncIntegration:
             ".cursor/rules/testing.mdc",
         }
         apm_package = Mock()
-        result = self.integrator.sync_integration_cursor(apm_package, self.project_root, managed_files=managed)
+        result = self.integrator.sync_integration_cursor(
+            apm_package, self.project_root, managed_files=managed
+        )
 
         assert result["files_removed"] == 2
         assert not (rules_dir / "python.mdc").exists()
@@ -747,7 +769,9 @@ class TestCursorRulesSyncIntegration:
 
         managed = {".cursor/rules/python.mdc"}
         apm_package = Mock()
-        result = self.integrator.sync_integration_cursor(apm_package, self.project_root, managed_files=managed)
+        result = self.integrator.sync_integration_cursor(
+            apm_package, self.project_root, managed_files=managed
+        )
 
         assert result["files_removed"] == 1
         assert (rules_dir / "my-custom.mdc").exists()
@@ -759,7 +783,9 @@ class TestCursorRulesSyncIntegration:
         (rules_dir / "testing.mdc").write_text("# Testing")
 
         apm_package = Mock()
-        result = self.integrator.sync_integration_cursor(apm_package, self.project_root, managed_files=None)
+        result = self.integrator.sync_integration_cursor(
+            apm_package, self.project_root, managed_files=None
+        )
 
         assert result["files_removed"] == 2
 
@@ -1055,7 +1081,9 @@ class TestClaudeRulesSyncIntegration:
             ".claude/rules/testing.md",
         }
         apm_package = Mock()
-        result = self.integrator.sync_integration_claude(apm_package, self.project_root, managed_files=managed)
+        result = self.integrator.sync_integration_claude(
+            apm_package, self.project_root, managed_files=managed
+        )
 
         assert result["files_removed"] == 2
         assert not (rules_dir / "python.md").exists()
@@ -1069,7 +1097,9 @@ class TestClaudeRulesSyncIntegration:
 
         managed = {".claude/rules/python.md"}
         apm_package = Mock()
-        result = self.integrator.sync_integration_claude(apm_package, self.project_root, managed_files=managed)
+        result = self.integrator.sync_integration_claude(
+            apm_package, self.project_root, managed_files=managed
+        )
 
         assert result["files_removed"] == 1
         assert (rules_dir / "my-custom.md").exists()
@@ -1083,7 +1113,9 @@ class TestClaudeRulesSyncIntegration:
         (rules_dir / "testing.md").write_text("# Testing")
 
         apm_package = Mock()
-        result = self.integrator.sync_integration_claude(apm_package, self.project_root, managed_files=None)
+        result = self.integrator.sync_integration_claude(
+            apm_package, self.project_root, managed_files=None
+        )
 
         assert result["files_removed"] == 0
         assert (rules_dir / "python.md").exists()
@@ -1095,5 +1127,3 @@ class TestClaudeRulesSyncIntegration:
 
         assert result["files_removed"] == 0
         assert result["errors"] == 0
-
-

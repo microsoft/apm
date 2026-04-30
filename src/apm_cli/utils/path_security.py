@@ -64,13 +64,11 @@ def validate_path_segments(
     for segment in path_str.replace("\\", "/").split("/"):
         if segment in reject:
             raise PathTraversalError(
-                f"Invalid {context} '{path_str}': "
-                f"segment '{segment}' is a traversal sequence"
+                f"Invalid {context} '{path_str}': segment '{segment}' is a traversal sequence"
             )
         if reject_empty and not segment:
             raise PathTraversalError(
-                f"Invalid {context} '{path_str}': "
-                f"path segments must not be empty"
+                f"Invalid {context} '{path_str}': path segments must not be empty"
             )
 
 

@@ -1,7 +1,7 @@
 """Tests for the apm config command."""
 
 import os
-import sys
+import sys  # noqa: F401
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -20,7 +20,7 @@ class TestConfigShow:
         self.original_dir = os.getcwd()
 
     def teardown_method(self):
-        try:
+        try:  # noqa: SIM105
             os.chdir(self.original_dir)
         except (FileNotFoundError, OSError):
             pass
@@ -78,9 +78,7 @@ class TestConfigShow:
                 }
                 with (
                     patch("apm_cli.commands.config.get_version", return_value="1.2.3"),
-                    patch(
-                        "apm_cli.commands.config._load_apm_config", return_value=apm_config
-                    ),
+                    patch("apm_cli.commands.config._load_apm_config", return_value=apm_config),
                 ):
                     result = self.runner.invoke(config, [])
             finally:
@@ -91,7 +89,7 @@ class TestConfigShow:
         """Fallback plain-text display when Rich (rich.table.Table) is unavailable."""
         import rich.table
 
-        mock_table_cls = MagicMock(side_effect=ImportError("no rich"))
+        mock_table_cls = MagicMock(side_effect=ImportError("no rich"))  # noqa: F841
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
@@ -121,9 +119,7 @@ class TestConfigShow:
                 }
                 with (
                     patch("apm_cli.commands.config.get_version", return_value="0.9.0"),
-                    patch(
-                        "apm_cli.commands.config._load_apm_config", return_value=apm_config
-                    ),
+                    patch("apm_cli.commands.config._load_apm_config", return_value=apm_config),
                     patch.object(rich.table, "Table", side_effect=ImportError("no rich")),
                 ):
                     result = self.runner.invoke(config, [])
@@ -233,6 +229,7 @@ class TestConfigSet:
         assert result.exit_code == 0
         mock_set.assert_called_once_with(True)
 
+
 class TestConfigGet:
     """Tests for `apm config get [key]`."""
 
@@ -289,9 +286,7 @@ class TestAutoIntegrateFunctions:
         """Returns False when set to False."""
         import apm_cli.config as cfg_module
 
-        with patch.object(
-            cfg_module, "get_config", return_value={"auto_integrate": False}
-        ):
+        with patch.object(cfg_module, "get_config", return_value={"auto_integrate": False}):
             assert cfg_module.get_auto_integrate() is False
 
     def test_set_auto_integrate_calls_update_config(self):
@@ -325,9 +320,7 @@ class TestTempDirFunctions:
         """Returns stored temp_dir value."""
         import apm_cli.config as cfg_module
 
-        with patch.object(
-            cfg_module, "get_config", return_value={"temp_dir": "/custom/tmp"}
-        ):
+        with patch.object(cfg_module, "get_config", return_value={"temp_dir": "/custom/tmp"}):
             assert cfg_module.get_temp_dir() == "/custom/tmp"
 
     def test_set_temp_dir_validates_and_stores(self):
@@ -552,9 +545,7 @@ class TestCoworkSkillsDirFunctions:
         expected = os.path.normpath(raw)
         with patch.object(cfg_module, "update_config") as mock_update:
             cfg_module.set_copilot_cowork_skills_dir(raw)
-            mock_update.assert_called_once_with(
-                {"copilot_cowork_skills_dir": expected}
-            )
+            mock_update.assert_called_once_with({"copilot_cowork_skills_dir": expected})
 
     def test_set_copilot_cowork_skills_dir_expands_tilde_before_storing(self):
         """Tilde in path is expanded to an absolute path before storage."""
@@ -663,18 +654,14 @@ class TestConfigSetCoworkSkillsDir:
             patch("apm_cli.config.set_copilot_cowork_skills_dir") as mock_set,
             patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value="/tmp/foo"),
         ):
-            result = self.runner.invoke(
-                config, ["set", "copilot-cowork-skills-dir", "/tmp/foo"]
-            )
+            result = self.runner.invoke(config, ["set", "copilot-cowork-skills-dir", "/tmp/foo"])
         assert result.exit_code == 0
         mock_set.assert_called_once_with("/tmp/foo")
 
     def test_set_copilot_cowork_skills_dir_flag_disabled_returns_exit_1(self):
         """Attempting to set copilot-cowork-skills-dir without the cowork flag exits 1."""
         with patch("apm_cli.core.experimental.is_enabled", return_value=False):
-            result = self.runner.invoke(
-                config, ["set", "copilot-cowork-skills-dir", "/tmp/foo"]
-            )
+            result = self.runner.invoke(config, ["set", "copilot-cowork-skills-dir", "/tmp/foo"])
         assert result.exit_code == 1
         # The phrase may be line-wrapped in terminal output; check for the
         # key parts that appear on the same output line.
@@ -794,7 +781,7 @@ class TestConfigListingFlagGating:
         self.original_dir = os.getcwd()
 
     def teardown_method(self):
-        try:
+        try:  # noqa: SIM105
             os.chdir(self.original_dir)
         except (FileNotFoundError, OSError):
             pass
@@ -840,9 +827,7 @@ class TestConfigListingFlagGating:
                         "apm_cli.config.get_copilot_cowork_skills_dir",
                         return_value="/cowork/skills",
                     ),
-                    patch.object(
-                        rich.table, "Table", side_effect=ImportError("no rich")
-                    ),
+                    patch.object(rich.table, "Table", side_effect=ImportError("no rich")),
                 ):
                     result = self.runner.invoke(config, [])
             finally:
@@ -861,9 +846,7 @@ class TestConfigListingFlagGating:
                     patch("apm_cli.commands.config.get_version", return_value="1.0.0"),
                     patch("apm_cli.config.get_temp_dir", return_value=None),
                     patch("apm_cli.core.experimental.is_enabled", return_value=False),
-                    patch.object(
-                        rich.table, "Table", side_effect=ImportError("no rich")
-                    ),
+                    patch.object(rich.table, "Table", side_effect=ImportError("no rich")),
                 ):
                     result = self.runner.invoke(config, [])
             finally:
@@ -901,8 +884,5 @@ class TestFlagGatingRegression:
     def test_copilot_cowork_skills_dir_set_is_gated(self):
         """apm config set copilot-cowork-skills-dir exits 1 when the copilot-cowork flag is off."""
         with patch("apm_cli.core.experimental.is_enabled", return_value=False):
-            result = self.runner.invoke(
-                config, ["set", "copilot-cowork-skills-dir", "/some/path"]
-            )
+            result = self.runner.invoke(config, ["set", "copilot-cowork-skills-dir", "/some/path"])
         assert result.exit_code == 1
-

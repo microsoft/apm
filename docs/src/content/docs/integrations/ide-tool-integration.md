@@ -169,6 +169,8 @@ APM provides first-class support for Claude Code and Claude Desktop through nati
 
 > **Auto-Detection**: Claude integration is automatically enabled when a `.claude/` folder exists in your project. If neither `.github/` nor `.claude/` exists, `apm install` skips folder integration (packages are still installed to `apm_modules/`). To force integration regardless of folder presence, pass an explicit target (e.g. `apm install --target claude`) or set `target: claude` in `apm.yml` -- `.claude/` will be created automatically.
 
+> **User-scope `CLAUDE_CONFIG_DIR`**: At user scope (`apm install -g --target claude`), APM honors the `CLAUDE_CONFIG_DIR` environment variable that Claude Code itself reads. If set (and inside `$HOME`), primitives deploy to that directory instead of `~/.claude/`. Values outside `$HOME` are not normalized.
+
 ### Optional: Compiled Output for Claude
 
 Running `apm compile` is optional for Claude Code, which reads deployed primitives natively via `apm install`. If you want a single `CLAUDE.md` instruction file (for example, for Claude Desktop), you can generate one:
@@ -272,7 +274,37 @@ apm install microsoft/apm-sample-package
 **How it works:**
 1. `apm install` detects `.prompt.md` files in the package
 2. Converts each to Claude command format in `.claude/commands/`
-3. `apm uninstall` automatically removes the package's commands
+3. Maps APM `input:` frontmatter to Claude `arguments:` frontmatter
+4. Converts `${input:name}` references to `$name` placeholders
+5. Auto-generates `argument-hint` from input names (unless one is already set)
+6. `apm uninstall` automatically removes the package's commands
+
+**Input-to-arguments mapping example:**
+
+```yaml
+# APM prompt (.prompt.md)
+---
+description: Review a feature
+input:
+  - feature_name
+  - priority
+---
+Review ${input:feature_name} with priority ${input:priority}.
+```
+
+Becomes:
+
+```yaml
+# Claude command (.claude/commands/review.md)
+---
+description: Review a feature
+arguments:
+  - feature_name
+  - priority
+argument-hint: <feature_name> <priority>
+---
+Review $feature_name with priority $priority.
+```
 
 ### Automatic Skills Integration
 

@@ -35,7 +35,9 @@ def _write(path: Path, content: str) -> None:
 
 
 CHATMODE_CONTENT = "---\ndescription: Test chatmode\n---\n\n# Chatmode body\n"
-INSTRUCTION_CONTENT = "---\ndescription: Test instruction\napplyTo: '**/*.py'\n---\n\n# Instruction body\n"
+INSTRUCTION_CONTENT = (
+    "---\ndescription: Test instruction\napplyTo: '**/*.py'\n---\n\n# Instruction body\n"
+)
 CONTEXT_CONTENT = "---\ndescription: Test context\n---\n\n# Context body\n"
 SKILL_CONTENT = "---\nname: my-skill\ndescription: A skill\n---\n\n# Skill body\n"
 SKILL_NO_NAME = "---\ndescription: A skill\n---\n\n# Skill body\n"
@@ -240,9 +242,7 @@ class TestDiscoverSkillInDirectory(unittest.TestCase):
         dep_dir = Path(self.tmp) / "owner" / "repo"
         _write(dep_dir / "SKILL.md", SKILL_CONTENT)
         collection = PrimitiveCollection()
-        _discover_skill_in_directory(
-            dep_dir, collection, source="dependency:owner/repo"
-        )
+        _discover_skill_in_directory(dep_dir, collection, source="dependency:owner/repo")
         self.assertEqual(len(collection.skills), 1)
         self.assertEqual(collection.skills[0].source, "dependency:owner/repo")
 
@@ -250,9 +250,7 @@ class TestDiscoverSkillInDirectory(unittest.TestCase):
         dep_dir = Path(self.tmp) / "owner" / "repo"
         dep_dir.mkdir(parents=True)
         collection = PrimitiveCollection()
-        _discover_skill_in_directory(
-            dep_dir, collection, source="dependency:owner/repo"
-        )
+        _discover_skill_in_directory(dep_dir, collection, source="dependency:owner/repo")
         self.assertEqual(len(collection.skills), 0)
 
     def test_parse_error_in_dep_skill_warns_and_skips(self):
@@ -419,15 +417,17 @@ class TestGetDependencyDeclarationOrder(unittest.TestCase):
         mock_dep.is_virtual = False
         mock_package = MagicMock()
         mock_package.get_apm_dependencies.return_value = [mock_dep]
-        with patch(
-            "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
-            return_value=mock_package,
-        ):
-            with patch(
+        with (
+            patch(
+                "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
+                return_value=mock_package,
+            ),
+            patch(
                 "apm_cli.primitives.discovery.LockFile.installed_paths_for_project",
                 return_value=[],
-            ):
-                result = get_dependency_declaration_order(self.tmp)
+            ),
+        ):
+            result = get_dependency_declaration_order(self.tmp)
         self.assertEqual(result, ["my-alias"])
 
     def test_virtual_github_subdir_dependency(self):
@@ -443,15 +443,17 @@ class TestGetDependencyDeclarationOrder(unittest.TestCase):
         mock_dep.is_azure_devops.return_value = False
         mock_package = MagicMock()
         mock_package.get_apm_dependencies.return_value = [mock_dep]
-        with patch(
-            "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
-            return_value=mock_package,
-        ):
-            with patch(
+        with (
+            patch(
+                "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
+                return_value=mock_package,
+            ),
+            patch(
                 "apm_cli.primitives.discovery.LockFile.installed_paths_for_project",
                 return_value=[],
-            ):
-                result = get_dependency_declaration_order(self.tmp)
+            ),
+        ):
+            result = get_dependency_declaration_order(self.tmp)
         self.assertEqual(result, ["owner/repo/subdir"])
 
     def test_virtual_github_collection_dependency(self):
@@ -468,15 +470,17 @@ class TestGetDependencyDeclarationOrder(unittest.TestCase):
         mock_dep.get_virtual_package_name.return_value = "my-coll"
         mock_package = MagicMock()
         mock_package.get_apm_dependencies.return_value = [mock_dep]
-        with patch(
-            "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
-            return_value=mock_package,
-        ):
-            with patch(
+        with (
+            patch(
+                "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
+                return_value=mock_package,
+            ),
+            patch(
                 "apm_cli.primitives.discovery.LockFile.installed_paths_for_project",
                 return_value=[],
-            ):
-                result = get_dependency_declaration_order(self.tmp)
+            ),
+        ):
+            result = get_dependency_declaration_order(self.tmp)
         self.assertEqual(result, ["owner/my-coll"])
 
     def test_virtual_ado_subdir_dependency(self):
@@ -492,15 +496,17 @@ class TestGetDependencyDeclarationOrder(unittest.TestCase):
         mock_dep.is_azure_devops.return_value = True
         mock_package = MagicMock()
         mock_package.get_apm_dependencies.return_value = [mock_dep]
-        with patch(
-            "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
-            return_value=mock_package,
-        ):
-            with patch(
+        with (
+            patch(
+                "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
+                return_value=mock_package,
+            ),
+            patch(
                 "apm_cli.primitives.discovery.LockFile.installed_paths_for_project",
                 return_value=[],
-            ):
-                result = get_dependency_declaration_order(self.tmp)
+            ),
+        ):
+            result = get_dependency_declaration_order(self.tmp)
         self.assertEqual(result, ["org/project/repo/subdir"])
 
     def test_virtual_ado_collection_dependency(self):
@@ -517,15 +523,17 @@ class TestGetDependencyDeclarationOrder(unittest.TestCase):
         mock_dep.get_virtual_package_name.return_value = "my-coll"
         mock_package = MagicMock()
         mock_package.get_apm_dependencies.return_value = [mock_dep]
-        with patch(
-            "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
-            return_value=mock_package,
-        ):
-            with patch(
+        with (
+            patch(
+                "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
+                return_value=mock_package,
+            ),
+            patch(
                 "apm_cli.primitives.discovery.LockFile.installed_paths_for_project",
                 return_value=[],
-            ):
-                result = get_dependency_declaration_order(self.tmp)
+            ),
+        ):
+            result = get_dependency_declaration_order(self.tmp)
         self.assertEqual(result, ["org/project/my-coll"])
 
     def test_virtual_single_part_repo_url_subdir(self):
@@ -541,15 +549,17 @@ class TestGetDependencyDeclarationOrder(unittest.TestCase):
         mock_dep.is_azure_devops.return_value = False
         mock_package = MagicMock()
         mock_package.get_apm_dependencies.return_value = [mock_dep]
-        with patch(
-            "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
-            return_value=mock_package,
-        ):
-            with patch(
+        with (
+            patch(
+                "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
+                return_value=mock_package,
+            ),
+            patch(
                 "apm_cli.primitives.discovery.LockFile.installed_paths_for_project",
                 return_value=[],
-            ):
-                result = get_dependency_declaration_order(self.tmp)
+            ),
+        ):
+            result = get_dependency_declaration_order(self.tmp)
         self.assertEqual(result, ["subdir"])
 
     def test_virtual_single_part_repo_url_collection(self):
@@ -566,15 +576,17 @@ class TestGetDependencyDeclarationOrder(unittest.TestCase):
         mock_dep.get_virtual_package_name.return_value = "my-coll"
         mock_package = MagicMock()
         mock_package.get_apm_dependencies.return_value = [mock_dep]
-        with patch(
-            "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
-            return_value=mock_package,
-        ):
-            with patch(
+        with (
+            patch(
+                "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
+                return_value=mock_package,
+            ),
+            patch(
                 "apm_cli.primitives.discovery.LockFile.installed_paths_for_project",
                 return_value=[],
-            ):
-                result = get_dependency_declaration_order(self.tmp)
+            ),
+        ):
+            result = get_dependency_declaration_order(self.tmp)
         self.assertEqual(result, ["my-coll"])
 
     def test_transitive_deps_appended_deduped(self):
@@ -587,15 +599,17 @@ class TestGetDependencyDeclarationOrder(unittest.TestCase):
         mock_dep.repo_url = "owner/direct-dep"
         mock_package = MagicMock()
         mock_package.get_apm_dependencies.return_value = [mock_dep]
-        with patch(
-            "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
-            return_value=mock_package,
-        ):
-            with patch(
+        with (
+            patch(
+                "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
+                return_value=mock_package,
+            ),
+            patch(
                 "apm_cli.primitives.discovery.LockFile.installed_paths_for_project",
                 return_value=["owner/direct-dep", "owner/transitive-dep"],
-            ):
-                result = get_dependency_declaration_order(self.tmp)
+            ),
+        ):
+            result = get_dependency_declaration_order(self.tmp)
         self.assertEqual(result, ["owner/direct-dep", "owner/transitive-dep"])
 
 
@@ -674,18 +688,11 @@ class TestExcludePatternsInDiscovery(unittest.TestCase):
         )
         # Instruction inside docs/ (should be excluded)
         _write(
-            base
-            / "docs"
-            / "labs"
-            / ".github"
-            / "instructions"
-            / "react.instructions.md",
+            base / "docs" / "labs" / ".github" / "instructions" / "react.instructions.md",
             INSTRUCTION_CONTENT,
         )
         collection = PrimitiveCollection()
-        scan_local_primitives(
-            self.tmp, collection, exclude_patterns=["docs/**"]
-        )
+        scan_local_primitives(self.tmp, collection, exclude_patterns=["docs/**"])
         self.assertEqual(len(collection.instructions), 1)
 
     def test_scan_local_primitives_no_exclude_discovers_all(self):
@@ -696,12 +703,7 @@ class TestExcludePatternsInDiscovery(unittest.TestCase):
             INSTRUCTION_CONTENT,
         )
         _write(
-            base
-            / "docs"
-            / "labs"
-            / ".github"
-            / "instructions"
-            / "react.instructions.md",
+            base / "docs" / "labs" / ".github" / "instructions" / "react.instructions.md",
             INSTRUCTION_CONTENT,
         )
         collection = PrimitiveCollection()
@@ -716,25 +718,15 @@ class TestExcludePatternsInDiscovery(unittest.TestCase):
             INSTRUCTION_CONTENT,
         )
         _write(
-            base
-            / "docs"
-            / ".github"
-            / "instructions"
-            / "a.instructions.md",
+            base / "docs" / ".github" / "instructions" / "a.instructions.md",
             INSTRUCTION_CONTENT,
         )
         _write(
-            base
-            / "tmp"
-            / ".github"
-            / "instructions"
-            / "b.instructions.md",
+            base / "tmp" / ".github" / "instructions" / "b.instructions.md",
             INSTRUCTION_CONTENT,
         )
         collection = PrimitiveCollection()
-        scan_local_primitives(
-            self.tmp, collection, exclude_patterns=["docs/**", "tmp/**"]
-        )
+        scan_local_primitives(self.tmp, collection, exclude_patterns=["docs/**", "tmp/**"])
         self.assertEqual(len(collection.instructions), 1)
 
     def test_discover_primitives_respects_exclude(self):
@@ -745,18 +737,12 @@ class TestExcludePatternsInDiscovery(unittest.TestCase):
             INSTRUCTION_CONTENT,
         )
         _write(
-            base
-            / "docs"
-            / ".github"
-            / "instructions"
-            / "leak.instructions.md",
+            base / "docs" / ".github" / "instructions" / "leak.instructions.md",
             INSTRUCTION_CONTENT,
         )
         from apm_cli.primitives.discovery import discover_primitives
 
-        collection = discover_primitives(
-            self.tmp, exclude_patterns=["docs/**"]
-        )
+        collection = discover_primitives(self.tmp, exclude_patterns=["docs/**"])
         self.assertEqual(len(collection.instructions), 1)
 
     def test_discover_primitives_with_dependencies_respects_exclude(self):
@@ -767,24 +753,16 @@ class TestExcludePatternsInDiscovery(unittest.TestCase):
             INSTRUCTION_CONTENT,
         )
         _write(
-            base
-            / "docs"
-            / ".github"
-            / "instructions"
-            / "leak.instructions.md",
+            base / "docs" / ".github" / "instructions" / "leak.instructions.md",
             INSTRUCTION_CONTENT,
         )
         # Create minimal apm.yml for the function to work
-        (base / "apm.yml").write_text(
-            "name: test\nversion: 1.0.0\n", encoding="utf-8"
-        )
+        (base / "apm.yml").write_text("name: test\nversion: 1.0.0\n", encoding="utf-8")
         from apm_cli.primitives.discovery import (
             discover_primitives_with_dependencies,
         )
 
-        collection = discover_primitives_with_dependencies(
-            self.tmp, exclude_patterns=["docs/**"]
-        )
+        collection = discover_primitives_with_dependencies(self.tmp, exclude_patterns=["docs/**"])
         self.assertEqual(len(collection.instructions), 1)
 
     def test_discover_primitives_excludes_skill_md(self):
@@ -805,6 +783,7 @@ class TestExcludePatternsInDiscovery(unittest.TestCase):
     def test_validate_rejects_dos_pattern(self):
         """Patterns with excessive non-consecutive ** segments are rejected."""
         from apm_cli.utils.exclude import validate_exclude_patterns
+
         # 7 non-consecutive ** segments (consecutive ones collapse)
         with self.assertRaises(ValueError):
             validate_exclude_patterns(["a/**/b/**/c/**/d/**/e/**/f/**/g/**"])
@@ -881,9 +860,7 @@ class TestIsUnderDirectory(unittest.TestCase):
 
     def test_file_not_under_directory_returns_false(self):
         self.assertFalse(
-            _is_under_directory(
-                Path("/project/.apm/file.md"), Path("/project/apm_modules")
-            )
+            _is_under_directory(Path("/project/.apm/file.md"), Path("/project/apm_modules"))
         )
 
 

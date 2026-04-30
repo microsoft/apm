@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
-from unittest.mock import MagicMock
+from typing import Dict, List, Optional  # noqa: F401, UP035
+from unittest.mock import MagicMock  # noqa: F401
 
 from apm_cli.drift import (
     build_download_ref,
@@ -19,7 +19,6 @@ from apm_cli.drift import (
     detect_ref_change,
 )
 from apm_cli.models.dependency.reference import DependencyReference
-
 
 # ---------------------------------------------------------------------------
 # Helpers: minimal LockedDependency stub
@@ -31,14 +30,14 @@ class _LockedDep:
     """Minimal stand-in for LockedDependency to keep tests self-contained."""
 
     repo_url: str = "owner/repo"
-    resolved_ref: Optional[str] = None
-    resolved_commit: Optional[str] = None
-    host: Optional[str] = None
-    registry_prefix: Optional[str] = None
-    virtual_path: Optional[str] = None
-    source: Optional[str] = None
-    local_path: Optional[str] = None
-    deployed_files: List[str] = field(default_factory=list)
+    resolved_ref: str | None = None
+    resolved_commit: str | None = None
+    host: str | None = None
+    registry_prefix: str | None = None
+    virtual_path: str | None = None
+    source: str | None = None
+    local_path: str | None = None
+    deployed_files: list[str] = field(default_factory=list)
 
     def get_unique_key(self) -> str:
         if self.source == "local" and self.local_path:
@@ -52,13 +51,13 @@ class _LockedDep:
 class _LockFile:
     """Minimal stand-in for LockFile."""
 
-    dependencies: Dict[str, _LockedDep] = field(default_factory=dict)
+    dependencies: dict[str, _LockedDep] = field(default_factory=dict)
 
-    def get_dependency(self, key: str) -> Optional[_LockedDep]:
+    def get_dependency(self, key: str) -> _LockedDep | None:
         return self.dependencies.get(key)
 
 
-def _dep(repo_url: str = "owner/repo", reference: Optional[str] = None) -> DependencyReference:
+def _dep(repo_url: str = "owner/repo", reference: str | None = None) -> DependencyReference:
     return DependencyReference(repo_url=repo_url, reference=reference)
 
 

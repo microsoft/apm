@@ -14,7 +14,7 @@ they accumulate via union -- an absent key simply means "nothing to add".
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple  # noqa: F401, UP035
 
 
 @dataclass(frozen=True)
@@ -28,9 +28,9 @@ class PolicyCache:
 class DependencyPolicy:
     """Rules governing which APM dependencies are permitted."""
 
-    allow: Optional[Tuple[str, ...]] = None
-    deny: Tuple[str, ...] = ()
-    require: Tuple[str, ...] = ()
+    allow: tuple[str, ...] | None = None
+    deny: tuple[str, ...] = ()
+    require: tuple[str, ...] = ()
     require_resolution: str = "project-wins"  # project-wins | policy-wins | block
     max_depth: int = 50
 
@@ -39,15 +39,15 @@ class DependencyPolicy:
 class McpTransportPolicy:
     """Allowed MCP transport protocols."""
 
-    allow: Optional[Tuple[str, ...]] = None  # stdio, sse, http, streamable-http
+    allow: tuple[str, ...] | None = None  # stdio, sse, http, streamable-http
 
 
 @dataclass(frozen=True)
 class McpPolicy:
     """Rules governing MCP server references."""
 
-    allow: Optional[Tuple[str, ...]] = None
-    deny: Tuple[str, ...] = ()
+    allow: tuple[str, ...] | None = None
+    deny: tuple[str, ...] = ()
     transport: McpTransportPolicy = field(default_factory=McpTransportPolicy)
     self_defined: str = "warn"  # deny | warn | allow
     trust_transitive: bool = False
@@ -57,15 +57,15 @@ class McpPolicy:
 class CompilationTargetPolicy:
     """Allowed compilation targets."""
 
-    allow: Optional[Tuple[str, ...]] = None  # vscode, claude, all
-    enforce: Optional[str] = None
+    allow: tuple[str, ...] | None = None  # vscode, claude, all
+    enforce: str | None = None
 
 
 @dataclass(frozen=True)
 class CompilationStrategyPolicy:
     """Compilation strategy constraints."""
 
-    enforce: Optional[str] = None  # distributed | single-file
+    enforce: str | None = None  # distributed | single-file
 
 
 @dataclass(frozen=True)
@@ -81,9 +81,9 @@ class CompilationPolicy:
 class ManifestPolicy:
     """Rules governing apm.yml manifest content."""
 
-    required_fields: Tuple[str, ...] = ()
+    required_fields: tuple[str, ...] = ()
     scripts: str = "allow"  # allow | deny
-    content_types: Optional[Dict] = None  # {"allow": [...]}
+    content_types: dict | None = None  # {"allow": [...]}
     require_explicit_includes: bool = False
 
 
@@ -92,7 +92,7 @@ class UnmanagedFilesPolicy:
     """Rules for files not tracked in apm.lock."""
 
     action: str = "ignore"  # ignore | warn | deny
-    directories: Tuple[str, ...] = ()
+    directories: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -101,7 +101,7 @@ class ApmPolicy:
 
     name: str = ""
     version: str = ""
-    extends: Optional[str] = None  # "org", "<owner>/<repo>", or URL
+    extends: str | None = None  # "org", "<owner>/<repo>", or URL
     enforcement: str = "warn"  # warn | block | off
     fetch_failure: str = "warn"  # warn | block (closes #829)
     cache: PolicyCache = field(default_factory=PolicyCache)

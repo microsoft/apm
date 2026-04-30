@@ -1,0 +1,46 @@
+---
+description: "Lint contract: run BEFORE pushing or producing artifacts that claim green CI. Mirrors the CI Lint job."
+---
+
+# Linting (canonical contract)
+
+The CI `Lint` job is a hard gate. Mirror it locally before `git push`
+and before producing any artifact (PR body, release note, audit
+report) that claims CI is green.
+
+## CI-mirror commands
+
+The `Lint` job runs:
+
+- `uv run --extra dev ruff check src/ tests/`
+- `uv run --extra dev ruff format --check src/ tests/`
+
+Both must be silent.
+
+## Local workflow
+
+- **Auto-fix style+imports:** `uv run --extra dev ruff check src/ tests/ --fix`
+- **Apply formatter:** `uv run --extra dev ruff format src/ tests/`
+- **Verify (must be silent):** `uv run --extra dev ruff check src/ tests/ && uv run --extra dev ruff format --check src/ tests/`
+
+Always run the verify pair before `git push` -- the CI Lint job
+fails on any remaining diagnostic.
+
+## Common surprises
+
+- `RUF043` -- use `match=r"..."` for `pytest.raises` patterns with
+  regex metacharacters (`(`, `)`, `[`, etc.).
+- `UP006` / `UP045` -- use `list` / `dict` / `X | None` instead of
+  `List` / `Dict` / `Optional`.
+- `RUF100` -- drop stale `# noqa` directives.
+- `F401` / `F841` -- remove unused imports / unused locals.
+- `SIM103` -- inline negated returns where the body is one line.
+- `I001` -- import sort order (auto-fixable).
+
+## Lifecycle binding
+
+This is the canonical lint contract for the repo. Skills that
+produce artifacts asserting green CI -- notably `pr-description-skill`
+(whose "Validation evidence" row covers CI checks) -- inherit this
+gate transitively. Do NOT redefine ruff commands inside individual
+skills; honor this instruction before invoking them.

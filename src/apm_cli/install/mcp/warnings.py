@@ -22,8 +22,8 @@ from __future__ import annotations
 
 import ipaddress
 import socket
-from typing import Iterable, Optional
-
+from collections.abc import Iterable  # noqa: F401
+from typing import Optional  # noqa: F401
 
 # F7: tokens that would be evaluated by a real shell but are NOT evaluated
 # when an MCP stdio server runs through ``execve``-style spawning.
@@ -32,9 +32,9 @@ _SHELL_METACHAR_TOKENS = ("$(", "`", ";", "&&", "||", "|", ">>", ">", "<")
 # F5: well-known cloud metadata endpoints surfaced as constants for
 # explicit allow/deny review.
 _METADATA_HOSTS = {
-    "169.254.169.254",   # AWS / Azure / GCP IMDS
-    "100.100.100.200",   # Alibaba Cloud
-    "fd00:ec2::254",     # AWS IPv6 IMDS
+    "169.254.169.254",  # AWS / Azure / GCP IMDS
+    "100.100.100.200",  # Alibaba Cloud
+    "fd00:ec2::254",  # AWS IPv6 IMDS
 }
 
 
@@ -74,12 +74,13 @@ def _is_internal_or_metadata_host(host: str) -> bool:
     return False
 
 
-def warn_ssrf_url(url: Optional[str], logger) -> None:
+def warn_ssrf_url(url: str | None, logger) -> None:
     """F5: warn (do not block) when URL points at an internal/metadata host."""
     if not url:
         return
     try:
         from urllib.parse import urlparse
+
         host = urlparse(url).hostname or ""
     except (ValueError, TypeError):
         return
@@ -90,7 +91,7 @@ def warn_ssrf_url(url: Optional[str], logger) -> None:
         )
 
 
-def warn_shell_metachars(env, logger, command: Optional[str] = None) -> None:
+def warn_shell_metachars(env, logger, command: str | None = None) -> None:
     """F7: warn (do not block) on shell metacharacters in env values or stdio command.
 
     MCP stdio servers spawn via ``execve``-style calls with no shell, so

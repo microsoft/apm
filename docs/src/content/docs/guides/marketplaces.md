@@ -103,13 +103,13 @@ This ensures parity with Claude Code install instructions -- if a marketplace's 
 ```
 [*] Registering marketplace 'addy-agent-skills'...
 [+] Marketplace 'addy-agent-skills' registered (1 plugins)
-[i] Install plugins with: apm install @addy-agent-skills
+[i] Install plugins with: apm install <plugin>@addy-agent-skills
 ```
 
 Use `--name` to override the alias explicitly.
 
 **Options:**
-- `--name/-n` -- Override the local alias (defaults to `manifest.name`, then repo name)
+- `--name/-n` -- Override the local alias (defaults to the `marketplace.json` `name` field, then repo name)
 - `--branch/-b` -- Branch to track (default: `main`)
 - `--host` -- Git host FQDN for non-github.com hosts (default: `github.com` or `GITHUB_HOST` env var)
 
@@ -292,7 +292,7 @@ apm marketplace package add acme/monorepo --subdir plugins/formatter --name form
 
 ### Ref auto-resolution
 
-Mutable git refs (`HEAD`, branch names) are automatically resolved to concrete 40-character SHAs before being stored in `marketplace.yml`. This ensures supply-chain safety -- the entry always pins to an immutable commit.
+Mutable git refs (`HEAD`, branch names) are automatically resolved to concrete 40-character SHAs before being stored in `apm.yml`. This ensures supply-chain safety -- the entry always pins to an immutable commit.
 
 **Default behaviour (no `--ref`):** When neither `--version` nor `--ref` is provided, the current `HEAD` SHA is pinned automatically:
 

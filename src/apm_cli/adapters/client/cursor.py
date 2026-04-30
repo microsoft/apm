@@ -74,9 +74,9 @@ class CursorClientAdapter(CopilotClientAdapter):
             return {}
 
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             return {}
 
     # ------------------------------------------------------------------ #
@@ -125,14 +125,10 @@ class CursorClientAdapter(CopilotClientAdapter):
             else:
                 config_key = server_url
 
-            server_config = self._format_server_config(
-                server_info, env_overrides, runtime_vars
-            )
+            server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             self.update_config({config_key: server_config})
 
-            print(
-                f"Successfully configured MCP server '{config_key}' for Cursor"
-            )
+            print(f"Successfully configured MCP server '{config_key}' for Cursor")
             return True
 
         except Exception as e:
