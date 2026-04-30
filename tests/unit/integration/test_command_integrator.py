@@ -491,9 +491,6 @@ class TestIntegratePackagePrimitivesTargetGating:
         Copilot has no ``commands`` primitive, so the dispatch loop
         should never call ``integrate_commands_for_target``.
         """
-        import shutil
-        import tempfile
-
         from apm_cli.commands.install import _integrate_package_primitives
         from apm_cli.integration.targets import KNOWN_TARGETS
         from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -524,9 +521,6 @@ class TestIntegratePackagePrimitivesTargetGating:
 
     def test_claude_target_dispatches_commands(self):
         """When targets=[claude], commands must be dispatched."""
-        import shutil
-        import tempfile
-
         from apm_cli.commands.install import _integrate_package_primitives
         from apm_cli.integration.targets import KNOWN_TARGETS
         from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -556,9 +550,6 @@ class TestIntegratePackagePrimitivesTargetGating:
 
     def test_cursor_target_dispatches_commands(self):
         """When targets=[cursor], commands must be dispatched."""
-        import shutil
-        import tempfile
-
         from apm_cli.commands.install import _integrate_package_primitives
         from apm_cli.integration.targets import KNOWN_TARGETS
         from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -1313,8 +1304,6 @@ class TestWriteGeminiCommand:
     """Direct unit tests for CommandIntegrator._write_gemini_command()."""
 
     def setup_method(self):
-        import tempfile
-
         self.temp_dir = tempfile.mkdtemp()
 
     def teardown_method(self):
