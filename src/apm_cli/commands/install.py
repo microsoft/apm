@@ -401,22 +401,6 @@ def _resolve_package_references(
             dep_ref.allow_insecure = True
             _apm_yml_entries[canonical] = dep_ref.to_apm_yml_entry()
 
-        # Reject local packages at user scope -- relative paths resolve
-        # against cwd during validation but against $HOME during copy,
-        # causing silent failures.
-        if dep_ref.is_local and scope is not None:
-            from ..core.scope import InstallScope
-
-            if scope is InstallScope.USER:
-                reason = (
-                    "local packages are not supported at user scope (--global). "
-                    "Use a remote reference (owner/repo) instead"
-                )
-                invalid_outcomes.append((package, reason))
-                if logger:
-                    logger.validation_fail(package, reason)
-                continue
-
         # Check if package is already in dependencies (by identity)
         already_in_deps = identity in existing_identities
 

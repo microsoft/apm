@@ -443,7 +443,7 @@ dependencies:
 | **Required** | OPTIONAL |
 | **Known keys** | `apm`, `mcp` |
 
-Development-only dependencies installed locally but excluded from plugin bundles (`apm pack --format plugin`). Uses the same structure as [`dependencies`](#4-dependencies).
+Development-only dependencies installed locally but excluded from plugin bundles (`apm pack`, plugin format is the default). Uses the same structure as [`dependencies`](#4-dependencies).
 
 ```yaml
 devDependencies:
@@ -458,7 +458,7 @@ Created automatically by `apm init --plugin`. Use [`apm install --dev`](../cli-c
 apm install --dev owner/test-helpers
 ```
 
-Plain `apm install` (no flag) deploys both `dependencies` and `devDependencies`. There is currently no `--omit=dev` flag -- the dev/prod separation kicks in at `apm pack --format plugin` time. The local-content scanner that builds plugin bundles also operates on `.apm/` only and does not consult the devDep marker. To keep maintainer-only primitives out of shipped artifacts, author them outside `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../../guides/dev-only-primitives/).
+Plain `apm install` (no flag) deploys both `dependencies` and `devDependencies`. There is currently no `--omit=dev` flag -- the dev/prod separation kicks in at `apm pack` (plugin format, the default). The local-content scanner that builds plugin bundles also operates on `.apm/` only and does not consult the devDep marker. To keep maintainer-only primitives out of shipped artifacts, author them outside `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../../guides/dev-only-primitives/).
 
 Local-path devDependency example:
 

@@ -363,30 +363,38 @@ def _find_or_synthesize_plugin_json(
     return synthesize_plugin_json_from_apm_yml(apm_yml_path)
 
 
-def _update_plugin_json_paths(plugin_json: dict, output_files: list[str]) -> dict:
-    """Update component paths in ``plugin.json`` to reflect the output layout."""
+def _update_plugin_json_paths(plugin_json: dict, output_files: list[str], logger=None) -> dict:
+    r"""Strip component-path keys from ``plugin.json``.
+
+    Per the official Claude Code plugin manifest schema, the
+    ``agents``/``skills``/``commands`` keys point to *additional* files
+    OUTSIDE the convention directories (``agents/``, ``skills/``,
+    ``commands/``) and each entry must match ``^\./.*`` (relative path)
+    and the per-key file-extension pattern. The ``instructions`` key is
+    not defined by the schema at all. The convention directories
+    themselves are auto-discovered by Claude Code -- listing them here
+    is invalid (or unrecognized).
+
+    APM emits everything into the convention directories, so we drop
+    these keys entirely to keep the manifest schema-conformant.
+
+    The ``output_files`` argument is retained for signature stability
+    (and as a hook for future "additional files" extensions); it is
+    currently unused.
+    """
     result = dict(plugin_json)
-
-    # Detect which top-level directories actually exist in the output
-    top_dirs: set[str] = set()
-    for f in output_files:
-        parts = Path(f).parts
-        if parts:
-            top_dirs.add(parts[0])
-
-    # Map component keys to their output directories
-    component_dirs = {
-        "agents": "agents",
-        "skills": "skills",
-        "commands": "commands",
-        "instructions": "instructions",
-    }
-    for key, dirname in component_dirs.items():
-        if dirname in top_dirs:
-            result[key] = [f"{dirname}/"]
+    stripped = [k for k in ("agents", "skills", "commands", "instructions") if k in result]
+    for key in stripped:
+        result.pop(key, None)
+    if stripped:
+        msg = (
+            "Stripped schema-invalid keys from authored plugin.json: "
+            f"{', '.join(stripped)} -- convention directories are auto-discovered by Claude Code"
+        )
+        if logger:
+            logger.warning(msg)
         else:
-            result.pop(key, None)
-
+            _rich_warning(msg)
     return result
 
 
@@ -605,7 +613,7 @@ def export_plugin_bundle(
         )
 
     # 14. Write plugin.json with updated component paths
-    plugin_json = _update_plugin_json_paths(plugin_json, output_files)
+    plugin_json = _update_plugin_json_paths(plugin_json, output_files, logger=logger)
     (bundle_dir / "plugin.json").write_text(
         json.dumps(plugin_json, indent=2, sort_keys=False), encoding="utf-8"
     )

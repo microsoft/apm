@@ -214,6 +214,11 @@ complete.
 Run these steps in order. Tick each before moving on.
 
 1. [ ] Confirm every row of the activation contract is filled in.
+   Defense-in-depth gate: before drafting the body, confirm the
+   repo's lint contract is green (canonical commands and lifecycle
+   binding live in `.apm/instructions/linting.instructions.md`). If lint is red,
+   STOP, fix, re-run; a PR body claiming green CI while lint fails
+   is a credibility tax we refuse to take on.
 2. [ ] Read the diff in full. Identify per-file change summary,
        new files, deleted files, behavior changes at module
        boundaries.

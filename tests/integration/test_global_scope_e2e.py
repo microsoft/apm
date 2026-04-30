@@ -256,6 +256,27 @@ class TestGlobalManifestPlacement:
             f"Package not recorded in manifest: {apm_deps}"
         )
 
+        # Regression guard for #937: manifest entry alone is not enough --
+        # the package contents must actually be deployed under ~/.apm/.
+        # Previously a USER-scope guard in sources.py / phases/resolve.py
+        # silently dropped local refs, leaving the user with a poisoned
+        # manifest and zero deployed content.
+        cached_pkg = (
+            fake_home
+            / ".apm"
+            / "apm_modules"
+            / "_local"
+            / local_package.name
+            / ".apm"
+            / "instructions"
+            / "test.instructions.md"
+        )
+        assert cached_pkg.exists(), (
+            f"Local package content not deployed under ~/.apm/apm_modules/_local/. "
+            f"Looked for: {cached_pkg}\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
     def test_user_manifest_does_not_pollute_cwd(self, apm_command, fake_home, local_package):
         """--global must not create apm.yml in the working directory."""
         work_dir = fake_home / "workdir"

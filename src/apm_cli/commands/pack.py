@@ -30,9 +30,9 @@ is embedded in each bundle.
 Examples:
 
   # Bundle only (most common -- just dependencies: in apm.yml):
-  apm pack
+  apm pack                              # Claude Code plugin (default)
   apm pack --target claude --archive
-  apm pack --format plugin -o ./dist
+  apm pack --format apm -o ./dist       # Legacy APM bundle layout
 
   # Marketplace only (marketplace: in apm.yml, no dependencies:):
   apm pack
@@ -56,9 +56,9 @@ Exit codes:
 @click.option(
     "--format",
     "fmt",
-    type=click.Choice(["apm", "plugin"]),
-    default="apm",
-    help="Bundle format: 'apm' (default) for standard bundles, 'plugin' for standalone plugin directories with plugin.json.",
+    type=click.Choice(["plugin", "apm"]),
+    default="plugin",
+    help="Bundle format. 'plugin' (default) emits a Claude Code plugin directory with plugin.json. 'apm' produces the legacy APM bundle layout (kept for tooling that still consumes it).",
 )
 @click.option(
     "--target",

@@ -19,6 +19,7 @@ local_deployed_files:
 - .github/instructions/doc-sync.instructions.md
 - .github/instructions/encoding.instructions.md
 - .github/instructions/integrators.instructions.md
+- .github/instructions/linting.instructions.md
 - .github/instructions/python.instructions.md
 - .github/instructions/tests.instructions.md
 - .github/skills/apm-review-panel
@@ -49,5 +50,6 @@ local_deployed_file_hashes:
   .github/instructions/doc-sync.instructions.md: sha256:bb3816254f8df6bffc6faacd556871f36903e9d7f348982f1e2de0339384c696
   .github/instructions/encoding.instructions.md: sha256:93db7377dc896f6efecf2c5d8c5d89255a555562f468d034d64c42edd5cf46d5
   .github/instructions/integrators.instructions.md: sha256:b151e0438088d2c0b636dfc28532ecf43c3b51e5f1070a354b8d5b57c345e335
+  .github/instructions/linting.instructions.md: sha256:312acd32353567834ec9f4f246710a47a991729a11c0380aa6a010b63de607eb
   .github/instructions/python.instructions.md: sha256:45173f778eddc126c37c7ace96acd0e17adb1895031eec134ec0754638d3ba37
-  .github/instructions/tests.instructions.md: sha256:19a0d078417876ab3b758f8d404cf8266354e3412860eb88b849b620692657e4
+  .github/instructions/tests.instructions.md: sha256:4c6335e3373f9735778a05913f2d8ef250d118f8c5305e70ba407e578a525ef7

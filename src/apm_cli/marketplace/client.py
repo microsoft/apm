@@ -88,13 +88,13 @@ def _read_cache(name: str) -> dict | None:
     if not os.path.exists(data_path) or not os.path.exists(meta_path):
         return None
     try:
-        with open(meta_path) as f:
+        with open(meta_path, encoding="utf-8") as f:
             meta = json.load(f)
         fetched_at = meta.get("fetched_at", 0)
         ttl = meta.get("ttl_seconds", _CACHE_TTL_SECONDS)
         if time.time() - fetched_at > ttl:
             return None  # Expired
-        with open(data_path) as f:
+        with open(data_path, encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError, KeyError) as exc:
         logger.debug("Cache read failed for '%s': %s", name, exc)
@@ -107,7 +107,7 @@ def _read_stale_cache(name: str) -> dict | None:
     if not os.path.exists(data_path):
         return None
     try:
-        with open(data_path) as f:
+        with open(data_path, encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return None
@@ -118,9 +118,9 @@ def _write_cache(name: str, data: dict) -> None:
     data_path = _cache_data_path(name)
     meta_path = _cache_meta_path(name)
     try:
-        with open(data_path, "w") as f:
+        with open(data_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        with open(meta_path, "w") as f:
+        with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(
                 {"fetched_at": time.time(), "ttl_seconds": _CACHE_TTL_SECONDS},
                 f,

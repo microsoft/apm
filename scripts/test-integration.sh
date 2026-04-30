@@ -402,6 +402,17 @@ run_e2e_tests() {
         exit 1
     fi
 
+    # Run global-scope (--global / -g) E2E tests -- offline, no tokens needed
+    log_info "Running global-scope E2E tests..."
+    echo "Command: pytest tests/integration/test_global_scope_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_global_scope_e2e.py -v -s --tb=short; then
+        log_success "Global-scope E2E tests passed!"
+    else
+        log_error "Global-scope E2E tests failed!"
+        exit 1
+    fi
+
     # Run Azure DevOps E2E tests (requires ADO_APM_PAT)
     if [[ -n "${ADO_APM_PAT:-}" ]]; then
         log_info "Running Azure DevOps E2E tests..."

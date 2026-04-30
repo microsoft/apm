@@ -32,7 +32,7 @@ def _ensure_file() -> str:
     ensure_config_exists()
     path = _marketplaces_path()
     if not os.path.exists(path):
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump({"marketplaces": []}, f, indent=2)
     return path
 
@@ -51,7 +51,7 @@ def _load() -> list[MarketplaceSource]:
             return list(_registry_cache)
         path = _ensure_file()
         try:
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("Failed to read %s: %s", path, exc)
@@ -72,7 +72,7 @@ def _save(sources: list[MarketplaceSource]) -> None:
     path = _ensure_file()
     data = {"marketplaces": [s.to_dict() for s in sources]}
     tmp = path + ".tmp"
-    with open(tmp, "w") as f:
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     os.replace(tmp, path)
     with _registry_lock:

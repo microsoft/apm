@@ -128,7 +128,7 @@ def enrich_lockfile_for_pack(
 
     Args:
         lockfile: The resolved lockfile to enrich.
-        fmt: Bundle format (``"apm"`` or ``"plugin"``).
+        fmt: Bundle format (``"plugin"`` or ``"apm"``).
         target: Effective target used for packing (e.g. ``"copilot"``, ``"claude"``,
             ``"all"``).  May also be a list of target strings for multi-target
             packing.  The internal alias ``"vscode"`` is also accepted.

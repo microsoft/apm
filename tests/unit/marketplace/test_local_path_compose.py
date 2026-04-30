@@ -122,3 +122,143 @@ def test_legacy_compose_keeps_top_level_description(tmp_path: Path) -> None:
     assert doc["name"] == "legacy-mp"
     assert doc["description"] == "Legacy marketplace."
     assert doc["version"] == "2.0.0"
+
+
+# ---------------------------------------------------------------------------
+# pluginRoot subtraction tests (#1061)
+# ---------------------------------------------------------------------------
+
+
+_APM_WITH_PLUGIN_ROOT = """\
+name: my-project
+description: A project.
+version: 1.0.0
+marketplace:
+  owner:
+    name: ACME
+  metadata:
+    pluginRoot: "./plugins"
+  packages:
+    - name: foo-tool
+      source: ./plugins/foo-tool
+      description: Foo tool.
+    - name: nested-tool
+      source: ./plugins/sub/deep
+      description: Nested.
+"""
+
+
+@pytest.fixture()
+def project_with_plugin_root(tmp_path: Path) -> Path:
+    _write(tmp_path / "apm.yml", _APM_WITH_PLUGIN_ROOT)
+    return tmp_path
+
+
+def test_plugin_root_subtraction_strips_prefix(
+    project_with_plugin_root: Path,
+) -> None:
+    """pluginRoot prefix is subtracted from local source paths."""
+    config = load_marketplace_config(project_with_plugin_root)
+    builder = MarketplaceBuilder.from_config(
+        config, project_with_plugin_root, BuildOptions(offline=True)
+    )
+    local_entries = [e for e in config.packages if e.is_local]
+    resolved = [builder._resolve_entry(e) for e in local_entries]
+    doc = builder.compose_marketplace_json(resolved)
+
+    plugins = doc["plugins"]
+    assert plugins[0]["source"] == "./foo-tool"
+
+
+def test_plugin_root_subtraction_nested(
+    project_with_plugin_root: Path,
+) -> None:
+    """Nested paths under pluginRoot are correctly subtracted."""
+    config = load_marketplace_config(project_with_plugin_root)
+    builder = MarketplaceBuilder.from_config(
+        config, project_with_plugin_root, BuildOptions(offline=True)
+    )
+    local_entries = [e for e in config.packages if e.is_local]
+    resolved = [builder._resolve_entry(e) for e in local_entries]
+    doc = builder.compose_marketplace_json(resolved)
+
+    plugins = doc["plugins"]
+    assert plugins[1]["source"] == "./sub/deep"
+
+
+def test_plugin_root_unset_emits_verbatim(tmp_path: Path) -> None:
+    """When pluginRoot is not set, source is emitted verbatim."""
+    content = """\
+name: my-project
+description: A project.
+version: 1.0.0
+marketplace:
+  owner:
+    name: ACME
+  packages:
+    - name: tool
+      source: ./packages/bar
+"""
+    _write(tmp_path / "apm.yml", content)
+    config = load_marketplace_config(tmp_path)
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+    local_entry = next(e for e in config.packages if e.is_local)
+    resolved = [builder._resolve_entry(local_entry)]
+    doc = builder.compose_marketplace_json(resolved)
+    assert doc["plugins"][0]["source"] == "./packages/bar"
+
+
+def test_plugin_root_mismatch_emits_verbatim_with_warning(
+    tmp_path: Path,
+) -> None:
+    """Source outside pluginRoot is emitted verbatim with W1 warning."""
+    content = """\
+name: my-project
+description: A project.
+version: 1.0.0
+marketplace:
+  owner:
+    name: ACME
+  metadata:
+    pluginRoot: "./plugins"
+  packages:
+    - name: baz
+      source: ./other/baz
+"""
+    _write(tmp_path / "apm.yml", content)
+    config = load_marketplace_config(tmp_path)
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+    local_entry = next(e for e in config.packages if e.is_local)
+    resolved = [builder._resolve_entry(local_entry)]
+    doc = builder.compose_marketplace_json(resolved)
+    assert doc["plugins"][0]["source"] == "./other/baz"
+    # Check warning was recorded
+    diagnostics = getattr(builder, "_compose_diagnostics", ())
+    warnings = [d for d in diagnostics if d.level == "warning"]
+    assert any("outside pluginRoot" in w.message for w in warnings)
+
+
+def test_plugin_root_subtraction_empty_path_errors(tmp_path: Path) -> None:
+    """Source == pluginRoot yields empty path -> BuildError."""
+    from apm_cli.marketplace.errors import BuildError
+
+    content = """\
+name: my-project
+description: A project.
+version: 1.0.0
+marketplace:
+  owner:
+    name: ACME
+  metadata:
+    pluginRoot: "./plugins"
+  packages:
+    - name: bad
+      source: ./plugins
+"""
+    _write(tmp_path / "apm.yml", content)
+    config = load_marketplace_config(tmp_path)
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+    local_entry = next(e for e in config.packages if e.is_local)
+    resolved = [builder._resolve_entry(local_entry)]
+    with pytest.raises(BuildError, match="yields empty path"):
+        builder.compose_marketplace_json(resolved)

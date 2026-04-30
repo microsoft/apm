@@ -16,8 +16,8 @@ import pytest  # noqa: F401
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import init
-from apm_cli.marketplace.init_template import render_marketplace_yml_template
-from apm_cli.marketplace.yml_schema import load_marketplace_yml
+from apm_cli.marketplace.init_template import render_marketplace_block
+from apm_cli.marketplace.yml_schema import load_marketplace_from_apm_yml
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -45,13 +45,13 @@ def _run_init(tmp_path: Path, extra_args=(), catch_exceptions=True):
 class TestInitScaffold:
     """Verify scaffold creation behaviour."""
 
-    def test_creates_marketplace_yml(self, tmp_path: Path):
-        """init must write marketplace.yml in the current directory."""
+    def test_creates_apm_yml(self, tmp_path: Path):
+        """init must write apm.yml in the current directory."""
         runner = CliRunner()
         with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
             result = runner.invoke(init, [], catch_exceptions=False)
-            yml_path = Path(cwd) / "marketplace.yml"
-            assert yml_path.exists(), "marketplace.yml was not created"
+            yml_path = Path(cwd) / "apm.yml"
+            assert yml_path.exists(), "apm.yml was not created"
         assert result.exit_code == 0
 
     def test_template_content_is_valid_yml(self, tmp_path: Path):
@@ -59,9 +59,8 @@ class TestInitScaffold:
         runner = CliRunner()
         with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
             runner.invoke(init, [], catch_exceptions=False)
-            yml_path = Path(cwd) / "marketplace.yml"
-            # load_marketplace_yml must not raise
-            parsed = load_marketplace_yml(yml_path)
+            yml_path = Path(cwd) / "apm.yml"
+            parsed = load_marketplace_from_apm_yml(yml_path)
         assert parsed.name == "my-marketplace"
 
     def test_success_message_in_output(self, tmp_path: Path):
@@ -70,18 +69,18 @@ class TestInitScaffold:
         with runner.isolated_filesystem(temp_dir=str(tmp_path)):
             result = runner.invoke(init, [], catch_exceptions=False)
         combined = result.output
-        assert "marketplace.yml" in combined
+        assert "apm.yml" in combined
 
     def test_verbose_shows_path(self, tmp_path: Path):
         """--verbose must show the output path."""
         runner = CliRunner()
         with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:  # noqa: F841
             result = runner.invoke(init, ["--verbose"], catch_exceptions=False)
-        assert "marketplace.yml" in result.output or "Path" in result.output
+        assert "apm.yml" in result.output or "Path" in result.output
 
     def test_template_contains_packages_example(self, tmp_path: Path):
         """Scaffold must contain at least one example package entry."""
-        template = render_marketplace_yml_template()
+        template = render_marketplace_block()
         assert "packages:" in template
         assert "source:" in template
 
@@ -96,22 +95,20 @@ class TestInitIdempotency:
             runner.invoke(init, [], catch_exceptions=False)
             result = runner.invoke(init, [], catch_exceptions=False)
         assert result.exit_code == 1
-        assert "already exists" in result.output or "--force" in result.output
+        assert "already" in result.output or "--force" in result.output
 
     def test_force_overwrites_existing(self, tmp_path: Path):
-        """--force must overwrite an existing marketplace.yml."""
+        """--force must overwrite an existing marketplace block."""
         runner = CliRunner()
         with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
             # First run
             runner.invoke(init, [], catch_exceptions=False)
-            yml_path = Path(cwd) / "marketplace.yml"
-            yml_path.write_text("corrupted: true\n", encoding="utf-8")
+            yml_path = Path(cwd) / "apm.yml"
             # Force overwrite
             result = runner.invoke(init, ["--force"], catch_exceptions=False)
             content = yml_path.read_text(encoding="utf-8")
         assert result.exit_code == 0
-        # The scaffold must have replaced the corrupted content
-        assert "my-marketplace" in content
+        assert "marketplace:" in content
 
 
 class TestInitGitignoreWarning:

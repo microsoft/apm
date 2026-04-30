@@ -19,6 +19,7 @@ This is the first phase of the install pipeline.  It covers:
 from __future__ import annotations
 
 import builtins
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -128,8 +129,13 @@ def run(ctx: InstallContext) -> None:
         try:
             # Handle local packages: copy instead of git clone
             if dep_ref.is_local and dep_ref.local_path:
-                if scope is InstallScope.USER:
-                    # Cannot resolve local paths at user scope.
+                if (
+                    scope is InstallScope.USER
+                    and not Path(dep_ref.local_path).expanduser().is_absolute()
+                ):
+                    # At user scope, relative local paths have no meaningful
+                    # root (cwd is arbitrary, $HOME is not a project).  Only
+                    # absolute paths are unambiguous; reject relative refs.
                     # Note: callback_failures is a set (see line ~105),
                     # so use .add() rather than dict-style assignment.
                     callback_failures.add(dep_ref.get_unique_key())

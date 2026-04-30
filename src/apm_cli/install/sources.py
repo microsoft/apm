@@ -136,21 +136,25 @@ class LocalDependencySource(DependencySource):
         diagnostics = ctx.diagnostics
         logger = ctx.logger
 
-        # User scope: relative paths would resolve against $HOME instead
-        # of cwd, producing wrong results.  Skip with a clear diagnostic.
+        # User scope: relative paths are project-relative and have no
+        # meaningful root outside a project, so reject them.  Absolute
+        # paths are unambiguous and supported.
         if ctx.scope is InstallScope.USER:
-            diagnostics.warn(
-                f"Skipped local package '{dep_ref.local_path}' "
-                "-- local paths are not supported at user scope (--global). "
-                "Use a remote reference (owner/repo) instead.",
-                package=dep_ref.local_path,
-            )
-            if logger:
-                logger.verbose_detail(
-                    f"  Skipping {dep_ref.local_path} (local packages "
-                    "resolve against cwd, not $HOME)"
+            local_path_str = dep_ref.local_path or ""
+            if not local_path_str or not Path(local_path_str).expanduser().is_absolute():
+                diagnostics.warn(
+                    f"Skipped local package '{local_path_str}' "
+                    "-- relative local paths are not supported at user scope "
+                    "(--global). Use an absolute path or a remote reference "
+                    "(owner/repo) instead.",
+                    package=local_path_str,
                 )
-            return None
+                if logger:
+                    logger.verbose_detail(
+                        f"  Skipping {local_path_str} (relative local paths "
+                        "are project-relative and have no root at user scope)"
+                    )
+                return None
 
         result_path = _copy_local_package(dep_ref, install_path, ctx.project_root, logger=logger)
         if not result_path:
