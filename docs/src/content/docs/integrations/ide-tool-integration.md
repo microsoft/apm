@@ -272,7 +272,37 @@ apm install microsoft/apm-sample-package
 **How it works:**
 1. `apm install` detects `.prompt.md` files in the package
 2. Converts each to Claude command format in `.claude/commands/`
-3. `apm uninstall` automatically removes the package's commands
+3. Maps APM `input:` frontmatter to Claude `arguments:` frontmatter
+4. Converts `${input:name}` references to `$name` placeholders
+5. Auto-generates `argument-hint` from input names (unless one is already set)
+6. `apm uninstall` automatically removes the package's commands
+
+**Input-to-arguments mapping example:**
+
+```yaml
+# APM prompt (.prompt.md)
+---
+description: Review a feature
+input:
+  - feature_name
+  - priority
+---
+Review ${input:feature_name} with priority ${input:priority}.
+```
+
+Becomes:
+
+```yaml
+# Claude command (.claude/commands/review.md)
+---
+description: Review a feature
+arguments:
+  - feature_name
+  - priority
+argument-hint: <feature_name> <priority>
+---
+Review $feature_name with priority $priority.
+```
 
 ### Automatic Skills Integration
 

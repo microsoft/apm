@@ -17,10 +17,19 @@ from apm_cli.policy.ci_checks import (
     run_baseline_checks,
 )
 from apm_cli.policy.models import CIAuditResult, CheckResult
-from apm_cli.models.apm_package import clear_apm_yml_cache
+from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 
 
 # -- Helpers --------------------------------------------------------
+
+
+def _parse_manifest(project: Path):
+    """Parse apm.yml and return the manifest, or ``None`` if absent."""
+    apm_yml = project / "apm.yml"
+    if not apm_yml.exists():
+        return None
+    clear_apm_yml_cache()
+    return APMPackage.from_apm_yml(apm_yml)
 
 
 def _write_apm_yml(project: Path, *, deps: list[str] | None = None, mcp: list | None = None) -> None:
@@ -86,25 +95,28 @@ class TestLockfileExists:
                     resolved_ref: main
             """),
         )
-        result = _check_lockfile_exists(tmp_path)
+        manifest = _parse_manifest(tmp_path)
+        result = _check_lockfile_exists(tmp_path, manifest)
         assert result.passed
         assert result.name == "lockfile-exists"
 
     def test_fail_lockfile_missing(self, tmp_path):
         _write_apm_yml(tmp_path, deps=["owner/repo"])
-        result = _check_lockfile_exists(tmp_path)
+        manifest = _parse_manifest(tmp_path)
+        result = _check_lockfile_exists(tmp_path, manifest)
         assert not result.passed
         assert "missing" in result.message.lower()
         assert len(result.details) > 0
 
     def test_pass_no_deps_no_lockfile(self, tmp_path):
         _write_apm_yml(tmp_path)  # no deps
-        result = _check_lockfile_exists(tmp_path)
+        manifest = _parse_manifest(tmp_path)
+        result = _check_lockfile_exists(tmp_path, manifest)
         assert result.passed
         assert "not required" in result.message.lower()
 
     def test_pass_no_apm_yml(self, tmp_path):
-        result = _check_lockfile_exists(tmp_path)
+        result = _check_lockfile_exists(tmp_path, None)
         assert result.passed
 
 
@@ -754,7 +766,7 @@ class TestLocalOnlyRepoSupport:
                   - .github/prompts/local.prompt.md
             """),
         )
-        result = _check_lockfile_exists(tmp_path)
+        result = _check_lockfile_exists(tmp_path, _parse_manifest(tmp_path))
         assert result.passed
         assert "lockfile present" in result.message.lower()
         # Must NOT have been short-circuited as "no dependencies declared"
@@ -765,11 +777,9 @@ class TestLocalOnlyRepoSupport:
         returns the 'no dependencies declared' fast-path (no false fail)."""
         _write_apm_yml(tmp_path)  # no deps
         # No lockfile on disk at all.
-        result = _check_lockfile_exists(tmp_path)
+        result = _check_lockfile_exists(tmp_path, _parse_manifest(tmp_path))
         assert result.passed
         assert "not required" in result.message.lower()
-
-    def test_aggregate_runs_deployed_files_check_for_local_only_repo(self, tmp_path):
         """(c) Aggregate must NOT short-circuit before deployed-files-present
         runs against the synthesized self-entry."""
         # File declared in lockfile but missing on disk -> deployed check fails.
@@ -1021,3 +1031,97 @@ class TestIncludesConsent:
         consent = next(c for c in result.checks if c.name == "includes-consent")
         assert consent.passed
         assert "consider adding 'includes: auto'" in consent.message
+
+
+# -- Group 3: _check_lockfile_exists contract tests ----------------
+
+
+class TestCheckLockfileExistsContract:
+    """_check_lockfile_exists must ALWAYS return name='lockfile-exists'.
+
+    After the refactor (fix #936), manifest parsing is hoisted into
+    run_baseline_checks.  _check_lockfile_exists receives the already-parsed
+    manifest and never emits 'manifest-parse'.
+    """
+
+    def test_none_manifest_returns_lockfile_exists(self, tmp_path: Path) -> None:
+        """When manifest is None (no apm.yml), returns lockfile-exists pass."""
+        check = _check_lockfile_exists(tmp_path, None)
+        assert check.name == "lockfile-exists"
+        assert check.passed
+        assert "No apm.yml" in check.message
+
+    def test_valid_manifest_no_lockfile_returns_lockfile_exists(self, tmp_path: Path) -> None:
+        """When manifest has deps but no lockfile, returns lockfile-exists fail."""
+        _write_apm_yml(tmp_path, deps=["owner/repo"])
+        manifest = _parse_manifest(tmp_path)
+        check = _check_lockfile_exists(tmp_path, manifest)
+        assert check.name == "lockfile-exists"
+        assert not check.passed
+
+    def test_valid_manifest_with_lockfile_returns_lockfile_exists(self, tmp_path: Path) -> None:
+        """When manifest has deps and lockfile present, returns lockfile-exists pass."""
+        _write_apm_yml(tmp_path, deps=["owner/repo"])
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent("""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies:
+                  - repo_url: owner/repo
+                    resolved_ref: main
+            """),
+        )
+        manifest = _parse_manifest(tmp_path)
+        check = _check_lockfile_exists(tmp_path, manifest)
+        assert check.name == "lockfile-exists"
+        assert check.passed
+
+    def test_no_deps_manifest_returns_lockfile_exists(self, tmp_path: Path) -> None:
+        """When manifest has no deps, returns lockfile-exists pass."""
+        _write_apm_yml(tmp_path)  # no deps
+        manifest = _parse_manifest(tmp_path)
+        check = _check_lockfile_exists(tmp_path, manifest)
+        assert check.name == "lockfile-exists"
+        assert check.passed
+
+
+# -- Group 4: run_baseline_checks malformed-manifest tests ---------
+
+
+class TestRunBaselineChecksMalformedManifest:
+    """run_baseline_checks must fail-closed on malformed apm.yml (fix #936)."""
+
+    def test_malformed_yaml_produces_failing_check(self, tmp_path: Path) -> None:
+        """Malformed YAML is caught by the single parse block in
+        run_baseline_checks and returned as manifest-parse failure."""
+        (tmp_path / "apm.yml").write_text(": :\n  bad: [yaml\n", encoding="utf-8")
+        clear_apm_yml_cache()
+        result = run_baseline_checks(tmp_path)
+        assert not result.passed
+        parse_checks = [c for c in result.checks if c.name == "manifest-parse"]
+        assert len(parse_checks) == 1
+        assert not parse_checks[0].passed
+        assert "fix the YAML syntax error" in parse_checks[0].message
+
+    def test_non_dict_yaml_produces_failing_check(self, tmp_path: Path) -> None:
+        """Non-dict YAML (bare list) propagates as manifest-parse failure."""
+        (tmp_path / "apm.yml").write_text("- item1\n- item2\n", encoding="utf-8")
+        clear_apm_yml_cache()
+        result = run_baseline_checks(tmp_path)
+        assert not result.passed
+        parse_checks = [c for c in result.checks if c.name == "manifest-parse"]
+        assert len(parse_checks) == 1
+        assert not parse_checks[0].passed
+        assert "fix the YAML syntax error" in parse_checks[0].message
+
+    def test_remediation_hint_present_in_error_message(self, tmp_path: Path) -> None:
+        """The manifest-parse error message includes a remediation hint
+        guiding users to fix the YAML and re-run."""
+        (tmp_path / "apm.yml").write_text(": :\n  bad: [yaml\n", encoding="utf-8")
+        clear_apm_yml_cache()
+        result = run_baseline_checks(tmp_path)
+        parse_check = result.checks[0]
+        assert parse_check.name == "manifest-parse"
+        assert "Cannot parse apm.yml" in parse_check.message
+        assert "fix the YAML syntax error in apm.yml and re-run" in parse_check.message

@@ -2,7 +2,7 @@
 
 Covers inheritance of name/description/version from the apm.yml top
 level, override semantics inside the marketplace block, and rejection
-of unknown keys at both levels.
+of unknown keys within the marketplace block.
 """
 
 from __future__ import annotations

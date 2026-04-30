@@ -123,7 +123,11 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, verbose):
                 existing = apm_yml_path.read_text(encoding="utf-8")
                 if not existing.endswith("\n"):
                     existing += "\n"
-                block = render_marketplace_block(owner=config.get("name"))
+                # Owner is intentionally left to the template default
+                # (acme-org placeholder). Deriving it from the project
+                # name produced misleading https://github.com/<project>
+                # URLs; the user is expected to edit the placeholder.
+                block = render_marketplace_block()
                 apm_yml_path.write_text(existing + "\n" + block, encoding="utf-8")
             except OSError as exc:
                 logger.warning(

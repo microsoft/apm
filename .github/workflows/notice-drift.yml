@@ -1,0 +1,139 @@
+# NOTICE Drift Check -- guards the third-party attribution file (NOTICE.md)
+# against silent drift on every PR and every merge-queue entry. Also runs
+# a license-policy gate (dependency-review-action) on PR-time only.
+#
+# Why this gate exists
+# --------------------
+# `NOTICE.md` is a legally significant artifact: it lists every third-party
+# OSS component shipped inside the apm-cli wheel, with verbatim license
+# texts. Microsoft CELA's "Manual NOTICE Generation" process makes this
+# file *normative* -- if it drifts from the actual install graph (someone
+# bumps a dep but forgets to regenerate, or an upstream re-licenses) we
+# ship inaccurate attribution. The fix is to make the file generated
+# rather than authored, and gate every PR on `--check` mode.
+#
+# Why no SBOM emission here
+# -------------------------
+# GitHub's dependency graph already produces an SPDX SBOM for this repo
+# on demand (REST API: GET /repos/{owner}/{repo}/dependency-graph/sbom).
+# Dependabot owns vulnerability + version updates over the same graph.
+# Adding a second SBOM generator here would duplicate that without value.
+# If a CycloneDX-format SBOM is later required for compliance reporting,
+# add a separate workflow keyed off release events rather than overloading
+# this gate.
+#
+# Why the dual pull_request + merge_group trigger
+# -----------------------------------------------
+# Same pattern as ci.yml / merge-gate.yml: the merge-queue ruleset also
+# requires this check, so the workflow has to fire against the temp merge
+# commit produced by GitHub's queue. Without the merge_group trigger the
+# 'NOTICE Drift Check' check-run would never report on the temp branch
+# SHA and the queue would stall waiting for it (see the post-mortem on
+# PR #899 referenced in merge-gate.yml).
+#
+# Why minimum permissions
+# -----------------------
+# The job only reads source -- it does not need write access to anything.
+# `dependency-review-action` consumes the dep-graph data attached to the
+# pull_request event payload, which works with `contents: read`. Keeping
+# this at the floor minimises blast radius if a malicious dep ever runs
+# code during `uv sync`.
+#
+# Why `uv sync --frozen`
+# ----------------------
+# `--frozen` refuses to update uv.lock during install. Two reasons:
+#   1. Reproducibility: the license text we read from dist-info MUST
+#      correspond to the locked versions, not whatever's newest at CI
+#      time. A non-frozen sync could pull a newer LICENSE silently.
+#   2. Tampering signal: if uv.lock would need to be modified, that's a
+#      sign someone changed pyproject.toml deps without re-locking --
+#      the gate should fail loudly so the author runs `uv lock` locally.
+
+name: NOTICE Drift Check
+
+on:
+  pull_request:
+    branches: [ main ]
+  merge_group:
+    branches: [ main ]
+    types: [ checks_requested ]
+
+permissions:
+  contents: read
+
+# Dedup rapid pushes on the same PR / merge-queue entry. Same shape as
+# merge-gate.yml so the cancellation semantics are uniform across the
+# repo's required checks.
+concurrency:
+  group: notice-drift-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  notice-drift:
+    # The job's `name:` is what GitHub displays as the check-run name
+    # AND what merge-gate.yml polls in EXPECTED_CHECKS. Renaming this
+    # value MUST be accompanied by an edit to merge-gate.yml's env.
+    name: NOTICE Drift Check
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned to the same Python version as ci.yml. NOTICE.md content
+      # depends on which dist-info layout the installed wheels use, and
+      # different interpreters can resolve different conditional deps
+      # (e.g. tomli is only installed under python_version<'3.11').
+      # Locking to 3.12 keeps the rendered output deterministic across
+      # CI runs and developer machines.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies (frozen)
+        # --extra dev brings in ruamel.yaml that the generator imports.
+        # --frozen guarantees we resolve to the exact versions that the
+        # maintainer locked, so the LICENSE text read from dist-info
+        # matches what NOTICE.md was generated against locally.
+        run: uv sync --frozen --extra dev
+
+      # Drift check: regenerate NOTICE.md to memory and diff against the
+      # committed copy. Exit 1 with a unified diff to stderr if they
+      # differ -- the diff lands in the GitHub Actions log so the PR
+      # author can see exactly what to regenerate.
+      - name: Verify NOTICE.md is up to date
+        run: uv run python scripts/generate-notice.py --check
+
+      # Supply-chain hygiene: surface any newly-introduced dep whose
+      # license is incompatible with our redistribution model BEFORE
+      # the PR merges. We deny the strong-copyleft families (GPL/AGPL)
+      # and SSPL because apm-cli ships as a single binary; pulling in
+      # a GPL dep would virally license the whole binary. MPL-2.0 is
+      # explicitly allowed because we already depend transitively on
+      # MPL-2.0 components (e.g. certifi-style cert bundles) and the
+      # MPL's file-level copyleft does not affect our combined work.
+      #
+      # Skipped under merge_group because the action requires a
+      # pull_request context (the dep-graph diff is computed from the
+      # PR base/head refs, which don't exist in the merge-queue temp
+      # branch view).
+      # NOTE: dependency-review-action rejects specifying both
+      # `allow-licenses` and `deny-licenses` ("You cannot specify both"),
+      # so we use the deny-list form. That's the safer choice anyway --
+      # an allow-list would fail closed on every novel-but-permissive
+      # SPDX identifier the upstream metadata throws at us (BlueOak,
+      # 0BSD-variants, dual-licensed `MIT OR Apache-2.0` strings, etc.)
+      # and produce noisy false positives on otherwise-fine PRs.
+      - name: License policy check (PR only)
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@v4
+        with:
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, SSPL-1.0
+          fail-on-severity: moderate

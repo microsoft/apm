@@ -16,7 +16,6 @@ from ...utils.console import (
     _rich_panel,
 )
 from .._helpers import (
-    _atomic_write,
     _check_orphaned_packages,
     _get_console,
     _rich_blank_line,
@@ -577,26 +576,6 @@ def compile(
                         output_path=output_path,
                     )
 
-                    # Compute deterministic Build ID (12-char SHA256) over content with placeholder removed
-                    import hashlib
-
-                    from ...compilation.constants import BUILD_ID_PLACEHOLDER
-
-                    lines = final_content.splitlines()
-                    # Identify placeholder line index
-                    try:
-                        idx = lines.index(BUILD_ID_PLACEHOLDER)
-                    except ValueError:
-                        idx = None
-                    hash_input_lines = [l for i, l in enumerate(lines) if i != idx]
-                    hash_bytes = "\n".join(hash_input_lines).encode("utf-8")
-                    build_id = hashlib.sha256(hash_bytes).hexdigest()[:12]
-                    if idx is not None:
-                        lines[idx] = f"<!-- Build ID: {build_id} -->"
-                        final_content = "\n".join(lines) + (
-                            "\n" if final_content.endswith("\n") else ""
-                        )
-
                     if not dry_run:
                         # Only rewrite when content materially changes (creation, update, missing constitution case)
                         if c_status in ("CREATED", "UPDATED", "MISSING"):
@@ -616,7 +595,9 @@ def compile(
                                         f"-- run 'apm audit --file {output_path}' to inspect"
                                     )
                             try:
-                                _atomic_write(output_path, final_content)
+                                from ...compilation.output_writer import CompiledOutputWriter
+
+                                CompiledOutputWriter().write(output_path, final_content)
                             except OSError as e:
                                 logger.error(f"Failed to write final AGENTS.md: {e}")
                                 sys.exit(1)

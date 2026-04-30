@@ -17,6 +17,7 @@ Architecture:
     phases/         one module per pipeline phase
     helpers/        cross-cutting helpers (security scan, gitignore)
     presentation/   dry-run preview + final result rendering
+    mcp/            ``apm install --mcp`` flow (parse / build / warn / write)
 
 The engine is import-safe (no Click decorators at top level) so phase modules
 can be unit-tested directly without invoking the CLI.

@@ -28,6 +28,7 @@ from apm_cli.policy.policy_checks import (
     _check_source_attribution,
     _check_transitive_depth,
     _check_unmanaged_files,
+    _load_raw_apm_yml,
     run_policy_checks,
 )
 from apm_cli.policy.schema import (
@@ -851,3 +852,138 @@ class TestRunPolicyChecks:
         assert "dependency-denylist" in failed_names
         assert "scripts-policy" in failed_names
         assert "required-manifest-fields" in failed_names
+
+
+# -- Group 1: _load_raw_apm_yml malformed-manifest tests -----------
+
+
+class TestLoadRawApmYml:
+    """Tests for _load_raw_apm_yml with malformed content (fix #936)."""
+
+    def test_malformed_yaml_returns_none_and_logs(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Malformed YAML returns None and logs a WARNING."""
+        (tmp_path / "apm.yml").write_text(": :\n  bad: [yaml\n", encoding="utf-8")
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="apm_cli.policy.policy_checks"):
+            result = _load_raw_apm_yml(tmp_path)
+        assert result is None
+        assert "Malformed YAML" in caplog.text
+
+    def test_non_dict_yaml_returns_none_and_logs(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Non-mapping YAML (bare list) returns None and logs a WARNING."""
+        (tmp_path / "apm.yml").write_text("- item1\n- item2\n", encoding="utf-8")
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="apm_cli.policy.policy_checks"):
+            result = _load_raw_apm_yml(tmp_path)
+        assert result is None
+        assert "not a YAML mapping" in caplog.text
+
+    def test_scalar_yaml_returns_none_and_logs(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Plain scalar YAML returns None and logs a WARNING."""
+        (tmp_path / "apm.yml").write_text("just a string\n", encoding="utf-8")
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="apm_cli.policy.policy_checks"):
+            result = _load_raw_apm_yml(tmp_path)
+        assert result is None
+        assert "not a YAML mapping" in caplog.text
+
+    def test_empty_file_returns_none_and_logs(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Empty apm.yml (yaml.safe_load returns None) is not a dict."""
+        (tmp_path / "apm.yml").write_text("", encoding="utf-8")
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="apm_cli.policy.policy_checks"):
+            result = _load_raw_apm_yml(tmp_path)
+        assert result is None
+        assert "not a YAML mapping" in caplog.text
+
+    def test_missing_file_returns_none_silently(self, tmp_path: Path) -> None:
+        """Missing apm.yml returns None without raising or logging."""
+        result = _load_raw_apm_yml(tmp_path)
+        assert result is None
+
+    def test_valid_yaml_returns_dict(self, tmp_path: Path) -> None:
+        """Valid YAML mapping is returned as a dict unchanged."""
+        (tmp_path / "apm.yml").write_text(
+            "name: test\nversion: '1.0'\n", encoding="utf-8"
+        )
+        result = _load_raw_apm_yml(tmp_path)
+        assert result == {"name": "test", "version": "1.0"}
+
+
+# -- Group 2: run_policy_checks malformed-manifest tests -----------
+
+
+class TestRunPolicyChecksMalformedManifest:
+    """run_policy_checks must fail-closed on malformed apm.yml (fix #936)."""
+
+    def test_malformed_yaml_produces_failing_check(self, tmp_path: Path) -> None:
+        """Malformed YAML appends manifest-parse check with passed=False."""
+        (tmp_path / "apm.yml").write_text(": :\n  bad: [yaml\n", encoding="utf-8")
+        clear_apm_yml_cache()
+        policy = ApmPolicy()
+        result = run_policy_checks(tmp_path, policy)
+        assert not result.passed
+        parse_checks = [c for c in result.checks if c.name == "manifest-parse"]
+        assert len(parse_checks) == 1
+        assert not parse_checks[0].passed
+        assert "Cannot parse apm.yml" in parse_checks[0].message
+
+    def test_non_dict_yaml_produces_failing_check(self, tmp_path: Path) -> None:
+        """Non-dict YAML (bare list) triggers a manifest-parse failing check."""
+        (tmp_path / "apm.yml").write_text("- item1\n- item2\n", encoding="utf-8")
+        clear_apm_yml_cache()
+        policy = ApmPolicy()
+        result = run_policy_checks(tmp_path, policy)
+        assert not result.passed
+        parse_checks = [c for c in result.checks if c.name == "manifest-parse"]
+        assert len(parse_checks) == 1
+        assert not parse_checks[0].passed
+
+    def test_empty_file_produces_failing_check(self, tmp_path: Path) -> None:
+        """Empty apm.yml triggers ValueError from from_apm_yml."""
+        (tmp_path / "apm.yml").write_text("", encoding="utf-8")
+        clear_apm_yml_cache()
+        policy = ApmPolicy()
+        result = run_policy_checks(tmp_path, policy)
+        assert not result.passed
+        parse_checks = [c for c in result.checks if c.name == "manifest-parse"]
+        assert len(parse_checks) == 1
+        assert not parse_checks[0].passed
+
+    def test_missing_apm_yml_returns_empty_passing_result(
+        self, tmp_path: Path
+    ) -> None:
+        """No apm.yml means nothing to check -- result is empty and passes."""
+        clear_apm_yml_cache()
+        policy = ApmPolicy()
+        result = run_policy_checks(tmp_path, policy)
+        assert result.passed
+        assert len(result.checks) == 0
+
+    # -- Group 5 regression guard --
+
+    def test_malformed_yaml_does_not_silently_pass(self, tmp_path: Path) -> None:
+        """Regression: malformed YAML must NOT produce an empty passing result.
+
+        Before fix #936, malformed apm.yml returned CIAuditResult() with
+        no checks, which trivially passed (all([]) is True).
+        """
+        (tmp_path / "apm.yml").write_text("{{invalid yaml}}\n", encoding="utf-8")
+        clear_apm_yml_cache()
+        policy = ApmPolicy()
+        result = run_policy_checks(tmp_path, policy)
+        assert not result.passed, (
+            "Malformed apm.yml must not silently pass policy checks"
+        )
