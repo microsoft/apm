@@ -549,6 +549,37 @@ class TestUpdatePluginJsonPaths:
         assert "agents" not in result
         assert result["name"] == "test"
 
+    def test_warns_when_stripping_authored_keys(self):
+        """When authored plugin.json has the keys, emit a warning naming what was stripped."""
+        import logging
+
+        pj = {"name": "test", "skills": ["skills/"], "agents": ["agents/"]}
+        captured = []
+
+        class _StubLogger:
+            def warning(self, msg):
+                captured.append(msg)
+
+        _update_plugin_json_paths(pj, [], logger=_StubLogger())
+        assert len(captured) == 1
+        assert "Stripped schema-invalid keys" in captured[0]
+        assert "skills" in captured[0]
+        assert "agents" in captured[0]
+        assert "auto-discovered" in captured[0]
+        del logging  # silence unused
+
+    def test_no_warning_when_no_authored_keys(self):
+        """Synthesized manifests don't carry the keys; no warning to noise the user."""
+        pj = {"name": "test"}
+        captured = []
+
+        class _StubLogger:
+            def warning(self, msg):
+                captured.append(msg)
+
+        _update_plugin_json_paths(pj, [], logger=_StubLogger())
+        assert captured == []
+
 
 # ---------------------------------------------------------------------------
 # Integration tests: export_plugin_bundle

@@ -58,7 +58,7 @@ Exit codes:
     "fmt",
     type=click.Choice(["plugin", "apm"]),
     default="plugin",
-    help="Bundle format: 'plugin' (default) emits a Claude Code plugin directory with plugin.json; 'apm' produces the legacy APM bundle layout (kept for tooling that still consumes it).",
+    help="Bundle format. 'plugin' (default) emits a Claude Code plugin directory with plugin.json. 'apm' produces the legacy APM bundle layout (kept for tooling that still consumes it).",
 )
 @click.option(
     "--target",
