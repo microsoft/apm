@@ -30,10 +30,10 @@ APM is the supply-chain layer. Author packages with full tooling — transitive 
 apm init my-plugin --plugin    # Creates both apm.yml and plugin.json
 apm install --dev owner/helpers # Dev-only dependency (excluded from export)
 apm install owner/core-rules   # Production dependency
-apm pack --format plugin       # Export — dev deps excluded, security scanned
+apm pack                       # Export -- plugin format is the default; dev deps excluded, security scanned
 ```
 
-The exported plugin directory contains no APM-specific files. See [Pack & Distribute — Plugin format](../../guides/pack-distribute/#plugin-format) for the output mapping.
+The exported plugin directory contains no APM-specific files. See [Pack & Distribute -- Plugin format](../../guides/pack-distribute/#plugin-format-vs-apm-format) for the output mapping.
 
 ## Overview
 
@@ -362,7 +362,7 @@ This:
 
 ## Exporting APM packages as plugins
 
-Use the [hybrid authoring workflow](#hybrid-authoring-workflow) to develop plugins with APM's full tooling and export them as standalone plugin directories. See [Pack & Distribute — Plugin format](../../guides/pack-distribute/#plugin-format) for the output mapping and structure.
+Use the [hybrid authoring workflow](#hybrid-authoring-workflow) to develop plugins with APM's full tooling and export them as standalone plugin directories. See [Pack & Distribute -- Plugin format](../../guides/pack-distribute/#plugin-format-vs-apm-format) for the output mapping and structure.
 
 ## Finding Plugins
 

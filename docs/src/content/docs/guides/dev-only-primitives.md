@@ -35,7 +35,7 @@ devDependencies:
     - path: ./dev/skills/release-checklist
 ```
 
-`apm install --dev` deploys the release-checklist skill to `.github/skills/release-checklist/` with `is_dev: true` in the lockfile. `apm pack --format plugin` excludes it. Consumers running `apm install your-org/your-package` never see it.
+`apm install --dev` deploys the release-checklist skill to `.github/skills/release-checklist/` with `is_dev: true` in the lockfile. `apm pack` (plugin format, the default) excludes it. Consumers running `apm install your-org/your-package` never see it.
 
 ## Why outside `.apm/`?
 
@@ -49,7 +49,7 @@ Authoring dev-only primitives anywhere outside `.apm/` (`dev/`, `internal/`, `.m
 
 2. **`includes:` is allow-list only.** There is no `exclude:` form. You cannot write `includes: [.apm/]` and expect a sibling `.apm/dev/` subtree to be stripped -- `includes` does not gate `.apm/` against itself, and the manifest schema has no exclude verb. See [Manifest section 3.9](../../reference/manifest-schema/#39-includes).
 
-3. **Plain `apm install` deploys devDeps.** `apm install` (no flag) resolves and deploys both `dependencies` and `devDependencies`. `apm install --dev <pkg>` adds a new dev dependency to the manifest -- it is not a filter that excludes prod deps. There is currently no `--omit=dev` flag; the dev/prod separation kicks in at `apm pack --format plugin` time, not at install time.
+3. **Plain `apm install` deploys devDeps.** `apm install` (no flag) resolves and deploys both `dependencies` and `devDependencies`. `apm install --dev <pkg>` adds a new dev dependency to the manifest -- it is not a filter that excludes prod deps. There is currently no `--omit=dev` flag; the dev/prod separation kicks in at `apm pack` time, not at install time.
 
 ## When to use this pattern
 
@@ -68,7 +68,7 @@ Authoring dev-only primitives anywhere outside `.apm/` (`dev/`, `internal/`, `.m
 ```bash
 apm install --dev                          # deploys with is_dev: true
 grep is_dev apm.lock.yaml                  # confirm marker
-apm pack --format plugin --dry-run         # confirm absence from bundle
+apm pack --dry-run                         # confirm absence from bundle (plugin format, default)
 ls build/your-package-1.0.0/skills/        # release-checklist must NOT appear
 ```
 
@@ -79,4 +79,4 @@ If the dev-only skill appears in the dry-run output, it is sitting under `.apm/`
 - [Anatomy of an APM Package](../../introduction/anatomy-of-an-apm-package/) -- why `.apm/` is the publishable source root.
 - [Manifest Schema 3.9 -- `includes`](../../reference/manifest-schema/#39-includes) -- allow-list semantics, no exclude form.
 - [Manifest Schema 5 -- `devDependencies`](../../reference/manifest-schema/#5-devdependencies) -- the field reference.
-- [Pack & Distribute -- Plugin format](./pack-distribute/#plugin-format) -- what the scanner emits.
+- [Pack & Distribute -- Plugin format](./pack-distribute/#plugin-format-vs-apm-format) -- what the scanner emits.

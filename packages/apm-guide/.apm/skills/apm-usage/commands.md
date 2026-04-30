@@ -45,7 +45,7 @@
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm pack` | Build distributable artifacts (bundle and/or marketplace.json -- driven by `apm.yml`) | `-o PATH`, `-t TARGET`, `--archive`, `--dry-run`, `--format [apm\|plugin]`, `--force`, `--offline`, `--include-prerelease`, `--marketplace-output PATH` |
+| `apm pack` | Build distributable artifacts (bundle and/or marketplace.json -- driven by `apm.yml`). Default output is a Claude Code plugin directory. | `-o PATH`, `-t TARGET`, `--archive`, `--dry-run`, `--format [plugin\|apm]` (default `plugin`), `--force`, `--offline`, `--include-prerelease`, `--marketplace-output PATH` |
 | `apm unpack BUNDLE` | Extract a bundle | `-o PATH`, `--skip-verify`, `--force`, `--dry-run` |
 
 ## Marketplace (consumer)

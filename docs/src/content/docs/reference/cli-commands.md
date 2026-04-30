@@ -106,7 +106,7 @@ apm install [PACKAGES...] [OPTIONS]
 - `--header KEY=VALUE` - HTTP header for remote MCP servers (only with `--mcp`). Repeatable. Requires `--url`.
 - `--mcp-version VER` - Pin a registry MCP entry to a specific version (only with `--mcp`).
 - `--registry URL` - Custom MCP registry URL (`http://` or `https://`) for resolving the registry-form `--mcp NAME`. Overrides `MCP_REGISTRY_URL`. Persisted to `apm.yml` for reproducible installs. Not valid with `--url` or a stdio command. Only with `--mcp`.
-- `--dev` - Add packages to [`devDependencies`](../manifest-schema/#5-devdependencies) instead of `dependencies`. Dev deps are installed locally but excluded from `apm pack --format plugin` bundles
+- `--dev` - Add packages to [`devDependencies`](../manifest-schema/#5-devdependencies) instead of `dependencies`. Dev deps are installed locally but excluded from `apm pack` plugin output (and from `apm pack --format apm` bundles too).
 - `-g, --global` - Install to user scope (`~/.apm/`) instead of the current project. Primitives deploy to `~/.copilot/`, `~/.claude/`, etc. MCP servers are only installed for global-capable runtimes (Copilot CLI, Codex CLI); workspace-only runtimes are skipped.
 - `--allow-insecure` - Allow HTTP (insecure) dependencies. Required when adding or installing dependencies that use an `http://` URL.
 - `--allow-insecure-host HOSTNAME` - Allow transitive HTTP (insecure) dependencies from `HOSTNAME`. Repeat the flag to allow multiple hosts.
@@ -586,7 +586,7 @@ apm pack [OPTIONS]
 - `-o, --output PATH` - Bundle output directory (default: `./build`). Does not affect `marketplace.json` path.
 - `-t, --target [copilot|vscode|claude|cursor|codex|opencode|gemini|all]` - Filter bundle files by target. Accepts comma-separated values (e.g., `-t claude,copilot`). Auto-detects from `apm.yml` if omitted. `vscode` is an alias for `copilot`. No-op for marketplace output.
 - `--archive` - Produce a `.tar.gz` archive instead of a directory. Bundle only.
-- `--format [apm|plugin]` - Bundle format (default: `apm`). `plugin` produces a standalone plugin directory with `plugin.json`. No-op for marketplace output.
+- `--format [plugin|apm]` - Bundle format (default: `plugin`). `plugin` emits a Claude Code plugin directory with a schema-conformant `plugin.json` ([official schema](https://json.schemastore.org/claude-code-plugin.json)). `apm` produces the legacy APM bundle layout (consumed by `microsoft/apm-action@v1` restore mode and other bundle-aware tooling). No-op for marketplace output.
 - `--force` - On collision (plugin format), last writer wins instead of first. Bundle only.
 - `--dry-run` - Preview outputs without writing anything.
 - `--offline` - Marketplace: use cached refs only (skip `git ls-remote`).
@@ -604,9 +604,9 @@ Flags whose scope does not match the detected outputs are silent no-ops, not err
 **Examples:**
 ```bash
 # Bundle only (apm.yml has dependencies:, no marketplace:)
-apm pack
+apm pack                              # plugin format (default)
 apm pack --target claude --archive
-apm pack --format plugin -o ./dist
+apm pack --format apm -o ./dist       # legacy APM bundle layout
 
 # Marketplace only (apm.yml has marketplace:, no dependencies:)
 apm pack
@@ -622,10 +622,9 @@ apm pack --marketplace-output ./build/marketplace.json
 
 **Bundle behaviour:**
 - Reads `apm.lock.yaml` to enumerate all `deployed_files` from installed dependencies
-- Scans files for hidden Unicode characters before bundling — warns if findings are detected (non-blocking; consumers are protected by `apm install`/`apm unpack` which block on critical)
-- Copies files preserving directory structure
-- Writes an enriched `apm.lock.yaml` inside the bundle with a `pack:` metadata section (the project's own `apm.lock.yaml` is never modified)
-- **Plugin format** (`--format plugin`): Remaps `.apm/` content into plugin-native paths (`agents/`, `skills/`, `commands/`, etc.), generates or updates `plugin.json`, merges hooks into a single `hooks.json`. `devDependencies` are also excluded from plugin bundles. See [Pack & Distribute](../../guides/pack-distribute/#plugin-format) for the full mapping table
+- Scans files for hidden Unicode characters before bundling -- warns if findings are detected (non-blocking; consumers are protected by `apm install`/`apm unpack` which block on critical)
+- **Plugin format (default):** Remaps `.apm/` content into plugin-native paths (`agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`); generates or updates a schema-conformant `plugin.json` (convention-dir keys are stripped because Claude Code auto-discovers them); merges hooks into a single `hooks.json`. `devDependencies` are excluded. See [Pack & Distribute -- Plugin format](../../guides/pack-distribute/#plugin-format-vs-apm-format).
+- **APM format (`--format apm`):** Copies files preserving the install-time directory structure; writes an enriched `apm.lock.yaml` inside the bundle with a `pack:` metadata section (the project's own `apm.lock.yaml` is never modified). Consumed by `microsoft/apm-action@v1` restore mode and other bundle-aware tooling.
 
 **Marketplace behaviour:**
 - Reads the `marketplace:` block from `apm.yml` (falls back to legacy `marketplace.yml` with a deprecation warning when no block is present; both files present is a hard error)

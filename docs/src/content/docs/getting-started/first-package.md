@@ -242,14 +242,14 @@ consumers. This lets you target plugin-aware hosts (Copilot CLI plugins,
 the broader plugin ecosystem) with the primitives you already authored.
 
 ```bash
-apm pack --format plugin
+apm pack
 ```
 
-Output:
+Output (plugin format is the default):
 
 ```
 build/team-skills-1.0.0/
-+-- plugin.json        # synthesized from apm.yml
++-- plugin.json        # synthesized, schema-conformant per https://json.schemastore.org/claude-code-plugin.json
 +-- agents/
 |   +-- team-reviewer.agent.md
 +-- skills/
@@ -257,7 +257,9 @@ build/team-skills-1.0.0/
 ```
 
 No `apm.yml`, no `apm_modules/`, no `.apm/`. Just primitives in
-plugin-native layout.
+plugin-native layout. Convention dirs (`agents/`, `skills/`, `commands/`,
+`instructions/`) are auto-discovered by Claude Code, so the synthesized
+`plugin.json` does not list them.
 
 If you know up front that you want to ship a plugin, you can scaffold with
 `apm init --plugin team-skills`, which adds `plugin.json` next to `apm.yml`

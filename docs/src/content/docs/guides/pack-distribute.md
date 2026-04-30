@@ -33,10 +33,10 @@ The left side (install, pack) runs where APM is available. The right side (downl
 
 ## `apm pack`
 
-Creates a self-contained bundle from installed dependencies. Reads the `deployed_files` manifest in `apm.lock.yaml` as the source of truth — it does not scan the disk.
+Creates a self-contained bundle from installed dependencies. Reads the `deployed_files` manifest in `apm.lock.yaml` as the source of truth -- it does not scan the disk.
 
 ```bash
-# Default: apm format, target auto-detected from apm.yml
+# Default: Claude Code plugin directory, target auto-detected
 apm pack
 
 # Filter by target
@@ -45,8 +45,8 @@ apm pack --target claude          # only .claude/ files
 apm pack --target all             # all targets
 apm pack -t claude,copilot        # multiple targets (comma-separated)
 
-# Bundle format
-apm pack --format plugin          # valid plugin directory structure
+# Legacy APM bundle layout (consumed by microsoft/apm-action restore)
+apm pack --format apm
 
 # Produce a .tar.gz archive
 apm pack --archive
@@ -62,8 +62,8 @@ apm pack --dry-run
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--format` | `apm` | Bundle format (`apm` or `plugin`) |
-| `-t, --target` | auto-detect | File filter: `copilot`, `claude`, `cursor`, `opencode`, `all`. `vscode` is a deprecated alias for `copilot` |
+| `--format` | `plugin` | Bundle format. `plugin` emits a Claude Code plugin directory with `plugin.json`. `apm` emits the legacy APM bundle layout. |
+| `-t, --target` | auto-detect | File filter: `copilot`, `claude`, `cursor`, `opencode`, `all`. `vscode` is a deprecated alias for `copilot`. |
 | `--archive` | off | Produce `.tar.gz` instead of directory |
 | `-o, --output` | `./build` | Output directory |
 | `--dry-run` | off | List files without writing |
@@ -118,11 +118,83 @@ $ apm unpack team-skills.tar.gz
 
 This is informational -- the files still extract. The warning helps users understand why their tool may not see the unpacked files and suggests the correct workflow.
 
-## Bundle structure
+## Plugin format vs APM format
 
-The bundle mirrors the directory structure that `apm install` produces. It is not an intermediate format — extract it at the project root and the files land exactly where they belong.
+`apm pack` produces one of two output shapes. The default is the plugin format.
 
-Output is written to `./build/<name>-<version>/` by default, where name and version come from `apm.yml`.
+| Aspect | Plugin format (default) | APM format (`--format apm`) |
+|---|---|---|
+| Output layout | Claude Code plugin directory with `plugin.json` at the root and convention dirs (`agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`) | Mirrors `apm install` deploy paths (`.github/`, `.claude/`, `.cursor/`, `.opencode/`) plus an enriched `apm.lock.yaml` |
+| `plugin.json` | Synthesized (or updated from existing) and validates against the [official Claude Code plugin manifest schema](https://json.schemastore.org/claude-code-plugin.json) | Not emitted |
+| `apm.lock.yaml` inside output | Not emitted (no APM-specific files) | Enriched copy with a `pack:` metadata section |
+| Drop-in for | Any Claude Code plugin consumer (Copilot CLI, Claude Code, Cursor, ...) | `microsoft/apm-action`'s restore mode and bundle-aware tooling |
+| `devDependencies` | Excluded | Included (full install layout) |
+
+Pick `--format apm` when a downstream consumer expects the enriched lockfile and the install-shape directory tree -- in particular `microsoft/apm-action@v1` with `bundle:` (its restore mode reads the bundle's `apm.lock.yaml`). The action exposes `--format apm` end-to-end so existing pack/restore workflows continue unchanged. Otherwise leave the default in place.
+
+## Bundle structure (plugin format, default)
+
+`apm pack` writes to `./build/<name>-<version>/` by default. Convention directories (`agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`) are auto-discovered by Claude Code, so the synthesized `plugin.json` does NOT emit `agents`/`skills`/`commands`/`instructions` keys for them. Per the [official schema](https://json.schemastore.org/claude-code-plugin.json), those array entries are reserved for `./*.md` paths to *additional* files outside the convention directories.
+
+### Single plugin per repo
+
+```
+build/my-plugin-1.0.0/
+  plugin.json                              # schema-conformant, synthesized from apm.yml
+  agents/
+    architect.agent.md
+  skills/
+    security-scan/
+      SKILL.md
+  commands/
+    review.md
+  instructions/
+    coding-standards.instructions.md
+  hooks.json
+```
+
+`.apm/` source content is remapped into plugin-native paths:
+
+| APM source | Plugin output |
+|---|---|
+| `.apm/agents/*.agent.md` | `agents/*.agent.md` |
+| `.apm/skills/*/SKILL.md` | `skills/*/SKILL.md` |
+| `.apm/prompts/*.prompt.md` | `commands/*.md` |
+| `.apm/prompts/*.md` | `commands/*.md` |
+| `.apm/instructions/*.instructions.md` | `instructions/*.instructions.md` |
+| `.apm/hooks/*.json` | `hooks.json` (merged) |
+| `.apm/commands/*.md` | `commands/*.md` |
+
+Prompt files are renamed: `review.prompt.md` becomes `review.md` in `commands/`.
+
+### `plugin.json` generation
+
+If a `plugin.json` already exists in the project (root, `.github/plugin/`, `.claude-plugin/`, or `.cursor-plugin/`), it is reused. Stale `agents`/`skills`/`commands`/`instructions` keys that point at the convention directories are stripped so the output validates against the schema. Otherwise APM synthesizes one from `apm.yml` metadata.
+
+### Multi-plugin repo (with `marketplace:` block)
+
+When `apm.yml` declares a `marketplace:` block, `apm pack` ALSO emits `.claude-plugin/marketplace.json` aggregating each declared package as a marketplace entry. Curators have two options:
+
+- **Per-plugin `plugin.json` files**: run `apm pack` per subdirectory (each subdirectory has its own `apm.yml`) to produce a schema-conformant `plugin.json` for every plugin.
+- **Marketplace pass-through**: with `strict: false` on entries, the marketplace entry's pass-through fields (`description`, `version`, `author`, ...) stand in for the plugin manifest -- consumers read them directly from `marketplace.json`.
+
+See [Authoring a marketplace](./marketplace-authoring/) for the full schema and build flow.
+
+### `devDependencies` exclusion
+
+Dependencies listed under [`devDependencies`](../../reference/manifest-schema/#5-devdependencies) in `apm.yml` are excluded from the plugin bundle. Use [`apm install --dev`](../../reference/cli-commands/#apm-install---install-dependencies-and-deploy-local-content) to add dev deps:
+
+```bash
+apm install --dev owner/test-helpers
+```
+
+This keeps third-party development-only packages (test helpers, lint rules) out of distributed plugins.
+
+**Caveat for primitives you author yourself:** the dev/prod split is enforced via the lockfile's `is_dev` marker for resolved dependencies. The local-content scanner that ships your own `.apm/` content does NOT consult that marker -- it bundles everything under `.apm/`. To keep maintainer-only primitives (release-checklist skills, internal debugging agents) out of plugin bundles, author them OUTSIDE `.apm/` (e.g. under `dev/`) and reference them via a local-path devDependency. See [Dev-only Primitives](./dev-only-primitives/).
+
+## Bundle structure (APM format, `--format apm`)
+
+`apm pack --format apm` mirrors the directory structure that `apm install` produces. It is not an intermediate format -- extract it at the project root and the files land exactly where they belong. Use this format when a consumer (e.g. `microsoft/apm-action@v1` restore mode) needs the enriched lockfile alongside the deployed files.
 
 ### VS Code / Copilot target
 
@@ -181,70 +253,9 @@ build/my-project-1.0.0/
 
 The bundle is self-describing: its `apm.lock.yaml` lists every file it contains and the dependency graph that produced them.
 
-## Plugin format
+## Lockfile enrichment (APM format only)
 
-`apm pack --format plugin` transforms your project into a standalone plugin directory consumable by Copilot CLI, Claude Code, or other plugin hosts. The output contains no APM-specific files — no `apm.yml`, `apm_modules/`, `.apm/`, or `apm.lock.yaml`.
-
-Use this when you want to distribute your APM package as a standalone plugin that works without APM.
-
-```bash
-apm pack --format plugin
-```
-
-### Output mapping
-
-The exporter remaps `.apm/` content into plugin-native paths:
-
-| APM source | Plugin output |
-|---|---|
-| `.apm/agents/*.agent.md` | `agents/*.agent.md` |
-| `.apm/skills/*/SKILL.md` | `skills/*/SKILL.md` |
-| `.apm/prompts/*.prompt.md` | `commands/*.md` |
-| `.apm/prompts/*.md` | `commands/*.md` |
-| `.apm/instructions/*.instructions.md` | `instructions/*.instructions.md` |
-| `.apm/hooks/*.json` | `hooks.json` (merged) |
-| `.apm/commands/*.md` | `commands/*.md` |
-
-Prompt files are renamed: `review.prompt.md` becomes `review.md` in `commands/`.
-
-**Excluded from plugin output:** `devDependencies` are excluded from plugin bundles — see [devDependencies](../../reference/manifest-schema/#5-devdependencies).
-
-### plugin.json generation
-
-The bundle includes a `plugin.json`. If one already exists in the project (at the root, `.github/plugin/`, `.claude-plugin/`, or `.cursor-plugin/`), it is used and updated with component paths reflecting the output layout. Otherwise, APM synthesizes one from `apm.yml` metadata.
-
-### devDependencies exclusion
-
-Dependencies listed under [`devDependencies`](../../reference/manifest-schema/#5-devdependencies) in `apm.yml` are excluded from the plugin bundle. Use [`apm install --dev`](../../reference/cli-commands/#apm-install---install-dependencies-and-deploy-local-content) to add dev deps:
-
-```bash
-apm install --dev owner/test-helpers
-```
-
-This keeps third-party development-only packages (test helpers, lint rules) out of distributed plugins.
-
-**Caveat for primitives you author yourself:** the dev/prod split is enforced via the lockfile's `is_dev` marker for resolved dependencies. The local-content scanner that ships your own `.apm/` content does NOT consult that marker -- it bundles everything under `.apm/`. To keep maintainer-only primitives (release-checklist skills, internal debugging agents) out of plugin bundles, author them OUTSIDE `.apm/` (e.g. under `dev/`) and reference them via a local-path devDependency. See [Dev-only Primitives](./dev-only-primitives/).
-
-### Example output
-
-```
-build/my-plugin-1.0.0/
-  agents/
-    architect.agent.md
-  skills/
-    security-scan/
-      SKILL.md
-  commands/
-    review.md
-  instructions/
-    coding-standards.instructions.md
-  hooks.json
-  plugin.json
-```
-
-## Lockfile enrichment
-
-The bundle includes a copy of `apm.lock.yaml` enriched with a `pack:` section. The project's own `apm.lock.yaml` is never modified.
+When `--format apm` is used, the bundle includes a copy of `apm.lock.yaml` enriched with a `pack:` section. The project's own `apm.lock.yaml` is never modified.
 
 ```yaml
 pack:
@@ -267,17 +278,11 @@ dependencies:
       - .github/agents/architect.md
 ```
 
-The `pack:` section records:
-
-- **format** — the bundle format used (`apm` or `plugin`)
-- **target** — the effective target filter applied
-- **packed_at** — UTC timestamp of when the bundle was created
-
-This metadata lets consumers verify what they received and trace it back to a build.
+The `pack:` section records the bundle `format`, the effective `target` filter, and a `packed_at` UTC timestamp. Plugin-format output has no `apm.lock.yaml` -- consumers verify by re-running the upstream pack instead.
 
 ## `apm unpack`
 
-Extracts an APM bundle into a project directory. Accepts both `.tar.gz` archives and unpacked bundle directories.
+Extracts an APM bundle (produced with `--format apm`) into a project directory. Accepts both `.tar.gz` archives and unpacked bundle directories. Plugin-format output is consumed directly by Claude Code and other plugin hosts and does not need `apm unpack`.
 
 ```bash
 # Extract and verify
@@ -313,7 +318,7 @@ apm unpack ./build/my-project-1.0.0.tar.gz --dry-run
 
 ### CI: cross-job artifact sharing
 
-Resolve once in a setup job, fan out to N consumer jobs. No APM installation in downstream jobs.
+Resolve once in a setup job, fan out to N consumer jobs. No APM installation in downstream jobs. Use `--format apm` so the bundle preserves the `apm install` directory layout that `tar xzf` restores in place.
 
 ```yaml
 # .github/workflows/ci.yml
@@ -323,7 +328,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: microsoft/apm-action@v1
-      - run: apm pack --archive
+      - run: apm pack --format apm --archive
       - uses: actions/upload-artifact@v4
         with:
           name: apm-bundle
@@ -339,25 +344,25 @@ jobs:
           name: apm-bundle
           path: ./bundle
       - run: tar xzf ./bundle/*.tar.gz -C .
-      # Prompts and agents are now in place — no APM needed
+      # Prompts and agents are now in place -- no APM needed
 ```
 
 ### Agentic workflows
 
-GitHub's agentic workflow runners operate in sandboxed environments with no network access. Pre-pack the bundle and include it as a workflow artifact so the agent has full context from the start.
+GitHub's agentic workflow runners operate in sandboxed environments with no network access. Pre-pack the bundle (`--format apm --archive`) and include it as a workflow artifact so the agent has full context from the start.
 
 ### Release audit trail
 
 Attach the bundle as a release artifact. Anyone auditing the release can inspect exactly which prompts, agents, and skills shipped with that version.
 
 ```bash
-apm pack --archive -o ./release-artifacts/
+apm pack --format apm --archive -o ./release-artifacts/
 gh release upload v1.2.0 ./release-artifacts/*.tar.gz
 ```
 
 ### Dev Containers and Codespaces
 
-Include a pre-built bundle in the dev container image or restore it during `onCreateCommand`. New contributors get working AI context without running `apm install`.
+Include a pre-built APM bundle in the dev container image or restore it during `onCreateCommand`. New contributors get working AI context without running `apm install`.
 
 ```json
 {
@@ -367,20 +372,20 @@ Include a pre-built bundle in the dev container image or restore it during `onCr
 
 ### Org-wide distribution
 
-A central platform team maintains the canonical prompt library. Monthly, they run `apm install && apm pack --archive`, publish the bundle to an internal artifact registry, and downstream repos pull it during CI or onboarding.
+A central platform team maintains the canonical prompt library. Monthly, they run `apm install && apm pack --format apm --archive`, publish the bundle to an internal artifact registry, and downstream repos pull it during CI or onboarding.
 
 ## `apm-action` integration
 
-The official [apm-action](https://github.com/microsoft/apm-action) supports pack and restore as first-class modes.
+The official [apm-action](https://github.com/microsoft/apm-action) supports pack and restore as first-class modes. The action's restore mode consumes the legacy APM bundle layout, so its pack mode emits `--format apm` by default.
 
 ### Pack mode
 
-Generate a bundle as part of a GitHub Actions workflow:
+Generate an APM-format bundle as part of a GitHub Actions workflow:
 
 ```yaml
 - uses: microsoft/apm-action@v1
   with:
-    pack: true
+    pack: true        # produces --format apm bundle for restore-mode consumers
 ```
 
 ### Restore mode
