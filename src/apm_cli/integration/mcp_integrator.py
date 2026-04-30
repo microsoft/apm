@@ -24,7 +24,7 @@ from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.utils.console import (
     _get_console,
     _rich_error,  # noqa: F401
-    _rich_info,
+    _rich_info,  # noqa: F401
     _rich_success,
     _rich_warning,  # noqa: F401
 )
@@ -1053,7 +1053,7 @@ class MCPIntegrator:
                 logger.progress("No runtimes installed, using VS Code as fallback")
 
         # Codex MCP is project-scoped: only configure it when Codex is an
-        # active project target, mirroring Cursor/OpenCode opt-in behavior.
+        # active project target (silent skip, same as Cursor/OpenCode/Gemini).
         if not user_scope and "codex" in target_runtimes:
             from apm_cli.integration.targets import active_targets
 
@@ -1063,14 +1063,6 @@ class MCPIntegrator:
             if "codex" not in active:
                 _log.debug("Codex gated out: active_targets=%s", sorted(active))
                 target_runtimes = [r for r in target_runtimes if r != "codex"]
-                message = (
-                    "Codex not an active project target -- skipping MCP config "
-                    "(create .codex/ or set target: codex in apm.yml)"
-                )
-                if logger:
-                    logger.progress(message)
-                else:
-                    _rich_info(message, symbol="info")
 
         # Explicit runtime/exclusion/gating can leave nothing to configure.
         if not target_runtimes:
