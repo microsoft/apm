@@ -14,19 +14,11 @@ Design notes
 ``integrate_local_content()`` calls ``integrate_package_primitives()`` via a
 bare-name lookup so that ``@patch`` of either symbol on this module's
 namespace intercepts both call paths consistently.
-
-``IntegrateOptions`` carries per-call options that are not shared by every
-integrator (e.g. the Threat #8 consent flag for the command integrator).
-The dispatch loop is unconditional -- per-primitive kwarg shaping lives on
-the options dataclass via :meth:`extra_kwargs`, so future consent-gated
-primitives extend that single source of truth instead of accumulating
-``if _prim_name == ...`` branches in the loop body.
 """
 
 from __future__ import annotations
 
 import builtins
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional  # noqa: F401
 
@@ -44,43 +36,6 @@ if TYPE_CHECKING:
 set = builtins.set
 list = builtins.list
 dict = builtins.dict
-
-
-@dataclass(frozen=True)
-class IntegrateOptions:
-    """Per-call integration options that are not shared by every integrator.
-
-    Carries flags that only specific primitives consume (e.g. the Threat #8
-    consent flag for the command integrator).  Use :meth:`extra_kwargs` to
-    obtain the primitive-specific kwarg dict the dispatch loop should
-    splat into the integrator call -- that keeps the dispatch loop body
-    unconditional and centralises per-primitive routing here.
-
-    To extend with a future primitive-specific option:
-
-    1. Add a new field on this dataclass.
-    2. Extend :meth:`extra_kwargs` with the per-primitive mapping.
-    3. Update the relevant integrator's signature to accept the kwarg.
-
-    The dataclass is frozen so options established at the start of an
-    install run cannot be mutated by individual integrators mid-loop.
-    """
-
-    allow_executable_commands: bool = False
-
-    def extra_kwargs(self, primitive_name: str) -> dict:
-        """Return integrator kwargs specific to *primitive_name*.
-
-        The dispatch loop merges this dict into the base kwargs (force,
-        managed_files, diagnostics) so the call site stays
-        ``integrator.method(target, pkg, root, **base, **extra)``
-        regardless of which primitive is being integrated.
-        """
-        if primitive_name == "commands":
-            # Threat #8 consent gate: the command integrator enforces the
-            # gate per-target via should_deploy_executable_commands().
-            return {"allow_executable_commands": self.allow_executable_commands}
-        return {}
 
 
 def _deployed_path_entry(
@@ -138,7 +93,6 @@ def integrate_package_primitives(
     scope: InstallScope | None = None,
     skill_subset: tuple | None = None,
     ctx: InstallContext | None = None,
-    allow_executable_commands: bool = False,
 ) -> dict:
     """Run the full integration pipeline for a single package.
 
@@ -222,9 +176,6 @@ def integrate_package_primitives(
     }
 
     for _target in targets:
-        _options = IntegrateOptions(
-            allow_executable_commands=allow_executable_commands,
-        )
         for _prim_name, _mapping in _target.primitives.items():
             _entry = _dispatch.get(_prim_name)
             if not _entry or _entry.multi_target:
@@ -238,7 +189,6 @@ def integrate_package_primitives(
                 force=force,
                 managed_files=managed_files,
                 diagnostics=diagnostics,
-                **_options.extra_kwargs(_prim_name),
             )
 
             if _int_result.files_integrated > 0:
@@ -323,7 +273,6 @@ def integrate_local_content(
     logger: InstallLogger | None = None,
     scope: InstallScope | None = None,
     ctx: InstallContext | None = None,
-    allow_executable_commands: bool = False,
 ) -> dict:
     """Integrate primitives from the project's own .apm/ directory.
 
@@ -369,7 +318,6 @@ def integrate_local_content(
         logger=logger,
         scope=scope,
         ctx=ctx,
-        allow_executable_commands=allow_executable_commands,
     )
 
 

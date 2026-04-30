@@ -58,32 +58,6 @@ def _is_valid_input_name(name: str) -> bool:
     return bool(_INPUT_NAME_RE.match(name))
 
 
-def should_deploy_executable_commands(
-    target: TargetProfile,
-    *,
-    allow_executable_commands: bool,
-) -> bool:
-    """Return True when *target* may receive executable command files.
-
-    Centralised gate (Threat #8) shared by every slash-command target.
-    A target opts in to the gate by setting
-    :attr:`TargetProfile.requires_executable_consent`; the gate then
-    returns True only when the caller passes
-    ``allow_executable_commands=True`` (sourced from
-    ``apm install --allow-cursor-commands`` at the CLI surface; the
-    internal kwarg keeps a generic name so the gate can be reused by
-    future target-scoped consent flags).
-
-    Targets that did not opt in are always allowed (returns True
-    immediately) so existing Claude/OpenCode/Gemini behaviour is preserved
-    in this PR.  See :class:`TargetProfile.requires_executable_consent`
-    for the asymmetric-consent rationale.
-    """
-    if not target.requires_executable_consent:
-        return True
-    return allow_executable_commands
-
-
 def _extract_input_names(
     input_spec: Any,
 ) -> tuple[list[str], list[str]]:
@@ -438,22 +412,12 @@ class CommandIntegrator(BaseIntegrator):
         force: bool = False,
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
-        allow_executable_commands: bool = False,
     ) -> IntegrationResult:
         """Integrate prompt files as commands for a single *target*.
 
         Reads deployment paths from *target*'s ``commands`` primitive
         mapping, applying the opt-in guard when ``auto_create`` is
         ``False``.
-
-        When *target* sets ``requires_executable_consent=True`` (currently
-        Cursor only), deployment is gated on *allow_executable_commands*
-        (sourced from ``apm install --allow-cursor-commands``).  A missing
-        consent flag causes deployment to be skipped with a clear
-        diagnostic explaining how to enable it -- this implements the
-        consent gate from Threat #8 uniformly via
-        :func:`should_deploy_executable_commands` rather than per-target
-        name-string branches.
         """
         mapping = target.primitives.get("commands")
         if not mapping:
@@ -472,69 +436,17 @@ class CommandIntegrator(BaseIntegrator):
         target_root = project_root / effective_root
         if not target.auto_create and not (project_root / target.root_dir).is_dir():
             # Surface a discoverability note so users (and CI logs) see
-            # why the target was skipped.  When the target also requires
-            # explicit consent, mention the flag in the same hint so a
-            # user who creates the directory and re-runs does not hit a
-            # second confusing skip on the consent gate.
+            # why the target was skipped.
             if diagnostics is not None:
-                consent_hint = ""
-                if target.requires_executable_consent:
-                    consent_hint = (
-                        f" Once {target.root_dir}/ exists, re-run with "
-                        f"`apm install --allow-cursor-commands` to "
-                        f"register the deployed files as IDE-invokable "
-                        f"slash commands."
-                    )
                 diagnostics.info(
                     message=(
                         f"Skipped {target.root_dir}/{mapping.subdir}/ -- "
                         f"create a {target.root_dir}/ directory to enable "
-                        f"{target.name} command deployment.{consent_hint}"
+                        f"{target.name} command deployment."
                     ),
                     package=pkg_name,
                 )
             return IntegrationResult(0, 0, 0, [], 0)
-
-        # Threat #8 consent gate: if the target marks command deployment
-        # as post-install code execution, refuse to do *any* filesystem
-        # work (including discovery I/O) before the user opts in.  warn()
-        # is notification, not consent; this gate enforces the difference.
-        # The skip-note names the exact flag the user must add.  Applied
-        # via the shared helper so new targets opt in by setting
-        # requires_executable_consent rather than touching this branch.
-        if not should_deploy_executable_commands(
-            target,
-            allow_executable_commands=allow_executable_commands,
-        ):
-            # Cheap discovery so the warning can quote the exact file
-            # count -- but only after the gate has decided to skip, so
-            # the I/O cost is paid once (not at install steady-state
-            # when consent is missing on every package).  This is still
-            # called inside the gate-skipped branch so consent-absent
-            # installs do exactly one find per package, not zero -- the
-            # tradeoff is a more actionable warning vs. a silent zero.
-            n_prompt_files = len(self.find_prompt_files(package_info.install_path))
-            if diagnostics is not None and n_prompt_files:
-                diagnostics.warn(
-                    message=(
-                        f"Skipped {n_prompt_files} {target.name} "
-                        f"command(s): deployment to "
-                        f"{target.root_dir}/{mapping.subdir}/ requires "
-                        f"explicit opt-in. Re-run with "
-                        f"`apm install --allow-cursor-commands` to "
-                        f"register these files as IDE-invokable slash "
-                        f"commands."
-                    ),
-                    package=pkg_name,
-                    detail=(
-                        f"{target.name} reads "
-                        f"{target.root_dir}/{mapping.subdir}/*"
-                        f"{mapping.extension} as executable slash "
-                        f"commands; treating deployment as post-install "
-                        f"code execution requires explicit consent."
-                    ),
-                )
-            return IntegrationResult(0, 0, n_prompt_files, [], 0)
 
         prompt_files = self.find_prompt_files(package_info.install_path)
         if not prompt_files:
@@ -723,7 +635,6 @@ class CommandIntegrator(BaseIntegrator):
         force: bool = False,
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
-        allow_executable_commands: bool = False,
     ) -> IntegrationResult:
         """Integrate prompt files as Claude commands (.claude/commands/).
 
@@ -740,7 +651,6 @@ class CommandIntegrator(BaseIntegrator):
             force=force,
             managed_files=managed_files,
             diagnostics=diagnostics,
-            allow_executable_commands=allow_executable_commands,
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["claude"], ...) instead.
@@ -774,7 +684,6 @@ class CommandIntegrator(BaseIntegrator):
         force: bool = False,
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
-        allow_executable_commands: bool = False,
     ) -> IntegrationResult:
         """Integrate prompt files as OpenCode commands (.opencode/commands/)."""
         from apm_cli.integration.targets import KNOWN_TARGETS
@@ -786,7 +695,6 @@ class CommandIntegrator(BaseIntegrator):
             force=force,
             managed_files=managed_files,
             diagnostics=diagnostics,
-            allow_executable_commands=allow_executable_commands,
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["opencode"], ...) instead.

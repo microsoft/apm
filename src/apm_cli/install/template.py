@@ -100,7 +100,6 @@ def _integrate_materialization(
                 else (tuple(dep_ref.skill_subset) if dep_ref.skill_subset else None)
             ),
             ctx=ctx,
-            allow_executable_commands=ctx.allow_executable_commands,
         )
         for k in (
             "prompts",

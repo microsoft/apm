@@ -226,7 +226,6 @@ def _integrate_root_project(
             logger=logger,
             scope=ctx.scope,
             ctx=ctx,
-            allow_executable_commands=ctx.allow_executable_commands,
         )
 
         # Track deployed files for the post-deps-local phase (stale

@@ -127,11 +127,6 @@ class InstallContext:
     skill_subset_from_cli: bool = False  # True when user passed --skill (even --skill '*')
     early_lockfile: Any = None  # LockFile read before pipeline phases (avoids re-read)
     direct_mcp_deps: list[Any] | None = None  # Direct MCP deps from apm.yml for policy gate
-    # Threat #8: explicit user opt-in to deploy slash commands for targets
-    # marked requires_executable_consent (currently Cursor).  Wired from
-    # ``apm install --allow-cursor-commands``; default False so missing
-    # consent skips deployment with a diagnostic explaining how to enable it.
-    allow_executable_commands: bool = False
 
     # ------------------------------------------------------------------
     # Post-deps local content tracking (F3)

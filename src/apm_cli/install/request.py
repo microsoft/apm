@@ -44,7 +44,3 @@ class InstallRequest:
     no_policy: bool = False  # W2-escape-hatch: skip org policy enforcement
     skill_subset: tuple[str, ...] | None = None  # --skill filter for SKILL_BUNDLE packages
     skill_subset_from_cli: bool = False  # True when user passed --skill (even --skill '*')
-    # Threat #8: explicit consent for deploying slash commands to targets
-    # marked requires_executable_consent (currently Cursor).  Wired from
-    # ``apm install --allow-cursor-commands``.
-    allow_executable_commands: bool = False

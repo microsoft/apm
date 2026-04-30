@@ -227,40 +227,26 @@ APM separates production and development dependencies:
 
 This prevents transitive inclusion of development-only packages (test fixtures, linting rules, internal helpers) in distributed artifacts. The lockfile marks dev dependencies with `is_dev: true` for explicit tracking. See the [Lock File Specification](../../reference/lockfile-spec/#42-dependency-entries) for field details.
 
-## Post-install code execution (Threat #8)
+## Slash command deployment
 
-Some IDE-style targets read files in their `commands/` directory as
-**executable slash commands** -- typing `/foo` in the IDE invokes the
-file's content as an LLM prompt with full tool access. Treating
-`apm install` as a passive copy in those cases would silently introduce
-post-install code execution from any package in your dependency graph,
-analogous to npm package install scripts.
+Several IDE-style targets read files in their `commands/` directory as
+**slash commands** -- typing `/foo` in the IDE invokes the file's
+content as an LLM prompt with full tool access. Across all supported
+targets (Claude Code, Cursor, OpenCode, Gemini CLI), invocation
+requires the user to type the command name; commands are not
+auto-invoked at IDE startup or on disk-write.
 
-APM's posture is **explicit-consent per target**, with the default set
-fail-closed at the dataclass level: every `TargetProfile` carries a
-`requires_executable_consent` flag that defaults to `True`, so any new
-target that does not consciously opt out will refuse command deployment
-until a maintainer wires a consent flag through the install pipeline.
+`apm install` deploys package `.prompt.md` files to each target's
+commands directory by default when that directory exists, so packaged
+slash commands are available to the user immediately and consistently
+across targets.
 
-| Target | Consent posture | Rationale |
-|--------|-----------------|-----------|
-| **Cursor** | **Gated.** Requires `apm install --allow-cursor-commands` to deploy `.cursor/commands/*.md`. Without the flag the command files are skipped and a warning names the exact flag to add. | Cursor reads `.cursor/commands/*` as IDE-invokable slash commands. The directory is on a code-execution surface; passive `warn()` is not consent. |
-| **Claude Code** | Ungated (`requires_executable_consent=False`). `.claude/commands/*.md` deploys by default. | Claude Code does not auto-invoke command files at IDE startup; users must explicitly type `/command-name` to invoke. The pre-`apm install --allow-cursor-commands` ergonomics for Claude users would regress without offsetting risk reduction. |
-| **OpenCode** | Ungated. `.opencode/commands/*.md` deploys by default. | Same as Claude: command files are not auto-invoked; user-typed only. |
-| **Gemini CLI** | Ungated. `.gemini/commands/*.toml` deploys by default. | Same as Claude/OpenCode: TOML command files are not auto-invoked. |
-
-**Asymmetry is intentional, not a gap.** The gate is uniform in the
-codebase (one helper, one dataclass field) but the per-target posture
-differs because the underlying IDE behaviour differs. The asymmetry is
-documented here so future maintainers do not flip the defaults without
-revisiting the rationale, and so end users can predict which targets
-require the consent flag.
-
-The flag mirrors `npm --ignore-scripts` for the post-install code
-execution risk class. If future targets join Cursor on the gated side,
-they should add their own target-scoped consent flag (e.g.
-`--allow-<target>-commands`) wired to the same internal
-`allow_executable_commands` parameter on the install pipeline.
+| Target | Commands directory | Notes |
+|--------|--------------------|-------|
+| **Claude Code** | `.claude/commands/*.md` | Deployed when `.claude/` exists. |
+| **Cursor** | `.cursor/commands/*.md` | Deployed when `.cursor/` exists. Cursor 1.6+ only; Cursor is de-emphasizing commands in favor of rules/skills -- monitor [Cursor release notes](https://cursor.com/changelog) for changes. The shared command transformer keeps the Claude-compatible frontmatter subset (`description`, `allowed-tools`, `model`, `argument-hint`, `input`); Cursor-specific keys (`author`, `mcp`, `parameters`, ...) are dropped with an install-time warning per file. |
+| **OpenCode** | `.opencode/command/*.md` | Deployed when `.opencode/` exists. |
+| **Gemini CLI** | `.gemini/commands/*.toml` | Deployed when `.gemini/` exists. |
 
 ## MCP server trust model
 
