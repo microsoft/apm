@@ -1936,3 +1936,147 @@ class TestEnsureAuth:
 
         resolver = builder._get_resolver()
         assert resolver._token == "ghp_wired"
+
+
+# ---------------------------------------------------------------------------
+# New fields & override semantics tests (#1061)
+# ---------------------------------------------------------------------------
+
+
+class TestRemoteOverrideSemantics:
+    """Entry-level description/version override remote-fetched values."""
+
+    def _make_remote_builder(self, tmp_path, entry_fields=""):
+        from apm_cli.marketplace.builder import BuildOptions, ResolvedPackage
+        from apm_cli.marketplace.migration import load_marketplace_config
+
+        content = textwrap.dedent(f"""\
+            name: test
+            description: x
+            version: 1.0.0
+            marketplace:
+              owner:
+                name: ACME
+              packages:
+                - name: remote-tool
+                  source: acme/remote-tool
+                  ref: v1.0.0
+                  {entry_fields}
+        """)
+        (tmp_path / "apm.yml").write_text(content, encoding="utf-8")
+        config = load_marketplace_config(tmp_path)
+        builder = MarketplaceBuilder.from_config(
+            config, tmp_path, BuildOptions(offline=True)
+        )
+        resolved = [
+            ResolvedPackage(
+                name="remote-tool",
+                source_repo="acme/remote-tool",
+                subdir=None,
+                ref="v1.0.0",
+                sha="a" * 40,
+                requested_version=None,
+                tags=(),
+                is_prerelease=False,
+            )
+        ]
+        return builder, resolved
+
+    def test_remote_entry_override_description_version(self, tmp_path):
+        builder, resolved = self._make_remote_builder(
+            tmp_path, 'description: "custom"\n                  version: "3.0.0"'
+        )
+        builder._prefetch_metadata = lambda r: {
+            "remote-tool": {"description": "remote desc", "version": "1.0.0"}
+        }
+        doc = builder.compose_marketplace_json(resolved)
+        plugin = doc["plugins"][0]
+        assert plugin["description"] == "custom"
+        assert plugin["version"] == "3.0.0"
+
+    def test_remote_entry_no_override_uses_fetched(self, tmp_path):
+        builder, resolved = self._make_remote_builder(tmp_path)
+        builder._prefetch_metadata = lambda r: {
+            "remote-tool": {"description": "remote desc", "version": "1.0.0"}
+        }
+        doc = builder.compose_marketplace_json(resolved)
+        plugin = doc["plugins"][0]
+        assert plugin["description"] == "remote desc"
+        assert plugin["version"] == "1.0.0"
+
+    def test_author_license_repository_emitted_for_local(self, tmp_path):
+        from apm_cli.marketplace.builder import BuildOptions
+        from apm_cli.marketplace.migration import load_marketplace_config
+
+        content = textwrap.dedent("""\
+            name: test
+            description: x
+            version: 1.0.0
+            marketplace:
+              owner:
+                name: ACME
+              packages:
+                - name: local-tool
+                  source: ./plugins/local-tool
+                  author: "ACME Inc"
+                  license: "MIT"
+                  repository: "https://github.com/acme/tool"
+        """)
+        (tmp_path / "apm.yml").write_text(content, encoding="utf-8")
+        config = load_marketplace_config(tmp_path)
+        builder = MarketplaceBuilder.from_config(
+            config, tmp_path, BuildOptions(offline=True)
+        )
+        local_entry = next(e for e in config.packages if e.is_local)
+        resolved = [builder._resolve_entry(local_entry)]
+        doc = builder.compose_marketplace_json(resolved)
+        plugin = doc["plugins"][0]
+        assert plugin["author"] == "ACME Inc"
+        assert plugin["license"] == "MIT"
+        assert plugin["repository"] == "https://github.com/acme/tool"
+
+    def test_author_license_repository_emitted_for_remote(self, tmp_path):
+        builder, resolved = self._make_remote_builder(
+            tmp_path,
+            'author: "ACME"\n                  license: "Apache-2.0"\n                  repository: "https://github.com/acme/remote"'
+        )
+        doc = builder.compose_marketplace_json(resolved)
+        plugin = doc["plugins"][0]
+        assert plugin["author"] == "ACME"
+        assert plugin["license"] == "Apache-2.0"
+        assert plugin["repository"] == "https://github.com/acme/remote"
+
+    def test_serialization_order(self, tmp_path):
+        from apm_cli.marketplace.builder import BuildOptions
+        from apm_cli.marketplace.migration import load_marketplace_config
+
+        content = textwrap.dedent("""\
+            name: test
+            description: x
+            version: 1.0.0
+            marketplace:
+              owner:
+                name: ACME
+              packages:
+                - name: local-tool
+                  source: ./plugins/local-tool
+                  description: "A tool"
+                  version: "1.0.0"
+                  author: "ACME"
+                  license: "MIT"
+                  repository: "https://github.com/acme/tool"
+                  tags: [ai]
+                  homepage: "https://acme.com"
+        """)
+        (tmp_path / "apm.yml").write_text(content, encoding="utf-8")
+        config = load_marketplace_config(tmp_path)
+        builder = MarketplaceBuilder.from_config(
+            config, tmp_path, BuildOptions(offline=True)
+        )
+        local_entry = next(e for e in config.packages if e.is_local)
+        resolved = [builder._resolve_entry(local_entry)]
+        doc = builder.compose_marketplace_json(resolved)
+        plugin = doc["plugins"][0]
+        keys = list(plugin.keys())
+        # Expected order: name, description, version, author, license, repository, tags, homepage, source
+        assert keys == ["name", "description", "version", "author", "license", "repository", "tags", "homepage", "source"]

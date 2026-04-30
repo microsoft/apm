@@ -153,10 +153,14 @@ Stripped from `marketplace.json` at compile time.
 |-------|----------|-------------|
 | `name` | yes | Plugin name consumers will install. Unique within the marketplace. |
 | `source` | yes | Either `<owner>/<repo>` (remote) or `./path/to/dir` (local-path entry in this repo). |
-| `description` | no | Pass-through to `marketplace.json`. |
+| `description` | no | Pass-through to `marketplace.json`. For remote entries, overrides the remote-fetched description (curator-wins). |
 | `homepage` | no | Pass-through URL. |
-| `tags` | no | Pass-through list of strings. Omitted from output when empty. |
-| `version` | conditional | Semver range (see below). Either `version` or `ref` must be set for remote sources. Local sources may set `version` to seed the compiled output. |
+| `tags` | no | Pass-through list of strings. Omitted from output when empty. Max 50 items, 100 chars each. |
+| `keywords` | no | Alias for `tags`. Merged with `tags` (deduplicated). Same limits apply to the combined list. |
+| `author` | no | Pass-through string (e.g. `"ACME Corp"`). Must be a string if set. |
+| `license` | no | Pass-through string (e.g. `"MIT"`). Must be a string if set. |
+| `repository` | no | Pass-through URL string (e.g. `"https://github.com/org/repo"`). Must be a string if set. |
+| `version` | conditional | Semver range (see below). Either `version` or `ref` must be set for remote sources. For remote entries, a fixed version (not a range) is emitted as display metadata (curator-wins override). Local sources may set `version` to seed the compiled output. |
 | `ref` | conditional | Explicit SHA, tag, or branch. Takes precedence over `version`. Remote sources only. |
 | `subdir` | no | Subdirectory within a remote repo. Validated against path traversal. |
 | `tag_pattern` | no | Per-plugin override of `build.tagPattern`. |
@@ -166,7 +170,11 @@ Unknown keys inside `marketplace:` raise a schema error rather than being silent
 
 ### Local-path entries
 
-When `source` starts with `./`, the entry is a local-path plugin: APM does not run `git ls-remote`, does not resolve a SHA, and emits the path verbatim into `marketplace.json` as a plain string source. Use this for plugins that ship in the same repository as the marketplace itself (the azure-skills pattern).
+When `source` starts with `./`, the entry is a local-path plugin: APM does not run `git ls-remote`, does not resolve a SHA, and emits the path into `marketplace.json` as a plain string source.
+
+If `metadata.pluginRoot` is set, local source paths are emitted **relative to pluginRoot** in the output. For example, with `pluginRoot: ./plugins`, a source of `./plugins/my-tool` is emitted as `./my-tool`. This prevents double-prefix bugs where consumers prepend pluginRoot to an already-rooted path.
+
+If the source path does not start with pluginRoot, it is emitted verbatim and a build warning is produced.
 
 ```yaml
 plugins:

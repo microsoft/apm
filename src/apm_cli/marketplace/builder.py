@@ -54,6 +54,7 @@ __all__ = [
     "ResolvedPackage",
     "ResolveResult",
     "BuildReport",
+    "BuildDiagnostic",
     "BuildOptions",
     "MarketplaceBuilder",
 ]
@@ -61,6 +62,14 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Public dataclasses
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BuildDiagnostic:
+    """Structured diagnostic emitted during marketplace.json composition."""
+
+    level: str  # "warning" | "verbose"
+    message: str
 
 
 @dataclass(frozen=True)
@@ -97,12 +106,13 @@ class BuildReport:
     resolved: Tuple[ResolvedPackage, ...]
     errors: Tuple[Tuple[str, str], ...]  # (package name, error message) pairs
     warnings: Tuple[str, ...]  # non-fatal diagnostic messages
-    unchanged_count: int
-    added_count: int
-    updated_count: int
-    removed_count: int
-    output_path: Path
-    dry_run: bool
+    diagnostics: Tuple[BuildDiagnostic, ...] = ()  # structured diagnostics
+    unchanged_count: int = 0
+    added_count: int = 0
+    updated_count: int = 0
+    removed_count: int = 0
+    output_path: Path = field(default_factory=lambda: Path("."))
+    dry_run: bool = False
 
 
 @dataclass
@@ -125,6 +135,71 @@ class BuildOptions:
 
 # 40-char hex SHA pattern
 _SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+
+# Version range indicators -- if a version string starts with any of these
+# or contains spaces, it's a resolution constraint, not a display override.
+_VERSION_RANGE_CHARS = ("^", "~", ">", "<", "=")
+
+
+def _is_display_version(version: Optional[str]) -> bool:
+    """Return True if *version* looks like a fixed display version, not a range."""
+    if not version:
+        return False
+    v = version.strip()
+    if any(v.startswith(c) for c in _VERSION_RANGE_CHARS):
+        return False
+    if " " in v or "*" in v or "x" in v.lower().split(".")[-1:]:
+        return False
+    return True
+
+
+def _subtract_plugin_root(source: str, plugin_root: str) -> str:
+    """Remove pluginRoot prefix from a local source path for emit.
+
+    Uses PurePosixPath.relative_to() for robust normalization.
+    Returns the relative path prefixed with ``./``.
+
+    Raises
+    ------
+    ValueError
+        If *source* does not start with *plugin_root*.
+    BuildError
+        If subtraction yields an empty or invalid path (S2 guard).
+    """
+    from pathlib import PurePosixPath
+
+    # Normalize: strip leading "./" for comparison
+    norm_source = source.lstrip("./") if source.startswith("./") else source
+    norm_root = plugin_root.lstrip("./") if plugin_root.startswith("./") else plugin_root
+    # Strip trailing slashes
+    norm_root = norm_root.rstrip("/")
+    norm_source = norm_source.rstrip("/")
+
+    src_path = PurePosixPath(norm_source)
+    root_path = PurePosixPath(norm_root)
+
+    # relative_to raises ValueError if not a prefix
+    relative = src_path.relative_to(root_path)
+    result = str(relative)
+
+    # X1: empty result means source == pluginRoot exactly
+    if not result or result == ".":
+        raise BuildError(
+            f"subtracting pluginRoot '{plugin_root}' from source "
+            f"'{source}' yields empty path"
+        )
+
+    # S2: post-subtraction guard -- no absolute paths, no traversal
+    if result.startswith("/"):
+        raise BuildError(
+            f"pluginRoot subtraction produced absolute path: '{result}'"
+        )
+    if ".." in result.split("/"):
+        raise BuildError(
+            f"pluginRoot subtraction produced path with traversal: '{result}'"
+        )
+
+    return "./" + result
 
 
 class MarketplaceBuilder:
@@ -699,6 +774,11 @@ class MarketplaceBuilder:
 
         # Plugins (packages -> plugins)
         plugins: List[Dict[str, Any]] = []
+        diagnostics: List[BuildDiagnostic] = []
+        plugin_root = yml.metadata.get("pluginRoot", "")
+        strip_count = 0
+        override_count = 0
+
         for pkg in resolved:
             plugin: Dict[str, Any] = OrderedDict()
             plugin["name"] = pkg.name
@@ -706,41 +786,120 @@ class MarketplaceBuilder:
             entry = entry_by_name.get(pkg.name)
             is_local = entry is not None and entry.is_local
 
+            # -- description / version (with curator-wins override for remote) --
             if is_local:
-                # Local packages: description/version come from the yml
-                # entry itself (not a remote fetch).
                 if entry.description:
                     plugin["description"] = entry.description
                 if entry.version:
                     plugin["version"] = entry.version
             else:
                 meta = remote_metadata.get(pkg.name, {})
-                if meta.get("description"):
+                # Curator-wins: entry-level value overrides remote-fetched
+                if entry and entry.description:
+                    plugin["description"] = entry.description
+                    remote_desc = meta.get("description", "")
+                    if remote_desc and remote_desc != entry.description:
+                        override_count += 1
+                        diagnostics.append(BuildDiagnostic(
+                            level="verbose",
+                            message=(
+                                f"[i] Package '{pkg.name}': using curator "
+                                f"description (remote: "
+                                f"'{remote_desc[:40]}')"
+                            ),
+                        ))
+                elif meta.get("description"):
                     plugin["description"] = meta["description"]
-                if meta.get("version"):
+
+                if entry and _is_display_version(entry.version):
+                    plugin["version"] = entry.version
+                    remote_ver = meta.get("version", "")
+                    if remote_ver and remote_ver != entry.version:
+                        override_count += 1
+                        diagnostics.append(BuildDiagnostic(
+                            level="verbose",
+                            message=(
+                                f"[i] Package '{pkg.name}': using curator "
+                                f"version '{entry.version}' "
+                                f"(remote: '{remote_ver}')"
+                            ),
+                        ))
+                elif meta.get("version"):
                     plugin["version"] = meta["version"]
 
+            # -- author / license / repository (curator-only pass-through) --
+            if entry and entry.author:
+                plugin["author"] = entry.author
+            if entry and entry.license:
+                plugin["license"] = entry.license
+            if entry and entry.repository:
+                plugin["repository"] = entry.repository
+
+            # -- tags --
             if pkg.tags:
                 plugin["tags"] = list(pkg.tags)
 
+            # -- homepage (local only) --
+            if is_local and entry.homepage:
+                plugin["homepage"] = entry.homepage
+
+            # -- source --
             if is_local:
-                # Anthropic spec: local sources are emitted as plain
-                # strings (the path), not the {type, repository, ref,
-                # commit} object used for remote sources.
-                plugin["source"] = entry.source
-                if entry.homepage:
-                    plugin["homepage"] = entry.homepage
+                source_value = entry.source
+                if plugin_root:
+                    try:
+                        source_value = _subtract_plugin_root(
+                            entry.source, plugin_root
+                        )
+                        strip_count += 1
+                        diagnostics.append(BuildDiagnostic(
+                            level="verbose",
+                            message=(
+                                f"[i] Package '{pkg.name}': stripped "
+                                f"pluginRoot -- '{entry.source}' -> "
+                                f"'{source_value}'"
+                            ),
+                        ))
+                    except ValueError:
+                        # W1: source outside pluginRoot -- emit as-is
+                        source_value = entry.source
+                        diagnostics.append(BuildDiagnostic(
+                            level="warning",
+                            message=(
+                                f"[!] Package '{pkg.name}': source "
+                                f"'{entry.source}' is outside pluginRoot "
+                                f"'{plugin_root}' -- emitted as-is"
+                            ),
+                        ))
+                plugin["source"] = source_value
             else:
-                source: Dict[str, Any] = OrderedDict()
-                source["type"] = "github"
-                source["repository"] = pkg.source_repo
+                source_obj: Dict[str, Any] = OrderedDict()
+                source_obj["type"] = "github"
+                source_obj["repository"] = pkg.source_repo
                 if pkg.subdir:
-                    source["path"] = pkg.subdir
-                source["ref"] = pkg.ref
-                source["commit"] = pkg.sha
-                plugin["source"] = source
+                    source_obj["path"] = pkg.subdir
+                source_obj["ref"] = pkg.ref
+                source_obj["commit"] = pkg.sha
+                plugin["source"] = source_obj
 
             plugins.append(plugin)
+
+        # Verbose summary line
+        summary_parts: List[str] = []
+        if plugin_root and strip_count > 0:
+            summary_parts.append(
+                f"stripped from {strip_count} local source(s)"
+            )
+        if override_count > 0:
+            summary_parts.append(
+                f"{override_count} remote entry(ies) used "
+                f"curator-supplied overrides"
+            )
+        if summary_parts:
+            diagnostics.append(BuildDiagnostic(
+                level="verbose",
+                message="pluginRoot: " + "; ".join(summary_parts),
+            ))
 
         # Defence-in-depth: detect duplicate plugin names and record
         # warnings so the command layer can alert the maintainer.
@@ -762,6 +921,7 @@ class MarketplaceBuilder:
             else:
                 seen_names[pname] = src_label
         self._compose_warnings = tuple(build_warnings)
+        self._compose_diagnostics = tuple(diagnostics)
 
         doc["plugins"] = plugins
         return doc
@@ -859,6 +1019,7 @@ class MarketplaceBuilder:
 
         new_json = self.compose_marketplace_json(resolved)
         build_warnings = getattr(self, "_compose_warnings", ())
+        build_diagnostics = getattr(self, "_compose_diagnostics", ())
         output_path = self._output_path()
 
         # Load existing for diff
@@ -879,6 +1040,7 @@ class MarketplaceBuilder:
             resolved=tuple(resolved),
             errors=tuple(errors),
             warnings=tuple(build_warnings),
+            diagnostics=tuple(build_diagnostics),
             unchanged_count=unchanged,
             added_count=added,
             updated_count=updated,
