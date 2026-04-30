@@ -363,8 +363,14 @@ def _check_gitignore_for_marketplace_json(logger):
 @click.option("--name", "-n", default=None, help="Display name (defaults to repo name)")
 @click.option("--branch", "-b", default="main", show_default=True, help="Branch to use")
 @click.option("--host", default=None, help="Git host FQDN (default: github.com)")
+@click.option(
+    "--allow-insecure",
+    is_flag=True,
+    default=False,
+    help="Allow HTTP (insecure) URLs. HTTPS is required by default.",
+)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
-def add(repo, name, branch, host, verbose):
+def add(repo, name, branch, host, allow_insecure, verbose):
     """Register a marketplace from OWNER/REPO, HOST/OWNER/.../REPO, or a full HTTPS URL."""
     logger = CommandLogger("marketplace-add", verbose=verbose)
     try:
@@ -372,14 +378,30 @@ def add(repo, name, branch, host, verbose):
         from ..marketplace.models import MarketplaceSource
         from ..marketplace.registry import add_marketplace
         from ..models.dependency.reference import DependencyReference
+        from ..utils.path_security import PathTraversalError
 
         # Parse the repo argument -- handles owner/repo, host/owner/repo, HTTPS URLs, SSH URLs.
         try:
             dep = DependencyReference.parse(repo)
+        except PathTraversalError:
+            logger.error(
+                "Invalid repository: path traversal sequences ('..', '.', '~') are not allowed.",
+                symbol="error",
+            )
+            sys.exit(1)
         except ValueError:
             logger.error(
                 "Invalid repository format. Use OWNER/REPO, HOST/OWNER/REPO, "
                 "or a full HTTPS URL (e.g. https://gitlab.com/org/repo).",
+                symbol="error",
+            )
+            sys.exit(1)
+
+        # Reject HTTP URLs unless --allow-insecure is explicitly passed.
+        if dep.is_insecure and not allow_insecure:
+            logger.error(
+                "Only HTTPS URLs are accepted for marketplace sources. "
+                "Use https:// instead of http://, or pass --allow-insecure to override.",
                 symbol="error",
             )
             sys.exit(1)

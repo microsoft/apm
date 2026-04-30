@@ -1146,34 +1146,43 @@ apm marketplace COMMAND [OPTIONS]
 
 #### `apm marketplace add` - Register a marketplace
 
-Register a GitHub repository as a plugin marketplace.
+Register a repository as a plugin marketplace. Accepts any of the following forms:
 
 ```bash
 apm marketplace add OWNER/REPO [OPTIONS]
-apm marketplace add HOST/OWNER/REPO [OPTIONS]
+apm marketplace add HOST/OWNER/.../REPO [OPTIONS]
+apm marketplace add https://HOST/OWNER/.../REPO [OPTIONS]
 ```
 
 **Arguments:**
 - `OWNER/REPO` - GitHub repository containing `marketplace.json`
-- `HOST/OWNER/REPO` - Repository on a non-github.com host (e.g., GitHub Enterprise)
+- `HOST/OWNER/.../REPO` - N-segment path with explicit host (GitHub Enterprise, GitLab, etc.)
+- `https://HOST/OWNER/.../REPO` - Full HTTPS URL pasted directly from the browser; `.git` suffix is stripped automatically. GitLab subgroup paths are supported.
 
 **Options:**
 - `-n, --name TEXT` - Custom display name for the marketplace
 - `-b, --branch TEXT` - Branch to track (default: main)
 - `--host TEXT` - Git host FQDN (default: github.com or `GITHUB_HOST` env var)
+- `--allow-insecure` - Allow HTTP (non-HTTPS) URLs. HTTPS is required by default.
 - `-v, --verbose` - Show detailed output
 
 **Examples:**
 ```bash
-# Register a marketplace
+# Register a marketplace (GitHub)
 apm marketplace add acme/plugin-marketplace
 
 # Register with a custom name and branch
 apm marketplace add acme/plugin-marketplace --name acme-plugins --branch release
 
-# Register from a GitHub Enterprise host
+# Register from GitHub Enterprise (FQDN shorthand)
 apm marketplace add acme/plugin-marketplace --host ghes.corp.example.com
 apm marketplace add ghes.corp.example.com/acme/plugin-marketplace
+
+# Register from GitLab with a subgroup path (paste the URL directly)
+apm marketplace add https://gitlab.com/mycompany/platform/infra/plugin-marketplace
+
+# Register a GitLab subgroup shorthand
+apm marketplace add gitlab.com/mycompany/platform/plugin-marketplace
 ```
 
 #### `apm marketplace list` - List registered marketplaces
