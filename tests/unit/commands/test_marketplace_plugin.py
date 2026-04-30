@@ -4,16 +4,15 @@ from __future__ import annotations
 
 import textwrap
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch  # noqa: F401
 
 import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import marketplace
-from apm_cli.commands.marketplace_plugin import _resolve_ref, _SHA_RE
+from apm_cli.commands.marketplace.plugin import _SHA_RE, _resolve_ref  # noqa: F401
 from apm_cli.core.command_logger import CommandLogger
 from apm_cli.marketplace.ref_resolver import RemoteRef
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -90,9 +89,7 @@ class TestPackageAdd:
         assert result.exit_code == 2
         assert "already exists" in result.output
 
-    def test_missing_version_and_ref_no_verify_exits_2(
-        self, runner, tmp_path, monkeypatch
-    ):
+    def test_missing_version_and_ref_no_verify_exits_2(self, runner, tmp_path, monkeypatch):
         """With --no-verify and no --ref/--version, auto-resolve fails."""
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
@@ -103,9 +100,7 @@ class TestPackageAdd:
         assert result.exit_code == 2
         assert "Cannot resolve HEAD" in result.output
 
-    def test_version_and_ref_conflict_exits_2(
-        self, runner, tmp_path, monkeypatch
-    ):
+    def test_version_and_ref_conflict_exits_2(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
         result = runner.invoke(
@@ -129,9 +124,7 @@ class TestPackageAdd:
         assert result.exit_code == 0
         assert "Add a package" in result.output
 
-    def test_verify_calls_ref_resolver(
-        self, runner, tmp_path, monkeypatch
-    ):
+    def test_verify_calls_ref_resolver(self, runner, tmp_path, monkeypatch):
         """Without --no-verify the command calls list_remote_refs."""
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
@@ -159,9 +152,7 @@ class TestPackageAdd:
 
 
 class TestPackageSet:
-    def test_happy_path_update_version(
-        self, runner, tmp_path, monkeypatch
-    ):
+    def test_happy_path_update_version(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
         result = runner.invoke(
@@ -177,9 +168,7 @@ class TestPackageSet:
         assert result.exit_code == 0, result.output
         assert "Updated" in result.output
 
-    def test_package_not_found_exits_2(
-        self, runner, tmp_path, monkeypatch
-    ):
+    def test_package_not_found_exits_2(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
         result = runner.invoke(
@@ -200,9 +189,7 @@ class TestPackageSet:
         assert result.exit_code == 0
         assert "Update a package" in result.output
 
-    def test_version_and_ref_conflict_exits_2(
-        self, runner, tmp_path, monkeypatch
-    ):
+    def test_version_and_ref_conflict_exits_2(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
         result = runner.invoke(
@@ -248,9 +235,7 @@ class TestPackageRemove:
         assert result.exit_code == 0, result.output
         assert "Removed" in result.output
 
-    def test_without_yes_non_interactive_cancels(
-        self, runner, tmp_path, monkeypatch
-    ):
+    def test_without_yes_non_interactive_cancels(self, runner, tmp_path, monkeypatch):
         """Non-interactive mode exits with error asking for --yes."""
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
@@ -262,9 +247,7 @@ class TestPackageRemove:
         assert result.exit_code == 1
         assert "--yes" in result.output
 
-    def test_package_not_found_exits_2(
-        self, runner, tmp_path, monkeypatch
-    ):
+    def test_package_not_found_exits_2(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
         result = runner.invoke(
@@ -288,9 +271,7 @@ class TestPackageRemove:
 class TestPackageAddMutualExclusivity:
     """The ``add`` command must reject ``--version`` and ``--ref`` together."""
 
-    def test_version_and_ref_mutually_exclusive(
-        self, runner, tmp_path, monkeypatch
-    ):
+    def test_version_and_ref_mutually_exclusive(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
         result = runner.invoke(
@@ -327,8 +308,11 @@ class TestResolveRef:
     def test_version_set_returns_none(self):
         """When version is provided, ref resolution is skipped."""
         result = _resolve_ref(
-            self._make_logger(), "acme/tools", ref=None,
-            version=">=1.0.0", no_verify=False,
+            self._make_logger(),
+            "acme/tools",
+            ref=None,
+            version=">=1.0.0",
+            no_verify=False,
         )
         assert result is None
 
@@ -336,8 +320,11 @@ class TestResolveRef:
         """No --ref, --no-verify → error (cannot resolve without network)."""
         with pytest.raises(SystemExit) as exc_info:
             _resolve_ref(
-                self._make_logger(), "acme/tools", ref=None,
-                version=None, no_verify=True,
+                self._make_logger(),
+                "acme/tools",
+                ref=None,
+                version=None,
+                no_verify=True,
             )
         assert exc_info.value.code == 2
 
@@ -348,8 +335,11 @@ class TestResolveRef:
     def test_no_ref_resolves_head(self, mock_resolve):
         """No --ref, no --version → auto-resolve HEAD."""
         result = _resolve_ref(
-            self._make_logger(), "acme/tools", ref=None,
-            version=None, no_verify=False,
+            self._make_logger(),
+            "acme/tools",
+            ref=None,
+            version=None,
+            no_verify=False,
         )
         assert result == _FAKE_SHA
         mock_resolve.assert_called_once_with("acme/tools", "HEAD")
@@ -358,8 +348,11 @@ class TestResolveRef:
         """--ref HEAD + --no-verify → error."""
         with pytest.raises(SystemExit) as exc_info:
             _resolve_ref(
-                self._make_logger(), "acme/tools", ref="HEAD",
-                version=None, no_verify=True,
+                self._make_logger(),
+                "acme/tools",
+                ref="HEAD",
+                version=None,
+                no_verify=True,
             )
         assert exc_info.value.code == 2
 
@@ -370,8 +363,11 @@ class TestResolveRef:
     def test_explicit_head_resolves(self, mock_resolve):
         """--ref HEAD → warn + resolve."""
         result = _resolve_ref(
-            self._make_logger(), "acme/tools", ref="HEAD",
-            version=None, no_verify=False,
+            self._make_logger(),
+            "acme/tools",
+            ref="HEAD",
+            version=None,
+            no_verify=False,
         )
         assert result == _FAKE_SHA
 
@@ -382,16 +378,22 @@ class TestResolveRef:
     def test_explicit_head_case_insensitive(self, mock_resolve):
         """--ref head (lowercase) → treated as HEAD."""
         result = _resolve_ref(
-            self._make_logger(), "acme/tools", ref="head",
-            version=None, no_verify=False,
+            self._make_logger(),
+            "acme/tools",
+            ref="head",
+            version=None,
+            no_verify=False,
         )
         assert result == _FAKE_SHA
 
     def test_sha_returns_as_is(self):
         """A 40-char hex SHA is returned unchanged."""
         result = _resolve_ref(
-            self._make_logger(), "acme/tools", ref=_FAKE_SHA,
-            version=None, no_verify=False,
+            self._make_logger(),
+            "acme/tools",
+            ref=_FAKE_SHA,
+            version=None,
+            no_verify=False,
         )
         assert result == _FAKE_SHA
 
@@ -405,8 +407,11 @@ class TestResolveRef:
     def test_branch_name_resolves_to_sha(self, mock_list):
         """--ref main (matching refs/heads/main) → warn + resolve."""
         result = _resolve_ref(
-            self._make_logger(), "acme/tools", ref="main",
-            version=None, no_verify=False,
+            self._make_logger(),
+            "acme/tools",
+            ref="main",
+            version=None,
+            no_verify=False,
         )
         assert result == _FAKE_SHA_B
 
@@ -420,8 +425,11 @@ class TestResolveRef:
     def test_tag_name_returns_as_is(self, mock_list):
         """--ref v1.0.0 (not a branch) → returned as-is."""
         result = _resolve_ref(
-            self._make_logger(), "acme/tools", ref="v1.0.0",
-            version=None, no_verify=False,
+            self._make_logger(),
+            "acme/tools",
+            ref="v1.0.0",
+            version=None,
+            no_verify=False,
         )
         assert result == "v1.0.0"
 
@@ -443,7 +451,12 @@ class TestPackageAddRefResolution:
         return_value=[],
     )
     def test_add_no_ref_auto_resolves_head(
-        self, mock_list, mock_resolve, runner, tmp_path, monkeypatch,
+        self,
+        mock_list,
+        mock_resolve,
+        runner,
+        tmp_path,
+        monkeypatch,
     ):
         """``package add <source>`` (no --ref, no --version) pins HEAD SHA."""
         monkeypatch.chdir(tmp_path)
@@ -467,7 +480,12 @@ class TestPackageAddRefResolution:
         return_value=[],
     )
     def test_add_ref_head_warns_and_resolves(
-        self, mock_list, mock_resolve, runner, tmp_path, monkeypatch,
+        self,
+        mock_list,
+        mock_resolve,
+        runner,
+        tmp_path,
+        monkeypatch,
     ):
         """``package add <source> --ref HEAD`` warns + stores SHA."""
         monkeypatch.chdir(tmp_path)
@@ -488,7 +506,11 @@ class TestPackageAddRefResolution:
         ],
     )
     def test_add_ref_branch_warns_and_resolves(
-        self, mock_list, runner, tmp_path, monkeypatch,
+        self,
+        mock_list,
+        runner,
+        tmp_path,
+        monkeypatch,
     ):
         """``package add <source> --ref main`` warns + stores branch SHA."""
         monkeypatch.chdir(tmp_path)
@@ -503,7 +525,10 @@ class TestPackageAddRefResolution:
         assert _FAKE_SHA in yml_content
 
     def test_add_ref_sha_stores_as_is(
-        self, runner, tmp_path, monkeypatch,
+        self,
+        runner,
+        tmp_path,
+        monkeypatch,
     ):
         """``package add <source> --ref <sha>`` stores SHA directly."""
         monkeypatch.chdir(tmp_path)
@@ -511,8 +536,12 @@ class TestPackageAddRefResolution:
         result = runner.invoke(
             marketplace,
             [
-                "package", "add", "acme/new-tool",
-                "--ref", _FAKE_SHA, "--no-verify",
+                "package",
+                "add",
+                "acme/new-tool",
+                "--ref",
+                _FAKE_SHA,
+                "--no-verify",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -537,7 +566,12 @@ class TestPackageSetRefResolution:
         return_value=[],
     )
     def test_set_ref_head_resolves(
-        self, mock_list, mock_resolve, runner, tmp_path, monkeypatch,
+        self,
+        mock_list,
+        mock_resolve,
+        runner,
+        tmp_path,
+        monkeypatch,
     ):
         """``package set <name> --ref HEAD`` resolves to SHA."""
         monkeypatch.chdir(tmp_path)
@@ -556,7 +590,11 @@ class TestPackageSetRefResolution:
         ],
     )
     def test_set_ref_branch_resolves(
-        self, mock_list, runner, tmp_path, monkeypatch,
+        self,
+        mock_list,
+        runner,
+        tmp_path,
+        monkeypatch,
     ):
         """``package set <name> --ref develop`` resolves branch to SHA."""
         monkeypatch.chdir(tmp_path)
@@ -569,7 +607,10 @@ class TestPackageSetRefResolution:
         assert "Updated" in result.output
 
     def test_set_ref_sha_stores_directly(
-        self, runner, tmp_path, monkeypatch,
+        self,
+        runner,
+        tmp_path,
+        monkeypatch,
     ):
         """``package set <name> --ref <sha>`` stores SHA without network."""
         monkeypatch.chdir(tmp_path)
@@ -581,7 +622,10 @@ class TestPackageSetRefResolution:
         assert result.exit_code == 0, result.output
 
     def test_set_ref_nonexistent_package_exits(
-        self, runner, tmp_path, monkeypatch,
+        self,
+        runner,
+        tmp_path,
+        monkeypatch,
     ):
         """``package set <unknown> --ref HEAD`` errors on missing package."""
         monkeypatch.chdir(tmp_path)

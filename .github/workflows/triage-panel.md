@@ -37,7 +37,8 @@ description: Auto-invoke the apm-triage-panel skill on a daily sweep of untriage
 #     triage on a specific issue apply `status/needs-triage` (fast
 #     path) -- one click, instant.
 #
-# Front-gates (`on.steps:`) for the labeled fast path:
+# Front-gates for the labeled fast path (enforced via the top-level
+# `if:` field below, not via `on.steps:` -- see comment block on `if:`):
 #   - Triggering label must be `status/needs-triage`. Any other label
 #     change is dropped at zero cost (no runner, no agent).
 #   - Issue author must not be a Bot.
@@ -56,39 +57,27 @@ on:
         description: "Optional: specific issue number to triage (overrides sweep). Leave blank to run the daily sweep on demand."
         required: false
         type: string
-  steps:
-    - name: Front-gate (labeled fast path only)
-      id: gate
-      if: github.event_name == 'issues'
-      env:
-        ACTION: ${{ github.event.action }}
-        LABEL_NAME: ${{ github.event.label.name }}
-        AUTHOR_TYPE: ${{ github.event.issue.user.type }}
-        IS_LOCKED: ${{ github.event.issue.locked }}
-        STATE: ${{ github.event.issue.state }}
-      run: |
-        if [ "$ACTION" != "labeled" ]; then
-          echo "Action '$ACTION' not subscribed; skipping."
-          exit 1
-        fi
-        if [ "$LABEL_NAME" != "status/needs-triage" ]; then
-          echo "Label '$LABEL_NAME' is not 'status/needs-triage'; skipping."
-          exit 1
-        fi
-        if [ "$AUTHOR_TYPE" = "Bot" ]; then
-          echo "Issue author is a Bot; skipping."
-          exit 1
-        fi
-        if [ "$IS_LOCKED" = "true" ]; then
-          echo "Issue is locked; skipping."
-          exit 1
-        fi
-        if [ "$STATE" != "open" ]; then
-          echo "Issue is not open (state=$STATE); skipping."
-          exit 1
-        fi
-        echo "Fast-path gate passed: opt-in re-triage requested by maintainer."
   roles: [admin, maintainer, write]
+
+# Label-name + issue-state gate for the `issues.labeled` fast path.
+# gh-aw propagates this top-level `if:` to BOTH `pre_activation` and
+# `activation`, so unmatched events render as a clean gray Skipped
+# status (no failed CI check, no runner cold-start). schedule and
+# workflow_dispatch are unconditionally allowed through (the daily
+# sweep handles its own filtering against the issue list).
+#
+# Previously this gate lived in an `on.steps:` step that called `exit 1`
+# on every non-matching label change, which marked each unrelated
+# `issues.labeled` event as a Failed run on the CI dashboard. Replace
+# with `on.labels: [status/needs-triage]` once gh-aw releases a version
+# that supports it on `issues` (see github/gh-aw ADR-28737, currently
+# unreleased post-v0.71.1).
+if: >-
+  ${{ github.event_name != 'issues'
+      || (github.event.label.name == 'status/needs-triage'
+          && github.event.issue.user.type != 'Bot'
+          && github.event.issue.locked != true
+          && github.event.issue.state == 'open') }}
 
 # Concurrency: never run two triage workflows against the same issue
 # simultaneously. For schedule and workflow_dispatch (no specific

@@ -40,14 +40,15 @@ def tmp_apm_yml():
 
 
 def _read(path):
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         return yaml.safe_load(fh)
 
 
 class TestNewEntry:
     def test_append_bare_string(self, tmp_apm_yml):
         status, diff = _add_mcp_to_apm_yml(
-            "io.github.foo/bar", "io.github.foo/bar",
+            "io.github.foo/bar",
+            "io.github.foo/bar",
             manifest_path=tmp_apm_yml,
         )
         assert status == "added"
@@ -56,8 +57,13 @@ class TestNewEntry:
         assert data["dependencies"]["mcp"] == ["io.github.foo/bar"]
 
     def test_append_dict_entry(self, tmp_apm_yml):
-        entry = {"name": "foo", "registry": False, "transport": "stdio",
-                 "command": "npx", "args": ["-y", "srv"]}
+        entry = {
+            "name": "foo",
+            "registry": False,
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["-y", "srv"],
+        }
         status, _ = _add_mcp_to_apm_yml("foo", entry, manifest_path=tmp_apm_yml)
         assert status == "added"
         data = _read(tmp_apm_yml)
@@ -65,7 +71,10 @@ class TestNewEntry:
 
     def test_dev_routes_to_devdependencies(self, tmp_apm_yml):
         status, _ = _add_mcp_to_apm_yml(
-            "foo", "foo", dev=True, manifest_path=tmp_apm_yml,
+            "foo",
+            "foo",
+            dev=True,
+            manifest_path=tmp_apm_yml,
         )
         assert status == "added"
         data = _read(tmp_apm_yml)
@@ -76,7 +85,7 @@ class TestNewEntry:
     def test_no_apm_yml_raises(self):
         with tempfile.TemporaryDirectory() as tmp:
             missing = Path(tmp) / "apm.yml"
-            with pytest.raises(click.UsageError, match="no apm.yml"):
+            with pytest.raises(click.UsageError, match="no apm.yml"):  # noqa: RUF043
                 _add_mcp_to_apm_yml("foo", "foo", manifest_path=missing)
 
     def test_multiple_sequential_adds_preserve_order(self, tmp_apm_yml):
@@ -96,10 +105,12 @@ class TestExistingEntry:
 
     def test_force_replaces_silently(self, tmp_apm_yml):
         self._seed(tmp_apm_yml, "foo")  # bare string
-        new_entry = {"name": "foo", "registry": False,
-                     "transport": "stdio", "command": "node"}
+        new_entry = {"name": "foo", "registry": False, "transport": "stdio", "command": "node"}
         status, diff = _add_mcp_to_apm_yml(
-            "foo", new_entry, force=True, manifest_path=tmp_apm_yml,
+            "foo",
+            new_entry,
+            force=True,
+            manifest_path=tmp_apm_yml,
         )
         assert status == "replaced"
         assert diff  # non-empty
@@ -108,24 +119,29 @@ class TestExistingEntry:
 
     def test_non_tty_without_force_errors(self, tmp_apm_yml):
         self._seed(tmp_apm_yml, "foo")
-        with patch("sys.stdin.isatty", return_value=False), \
-             patch("sys.stdout.isatty", return_value=False):
+        with (
+            patch("sys.stdin.isatty", return_value=False),
+            patch("sys.stdout.isatty", return_value=False),
+        ):
             with pytest.raises(click.UsageError, match="--force to replace"):
                 _add_mcp_to_apm_yml(
-                    "foo", {"name": "foo", "registry": False,
-                            "transport": "stdio", "command": "node"},
+                    "foo",
+                    {"name": "foo", "registry": False, "transport": "stdio", "command": "node"},
                     manifest_path=tmp_apm_yml,
                 )
 
     def test_tty_prompt_accept_replaces(self, tmp_apm_yml):
         self._seed(tmp_apm_yml, "foo")
-        new_entry = {"name": "foo", "registry": False,
-                     "transport": "stdio", "command": "node"}
-        with patch("sys.stdin.isatty", return_value=True), \
-             patch("sys.stdout.isatty", return_value=True), \
-             patch("click.confirm", return_value=True):
+        new_entry = {"name": "foo", "registry": False, "transport": "stdio", "command": "node"}
+        with (
+            patch("sys.stdin.isatty", return_value=True),
+            patch("sys.stdout.isatty", return_value=True),
+            patch("click.confirm", return_value=True),
+        ):
             status, _ = _add_mcp_to_apm_yml(
-                "foo", new_entry, manifest_path=tmp_apm_yml,
+                "foo",
+                new_entry,
+                manifest_path=tmp_apm_yml,
             )
         assert status == "replaced"
         data = _read(tmp_apm_yml)
@@ -133,9 +149,11 @@ class TestExistingEntry:
 
     def test_tty_prompt_decline_skips(self, tmp_apm_yml):
         self._seed(tmp_apm_yml, "foo")
-        with patch("sys.stdin.isatty", return_value=True), \
-             patch("sys.stdout.isatty", return_value=True), \
-             patch("click.confirm", return_value=False):
+        with (
+            patch("sys.stdin.isatty", return_value=True),
+            patch("sys.stdout.isatty", return_value=True),
+            patch("click.confirm", return_value=False),
+        ):
             status, _ = _add_mcp_to_apm_yml(
                 "foo",
                 {"name": "foo", "registry": False, "transport": "stdio", "command": "node"},
@@ -149,7 +167,9 @@ class TestExistingEntry:
     def test_identical_entry_is_skipped(self, tmp_apm_yml):
         self._seed(tmp_apm_yml, "foo")
         status, diff = _add_mcp_to_apm_yml(
-            "foo", "foo", manifest_path=tmp_apm_yml,
+            "foo",
+            "foo",
+            manifest_path=tmp_apm_yml,
         )
         assert status == "skipped"
         assert diff == []

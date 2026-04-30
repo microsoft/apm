@@ -6,8 +6,8 @@ resolution time, preventing arbitrary local file reads.
 
 import json
 import os
-import tempfile
 import shutil
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -17,7 +17,7 @@ def _try_symlink(link: Path, target: Path):
     try:
         link.symlink_to(target)
     except OSError:
-        raise unittest.SkipTest("Symlinks not supported on this platform")
+        raise unittest.SkipTest("Symlinks not supported on this platform")  # noqa: B904
 
 
 class TestPromptCompilerSymlinkContainment(unittest.TestCase):
@@ -33,9 +33,7 @@ class TestPromptCompilerSymlinkContainment(unittest.TestCase):
         self.secret = self.outside / "secret.txt"
         self.secret.write_text("sensitive-data", encoding="utf-8")
         # Create apm.yml so the project is valid
-        (self.project / "apm.yml").write_text(
-            "name: test\nversion: 1.0.0\n", encoding="utf-8"
-        )
+        (self.project / "apm.yml").write_text("name: test\nversion: 1.0.0\n", encoding="utf-8")
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -143,7 +141,9 @@ class TestBaseIntegratorSymlinkContainment(unittest.TestCase):
         normal.write_text("# Safe agent", encoding="utf-8")
 
         results = BaseIntegrator.find_files_by_glob(
-            self.pkg, "*.agent.md", subdirs=[".apm/agents"],
+            self.pkg,
+            "*.agent.md",
+            subdirs=[".apm/agents"],
         )
         names = [f.name for f in results]
         self.assertIn("safe.agent.md", names)
@@ -247,6 +247,7 @@ class TestSkillIntegratorCopytreeSymlinkContainment(unittest.TestCase):
         this test fails before any malicious package can exploit it.
         """
         import inspect
+
         from apm_cli.integration import skill_integrator
 
         source = inspect.getsource(skill_integrator)

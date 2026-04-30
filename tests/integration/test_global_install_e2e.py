@@ -21,7 +21,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-
 pytestmark = pytest.mark.skipif(
     not os.environ.get("GITHUB_APM_PAT") and not os.environ.get("GITHUB_TOKEN"),
     reason="GITHUB_APM_PAT or GITHUB_TOKEN required for GitHub API access",
@@ -61,7 +60,7 @@ def _env_with_home(fake_home):
 
 def _run_apm(apm_command, args, cwd, fake_home, timeout=180):
     return subprocess.run(
-        [apm_command] + args,
+        [apm_command] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -127,9 +126,7 @@ class TestGlobalInstallDeploysRealPackage:
         work_dir = tmp_path / "workdir"
         work_dir.mkdir()
 
-        result = _run_apm(
-            apm_command, ["install", "-g"], work_dir, fake_home
-        )
+        result = _run_apm(apm_command, ["install", "-g"], work_dir, fake_home)
         assert result.returncode == 0, (
             f"global install failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
         )
@@ -138,9 +135,7 @@ class TestGlobalInstallDeploysRealPackage:
         lockfile = _read_lockfile(apm_dir)
         assert lockfile is not None, "~/.apm/apm.lock.yaml was not created"
         dep = _get_locked_dep(lockfile, SAMPLE_PKG)
-        assert dep is not None, (
-            f"{SAMPLE_PKG} not present in user-scope lockfile: {lockfile}"
-        )
+        assert dep is not None, f"{SAMPLE_PKG} not present in user-scope lockfile: {lockfile}"
 
         deployed = _existing_deployed_files(fake_home, dep)
         assert len(deployed) > 0, (
@@ -154,16 +149,12 @@ class TestGlobalInstallDeploysRealPackage:
         assert not (work_dir / "apm.lock.yaml").exists(), "lockfile leaked into cwd"
         assert not (work_dir / "apm_modules").exists(), "apm_modules leaked into cwd"
 
-    def test_uninstall_global_removes_deployed_files(
-        self, apm_command, fake_home, tmp_path
-    ):
+    def test_uninstall_global_removes_deployed_files(self, apm_command, fake_home, tmp_path):
         _write_user_manifest(fake_home, [SAMPLE_PKG])
         work_dir = tmp_path / "workdir"
         work_dir.mkdir()
 
-        install_result = _run_apm(
-            apm_command, ["install", "-g"], work_dir, fake_home
-        )
+        install_result = _run_apm(apm_command, ["install", "-g"], work_dir, fake_home)
         assert install_result.returncode == 0, (
             f"setup install failed:\nSTDOUT: {install_result.stdout}\n"
             f"STDERR: {install_result.stderr}"
@@ -214,9 +205,7 @@ class TestGlobalInstallDeploysRealPackage:
         _write_user_manifest(fake_home, [SAMPLE_PKG])
         global_workdir = tmp_path / "global-workdir"
         global_workdir.mkdir()
-        global_result = _run_apm(
-            apm_command, ["install", "-g"], global_workdir, fake_home
-        )
+        global_result = _run_apm(apm_command, ["install", "-g"], global_workdir, fake_home)
         assert global_result.returncode == 0, (
             f"global install failed:\nSTDOUT: {global_result.stdout}\n"
             f"STDERR: {global_result.stderr}"
@@ -242,12 +231,9 @@ class TestGlobalInstallDeploysRealPackage:
             encoding="utf-8",
         )
 
-        local_result = _run_apm(
-            apm_command, ["install"], project_dir, fake_home
-        )
+        local_result = _run_apm(apm_command, ["install"], project_dir, fake_home)
         assert local_result.returncode == 0, (
-            f"project install failed:\nSTDOUT: {local_result.stdout}\n"
-            f"STDERR: {local_result.stderr}"
+            f"project install failed:\nSTDOUT: {local_result.stdout}\nSTDERR: {local_result.stderr}"
         )
 
         # Both deployments must coexist.
@@ -262,6 +248,4 @@ class TestGlobalInstallDeploysRealPackage:
         assert (apm_dir / "apm_modules").exists(), (
             "Global apm_modules disappeared after project install"
         )
-        assert (project_dir / "apm_modules").exists(), (
-            "Project apm_modules was not created"
-        )
+        assert (project_dir / "apm_modules").exists(), "Project apm_modules was not created"

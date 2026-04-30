@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from apm_cli.models.results import InstallResult
 
 
-def run(ctx: "InstallContext") -> "InstallResult":
+def run(ctx: InstallContext) -> InstallResult:
     """Emit verbose stats, fallback success, unpinned warning, and return final result."""
     from apm_cli.commands import install as _install_mod
     from apm_cli.models.results import InstallResult
@@ -39,7 +39,9 @@ def run(ctx: "InstallContext") -> "InstallResult":
 
     if ctx.total_instructions_integrated > 0:
         if ctx.logger:
-            ctx.logger.verbose_detail(f"Integrated {ctx.total_instructions_integrated} instruction(s)")
+            ctx.logger.verbose_detail(
+                f"Integrated {ctx.total_instructions_integrated} instruction(s)"
+            )
 
     # Summary is now emitted by the caller via logger.install_summary()
     if not ctx.logger:
@@ -52,4 +54,10 @@ def run(ctx: "InstallContext") -> "InstallResult":
             f"-- pin with #tag or #sha to prevent drift"
         )
 
-    return InstallResult(ctx.installed_count, ctx.total_prompts_integrated, ctx.total_agents_integrated, ctx.diagnostics, package_types=dict(ctx.package_types))
+    return InstallResult(
+        ctx.installed_count,
+        ctx.total_prompts_integrated,
+        ctx.total_agents_integrated,
+        ctx.diagnostics,
+        package_types=dict(ctx.package_types),
+    )

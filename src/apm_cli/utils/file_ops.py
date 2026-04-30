@@ -25,8 +25,9 @@ import shutil
 import stat
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 T = TypeVar("T")
 
@@ -128,7 +129,7 @@ def _retry_on_lock(
                 f"-- {exc}"
             )
             if before_retry is not None:
-                try:
+                try:  # noqa: SIM105
                     before_retry()
                 except OSError:
                     pass
@@ -248,7 +249,7 @@ def robust_copytree(
 
     def _cleanup_partial() -> None:
         if not dirs_exist_ok and os.path.isdir(dst_s):
-            try:
+            try:  # noqa: SIM105
                 shutil.rmtree(dst_s, onerror=_on_readonly_retry)
             except OSError:
                 pass

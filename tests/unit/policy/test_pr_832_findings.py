@@ -41,7 +41,6 @@ from apm_cli.policy.outcome_routing import route_discovery_outcome
 from apm_cli.policy.schema import ApmPolicy
 from apm_cli.utils.path_security import PathTraversalError
 
-
 # ──────────────────────────────────────────────────────────────────────
 # #2: PolicyBlockError is an alias of PolicyViolationError
 # ──────────────────────────────────────────────────────────────────────
@@ -118,30 +117,24 @@ class TestOutcomeRoutingTable:
         logger = InstallLogger(verbose=True)
         fetch = PolicyFetchResult(policy=None, source="org:acme/.github", outcome="absent")
         with patch("apm_cli.core.command_logger._rich_info") as mock_info:
-            policy = route_discovery_outcome(
-                fetch, logger=logger, fetch_failure_default="warn"
-            )
+            policy = route_discovery_outcome(fetch, logger=logger, fetch_failure_default="warn")
         assert policy is None
         # absent + verbose => one info line
         assert mock_info.call_count == 1
 
     def test_hash_mismatch_always_raises(self):
         logger = InstallLogger()
-        fetch = PolicyFetchResult(
-            policy=None, source="org:acme/.github", outcome="hash_mismatch"
-        )
+        fetch = PolicyFetchResult(policy=None, source="org:acme/.github", outcome="hash_mismatch")
         with pytest.raises(PolicyViolationError, match="hash mismatch"):
-            route_discovery_outcome(
-                fetch, logger=logger, fetch_failure_default="warn"
-            )
+            route_discovery_outcome(fetch, logger=logger, fetch_failure_default="warn")
 
     def test_hash_mismatch_dry_run_no_raise(self):
         logger = InstallLogger()
-        fetch = PolicyFetchResult(
-            policy=None, source="org:acme/.github", outcome="hash_mismatch"
-        )
+        fetch = PolicyFetchResult(policy=None, source="org:acme/.github", outcome="hash_mismatch")
         result = route_discovery_outcome(
-            fetch, logger=logger, fetch_failure_default="warn",
+            fetch,
+            logger=logger,
+            fetch_failure_default="warn",
             raise_blocking_errors=False,
         )
         assert result is None
@@ -149,23 +142,23 @@ class TestOutcomeRoutingTable:
     def test_fetch_failure_default_block_raises(self):
         logger = InstallLogger()
         fetch = PolicyFetchResult(
-            policy=None, source="org:acme/.github", outcome="malformed",
+            policy=None,
+            source="org:acme/.github",
+            outcome="malformed",
             error="bad yaml",
         )
         with pytest.raises(PolicyViolationError, match="fetch_failure_default=block"):
-            route_discovery_outcome(
-                fetch, logger=logger, fetch_failure_default="block"
-            )
+            route_discovery_outcome(fetch, logger=logger, fetch_failure_default="block")
 
     def test_fetch_failure_default_warn_does_not_raise(self):
         logger = InstallLogger()
         fetch = PolicyFetchResult(
-            policy=None, source="org:acme/.github", outcome="malformed",
+            policy=None,
+            source="org:acme/.github",
+            outcome="malformed",
             error="bad yaml",
         )
-        result = route_discovery_outcome(
-            fetch, logger=logger, fetch_failure_default="warn"
-        )
+        result = route_discovery_outcome(fetch, logger=logger, fetch_failure_default="warn")
         assert result is None
 
 
@@ -206,12 +199,15 @@ class TestDryRunEmptyDetailsFallback:
         logger = MagicMock()
         # Force the audit_result returned by run_dependency_policy_checks
         # to be ours, so the empty-details edge case is exercised.
-        with patch(
-            "apm_cli.policy.install_preflight.discover_policy_with_chain",
-            return_value=fetch,
-        ), patch(
-            "apm_cli.policy.install_preflight.run_dependency_policy_checks",
-            return_value=audit,
+        with (
+            patch(
+                "apm_cli.policy.install_preflight.discover_policy_with_chain",
+                return_value=fetch,
+            ),
+            patch(
+                "apm_cli.policy.install_preflight.run_dependency_policy_checks",
+                return_value=audit,
+            ),
         ):
             run_policy_preflight(
                 project_root=Path("/tmp/fake"),
@@ -238,17 +234,16 @@ class TestDryRunEmptyDetailsFallback:
 class TestExtractDepRefContract:
     def test_standard_ref_colon_reason(self):
         # Standard policy_checks output: "{ref}: {reason}"
-        assert _extract_dep_ref(
-            "acme/server: not in allow list", "dependency-allowlist"
-        ) == "acme/server"
+        assert (
+            _extract_dep_ref("acme/server: not in allow list", "dependency-allowlist")
+            == "acme/server"
+        )
 
     def test_empty_detail_falls_back_to_check_name(self):
         assert _extract_dep_ref("", "dependency-denylist") == "dependency-denylist"
 
     def test_no_colon_returns_stripped_detail(self):
-        assert _extract_dep_ref(
-            "  some weird detail  ", "rule-x"
-        ) == "some weird detail"
+        assert _extract_dep_ref("  some weird detail  ", "rule-x") == "some weird detail"
 
     def test_colon_only_falls_back_to_check_name(self):
         # Pathological: ":foo" -> head is empty -> fallback

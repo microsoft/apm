@@ -2,12 +2,12 @@
 
 import json
 import os
-from typing import Optional
+from typing import Optional  # noqa: F401
 
 CONFIG_DIR = os.path.expanduser("~/.apm")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 
-_config_cache: Optional[dict] = None
+_config_cache: dict | None = None
 
 
 def ensure_config_exists():
@@ -16,7 +16,7 @@ def ensure_config_exists():
         os.makedirs(CONFIG_DIR)
 
     if not os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "w") as f:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump({"default_client": "vscode"}, f)
 
 
@@ -32,7 +32,7 @@ def get_config():
     if _config_cache is not None:
         return _config_cache
     ensure_config_exists()
-    with open(CONFIG_FILE, "r") as f:
+    with open(CONFIG_FILE, encoding="utf-8") as f:
         _config_cache = json.load(f)
     return _config_cache
 
@@ -53,7 +53,7 @@ def update_config(updates):
     config = get_config()
     config.update(updates)
 
-    with open(CONFIG_FILE, "w") as f:
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
     _invalidate_config_cache()
 
@@ -94,7 +94,7 @@ def set_auto_integrate(enabled: bool) -> None:
     update_config({"auto_integrate": enabled})
 
 
-def get_temp_dir() -> Optional[str]:
+def get_temp_dir() -> str | None:
     """Get the configured temporary directory.
 
     Returns:
@@ -135,7 +135,7 @@ def unset_temp_dir() -> None:
     config = get_config()
     if "temp_dir" in config:
         del config["temp_dir"]
-        with open(CONFIG_FILE, "w") as f:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2)
     _invalidate_config_cache()
 
@@ -144,7 +144,8 @@ def unset_temp_dir() -> None:
 # Cowork skills directory
 # ---------------------------------------------------------------------------
 
-def get_copilot_cowork_skills_dir() -> Optional[str]:
+
+def get_copilot_cowork_skills_dir() -> str | None:
     """Get the configured cowork skills directory.
 
     Returns:
@@ -184,12 +185,12 @@ def unset_copilot_cowork_skills_dir() -> None:
     config = get_config()
     if "copilot_cowork_skills_dir" in config:
         del config["copilot_cowork_skills_dir"]
-        with open(CONFIG_FILE, "w") as f:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2)
     _invalidate_config_cache()
 
 
-def get_apm_temp_dir() -> Optional[str]:
+def get_apm_temp_dir() -> str | None:
     """Return the effective temporary directory for APM operations.
 
     Resolution order:

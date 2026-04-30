@@ -6,8 +6,7 @@ and show users a package-manager-specific update command.
 
 # Default guidance when self-update is disabled.
 DEFAULT_SELF_UPDATE_DISABLED_MESSAGE = (
-    "Self-update is disabled for this APM distribution. "
-    "Update APM using your package manager."
+    "Self-update is disabled for this APM distribution. Update APM using your package manager."
 )
 
 # Build-time policy values.

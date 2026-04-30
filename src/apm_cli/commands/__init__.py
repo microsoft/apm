@@ -2,4 +2,4 @@
 
 from .deps import deps
 
-__all__ = ['deps']
+__all__ = ["deps"]

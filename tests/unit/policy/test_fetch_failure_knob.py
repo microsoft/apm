@@ -13,7 +13,7 @@ from __future__ import annotations
 import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List  # noqa: F401, UP035
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -122,7 +122,7 @@ class _FakeCtx:
     apm_dir: Path = field(default_factory=lambda: Path("/tmp/fake/.apm"))
     verbose: bool = False
     logger: Any = None
-    deps_to_install: List[Any] = field(default_factory=list)
+    deps_to_install: list[Any] = field(default_factory=list)
     existing_lockfile: Any = None
     policy_fetch: Any = None
     policy_enforcement_active: bool = False
@@ -131,8 +131,7 @@ class _FakeCtx:
     policy_fetch_failure_default: str = "warn"
 
 
-def _fetch(outcome, *, policy=None, source="org:contoso/.github",
-           fetch_error=None, error=None):
+def _fetch(outcome, *, policy=None, source="org:contoso/.github", fetch_error=None, error=None):
     return PolicyFetchResult(
         policy=policy,
         source=source,
@@ -163,9 +162,7 @@ class TestPolicyGateFailClosed:
 
     @patch(_PATCH_DISCOVER)
     def test_garbage_response_block_raises(self, mock_discover):
-        mock_discover.return_value = _fetch(
-            "garbage_response", error="not yaml"
-        )
+        mock_discover.return_value = _fetch("garbage_response", error="not yaml")
         ctx = _FakeCtx(
             logger=MagicMock(),
             policy_fetch_failure_default="block",
@@ -222,17 +219,11 @@ class TestPolicyGateFailClosed:
 class TestPolicyGateCachedStale:
     """cached_stale reads fetch_failure off the cached ApmPolicy."""
 
-    @patch(
-        "apm_cli.policy.policy_checks.run_dependency_policy_checks"
-    )
+    @patch("apm_cli.policy.policy_checks.run_dependency_policy_checks")
     @patch(_PATCH_DISCOVER)
-    def test_cached_stale_block_raises_from_cached_policy(
-        self, mock_discover, mock_checks
-    ):
+    def test_cached_stale_block_raises_from_cached_policy(self, mock_discover, mock_checks):
         cached = ApmPolicy(enforcement="warn", fetch_failure="block")
-        mock_discover.return_value = _fetch(
-            "cached_stale", policy=cached, fetch_error="timeout"
-        )
+        mock_discover.return_value = _fetch("cached_stale", policy=cached, fetch_error="timeout")
         ctx = _FakeCtx(
             logger=MagicMock(),
             # Project-side warn must NOT prevent block from cached policy.
@@ -242,20 +233,16 @@ class TestPolicyGateCachedStale:
             run(ctx)
         assert "cached" in str(excinfo.value).lower()
 
-    @patch(
-        "apm_cli.policy.policy_checks.run_dependency_policy_checks"
-    )
+    @patch("apm_cli.policy.policy_checks.run_dependency_policy_checks")
     @patch(_PATCH_DISCOVER)
     def test_cached_stale_warn_proceeds(self, mock_discover, mock_checks):
         cached = ApmPolicy(enforcement="warn", fetch_failure="warn")
-        from apm_cli.policy.models import CIAuditResult, CheckResult
+        from apm_cli.policy.models import CheckResult, CIAuditResult
 
         mock_checks.return_value = CIAuditResult(
             checks=[CheckResult(name="x", passed=True, message="OK")]
         )
-        mock_discover.return_value = _fetch(
-            "cached_stale", policy=cached, fetch_error="timeout"
-        )
+        mock_discover.return_value = _fetch("cached_stale", policy=cached, fetch_error="timeout")
         ctx = _FakeCtx(
             logger=MagicMock(),
             policy_fetch_failure_default="warn",
@@ -277,9 +264,7 @@ class TestPreflightFailClosed:
             run_policy_preflight,
         )
 
-        mock_discover.return_value = _fetch(
-            "cache_miss_fetch_fail", fetch_error="dns fail"
-        )
+        mock_discover.return_value = _fetch("cache_miss_fetch_fail", fetch_error="dns fail")
         (tmp_path / "apm.yml").write_text(
             "name: p\nversion: '1.0'\npolicy:\n  fetch_failure_default: block\n",
             encoding="utf-8",
@@ -296,11 +281,9 @@ class TestPreflightFailClosed:
     def test_warn_does_not_raise(self, mock_discover, tmp_path: Path):
         from apm_cli.policy.install_preflight import run_policy_preflight
 
-        mock_discover.return_value = _fetch(
-            "cache_miss_fetch_fail", fetch_error="dns fail"
-        )
+        mock_discover.return_value = _fetch("cache_miss_fetch_fail", fetch_error="dns fail")
         # No apm.yml -> default warn.
-        result, active = run_policy_preflight(
+        result, active = run_policy_preflight(  # noqa: RUF059
             project_root=tmp_path,
             apm_deps=[],
             no_policy=False,
@@ -312,15 +295,13 @@ class TestPreflightFailClosed:
     def test_dry_run_block_does_not_raise(self, mock_discover, tmp_path: Path):
         from apm_cli.policy.install_preflight import run_policy_preflight
 
-        mock_discover.return_value = _fetch(
-            "cache_miss_fetch_fail", fetch_error="dns fail"
-        )
+        mock_discover.return_value = _fetch("cache_miss_fetch_fail", fetch_error="dns fail")
         (tmp_path / "apm.yml").write_text(
             "name: p\nversion: '1.0'\npolicy:\n  fetch_failure_default: block\n",
             encoding="utf-8",
         )
         # dry_run never raises.
-        result, active = run_policy_preflight(
+        result, active = run_policy_preflight(  # noqa: RUF059
             project_root=tmp_path,
             apm_deps=[],
             no_policy=False,

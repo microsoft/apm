@@ -14,7 +14,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-
 TIMEOUT = 180
 
 
@@ -52,11 +51,15 @@ def chain_workspace(tmp_path):
 
     consumer = workspace / "consumer"
     consumer.mkdir()
-    (consumer / "apm.yml").write_text(yaml.dump({
-        "name": "consumer-project",
-        "version": "1.0.0",
-        "dependencies": {"apm": []},
-    }))
+    (consumer / "apm.yml").write_text(
+        yaml.dump(
+            {
+                "name": "consumer-project",
+                "version": "1.0.0",
+                "dependencies": {"apm": []},
+            }
+        )
+    )
     (consumer / ".github").mkdir()
 
     # Sibling layout: ../pkg-x from consumer resolves under workspace/.
@@ -91,7 +94,10 @@ def test_three_level_apm_chain_resolves_all_levels(chain_workspace, apm_command)
 
     result = subprocess.run(
         [apm_command, "install", "../pkg-a"],
-        cwd=consumer, capture_output=True, text=True, timeout=TIMEOUT,
+        cwd=consumer,
+        capture_output=True,
+        text=True,
+        timeout=TIMEOUT,
     )
     assert result.returncode == 0, f"Install failed: {result.stderr}\n{result.stdout}"
 
@@ -114,11 +120,13 @@ def test_three_level_apm_chain_resolves_all_levels(chain_workspace, apm_command)
     assert deps["_local/pkg-c"].get("resolved_by") == "_local/pkg-b"
 
     deployed = consumer / ".github" / "instructions"
-    for fname in ("root-skill.instructions.md", "middle-skill.instructions.md",
-                  "leaf-skill.instructions.md"):
+    for fname in (
+        "root-skill.instructions.md",
+        "middle-skill.instructions.md",
+        "leaf-skill.instructions.md",
+    ):
         assert (deployed / fname).exists(), (
-            f"Primitive {fname} not deployed. Present: "
-            f"{sorted(p.name for p in deployed.glob('*'))}"
+            f"Primitive {fname} not deployed. Present: {sorted(p.name for p in deployed.glob('*'))}"
         )
 
 
@@ -128,13 +136,19 @@ def test_three_level_chain_uninstall_root_cascades(chain_workspace, apm_command)
 
     install = subprocess.run(
         [apm_command, "install", "../pkg-a"],
-        cwd=consumer, capture_output=True, text=True, timeout=TIMEOUT,
+        cwd=consumer,
+        capture_output=True,
+        text=True,
+        timeout=TIMEOUT,
     )
     assert install.returncode == 0, f"Install failed: {install.stderr}"
 
     uninstall = subprocess.run(
         [apm_command, "uninstall", "../pkg-a"],
-        cwd=consumer, capture_output=True, text=True, timeout=TIMEOUT,
+        cwd=consumer,
+        capture_output=True,
+        text=True,
+        timeout=TIMEOUT,
     )
     assert uninstall.returncode == 0, f"Uninstall failed: {uninstall.stderr}"
 
@@ -153,8 +167,9 @@ def test_three_level_chain_uninstall_root_cascades(chain_workspace, apm_command)
             assert key not in deps, f"Lockfile still references {key} after cascade"
 
     deployed = consumer / ".github" / "instructions"
-    for fname in ("root-skill.instructions.md", "middle-skill.instructions.md",
-                  "leaf-skill.instructions.md"):
-        assert not (deployed / fname).exists(), (
-            f"Primitive {fname} survived cascade uninstall"
-        )
+    for fname in (
+        "root-skill.instructions.md",
+        "middle-skill.instructions.md",
+        "leaf-skill.instructions.md",
+    ):
+        assert not (deployed / fname).exists(), f"Primitive {fname} survived cascade uninstall"

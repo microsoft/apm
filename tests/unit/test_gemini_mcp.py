@@ -1,12 +1,12 @@
 """Tests for the Gemini CLI MCP client adapter."""
 
 import json
-import os
-import tempfile
+import os  # noqa: F401
 import shutil
+import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from apm_cli.adapters.client.gemini import GeminiClientAdapter
 from apm_cli.factory import ClientFactory
@@ -62,10 +62,14 @@ class TestGeminiClientAdapter(unittest.TestCase):
         self.assertEqual(data["mcpServers"]["my-server"]["command"], "npx")
 
     def test_update_config_preserves_existing_keys(self):
-        self.settings_json.write_text(json.dumps({
-            "theme": "dark",
-            "tools": {"sandbox": "docker"},
-        }))
+        self.settings_json.write_text(
+            json.dumps(
+                {
+                    "theme": "dark",
+                    "tools": {"sandbox": "docker"},
+                }
+            )
+        )
         self.adapter.update_config({"server-a": {"command": "node", "args": ["server.js"]}})
         data = json.loads(self.settings_json.read_text())
         self.assertEqual(data["theme"], "dark")
@@ -73,9 +77,7 @@ class TestGeminiClientAdapter(unittest.TestCase):
         self.assertIn("server-a", data["mcpServers"])
 
     def test_update_config_merges_servers(self):
-        self.settings_json.write_text(json.dumps({
-            "mcpServers": {"existing": {"command": "old"}}
-        }))
+        self.settings_json.write_text(json.dumps({"mcpServers": {"existing": {"command": "old"}}}))
         self.adapter.update_config({"new-server": {"command": "new"}})
         data = json.loads(self.settings_json.read_text())
         self.assertIn("existing", data["mcpServers"])
@@ -98,16 +100,12 @@ class TestGeminiConfigureMCPServer(unittest.TestCase):
         self._cwd_patcher = patch("os.getcwd", return_value=self.tmp.name)
         self._cwd_patcher.start()
 
-        self.mock_registry_patcher = patch(
-            "apm_cli.adapters.client.copilot.SimpleRegistryClient"
-        )
+        self.mock_registry_patcher = patch("apm_cli.adapters.client.copilot.SimpleRegistryClient")
         self.mock_registry_class = self.mock_registry_patcher.start()
         self.mock_registry = MagicMock()
         self.mock_registry_class.return_value = self.mock_registry
 
-        self.mock_integration_patcher = patch(
-            "apm_cli.adapters.client.copilot.RegistryIntegration"
-        )
+        self.mock_integration_patcher = patch("apm_cli.adapters.client.copilot.RegistryIntegration")
         self.mock_integration_class = self.mock_integration_patcher.start()
 
         self.adapter = GeminiClientAdapter()
@@ -134,7 +132,11 @@ class TestGeminiConfigureMCPServer(unittest.TestCase):
         self.assertFalse(result)
 
     def test_uses_cached_server_info(self):
-        cached = {"some/server": {"packages": [{"name": "pkg", "registry_name": "npm", "runtime_hint": "npx"}]}}
+        cached = {
+            "some/server": {
+                "packages": [{"name": "pkg", "registry_name": "npm", "runtime_hint": "npx"}]
+            }
+        }
         result = self.adapter.configure_mcp_server(
             "some/server",
             server_info_cache=cached,
@@ -144,7 +146,9 @@ class TestGeminiConfigureMCPServer(unittest.TestCase):
 
     def test_extracts_server_name_from_url(self):
         self.mock_registry.find_server_by_reference.return_value = {
-            "packages": [{"name": "@scope/mcp-server", "registry_name": "npm", "runtime_hint": "npx"}]
+            "packages": [
+                {"name": "@scope/mcp-server", "registry_name": "npm", "runtime_hint": "npx"}
+            ]
         }
         result = self.adapter.configure_mcp_server("scope/mcp-server")
         self.assertTrue(result)
@@ -155,9 +159,7 @@ class TestGeminiConfigureMCPServer(unittest.TestCase):
         self.mock_registry.find_server_by_reference.return_value = {
             "packages": [{"name": "pkg", "registry_name": "npm", "runtime_hint": "npx"}]
         }
-        result = self.adapter.configure_mcp_server(
-            "some/server", server_name="custom-name"
-        )
+        result = self.adapter.configure_mcp_server("some/server", server_name="custom-name")
         self.assertTrue(result)
         data = json.loads(self.settings_json.read_text())
         self.assertIn("custom-name", data["mcpServers"])
@@ -176,14 +178,10 @@ class TestGeminiFormatServerConfig(unittest.TestCase):
         self._cwd_patcher = patch("os.getcwd", return_value=self.tmp.name)
         self._cwd_patcher.start()
 
-        self.mock_registry_patcher = patch(
-            "apm_cli.adapters.client.copilot.SimpleRegistryClient"
-        )
+        self.mock_registry_patcher = patch("apm_cli.adapters.client.copilot.SimpleRegistryClient")
         self.mock_registry_class = self.mock_registry_patcher.start()
 
-        self.mock_integration_patcher = patch(
-            "apm_cli.adapters.client.copilot.RegistryIntegration"
-        )
+        self.mock_integration_patcher = patch("apm_cli.adapters.client.copilot.RegistryIntegration")
         self.mock_integration_class = self.mock_integration_patcher.start()
 
         self.adapter = GeminiClientAdapter()
@@ -215,11 +213,13 @@ class TestGeminiFormatServerConfig(unittest.TestCase):
     def test_npm_package_config_has_no_copilot_fields(self):
         """npm package config must not contain type, tools, or id."""
         server_info = {
-            "packages": [{
-                "name": "@scope/mcp-server",
-                "registry_name": "npm",
-                "runtime_hint": "npx",
-            }],
+            "packages": [
+                {
+                    "name": "@scope/mcp-server",
+                    "registry_name": "npm",
+                    "runtime_hint": "npx",
+                }
+            ],
             "name": "test-server",
         }
         config = self.adapter._format_server_config(server_info)
@@ -232,10 +232,12 @@ class TestGeminiFormatServerConfig(unittest.TestCase):
     def test_remote_http_uses_httpUrl(self):
         """HTTP remotes must use httpUrl key, not url."""
         server_info = {
-            "remotes": [{
-                "url": "https://api.example.com/mcp",
-                "transport_type": "http",
-            }],
+            "remotes": [
+                {
+                    "url": "https://api.example.com/mcp",
+                    "transport_type": "http",
+                }
+            ],
             "name": "remote-server",
         }
         config = self.adapter._format_server_config(server_info)
@@ -248,10 +250,12 @@ class TestGeminiFormatServerConfig(unittest.TestCase):
     def test_remote_sse_uses_url(self):
         """SSE remotes must use url key, not httpUrl."""
         server_info = {
-            "remotes": [{
-                "url": "https://api.example.com/sse",
-                "transport_type": "sse",
-            }],
+            "remotes": [
+                {
+                    "url": "https://api.example.com/sse",
+                    "transport_type": "sse",
+                }
+            ],
             "name": "sse-server",
         }
         config = self.adapter._format_server_config(server_info)

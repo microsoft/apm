@@ -275,7 +275,7 @@ apm marketplace package add acme/monorepo --subdir plugins/formatter --name form
 
 ### Ref auto-resolution
 
-Mutable git refs (`HEAD`, branch names) are automatically resolved to concrete 40-character SHAs before being stored in `marketplace.yml`. This ensures supply-chain safety -- the entry always pins to an immutable commit.
+Mutable git refs (`HEAD`, branch names) are automatically resolved to concrete 40-character SHAs before being stored in `apm.yml`. This ensures supply-chain safety -- the entry always pins to an immutable commit.
 
 **Default behaviour (no `--ref`):** When neither `--version` nor `--ref` is provided, the current `HEAD` SHA is pinned automatically:
 

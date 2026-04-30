@@ -7,7 +7,7 @@ Extracted from ``commands/audit.py`` so the policy module can call
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 from ..deps.lockfile import LockFile, get_lockfile_path
 from ..integration.base_integrator import BaseIntegrator
@@ -26,7 +26,7 @@ def _is_safe_lockfile_path(rel_path: str, project_root: Path) -> bool:
 def _scan_files_in_dir(
     dir_path: Path,
     base_label: str,
-) -> Tuple[Dict[str, List[ScanFinding]], int]:
+) -> tuple[dict[str, list[ScanFinding]], int]:
     """Recursively scan all files under a directory via SecurityGate.
 
     Returns (findings_by_file, files_scanned).
@@ -34,7 +34,7 @@ def _scan_files_in_dir(
     from ..security.gate import REPORT_POLICY, SecurityGate
 
     verdict = SecurityGate.scan_files(dir_path, policy=REPORT_POLICY)
-    findings: Dict[str, List[ScanFinding]] = {}
+    findings: dict[str, list[ScanFinding]] = {}
     for rel_path, file_findings in verdict.findings_by_file.items():
         label = f"{base_label}/{rel_path}"
         findings[label] = file_findings
@@ -43,8 +43,8 @@ def _scan_files_in_dir(
 
 def scan_lockfile_packages(
     project_root: Path,
-    package_filter: Optional[str] = None,
-) -> Tuple[Dict[str, List[ScanFinding]], int]:
+    package_filter: str | None = None,
+) -> tuple[dict[str, list[ScanFinding]], int]:
     """Scan deployed files tracked in apm.lock.yaml.
 
     Returns:
@@ -56,7 +56,7 @@ def scan_lockfile_packages(
     if lock is None:
         return {}, 0
 
-    all_findings: Dict[str, List[ScanFinding]] = {}
+    all_findings: dict[str, list[ScanFinding]] = {}
     files_scanned = 0
 
     for dep_key, dep in lock.dependencies.items():

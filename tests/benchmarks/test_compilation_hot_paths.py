@@ -17,31 +17,30 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set  # noqa: F401, UP035
 
 import pytest
 
-from apm_cli.install.phases.lockfile import compute_deployed_hashes
-from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.compilation.context_optimizer import ContextOptimizer
 from apm_cli.compilation.link_resolver import (
     LinkResolutionContext,
     UnifiedLinkResolver,
 )
+from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.install.phases.lockfile import compute_deployed_hashes
 from apm_cli.integration.base_integrator import BaseIntegrator
-from apm_cli.deps.lockfile import LockFile, LockedDependency
-from apm_cli.primitives.models import Instruction, Context
-
+from apm_cli.primitives.models import Context, Instruction  # noqa: F401
+from apm_cli.utils.content_hash import compute_file_hash  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # Helpers to build synthetic data
 # ---------------------------------------------------------------------------
 
 
-def _populate_flat_files(base: Path, file_count: int) -> List[str]:
+def _populate_flat_files(base: Path, file_count: int) -> list[str]:
     """Create *file_count* ~1 KB files under *base* and return relative paths."""
     base.mkdir(parents=True, exist_ok=True)
-    rel_paths: List[str] = []
+    rel_paths: list[str] = []
     for i in range(file_count):
         subdir = base / f"sub-{i // 20}"
         subdir.mkdir(parents=True, exist_ok=True)
@@ -66,9 +65,9 @@ def _create_dir_tree(base: Path, dir_count: int, files_per_dir: int = 3) -> None
             (subdir / f"file-{f}.py").write_text(f"# module {d} file {f}\n")
 
 
-def _build_instructions(count: int) -> List[Instruction]:
+def _build_instructions(count: int) -> list[Instruction]:
     """Build *count* synthetic Instruction objects with varied apply_to patterns."""
-    instructions: List[Instruction] = []
+    instructions: list[Instruction] = []
     patterns = [
         "src/**/*.py",
         "tests/**/*.py",
@@ -90,7 +89,7 @@ def _build_instructions(count: int) -> List[Instruction]:
     return instructions
 
 
-def _generate_managed_paths(count: int) -> Set[str]:
+def _generate_managed_paths(count: int) -> set[str]:
     """Generate *count* realistic managed-file paths across targets."""
     prefixes = [
         ".github/prompts/p{i}.prompt.md",
@@ -100,7 +99,7 @@ def _generate_managed_paths(count: int) -> Set[str]:
         ".github/skills/s{i}/SKILL.md",
         ".github/hooks/h{i}.hook.md",
     ]
-    paths: Set[str] = set()
+    paths: set[str] = set()
     for i in range(count):
         template = prefixes[i % len(prefixes)]
         paths.add(template.format(i=i))
@@ -114,13 +113,9 @@ def _make_rich_lockfile(dep_count: int) -> LockFile:
         dep = LockedDependency(
             repo_url=f"https://github.com/org/pkg-{i}",
             depth=(i % 5) + 1,
-            deployed_files=[
-                f".github/agents/agent-{i}-{j}.agent.md"
-                for j in range(10)
-            ],
+            deployed_files=[f".github/agents/agent-{i}-{j}.agent.md" for j in range(10)],
             deployed_file_hashes={
-                f".github/agents/agent-{i}-{j}.agent.md": f"sha256:{'ab' * 32}"
-                for j in range(10)
+                f".github/agents/agent-{i}-{j}.agent.md": f"sha256:{'ab' * 32}" for j in range(10)
             },
         )
         lf.add_dependency(dep)
@@ -128,28 +123,29 @@ def _make_rich_lockfile(dep_count: int) -> LockFile:
     lf.mcp_servers = [f"server-{s}" for s in range(10)]
     lf.mcp_configs = {f"config-{c}": {"key": f"val-{c}"} for c in range(5)}
     lf.local_deployed_files = [f"local-{n}.md" for n in range(20)]
-    lf.local_deployed_file_hashes = {
-        f"local-{n}.md": f"sha256:{'cd' * 32}" for n in range(20)
-    }
+    lf.local_deployed_file_hashes = {f"local-{n}.md": f"sha256:{'cd' * 32}" for n in range(20)}
     return lf
 
 
 @dataclass
 class _FakeContext:
     """Minimal stand-in for a context object used by register_contexts."""
+
     file_path: Path
-    source: Optional[str] = None
+    source: str | None = None
 
 
 @dataclass
 class _FakePrimitiveCollection:
     """Minimal stand-in for PrimitiveCollection."""
-    contexts: List[_FakeContext]
+
+    contexts: list[_FakeContext]
 
 
 # ---------------------------------------------------------------------------
 # Benchmark 1: compute_deployed_hashes() throughput
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.benchmark
 class TestComputeDeployedHashesPerf:
@@ -182,6 +178,7 @@ class TestComputeDeployedHashesPerf:
 # Benchmark 2: ContextOptimizer.optimize_instruction_placement()
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.benchmark
 class TestOptimizeInstructionPlacementPerf:
     """Benchmark optimize_instruction_placement() with varying scale."""
@@ -194,15 +191,11 @@ class TestOptimizeInstructionPlacementPerf:
             (200, 200),
         ],
     )
-    def test_placement_latency(
-        self, tmp_path: Path, instr_count: int, dir_count: int
-    ):
+    def test_placement_latency(self, tmp_path: Path, instr_count: int, dir_count: int):
         """Optimizing N instructions over M directories should finish in time."""
         _create_dir_tree(tmp_path, dir_count)
         instructions = _build_instructions(instr_count)
-        optimizer = ContextOptimizer(
-            base_dir=str(tmp_path), exclude_patterns=None
-        )
+        optimizer = ContextOptimizer(base_dir=str(tmp_path), exclude_patterns=None)
 
         start = time.perf_counter()
         placement = optimizer.optimize_instruction_placement(instructions)
@@ -230,6 +223,7 @@ class TestOptimizeInstructionPlacementPerf:
 # Benchmark 3: UnifiedLinkResolver._rewrite_markdown_links()
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.benchmark
 class TestRewriteMarkdownLinksPerf:
     """Benchmark _rewrite_markdown_links() for context link rewriting."""
@@ -251,9 +245,7 @@ class TestRewriteMarkdownLinksPerf:
         lines = ["# Test Document\n\n"]
         for i in range(link_count):
             ctx_name = f"ctx-{i % 50}.context.md"
-            lines.append(
-                f"See [{ctx_name}]({ctx_name}) for details on item {i}.\n\n"
-            )
+            lines.append(f"See [{ctx_name}]({ctx_name}) for details on item {i}.\n\n")
         lines.append("End of document.\n")
         content = "".join(lines)
 
@@ -310,14 +302,13 @@ class TestRewriteMarkdownLinksPerf:
         # Non-context links should remain unchanged
         assert "[External](https://example.com)" in result
         # Generous ceiling -- catches catastrophic regressions only.
-        assert elapsed < 2.0, (
-            f"Passthrough took {elapsed:.3f}s, expected < 2.0s (generous ceiling)"
-        )
+        assert elapsed < 2.0, f"Passthrough took {elapsed:.3f}s, expected < 2.0s (generous ceiling)"
 
 
 # ---------------------------------------------------------------------------
 # Benchmark 4: partition_managed_files() at scale
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.benchmark
 class TestPartitionManagedFilesPerf:
@@ -335,9 +326,7 @@ class TestPartitionManagedFilesPerf:
         assert isinstance(buckets, dict)
         # Every path should land in exactly one bucket
         total_routed = sum(len(v) for v in buckets.values())
-        assert total_routed == file_count, (
-            f"Expected {file_count} routed files, got {total_routed}"
-        )
+        assert total_routed == file_count, f"Expected {file_count} routed files, got {total_routed}"
         # Generous ceiling (5x expected) -- catches catastrophic regressions only.
         # Scaling guards in the default test suite handle O(n^2) detection.
         thresholds = {100: 2.5, 1000: 5.0, 5000: 15.0}
@@ -366,6 +355,7 @@ class TestPartitionManagedFilesPerf:
 # Benchmark 5: LockFile round-trip (to_yaml + from_yaml)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.benchmark
 class TestLockFileRoundTripPerf:
     """Benchmark LockFile serialization + deserialization round-trip."""
@@ -384,9 +374,7 @@ class TestLockFileRoundTripPerf:
         assert "lockfile_version" in yaml_str
         # The deserialized lockfile should have the same dep count
         # (from_yaml may add a synthetic "." entry for local_deployed_files)
-        real_deps = {
-            k: v for k, v in lf2.dependencies.items() if k != "."
-        }
+        real_deps = {k: v for k, v in lf2.dependencies.items() if k != "."}
         assert len(real_deps) == dep_count
         # Generous ceiling (5x expected) -- catches catastrophic regressions only.
         # Scaling guards in the default test suite handle O(n^2) detection.
@@ -408,23 +396,17 @@ class TestLockFileRoundTripPerf:
         assert len(lf2.local_deployed_files) == len(lf.local_deployed_files)
 
         # Spot-check a dependency
-        real_deps_orig = {
-            k: v for k, v in lf.dependencies.items() if k != "."
-        }
-        real_deps_rt = {
-            k: v for k, v in lf2.dependencies.items() if k != "."
-        }
+        real_deps_orig = {k: v for k, v in lf.dependencies.items() if k != "."}
+        real_deps_rt = {k: v for k, v in lf2.dependencies.items() if k != "."}
         orig_key = next(iter(real_deps_orig))
         assert orig_key in real_deps_rt
-        assert (
-            real_deps_rt[orig_key].repo_url
-            == real_deps_orig[orig_key].repo_url
-        )
+        assert real_deps_rt[orig_key].repo_url == real_deps_orig[orig_key].repo_url
 
 
 # ---------------------------------------------------------------------------
 # Benchmark 6: register_contexts() index building
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.benchmark
 class TestRegisterContextsPerf:
@@ -435,13 +417,9 @@ class TestRegisterContextsPerf:
         """Registering N contexts into the lookup index should be fast."""
         resolver = UnifiedLinkResolver(base_dir=tmp_path)
 
-        contexts: List[_FakeContext] = []
+        contexts: list[_FakeContext] = []
         for i in range(context_count):
-            source = (
-                f"dependency:org/repo-{i}"
-                if i % 2 == 0
-                else "local"
-            )
+            source = f"dependency:org/repo-{i}" if i % 2 == 0 else "local"
             contexts.append(
                 _FakeContext(
                     file_path=Path(f".apm/context/ctx-{i}.context.md"),
@@ -496,6 +474,7 @@ class TestRegisterContextsPerf:
 # Benchmark 7: compute_deployed_hashes() correctness
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.benchmark
 class TestComputeDeployedHashesCorrectness:
     """Sanity: deployed hashes have correct format and are content-sensitive."""
@@ -528,9 +507,7 @@ class TestComputeDeployedHashesCorrectness:
     def test_missing_file_omitted(self, tmp_path: Path):
         """Non-existent paths should be silently omitted from output."""
         (tmp_path / "exists.md").write_text("present\n")
-        result = compute_deployed_hashes(
-            ["exists.md", "missing.md"], tmp_path
-        )
+        result = compute_deployed_hashes(["exists.md", "missing.md"], tmp_path)
         assert "exists.md" in result
         assert "missing.md" not in result
 
@@ -539,6 +516,7 @@ class TestComputeDeployedHashesCorrectness:
 # Benchmark 8: ContextOptimizer with empty instructions
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.benchmark
 class TestContextOptimizerEdgeCases:
     """Edge-case benchmarks for ContextOptimizer."""
@@ -546,9 +524,7 @@ class TestContextOptimizerEdgeCases:
     def test_empty_instructions(self, tmp_path: Path):
         """Optimizing zero instructions should return empty dict instantly."""
         _create_dir_tree(tmp_path, 10)
-        optimizer = ContextOptimizer(
-            base_dir=str(tmp_path), exclude_patterns=None
-        )
+        optimizer = ContextOptimizer(base_dir=str(tmp_path), exclude_patterns=None)
 
         start = time.perf_counter()
         placement = optimizer.optimize_instruction_placement([])
@@ -571,9 +547,7 @@ class TestContextOptimizerEdgeCases:
             content="Follow this global rule.",
             source="local",
         )
-        optimizer = ContextOptimizer(
-            base_dir=str(tmp_path), exclude_patterns=None
-        )
+        optimizer = ContextOptimizer(base_dir=str(tmp_path), exclude_patterns=None)
 
         placement = optimizer.optimize_instruction_placement([instr])
 
@@ -589,6 +563,7 @@ class TestContextOptimizerEdgeCases:
 # ---------------------------------------------------------------------------
 # Benchmark 9: link rewriter with mixed link types
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.benchmark
 class TestRewriteMixedLinks:
@@ -638,6 +613,7 @@ class TestRewriteMixedLinks:
 # Benchmark 10: partition_managed_files() with empty set
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.benchmark
 class TestPartitionEdgeCases:
     """Edge cases for partition_managed_files."""
@@ -672,6 +648,7 @@ class TestPartitionEdgeCases:
 # Benchmark 11: compute_deployed_hashes() with symlinks
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.benchmark
 class TestDeployedHashesSymlinks:
     """Verify symlinks are silently omitted from hash output."""
@@ -686,8 +663,6 @@ class TestDeployedHashesSymlinks:
         except OSError:
             pytest.skip("Cannot create symlinks on this platform")
 
-        result = compute_deployed_hashes(
-            ["real.md", "link.md"], tmp_path
-        )
+        result = compute_deployed_hashes(["real.md", "link.md"], tmp_path)
         assert "real.md" in result
         assert "link.md" not in result

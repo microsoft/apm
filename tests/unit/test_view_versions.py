@@ -1,9 +1,9 @@
 """Unit tests for marketplace plugin display in ``apm view``."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-from click.testing import CliRunner
+from click.testing import CliRunner  # noqa: F401
 
 from apm_cli.commands.view import _display_marketplace_plugin
 from apm_cli.marketplace.models import (
@@ -12,10 +12,10 @@ from apm_cli.marketplace.models import (
     MarketplaceSource,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _plugin(
     name="skill-auth",
@@ -79,6 +79,7 @@ class TestDisplayMarketplacePlugin:
     def test_marketplace_not_found_exits(self, mock_get_mkt):
         """Unknown marketplace triggers error and sys.exit."""
         from apm_cli.marketplace.errors import MarketplaceNotFoundError
+
         mock_get_mkt.side_effect = MarketplaceNotFoundError("nope")
 
         logger = MagicMock()

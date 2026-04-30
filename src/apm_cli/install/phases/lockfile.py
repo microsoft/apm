@@ -39,7 +39,7 @@ def compute_deployed_hashes(rel_paths, project_root: Path) -> dict:
     for _rel in rel_paths or ():
         _full = project_root / _rel
         if _full.is_file() and not _full.is_symlink():
-            try:
+            try:  # noqa: SIM105
                 out[_rel] = compute_file_hash(_full)
             except Exception:
                 pass
@@ -69,7 +69,8 @@ class LockfileBuilder:
         if not self.ctx.installed_packages:
             return
         try:
-            from apm_cli.deps.lockfile import LockFile as _LF, get_lockfile_path
+            from apm_cli.deps.lockfile import LockFile as _LF
+            from apm_cli.deps.lockfile import get_lockfile_path
 
             lockfile = _LF.from_installed_packages(
                 self.ctx.installed_packages, self.ctx.dependency_graph
@@ -117,8 +118,8 @@ class LockfileBuilder:
                 # cleanup so the recorded hashes match what is now
                 # deployed (provenance for the next install's stale
                 # cleanup).
-                lockfile.dependencies[dep_key].deployed_file_hashes = (
-                    compute_deployed_hashes(dep_files, self.ctx.project_root)
+                lockfile.dependencies[dep_key].deployed_file_hashes = compute_deployed_hashes(
+                    dep_files, self.ctx.project_root
                 )
 
     def _attach_package_types(self, lockfile: LockFile) -> None:
@@ -136,7 +137,7 @@ class LockfileBuilder:
         if not self.ctx.skill_subset:
             return  # No CLI override; dep_ref.skill_subset already flows through
         effective = sorted(set(self.ctx.skill_subset))
-        for dep_key, locked_dep in lockfile.dependencies.items():
+        for dep_key, locked_dep in lockfile.dependencies.items():  # noqa: B007
             if locked_dep.package_type == "skill_bundle":
                 locked_dep.skill_subset = effective
 
@@ -150,7 +151,9 @@ class LockfileBuilder:
             for dep_key, prov in self.ctx.marketplace_provenance.items():
                 if dep_key in lockfile.dependencies:
                     lockfile.dependencies[dep_key].discovered_via = prov.get("discovered_via")
-                    lockfile.dependencies[dep_key].marketplace_plugin_name = prov.get("marketplace_plugin_name")
+                    lockfile.dependencies[dep_key].marketplace_plugin_name = prov.get(
+                        "marketplace_plugin_name"
+                    )
 
     def _merge_existing(self, lockfile: LockFile) -> None:
         if self.ctx.existing_lockfile and not self.ctx.update_refs:
@@ -168,7 +171,7 @@ class LockfileBuilder:
         if self.ctx.only_packages:
             existing = _LF.read(lockfile_path)
             if existing:
-                for key, dep in lockfile.dependencies.items():
+                for key, dep in lockfile.dependencies.items():  # noqa: B007
                     existing.add_dependency(dep)
                 lockfile = existing
         return lockfile
@@ -185,7 +188,9 @@ class LockfileBuilder:
         else:
             lockfile.save(lockfile_path)
             if self.ctx.logger:
-                self.ctx.logger.verbose_detail(f"Generated apm.lock.yaml with {len(lockfile.dependencies)} dependencies")
+                self.ctx.logger.verbose_detail(
+                    f"Generated apm.lock.yaml with {len(lockfile.dependencies)} dependencies"
+                )
 
     def _handle_failure(self, e: Exception) -> None:
         _lock_msg = f"Could not generate apm.lock.yaml: {e}"

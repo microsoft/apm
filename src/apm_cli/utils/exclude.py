@@ -9,7 +9,7 @@ import fnmatch
 import logging
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional  # noqa: F401, UP035
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 _MAX_DOUBLE_STAR_SEGMENTS = 5
 
 
-def validate_exclude_patterns(patterns: Optional[List[str]]) -> List[str]:
+def validate_exclude_patterns(patterns: list[str] | None) -> list[str]:
     """Validate and normalize exclude patterns, rejecting dangerous ones.
 
     Args:
@@ -57,7 +57,7 @@ def validate_exclude_patterns(patterns: Optional[List[str]]) -> List[str]:
 def should_exclude(
     file_path: Path,
     base_dir: Path,
-    exclude_patterns: Optional[List[str]],
+    exclude_patterns: list[str] | None,
 ) -> bool:
     """Check whether a file path should be excluded.
 
@@ -83,7 +83,7 @@ def should_exclude(
 
     rel_path_str = str(rel_path).replace(os.sep, "/")
 
-    for pattern in exclude_patterns:
+    for pattern in exclude_patterns:  # noqa: SIM110
         if _matches_pattern(rel_path_str, pattern):
             return True
 
@@ -107,9 +107,8 @@ def _matches_pattern(rel_path_str: str, pattern: str) -> bool:
     if pattern.endswith("/"):
         if rel_path_str.startswith(pattern) or rel_path_str == pattern.rstrip("/"):
             return True
-    else:
-        if rel_path_str.startswith(pattern + "/") or rel_path_str == pattern:
-            return True
+    elif rel_path_str.startswith(pattern + "/") or rel_path_str == pattern:
+        return True
 
     return False
 
@@ -153,7 +152,7 @@ def _match_double_star(path_parts: list, pattern_parts: list) -> bool:
         return not path_parts
 
     if not path_parts:
-        return all(p == "**" or p == "" for p in pattern_parts)
+        return all(p == "**" or p == "" for p in pattern_parts)  # noqa: PLR1714
 
     part = pattern_parts[0]
 
@@ -161,7 +160,7 @@ def _match_double_star(path_parts: list, pattern_parts: list) -> bool:
         # ** matches zero or more directories
         if _match_double_star(path_parts, pattern_parts[1:]):
             return True
-        if _match_double_star(path_parts[1:], pattern_parts):
+        if _match_double_star(path_parts[1:], pattern_parts):  # noqa: SIM103
             return True
         return False
     else:

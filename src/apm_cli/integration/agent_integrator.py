@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING, Dict, List  # noqa: F401, UP035
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.utils.paths import portable_relpath
@@ -20,28 +20,28 @@ if TYPE_CHECKING:
 
 class AgentIntegrator(BaseIntegrator):
     """Handles integration of APM package agents into .github/agents/, .claude/agents/, and .cursor/agents/."""
-    
-    def find_agent_files(self, package_path: Path) -> List[Path]:
+
+    def find_agent_files(self, package_path: Path) -> list[Path]:
         """Find all .agent.md and .chatmode.md files in a package.
-        
+
         Searches in:
         - Package root directory (.agent.md and .chatmode.md)
         - .apm/agents/ subdirectory (new standard)
         - .apm/chatmodes/ subdirectory (legacy)
-        
+
         Args:
             package_path: Path to the package directory
-            
+
         Returns:
             List[Path]: List of absolute paths to agent files
         """
         agent_files = []
-        
+
         # Search in package root
         if package_path.exists():
             agent_files.extend(package_path.glob("*.agent.md"))
             agent_files.extend(package_path.glob("*.chatmode.md"))  # Legacy
-        
+
         # Search in .apm/agents/ (new standard)
         # Use rglob so agents in subdirectories (e.g. from plugin mapping) are
         # still discovered.
@@ -51,19 +51,16 @@ class AgentIntegrator(BaseIntegrator):
             # Also pick up plain .md files in agents/; plugins may not use
             # the .agent.md convention  -- the directory name already implies type
             for md_file in apm_agents.rglob("*.md"):
-                if (
-                    not md_file.name.endswith(".agent.md")
-                    and md_file not in agent_files
-                ):
+                if not md_file.name.endswith(".agent.md") and md_file not in agent_files:
                     agent_files.append(md_file)
-        
+
         # Search in .apm/chatmodes/ (legacy)
         apm_chatmodes = package_path / ".apm" / "chatmodes"
         if apm_chatmodes.exists():
             agent_files.extend(apm_chatmodes.glob("*.chatmode.md"))
-        
+
         return agent_files
-    
+
     # NOTE: find_skill_file(), integrate_skill(), and _generate_skill_agent_content()
     # have been REMOVED as part of T5 (skill-strategy.md).
     #
@@ -77,14 +74,17 @@ class AgentIntegrator(BaseIntegrator):
     # ------------------------------------------------------------------
 
     def get_target_filename_for_target(
-        self, source_file: Path, package_name: str, target: "TargetProfile",
+        self,
+        source_file: Path,
+        package_name: str,
+        target: TargetProfile,
     ) -> str:
         """Generate target filename using the extension from *target*'s agents mapping."""
         mapping = target.primitives.get("agents")
         ext = mapping.extension if mapping else ".agent.md"
-        if source_file.name.endswith('.agent.md'):
+        if source_file.name.endswith(".agent.md"):
             stem = source_file.name[:-9]
-        elif source_file.name.endswith('.chatmode.md'):
+        elif source_file.name.endswith(".chatmode.md"):
             stem = source_file.name[:-12]
         else:
             stem = source_file.stem
@@ -92,12 +92,12 @@ class AgentIntegrator(BaseIntegrator):
 
     def integrate_agents_for_target(
         self,
-        target: "TargetProfile",
+        target: TargetProfile,
         package_info,
         project_root: Path,
         *,
         force: bool = False,
-        managed_files: set = None,
+        managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
     ) -> IntegrationResult:
         """Integrate agents from a package for a single *target*.
@@ -125,18 +125,23 @@ class AgentIntegrator(BaseIntegrator):
 
         files_integrated = 0
         files_skipped = 0
-        target_paths: List[Path] = []
+        target_paths: list[Path] = []
         total_links_resolved = 0
 
         for source_file in agent_files:
             target_filename = self.get_target_filename_for_target(
-                source_file, package_info.package.name, target,
+                source_file,
+                package_info.package.name,
+                target,
             )
             target_path = agents_dir / target_filename
             rel_path = portable_relpath(target_path, project_root)
 
             if self.check_collision(
-                target_path, rel_path, managed_files, force,
+                target_path,
+                rel_path,
+                managed_files,
+                force,
                 diagnostics=diagnostics,
             ):
                 files_skipped += 1
@@ -161,11 +166,11 @@ class AgentIntegrator(BaseIntegrator):
 
     def sync_for_target(
         self,
-        target: "TargetProfile",
+        target: TargetProfile,
         apm_package,
         project_root: Path,
-        managed_files: set = None,
-    ) -> Dict[str, int]:
+        managed_files: set = None,  # noqa: RUF013
+    ) -> dict[str, int]:
         """Remove APM-managed agent files for a single *target*."""
         mapping = target.primitives.get("agents")
         if not mapping:
@@ -199,23 +204,26 @@ class AgentIntegrator(BaseIntegrator):
     def get_target_filename(self, source_file: Path, package_name: str) -> str:
         """Generate target filename for copilot (always .agent.md)."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         return self.get_target_filename_for_target(
-            source_file, package_name, KNOWN_TARGETS["copilot"],
+            source_file,
+            package_name,
+            KNOWN_TARGETS["copilot"],
         )
 
     def copy_agent(self, source: Path, target: Path) -> int:
         """Copy agent file verbatim, resolving context links.
-        
+
         Args:
             source: Source file path
             target: Target file path
-        
+
         Returns:
             int: Number of links resolved
         """
-        content = source.read_text(encoding='utf-8')
+        content = source.read_text(encoding="utf-8")
         content, links_resolved = self.resolve_links(content, source, target)
-        target.write_text(content, encoding='utf-8')
+        target.write_text(content, encoding="utf-8")
         return links_resolved
 
     # ------------------------------------------------------------------
@@ -246,7 +254,7 @@ class AgentIntegrator(BaseIntegrator):
 
         fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
         if fm_match:
-            body = content[fm_match.end():]
+            body = content[fm_match.end() :]
             try:
                 import yaml
 
@@ -264,10 +272,14 @@ class AgentIntegrator(BaseIntegrator):
         target.write_text(_toml.dumps(doc), encoding="utf-8")
 
     # DEPRECATED: use integrate_agents_for_target(KNOWN_TARGETS["copilot"], ...) instead.
-    def integrate_package_agents(self, package_info, project_root: Path,
-                                   force: bool = False,
-                                   managed_files: set = None,
-                                   diagnostics=None) -> IntegrationResult:
+    def integrate_package_agents(
+        self,
+        package_info,
+        project_root: Path,
+        force: bool = False,
+        managed_files: set = None,  # noqa: RUF013
+        diagnostics=None,
+    ) -> IntegrationResult:
         """Integrate agents into .github/agents/ + auto-copy to claude/cursor.
 
         Legacy entry point that preserves the multi-target auto-copy
@@ -275,6 +287,7 @@ class AgentIntegrator(BaseIntegrator):
         directly.
         """
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         copilot = KNOWN_TARGETS["copilot"]
 
         self.init_link_resolver(package_info, project_root)
@@ -299,17 +312,21 @@ class AgentIntegrator(BaseIntegrator):
 
         files_integrated = 0
         files_skipped = 0
-        target_paths: List[Path] = []
+        target_paths: list[Path] = []
         total_links_resolved = 0
 
         for source_file in agent_files:
             target_filename = self.get_target_filename_for_target(
-                source_file, package_info.package.name, copilot,
+                source_file,
+                package_info.package.name,
+                copilot,
             )
             target_path = agents_dir / target_filename
             rel_path = portable_relpath(target_path, project_root)
 
-            if self.check_collision(target_path, rel_path, managed_files, force, diagnostics=diagnostics):
+            if self.check_collision(
+                target_path, rel_path, managed_files, force, diagnostics=diagnostics
+            ):
                 files_skipped += 1
                 continue
 
@@ -321,22 +338,30 @@ class AgentIntegrator(BaseIntegrator):
             if claude_agents_dir:
                 claude_target = KNOWN_TARGETS["claude"]
                 claude_filename = self.get_target_filename_for_target(
-                    source_file, package_info.package.name, claude_target,
+                    source_file,
+                    package_info.package.name,
+                    claude_target,
                 )
                 claude_path = claude_agents_dir / claude_filename
                 claude_rel = portable_relpath(claude_path, project_root)
-                if not self.check_collision(claude_path, claude_rel, managed_files, force, diagnostics=diagnostics):
+                if not self.check_collision(
+                    claude_path, claude_rel, managed_files, force, diagnostics=diagnostics
+                ):
                     self.copy_agent(source_file, claude_path)
                     target_paths.append(claude_path)
 
             if cursor_agents_dir:
                 cursor_target = KNOWN_TARGETS["cursor"]
                 cursor_filename = self.get_target_filename_for_target(
-                    source_file, package_info.package.name, cursor_target,
+                    source_file,
+                    package_info.package.name,
+                    cursor_target,
                 )
                 cursor_path = cursor_agents_dir / cursor_filename
                 cursor_rel = portable_relpath(cursor_path, project_root)
-                if not self.check_collision(cursor_path, cursor_rel, managed_files, force, diagnostics=diagnostics):
+                if not self.check_collision(
+                    cursor_path, cursor_rel, managed_files, force, diagnostics=diagnostics
+                ):
                     self.copy_agent(source_file, cursor_path)
                     target_paths.append(cursor_path)
 
@@ -352,15 +377,22 @@ class AgentIntegrator(BaseIntegrator):
     def get_target_filename_claude(self, source_file: Path, package_name: str) -> str:
         """Generate target filename for Claude agents (plain .md)."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         return self.get_target_filename_for_target(
-            source_file, package_name, KNOWN_TARGETS["claude"],
+            source_file,
+            package_name,
+            KNOWN_TARGETS["claude"],
         )
 
     # DEPRECATED: use integrate_agents_for_target(KNOWN_TARGETS["claude"], ...) instead.
-    def integrate_package_agents_claude(self, package_info, project_root: Path,
-                                          force: bool = False,
-                                          managed_files: set = None,
-                                          diagnostics=None) -> IntegrationResult:
+    def integrate_package_agents_claude(
+        self,
+        package_info,
+        project_root: Path,
+        force: bool = False,
+        managed_files: set = None,  # noqa: RUF013
+        diagnostics=None,
+    ) -> IntegrationResult:
         """Integrate agents into .claude/agents/.
 
         Legacy compat: ensures ``.claude/`` exists so the target-driven
@@ -368,30 +400,48 @@ class AgentIntegrator(BaseIntegrator):
         existence).
         """
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         (project_root / ".claude").mkdir(parents=True, exist_ok=True)
         return self.integrate_agents_for_target(
-            KNOWN_TARGETS["claude"], package_info, project_root,
-            force=force, managed_files=managed_files,
+            KNOWN_TARGETS["claude"],
+            package_info,
+            project_root,
+            force=force,
+            managed_files=managed_files,
             diagnostics=diagnostics,
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["copilot"], ...) instead.
-    def sync_integration(self, apm_package, project_root: Path,
-                          managed_files: set = None) -> Dict[str, int]:
+    def sync_integration(
+        self,
+        apm_package,
+        project_root: Path,
+        managed_files: set = None,  # noqa: RUF013
+    ) -> dict[str, int]:
         """Remove APM-managed agent files from .github/agents/."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         return self.sync_for_target(
-            KNOWN_TARGETS["copilot"], apm_package, project_root,
+            KNOWN_TARGETS["copilot"],
+            apm_package,
+            project_root,
             managed_files=managed_files,
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["claude"], ...) instead.
-    def sync_integration_claude(self, apm_package, project_root: Path,
-                                managed_files: set = None) -> Dict[str, int]:
+    def sync_integration_claude(
+        self,
+        apm_package,
+        project_root: Path,
+        managed_files: set = None,  # noqa: RUF013
+    ) -> dict[str, int]:
         """Remove APM-managed agent files from .claude/agents/."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         return self.sync_for_target(
-            KNOWN_TARGETS["claude"], apm_package, project_root,
+            KNOWN_TARGETS["claude"],
+            apm_package,
+            project_root,
             managed_files=managed_files,
         )
 
@@ -399,54 +449,85 @@ class AgentIntegrator(BaseIntegrator):
     def get_target_filename_cursor(self, source_file: Path, package_name: str) -> str:
         """Generate target filename for Cursor agents (plain .md)."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         return self.get_target_filename_for_target(
-            source_file, package_name, KNOWN_TARGETS["cursor"],
+            source_file,
+            package_name,
+            KNOWN_TARGETS["cursor"],
         )
 
     # DEPRECATED: use integrate_agents_for_target(KNOWN_TARGETS["cursor"], ...) instead.
-    def integrate_package_agents_cursor(self, package_info, project_root: Path,
-                                          force: bool = False,
-                                          managed_files: set = None,
-                                          diagnostics=None) -> IntegrationResult:
+    def integrate_package_agents_cursor(
+        self,
+        package_info,
+        project_root: Path,
+        force: bool = False,
+        managed_files: set = None,  # noqa: RUF013
+        diagnostics=None,
+    ) -> IntegrationResult:
         """Integrate agents into .cursor/agents/."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         return self.integrate_agents_for_target(
-            KNOWN_TARGETS["cursor"], package_info, project_root,
-            force=force, managed_files=managed_files,
+            KNOWN_TARGETS["cursor"],
+            package_info,
+            project_root,
+            force=force,
+            managed_files=managed_files,
             diagnostics=diagnostics,
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["cursor"], ...) instead.
-    def sync_integration_cursor(self, apm_package, project_root: Path,
-                                managed_files: set = None) -> Dict[str, int]:
+    def sync_integration_cursor(
+        self,
+        apm_package,
+        project_root: Path,
+        managed_files: set = None,  # noqa: RUF013
+    ) -> dict[str, int]:
         """Remove APM-managed agent files from .cursor/agents/."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         return self.sync_for_target(
-            KNOWN_TARGETS["cursor"], apm_package, project_root,
+            KNOWN_TARGETS["cursor"],
+            apm_package,
+            project_root,
             managed_files=managed_files,
         )
 
     # DEPRECATED: use integrate_agents_for_target(KNOWN_TARGETS["opencode"], ...) instead.
-    def integrate_package_agents_opencode(self, package_info, project_root: Path,
-                                          force: bool = False,
-                                          managed_files: set = None,
-                                          diagnostics=None) -> IntegrationResult:
+    def integrate_package_agents_opencode(
+        self,
+        package_info,
+        project_root: Path,
+        force: bool = False,
+        managed_files: set = None,  # noqa: RUF013
+        diagnostics=None,
+    ) -> IntegrationResult:
         """Integrate agents into .opencode/agents/."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         return self.integrate_agents_for_target(
-            KNOWN_TARGETS["opencode"], package_info, project_root,
-            force=force, managed_files=managed_files,
+            KNOWN_TARGETS["opencode"],
+            package_info,
+            project_root,
+            force=force,
+            managed_files=managed_files,
             diagnostics=diagnostics,
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["opencode"], ...) instead.
-    def sync_integration_opencode(self, apm_package, project_root: Path,
-                                  managed_files: set = None) -> Dict[str, int]:
+    def sync_integration_opencode(
+        self,
+        apm_package,
+        project_root: Path,
+        managed_files: set = None,  # noqa: RUF013
+    ) -> dict[str, int]:
         """Remove APM-managed agent files from .opencode/agents/."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         return self.sync_for_target(
-            KNOWN_TARGETS["opencode"], apm_package, project_root,
+            KNOWN_TARGETS["opencode"],
+            apm_package,
+            project_root,
             managed_files=managed_files,
         )
-
-

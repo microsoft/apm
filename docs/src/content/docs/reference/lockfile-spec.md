@@ -55,7 +55,7 @@ The lock file serves four goals:
 | `apm install` (subsequent) | Read. Locked commits reused. New dependencies appended. |
 | `apm install --update` | Re-resolved. All refs re-resolved to latest matching commits. |
 | `apm deps update` | Re-resolved. Refreshes versions for specified or all dependencies. |
-| `apm pack` | Enriched. A `pack:` section is prepended to the bundled copy (see [section 6](#6-pack-enrichment)). |
+| `apm pack --format apm` | Enriched. A `pack:` section is prepended to the bundled copy (see [section 6](#6-pack-enrichment)). Plugin format (the default) does not emit `apm.lock.yaml` inside the bundle. |
 | `apm uninstall` | Updated. Removed dependency entries and their `deployed_files` references. |
 
 The lock file SHOULD be committed to version control. It MUST NOT be
@@ -122,7 +122,7 @@ fields:
 | `resolved_by` | string | MAY | `repo_url` of the parent that introduced this transitive dependency. Present only when `depth >= 2`. |
 | `package_type` | string | MUST | Package type: `apm_package`, `plugin`, `virtual`, or other registered types. |
 | `content_hash` | string | MAY | SHA-256 hash of the package file tree, in the format `"sha256:<hex>"`. Used to verify cached packages on subsequent installs. Omitted for local path dependencies. See [section 4.4](#44-content-integrity). |
-| `is_dev` | boolean | MAY | `true` if the dependency was resolved through [`devDependencies`](../manifest-schema/#5-devdependencies). Omitted when `false`. Dev deps are excluded from `apm pack --format plugin` bundles. |
+| `is_dev` | boolean | MAY | `true` if the dependency was resolved through [`devDependencies`](../manifest-schema/#5-devdependencies). Omitted when `false`. Dev deps are excluded from `apm pack` plugin output (and from `--format apm` bundles). |
 | `deployed_files` | array of strings | MUST | Every file path APM deployed for this dependency, relative to project root. |
 | `source` | string | MAY | Dependency source. `"local"` for local path dependencies. Omitted for remote (git) dependencies. |
 | `local_path` | string | MAY | Filesystem path (relative or absolute) to the local package. Present only when `source` is `"local"`. |
@@ -132,7 +132,7 @@ fields:
 Fields with empty or default values (empty strings, `false` booleans, empty
 lists) SHOULD be omitted from the serialized output to keep the file concise.
 
-**Dev dependency tracking:** Packages installed via `apm install --dev` are marked with `is_dev: true`. When building plugin bundles (`apm pack --format plugin`), dev dependencies are excluded from the output. Resolvers and CI tools should respect this flag when producing distributable artifacts.
+**Dev dependency tracking:** Packages installed via `apm install --dev` are marked with `is_dev: true`. `apm pack` (plugin format, the default) and `apm pack --format apm` both exclude dev dependencies from output. Resolvers and CI tools should respect this flag when producing distributable artifacts.
 
 ### 4.3 Unique Key
 
@@ -188,10 +188,10 @@ The synthesized entry MUST follow this convention:
 | `deployed_files` | populated from `local_deployed_files` |
 | `deployed_file_hashes` | populated from `local_deployed_file_hashes` |
 
-`is_dev: true` is non-negotiable. Plugin bundle exporters (`apm pack --format
-plugin`) skip dev dependencies; this flag ensures the host project's own content
-is excluded from distributable bundles via the existing dev-dependency filter,
-without requiring exporters to special-case the self-entry.
+`is_dev: true` is non-negotiable. `apm pack` (both formats) skips dev
+dependencies; this flag ensures the host project's own content is excluded from
+distributable bundles via the existing dev-dependency filter, without requiring
+exporters to special-case the self-entry.
 
 Consumers iterating `dependencies` SHOULD treat the `"."` key as the host
 project. Consumers reading the on-disk YAML directly will not see this entry --
@@ -219,9 +219,11 @@ produce consistent diffs in version control.
 
 ## 6. Pack Enrichment
 
-When `apm pack` creates a bundle, it prepends a `pack:` section to the lock
-file copy included in the bundle. This section is informational and is not
-written back to the project's `apm.lock.yaml`.
+When `apm pack --format apm` creates a bundle, it prepends a `pack:` section to
+the lock file copy included in the bundle. This section is informational and is
+not written back to the project's `apm.lock.yaml`. Plugin format (the default
+`apm pack`) does not embed `apm.lock.yaml` and therefore emits no `pack:`
+section.
 
 ```yaml
 pack:

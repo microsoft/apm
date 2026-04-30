@@ -146,7 +146,7 @@ APM-only keys (`subdir`, `version`, `ref` in yml, `tag_pattern`,
 | Unit tests fail | Library logic | Check the specific unit test file in tests/unit/marketplace/. |
 | Integration tests fail on yml parse | yml_schema.py | Confirm the test fixture YAML is valid. |
 | Integration tests fail on JSON content | builder.compose_marketplace_json | Check key order and golden fixture. |
-| Integration tests fail on exit code | CLI command handler | Inspect the sys.exit() paths in commands/marketplace.py. |
+| Integration tests fail on exit code | CLI command handler | Inspect the sys.exit() paths in the relevant module under src/apm_cli/commands/marketplace/. |
 | Integration tests fail on mock | conftest.py fixture | Confirm mock_ref_resolver patches the right import path. |
 | Live tests fail on resolution | Real remote | Check that APM_E2E_MARKETPLACE points to a valid repo with tags. |
 | Live tests fail on timeout | Network or rate limit | Increase timeout or set GITHUB_TOKEN to raise rate limit. |

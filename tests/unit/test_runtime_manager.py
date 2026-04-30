@@ -1,10 +1,10 @@
 """Unit tests for RuntimeManager and runtime CLI commands."""
 
-import shutil
-import subprocess
-import sys
+import shutil  # noqa: F401
+import subprocess  # noqa: F401
+import sys  # noqa: F401
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import MagicMock, Mock, call, patch  # noqa: F401
 
 import pytest
 from click.testing import CliRunner
@@ -73,9 +73,7 @@ class TestRuntimeManagerIsRuntimeAvailable:
     def test_binary_in_system_path_returns_true(self, tmp_path):
         manager = RuntimeManager()
         manager.runtime_dir = tmp_path  # nothing here
-        with patch(
-            "apm_cli.runtime.manager.shutil.which", return_value="/usr/bin/copilot"
-        ):
+        with patch("apm_cli.runtime.manager.shutil.which", return_value="/usr/bin/copilot"):
             assert manager.is_runtime_available("copilot") is True
 
     def test_binary_not_found_returns_false(self, tmp_path):
@@ -88,9 +86,7 @@ class TestRuntimeManagerIsRuntimeAvailable:
 class TestRuntimeManagerGetAvailableRuntime:
     def test_returns_first_available(self):
         manager = RuntimeManager()
-        with patch.object(
-            manager, "is_runtime_available", side_effect=lambda r: r == "codex"
-        ):
+        with patch.object(manager, "is_runtime_available", side_effect=lambda r: r == "codex"):
             assert manager.get_available_runtime() == "codex"
 
     def test_returns_none_when_nothing_available(self):
@@ -111,7 +107,7 @@ class TestRuntimeManagerListRuntimes:
         with patch("apm_cli.runtime.manager.shutil.which", return_value=None):
             result = manager.list_runtimes()
         assert set(result.keys()) == {"copilot", "codex", "llm", "gemini"}
-        for name, info in result.items():
+        for name, info in result.items():  # noqa: B007
             assert info["installed"] is False
             assert info["path"] is None
 
@@ -158,9 +154,7 @@ class TestRuntimeManagerListRuntimes:
         manager.runtime_dir = tmp_path
         binary = tmp_path / "llm"
         binary.write_text("fake")
-        with patch(
-            "apm_cli.runtime.manager.subprocess.run", side_effect=Exception("timeout")
-        ):
+        with patch("apm_cli.runtime.manager.subprocess.run", side_effect=Exception("timeout")):
             result = manager.list_runtimes()
         assert result["llm"]["version"] == "unknown"
 
@@ -190,9 +184,7 @@ class TestRuntimeManagerSetupRuntime:
 
     def test_exception_returns_false(self):
         manager = RuntimeManager()
-        with patch.object(
-            manager, "get_embedded_script", side_effect=RuntimeError("oops")
-        ):
+        with patch.object(manager, "get_embedded_script", side_effect=RuntimeError("oops")):
             assert manager.setup_runtime("copilot") is False
 
     def test_version_arg_unix(self):
@@ -307,10 +299,10 @@ class TestRuntimeManagerRemoveRuntime:
 class TestRuntimeManagerGetEmbeddedScript:
     def test_dev_script_found(self, tmp_path):
         """Script loading works when repo script exists on disk."""
-        manager = RuntimeManager()
+        manager = RuntimeManager()  # noqa: F841
         # Script search walks up from __file__ 4 levels then into scripts/runtime/
         # Create a fake script where the code looks for it
-        current_file = Path(__file__)
+        current_file = Path(__file__)  # noqa: F841
         # We just check that when a script is found it returns its content
         with patch("apm_cli.runtime.manager.Path") as MockPath:
             fake_script = MagicMock()
@@ -325,10 +317,7 @@ class TestRuntimeManagerGetEmbeddedScript:
         # Simpler: patch the actual script path resolution
         manager2 = RuntimeManager()
         real_script_path = (
-            Path(__file__).parent.parent.parent
-            / "scripts"
-            / "runtime"
-            / "setup-copilot.sh"
+            Path(__file__).parent.parent.parent / "scripts" / "runtime" / "setup-copilot.sh"
         )
         if real_script_path.exists():
             content = manager2.get_embedded_script("setup-copilot.sh")
@@ -385,9 +374,7 @@ class TestRuntimeSetupCommand:
             mock_mgr = MagicMock()
             mock_mgr.setup_runtime.return_value = True
             MockMgr.return_value = mock_mgr
-            result = runner.invoke(
-                runtime_group, ["setup", "copilot", "--version", "2.0"]
-            )
+            result = runner.invoke(runtime_group, ["setup", "copilot", "--version", "2.0"])  # noqa: F841
         mock_mgr.setup_runtime.assert_called_once_with("copilot", "2.0", False)
 
     def test_setup_with_vanilla_flag(self):
@@ -396,7 +383,7 @@ class TestRuntimeSetupCommand:
             mock_mgr = MagicMock()
             mock_mgr.setup_runtime.return_value = True
             MockMgr.return_value = mock_mgr
-            result = runner.invoke(runtime_group, ["setup", "copilot", "--vanilla"])
+            result = runner.invoke(runtime_group, ["setup", "copilot", "--vanilla"])  # noqa: F841
         mock_mgr.setup_runtime.assert_called_once_with("copilot", None, True)
 
     def test_setup_invalid_runtime_name(self):

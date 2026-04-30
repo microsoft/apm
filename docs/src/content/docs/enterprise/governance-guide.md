@@ -351,9 +351,10 @@ Workarounds when the network is unreliable:
 |---|---|---|---|
 | Network failure (`cache_miss_fetch_fail`) | Fail-OPEN, log warning, install proceeds with no policy | `policy.fetch_failure_default: block` in `apm.yml` | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
 | Cached stale (1h - 7d, refresh failed) | Warn and proceed with cached policy | `policy.fetch_failure: block` set in the cached policy itself | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
-| Malformed YAML (`malformed`) | Fail-OPEN by default | `policy.fetch_failure_default: block` | `policy/parser.py` |
+| Malformed YAML (`malformed`) (org policy file) | Fail-OPEN by default | `policy.fetch_failure_default: block` | `policy/parser.py` |
 | Hash-mismatch (project pin vs fetched) | **Always fail-CLOSED** | n/a (cannot be relaxed) | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
 | Garbage response | Fail-OPEN by default | `policy.fetch_failure_default: block` | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
+| Malformed project manifest (`manifest_parse`) | **Always fail-CLOSED** | n/a (cannot be relaxed) | `policy/policy_checks.py`, `policy/ci_checks.py` |
 | `extends:` cycle detected | Fail-CLOSED, raises `PolicyInheritanceError` | n/a | `policy/inheritance.py` |
 | Cross-host `extends:` rejected | Fail-CLOSED, raises before any fetch | n/a (security mitigation, cannot be relaxed) | `policy/discovery.py` |
 

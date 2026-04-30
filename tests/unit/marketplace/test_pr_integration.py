@@ -24,7 +24,6 @@ from apm_cli.marketplace.publisher import (
     TargetResult,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -102,7 +101,10 @@ class GhRunner:
     ) -> None:
         """Pre-configure a response for commands matching *key*."""
         self._responses[key] = subprocess.CompletedProcess(
-            list(key), returncode, stdout=stdout, stderr=stderr,
+            list(key),
+            returncode,
+            stdout=stdout,
+            stderr=stderr,
         )
 
     def set_error(
@@ -122,9 +124,7 @@ class GhRunner:
                     best = key
         return best
 
-    def __call__(
-        self, cmd: list[str], **kwargs: Any
-    ) -> subprocess.CompletedProcess:
+    def __call__(self, cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
         self.calls.append((list(cmd), dict(kwargs)))
 
         key = self._match_key(cmd)
@@ -138,8 +138,10 @@ class GhRunner:
             resp = self._responses[key]
             if kwargs.get("check") and resp.returncode != 0:
                 raise subprocess.CalledProcessError(
-                    resp.returncode, cmd,
-                    output=resp.stdout, stderr=resp.stderr,
+                    resp.returncode,
+                    cmd,
+                    output=resp.stdout,
+                    stderr=resp.stderr,
                 )
             return resp
 
@@ -232,7 +234,9 @@ class TestCheckAvailable:
         """gh --version returns non-zero -> False with install hint."""
         runner = GhRunner()
         runner.set_response(
-            ("gh", "--version"), returncode=1, stderr="not found",
+            ("gh", "--version"),
+            returncode=1,
+            stderr="not found",
         )
         integrator = PrIntegrator(runner=runner)
         ok, msg = integrator.check_available()
@@ -245,7 +249,8 @@ class TestCheckAvailable:
         """gh --version raises OSError -> False with install hint."""
         runner = GhRunner()
         runner.set_error(
-            ("gh", "--version"), FileNotFoundError("no such file"),
+            ("gh", "--version"),
+            FileNotFoundError("no such file"),
         )
         integrator = PrIntegrator(runner=runner)
         ok, msg = integrator.check_available()
@@ -257,10 +262,12 @@ class TestCheckAvailable:
         """gh auth status returns non-zero -> False with auth hint."""
         runner = GhRunner()
         runner.set_response(
-            ("gh", "--version"), stdout="gh version 2.50.0\n",
+            ("gh", "--version"),
+            stdout="gh version 2.50.0\n",
         )
         runner.set_response(
-            ("gh", "auth", "status"), returncode=1,
+            ("gh", "auth", "status"),
+            returncode=1,
             stderr="not logged in",
         )
         integrator = PrIntegrator(runner=runner)
@@ -274,10 +281,12 @@ class TestCheckAvailable:
         """gh auth status raises OSError -> False with auth hint."""
         runner = GhRunner()
         runner.set_response(
-            ("gh", "--version"), stdout="gh version 2.50.0\n",
+            ("gh", "--version"),
+            stdout="gh version 2.50.0\n",
         )
         runner.set_error(
-            ("gh", "auth", "status"), OSError("pipe broken"),
+            ("gh", "auth", "status"),
+            OSError("pipe broken"),
         )
         integrator = PrIntegrator(runner=runner)
         ok, msg = integrator.check_available()
@@ -289,7 +298,8 @@ class TestCheckAvailable:
         """gh --version and gh auth status both succeed -> True."""
         runner = GhRunner()
         runner.set_response(
-            ("gh", "--version"), stdout="gh version 2.50.0 (2025-01-01)\n",
+            ("gh", "--version"),
+            stdout="gh version 2.50.0 (2025-01-01)\n",
         )
         runner.set_response(("gh", "auth", "status"), stdout="Logged in\n")
         integrator = PrIntegrator(runner=runner)
@@ -312,7 +322,9 @@ class TestOpenOrUpdateEarlyReturns:
         runner = GhRunner()
         integrator = PrIntegrator(runner=runner)
         result = integrator.open_or_update(
-            _make_plan(), _make_target(), _make_target_result(),
+            _make_plan(),
+            _make_target(),
+            _make_target_result(),
             no_pr=True,
         )
         assert result.state == PrState.DISABLED
@@ -326,7 +338,8 @@ class TestOpenOrUpdateEarlyReturns:
         runner = GhRunner()
         integrator = PrIntegrator(runner=runner)
         result = integrator.open_or_update(
-            _make_plan(), _make_target(),
+            _make_plan(),
+            _make_target(),
             _make_target_result(outcome=PublishOutcome.NO_CHANGE),
         )
         assert result.state == PrState.SKIPPED
@@ -338,7 +351,8 @@ class TestOpenOrUpdateEarlyReturns:
         runner = GhRunner()
         integrator = PrIntegrator(runner=runner)
         result = integrator.open_or_update(
-            _make_plan(), _make_target(),
+            _make_plan(),
+            _make_target(),
             _make_target_result(outcome=PublishOutcome.SKIPPED_DOWNGRADE),
         )
         assert result.state == PrState.SKIPPED
@@ -350,7 +364,8 @@ class TestOpenOrUpdateEarlyReturns:
         runner = GhRunner()
         integrator = PrIntegrator(runner=runner)
         result = integrator.open_or_update(
-            _make_plan(), _make_target(),
+            _make_plan(),
+            _make_target(),
             _make_target_result(outcome=PublishOutcome.SKIPPED_REF_CHANGE),
         )
         assert result.state == PrState.SKIPPED
@@ -362,7 +377,8 @@ class TestOpenOrUpdateEarlyReturns:
         runner = GhRunner()
         integrator = PrIntegrator(runner=runner)
         result = integrator.open_or_update(
-            _make_plan(), _make_target(),
+            _make_plan(),
+            _make_target(),
             _make_target_result(outcome=PublishOutcome.FAILED),
         )
         assert result.state == PrState.SKIPPED
@@ -383,7 +399,8 @@ class TestCreatePr:
         runner = GhRunner()
         # gh pr list returns empty array (no existing PR)
         runner.set_response(
-            ("gh", "pr", "list"), stdout="[]\n",
+            ("gh", "pr", "list"),
+            stdout="[]\n",
         )
         # gh pr create returns PR URL
         runner.set_response(
@@ -392,7 +409,9 @@ class TestCreatePr:
         )
         integrator = PrIntegrator(runner=runner)
         result = integrator.open_or_update(
-            _make_plan(), _make_target(), _make_target_result(),
+            _make_plan(),
+            _make_target(),
+            _make_target_result(),
         )
 
         assert result.state == PrState.OPENED
@@ -411,14 +430,14 @@ class TestCreatePr:
         target = _make_target(repo="acme-org/other-repo", branch="develop")
         integrator = PrIntegrator(runner=runner)
         integrator.open_or_update(
-            _make_plan(), target,
+            _make_plan(),
+            target,
             _make_target_result(target=target),
         )
 
         # Find the pr create call
         create_calls = [
-            c for c, _ in runner.calls
-            if len(c) >= 3 and c[1] == "pr" and c[2] == "create"
+            c for c, _ in runner.calls if len(c) >= 3 and c[1] == "pr" and c[2] == "create"
         ]
         assert len(create_calls) == 1
         cmd = create_calls[0]
@@ -442,12 +461,13 @@ class TestCreatePr:
         )
         integrator = PrIntegrator(runner=runner)
         integrator.open_or_update(
-            plan, _make_target(), _make_target_result(),
+            plan,
+            _make_target(),
+            _make_target_result(),
         )
 
         create_calls = [
-            c for c, _ in runner.calls
-            if len(c) >= 3 and c[1] == "pr" and c[2] == "create"
+            c for c, _ in runner.calls if len(c) >= 3 and c[1] == "pr" and c[2] == "create"
         ]
         cmd = create_calls[0]
         head_idx = cmd.index("--head")
@@ -463,14 +483,15 @@ class TestCreatePr:
         )
         integrator = PrIntegrator(runner=runner)
         result = integrator.open_or_update(
-            _make_plan(), _make_target(), _make_target_result(),
+            _make_plan(),
+            _make_target(),
+            _make_target_result(),
             draft=True,
         )
 
         assert result.state == PrState.OPENED
         create_calls = [
-            c for c, _ in runner.calls
-            if len(c) >= 3 and c[1] == "pr" and c[2] == "create"
+            c for c, _ in runner.calls if len(c) >= 3 and c[1] == "pr" and c[2] == "create"
         ]
         assert any("--draft" in c for c in create_calls)
 
@@ -484,12 +505,13 @@ class TestCreatePr:
         )
         integrator = PrIntegrator(runner=runner)
         integrator.open_or_update(
-            _make_plan(), _make_target(), _make_target_result(),
+            _make_plan(),
+            _make_target(),
+            _make_target_result(),
         )
 
         create_calls = [
-            c for c, _ in runner.calls
-            if len(c) >= 3 and c[1] == "pr" and c[2] == "create"
+            c for c, _ in runner.calls if len(c) >= 3 and c[1] == "pr" and c[2] == "create"
         ]
         assert not any("--draft" in c for c in create_calls)
 
@@ -499,7 +521,9 @@ class TestCreatePr:
         runner.set_response(("gh", "pr", "list"), stdout="[]\n")
         integrator = PrIntegrator(runner=runner)
         result = integrator.open_or_update(
-            _make_plan(), _make_target(), _make_target_result(),
+            _make_plan(),
+            _make_target(),
+            _make_target_result(),
             dry_run=True,
         )
 
@@ -510,8 +534,7 @@ class TestCreatePr:
 
         # No pr create call should have been made
         create_calls = [
-            c for c, _ in runner.calls
-            if len(c) >= 3 and c[1] == "pr" and c[2] == "create"
+            c for c, _ in runner.calls if len(c) >= 3 and c[1] == "pr" and c[2] == "create"
         ]
         assert len(create_calls) == 0
 
@@ -525,7 +548,9 @@ class TestCreatePr:
         )
         integrator = PrIntegrator(runner=runner)
         result = integrator.open_or_update(
-            _make_plan(), _make_target(), _make_target_result(),
+            _make_plan(),
+            _make_target(),
+            _make_target_result(),
         )
 
         assert result.pr_number == 99
@@ -544,7 +569,9 @@ class TestCreatePr:
         )
         integrator = PrIntegrator(runner=runner)
         result = integrator.open_or_update(
-            _make_plan(), _make_target(), _make_target_result(),
+            _make_plan(),
+            _make_target(),
+            _make_target_result(),
         )
 
         assert result.pr_number == 123
@@ -568,16 +595,22 @@ class TestExistingPr:
         runner = GhRunner()
         runner.set_response(
             ("gh", "pr", "list"),
-            stdout=json.dumps([{
-                "number": 10,
-                "url": "https://github.com/acme-org/consumer/pull/10",
-                "body": body,
-                "headRefOid": "abc123",
-            }]),
+            stdout=json.dumps(
+                [
+                    {
+                        "number": 10,
+                        "url": "https://github.com/acme-org/consumer/pull/10",
+                        "body": body,
+                        "headRefOid": "abc123",
+                    }
+                ]
+            ),
         )
         integrator = PrIntegrator(runner=runner)
         result = integrator.open_or_update(
-            plan, target, _make_target_result(target=target),
+            plan,
+            target,
+            _make_target_result(target=target),
         )
 
         assert result.state == PrState.UPDATED
@@ -586,10 +619,7 @@ class TestExistingPr:
         assert "unchanged" in result.message
 
         # No pr edit call should have been made
-        edit_calls = [
-            c for c, _ in runner.calls
-            if len(c) >= 3 and c[1] == "pr" and c[2] == "edit"
-        ]
+        edit_calls = [c for c, _ in runner.calls if len(c) >= 3 and c[1] == "pr" and c[2] == "edit"]
         assert len(edit_calls) == 0
 
     def test_existing_pr_body_different(self) -> None:
@@ -600,17 +630,23 @@ class TestExistingPr:
         runner = GhRunner()
         runner.set_response(
             ("gh", "pr", "list"),
-            stdout=json.dumps([{
-                "number": 10,
-                "url": "https://github.com/acme-org/consumer/pull/10",
-                "body": "Old body text",
-                "headRefOid": "abc123",
-            }]),
+            stdout=json.dumps(
+                [
+                    {
+                        "number": 10,
+                        "url": "https://github.com/acme-org/consumer/pull/10",
+                        "body": "Old body text",
+                        "headRefOid": "abc123",
+                    }
+                ]
+            ),
         )
         runner.set_response(("gh", "pr", "edit"), stdout="")
         integrator = PrIntegrator(runner=runner)
         result = integrator.open_or_update(
-            plan, target, _make_target_result(target=target),
+            plan,
+            target,
+            _make_target_result(target=target),
         )
 
         assert result.state == PrState.UPDATED
@@ -618,10 +654,7 @@ class TestExistingPr:
         assert "body updated" in result.message.lower()
 
         # pr edit should have been called
-        edit_calls = [
-            c for c, _ in runner.calls
-            if len(c) >= 3 and c[1] == "pr" and c[2] == "edit"
-        ]
+        edit_calls = [c for c, _ in runner.calls if len(c) >= 3 and c[1] == "pr" and c[2] == "edit"]
         assert len(edit_calls) == 1
         cmd = edit_calls[0]
         assert "--body-file" in cmd
@@ -634,17 +667,23 @@ class TestExistingPr:
         runner = GhRunner()
         runner.set_response(
             ("gh", "pr", "list"),
-            stdout=json.dumps([{
-                "number": 10,
-                "url": "https://github.com/acme-org/consumer/pull/10",
-                "body": "Stale body",
-                "headRefOid": "abc123",
-            }]),
+            stdout=json.dumps(
+                [
+                    {
+                        "number": 10,
+                        "url": "https://github.com/acme-org/consumer/pull/10",
+                        "body": "Stale body",
+                        "headRefOid": "abc123",
+                    }
+                ]
+            ),
         )
         runner.set_response(("gh", "pr", "edit"), stdout="")
         integrator = PrIntegrator(runner=runner)
         result = integrator.open_or_update(
-            plan, target, _make_target_result(target=target),
+            plan,
+            target,
+            _make_target_result(target=target),
             dry_run=True,
         )
 
@@ -668,17 +707,19 @@ class TestErrorHandling:
         runner.set_error(
             ("gh", "pr", "create"),
             subprocess.CalledProcessError(
-                1, ["gh", "pr", "create"],
+                1,
+                ["gh", "pr", "create"],
                 output="",
                 stderr=(
-                    "fatal: authentication failed for "
-                    "'https://x-access-token:ghp_FAKE@github.com'"
+                    "fatal: authentication failed for 'https://x-access-token:ghp_FAKE@github.com'"
                 ),
             ),
         )
         integrator = PrIntegrator(runner=runner)
         result = integrator.open_or_update(
-            _make_plan(), _make_target(), _make_target_result(),
+            _make_plan(),
+            _make_target(),
+            _make_target_result(),
         )
 
         assert result.state == PrState.FAILED
@@ -691,11 +732,14 @@ class TestErrorHandling:
         """gh pr list returns non-JSON -> FAILED."""
         runner = GhRunner()
         runner.set_response(
-            ("gh", "pr", "list"), stdout="not valid json{{{",
+            ("gh", "pr", "list"),
+            stdout="not valid json{{{",
         )
         integrator = PrIntegrator(runner=runner)
         result = integrator.open_or_update(
-            _make_plan(), _make_target(), _make_target_result(),
+            _make_plan(),
+            _make_target(),
+            _make_target_result(),
         )
 
         assert result.state == PrState.FAILED
@@ -710,7 +754,9 @@ class TestErrorHandling:
         )
         integrator = PrIntegrator(runner=runner, timeout_s=30.0)
         result = integrator.open_or_update(
-            _make_plan(), _make_target(), _make_target_result(),
+            _make_plan(),
+            _make_target(),
+            _make_target_result(),
         )
 
         assert result.state == PrState.FAILED
@@ -720,11 +766,14 @@ class TestErrorHandling:
         """OSError from runner -> FAILED."""
         runner = GhRunner()
         runner.set_error(
-            ("gh", "pr", "list"), OSError("permission denied"),
+            ("gh", "pr", "list"),
+            OSError("permission denied"),
         )
         integrator = PrIntegrator(runner=runner)
         result = integrator.open_or_update(
-            _make_plan(), _make_target(), _make_target_result(),
+            _make_plan(),
+            _make_target(),
+            _make_target_result(),
         )
 
         assert result.state == PrState.FAILED
@@ -736,13 +785,17 @@ class TestErrorHandling:
         runner.set_error(
             ("gh", "pr", "list"),
             subprocess.CalledProcessError(
-                1, ["gh", "pr", "list"],
-                output="", stderr="HTTP 403",
+                1,
+                ["gh", "pr", "list"],
+                output="",
+                stderr="HTTP 403",
             ),
         )
         integrator = PrIntegrator(runner=runner)
         result = integrator.open_or_update(
-            _make_plan(), _make_target(), _make_target_result(),
+            _make_plan(),
+            _make_target(),
+            _make_target_result(),
         )
 
         assert result.state == PrState.FAILED
@@ -768,10 +821,7 @@ class TestTokenRedaction:
 
     def test_redacts_multiple_tokens(self) -> None:
         """Multiple token patterns are all redacted."""
-        text = (
-            "tried https://user:token1@host1 and "
-            "https://user:token2@host2"
-        )
+        text = "tried https://user:token1@host1 and https://user:token2@host2"
         redacted = _redact_token(text)
         assert "token1" not in redacted
         assert "token2" not in redacted
@@ -788,14 +838,17 @@ class TestTokenRedaction:
         runner.set_error(
             ("gh", "pr", "create"),
             subprocess.CalledProcessError(
-                128, ["gh", "pr", "create"],
+                128,
+                ["gh", "pr", "create"],
                 output="",
                 stderr="https://x-access-token:ghp_SECRET@github.com 403",
             ),
         )
         integrator = PrIntegrator(runner=runner)
         result = integrator.open_or_update(
-            _make_plan(), _make_target(), _make_target_result(),
+            _make_plan(),
+            _make_target(),
+            _make_target_result(),
         )
 
         assert result.state == PrState.FAILED
@@ -943,7 +996,8 @@ class TestEndToEnd:
         """Full flow: check_available -> open_or_update (create)."""
         runner = GhRunner()
         runner.set_response(
-            ("gh", "--version"), stdout="gh version 2.50.0\n",
+            ("gh", "--version"),
+            stdout="gh version 2.50.0\n",
         )
         runner.set_response(("gh", "auth", "status"), stdout="Logged in\n")
         runner.set_response(("gh", "pr", "list"), stdout="[]\n")
@@ -957,7 +1011,9 @@ class TestEndToEnd:
         assert ok is True
 
         result = integrator.open_or_update(
-            _make_plan(), _make_target(), _make_target_result(),
+            _make_plan(),
+            _make_target(),
+            _make_target_result(),
         )
         assert result.state == PrState.OPENED
         assert result.pr_number == 55
@@ -972,12 +1028,13 @@ class TestEndToEnd:
         )
         integrator = PrIntegrator(runner=runner)
         integrator.open_or_update(
-            _make_plan(), _make_target(), _make_target_result(),
+            _make_plan(),
+            _make_target(),
+            _make_target_result(),
         )
 
         list_calls = [
-            (c, kw) for c, kw in runner.calls
-            if len(c) >= 3 and c[1] == "pr" and c[2] == "list"
+            (c, kw) for c, kw in runner.calls if len(c) >= 3 and c[1] == "pr" and c[2] == "list"
         ]
         assert len(list_calls) == 1
         _, kw = list_calls[0]
@@ -993,12 +1050,13 @@ class TestEndToEnd:
         )
         integrator = PrIntegrator(runner=runner)
         integrator.open_or_update(
-            _make_plan(), _make_target(), _make_target_result(),
+            _make_plan(),
+            _make_target(),
+            _make_target_result(),
         )
 
         create_calls = [
-            c for c, _ in runner.calls
-            if len(c) >= 3 and c[1] == "pr" and c[2] == "create"
+            c for c, _ in runner.calls if len(c) >= 3 and c[1] == "pr" and c[2] == "create"
         ]
         cmd = create_calls[0]
         assert "--body-file" in cmd
@@ -1018,12 +1076,13 @@ class TestEndToEnd:
         )
         integrator = PrIntegrator(runner=runner)
         integrator.open_or_update(
-            plan, _make_target(), _make_target_result(),
+            plan,
+            _make_target(),
+            _make_target_result(),
         )
 
         create_calls = [
-            c for c, _ in runner.calls
-            if len(c) >= 3 and c[1] == "pr" and c[2] == "create"
+            c for c, _ in runner.calls if len(c) >= 3 and c[1] == "pr" and c[2] == "create"
         ]
         cmd = create_calls[0]
         title_idx = cmd.index("--title")

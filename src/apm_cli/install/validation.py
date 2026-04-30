@@ -29,6 +29,7 @@ import requests
 
 from ..utils.console import _rich_echo, _rich_info
 from ..utils.github_host import default_host
+from .errors import AuthenticationError
 
 # ---------------------------------------------------------------------------
 # TLS failure helpers
@@ -109,7 +110,10 @@ def _local_path_no_markers_hint(local_dir, logger=None):
         for grandchild in sorted(child.iterdir()) if child.is_dir() else []:
             if not grandchild.is_dir():
                 continue
-            if any((grandchild / m).exists() for m in markers) or find_plugin_json(grandchild) is not None:
+            if (
+                any((grandchild / m).exists() for m in markers)
+                or find_plugin_json(grandchild) is not None
+            ):
                 found.append(grandchild)
 
     if not found:
@@ -133,7 +137,8 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
     """Validate that a package exists and is accessible on GitHub, Azure DevOps, or locally."""
     import os
     import subprocess
-    import tempfile
+    import tempfile  # noqa: F401
+
     from apm_cli.core.auth import AuthResolver
 
     if logger:
@@ -146,8 +151,8 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
 
     try:
         # Parse the package to check if it's a virtual package or ADO
-        from apm_cli.models.apm_package import DependencyReference
         from apm_cli.deps.github_downloader import GitHubPackageDownloader
+        from apm_cli.models.apm_package import DependencyReference
 
         dep_ref = DependencyReference.parse(package)
 
@@ -163,6 +168,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             if (local / "apm.yml").exists() or (local / "SKILL.md").exists():
                 return True
             from apm_cli.utils.helpers import find_plugin_json
+
             if find_plugin_json(local) is not None:
                 return True
             # Directory exists but lacks package markers -- surface a hint
@@ -173,15 +179,24 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
         if dep_ref.is_virtual:
             ctx = auth_resolver.resolve_for_dep(dep_ref)
             host = dep_ref.host or default_host()
-            org = dep_ref.repo_url.split('/')[0] if dep_ref.repo_url and '/' in dep_ref.repo_url else None
+            org = (
+                dep_ref.repo_url.split("/")[0]
+                if dep_ref.repo_url and "/" in dep_ref.repo_url
+                else None
+            )
             if verbose_log:
-                verbose_log(f"Auth resolved: host={host}, org={org}, source={ctx.source}, type={ctx.token_type}")
+                verbose_log(
+                    f"Auth resolved: host={host}, org={org}, source={ctx.source}, type={ctx.token_type}"
+                )
             virtual_downloader = GitHubPackageDownloader(auth_resolver=auth_resolver)
             result = virtual_downloader.validate_virtual_package_exists(dep_ref)
             if not result and verbose_log:
                 try:
                     err_ctx = auth_resolver.build_error_context(
-                        host, f"accessing {package}", org=org, port=dep_ref.port,
+                        host,
+                        f"accessing {package}",
+                        org=org,
+                        port=dep_ref.port,
                         dep_url=dep_ref.repo_url,
                     )
                     for line in err_ctx.splitlines():
@@ -193,21 +208,26 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
         # For Azure DevOps or GitHub Enterprise (non-github.com hosts),
         # use the downloader which handles authentication properly
         if dep_ref.is_azure_devops() or (dep_ref.host and dep_ref.host != "github.com"):
-            from apm_cli.utils.github_host import is_github_hostname, is_azure_devops_hostname
+            from apm_cli.utils.github_host import is_azure_devops_hostname, is_github_hostname
 
             # Determine host type before building the URL so we know whether to
             # embed a token.  Generic (non-GitHub, non-ADO) hosts are excluded
             # from APM-managed auth; they rely on git credential helpers via the
             # relaxed validate_env below.
-            is_generic = not is_github_hostname(dep_ref.host) and not is_azure_devops_hostname(dep_ref.host)
+            is_generic = not is_github_hostname(dep_ref.host) and not is_azure_devops_hostname(
+                dep_ref.host
+            )
 
             # For GHES / ADO: resolve per-dependency auth up front so the URL
             # carries an embedded token and avoids triggering OS credential
             # helper popups during git ls-remote validation.
             _url_token = None
+            _dep_ctx = None
+            _auth_scheme = "basic"
             if not is_generic:
                 _dep_ctx = auth_resolver.resolve_for_dep(dep_ref)
                 _url_token = _dep_ctx.token
+                _auth_scheme = getattr(_dep_ctx, "auth_scheme", "basic") or "basic"
 
             ado_downloader = GitHubPackageDownloader(auth_resolver=auth_resolver)
             # Set the host
@@ -215,8 +235,14 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                 ado_downloader.github_host = dep_ref.host
 
             # Build authenticated URL using the resolved per-dep token.
+            # #1015: pass auth_scheme so bearer tokens use extraheader
+            # injection instead of embedding a ~1.5KB JWT in the userinfo.
             package_url = ado_downloader._build_repo_url(
-                dep_ref.repo_url, use_ssh=False, dep_ref=dep_ref, token=_url_token
+                dep_ref.repo_url,
+                use_ssh=False,
+                dep_ref=dep_ref,
+                token=_url_token,
+                auth_scheme=_auth_scheme,
             )
 
             explicit_scheme = (getattr(dep_ref, "explicit_scheme", None) or "").lower() or None
@@ -234,6 +260,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             # ``APM_ALLOW_PROTOCOL_FALLBACK=1`` env var (the same escape-hatch
             # the clone path honors) restores the legacy permissive chain.
             from apm_cli.deps.transport_selection import is_fallback_allowed
+
             allow_fallback_env = is_fallback_allowed()
 
             # For generic hosts (not GitHub, not ADO), relax the env so native
@@ -245,7 +272,11 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                     suppress_credential_helpers=is_insecure,
                 )
             else:
-                validate_env = {**os.environ, **ado_downloader.git_env}
+                # #1015: merge _dep_ctx.git_env (bearer-aware GIT_CONFIG_*
+                # overrides) into the subprocess env so `git ls-remote`
+                # actually sends the Authorization header for AAD tokens.
+                _ctx_git_env = getattr(_dep_ctx, "git_env", {}) if _dep_ctx else {}
+                validate_env = {**os.environ, **ado_downloader.git_env, **_ctx_git_env}
 
             # Build the probe order. Non-generic hosts (GHES/ADO) always probe
             # a single authenticated URL. Generic hosts:
@@ -260,7 +291,9 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                     dep_ref.repo_url, use_ssh=True, dep_ref=dep_ref
                 )
                 if explicit_scheme in ("http", "https"):
-                    urls_to_try = [package_url] if not allow_fallback_env else [package_url, ssh_url]
+                    urls_to_try = (
+                        [package_url] if not allow_fallback_env else [package_url, ssh_url]
+                    )
                 elif explicit_scheme == "ssh":
                     urls_to_try = [ssh_url] if not allow_fallback_env else [ssh_url, package_url]
                 else:
@@ -274,8 +307,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             if verbose_log:
                 attempt_word = "attempt" if len(urls_to_try) == 1 else "attempts"
                 verbose_log(
-                    f"Trying git ls-remote for {dep_ref.host} "
-                    f"({len(urls_to_try)} {attempt_word})"
+                    f"Trying git ls-remote for {dep_ref.host} ({len(urls_to_try)} {attempt_word})"
                 )
 
             def _scheme_of(url: str) -> str:
@@ -302,8 +334,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                     if env_val:
                         stderr_snippet = stderr_snippet.replace(env_val, "***")
                 verbose_log(
-                    f"git ls-remote ({scheme}) rc={run_result.returncode}: "
-                    f"{stderr_snippet}"
+                    f"git ls-remote ({scheme}) rc={run_result.returncode}: {stderr_snippet}"
                 )
 
             result = None
@@ -338,19 +369,27 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                 try:
                     from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
                     from apm_cli.utils.github_host import build_ado_bearer_git_env
+
                     provider = get_bearer_provider()
                     if provider.is_available():
                         try:
                             bearer = provider.get_bearer_token()
                             bearer_url = ado_downloader._build_repo_url(
-                                dep_ref.repo_url, use_ssh=False, dep_ref=dep_ref,
-                                token=None, auth_scheme="bearer",
+                                dep_ref.repo_url,
+                                use_ssh=False,
+                                dep_ref=dep_ref,
+                                token=None,
+                                auth_scheme="bearer",
                             )
                             bearer_env = {**validate_env, **build_ado_bearer_git_env(bearer)}
                             cmd = ["git", "ls-remote", "--heads", "--exit-code", bearer_url]
                             bearer_result = subprocess.run(
-                                cmd, capture_output=True, text=True,
-                                encoding="utf-8", timeout=30, env=bearer_env,
+                                cmd,
+                                capture_output=True,
+                                text=True,
+                                encoding="utf-8",
+                                timeout=30,
+                                env=bearer_env,
                             )
                             if bearer_result.returncode == 0:
                                 # Emit deferred stale-PAT warning via resolver
@@ -373,12 +412,46 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             # already on screen by the time we get here. Stderr is sanitized
             # via ``GitHubPackageDownloader._sanitize_git_error`` to scrub
             # any token-bearing URLs / env values before logging.
+
+            # #1015: distinguish auth failures from non-auth failures (DNS,
+            # timeout, repo-truly-not-found 404). Auth failures get a typed
+            # exception with actionable diagnostics; non-auth failures keep
+            # the legacy False return so the caller can word its own message.
+            if result.returncode != 0 and not is_generic:
+                _stderr = (result.stderr or "").lower()
+                _auth_signals = (
+                    "401" in _stderr
+                    or "403" in _stderr
+                    or "authentication failed" in _stderr
+                    or "unauthorized" in _stderr
+                    or "could not read username" in _stderr
+                )
+                if _auth_signals:
+                    _host = dep_ref.host or "dev.azure.com"
+                    _org = (
+                        dep_ref.repo_url.split("/")[0]
+                        if dep_ref.repo_url and "/" in dep_ref.repo_url
+                        else None
+                    )
+                    _diag = auth_resolver.build_error_context(
+                        _host,
+                        "validate",
+                        org=_org,
+                        dep_url=dep_ref.repo_url,
+                    )
+                    raise AuthenticationError(
+                        f"Authentication failed for {_host}",
+                        diagnostic_context=_diag,
+                    )
+
             return result.returncode == 0
 
         # For GitHub.com, use AuthResolver with unauth-first fallback
         host = dep_ref.host or default_host()
         port = dep_ref.port
-        org = dep_ref.repo_url.split('/')[0] if dep_ref.repo_url and '/' in dep_ref.repo_url else None
+        org = (
+            dep_ref.repo_url.split("/")[0] if dep_ref.repo_url and "/" in dep_ref.repo_url else None
+        )
         host_info = auth_resolver.classify_host(host, port=port)
 
         if verbose_log:
@@ -402,9 +475,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             try:
                 resp = requests.get(api_url, headers=headers, timeout=15)
             except requests.exceptions.SSLError as e:
-                raise RuntimeError(
-                    f"TLS verification failed for {host_info.display_name}"
-                ) from e
+                raise RuntimeError(f"TLS verification failed for {host_info.display_name}") from e
             except requests.exceptions.RequestException as e:
                 if verbose_log:
                     verbose_log(f"API request failed: {e}")
@@ -421,7 +492,8 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
 
         try:
             return auth_resolver.try_with_fallback(
-                host, _check_repo,
+                host,
+                _check_repo,
                 org=org,
                 port=port,
                 unauth_first=True,
@@ -434,7 +506,10 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             if verbose_log:
                 try:
                     ctx = auth_resolver.build_error_context(
-                        host, f"accessing {package}", org=org, port=port,
+                        host,
+                        f"accessing {package}",
+                        org=org,
+                        port=port,
                         dep_url=getattr(dep_ref, "repo_url", None),
                     )
                     for line in ctx.splitlines():
@@ -443,10 +518,14 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                     pass
             return False
 
+    except AuthenticationError:
+        # #1015: let auth failures propagate to the caller for proper
+        # rendering -- the outer try/except is only for parse failures.
+        raise
     except Exception:
         # If parsing fails, assume it's a regular GitHub package
         host = default_host()
-        org = package.split('/')[0] if '/' in package else None
+        org = package.split("/")[0] if "/" in package else None
         repo_path = package  # owner/repo format
 
         def _check_repo_fallback(token, git_env):
@@ -462,9 +541,7 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             try:
                 resp = requests.get(api_url, headers=headers, timeout=15)
             except requests.exceptions.SSLError as e:
-                raise RuntimeError(
-                    f"TLS verification failed for {host_info.display_name}"
-                ) from e
+                raise RuntimeError(f"TLS verification failed for {host_info.display_name}") from e
             except requests.exceptions.RequestException as e:
                 if verbose_log:
                     verbose_log(f"API fallback failed: {e}")
@@ -478,7 +555,8 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
 
         try:
             return auth_resolver.try_with_fallback(
-                host, _check_repo_fallback,
+                host,
+                _check_repo_fallback,
                 org=org,
                 unauth_first=True,
                 verbose_callback=verbose_log,
@@ -490,7 +568,9 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                 return False
             if verbose_log:
                 try:
-                    ctx = auth_resolver.build_error_context(host, f"accessing {package}", org=org, dep_url=package)
+                    ctx = auth_resolver.build_error_context(
+                        host, f"accessing {package}", org=org, dep_url=package
+                    )
                     for line in ctx.splitlines():
                         verbose_log(line)
                 except Exception:

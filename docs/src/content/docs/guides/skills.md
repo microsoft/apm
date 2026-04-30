@@ -270,7 +270,7 @@ devDependencies:
     - path: ./dev/skills/release-checklist
 ```
 
-`apm install --dev` deploys the skill locally; `apm pack --format plugin` excludes it. See [Dev-only Primitives](../dev-only-primitives/) for the full pattern.
+`apm install --dev` deploys the skill locally; `apm pack` excludes it from plugin output. See [Dev-only Primitives](../dev-only-primitives/) for the full pattern.
 
 ### Sub-skill Promotion
 

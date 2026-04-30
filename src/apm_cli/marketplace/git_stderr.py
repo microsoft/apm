@@ -131,11 +131,10 @@ def _build_summary(kind: GitErrorKind, operation: str, exit_code: int | None) ->
         text = f"Git ref or repository not found during {operation}."
     elif kind == GitErrorKind.TIMEOUT:
         text = f"Git network timeout during {operation}."
+    elif exit_code is not None:
+        text = f"Git failed during {operation} (exit {exit_code})."
     else:
-        if exit_code is not None:
-            text = f"Git failed during {operation} (exit {exit_code})."
-        else:
-            text = f"Git failed during {operation}."
+        text = f"Git failed during {operation}."
 
     if len(text) > _SUMMARY_MAX_LEN:
         text = text[: _SUMMARY_MAX_LEN - 3] + "..."
@@ -146,15 +145,11 @@ def _build_hint(kind: GitErrorKind, operation: str, remote: str | None) -> str:
     """Build a one-line actionable ASCII hint."""
     if kind == GitErrorKind.AUTH:
         return (
-            "Check your GITHUB_TOKEN / gh auth / SSH key. "
-            "Run 'apm marketplace doctor' to diagnose."
+            "Check your GITHUB_TOKEN / gh auth / SSH key. Run 'apm marketplace doctor' to diagnose."
         )
     if kind == GitErrorKind.NOT_FOUND:
         remote_label = f"'{remote}'" if remote else "the remote"
-        return (
-            f"Verify the remote {remote_label} exists "
-            "and the ref is spelled correctly."
-        )
+        return f"Verify the remote {remote_label} exists and the ref is spelled correctly."
     if kind == GitErrorKind.TIMEOUT:
         return "Network issue contacting the remote. Retry or check your connection."
     # UNKNOWN

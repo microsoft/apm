@@ -1,62 +1,110 @@
 <!--
 Canonical single-comment template for the APM Review Panel skill.
 
-Load this file ONLY at synthesis time, after every panelist has produced
-its findings. The orchestrator copies this skeleton verbatim, fills the
-placeholders, and emits the result as exactly ONE comment via the
-workflow's `safe-outputs.add-comment` channel.
+Loaded ONLY at synthesis time, AFTER:
+- every panelist task has returned JSON matching panelist-return-schema.json
+- the apm-ceo synthesizer task has returned JSON matching ceo-return-schema.json
+- the orchestrator has computed the binary verdict deterministically:
+    APPROVE iff sum(len(p.required) for p in panelists if p.active) == 0
+    REJECT  otherwise
+
+The orchestrator copies this skeleton verbatim, fills the placeholders
+from the collected JSON, and emits the result as exactly ONE comment via
+the workflow's `safe-outputs.add-comment` channel.
 
 Rules when filling the template:
 - ASCII only. No emojis, no Unicode dashes, no box-drawing characters.
-- Keep total length under ~600 lines.
+- Top-loaded order is non-negotiable: verdict, required, nits, CEO
+  arbitration FIRST. Per-persona detail goes in the collapsed details
+  block at the BOTTOM. Do not flip the order; the user-research is that
+  PR authors must see the decision and required actions in one screen.
 - Do NOT add or remove top-level sections. Adapt their bodies to the PR.
 - Do NOT split this output across multiple comments under any condition.
-- Routing changes which personas run, not which persona headings appear.
-- Only Auth Expert is conditional. If it was not activated for the PR,
-  write "Not activated -- <reason>" as that persona's body. Do not omit
-  the persona heading. All other persona headings always have findings.
-- The Python Architect block MUST contain the two mermaid diagrams and
-  the Design patterns subsection from the python-architect persona's
-  PR review output contract. If those are missing, the synthesis is
-  incomplete -- re-invoke the Python Architect before emitting.
+- The Required and Nits sections are AGGREGATES across all active
+  panelists. Render `[<persona>]` prefix on each item so authors know
+  who raised it.
+- The Per-persona detail block is the FULL JSON-derived findings list
+  for each panelist - even those with required==[] and nits==[]
+  (render those as "No findings.").
+- Auth Expert is the only persona that can render as "Inactive --
+  <reason>" in the per-persona block. Never omit its heading.
+- The python-architect persona MUST contribute the two mermaid diagrams
+  and the Design patterns subsection in its `extras.diagrams` payload;
+  surface them inside its per-persona block.
 -->
 
-## APM Review Panel Verdict
+## APM Review Panel Verdict: <APPROVE|REJECT>
 
-**Disposition**: <APPROVE | REQUEST_CHANGES | NEEDS_DISCUSSION> <optional one-line qualifier, e.g. "(with two minor pre-merge fixes)">
+> <one-line CEO arbitration headline; e.g. "All five specialists agreed; no required changes." or "Architecture is sound but supply-chain finding blocks merge.">
 
----
+### Required before merge (<N> items)
 
-### Per-persona findings
+<If N == 0:>
+None.
+<else, render aggregated required[] across all panelists:>
+- [<persona-slug>] <finding.summary> <if file/line: at `<file>:<line>`>
+  - Why: <finding.rationale>
+  - <if suggestion: Suggested fix: <finding.suggestion>>
+- ...
 
-**Python Architect**: <findings; MUST include the OO/class mermaid diagram, the execution-flow mermaid diagram, and the Design patterns subsection per the python-architect persona's PR review output contract>
+### Nits (<M> items, skip if you want)
 
-**CLI Logging Expert**: <findings>
-
-**DevX UX Expert**: <findings>
-
-**Supply Chain Security Expert**: <findings>
-
-**Auth Expert**: <findings, or "Not activated -- <reason citing the touched files>">
-
-**OSS Growth Hacker**: <findings; if relevant, include side-channel note to CEO about conversion / growth-strategy implications>
-
----
+<If M == 0:>
+None.
+<else, render aggregated nits[]:>
+- [<persona-slug>] <finding.summary> <if file/line: at `<file>:<line>`>
+- ...
 
 ### CEO arbitration
 
-<one-paragraph synthesis from apm-ceo: resolve any disagreements between specialists, ratify the disposition, and state the strategic call. If specialists agreed and the change is uncontroversial, say so plainly in one or two sentences.>
+<ceo.arbitration prose, one to three paragraphs.>
+
+<if ceo.dissent_notes is non-empty:>
+**Dissent resolved:** <ceo.dissent_notes>
+
+<if ceo.growth_signal is non-empty:>
+**Growth/positioning note:** <ceo.growth_signal>
 
 ---
 
-### Required actions before merge
+<details>
+<summary>Per-persona findings (full)</summary>
 
-1. <required action with concrete pointer (file path, line, diff suggestion). If Disposition is APPROVE with no required actions, write "None." here -- do not omit the section.>
-2. <...>
+#### Python Architect
 
----
+<if active:>
+<Include the OO/class mermaid diagram and execution-flow mermaid
+diagram from extras.diagrams. Then render required[] + nits[] in full;
+if both empty, write "No findings.">
+<else: should never be inactive>
 
-### Optional follow-ups
+#### CLI Logging Expert
 
-- <follow-up suggestion that is out of scope for this PR but worth tracking>
-- <...>
+<Render required[] + nits[] in full; "No findings." if both empty.>
+
+#### DevX UX Expert
+
+<Render required[] + nits[] in full; "No findings." if both empty.>
+
+#### Supply Chain Security Expert
+
+<Render required[] + nits[] in full; "No findings." if both empty.>
+
+#### Auth Expert
+
+<if active:>
+<Render required[] + nits[] in full; "No findings." if both empty.>
+<else:>
+Inactive -- <inactive_reason>
+
+#### OSS Growth Hacker
+
+<Render required[] + nits[] in full; "No findings." if both empty.
+Surface any side-channel growth/positioning note inline; CEO already
+echoed it in the headline section if relevant.>
+
+</details>
+
+<sub>Verdict computed deterministically: <N> required findings across
+<K> active panelists. APPROVE iff N == 0. Push a new commit to clear
+this verdict label automatically.</sub>
