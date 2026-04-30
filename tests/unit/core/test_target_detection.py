@@ -6,6 +6,7 @@ import pytest
 from apm_cli.core.target_detection import (
     ALL_CANONICAL_TARGETS,
     EXPERIMENTAL_TARGETS,
+    REASON_NO_TARGET_FOLDER,
     VALID_TARGET_VALUES,
     TargetParamType,
     detect_target,
@@ -122,8 +123,8 @@ class TestDetectTarget:
         assert reason == "apm.yml target"
 
     def test_auto_detect_github_only(self, tmp_path):
-        """Auto-detect vscode when only .github/ exists."""
-        (tmp_path / ".github").mkdir()
+        """Auto-detect vscode when only .github/ with Copilot markers exists."""
+        (tmp_path / ".github" / "prompts").mkdir(parents=True)
 
         target, reason = detect_target(
             project_root=tmp_path,
@@ -149,7 +150,7 @@ class TestDetectTarget:
 
     def test_auto_detect_both_folders(self, tmp_path):
         """Auto-detect all when both folders exist."""
-        (tmp_path / ".github").mkdir()
+        (tmp_path / ".github" / "prompts").mkdir(parents=True)
         (tmp_path / ".claude").mkdir()
 
         target, reason = detect_target(
@@ -170,6 +171,22 @@ class TestDetectTarget:
         )
 
         assert target == "minimal"
+
+    def test_auto_detect_bare_github_no_copilot_markers(self, tmp_path):
+        """Auto-detect minimal when .github/ exists but has no Copilot markers.
+
+        A bare .github/ with only workflows/CODEOWNERS is NOT a Copilot signal.
+        """
+        (tmp_path / ".github" / "workflows").mkdir(parents=True)
+
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target=None,
+        )
+
+        assert target == "minimal"
+        assert reason == REASON_NO_TARGET_FOLDER
         assert "no target folder found" in reason
 
 
@@ -318,8 +335,8 @@ class TestDetectTargetCursor:
         assert ".cursor/" in reason
 
     def test_auto_detect_cursor_plus_github(self, tmp_path):
-        """Auto-detect all when .cursor/ and .github/ exist."""
-        (tmp_path / ".github").mkdir()
+        """Auto-detect all when .cursor/ and .github/ with Copilot markers exist."""
+        (tmp_path / ".github" / "prompts").mkdir(parents=True)
         (tmp_path / ".cursor").mkdir()
         target, _ = detect_target(
             project_root=tmp_path,
@@ -357,8 +374,8 @@ class TestDetectTargetOpencode:
         assert ".opencode/" in reason
 
     def test_auto_detect_opencode_plus_github(self, tmp_path):
-        """Auto-detect all when .opencode/ and .github/ exist."""
-        (tmp_path / ".github").mkdir()
+        """Auto-detect all when .opencode/ and .github/ with Copilot markers exist."""
+        (tmp_path / ".github" / "prompts").mkdir(parents=True)
         (tmp_path / ".opencode").mkdir()
         target, _ = detect_target(
             project_root=tmp_path,

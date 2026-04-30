@@ -110,7 +110,17 @@ def detect_target(  # noqa: PLR0911
             return "all", "apm.yml target"
 
     # Priority 3: Auto-detect from existing folders
-    github_exists = (project_root / ".github").exists()
+    # For .github/, require Copilot-specific markers (not just CI workflows).
+    # A bare .github/ with only workflows/CODEOWNERS/etc. is NOT a Copilot signal.
+    github_copilot_markers = [
+        ".github/copilot-instructions.md",
+        ".github/skills",
+        ".github/agents",
+        ".github/prompts",
+    ]
+    github_exists = any(
+        (project_root / marker).exists() for marker in github_copilot_markers
+    )
     claude_exists = (project_root / ".claude").exists()
     cursor_exists = (project_root / ".cursor").is_dir()
     opencode_exists = (project_root / ".opencode").is_dir()
