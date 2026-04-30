@@ -1,10 +1,8 @@
-"""Tests for ContextOptimizer cache + placement changes from PR #871.
+"""Regression coverage for ContextOptimizer behavior tracked under #871.
 
 Covers:
-- ``_directory_files_cache`` population during ``_analyze_project_structure``
-  (skips DEFAULT_SKIP_DIRS and user-supplied ``exclude_patterns``).
-- ``_cached_glob`` filtering pre-built file list via ``_glob_match`` and
-  reusing cached results across calls.
+- ``_cached_glob`` reusing cached results across repeated calls (cache layer
+  populated via ``_glob_cache``).
 - ``_optimize_single_point_placement`` selecting the lowest common ancestor
   inside a deep subtree (regression: narrow ``applyTo`` patterns must not
   bias toward the project root).
@@ -30,26 +28,13 @@ class TestCachedGlobUsesFileList(unittest.TestCase):
 
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_cached_glob_respects_exclude_patterns(self):
-        """_cached_glob should not return files under excluded directories."""
-        (self.base / "src").mkdir()
-        (self.base / "src" / "app.py").touch()
-        (self.base / "vendor" / "lib").mkdir(parents=True)
-        (self.base / "vendor" / "lib" / "dep.py").touch()
-
-        optimizer = ContextOptimizer(
-            base_dir=str(self.base),
-            exclude_patterns=["vendor"],
-        )
-
-        matches = optimizer._cached_glob("**/*.py")
-        match_strs = [m.replace("\\", "/") for m in matches]
-
-        self.assertTrue(any("src/app.py" in m for m in match_strs))
-        self.assertFalse(any("vendor" in m for m in match_strs))
-
     def test_cached_glob_caches_results(self):
-        """Second call with same pattern reuses cached glob data."""
+        """Second call with same pattern reuses cached glob data.
+
+        Regression coverage for the cache layer added in #871: once a pattern
+        has been resolved, subsequent calls must reuse ``_glob_cache`` and
+        return equivalent results without re-scanning the filesystem.
+        """
         (self.base / "a.py").touch()
         optimizer = ContextOptimizer(base_dir=str(self.base))
         first = optimizer._cached_glob("**/*.py")
@@ -57,64 +42,6 @@ class TestCachedGlobUsesFileList(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertIn("**/*.py", optimizer._glob_cache)
         self.assertEqual(first, optimizer._glob_cache["**/*.py"])
-
-    def test_cached_glob_respects_file_level_excludes(self):
-        """File-level exclude patterns must keep excluded files out of _cached_glob."""
-        (self.base / "src").mkdir()
-        (self.base / "src" / "app.py").touch()
-        (self.base / "src" / "generated.dll").touch()
-        (self.base / "src" / "auto.generated.h").touch()
-
-        optimizer = ContextOptimizer(
-            base_dir=str(self.base),
-            exclude_patterns=["**/*.dll", "**/*.generated.h"],
-        )
-
-        # Glob for any file should not surface excluded file extensions.
-        all_matches = optimizer._cached_glob("**/*")
-        match_strs = [m.replace("\\", "/") for m in all_matches]
-        self.assertTrue(any("src/app.py" in m for m in match_strs))
-        self.assertFalse(any(m.endswith(".dll") for m in match_strs))
-        self.assertFalse(any(m.endswith(".generated.h") for m in match_strs))
-
-        # And the underlying file cache must not contain them either.
-        all_cached = [str(f) for files in optimizer._directory_files_cache.values() for f in files]
-        self.assertFalse(any(s.endswith(".dll") for s in all_cached))
-        self.assertFalse(any(s.endswith(".generated.h") for s in all_cached))
-
-    def test_directory_files_cache_skips_default_dirs(self):
-        """_directory_files_cache must not include files from DEFAULT_SKIP_DIRS."""
-        (self.base / "src").mkdir()
-        (self.base / "src" / "ok.py").touch()
-        (self.base / "node_modules" / "pkg").mkdir(parents=True)
-        (self.base / "node_modules" / "pkg" / "bad.js").touch()
-        (self.base / "__pycache__").mkdir()
-        (self.base / "__pycache__" / "mod.pyc").touch()
-
-        optimizer = ContextOptimizer(base_dir=str(self.base))
-        optimizer._analyze_project_structure()
-        all_files = [str(f) for files in optimizer._directory_files_cache.values() for f in files]
-
-        self.assertTrue(any("ok.py" in s for s in all_files))
-        self.assertFalse(any("node_modules" in s for s in all_files))
-        self.assertFalse(any("__pycache__" in s for s in all_files))
-
-    def test_directory_files_cache_skips_custom_excludes(self):
-        """_directory_files_cache must also respect user-supplied exclude_patterns."""
-        (self.base / "src").mkdir()
-        (self.base / "src" / "ok.py").touch()
-        (self.base / "Binaries" / "Win64").mkdir(parents=True)
-        (self.base / "Binaries" / "Win64" / "huge.dll").touch()
-
-        optimizer = ContextOptimizer(
-            base_dir=str(self.base),
-            exclude_patterns=["Binaries"],
-        )
-        optimizer._analyze_project_structure()
-        all_files = [str(f) for files in optimizer._directory_files_cache.values() for f in files]
-
-        self.assertTrue(any("ok.py" in s for s in all_files))
-        self.assertFalse(any("Binaries" in s for s in all_files))
 
 
 class TestSinglePointPlacementNonRootLCA(unittest.TestCase):

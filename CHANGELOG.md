@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **BREAKING: `apm pack` now produces a Claude Code plugin directory by default — zero extra flags, schema-validated `plugin.json`, convention dirs auto-discovered.** The legacy APM bundle layout is preserved under `--format apm`. Migration: CI workflows and scripts that consume the legacy bundle must add `--format apm` (the [`microsoft/apm-action`](https://github.com/microsoft/apm-action) wrapper has been updated accordingly). (#1061)
 - **Plugin manifest schema conformance.** The synthesized/written `plugin.json` no longer emits `agents`/`skills`/`commands`/`instructions` keys pointing at the convention directories — these are auto-discovered by Claude Code, and per the [official schema](https://json.schemastore.org/claude-code-plugin.json) those array entries must be `./*.md` paths to *additional* files. The convention dirs themselves are still copied to disk. When stripping such keys from an authored `plugin.json`, `apm pack` now emits a warning so authors can clean up their source. (#1061)
-- `ContextOptimizer` reuses a cached per-directory file list built during project analysis for glob matching, directory matching, and stats, eliminating repeated `os.walk` / `iterdir()` calls and rewriting the stats loop from O(N^2) to O(N). Low-distribution `applyTo` patterns are now placed at their lowest common ancestor instead of the project root. (#871)
+- `ContextOptimizer` regression tests for the cached glob layer and lowest-common-ancestor placement of narrow `applyTo` patterns. (#871)
 
 ### Added
 
