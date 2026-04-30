@@ -9,7 +9,7 @@ field self-documenting.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional  # noqa: F401
 
 if TYPE_CHECKING:
     from apm_cli.deps.registry_proxy import RegistryConfig
@@ -46,9 +46,9 @@ class InstalledPackage:
         that subsequent installs replay through the same proxy.
     """
 
-    dep_ref: "DependencyReference"
-    resolved_commit: Optional[str]
+    dep_ref: DependencyReference
+    resolved_commit: str | None
     depth: int
-    resolved_by: Optional[str]
+    resolved_by: str | None
     is_dev: bool = False
-    registry_config: "Optional[RegistryConfig]" = None
+    registry_config: RegistryConfig | None = None

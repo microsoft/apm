@@ -9,21 +9,26 @@ import sys
 
 import click
 
-from ._helpers import _get_console
 from ..core.command_logger import CommandLogger
 from ..core.experimental import (
     FLAGS,
     display_name,
-    normalise_flag_name,
-    validate_flag_name,
-    enable as _enable_flag,
-    disable as _disable_flag,
     get_malformed_flag_keys,
     get_overridden_flags,
     get_stale_config_keys,
+    normalise_flag_name,
+    validate_flag_name,
+)
+from ..core.experimental import (
+    disable as _disable_flag,
+)
+from ..core.experimental import (
+    enable as _enable_flag,
+)
+from ..core.experimental import (
     reset as _reset_flags,
 )
-
+from ._helpers import _get_console
 
 # ------------------------------------------------------------------
 # Helpers
@@ -38,7 +43,7 @@ def _resolve_verbose(ctx: click.Context, local_verbose: bool) -> bool:
     """
     if local_verbose:
         return True
-    return (ctx.obj.get("verbose", False) if ctx.obj else False)
+    return ctx.obj.get("verbose", False) if ctx.obj else False
 
 
 def _print_list_footer(flags_shown: list, logger: "CommandLogger") -> None:
@@ -137,6 +142,7 @@ def _handle_unknown_flag(name: str, logger: CommandLogger) -> None:
 # Click command group
 # ------------------------------------------------------------------
 
+
 @click.group(
     help="Manage experimental feature flags",
     invoke_without_command=True,
@@ -153,8 +159,12 @@ def experimental(ctx, verbose: bool):
 
 
 @experimental.command("list", help="List all experimental features")
-@click.option("--enabled", "filter_enabled", is_flag=True, default=False, help="Show only enabled features")
-@click.option("--disabled", "filter_disabled", is_flag=True, default=False, help="Show only disabled features")
+@click.option(
+    "--enabled", "filter_enabled", is_flag=True, default=False, help="Show only enabled features"
+)
+@click.option(
+    "--disabled", "filter_disabled", is_flag=True, default=False, help="Show only disabled features"
+)
 @click.option("--verbose", "-v", is_flag=True, default=False, help="Show detailed output")
 @click.option("--json", "as_json", is_flag=True, default=False, help="Output as JSON array")
 @click.pass_context
@@ -195,17 +205,21 @@ def list_flags(ctx, filter_enabled: bool, filter_disabled: bool, verbose: bool, 
         overridden = get_overridden_flags()
         rows = []
         for flag in flags_to_show:
-            rows.append({
-                "name": flag.name,
-                "enabled": is_enabled(flag.name),
-                "default": flag.default,
-                "description": flag.description,
-                "source": "config" if flag.name in overridden else "default",
-            })
+            rows.append(
+                {
+                    "name": flag.name,
+                    "enabled": is_enabled(flag.name),
+                    "default": flag.default,
+                    "description": flag.description,
+                    "source": "config" if flag.name in overridden else "default",
+                }
+            )
         click.echo(json.dumps(rows, indent=2))
         return
 
-    logger.verbose_detail("Experimental features let you try new behaviour before it becomes default.")
+    logger.verbose_detail(
+        "Experimental features let you try new behaviour before it becomes default."
+    )
     _build_table(flags_to_show, logger)
 
 

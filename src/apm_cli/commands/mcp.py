@@ -50,16 +50,14 @@ def _handle_registry_network_error(exc, registry, console, logger, action):
     url = registry.client.registry_url
     override = os.environ.get(MCP_REGISTRY_ENV)
     if override:
-        hint = (
-            f"{MCP_REGISTRY_ENV} is set -- verify the URL is correct and "
-            "reachable."
-        )
+        hint = f"{MCP_REGISTRY_ENV} is set -- verify the URL is correct and reachable."
     else:
         hint = "The registry may be temporarily unavailable. Retry shortly."
 
     msg = f"Could not {action} MCP registry at {url}"
     if console:
         from ..utils.console import STATUS_SYMBOLS
+
         console.print(f"\n{STATUS_SYMBOLS['error']} {msg}", style="red")
         console.print(f"  -> {hint}", style="dim")
     else:
@@ -156,16 +154,14 @@ def search(ctx, query, limit, verbose):
             return
 
         # Professional header with search context
-        console.print(f"\n[bold cyan]MCP Registry Search[/bold cyan]")
+        console.print("\n[bold cyan]MCP Registry Search[/bold cyan]")
         console.print(f"[muted]Query: {query}[/muted]")
 
         if not servers:
             console.print(
                 f"\n[yellow][!][/yellow] No MCP servers found matching '[bold]{query}[/bold]'"
             )
-            console.print(
-                "\n[muted] Try broader search terms or check the spelling[/muted]"
-            )
+            console.print("\n[muted] Try broader search terms or check the spelling[/muted]")
             return
 
         # Results summary
@@ -203,7 +199,7 @@ def search(ctx, query, limit, verbose):
 
         # Helpful next steps
         console.print(
-            f"\n[muted] Use [bold cyan]apm mcp show <name>[/bold cyan] for detailed information[/muted]"
+            "\n[muted] Use [bold cyan]apm mcp show <name>[/bold cyan] for detailed information[/muted]"
         )
         if total_shown == limit:
             console.print(
@@ -213,8 +209,10 @@ def search(ctx, query, limit, verbose):
     except Exception as e:
         try:
             import requests
-            if isinstance(e, requests.RequestException) and \
-                    _handle_registry_network_error(e, registry, _get_console(), logger, "reach"):
+
+            if isinstance(e, requests.RequestException) and _handle_registry_network_error(
+                e, registry, _get_console(), logger, "reach"
+            ):
                 sys.exit(1)
         except ImportError:
             pass
@@ -240,19 +238,15 @@ def show(ctx, server_name, verbose):
             try:
                 server_info = registry.get_package_info(server_name)
                 click.echo(f"Name: {server_info.get('name', 'Unknown')}")
-                click.echo(
-                    f"Description: {server_info.get('description', 'No description')}"
-                )
-                click.echo(
-                    f"Repository: {server_info.get('repository', {}).get('url', 'Unknown')}"
-                )
+                click.echo(f"Description: {server_info.get('description', 'No description')}")
+                click.echo(f"Repository: {server_info.get('repository', {}).get('url', 'Unknown')}")
             except ValueError:
                 logger.error(f"Server '{server_name}' not found")
                 sys.exit(1)
             return
 
         # Professional loading indicator
-        console.print(f"\n[bold cyan]MCP Server Details[/bold cyan]")
+        console.print("\n[bold cyan]MCP Server Details[/bold cyan]")
         console.print(f"[muted]Fetching: {server_name}[/muted]")
 
         try:
@@ -262,7 +256,7 @@ def show(ctx, server_name, verbose):
                 f"\n[red]x[/red] MCP server '[bold]{server_name}[/bold]' not found in registry"
             )
             console.print(
-                f"\n[muted] Use [bold cyan]apm mcp search <query>[/bold cyan] to find available servers[/muted]"
+                "\n[muted] Use [bold cyan]apm mcp search <query>[/bold cyan] to find available servers[/muted]"
             )
             sys.exit(1)
 
@@ -392,9 +386,7 @@ def show(ctx, server_name, verbose):
             "Add to apm.yml dependencies",
             f"[yellow]mcp:[/yellow] [cyan]- {install_name}[/cyan]",
         )
-        install_table.add_row(
-            "2", "Install dependencies", "[bold cyan]apm install[/bold cyan]"
-        )
+        install_table.add_row("2", "Install dependencies", "[bold cyan]apm install[/bold cyan]")
         install_table.add_row(
             "3",
             "Direct install (coming soon)",
@@ -406,8 +398,10 @@ def show(ctx, server_name, verbose):
     except Exception as e:
         try:
             import requests
-            if isinstance(e, requests.RequestException) and \
-                    _handle_registry_network_error(e, registry, _get_console(), logger, "reach"):
+
+            if isinstance(e, requests.RequestException) and _handle_registry_network_error(
+                e, registry, _get_console(), logger, "reach"
+            ):
                 sys.exit(1)
         except ImportError:
             pass
@@ -419,7 +413,7 @@ def show(ctx, server_name, verbose):
 @click.option("--limit", default=20, show_default=True, help="Number of results to show")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.pass_context
-def list(ctx, limit, verbose):
+def list(ctx, limit, verbose):  # noqa: F811
     """List all available MCP servers in the registry."""
     logger = CommandLogger("mcp-list", verbose=verbose)
     registry = None
@@ -440,23 +434,19 @@ def list(ctx, limit, verbose):
             return
 
         # Professional header
-        console.print(f"\n[bold cyan]MCP Registry Catalog[/bold cyan]")
-        console.print(f"[muted]Discovering available servers...[/muted]")
+        console.print("\n[bold cyan]MCP Registry Catalog[/bold cyan]")
+        console.print("[muted]Discovering available servers...[/muted]")
 
         servers = registry.list_available_packages()[:limit]
 
         if not servers:
-            console.print(f"\n[yellow][!][/yellow] No MCP servers found in registry")
-            console.print(
-                f"\n[muted] The registry might be temporarily unavailable[/muted]"
-            )
+            console.print("\n[yellow][!][/yellow] No MCP servers found in registry")
+            console.print("\n[muted] The registry might be temporarily unavailable[/muted]")
             return
 
         # Results summary with pagination info
         total_shown = len(servers)
-        console.print(
-            f"\n[green]+[/green] Showing [bold]{total_shown}[/bold] MCP servers"
-        )
+        console.print(f"\n[green]+[/green] Showing [bold]{total_shown}[/bold] MCP servers")
         if total_shown == limit:
             console.print(
                 f"[muted]Use [bold cyan]--limit {limit * 2}[/bold cyan] to see more results[/muted]"
@@ -491,17 +481,19 @@ def list(ctx, limit, verbose):
 
         # Helpful navigation
         console.print(
-            f"\n[muted] Use [bold cyan]apm mcp show <name>[/bold cyan] for detailed information[/muted]"
+            "\n[muted] Use [bold cyan]apm mcp show <name>[/bold cyan] for detailed information[/muted]"
         )
         console.print(
-            f"[muted]   Use [bold cyan]apm mcp search <query>[/bold cyan] to find specific servers[/muted]"
+            "[muted]   Use [bold cyan]apm mcp search <query>[/bold cyan] to find specific servers[/muted]"
         )
 
     except Exception as e:
         try:
             import requests
-            if isinstance(e, requests.RequestException) and \
-                    _handle_registry_network_error(e, registry, _get_console(), logger, "reach"):
+
+            if isinstance(e, requests.RequestException) and _handle_registry_network_error(
+                e, registry, _get_console(), logger, "reach"
+            ):
                 sys.exit(1)
         except ImportError:
             pass

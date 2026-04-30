@@ -12,11 +12,11 @@ from ...marketplace.pr_integration import PrIntegrator, PrResult, PrState
 from ...marketplace.publisher import MarketplacePublisher, PublishOutcome
 from .._helpers import _get_console, _is_interactive
 from . import (
-    marketplace,
-    _load_targets_file,
     _load_config_or_exit,
+    _load_targets_file,
     _render_publish_plan,
     _render_publish_summary,
+    marketplace,
 )
 
 
@@ -177,14 +177,16 @@ def publish(
                     )
                     pr_results.append(pr_result)
                 else:
-                    pr_results.append(PrResult(
-                        target=result.target,
-                        state=PrState.SKIPPED,
-                        pr_number=None,
-                        pr_url=None,
-                        message=f"No PR needed: {result.outcome.value}",
-                    ))
-            else:
+                    pr_results.append(
+                        PrResult(
+                            target=result.target,
+                            state=PrState.SKIPPED,
+                            pr_number=None,
+                            pr_url=None,
+                            message=f"No PR needed: {result.outcome.value}",
+                        )
+                    )
+            else:  # noqa: PLR5501
                 if result.outcome == PublishOutcome.UPDATED:
                     pr_result = pr.open_or_update(
                         plan,
@@ -196,13 +198,15 @@ def publish(
                     )
                     pr_results.append(pr_result)
                 else:
-                    pr_results.append(PrResult(
-                        target=result.target,
-                        state=PrState.SKIPPED,
-                        pr_number=None,
-                        pr_url=None,
-                        message=f"No PR needed: {result.outcome.value}",
-                    ))
+                    pr_results.append(
+                        PrResult(
+                            target=result.target,
+                            state=PrState.SKIPPED,
+                            pr_number=None,
+                            pr_url=None,
+                            message=f"No PR needed: {result.outcome.value}",
+                        )
+                    )
 
     # ------------------------------------------------------------------
     # 4. Summary rendering
@@ -226,12 +230,10 @@ def publish(
             )
         else:
             logger.progress(f"State file: {state_path}", symbol="info")
-    except Exception:  # noqa: BLE001 -- best-effort Rich rendering fallback
+    except Exception:
         logger.progress(f"State file: {state_path}", symbol="info")
 
     # Exit code
-    failed_count = sum(
-        1 for r in results if r.outcome == PublishOutcome.FAILED
-    )
+    failed_count = sum(1 for r in results if r.outcome == PublishOutcome.FAILED)
     if failed_count > 0:
         sys.exit(1)

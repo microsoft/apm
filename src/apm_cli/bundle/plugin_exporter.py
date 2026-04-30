@@ -6,24 +6,23 @@ plugin hosts can consume directly.  The output contains no APM-specific files
 """
 
 import json
-import os
+import os  # noqa: F401
+import re
 import shutil
 import tarfile
 from pathlib import Path, PurePosixPath
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple  # noqa: F401, UP035
 
 import yaml
 
-import re
-
 from ..deps.lockfile import (
-    LockFile,
     LockedDependency,
+    LockFile,
     get_lockfile_path,
     migrate_lockfile_if_needed,
 )
 from ..models.apm_package import APMPackage, DependencyReference
-from ..utils.console import _rich_info, _rich_warning
+from ..utils.console import _rich_info, _rich_warning  # noqa: F401
 from ..utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from .packer import PackResult
 
@@ -78,13 +77,13 @@ def _normalize_bare_skill_slug(slug: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _collect_apm_components(apm_dir: Path) -> List[Tuple[Path, str]]:
+def _collect_apm_components(apm_dir: Path) -> list[tuple[Path, str]]:
     """Collect all components from a package's ``.apm/`` directory.
 
     Returns a list of ``(source_abs, output_rel_posix)`` tuples using the
     APM → plugin mapping table.
     """
-    components: List[Tuple[Path, str]] = []
+    components: list[tuple[Path, str]] = []
     if not apm_dir.is_dir():
         return components
 
@@ -95,9 +94,7 @@ def _collect_apm_components(apm_dir: Path) -> List[Tuple[Path, str]]:
     _collect_recursive(apm_dir / "skills", "skills", components)
 
     # prompts/ -> commands/ (rename .prompt.md -> .md)
-    _collect_recursive(
-        apm_dir / "prompts", "commands", components, rename=_rename_prompt
-    )
+    _collect_recursive(apm_dir / "prompts", "commands", components, rename=_rename_prompt)
 
     # instructions/ -> instructions/
     _collect_recursive(apm_dir / "instructions", "instructions", components)
@@ -108,13 +105,13 @@ def _collect_apm_components(apm_dir: Path) -> List[Tuple[Path, str]]:
     return components
 
 
-def _collect_root_plugin_components(project_root: Path) -> List[Tuple[Path, str]]:
+def _collect_root_plugin_components(project_root: Path) -> list[tuple[Path, str]]:
     """Collect plugin-native components authored at root level.
 
     Packages that already follow the plugin directory convention (``agents/``,
     ``skills/``, etc. at the repo root) have their files picked up here.
     """
-    components: List[Tuple[Path, str]] = []
+    components: list[tuple[Path, str]] = []
     for dir_name in ("agents", "skills", "commands", "instructions"):
         _collect_recursive(project_root / dir_name, dir_name, components)
     return components
@@ -123,7 +120,7 @@ def _collect_root_plugin_components(project_root: Path) -> List[Tuple[Path, str]
 def _collect_bare_skill(
     install_path: Path,
     dep: "LockedDependency",
-    out: List[Tuple[Path, str]],
+    out: list[tuple[Path, str]],
 ) -> None:
     """Detect a bare Claude skill (SKILL.md at dep root, no skills/ subdir).
 
@@ -144,8 +141,15 @@ def _collect_bare_skill(
     if not slug:
         slug = dep.repo_url.rsplit("/", 1)[-1] if dep.repo_url else "skill"
     for f in sorted(install_path.iterdir()):
-        if f.is_file() and not f.is_symlink() and f.name not in (
-            "apm.yml", "apm.lock.yaml", "plugin.json",
+        if (
+            f.is_file()
+            and not f.is_symlink()
+            and f.name
+            not in (
+                "apm.yml",
+                "apm.lock.yaml",
+                "plugin.json",
+            )
         ):
             out.append((f, f"skills/{slug}/{f.name}"))
 
@@ -156,7 +160,7 @@ def _collect_bare_skill(
 def _collect_flat(
     src_dir: Path,
     output_prefix: str,
-    out: List[Tuple[Path, str]],
+    out: list[tuple[Path, str]],
     *,
     rename=None,
 ) -> None:
@@ -172,7 +176,7 @@ def _collect_flat(
 def _collect_recursive(
     src_dir: Path,
     output_prefix: str,
-    out: List[Tuple[Path, str]],
+    out: list[tuple[Path, str]],
     *,
     rename=None,
 ) -> None:
@@ -196,9 +200,7 @@ def _collect_recursive(
 _MAX_MERGE_DEPTH = 20
 
 
-def _deep_merge(
-    base: dict, overlay: dict, *, overwrite: bool = False, _depth: int = 0
-) -> None:
+def _deep_merge(base: dict, overlay: dict, *, overwrite: bool = False, _depth: int = 0) -> None:
     """Recursively merge *overlay* into *base*.
 
     When *overwrite* is False (default), existing base keys win.
@@ -207,9 +209,7 @@ def _deep_merge(
     Raises ``ValueError`` if nesting exceeds ``_MAX_MERGE_DEPTH``.
     """
     if _depth > _MAX_MERGE_DEPTH:
-        raise ValueError(
-            f"Hooks/MCP config exceeds maximum nesting depth ({_MAX_MERGE_DEPTH})"
-        )
+        raise ValueError(f"Hooks/MCP config exceeds maximum nesting depth ({_MAX_MERGE_DEPTH})")
     for key, value in overlay.items():
         if key not in base:
             base[key] = value
@@ -218,9 +218,8 @@ def _deep_merge(
                 _deep_merge(base[key], value, overwrite=True, _depth=_depth + 1)
             else:
                 base[key] = value
-        else:
-            if isinstance(base[key], dict) and isinstance(value, dict):
-                _deep_merge(base[key], value, overwrite=False, _depth=_depth + 1)
+        elif isinstance(base[key], dict) and isinstance(value, dict):
+            _deep_merge(base[key], value, overwrite=False, _depth=_depth + 1)
 
 
 def _collect_hooks_from_apm(apm_dir: Path) -> dict:
@@ -286,7 +285,7 @@ def _collect_mcp(package_root: Path) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _get_dev_dependency_urls(apm_yml_path: Path) -> Set[Tuple[str, str]]:
+def _get_dev_dependency_urls(apm_yml_path: Path) -> set[tuple[str, str]]:
     """Read ``devDependencies.apm`` from raw YAML and return a set of
     ``(repo_url, virtual_path)`` tuples for matching against lockfile entries.
 
@@ -296,6 +295,7 @@ def _get_dev_dependency_urls(apm_yml_path: Path) -> Set[Tuple[str, str]]:
     """
     try:
         from ..utils.yaml_io import load_yaml
+
         data = load_yaml(apm_yml_path)
     except (yaml.YAMLError, OSError, ValueError):
         return set()
@@ -307,7 +307,7 @@ def _get_dev_dependency_urls(apm_yml_path: Path) -> Set[Tuple[str, str]]:
     apm_dev = dev_deps.get("apm", [])
     if not isinstance(apm_dev, list):
         return set()
-    keys: Set[Tuple[str, str]] = set()
+    keys: set[tuple[str, str]] = set()
     for dep in apm_dev:
         if isinstance(dep, str):
             try:
@@ -330,7 +330,9 @@ def _get_dev_dependency_urls(apm_yml_path: Path) -> Set[Tuple[str, str]]:
 
 
 def _find_or_synthesize_plugin_json(
-    project_root: Path, apm_yml_path: Path, logger=None,
+    project_root: Path,
+    apm_yml_path: Path,
+    logger=None,
 ) -> dict:
     """Locate an existing ``plugin.json`` or synthesise one from ``apm.yml``."""
     from ..deps.plugin_parser import synthesize_plugin_json_from_apm_yml
@@ -352,8 +354,7 @@ def _find_or_synthesize_plugin_json(
 
     else:
         _warn_msg = (
-            "No plugin.json found. Synthesizing from apm.yml. "
-            "Consider running 'apm init --plugin'."
+            "No plugin.json found. Synthesizing from apm.yml. Consider running 'apm init --plugin'."
         )
         if logger:
             logger.warning(_warn_msg)
@@ -362,12 +363,12 @@ def _find_or_synthesize_plugin_json(
     return synthesize_plugin_json_from_apm_yml(apm_yml_path)
 
 
-def _update_plugin_json_paths(plugin_json: dict, output_files: List[str]) -> dict:
+def _update_plugin_json_paths(plugin_json: dict, output_files: list[str]) -> dict:
     """Update component paths in ``plugin.json`` to reflect the output layout."""
     result = dict(plugin_json)
 
     # Detect which top-level directories actually exist in the output
-    top_dirs: Set[str] = set()
+    top_dirs: set[str] = set()
     for f in output_files:
         parts = Path(f).parts
         if parts:
@@ -408,7 +409,7 @@ def _dep_install_path(dep: LockedDependency, apm_modules_dir: Path) -> Path:
 def export_plugin_bundle(
     project_root: Path,
     output_dir: Path,
-    target: Optional[str] = None,
+    target: str | None = None,
     archive: bool = False,
     dry_run: bool = False,
     force: bool = False,
@@ -459,8 +460,8 @@ def export_plugin_bundle(
 
     # 5. Collect components -- deps first (lockfile order), then root package
     #    file_map: output_rel_posix -> (source_abs, owner_name)
-    file_map: Dict[str, Tuple[Path, str]] = {}
-    collisions: List[str] = []
+    file_map: dict[str, tuple[Path, str]] = {}
+    collisions: list[str] = []
     merged_hooks: dict = {}
     merged_mcp: dict = {}
 
@@ -470,9 +471,10 @@ def export_plugin_bundle(
         for dep in lockfile.get_all_dependencies():
             # Prefer lockfile is_dev flag (covers transitive deps);
             # fall back to apm.yml URL matching for older lockfiles
-            if getattr(dep, "is_dev", False) or (
-                dep.repo_url, getattr(dep, "virtual_path", "") or ""
-            ) in dev_dep_urls:
+            if (
+                getattr(dep, "is_dev", False)
+                or (dep.repo_url, getattr(dep, "virtual_path", "") or "") in dev_dep_urls
+            ):
                 continue
 
             install_path = _dep_install_path(dep, apm_modules_dir)
@@ -491,9 +493,7 @@ def export_plugin_bundle(
             # Bare Claude skills: SKILL.md at dep root with no skills/ subdir
             _collect_bare_skill(install_path, dep, dep_components)
 
-            _merge_file_map(
-                file_map, dep_components, dep_name, force, collisions
-            )
+            _merge_file_map(file_map, dep_components, dep_name, force, collisions)
 
             # Hooks -- deps merge (first wins among deps)
             dep_hooks = _collect_hooks_from_apm(dep_apm_dir)
@@ -618,7 +618,7 @@ def export_plugin_bundle(
         ensure_path_within(archive_path, output_dir)
         with tarfile.open(archive_path, "w:gz") as tar:
 
-            def _tar_filter(info: tarfile.TarInfo) -> Optional[tarfile.TarInfo]:
+            def _tar_filter(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
                 if info.issym() or info.islnk():
                     return None  # reject symlinks injected after write
                 return info
@@ -636,11 +636,11 @@ def export_plugin_bundle(
 
 
 def _merge_file_map(
-    file_map: Dict[str, Tuple[Path, str]],
-    components: List[Tuple[Path, str]],
+    file_map: dict[str, tuple[Path, str]],
+    components: list[tuple[Path, str]],
     owner: str,
     force: bool,
-    collisions: List[str],
+    collisions: list[str],
 ) -> None:
     """Merge *components* into *file_map* with collision handling.
 

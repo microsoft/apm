@@ -32,11 +32,11 @@ import subprocess
 import tempfile
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field  # noqa: F401
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional  # noqa: F401
 
 import yaml
 
@@ -47,7 +47,7 @@ from ..utils.path_security import (
 )
 from ._git_utils import redact_token as _redact_token
 from ._io import atomic_write
-from .errors import MarketplaceError, MarketplaceYmlError
+from .errors import MarketplaceError, MarketplaceYmlError  # noqa: F401
 from .git_stderr import translate_git_stderr
 from .ref_resolver import RefResolver
 from .resolver import parse_marketplace_ref
@@ -59,11 +59,11 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "ConsumerTarget",
-    "PublishPlan",
-    "PublishOutcome",
-    "TargetResult",
-    "PublishState",
     "MarketplacePublisher",
+    "PublishOutcome",
+    "PublishPlan",
+    "PublishState",
+    "TargetResult",
 ]
 
 # ---------------------------------------------------------------------------
@@ -122,9 +122,7 @@ class ConsumerTarget:
             )
         from ..utils.path_security import validate_path_segments
 
-        validate_path_segments(
-            self.path_in_repo, context="consumer-targets path_in_repo"
-        )
+        validate_path_segments(self.path_in_repo, context="consumer-targets path_in_repo")
 
 
 @dataclass(frozen=True)
@@ -141,7 +139,7 @@ class PublishPlan:
     short_hash: str = ""  # deterministic hash suffix for the branch name
     allow_downgrade: bool = False
     allow_ref_change: bool = False
-    target_package: Optional[str] = None
+    target_package: str | None = None
 
 
 class PublishOutcome(str, Enum):
@@ -161,8 +159,8 @@ class TargetResult:
     target: ConsumerTarget
     outcome: PublishOutcome
     message: str  # human-readable detail
-    old_version: Optional[str] = None
-    new_version: Optional[str] = None
+    old_version: str | None = None
+    new_version: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +192,7 @@ class PublishState:
         }
 
     @classmethod
-    def load(cls, root: Path) -> "PublishState":
+    def load(cls, root: Path) -> PublishState:
         """Load state from disk or return a fresh instance.
 
         A missing file or corrupt JSON both result in a fresh state --
@@ -305,9 +303,9 @@ class MarketplacePublisher:
         self,
         marketplace_root: Path,
         *,
-        ref_resolver: Optional[RefResolver] = None,
-        clock: Optional[Callable[[], datetime]] = None,
-        runner: Optional[Callable[..., subprocess.CompletedProcess]] = None,
+        ref_resolver: RefResolver | None = None,
+        clock: Callable[[], datetime] | None = None,
+        runner: Callable[..., subprocess.CompletedProcess] | None = None,
     ) -> None:
         self._root = marketplace_root.resolve()
         self._ref_resolver = ref_resolver
@@ -328,7 +326,7 @@ class MarketplacePublisher:
         self,
         targets: Sequence[ConsumerTarget],
         *,
-        target_package: Optional[str] = None,
+        target_package: str | None = None,
         allow_downgrade: bool = False,
         allow_ref_change: bool = False,
     ) -> PublishPlan:
@@ -400,17 +398,12 @@ class MarketplacePublisher:
         hash_input = "|".join(sorted_repos) + "|" + yml.version
         if target_package:
             hash_input += "|" + target_package
-        short_hash = hashlib.sha1(
-            hash_input.encode("utf-8")
-        ).hexdigest()[:8]
+        short_hash = hashlib.sha1(hash_input.encode("utf-8")).hexdigest()[:8]  # noqa: S324
 
         # Compute branch name
         name_segment = _sanitise_branch_segment(yml.name)
         version_segment = _sanitise_branch_segment(yml.version)
-        branch_name = (
-            f"apm/marketplace-update-{name_segment}"
-            f"-{version_segment}-{short_hash}"
-        )
+        branch_name = f"apm/marketplace-update-{name_segment}-{version_segment}-{short_hash}"
 
         # Compute commit message
         commit_message = (
@@ -423,9 +416,7 @@ class MarketplacePublisher:
 
         # Compute tag for the new version
         tag_pattern = yml.build.tag_pattern
-        new_ref = render_tag(
-            tag_pattern, name=yml.name, version=yml.version
-        )
+        new_ref = render_tag(tag_pattern, name=yml.name, version=yml.version)
 
         return PublishPlan(
             marketplace_name=yml.name,
@@ -476,10 +467,8 @@ class MarketplacePublisher:
 
         def _process(idx: int, target: ConsumerTarget) -> TargetResult:
             try:
-                return self._process_single_target(
-                    target, plan, dry_run=dry_run
-                )
-            except Exception as exc:  # noqa: BLE001 -- per-target error isolation
+                return self._process_single_target(target, plan, dry_run=dry_run)
+            except Exception as exc:
                 logger.debug("Target processing failed for %s", target.repo, exc_info=True)
                 return TargetResult(
                     outcome=PublishOutcome.FAILED,
@@ -490,14 +479,13 @@ class MarketplacePublisher:
 
         with ThreadPoolExecutor(max_workers=workers) as pool:
             future_to_idx = {
-                pool.submit(_process, idx, target): idx
-                for idx, target in enumerate(plan.targets)
+                pool.submit(_process, idx, target): idx for idx, target in enumerate(plan.targets)
             }
             for future in as_completed(future_to_idx):
                 idx = future_to_idx[future]
                 try:
                     result = future.result()
-                except Exception as exc:  # noqa: BLE001 -- thread-pool future catch-all
+                except Exception as exc:
                     logger.debug("Future result failed for target %d", idx, exc_info=True)
                     result = TargetResult(
                         target=plan.targets[idx],
@@ -530,9 +518,13 @@ class MarketplacePublisher:
             try:
                 self._run_git(
                     [
-                        "git", "clone", "--depth=1",
-                        "--branch", target.branch,
-                        url, str(clone_dir),
+                        "git",
+                        "clone",
+                        "--depth=1",
+                        "--branch",
+                        target.branch,
+                        url,
+                        str(clone_dir),
                     ],
                     cwd=tmpdir,
                 )
@@ -560,10 +552,7 @@ class MarketplacePublisher:
                 return TargetResult(
                     target=target,
                     outcome=PublishOutcome.FAILED,
-                    message=(
-                        "Branch creation failed: "
-                        + _redact_token(str(exc))
-                    ),
+                    message=("Branch creation failed: " + _redact_token(str(exc))),
                 )
 
             # 3. Load consumer apm.yml
@@ -574,10 +563,7 @@ class MarketplacePublisher:
                 return TargetResult(
                     target=target,
                     outcome=PublishOutcome.FAILED,
-                    message=(
-                        "Path traversal rejected: "
-                        + target.path_in_repo
-                    ),
+                    message=("Path traversal rejected: " + target.path_in_repo),
                 )
 
             if not apm_yml_path.exists():
@@ -594,9 +580,7 @@ class MarketplacePublisher:
                 return TargetResult(
                     target=target,
                     outcome=PublishOutcome.FAILED,
-                    message=(
-                        f"Failed to parse {target.path_in_repo}: {exc}"
-                    ),
+                    message=(f"Failed to parse {target.path_in_repo}: {exc}"),
                 )
 
             if not isinstance(data, dict):
@@ -612,10 +596,7 @@ class MarketplacePublisher:
                 return TargetResult(
                     target=target,
                     outcome=PublishOutcome.FAILED,
-                    message=(
-                        f"Marketplace '{plan.marketplace_name}' not "
-                        "referenced in apm.yml"
-                    ),
+                    message=(f"Marketplace '{plan.marketplace_name}' not referenced in apm.yml"),
                 )
 
             apm_deps = deps.get("apm")
@@ -623,16 +604,13 @@ class MarketplacePublisher:
                 return TargetResult(
                     target=target,
                     outcome=PublishOutcome.FAILED,
-                    message=(
-                        f"Marketplace '{plan.marketplace_name}' not "
-                        "referenced in apm.yml"
-                    ),
+                    message=(f"Marketplace '{plan.marketplace_name}' not referenced in apm.yml"),
                 )
 
             # Parse each entry with parse_marketplace_ref
             new_ref = plan.new_ref
             mkt_lower = plan.marketplace_name.lower()
-            matches: list[tuple[int, str, Optional[str], str]] = []
+            matches: list[tuple[int, str, str | None, str]] = []
             warnings: list[str] = []
 
             for idx, entry_str in enumerate(apm_deps):
@@ -647,17 +625,13 @@ class MarketplacePublisher:
                     continue  # Direct repo ref -- not a marketplace entry
                 _plugin_name, entry_mkt, old_ref = parsed
                 if entry_mkt.lower() == mkt_lower:
-                    matches.append(
-                        (idx, _plugin_name, old_ref, entry_str)
-                    )
+                    matches.append((idx, _plugin_name, old_ref, entry_str))
 
             # 5. Zero matches -> FAILED
             if not matches:
                 warn_suffix = ""
                 if warnings:
-                    warn_suffix = (
-                        " (warnings: " + "; ".join(warnings) + ")"
-                    )
+                    warn_suffix = " (warnings: " + "; ".join(warnings) + ")"
                 return TargetResult(
                     target=target,
                     outcome=PublishOutcome.FAILED,
@@ -695,9 +669,7 @@ class MarketplacePublisher:
                         if not plan.allow_ref_change:
                             return TargetResult(
                                 target=target,
-                                outcome=(
-                                    PublishOutcome.SKIPPED_REF_CHANGE
-                                ),
+                                outcome=(PublishOutcome.SKIPPED_REF_CHANGE),
                                 message=(
                                     f"Entry '{entry_str}' uses "
                                     f"non-semver ref '{old_ref}'; "
@@ -712,9 +684,7 @@ class MarketplacePublisher:
                         if not plan.allow_downgrade:
                             return TargetResult(
                                 target=target,
-                                outcome=(
-                                    PublishOutcome.SKIPPED_DOWNGRADE
-                                ),
+                                outcome=(PublishOutcome.SKIPPED_DOWNGRADE),
                                 message=(
                                     f"Downgrade from {old_ref} to "
                                     f"{new_ref}; pass allow_downgrade "
@@ -725,10 +695,7 @@ class MarketplacePublisher:
                             )
 
             # 7. No-change check
-            needs_update = any(
-                old_ref != new_ref
-                for _, _, old_ref, _ in matches
-            )
+            needs_update = any(old_ref != new_ref for _, _, old_ref, _ in matches)
             if not needs_update:
                 return TargetResult(
                     target=target,
@@ -739,7 +706,7 @@ class MarketplacePublisher:
                 )
 
             # 8. Apply updates to matching entries
-            first_old_ref: Optional[str] = None
+            first_old_ref: str | None = None
             updated_count = 0
             for idx, _pname, old_ref, entry_str in matches:
                 if old_ref == new_ref:
@@ -756,7 +723,7 @@ class MarketplacePublisher:
             # 9. Write apm.yml atomically
             new_text = yaml.safe_dump(
                 data, default_flow_style=False, sort_keys=False
-            )
+            )  # yaml-io-exempt
             tmp_yml = apm_yml_path.with_suffix(".yml.tmp")
             try:
                 with open(tmp_yml, "w", encoding="utf-8") as fh:
@@ -765,7 +732,7 @@ class MarketplacePublisher:
                     os.fsync(fh.fileno())
                 os.replace(str(tmp_yml), str(apm_yml_path))
             except BaseException:
-                try:
+                try:  # noqa: SIM105
                     tmp_yml.unlink(missing_ok=True)
                 except OSError:
                     pass
@@ -778,9 +745,7 @@ class MarketplacePublisher:
                     cwd=str(clone_dir),
                 )
                 msg_file = Path(tmpdir) / "commit-msg.txt"
-                msg_file.write_text(
-                    plan.commit_message, encoding="utf-8"
-                )
+                msg_file.write_text(plan.commit_message, encoding="utf-8")
                 self._run_git(
                     ["git", "commit", "-F", str(msg_file)],
                     cwd=str(clone_dir),
@@ -789,9 +754,7 @@ class MarketplacePublisher:
                 return TargetResult(
                     target=target,
                     outcome=PublishOutcome.FAILED,
-                    message=(
-                        "Commit failed: " + _redact_token(str(exc))
-                    ),
+                    message=("Commit failed: " + _redact_token(str(exc))),
                 )
 
             # 11. Git push (unless dry_run)
@@ -799,8 +762,11 @@ class MarketplacePublisher:
                 try:
                     self._run_git(
                         [
-                            "git", "push", "-u",
-                            "origin", plan.branch_name,
+                            "git",
+                            "push",
+                            "-u",
+                            "origin",
+                            plan.branch_name,
                         ],
                         cwd=str(clone_dir),
                     )
@@ -814,15 +780,9 @@ class MarketplacePublisher:
 
             old_label = first_old_ref or "unset"
             if updated_count == 1:
-                msg = (
-                    f"Updated {plan.marketplace_name} from "
-                    f"{old_label} to {new_ref}"
-                )
+                msg = f"Updated {plan.marketplace_name} from {old_label} to {new_ref}"
             else:
-                msg = (
-                    f"Updated {updated_count} entries for "
-                    f"{plan.marketplace_name} to {new_ref}"
-                )
+                msg = f"Updated {updated_count} entries for {plan.marketplace_name} to {new_ref}"
             return TargetResult(
                 target=target,
                 outcome=PublishOutcome.UPDATED,
@@ -837,7 +797,7 @@ class MarketplacePublisher:
         self,
         cmd: list[str],
         *,
-        cwd: Optional[str] = None,
+        cwd: str | None = None,
         timeout: int = _GIT_TIMEOUT,
     ) -> subprocess.CompletedProcess:
         """Run a git command via the injectable runner."""
@@ -872,7 +832,10 @@ class MarketplacePublisher:
         try:
             result = self._run_git(
                 [
-                    "git", "log", "--format=%B", "-1",
+                    "git",
+                    "log",
+                    "--format=%B",
+                    "-1",
                     f"{remote}/{branch_name}",
                 ],
                 cwd=str(self._root),
@@ -885,8 +848,11 @@ class MarketplacePublisher:
 
             self._run_git(
                 [
-                    "git", "push", "--force-with-lease",
-                    remote, branch_name,
+                    "git",
+                    "push",
+                    "--force-with-lease",
+                    remote,
+                    branch_name,
                 ],
                 cwd=str(self._root),
             )

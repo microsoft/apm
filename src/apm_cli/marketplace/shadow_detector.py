@@ -11,7 +11,7 @@ never propagate to the caller.
 
 import logging
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional  # noqa: F401, UP035
 
 from .client import fetch_or_cache
 from .registry import get_registered_marketplaces
@@ -31,8 +31,8 @@ def detect_shadows(
     plugin_name: str,
     primary_marketplace: str,
     *,
-    auth_resolver: Optional[object] = None,
-) -> List[ShadowMatch]:
+    auth_resolver: object | None = None,
+) -> list[ShadowMatch]:
     """Check registered marketplaces for duplicate plugin names.
 
     Iterates over every registered marketplace *except*
@@ -52,7 +52,7 @@ def detect_shadows(
     Returns:
         A list of :class:`ShadowMatch` instances (may be empty).
     """
-    shadows: List[ShadowMatch] = []
+    shadows: list[ShadowMatch] = []
     for source in get_registered_marketplaces():
         if source.name.lower() == primary_marketplace.lower():
             continue

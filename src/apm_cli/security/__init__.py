@@ -12,13 +12,13 @@ from apm_cli.security.gate import (
 )
 
 __all__ = [
+    "BLOCK_POLICY",
+    "REPORT_POLICY",
+    "WARN_POLICY",
     "ContentScanner",
     "ScanFinding",
-    "SecurityGate",
     "ScanPolicy",
     "ScanVerdict",
-    "BLOCK_POLICY",
-    "WARN_POLICY",
-    "REPORT_POLICY",
+    "SecurityGate",
     "ignore_symlinks",
 ]

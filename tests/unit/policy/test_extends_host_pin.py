@@ -52,13 +52,14 @@ def _assert_redirect_target_host(error: str, expected_host: str) -> None:
     parsed = urlparse(match.group(1).rstrip(").,;"))
     assert parsed.hostname == expected_host
 
-from apm_cli.policy.discovery import (
+
+from apm_cli.policy.discovery import (  # noqa: E402
     PolicyFetchResult,
     _fetch_from_url,
     discover_policy_with_chain,
 )
-from apm_cli.policy.inheritance import PolicyInheritanceError
-from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
+from apm_cli.policy.inheritance import PolicyInheritanceError  # noqa: E402
+from apm_cli.policy.schema import ApmPolicy, DependencyPolicy  # noqa: E402
 
 _PATCH_DISCOVER = "apm_cli.policy.discovery.discover_policy"
 _PATCH_WRITE_CACHE = "apm_cli.policy.discovery._write_cache"
@@ -73,9 +74,7 @@ def _make_policy(*, enforcement="warn", extends=None, deny=()):
 
 
 def _make_fetch(policy=None, source="org:contoso/.github", outcome="found"):
-    return PolicyFetchResult(
-        policy=policy, source=source, outcome=outcome, cached=False
-    )
+    return PolicyFetchResult(policy=policy, source=source, outcome=outcome, cached=False)
 
 
 # ----------------------------------------------------------------------
@@ -88,13 +87,9 @@ class TestExtendsHostPin:
 
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
-    def test_extends_cross_host_rejected_url_form(
-        self, mock_discover, mock_write_cache
-    ):
+    def test_extends_cross_host_rejected_url_form(self, mock_discover, mock_write_cache):
         """Leaf at github.com cannot extend a full URL on evil.example.com."""
-        leaf = _make_policy(
-            enforcement="warn", extends="https://evil.example.com/policy.yml"
-        )
+        leaf = _make_policy(enforcement="warn", extends="https://evil.example.com/policy.yml")
         leaf_fetch = _make_fetch(policy=leaf, source="org:contoso/.github")
         # Only the leaf fetch should run. Validation must happen BEFORE
         # the parent fetch so credentials are never sent to evil host.
@@ -117,9 +112,7 @@ class TestExtendsHostPin:
         self, mock_discover, mock_write_cache
     ):
         """Leaf at github.com cannot extend `evil.example.com/org/.github`."""
-        leaf = _make_policy(
-            enforcement="warn", extends="evil.example.com/org/.github"
-        )
+        leaf = _make_policy(enforcement="warn", extends="evil.example.com/org/.github")
         leaf_fetch = _make_fetch(policy=leaf, source="org:contoso/.github")
         mock_discover.return_value = leaf_fetch
 
@@ -134,9 +127,7 @@ class TestExtendsHostPin:
 
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
-    def test_extends_same_host_owner_repo_shorthand_allowed(
-        self, mock_discover, mock_write_cache
-    ):
+    def test_extends_same_host_owner_repo_shorthand_allowed(self, mock_discover, mock_write_cache):
         """`owner/repo` shorthand is intrinsically same-host -> allowed."""
         leaf = _make_policy(enforcement="warn", extends="parent-org/.github")
         parent = _make_policy(enforcement="block")
@@ -151,9 +142,7 @@ class TestExtendsHostPin:
 
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
-    def test_extends_raw_githubusercontent_rejected(
-        self, mock_discover, mock_write_cache
-    ):
+    def test_extends_raw_githubusercontent_rejected(self, mock_discover, mock_write_cache):
         """Strict pin: raw.githubusercontent.com != github.com -> rejected.
 
         Decision: we pin strictly to the leaf's user-facing host. GitHub's
@@ -172,27 +161,19 @@ class TestExtendsHostPin:
 
         with pytest.raises(PolicyInheritanceError) as exc_info:
             discover_policy_with_chain(Path("/fake"))
-        _assert_extends_host_in_message(
-            str(exc_info.value), "raw.githubusercontent.com"
-        )
+        _assert_extends_host_in_message(str(exc_info.value), "raw.githubusercontent.com")
 
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
-    def test_extends_ghes_same_host_allowed(
-        self, mock_discover, mock_write_cache
-    ):
+    def test_extends_ghes_same_host_allowed(self, mock_discover, mock_write_cache):
         """Leaf on ghes.contoso.com may extend within ghes.contoso.com."""
         leaf = _make_policy(
             enforcement="warn",
             extends="ghes.contoso.com/platform/.github",
         )
         parent = _make_policy(enforcement="block")
-        leaf_fetch = _make_fetch(
-            policy=leaf, source="org:ghes.contoso.com/contoso/.github"
-        )
-        parent_fetch = _make_fetch(
-            policy=parent, source="org:ghes.contoso.com/platform/.github"
-        )
+        leaf_fetch = _make_fetch(policy=leaf, source="org:ghes.contoso.com/contoso/.github")
+        parent_fetch = _make_fetch(policy=parent, source="org:ghes.contoso.com/platform/.github")
         mock_discover.side_effect = [leaf_fetch, parent_fetch]
 
         result = discover_policy_with_chain(Path("/fake"))
@@ -200,16 +181,10 @@ class TestExtendsHostPin:
 
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
-    def test_extends_ghes_cross_host_rejected(
-        self, mock_discover, mock_write_cache
-    ):
+    def test_extends_ghes_cross_host_rejected(self, mock_discover, mock_write_cache):
         """Leaf on ghes.contoso.com cannot extend onto github.com."""
-        leaf = _make_policy(
-            enforcement="warn", extends="github.com/org/.github"
-        )
-        leaf_fetch = _make_fetch(
-            policy=leaf, source="org:ghes.contoso.com/contoso/.github"
-        )
+        leaf = _make_policy(enforcement="warn", extends="github.com/org/.github")
+        leaf_fetch = _make_fetch(policy=leaf, source="org:ghes.contoso.com/contoso/.github")
         mock_discover.return_value = leaf_fetch
 
         with pytest.raises(PolicyInheritanceError) as exc_info:
@@ -221,9 +196,7 @@ class TestExtendsHostPin:
 
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
-    def test_extends_org_shorthand_allowed(
-        self, mock_discover, mock_write_cache
-    ):
+    def test_extends_org_shorthand_allowed(self, mock_discover, mock_write_cache):
         """`org` (no slash) shorthand is intrinsically same-host -> allowed."""
         leaf = _make_policy(enforcement="warn", extends="contoso")
         # The shorthand "contoso" -> the parent fetch will route via the

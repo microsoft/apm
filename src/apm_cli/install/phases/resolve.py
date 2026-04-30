@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
 
 
-def run(ctx: "InstallContext") -> None:
+def run(ctx: InstallContext) -> None:
     """Execute the resolve phase.
 
     On return every field listed in the *Resolve phase outputs* section of
@@ -33,11 +33,12 @@ def run(ctx: "InstallContext") -> None:
     """
     from apm_cli.core.auth import AuthResolver
     from apm_cli.core.scope import InstallScope, get_modules_dir
-    from apm_cli.deps.apm_resolver import APMDependencyResolver
     from apm_cli.deps import github_downloader as _ghd_mod
+    from apm_cli.deps.apm_resolver import APMDependencyResolver
     from apm_cli.deps.lockfile import LockFile, get_lockfile_path
     from apm_cli.install.phases.local_content import _copy_local_package
     from apm_cli.models.apm_package import DependencyReference
+
     # ------------------------------------------------------------------
     # 1. Lockfile loading
     # ------------------------------------------------------------------
@@ -62,20 +63,13 @@ def run(ctx: "InstallContext") -> None:
                 )
             if ctx.logger.verbose:
                 for locked_dep in existing_lockfile.get_all_dependencies():
-                    _sha = (
-                        locked_dep.resolved_commit[:8]
-                        if locked_dep.resolved_commit
-                        else ""
-                    )
+                    _sha = locked_dep.resolved_commit[:8] if locked_dep.resolved_commit else ""
                     _ref = (
                         locked_dep.resolved_ref
-                        if hasattr(locked_dep, "resolved_ref")
-                        and locked_dep.resolved_ref
+                        if hasattr(locked_dep, "resolved_ref") and locked_dep.resolved_ref
                         else ""
                     )
-                    ctx.logger.lockfile_entry(
-                        locked_dep.get_unique_key(), ref=_ref, sha=_sha
-                    )
+                    ctx.logger.lockfile_entry(locked_dep.get_unique_key(), ref=_ref, sha=_sha)
     ctx.existing_lockfile = existing_lockfile
 
     # ------------------------------------------------------------------
@@ -102,9 +96,7 @@ def run(ctx: "InstallContext") -> None:
     # 4. Tracking variables (phase-local except where noted)
     # ------------------------------------------------------------------
     # direct_dep_keys is phase-local (only read inside download_callback)
-    direct_dep_keys = builtins.set(
-        dep.get_unique_key() for dep in ctx.all_apm_deps
-    )
+    direct_dep_keys = builtins.set(dep.get_unique_key() for dep in ctx.all_apm_deps)
     # These three escape to later phases via ctx
     callback_downloaded: builtins.dict = {}
     transitive_failures: builtins.list = []
@@ -119,7 +111,7 @@ def run(ctx: "InstallContext") -> None:
     project_root = ctx.project_root
     update_refs = ctx.update_refs
     logger = ctx.logger
-    verbose = ctx.verbose
+    verbose = ctx.verbose  # noqa: F841
 
     def download_callback(dep_ref, modules_dir, parent_chain=""):
         """Download a package during dependency resolution.
@@ -153,9 +145,7 @@ def run(ctx: "InstallContext") -> None:
             # T5: Use locked commit if available (reproducible installs)
             locked_ref = None
             if existing_lockfile:
-                locked_dep = existing_lockfile.get_dependency(
-                    dep_ref.get_unique_key()
-                )
+                locked_dep = existing_lockfile.get_dependency(dep_ref.get_unique_key())
                 if (
                     locked_dep
                     and locked_dep.resolved_commit
@@ -176,11 +166,7 @@ def run(ctx: "InstallContext") -> None:
             result = downloader.download_package(download_dep, install_path)
             # Capture resolved commit SHA for lockfile
             resolved_sha = None
-            if (
-                result
-                and hasattr(result, "resolved_reference")
-                and result.resolved_reference
-            ):
+            if result and hasattr(result, "resolved_reference") and result.resolved_reference:
                 resolved_sha = result.resolved_reference.resolved_commit
             callback_downloaded[dep_ref.get_unique_key()] = resolved_sha
             return install_path
@@ -192,18 +178,10 @@ def run(ctx: "InstallContext") -> None:
             # Distinguish direct vs transitive failure messages so users
             # don't see a misleading "transitive dep" label for top-level deps.
             if is_direct:
-                fail_msg = (
-                    f"Failed to download dependency "
-                    f"{dep_ref.repo_url}: {e}"
-                )
+                fail_msg = f"Failed to download dependency {dep_ref.repo_url}: {e}"
             else:
-                chain_hint = (
-                    f" (via {parent_chain})" if parent_chain else ""
-                )
-                fail_msg = (
-                    f"Failed to resolve transitive dep "
-                    f"{dep_ref.repo_url}{chain_hint}: {e}"
-                )
+                chain_hint = f" (via {parent_chain})" if parent_chain else ""
+                fail_msg = f"Failed to resolve transitive dep {dep_ref.repo_url}{chain_hint}: {e}"
 
             # Verbose: inline detail via logger (single output path).
             # Deferred diagnostics below cover the non-logger case.
@@ -237,9 +215,7 @@ def run(ctx: "InstallContext") -> None:
             )
             for node in tree.nodes.values():
                 if node.depth > 1:
-                    ctx.logger.verbose_detail(
-                        f"    {node.get_ancestor_chain()}"
-                    )
+                    ctx.logger.verbose_detail(f"    {node.get_ancestor_chain()}")
         else:
             ctx.logger.verbose_detail(
                 f"Resolved {direct_count} direct dependencies (no transitive)"
@@ -293,11 +269,7 @@ def run(ctx: "InstallContext") -> None:
             if node.dependency_ref.get_identity() in only_identities:
                 _collect_descendants(node)
 
-        deps_to_install = [
-            dep
-            for dep in deps_to_install
-            if dep.get_identity() in only_identities
-        ]
+        deps_to_install = [dep for dep in deps_to_install if dep.get_identity() in only_identities]
 
     from apm_cli.install.insecure_policy import (
         _check_insecure_dependencies,
@@ -328,9 +300,7 @@ def run(ctx: "InstallContext") -> None:
     # ------------------------------------------------------------------
     # 8. Orphan detection: intended_dep_keys
     # ------------------------------------------------------------------
-    ctx.intended_dep_keys = builtins.set(
-        d.get_unique_key() for d in deps_to_install
-    )
+    ctx.intended_dep_keys = builtins.set(d.get_unique_key() for d in deps_to_install)
 
     # ------------------------------------------------------------------
     # Write ancillary state to ctx for later phases

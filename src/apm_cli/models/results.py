@@ -1,7 +1,7 @@
 """Typed result containers for APM operations."""
 
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict  # noqa: F401, UP035
 
 
 @dataclass
@@ -12,7 +12,7 @@ class InstallResult:
     prompts_integrated: int = 0
     agents_integrated: int = 0
     diagnostics: object = None  # DiagnosticCollector or None
-    package_types: Dict[str, str] = field(default_factory=dict)  # dep_key -> type string
+    package_types: dict[str, str] = field(default_factory=dict)  # dep_key -> type string
 
 
 @dataclass

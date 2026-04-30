@@ -17,10 +17,10 @@ from ...marketplace.yml_schema import (
     load_marketplace_yml,
 )
 from . import (
-    marketplace,
     _DoctorCheck,
     _find_duplicate_names,
     _render_doctor_table,
+    marketplace,
 )
 
 
@@ -37,7 +37,9 @@ def doctor(verbose):
     try:
         result = subprocess.run(
             ["git", "--version"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode == 0:
             git_ok = True
@@ -51,11 +53,13 @@ def doctor(verbose):
     except (subprocess.SubprocessError, OSError) as exc:
         git_detail = str(exc)[:60]
 
-    checks.append(_DoctorCheck(
-        name="git",
-        passed=git_ok,
-        detail=git_detail,
-    ))
+    checks.append(
+        _DoctorCheck(
+            name="git",
+            passed=git_ok,
+            detail=git_detail,
+        )
+    )
 
     # Check 2: network reachability
     net_ok = False
@@ -63,7 +67,9 @@ def doctor(verbose):
     try:
         result = subprocess.run(
             ["git", "ls-remote", "https://github.com/git/git.git", "HEAD"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode == 0:
             net_ok = True
@@ -83,28 +89,33 @@ def doctor(verbose):
     except (subprocess.SubprocessError, OSError) as exc:
         net_detail = str(exc)[:60]
 
-    checks.append(_DoctorCheck(
-        name="network",
-        passed=net_ok,
-        detail=net_detail,
-    ))
+    checks.append(
+        _DoctorCheck(
+            name="network",
+            passed=net_ok,
+            detail=net_detail,
+        )
+    )
 
     # Check 3: auth tokens (delegate to AuthResolver for full coverage)
     try:
         from ...core.auth import AuthResolver
+
         resolver = AuthResolver()
         # Try to get a token for github.com as a representative check
         token = resolver.resolve("github.com").token
         has_token = bool(token)
-    except Exception:  # noqa: BLE001 -- best-effort auth probe
+    except Exception:
         has_token = False
     auth_detail = "Token detected" if has_token else "No token; unauthenticated rate limits apply"
-    checks.append(_DoctorCheck(
-        name="auth",
-        passed=True,  # informational; never fails
-        detail=auth_detail,
-        informational=True,
-    ))
+    checks.append(
+        _DoctorCheck(
+            name="auth",
+            passed=True,  # informational; never fails
+            detail=auth_detail,
+            informational=True,
+        )
+    )
 
     # Check 4: gh CLI availability (informational; only needed for publish)
     gh_ok = False
@@ -112,7 +123,9 @@ def doctor(verbose):
     try:
         result = subprocess.run(
             ["gh", "--version"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if result.returncode == 0:
             gh_ok = True
@@ -126,12 +139,14 @@ def doctor(verbose):
     except (subprocess.SubprocessError, OSError) as exc:
         gh_detail = str(exc)[:60]
 
-    checks.append(_DoctorCheck(
-        name="gh CLI",
-        passed=gh_ok,
-        detail=gh_detail,
-        informational=True,
-    ))
+    checks.append(
+        _DoctorCheck(
+            name="gh CLI",
+            passed=gh_ok,
+            detail=gh_detail,
+            informational=True,
+        )
+    )
 
     # Check 5: marketplace config presence + parsability
     project_root = Path.cwd()
@@ -166,30 +181,36 @@ def doctor(verbose):
         config_passed = False
         config_detail = str(exc)[:120]
 
-    checks.append(_DoctorCheck(
-        name="marketplace config",
-        passed=config_passed,
-        detail=config_detail,
-        informational=True,
-    ))
+    checks.append(
+        _DoctorCheck(
+            name="marketplace config",
+            passed=config_passed,
+            detail=config_detail,
+            informational=True,
+        )
+    )
 
     # Check 6: duplicate package names (defence-in-depth)
     if yml_obj is not None:
         dup_detail = _find_duplicate_names(yml_obj)
         if dup_detail:
-            checks.append(_DoctorCheck(
-                name="duplicate names",
-                passed=False,
-                detail=dup_detail,
-                informational=True,
-            ))
+            checks.append(
+                _DoctorCheck(
+                    name="duplicate names",
+                    passed=False,
+                    detail=dup_detail,
+                    informational=True,
+                )
+            )
         else:
-            checks.append(_DoctorCheck(
-                name="duplicate names",
-                passed=True,
-                detail="No duplicate package names",
-                informational=True,
-            ))
+            checks.append(
+                _DoctorCheck(
+                    name="duplicate names",
+                    passed=True,
+                    detail="No duplicate package names",
+                    informational=True,
+                )
+            )
 
     _render_doctor_table(logger, checks)
 

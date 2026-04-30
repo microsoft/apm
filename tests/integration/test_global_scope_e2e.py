@@ -14,7 +14,7 @@ resolution, and CLI output using local fixtures only.
 """
 
 import os
-import platform
+import platform  # noqa: F401
 import shutil
 import subprocess
 import sys
@@ -22,7 +22,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -65,7 +64,7 @@ def _env_with_home(fake_home):
 def _run_apm(apm_command, args, cwd, fake_home, timeout=60):
     """Run an apm CLI command with an overridden home directory."""
     return subprocess.run(
-        [apm_command] + args,
+        [apm_command] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -87,11 +86,15 @@ def local_package(tmp_path):
     """
     pkg = tmp_path / "local-pkg"
     pkg.mkdir()
-    (pkg / "apm.yml").write_text(yaml.dump({
-        "name": "local-pkg",
-        "version": "1.0.0",
-        "description": "Test package for global scope",
-    }))
+    (pkg / "apm.yml").write_text(
+        yaml.dump(
+            {
+                "name": "local-pkg",
+                "version": "1.0.0",
+                "description": "Test package for global scope",
+            }
+        )
+    )
     instructions_dir = pkg / ".apm" / "instructions"
     instructions_dir.mkdir(parents=True)
     (instructions_dir / "test.instructions.md").write_text(
@@ -161,20 +164,22 @@ class TestGlobalScopeOutput:
         """Install --global should warn about targets that lack user-scope support."""
         result = _run_apm(apm_command, ["install", "--global"], fake_home, fake_home)
         combined = result.stdout + result.stderr
-        assert "cursor" in combined.lower(), (
-            f"Missing cursor warning in output: {combined}"
-        )
+        assert "cursor" in combined.lower(), f"Missing cursor warning in output: {combined}"
 
     def test_uninstall_global_shows_scope_info(self, apm_command, fake_home):
         """Uninstall --global should mention user scope in output."""
         # Create a minimal manifest so uninstall doesn't fail on missing apm.yml
         apm_dir = fake_home / ".apm"
         apm_dir.mkdir(parents=True, exist_ok=True)
-        (apm_dir / "apm.yml").write_text(yaml.dump({
-            "name": "global-project",
-            "version": "1.0.0",
-            "dependencies": {"apm": ["test/pkg"]},
-        }))
+        (apm_dir / "apm.yml").write_text(
+            yaml.dump(
+                {
+                    "name": "global-project",
+                    "version": "1.0.0",
+                    "dependencies": {"apm": ["test/pkg"]},
+                }
+            )
+        )
 
         result = _run_apm(
             apm_command,
@@ -230,9 +235,7 @@ class TestGlobalErrorHandling:
 class TestGlobalManifestPlacement:
     """Verify that manifest/lockfile are written under ~/.apm/."""
 
-    def test_auto_bootstrap_creates_user_manifest(
-        self, apm_command, fake_home, local_package
-    ):
+    def test_auto_bootstrap_creates_user_manifest(self, apm_command, fake_home, local_package):
         """Installing a local package with --global auto-creates ~/.apm/apm.yml."""
         result = _run_apm(
             apm_command,
@@ -243,8 +246,7 @@ class TestGlobalManifestPlacement:
 
         user_manifest = fake_home / ".apm" / "apm.yml"
         assert user_manifest.exists(), (
-            f"~/.apm/apm.yml not created. "
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"~/.apm/apm.yml not created. stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         data = yaml.safe_load(user_manifest.read_text())
@@ -254,9 +256,7 @@ class TestGlobalManifestPlacement:
             f"Package not recorded in manifest: {apm_deps}"
         )
 
-    def test_user_manifest_does_not_pollute_cwd(
-        self, apm_command, fake_home, local_package
-    ):
+    def test_user_manifest_does_not_pollute_cwd(self, apm_command, fake_home, local_package):
         """--global must not create apm.yml in the working directory."""
         work_dir = fake_home / "workdir"
         work_dir.mkdir()
@@ -272,14 +272,12 @@ class TestGlobalManifestPlacement:
             "apm.yml was incorrectly created in the working directory"
         )
 
-    def test_lockfile_placed_under_user_dir(
-        self, apm_command, fake_home, local_package
-    ):
+    def test_lockfile_placed_under_user_dir(self, apm_command, fake_home, local_package):
         """Lockfile should be created under ~/.apm/, not in the working directory."""
         work_dir = fake_home / "workdir"
         work_dir.mkdir()
 
-        result = _run_apm(
+        result = _run_apm(  # noqa: F841
             apm_command,
             ["install", "--global", str(local_package)],
             work_dir,
@@ -312,6 +310,8 @@ class TestCrossPlatformPaths:
 
     def test_home_based_paths_are_absolute(self, apm_command, fake_home):
         """All user-scope paths should resolve to absolute paths."""
+        from unittest.mock import patch
+
         from apm_cli.core.scope import (
             InstallScope,
             get_apm_dir,
@@ -320,11 +320,15 @@ class TestCrossPlatformPaths:
             get_manifest_path,
             get_modules_dir,
         )
-        from unittest.mock import patch
 
         with patch.object(Path, "home", return_value=fake_home):
-            for fn in [get_apm_dir, get_deploy_root, get_lockfile_dir,
-                       get_manifest_path, get_modules_dir]:
+            for fn in [
+                get_apm_dir,
+                get_deploy_root,
+                get_lockfile_dir,
+                get_manifest_path,
+                get_modules_dir,
+            ]:
                 result = fn(InstallScope.USER)
                 assert result.is_absolute(), (
                     f"{fn.__name__}(USER) returned non-absolute path: {result}"
@@ -333,17 +337,16 @@ class TestCrossPlatformPaths:
     def test_forward_slash_paths_on_all_platforms(self, apm_command, fake_home):
         """User-scope paths should use forward slashes (POSIX) when
         stored as strings, matching the lockfile convention."""
-        from apm_cli.core.scope import InstallScope, get_apm_dir
         from unittest.mock import patch
+
+        from apm_cli.core.scope import InstallScope, get_apm_dir
 
         with patch.object(Path, "home", return_value=fake_home):
             apm_dir = get_apm_dir(InstallScope.USER)
             posix_str = apm_dir.as_posix()
             # Should not contain backslashes (even on Windows the as_posix()
             # call should convert them)
-            assert "\\" not in posix_str, (
-                f"Path contains backslashes: {posix_str}"
-            )
+            assert "\\" not in posix_str, f"Path contains backslashes: {posix_str}"
 
     def test_user_root_strings_are_relative(self):
         """TargetProfile user_root_dir values should be relative paths starting
@@ -365,9 +368,7 @@ class TestCrossPlatformPaths:
 class TestGlobalGeminiScope:
     """Verify user-scope install/uninstall deploys to ~/.gemini/."""
 
-    def test_global_install_creates_gemini_dirs(
-        self, apm_command, fake_home, local_package
-    ):
+    def test_global_install_creates_gemini_dirs(self, apm_command, fake_home, local_package):
         """--global should deploy primitives to ~/.gemini/ when .gemini/ exists."""
         gemini_dir = fake_home / ".gemini"
         gemini_dir.mkdir()
@@ -379,28 +380,23 @@ class TestGlobalGeminiScope:
             fake_home,
         )
         combined = result.stdout + result.stderr
-        assert "gemini" in combined.lower(), (
-            f"Gemini not mentioned in output: {combined}"
-        )
+        assert "gemini" in combined.lower(), f"Gemini not mentioned in output: {combined}"
 
-    def test_global_install_mentions_gemini_full_support(
-        self, apm_command, fake_home
-    ):
+    def test_global_install_mentions_gemini_full_support(self, apm_command, fake_home):
         """--global output should list gemini as fully supported."""
         gemini_dir = fake_home / ".gemini"
         gemini_dir.mkdir()
 
         result = _run_apm(
-            apm_command, ["install", "--global"], fake_home, fake_home,
+            apm_command,
+            ["install", "--global"],
+            fake_home,
+            fake_home,
         )
         combined = result.stdout + result.stderr
-        assert "gemini" in combined.lower(), (
-            f"Gemini not in scope support message: {combined}"
-        )
+        assert "gemini" in combined.lower(), f"Gemini not in scope support message: {combined}"
 
-    def test_global_uninstall_runs_in_user_scope(
-        self, apm_command, fake_home, local_package
-    ):
+    def test_global_uninstall_runs_in_user_scope(self, apm_command, fake_home, local_package):
         """Uninstall --global with .gemini/ present operates in user scope."""
         gemini_dir = fake_home / ".gemini"
         gemini_dir.mkdir()
@@ -419,17 +415,13 @@ class TestGlobalGeminiScope:
             fake_home,
         )
         combined = result.stdout + result.stderr
-        assert "user scope" in combined.lower(), (
-            f"Uninstall did not run in user scope: {combined}"
-        )
+        assert "user scope" in combined.lower(), f"Uninstall did not run in user scope: {combined}"
 
 
 class TestGlobalUninstallLifecycle:
     """Test uninstall --global removes packages from user-scope metadata."""
 
-    def test_uninstall_removes_package_from_user_manifest(
-        self, apm_command, fake_home
-    ):
+    def test_uninstall_removes_package_from_user_manifest(self, apm_command, fake_home):
         """Uninstall --global should remove the package entry from ~/.apm/apm.yml."""
         apm_dir = fake_home / ".apm"
         apm_dir.mkdir(parents=True, exist_ok=True)
@@ -437,11 +429,15 @@ class TestGlobalUninstallLifecycle:
 
         # Seed the manifest with a package
         manifest = apm_dir / "apm.yml"
-        manifest.write_text(yaml.dump({
-            "name": "global-project",
-            "version": "1.0.0",
-            "dependencies": {"apm": ["test/pkg-to-remove"]},
-        }))
+        manifest.write_text(
+            yaml.dump(
+                {
+                    "name": "global-project",
+                    "version": "1.0.0",
+                    "dependencies": {"apm": ["test/pkg-to-remove"]},
+                }
+            )
+        )
 
         result = _run_apm(
             apm_command,
@@ -457,20 +453,22 @@ class TestGlobalUninstallLifecycle:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_uninstall_global_package_not_found_warns(
-        self, apm_command, fake_home
-    ):
+    def test_uninstall_global_package_not_found_warns(self, apm_command, fake_home):
         """Uninstalling a package that is not in the manifest should warn."""
         apm_dir = fake_home / ".apm"
         apm_dir.mkdir(parents=True, exist_ok=True)
         (apm_dir / "apm_modules").mkdir(exist_ok=True)
 
         manifest = apm_dir / "apm.yml"
-        manifest.write_text(yaml.dump({
-            "name": "global-project",
-            "version": "1.0.0",
-            "dependencies": {"apm": []},
-        }))
+        manifest.write_text(
+            yaml.dump(
+                {
+                    "name": "global-project",
+                    "version": "1.0.0",
+                    "dependencies": {"apm": []},
+                }
+            )
+        )
 
         result = _run_apm(
             apm_command,

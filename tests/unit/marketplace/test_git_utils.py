@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
+import pytest  # noqa: F401
 
 from apm_cli.marketplace._git_utils import redact_token
 
@@ -45,20 +45,14 @@ class TestRedactToken:
 
     def test_multiple_tokens_in_one_string(self) -> None:
         """All token occurrences in a single string are redacted."""
-        text = (
-            "https://user:pass1@github.com/a/b "
-            "https://user:pass2@github.com/c/d"
-        )
+        text = "https://user:pass1@github.com/a/b https://user:pass2@github.com/c/d"
         result = redact_token(text)
         assert "pass1" not in result
         assert "pass2" not in result
 
     def test_mixed_patterns(self) -> None:
         """A string containing both URL-auth and query-param tokens."""
-        text = (
-            "clone https://tok@host/repo "
-            "archive at https://host/file?token=xyz"
-        )
+        text = "clone https://tok@host/repo archive at https://host/file?token=xyz"
         result = redact_token(text)
         assert "tok@" not in result
         assert "xyz" not in result

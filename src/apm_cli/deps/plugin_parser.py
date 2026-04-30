@@ -15,12 +15,12 @@ import json
 import logging
 import shutil
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional  # noqa: F401, UP035
+
 import yaml
 
-from ..utils.path_security import ensure_path_within, PathTraversalError
 from ..utils.console import _rich_warning
-
+from ..utils.path_security import PathTraversalError, ensure_path_within
 
 _logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ def _surface_warning(message: str, logger: logging.Logger) -> None:
     even without ``--verbose``. Falls back gracefully if Rich is unavailable.
     """
     logger.warning(message)
-    try:
+    try:  # noqa: SIM105
         _rich_warning(message, symbol="warning")
     except Exception:
         # Console output is best-effort; never mask the underlying warning.
@@ -61,13 +61,14 @@ def _is_within_plugin(candidate: Path, plugin_root: Path, *, component: str) -> 
         ensure_path_within(candidate, plugin_root)
     except PathTraversalError:
         _logger.warning(
-            "Skipping %s entry: path escapes plugin root", component,
+            "Skipping %s entry: path escapes plugin root",
+            component,
         )
         return False
     return True
 
 
-def parse_plugin_manifest(plugin_json_path: Path) -> Dict[str, Any]:
+def parse_plugin_manifest(plugin_json_path: Path) -> dict[str, Any]:
     """Parse a plugin.json manifest file.
 
     Args:
@@ -84,12 +85,12 @@ def parse_plugin_manifest(plugin_json_path: Path) -> Dict[str, Any]:
         raise FileNotFoundError(f"plugin.json not found: {plugin_json_path}")
 
     try:
-        with open(plugin_json_path, 'r', encoding='utf-8') as f:
+        with open(plugin_json_path, encoding="utf-8") as f:
             manifest = json.load(f)
     except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in plugin.json: {e}")
+        raise ValueError(f"Invalid JSON in plugin.json: {e}")  # noqa: B904
 
-    if not manifest.get('name'):
+    if not manifest.get("name"):
         logging.getLogger("apm").warning(
             "plugin.json at %s is missing 'name' field; falling back to directory name",
             plugin_json_path,
@@ -98,7 +99,7 @@ def parse_plugin_manifest(plugin_json_path: Path) -> Dict[str, Any]:
     return manifest
 
 
-def normalize_plugin_directory(plugin_path: Path, plugin_json_path: Optional[Path] = None) -> Path:
+def normalize_plugin_directory(plugin_path: Path, plugin_json_path: Path | None = None) -> Path:
     """Normalize a Claude plugin directory into an APM package.
 
     Works with or without plugin.json.  When plugin.json is present it is
@@ -116,22 +117,22 @@ def normalize_plugin_directory(plugin_path: Path, plugin_json_path: Optional[Pat
     Returns:
         Path: Path to the generated apm.yml.
     """
-    manifest: Dict[str, Any] = {}
+    manifest: dict[str, Any] = {}
 
     if plugin_json_path is not None and plugin_json_path.exists():
-        try:
+        try:  # noqa: SIM105
             manifest = parse_plugin_manifest(plugin_json_path)
         except (ValueError, FileNotFoundError):
             pass  # Treat as empty manifest; fall back to dir-name defaults
 
     # Derive name from directory if not in manifest
-    if 'name' not in manifest or not manifest['name']:
-        manifest['name'] = plugin_path.name
+    if "name" not in manifest or not manifest["name"]:
+        manifest["name"] = plugin_path.name
 
     return synthesize_apm_yml_from_plugin(plugin_path, manifest)
 
 
-def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: Dict[str, Any]) -> Path:
+def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) -> Path:
     """Synthesize apm.yml from plugin metadata.
 
     Maps the plugin's agents/, skills/, commands/, hooks/ directories and
@@ -146,8 +147,8 @@ def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: Dict[str, Any]) 
     Returns:
         Path: Path to the generated apm.yml.
     """
-    if not manifest.get('name'):
-        manifest['name'] = plugin_path.name
+    if not manifest.get("name"):
+        manifest["name"] = plugin_path.name
 
     # Create .apm directory structure
     apm_dir = plugin_path / ".apm"
@@ -161,13 +162,13 @@ def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: Dict[str, Any]) 
     if mcp_servers:
         mcp_deps = _mcp_servers_to_apm_deps(mcp_servers, plugin_path)
         if mcp_deps:
-            manifest['_mcp_deps'] = mcp_deps
+            manifest["_mcp_deps"] = mcp_deps
 
     # Generate apm.yml from plugin metadata
     apm_yml_content = _generate_apm_yml(manifest)
     apm_yml_path = plugin_path / "apm.yml"
 
-    with open(apm_yml_path, 'w', encoding='utf-8') as f:
+    with open(apm_yml_path, "w", encoding="utf-8") as f:
         f.write(apm_yml_content)
 
     return apm_yml_path
@@ -178,7 +179,7 @@ def _ignore_symlinks(directory, contents):
     return [name for name in contents if (Path(directory) / name).is_symlink()]
 
 
-def _extract_mcp_servers(plugin_path: Path, manifest: Dict[str, Any]) -> Dict[str, Any]:
+def _extract_mcp_servers(plugin_path: Path, manifest: dict[str, Any]) -> dict[str, Any]:
     """Extract MCP server definitions from a plugin manifest.
 
     Resolves ``mcpServers`` by type (per Claude Code spec):
@@ -240,7 +241,7 @@ def _extract_mcp_servers(plugin_path: Path, manifest: Dict[str, Any]) -> Dict[st
     return servers
 
 
-def _read_mcp_file(plugin_path: Path, rel_path: str, logger: logging.Logger) -> Dict[str, Any]:
+def _read_mcp_file(plugin_path: Path, rel_path: str, logger: logging.Logger) -> dict[str, Any]:
     """Read a JSON file relative to *plugin_path* and return its ``mcpServers`` dict."""
     target = (plugin_path / rel_path).resolve()
     # Security: must stay inside plugin_path and not be a symlink
@@ -259,7 +260,7 @@ def _read_mcp_file(plugin_path: Path, rel_path: str, logger: logging.Logger) -> 
     return _read_mcp_json(candidate, logger)
 
 
-def _read_mcp_json(path: Path, logger: logging.Logger) -> Dict[str, Any]:
+def _read_mcp_json(path: Path, logger: logging.Logger) -> dict[str, Any]:
     """Parse a JSON file and return the ``mcpServers`` mapping."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -273,8 +274,8 @@ def _read_mcp_json(path: Path, logger: logging.Logger) -> Dict[str, Any]:
 
 
 def _substitute_plugin_root(
-    servers: Dict[str, Any], abs_root: str, logger: logging.Logger
-) -> Dict[str, Any]:
+    servers: dict[str, Any], abs_root: str, logger: logging.Logger
+) -> dict[str, Any]:
     """Replace ``${CLAUDE_PLUGIN_ROOT}`` in server config string values."""
     placeholder = "${CLAUDE_PLUGIN_ROOT}"
     substituted = False
@@ -296,9 +297,7 @@ def _substitute_plugin_root(
     return result
 
 
-def _mcp_servers_to_apm_deps(
-    servers: Dict[str, Any], plugin_path: Path
-) -> List[Dict[str, Any]]:
+def _mcp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list[dict[str, Any]]:
     """Convert raw MCP server configs to ``dependencies.mcp`` dicts.
 
     Transport inference:
@@ -326,14 +325,14 @@ def _mcp_servers_to_apm_deps(
     from ..models.dependency.mcp import MCPDependency
 
     logger = logging.getLogger("apm")
-    deps: List[Dict[str, Any]] = []
+    deps: list[dict[str, Any]] = []
 
     for name, cfg in servers.items():
         if not isinstance(cfg, dict):
             logger.warning("Skipping non-dict MCP server config '%s'", name)
             continue
 
-        dep: Dict[str, Any] = {"name": name, "registry": False}
+        dep: dict[str, Any] = {"name": name, "registry": False}
 
         if "command" in cfg:
             dep["transport"] = "stdio"
@@ -369,8 +368,7 @@ def _mcp_servers_to_apm_deps(
             MCPDependency.from_dict(dep)
         except (ValueError, Exception) as exc:
             _surface_warning(
-                f"Skipping invalid MCP server '{name}' from plugin "
-                f"'{plugin_path.name}': {exc}",
+                f"Skipping invalid MCP server '{name}' from plugin '{plugin_path.name}': {exc}",
                 logger,
             )
             continue
@@ -380,7 +378,9 @@ def _mcp_servers_to_apm_deps(
     return deps
 
 
-def _map_plugin_artifacts(plugin_path: Path, apm_dir: Path, manifest: Optional[Dict[str, Any]] = None) -> None:
+def _map_plugin_artifacts(
+    plugin_path: Path, apm_dir: Path, manifest: dict[str, Any] | None = None
+) -> None:
     """Map plugin artifacts to .apm/ subdirectories and copy pass-through files.
 
     Copies:
@@ -481,8 +481,10 @@ def _map_plugin_artifacts(plugin_path: Path, apm_dir: Path, manifest: Optional[D
             target_skills.mkdir(parents=True, exist_ok=True)
             for d in skill_dirs:
                 shutil.copytree(
-                    d, target_skills / d.name,
-                    ignore=_ignore_symlinks, dirs_exist_ok=True,
+                    d,
+                    target_skills / d.name,
+                    ignore=_ignore_symlinks,
+                    dirs_exist_ok=True,
                 )
         elif skill_dirs:
             shutil.copytree(skill_dirs[0], target_skills, ignore=_ignore_symlinks)
@@ -501,7 +503,7 @@ def _map_plugin_artifacts(plugin_path: Path, apm_dir: Path, manifest: Optional[D
             shutil.rmtree(target_prompts)
         target_prompts.mkdir(parents=True, exist_ok=True)
 
-        def _copy_command_file(source_file: Path, dest_dir: Path, rel_to: Path = None):
+        def _copy_command_file(source_file: Path, dest_dir: Path, rel_to: Path = None):  # noqa: RUF013
             """Copy a command file, normalizing .md -> .prompt.md."""
             if rel_to:
                 relative_path = source_file.relative_to(rel_to)
@@ -529,15 +531,11 @@ def _map_plugin_artifacts(plugin_path: Path, apm_dir: Path, manifest: Optional[D
         # Inline hooks object -> write as .apm/hooks/hooks.json
         target_hooks = apm_dir / "hooks"
         target_hooks.mkdir(parents=True, exist_ok=True)
-        (target_hooks / "hooks.json").write_text(
-            json.dumps(hooks_value, indent=2)
-        )
+        (target_hooks / "hooks.json").write_text(json.dumps(hooks_value, indent=2))
     elif isinstance(hooks_value, str) and (plugin_path / hooks_value).is_file():
         # Config file path (e.g. "hooks": "hooks.json")
         src_file = plugin_path / hooks_value
-        if src_file.is_symlink() or not _is_within_plugin(
-            src_file, plugin_path, component="hooks"
-        ):
+        if src_file.is_symlink() or not _is_within_plugin(src_file, plugin_path, component="hooks"):
             pass
         else:
             target_hooks = apm_dir / "hooks"
@@ -561,7 +559,7 @@ def _map_plugin_artifacts(plugin_path: Path, apm_dir: Path, manifest: Optional[D
             shutil.copy2(source_file, apm_dir / passthrough)
 
 
-def _generate_apm_yml(manifest: Dict[str, Any]) -> str:
+def _generate_apm_yml(manifest: dict[str, Any]) -> str:
     """Generate apm.yml content from plugin metadata.
 
     Args:
@@ -570,37 +568,38 @@ def _generate_apm_yml(manifest: Dict[str, Any]) -> str:
     Returns:
         str: YAML content for apm.yml.
     """
-    apm_package: Dict[str, Any] = {
-        'name': manifest.get('name'),
-        'version': manifest.get('version', '0.0.0'),
-        'description': manifest.get('description', ''),
+    apm_package: dict[str, Any] = {
+        "name": manifest.get("name"),
+        "version": manifest.get("version", "0.0.0"),
+        "description": manifest.get("description", ""),
     }
 
     # author: spec defines it as {name, email, url} object; accept string too
-    if 'author' in manifest:
-        author = manifest['author']
+    if "author" in manifest:
+        author = manifest["author"]
         if isinstance(author, dict):
-            apm_package['author'] = author.get('name', '')
+            apm_package["author"] = author.get("name", "")
         else:
-            apm_package['author'] = str(author)
+            apm_package["author"] = str(author)
 
-    for field in ('license', 'repository', 'homepage', 'tags'):
+    for field in ("license", "repository", "homepage", "tags"):
         if field in manifest:
             apm_package[field] = manifest[field]
 
-    if manifest.get('dependencies'):
-        apm_package['dependencies'] = {'apm': manifest['dependencies']}
+    if manifest.get("dependencies"):
+        apm_package["dependencies"] = {"apm": manifest["dependencies"]}
 
     # Inject MCP deps extracted from plugin mcpServers / .mcp.json
-    mcp_deps = manifest.get('_mcp_deps')
+    mcp_deps = manifest.get("_mcp_deps")
     if mcp_deps:
-        apm_package.setdefault('dependencies', {})['mcp'] = mcp_deps
+        apm_package.setdefault("dependencies", {})["mcp"] = mcp_deps
 
     # Install behavior is driven by file presence (SKILL.md, etc.), not this
     # field.  Default to hybrid so the standard pipeline handles all components.
-    apm_package['type'] = 'hybrid'
+    apm_package["type"] = "hybrid"
 
     from ..utils.yaml_io import yaml_to_str
+
     return yaml_to_str(apm_package)
 
 
@@ -626,16 +625,15 @@ def synthesize_plugin_json_from_apm_yml(apm_yml_path: Path) -> dict:
 
     try:
         from ..utils.yaml_io import load_yaml
+
         data = load_yaml(apm_yml_path)
     except yaml.YAMLError as exc:
         raise ValueError(f"Invalid YAML in {apm_yml_path}: {exc}") from exc
 
     if not isinstance(data, dict) or not data.get("name"):
-        raise ValueError(
-            "apm.yml must contain at least a 'name' field to synthesize plugin.json"
-        )
+        raise ValueError("apm.yml must contain at least a 'name' field to synthesize plugin.json")
 
-    result: Dict[str, Any] = {"name": data["name"]}
+    result: dict[str, Any] = {"name": data["name"]}
 
     if data.get("version"):
         result["version"] = data["version"]
@@ -663,13 +661,14 @@ def validate_plugin_package(plugin_path: Path) -> bool:
     """
     # Check for plugin.json (optional; only name is required when present)
     from ..utils.helpers import find_plugin_json
+
     plugin_json = find_plugin_json(plugin_path)
     if plugin_json is not None:
         try:
-            with open(plugin_json, 'r', encoding='utf-8') as f:
+            with open(plugin_json, encoding="utf-8") as f:
                 manifest = json.load(f)
-            return bool(manifest.get('name'))
-        except (json.JSONDecodeError, IOError):
+            return bool(manifest.get("name"))
+        except (OSError, json.JSONDecodeError):
             pass
 
     # Fallback: presence of any standard component directory

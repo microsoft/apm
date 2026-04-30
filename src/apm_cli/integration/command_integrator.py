@@ -9,7 +9,8 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple  # noqa: F401, UP035
+
 import frontmatter
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
@@ -37,7 +38,7 @@ def _is_valid_input_name(name: str) -> bool:
 
 def _extract_input_names(
     input_spec: Any,
-) -> Tuple[List[str], List[str]]:
+) -> tuple[list[str], list[str]]:
     """Extract argument names from an APM 'input' front-matter value.
 
     Handles both formats:
@@ -55,8 +56,8 @@ def _extract_input_names(
         anything else (empty/whitespace, YAML-significant chars, oversize) is
         rejected and reported back so the caller can surface a warning.
     """
-    valid: List[str] = []
-    rejected: List[str] = []
+    valid: list[str] = []
+    rejected: list[str] = []
 
     def _accept(candidate: Any) -> None:
         if not isinstance(candidate, str):
@@ -78,7 +79,7 @@ def _extract_input_names(
             if isinstance(item, str):
                 _accept(item)
             elif isinstance(item, dict):
-                for k in item.keys():
+                for k in item.keys():  # noqa: SIM118
                     _accept(k)
             else:
                 rejected.append(repr(item))
@@ -89,7 +90,7 @@ def _extract_input_names(
         return valid, rejected
 
     if isinstance(input_spec, dict):
-        for k in input_spec.keys():
+        for k in input_spec.keys():  # noqa: SIM118
             _accept(k)
         return valid, rejected
 
@@ -102,20 +103,19 @@ CommandIntegrationResult = IntegrationResult
 
 class CommandIntegrator(BaseIntegrator):
     """Handles integration of APM package prompts into .claude/commands/.
-    
+
     Transforms .prompt.md files into Claude Code custom slash commands
     during package installation, following the same pattern as PromptIntegrator.
     """
-    
-    def find_prompt_files(self, package_path: Path) -> List[Path]:
+
+    def find_prompt_files(self, package_path: Path) -> list[Path]:
         """Find all .prompt.md files in a package."""
-        return self.find_files_by_glob(
-            package_path, "*.prompt.md", subdirs=[".apm/prompts"]
-        )
-    
+        return self.find_files_by_glob(package_path, "*.prompt.md", subdirs=[".apm/prompts"])
+
     def _transform_prompt_to_command(
-        self, source: Path,
-    ) -> Tuple[str, frontmatter.Post, List[str]]:
+        self,
+        source: Path,
+    ) -> tuple[str, frontmatter.Post, list[str]]:
         """Transform a .prompt.md file into Claude command format.
 
         Args:
@@ -124,14 +124,14 @@ class CommandIntegrator(BaseIntegrator):
         Returns:
             Tuple of (command_name, post, warnings).
         """
-        warnings: List[str] = []
+        warnings: list[str] = []
 
         post = frontmatter.load(source)
 
         # Extract command name from filename
         filename = source.name
-        if filename.endswith('.prompt.md'):
-            command_name = filename[:-len('.prompt.md')]
+        if filename.endswith(".prompt.md"):
+            command_name = filename[: -len(".prompt.md")]
         else:
             command_name = source.stem
 
@@ -139,44 +139,41 @@ class CommandIntegrator(BaseIntegrator):
         claude_metadata = {}
 
         # Map APM frontmatter to Claude frontmatter
-        if 'description' in post.metadata:
-            claude_metadata['description'] = post.metadata['description']
+        if "description" in post.metadata:
+            claude_metadata["description"] = post.metadata["description"]
 
-        if 'allowed-tools' in post.metadata:
-            claude_metadata['allowed-tools'] = post.metadata['allowed-tools']
-        elif 'allowedTools' in post.metadata:
-            claude_metadata['allowed-tools'] = post.metadata['allowedTools']
+        if "allowed-tools" in post.metadata:
+            claude_metadata["allowed-tools"] = post.metadata["allowed-tools"]
+        elif "allowedTools" in post.metadata:
+            claude_metadata["allowed-tools"] = post.metadata["allowedTools"]
 
-        if 'model' in post.metadata:
-            claude_metadata['model'] = post.metadata['model']
+        if "model" in post.metadata:
+            claude_metadata["model"] = post.metadata["model"]
 
-        if 'argument-hint' in post.metadata:
-            claude_metadata['argument-hint'] = post.metadata['argument-hint']
-        elif 'argumentHint' in post.metadata:
-            claude_metadata['argument-hint'] = post.metadata['argumentHint']
+        if "argument-hint" in post.metadata:
+            claude_metadata["argument-hint"] = post.metadata["argument-hint"]
+        elif "argumentHint" in post.metadata:
+            claude_metadata["argument-hint"] = post.metadata["argumentHint"]
 
         # Map APM 'input' to Claude 'arguments' and 'argument-hint'
-        input_names, rejected_names = _extract_input_names(post.metadata.get('input'))
+        input_names, rejected_names = _extract_input_names(post.metadata.get("input"))
         if rejected_names:
             warnings.append(
                 f"input: rejected {len(rejected_names)} invalid name(s) "
                 f"(must match [A-Za-z][\\w-]{{0,63}}): "
-                f"{', '.join(rejected_names[:5])}"
-                + (" ..." if len(rejected_names) > 5 else "")
+                f"{', '.join(rejected_names[:5])}" + (" ..." if len(rejected_names) > 5 else "")
             )
         if input_names:
-            claude_metadata['arguments'] = input_names
-            if 'argument-hint' not in claude_metadata:
-                claude_metadata['argument-hint'] = " ".join(
-                    f"<{name}>" for name in input_names
-                )
+            claude_metadata["arguments"] = input_names
+            if "argument-hint" not in claude_metadata:
+                claude_metadata["argument-hint"] = " ".join(f"<{name}>" for name in input_names)
 
         # Convert APM input references to Claude $name placeholders
         content = post.content
         if input_names:
             content = re.sub(
-                r'\$\{\{?\s*input\s*:\s*([\w-]+)\s*\}?\}',
-                r'$\1',
+                r"\$\{\{?\s*input\s*:\s*([\w-]+)\s*\}?\}",
+                r"$\1",
                 content,
             )
 
@@ -185,7 +182,7 @@ class CommandIntegrator(BaseIntegrator):
         new_post.metadata = claude_metadata
 
         return (command_name, new_post, warnings)
-    
+
     def integrate_command(
         self,
         source: Path,
@@ -193,7 +190,7 @@ class CommandIntegrator(BaseIntegrator):
         package_info: Any,
         original_path: Path,
         *,
-        diagnostics: Optional["DiagnosticCollector"] = None,
+        diagnostics: DiagnosticCollector | None = None,
     ) -> int:
         """Integrate a prompt file as a Claude command (verbatim copy with format conversion).
 
@@ -208,13 +205,15 @@ class CommandIntegrator(BaseIntegrator):
             int: Number of links resolved
         """
         # Transform to command format
-        command_name, post, warnings = self._transform_prompt_to_command(source)
+        command_name, post, warnings = self._transform_prompt_to_command(source)  # noqa: RUF059
 
         # Resolve context links in content
         post.content, links_resolved = self.resolve_links(post.content, source, target)
 
         pkg_name = getattr(
-            getattr(package_info, "package", None), "name", "",
+            getattr(package_info, "package", None),
+            "name",
+            "",
         )
 
         # Surface install-time info when input -> arguments mapping happened so
@@ -223,8 +222,7 @@ class CommandIntegrator(BaseIntegrator):
         if mapped_args and diagnostics is not None:
             diagnostics.info(
                 message=(
-                    f"Mapped input -> Claude arguments in {target.name}: "
-                    f"[{', '.join(mapped_args)}]"
+                    f"Mapped input -> Claude arguments in {target.name}: [{', '.join(mapped_args)}]"
                 ),
                 package=pkg_name,
                 detail=(
@@ -240,17 +238,17 @@ class CommandIntegrator(BaseIntegrator):
         scan_verdict = None
         try:
             scan_verdict = SecurityGate.scan_text(
-                compiled, str(target), policy=WARN_POLICY,
+                compiled,
+                str(target),
+                policy=WARN_POLICY,
             )
         except ImportError:
             # Missing/tampered gate must not silently become a no-op.
             raise
         except (OSError, ValueError) as exc:
-            warnings.append(
-                f"{target.name}: security scan skipped due to scan error: {exc}"
-            )
+            warnings.append(f"{target.name}: security scan skipped due to scan error: {exc}")
 
-        security_messages: List[Tuple[str, str, str]] = []
+        security_messages: list[tuple[str, str, str]] = []
         if scan_verdict is not None:
             if scan_verdict.has_critical:
                 security_messages.append(
@@ -304,23 +302,23 @@ class CommandIntegrator(BaseIntegrator):
         target.parent.mkdir(parents=True, exist_ok=True)
 
         # Write the command file
-        with open(target, 'w', encoding='utf-8') as f:
+        with open(target, "w", encoding="utf-8") as f:
             f.write(compiled)
 
         return links_resolved
-    
+
     # ------------------------------------------------------------------
     # Target-driven API (data-driven dispatch)
     # ------------------------------------------------------------------
 
     def integrate_commands_for_target(
         self,
-        target: "TargetProfile",
+        target: TargetProfile,
         package_info,
         project_root: Path,
         *,
         force: bool = False,
-        managed_files: set = None,
+        managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
     ) -> IntegrationResult:
         """Integrate prompt files as commands for a single *target*.
@@ -347,13 +345,13 @@ class CommandIntegrator(BaseIntegrator):
         commands_dir = target_root / mapping.subdir
         files_integrated = 0
         files_skipped = 0
-        target_paths: List[Path] = []
+        target_paths: list[Path] = []
         total_links_resolved = 0
 
         for prompt_file in prompt_files:
             filename = prompt_file.name
-            if filename.endswith('.prompt.md'):
-                base_name = filename[:-len('.prompt.md')]
+            if filename.endswith(".prompt.md"):
+                base_name = filename[: -len(".prompt.md")]
             else:
                 base_name = prompt_file.stem
 
@@ -361,7 +359,10 @@ class CommandIntegrator(BaseIntegrator):
             rel_path = portable_relpath(target_path, project_root)
 
             if self.check_collision(
-                target_path, rel_path, managed_files, force,
+                target_path,
+                rel_path,
+                managed_files,
+                force,
                 diagnostics=diagnostics,
             ):
                 files_skipped += 1
@@ -372,7 +373,10 @@ class CommandIntegrator(BaseIntegrator):
                 links_resolved = 0
             else:
                 links_resolved = self.integrate_command(
-                    prompt_file, target_path, package_info, prompt_file,
+                    prompt_file,
+                    target_path,
+                    package_info,
+                    prompt_file,
                     diagnostics=diagnostics,
                 )
             files_integrated += 1
@@ -389,11 +393,11 @@ class CommandIntegrator(BaseIntegrator):
 
     def sync_for_target(
         self,
-        target: "TargetProfile",
+        target: TargetProfile,
         apm_package,
         project_root: Path,
-        managed_files: set = None,
-    ) -> Dict:
+        managed_files: set = None,  # noqa: RUF013
+    ) -> dict:
         """Remove APM-managed command files for a single *target*."""
         mapping = target.primitives.get("commands")
         if not mapping:
@@ -432,7 +436,7 @@ class CommandIntegrator(BaseIntegrator):
         prompt_text = post.content.strip()
         prompt_text = prompt_text.replace("$ARGUMENTS", "{{args}}")
 
-        if re.search(r'(?<!\d)\$\d+', prompt_text):
+        if re.search(r"(?<!\d)\$\d+", prompt_text):
             prompt_text = f"Arguments: {{{{args}}}}\n\n{prompt_text}"
 
         doc = {"prompt": prompt_text}
@@ -454,60 +458,88 @@ class CommandIntegrator(BaseIntegrator):
     # ------------------------------------------------------------------
 
     # DEPRECATED: use integrate_commands_for_target(KNOWN_TARGETS["claude"], ...) instead.
-    def integrate_package_commands(self, package_info, project_root: Path,
-                                    force: bool = False,
-                                    managed_files: set = None,
-                                    diagnostics=None) -> IntegrationResult:
+    def integrate_package_commands(
+        self,
+        package_info,
+        project_root: Path,
+        force: bool = False,
+        managed_files: set = None,  # noqa: RUF013
+        diagnostics=None,
+    ) -> IntegrationResult:
         """Integrate prompt files as Claude commands (.claude/commands/).
 
         Legacy compat: ensures ``.claude/`` exists so the target-driven
         method does not skip.
         """
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         (project_root / ".claude").mkdir(parents=True, exist_ok=True)
         return self.integrate_commands_for_target(
-            KNOWN_TARGETS["claude"], package_info, project_root,
-            force=force, managed_files=managed_files,
+            KNOWN_TARGETS["claude"],
+            package_info,
+            project_root,
+            force=force,
+            managed_files=managed_files,
             diagnostics=diagnostics,
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["claude"], ...) instead.
-    def sync_integration(self, apm_package, project_root: Path,
-                          managed_files: set = None) -> Dict:
+    def sync_integration(self, apm_package, project_root: Path, managed_files: set = None) -> dict:  # noqa: RUF013
         """Remove APM-managed command files from .claude/commands/."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         return self.sync_for_target(
-            KNOWN_TARGETS["claude"], apm_package, project_root,
+            KNOWN_TARGETS["claude"],
+            apm_package,
+            project_root,
             managed_files=managed_files,
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["claude"], ...) instead.
-    def remove_package_commands(self, package_name: str, project_root: Path,
-                                managed_files: set = None) -> int:
+    def remove_package_commands(
+        self,
+        package_name: str,
+        project_root: Path,
+        managed_files: set = None,  # noqa: RUF013
+    ) -> int:
         """Remove APM-managed command files."""
-        stats = self.sync_integration(None, project_root,
-                                       managed_files=managed_files)
+        stats = self.sync_integration(None, project_root, managed_files=managed_files)
         return stats["files_removed"]
 
     # DEPRECATED: use integrate_commands_for_target(KNOWN_TARGETS["opencode"], ...) instead.
-    def integrate_package_commands_opencode(self, package_info, project_root: Path,
-                                            force: bool = False,
-                                            managed_files: set = None,
-                                            diagnostics=None) -> IntegrationResult:
+    def integrate_package_commands_opencode(
+        self,
+        package_info,
+        project_root: Path,
+        force: bool = False,
+        managed_files: set = None,  # noqa: RUF013
+        diagnostics=None,
+    ) -> IntegrationResult:
         """Integrate prompt files as OpenCode commands (.opencode/commands/)."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         return self.integrate_commands_for_target(
-            KNOWN_TARGETS["opencode"], package_info, project_root,
-            force=force, managed_files=managed_files,
+            KNOWN_TARGETS["opencode"],
+            package_info,
+            project_root,
+            force=force,
+            managed_files=managed_files,
             diagnostics=diagnostics,
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["opencode"], ...) instead.
-    def sync_integration_opencode(self, apm_package, project_root: Path,
-                                  managed_files: set = None) -> Dict:
+    def sync_integration_opencode(
+        self,
+        apm_package,
+        project_root: Path,
+        managed_files: set = None,  # noqa: RUF013
+    ) -> dict:
         """Remove APM-managed command files from .opencode/commands/."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         return self.sync_for_target(
-            KNOWN_TARGETS["opencode"], apm_package, project_root,
+            KNOWN_TARGETS["opencode"],
+            apm_package,
+            project_root,
             managed_files=managed_files,
         )

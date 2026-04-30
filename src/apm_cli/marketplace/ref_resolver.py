@@ -21,18 +21,18 @@ import re
 import subprocess
 import threading
 import time
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from dataclasses import dataclass, field  # noqa: F401
+from typing import Dict, List, Optional  # noqa: F401, UP035
 
-from .errors import GitLsRemoteError, OfflineMissError
+from ..utils.github_host import build_https_clone_url, default_host
 from ._git_utils import redact_token as _redact_token
+from .errors import GitLsRemoteError, OfflineMissError
 from .git_stderr import translate_git_stderr
-from ..utils.github_host import default_host, build_https_clone_url
 
 __all__ = [
-    "RemoteRef",
     "RefCache",
     "RefResolver",
+    "RemoteRef",
 ]
 
 # ---------------------------------------------------------------------------
@@ -47,7 +47,7 @@ class RemoteRef:
     """A single ref returned by ``git ls-remote``."""
 
     name: str  # e.g. "refs/tags/v1.2.0" or "refs/heads/main"
-    sha: str   # 40-char hex SHA
+    sha: str  # 40-char hex SHA
 
 
 # ---------------------------------------------------------------------------
@@ -59,7 +59,7 @@ _DEFAULT_TTL_SECONDS = 300.0  # 5 minutes
 
 @dataclass
 class _CacheEntry:
-    refs: List[RemoteRef]
+    refs: list[RemoteRef]
     timestamp: float
 
 
@@ -73,9 +73,9 @@ class RefCache:
 
     def __init__(self, ttl_seconds: float = _DEFAULT_TTL_SECONDS) -> None:
         self._ttl = ttl_seconds
-        self._store: Dict[str, _CacheEntry] = {}
+        self._store: dict[str, _CacheEntry] = {}
 
-    def get(self, owner_repo: str) -> Optional[List[RemoteRef]]:
+    def get(self, owner_repo: str) -> list[RemoteRef] | None:
         """Return cached refs or ``None`` on miss / expiry."""
         entry = self._store.get(owner_repo)
         if entry is None:
@@ -85,7 +85,7 @@ class RefCache:
             return None
         return list(entry.refs)
 
-    def put(self, owner_repo: str, refs: List[RemoteRef]) -> None:
+    def put(self, owner_repo: str, refs: list[RemoteRef]) -> None:
         """Store *refs* for *owner_repo*."""
         self._store[owner_repo] = _CacheEntry(
             refs=list(refs),
@@ -105,9 +105,9 @@ class RefCache:
 # ---------------------------------------------------------------------------
 
 
-def _parse_ls_remote_output(output: str) -> List[RemoteRef]:
+def _parse_ls_remote_output(output: str) -> list[RemoteRef]:
     """Parse ``git ls-remote`` stdout into a list of ``RemoteRef``."""
-    refs: List[RemoteRef] = []
+    refs: list[RemoteRef] = []
     for line in output.splitlines():
         line = line.strip()
         if not line:
@@ -149,19 +149,19 @@ class RefResolver:
         timeout_seconds: float = 10.0,
         offline: bool = False,
         stderr_translator_enabled: bool = True,
-        host: Optional[str] = None,
-        token: Optional[str] = None,
+        host: str | None = None,
+        token: str | None = None,
     ) -> None:
         self._timeout = timeout_seconds
         self._offline = offline
         self._stderr_translator = stderr_translator_enabled
         self._host: str = host or default_host() or "github.com"
-        self._token: Optional[str] = token
+        self._token: str | None = token
         self._cache = RefCache()
         self._lock = threading.Lock()
         # Per-remote locks to serialise calls to the same remote while
         # allowing different remotes to proceed in parallel.
-        self._remote_locks: Dict[str, threading.Lock] = {}
+        self._remote_locks: dict[str, threading.Lock] = {}
 
     @property
     def cache(self) -> RefCache:
@@ -174,7 +174,7 @@ class RefResolver:
                 self._remote_locks[owner_repo] = threading.Lock()
             return self._remote_locks[owner_repo]
 
-    def list_remote_refs(self, owner_repo: str) -> List[RemoteRef]:
+    def list_remote_refs(self, owner_repo: str) -> list[RemoteRef]:
         """Fetch all tags and heads from the configured Git host.
 
         Results are cached; subsequent calls for the same remote return
@@ -220,13 +220,13 @@ class RefResolver:
                     env=env,
                 )
             except subprocess.TimeoutExpired:
-                raise GitLsRemoteError(
+                raise GitLsRemoteError(  # noqa: B904
                     package="",
                     summary=f"git ls-remote timed out after {self._timeout}s for '{owner_repo}'.",
                     hint="Increase --timeout or check your network connection.",
                 )
             except OSError as exc:
-                raise GitLsRemoteError(
+                raise GitLsRemoteError(  # noqa: B904
                     package="",
                     summary=f"Failed to run git ls-remote for '{owner_repo}'.",
                     hint=f"Ensure git is installed and on PATH. Error: {exc}",
@@ -297,13 +297,13 @@ class RefResolver:
                 env=env,
             )
         except subprocess.TimeoutExpired:
-            raise GitLsRemoteError(
+            raise GitLsRemoteError(  # noqa: B904
                 package="",
                 summary=f"git ls-remote timed out after {self._timeout}s for '{owner_repo}'.",
                 hint="Increase --timeout or check your network connection.",
             )
         except OSError as exc:
-            raise GitLsRemoteError(
+            raise GitLsRemoteError(  # noqa: B904
                 package="",
                 summary=f"Failed to run git ls-remote for '{owner_repo}'.",
                 hint=f"Ensure git is installed and on PATH. Error: {exc}",

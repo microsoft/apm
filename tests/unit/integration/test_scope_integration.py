@@ -10,7 +10,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-import pytest
+import pytest  # noqa: F401
 
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
@@ -81,12 +81,7 @@ class TestCopilotScopeResolution:
         )
 
         assert result.files_integrated == 1
-        deployed = (
-            self.project_root
-            / ".github"
-            / "instructions"
-            / "python.instructions.md"
-        )
+        deployed = self.project_root / ".github" / "instructions" / "python.instructions.md"
         assert deployed.exists()
         assert not (self.project_root / ".copilot").exists()
 
@@ -117,9 +112,7 @@ class TestCopilotScopeResolution:
         )
 
         assert result.files_integrated == 1
-        assert (
-            self.project_root / ".copilot" / "agents" / "reviewer.agent.md"
-        ).exists()
+        assert (self.project_root / ".copilot" / "agents" / "reviewer.agent.md").exists()
         assert not (self.project_root / ".github" / "agents").exists()
 
 
@@ -161,13 +154,7 @@ class TestOpenCodeScopeResolution:
 
         assert result.files_integrated == 1
         # opencode agents mapping uses .md extension, not .agent.md
-        expected = (
-            self.project_root
-            / ".config"
-            / "opencode"
-            / "agents"
-            / "helper.md"
-        )
+        expected = self.project_root / ".config" / "opencode" / "agents" / "helper.md"
         assert expected.exists()
         assert not (self.project_root / ".opencode" / "agents").exists()
 
@@ -191,9 +178,7 @@ class TestOpenCodeScopeResolution:
 
         assert result.files_integrated == 1
         # opencode agents mapping uses .md extension
-        assert (
-            self.project_root / ".opencode" / "agents" / "helper.md"
-        ).exists()
+        assert (self.project_root / ".opencode" / "agents" / "helper.md").exists()
 
 
 # -- Codex user-scope behavior ----------------------------------------------
@@ -224,9 +209,11 @@ class TestCodexUserScope:
 
 
 class TestClaudeScopeResolution:
-    """Verify Claude uses .claude at both scopes (user_root_dir is None)."""
+    """Verify Claude's scope resolution, including the CLAUDE_CONFIG_DIR
+    override at user scope."""
 
-    def test_project_and_user_scope_same_root(self):
+    def test_project_and_user_scope_same_root(self, monkeypatch):
+        monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
         claude = KNOWN_TARGETS["claude"]
         project = claude.for_scope(user_scope=False)
         user = claude.for_scope(user_scope=True)
@@ -240,6 +227,47 @@ class TestClaudeScopeResolution:
         assert "instructions" in resolved.primitives
         assert "agents" in resolved.primitives
 
+    def test_user_scope_expands_tilde(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", "~/.config/claude")
+        scoped = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
+        assert scoped is not None
+        assert scoped.root_dir == ".config/claude"
+
+    def test_user_scope_blank_falls_back_to_default(self, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", "   ")
+        scoped = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
+        assert scoped is not None
+        assert scoped.root_dir == ".claude"
+
+    def test_user_scope_outside_home_keeps_absolute(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        outside = tmp_path / "elsewhere"
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(outside))
+        scoped = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
+        assert scoped is not None
+        # Paths outside $HOME are not normalized; preserve the absolute string.
+        assert scoped.root_dir == str(outside)
+
+    def test_user_scope_collapses_dotdot_segments(self, tmp_path, monkeypatch):
+        # ``..`` must be resolved before relative_to(home) so traversal
+        # cannot leak into root_dir and later escape project_root / root_dir.
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home / ".." / "outside"))
+        scoped = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
+        assert scoped is not None
+        assert ".." not in scoped.root_dir
+        assert scoped.root_dir == str((tmp_path / "outside").resolve())
+
+    def test_project_scope_ignores_env_var(self, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/should/not/be/used")
+        scoped = KNOWN_TARGETS["claude"].for_scope(user_scope=False)
+        assert scoped is KNOWN_TARGETS["claude"]
+        assert scoped.root_dir == ".claude"
+
 
 # -- resolve_targets consistency ----------------------------------------------
 
@@ -247,11 +275,10 @@ class TestClaudeScopeResolution:
 class TestResolveTargetsConsistency:
     """Verify resolve_targets produces correct profiles for all targets."""
 
-    def test_all_targets_at_user_scope_have_correct_roots(self):
+    def test_all_targets_at_user_scope_have_correct_roots(self, monkeypatch):
+        monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
         with tempfile.TemporaryDirectory() as tmp:
-            targets = resolve_targets(
-                Path(tmp), user_scope=True, explicit_target="all"
-            )
+            targets = resolve_targets(Path(tmp), user_scope=True, explicit_target="all")
             root_map = {t.name: t.root_dir for t in targets}
             # Codex keeps .codex at user scope
             assert root_map["codex"] == ".codex"
@@ -267,9 +294,7 @@ class TestResolveTargetsConsistency:
 
     def test_unsupported_primitives_filtered_at_user_scope(self):
         with tempfile.TemporaryDirectory() as tmp:
-            targets = resolve_targets(
-                Path(tmp), user_scope=True, explicit_target="all"
-            )
+            targets = resolve_targets(Path(tmp), user_scope=True, explicit_target="all")
             for t in targets:
                 if t.name == "copilot":
                     assert "prompts" not in t.primitives
@@ -281,9 +306,7 @@ class TestResolveTargetsConsistency:
 
     def test_project_scope_preserves_all_primitives(self):
         with tempfile.TemporaryDirectory() as tmp:
-            targets = resolve_targets(
-                Path(tmp), user_scope=False, explicit_target="all"
-            )
+            targets = resolve_targets(Path(tmp), user_scope=False, explicit_target="all")
             copilot = next(t for t in targets if t.name == "copilot")
             assert "prompts" in copilot.primitives
             assert "instructions" in copilot.primitives
@@ -327,9 +350,7 @@ class TestSkillScopeDeployment:
         )
 
         assert result.skill_created
-        assert (
-            self.project_root / ".copilot" / "skills" / "my-skill" / "SKILL.md"
-        ).exists()
+        assert (self.project_root / ".copilot" / "skills" / "my-skill" / "SKILL.md").exists()
         assert not (self.project_root / ".github" / "skills").exists()
 
 
@@ -387,6 +408,4 @@ class TestAutoCreateGuard:
         )
 
         assert result.files_integrated == 1
-        assert (
-            self.project_root / ".github" / "agents" / "helper.agent.md"
-        ).exists()
+        assert (self.project_root / ".github" / "agents" / "helper.agent.md").exists()

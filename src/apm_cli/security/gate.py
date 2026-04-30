@@ -10,11 +10,10 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional  # noqa: F401, UP035
 
-from .content_scanner import ContentScanner, ScanFinding
 from ..utils.paths import portable_relpath
-
+from .content_scanner import ContentScanner, ScanFinding
 
 # ---------------------------------------------------------------------------
 # Policy & Verdict
@@ -37,9 +36,7 @@ class ScanPolicy:
 
     def effective_block(self, force: bool) -> bool:
         """Return True when this policy would block deployment."""
-        return self.on_critical == "block" and not (
-            self.force_overrides and force
-        )
+        return self.on_critical == "block" and not (self.force_overrides and force)
 
 
 # Pre-built policies — import these instead of constructing ad-hoc ones.
@@ -52,7 +49,7 @@ REPORT_POLICY = ScanPolicy(on_critical="ignore", force_overrides=False)
 class ScanVerdict:
     """Result of a SecurityGate check."""
 
-    findings_by_file: Dict[str, List[ScanFinding]] = field(default_factory=dict)
+    findings_by_file: dict[str, list[ScanFinding]] = field(default_factory=dict)
     has_critical: bool = False
     should_block: bool = False
     critical_count: int = 0
@@ -64,7 +61,7 @@ class ScanVerdict:
         return bool(self.findings_by_file)
 
     @property
-    def all_findings(self) -> List[ScanFinding]:
+    def all_findings(self) -> list[ScanFinding]:
         """Flatten findings across all files."""
         return [f for ff in self.findings_by_file.values() for f in ff]
 
@@ -89,7 +86,7 @@ class SecurityGate:
         Symlinks are never followed (``followlinks=False``, ``is_symlink()``).
         All files are scanned to produce a complete findings report.
         """
-        findings_by_file: Dict[str, List[ScanFinding]] = {}
+        findings_by_file: dict[str, list[ScanFinding]] = {}
         files_scanned = 0
 
         for dirpath, _dirs, filenames in os.walk(root, followlinks=False):
@@ -106,9 +103,7 @@ class SecurityGate:
                     rel = portable_relpath(fpath, root)
                     findings_by_file[rel] = file_findings
 
-        return SecurityGate._build_verdict(
-            findings_by_file, files_scanned, policy, force
-        )
+        return SecurityGate._build_verdict(findings_by_file, files_scanned, policy, force)
 
     @staticmethod
     def scan_text(
@@ -119,12 +114,10 @@ class SecurityGate:
     ) -> ScanVerdict:
         """Scan in-memory text (compiled output, generated files)."""
         file_findings = ContentScanner.scan_text(content, filename=filename)
-        findings_by_file: Dict[str, List[ScanFinding]] = {}
+        findings_by_file: dict[str, list[ScanFinding]] = {}
         if file_findings:
             findings_by_file[filename] = file_findings
-        return SecurityGate._build_verdict(
-            findings_by_file, 1, policy, force=False
-        )
+        return SecurityGate._build_verdict(findings_by_file, 1, policy, force=False)
 
     @staticmethod
     def report(
@@ -141,9 +134,7 @@ class SecurityGate:
         if verdict.has_critical and not verdict.should_block and force:
             # --force: deployed despite critical
             diagnostics.security(
-                message=(
-                    "Deployed with --force despite critical hidden characters"
-                ),
+                message=("Deployed with --force despite critical hidden characters"),
                 package=package,
                 detail=(
                     f"{verdict.critical_count} critical finding(s) — "
@@ -154,8 +145,7 @@ class SecurityGate:
         elif verdict.has_critical and verdict.should_block:
             diagnostics.security(
                 message=(
-                    "Blocked — critical hidden characters in source. "
-                    "Use --force to override."
+                    "Blocked — critical hidden characters in source. Use --force to override."
                 ),
                 package=package,
                 detail=f"at least {verdict.critical_count} critical, "
@@ -179,8 +169,7 @@ class SecurityGate:
                 message="Hidden characters in source files",
                 package=package,
                 detail=(
-                    f"{verdict.warning_count} warning(s) — "
-                    "run 'apm audit --strip' after install"
+                    f"{verdict.warning_count} warning(s) — run 'apm audit --strip' after install"
                 ),
                 severity="warning",
             )
@@ -191,7 +180,7 @@ class SecurityGate:
 
     @staticmethod
     def _build_verdict(
-        findings_by_file: Dict[str, List[ScanFinding]],
+        findings_by_file: dict[str, list[ScanFinding]],
         files_scanned: int,
         policy: ScanPolicy,
         force: bool,

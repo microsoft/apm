@@ -7,12 +7,11 @@ They are always run in addition to the baseline checks in ``ci_checks``.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import List, Optional
-
 import logging
+from pathlib import Path
+from typing import List, Optional  # noqa: F401, UP035
 
-from .models import CIAuditResult, CheckResult
+from .models import CheckResult, CIAuditResult
 
 _logger = logging.getLogger(__name__)
 
@@ -20,7 +19,7 @@ _logger = logging.getLogger(__name__)
 # -- Helpers -------------------------------------------------------
 
 
-def _load_raw_apm_yml(project_root: Path) -> Optional[dict]:
+def _load_raw_apm_yml(project_root: Path) -> dict | None:
     """Load raw apm.yml as a dict for policy checks that inspect raw fields.
 
     This helper is called **after** :pymethod:`APMPackage.from_apm_yml` has
@@ -44,7 +43,7 @@ def _load_raw_apm_yml(project_root: Path) -> Optional[dict]:
     if not apm_yml_path.exists():
         return None
     try:
-        with open(apm_yml_path, "r", encoding="utf-8") as f:
+        with open(apm_yml_path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
     except FileNotFoundError:
         # TOCTOU: file disappeared between exists() check and open(); normal condition.
@@ -71,8 +70,8 @@ def _load_raw_apm_yml(project_root: Path) -> Optional[dict]:
 
 
 def _check_dependency_allowlist(
-    deps: List["DependencyReference"],
-    policy: "DependencyPolicy",
+    deps: list[DependencyReference],
+    policy: DependencyPolicy,
 ) -> CheckResult:
     """Check 1: every dependency matches policy allow list."""
     from .matcher import check_dependency_allowed
@@ -84,7 +83,7 @@ def _check_dependency_allowlist(
             message="No dependency allow list configured",
         )
 
-    violations: List[str] = []
+    violations: list[str] = []
     for dep in deps:
         ref = dep.get_canonical_dependency_string()
         allowed, reason = check_dependency_allowed(ref, policy)
@@ -106,8 +105,8 @@ def _check_dependency_allowlist(
 
 
 def _check_dependency_denylist(
-    deps: List["DependencyReference"],
-    policy: "DependencyPolicy",
+    deps: list[DependencyReference],
+    policy: DependencyPolicy,
 ) -> CheckResult:
     """Check 2: no dependency matches policy deny list."""
     from .matcher import check_dependency_allowed
@@ -119,7 +118,7 @@ def _check_dependency_denylist(
             message="No dependency deny list configured",
         )
 
-    violations: List[str] = []
+    violations: list[str] = []
     for dep in deps:
         ref = dep.get_canonical_dependency_string()
         allowed, reason = check_dependency_allowed(ref, policy)
@@ -141,8 +140,8 @@ def _check_dependency_denylist(
 
 
 def _check_required_packages(
-    deps: List["DependencyReference"],
-    policy: "DependencyPolicy",
+    deps: list[DependencyReference],
+    policy: DependencyPolicy,
 ) -> CheckResult:
     """Check 3: every required package is in manifest deps."""
     if not policy.require:
@@ -152,10 +151,8 @@ def _check_required_packages(
             message="No required packages configured",
         )
 
-    dep_names = {
-        dep.get_canonical_dependency_string().split("#")[0] for dep in deps
-    }
-    missing: List[str] = []
+    dep_names = {dep.get_canonical_dependency_string().split("#")[0] for dep in deps}
+    missing: list[str] = []
     for req in policy.require:
         pkg_name = req.split("#")[0]
         if pkg_name not in dep_names:
@@ -176,9 +173,9 @@ def _check_required_packages(
 
 
 def _check_required_packages_deployed(
-    deps: List["DependencyReference"],
-    lock: Optional["LockFile"],
-    policy: "DependencyPolicy",
+    deps: list[DependencyReference],
+    lock: LockFile | None,
+    policy: DependencyPolicy,
 ) -> CheckResult:
     """Check 4: required packages appear in lockfile with deployed files."""
     if not policy.require or lock is None:
@@ -188,14 +185,9 @@ def _check_required_packages_deployed(
             message="No required packages to verify deployment",
         )
 
-    dep_names = {
-        dep.get_canonical_dependency_string().split("#")[0] for dep in deps
-    }
-    lock_by_name = {
-        locked.get_unique_key(): locked
-        for _key, locked in lock.dependencies.items()
-    }
-    not_deployed: List[str] = []
+    dep_names = {dep.get_canonical_dependency_string().split("#")[0] for dep in deps}
+    lock_by_name = {locked.get_unique_key(): locked for _key, locked in lock.dependencies.items()}
+    not_deployed: list[str] = []
     for req in policy.require:
         pkg_name = req.split("#")[0]
         if pkg_name not in dep_names:
@@ -221,9 +213,9 @@ def _check_required_packages_deployed(
 
 
 def _check_required_package_version(
-    deps: List["DependencyReference"],
-    lock: Optional["LockFile"],
-    policy: "DependencyPolicy",
+    deps: list[DependencyReference],
+    lock: LockFile | None,
+    policy: DependencyPolicy,
 ) -> CheckResult:
     """Check 5: required packages with version pins match per resolution strategy."""
     pinned = [(r, r.split("#", 1)) for r in policy.require if "#" in r]
@@ -235,13 +227,10 @@ def _check_required_package_version(
         )
 
     resolution = policy.require_resolution
-    violations: List[str] = []
-    warnings: List[str] = []
+    violations: list[str] = []
+    warnings: list[str] = []
 
-    lock_by_name = {
-        locked.get_unique_key(): locked
-        for _key, locked in lock.dependencies.items()
-    }
+    lock_by_name = {locked.get_unique_key(): locked for _key, locked in lock.dependencies.items()}
 
     for _req, parts in pinned:
         pkg_name, expected_ref = parts[0], parts[1]
@@ -250,13 +239,8 @@ def _check_required_package_version(
         if locked is not None:
             actual_ref = locked.resolved_ref or ""
             if actual_ref != expected_ref:
-                detail = (
-                    f"{pkg_name}: expected ref '{expected_ref}', "
-                    f"got '{actual_ref}'"
-                )
-                if resolution == "block":
-                    violations.append(detail)
-                elif resolution == "policy-wins":
+                detail = f"{pkg_name}: expected ref '{expected_ref}', got '{actual_ref}'"
+                if resolution == "block" or resolution == "policy-wins":  # noqa: PLR1714
                     violations.append(detail)
                 else:  # project-wins
                     warnings.append(detail)
@@ -278,8 +262,8 @@ def _check_required_package_version(
 
 
 def _check_transitive_depth(
-    lock: Optional["LockFile"],
-    policy: "DependencyPolicy",
+    lock: LockFile | None,
+    policy: DependencyPolicy,
 ) -> CheckResult:
     """Check 6: no lockfile dep exceeds max_depth."""
     if lock is None or policy.max_depth >= 50:
@@ -291,12 +275,10 @@ def _check_transitive_depth(
             else "No lockfile to check",
         )
 
-    violations: List[str] = []
+    violations: list[str] = []
     for key, dep in lock.dependencies.items():
         if dep.depth > policy.max_depth:
-            violations.append(
-                f"{key}: depth {dep.depth} exceeds limit {policy.max_depth}"
-            )
+            violations.append(f"{key}: depth {dep.depth} exceeds limit {policy.max_depth}")
 
     if not violations:
         return CheckResult(
@@ -313,8 +295,8 @@ def _check_transitive_depth(
 
 
 def _check_mcp_allowlist(
-    mcp_deps: List,
-    policy: "McpPolicy",
+    mcp_deps: list,
+    policy: McpPolicy,
 ) -> CheckResult:
     """Check 7: MCP server names match allow list."""
     from .matcher import check_mcp_allowed
@@ -326,7 +308,7 @@ def _check_mcp_allowlist(
             message="No MCP allow list configured",
         )
 
-    violations: List[str] = []
+    violations: list[str] = []
     for mcp in mcp_deps:
         allowed, reason = check_mcp_allowed(mcp.name, policy)
         if not allowed and "not in allowed" in reason:
@@ -347,8 +329,8 @@ def _check_mcp_allowlist(
 
 
 def _check_mcp_denylist(
-    mcp_deps: List,
-    policy: "McpPolicy",
+    mcp_deps: list,
+    policy: McpPolicy,
 ) -> CheckResult:
     """Check 8: no MCP server matches deny list."""
     from .matcher import check_mcp_allowed
@@ -360,7 +342,7 @@ def _check_mcp_denylist(
             message="No MCP deny list configured",
         )
 
-    violations: List[str] = []
+    violations: list[str] = []
     for mcp in mcp_deps:
         allowed, reason = check_mcp_allowed(mcp.name, policy)
         if not allowed and "denied by pattern" in reason:
@@ -381,8 +363,8 @@ def _check_mcp_denylist(
 
 
 def _check_mcp_transport(
-    mcp_deps: List,
-    policy: "McpPolicy",
+    mcp_deps: list,
+    policy: McpPolicy,
 ) -> CheckResult:
     """Check 9: MCP transport values match policy allow list."""
     allowed_transports = policy.transport.allow
@@ -393,7 +375,7 @@ def _check_mcp_transport(
             message="No MCP transport restrictions configured",
         )
 
-    violations: List[str] = []
+    violations: list[str] = []
     for mcp in mcp_deps:
         if mcp.transport and mcp.transport not in allowed_transports:
             violations.append(
@@ -415,8 +397,8 @@ def _check_mcp_transport(
 
 
 def _check_mcp_self_defined(
-    mcp_deps: List,
-    policy: "McpPolicy",
+    mcp_deps: list,
+    policy: McpPolicy,
 ) -> CheckResult:
     """Check 10: self-defined MCP servers comply with policy."""
     self_defined_policy = policy.self_defined
@@ -453,8 +435,8 @@ def _check_mcp_self_defined(
 
 
 def _check_compilation_target(
-    raw_yml: Optional[dict],
-    policy: "CompilationPolicy",
+    raw_yml: dict | None,
+    policy: CompilationPolicy,
 ) -> CheckResult:
     """Check 11: compilation target matches policy."""
     enforce = policy.target.enforce
@@ -505,8 +487,8 @@ def _check_compilation_target(
 
 
 def _check_compilation_strategy(
-    raw_yml: Optional[dict],
-    policy: "CompilationPolicy",
+    raw_yml: dict | None,
+    policy: CompilationPolicy,
 ) -> CheckResult:
     """Check 12: compilation strategy matches policy."""
     enforce = policy.strategy.enforce
@@ -541,8 +523,8 @@ def _check_compilation_strategy(
 
 
 def _check_source_attribution(
-    raw_yml: Optional[dict],
-    policy: "CompilationPolicy",
+    raw_yml: dict | None,
+    policy: CompilationPolicy,
 ) -> CheckResult:
     """Check 13: source attribution enabled if policy requires."""
     if not policy.source_attribution:
@@ -553,11 +535,7 @@ def _check_source_attribution(
         )
 
     compilation = (raw_yml or {}).get("compilation", {})
-    attribution = (
-        compilation.get("source_attribution")
-        if isinstance(compilation, dict)
-        else None
-    )
+    attribution = compilation.get("source_attribution") if isinstance(compilation, dict) else None
     if attribution is True:
         return CheckResult(
             name="source-attribution",
@@ -573,8 +551,8 @@ def _check_source_attribution(
 
 
 def _check_required_manifest_fields(
-    raw_yml: Optional[dict],
-    policy: "ManifestPolicy",
+    raw_yml: dict | None,
+    policy: ManifestPolicy,
 ) -> CheckResult:
     """Check 14: all required fields are present with non-empty values."""
     if not policy.required_fields:
@@ -585,7 +563,7 @@ def _check_required_manifest_fields(
         )
 
     data = raw_yml or {}
-    missing: List[str] = []
+    missing: list[str] = []
     for field_name in policy.required_fields:
         value = data.get(field_name)
         if not value:  # None, empty string, missing
@@ -610,7 +588,7 @@ _INCLUDES_NOT_PROVIDED = object()
 
 def _check_includes_explicit(
     manifest_includes,
-    policy: "ManifestPolicy",
+    policy: ManifestPolicy,
 ) -> CheckResult:
     """Check: manifest declares an explicit ``includes:`` list when policy requires it.
 
@@ -665,8 +643,8 @@ def _check_includes_explicit(
 
 
 def _check_scripts_policy(
-    raw_yml: Optional[dict],
-    policy: "ManifestPolicy",
+    raw_yml: dict | None,
+    policy: ManifestPolicy,
 ) -> CheckResult:
     """Check 15: scripts section absent if policy denies it."""
     if policy.scripts != "deny":
@@ -706,8 +684,8 @@ _MAX_UNMANAGED_SCAN_FILES = 10_000
 
 def _check_unmanaged_files(
     project_root: Path,
-    lock: Optional["LockFile"],
-    policy: "UnmanagedFilesPolicy",
+    lock: LockFile | None,
+    policy: UnmanagedFilesPolicy,
 ) -> CheckResult:
     """Check 16: no untracked files in governance directories."""
     if policy.action == "ignore":
@@ -732,7 +710,7 @@ def _check_unmanaged_files(
 
     dir_prefix_tuple = tuple(deployed_dir_prefixes)
 
-    unmanaged: List[str] = []
+    unmanaged: list[str] = []
     files_scanned = 0
     cap_hit = False
     for gov_dir in dirs:
@@ -798,10 +776,10 @@ def run_dependency_policy_checks(
     deps_to_install,
     *,
     lockfile=None,
-    policy: "ApmPolicy",
+    policy: ApmPolicy,
     mcp_deps=None,
-    effective_target: Optional[str] = None,
-    fetch_outcome: Optional[str] = None,
+    effective_target: str | None = None,
+    fetch_outcome: str | None = None,
     fail_fast: bool = True,
     manifest_includes=_INCLUDES_NOT_PROVIDED,
 ) -> CIAuditResult:
@@ -876,17 +854,9 @@ def run_dependency_policy_checks(
         return result
     if _run(_check_required_packages(deps_list, policy.dependencies)):
         return result
-    if _run(
-        _check_required_packages_deployed(
-            deps_list, lockfile, policy.dependencies
-        )
-    ):
+    if _run(_check_required_packages_deployed(deps_list, lockfile, policy.dependencies)):
         return result
-    if _run(
-        _check_required_package_version(
-            deps_list, lockfile, policy.dependencies
-        )
-    ):
+    if _run(_check_required_package_version(deps_list, lockfile, policy.dependencies)):
         return result
     if _run(_check_transitive_depth(lockfile, policy.dependencies)):
         return result
@@ -913,9 +883,7 @@ def run_dependency_policy_checks(
         # sees the effective (possibly CLI-overridden) target value
         # rather than what is literally on disk.
         synthetic_yml = {"target": effective_target}
-        if _run(
-            _check_compilation_target(synthetic_yml, policy.compilation)
-        ):
+        if _run(_check_compilation_target(synthetic_yml, policy.compilation)):
             return result
 
     # -- Manifest-level explicit-includes check --------------------
@@ -939,7 +907,7 @@ def run_dependency_policy_checks(
 
 def run_policy_checks(
     project_root: Path,
-    policy: "ApmPolicy",
+    policy: ApmPolicy,
     *,
     fail_fast: bool = True,
 ) -> CIAuditResult:
@@ -976,7 +944,8 @@ def run_policy_checks(
             CheckResult(
                 name="manifest-parse",
                 passed=False,
-                message="Cannot parse apm.yml: %s -- fix the YAML syntax error in apm.yml and re-run." % exc,
+                message="Cannot parse apm.yml: %s -- fix the YAML syntax error in apm.yml and re-run."  # noqa: UP031
+                % exc,
             )
         )
         return result
@@ -1036,8 +1005,6 @@ def run_policy_checks(
         return result
 
     # Unmanaged files check (16)
-    _run(
-        _check_unmanaged_files(project_root, lock, policy.unmanaged_files)
-    )
+    _run(_check_unmanaged_files(project_root, lock, policy.unmanaged_files))
 
     return result

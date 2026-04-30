@@ -15,19 +15,19 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.primitives.models import (
-    PrimitiveCollection,
-    Instruction,
-)
-from apm_cli.deps.dependency_graph import DependencyTree, DependencyNode
+from apm_cli.compilation.constitution import clear_constitution_cache, read_constitution
 from apm_cli.deps.apm_resolver import APMDependencyResolver
+from apm_cli.deps.dependency_graph import DependencyNode, DependencyTree
 from apm_cli.models.apm_package import APMPackage, DependencyReference, clear_apm_yml_cache
-from apm_cli.compilation.constitution import read_constitution, clear_constitution_cache
-
+from apm_cli.primitives.models import (
+    Instruction,
+    PrimitiveCollection,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers to build synthetic data
 # ---------------------------------------------------------------------------
+
 
 def _make_instruction(name: str, source: str = "local") -> Instruction:
     return Instruction(
@@ -65,6 +65,7 @@ def _build_deep_tree(n_packages: int, max_depth: int) -> DependencyTree:
 # Benchmark: Primitive conflict detection
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.benchmark
 class TestPrimitiveConflictDetectionPerf:
     """Verify O(m) conflict detection (was O(m²) before #171)."""
@@ -100,6 +101,7 @@ class TestPrimitiveConflictDetectionPerf:
 # Benchmark: Dependency tree depth-index
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.benchmark
 class TestDepthIndexPerf:
     """Verify O(1) depth lookups (was O(V × max_depth) before #171)."""
@@ -121,17 +123,14 @@ class TestDepthIndexPerf:
         tree = _build_deep_tree(50, 5)
         for depth in range(1, 6):
             indexed = set(n.get_id() for n in tree.get_nodes_at_depth(depth))
-            brute = set(
-                n.get_id()
-                for n in tree.nodes.values()
-                if n.depth == depth
-            )
+            brute = set(n.get_id() for n in tree.nodes.values() if n.depth == depth)
             assert indexed == brute, f"Mismatch at depth {depth}"
 
 
 # ---------------------------------------------------------------------------
 # Benchmark: Cycle detection
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.benchmark
 class TestCycleDetectionPerf:
@@ -161,6 +160,7 @@ class TestCycleDetectionPerf:
 # ---------------------------------------------------------------------------
 # Benchmark: from_apm_yml caching
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.benchmark
 class TestFromApmYmlCachePerf:
@@ -192,6 +192,7 @@ class TestFromApmYmlCachePerf:
 # ---------------------------------------------------------------------------
 # Benchmark: read_constitution caching
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.benchmark
 class TestConstitutionCachePerf:

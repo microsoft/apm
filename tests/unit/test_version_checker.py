@@ -1,18 +1,18 @@
 """Tests for version checker utility."""
 
-import unittest
-from unittest.mock import patch, Mock
-from pathlib import Path
 import tempfile
 import time
+import unittest
+from pathlib import Path
+from unittest.mock import Mock, patch
 
 from apm_cli.utils.version_checker import (
-    get_latest_version_from_github,
-    parse_version,
-    is_newer_version,
-    should_check_for_updates,
-    save_version_check_timestamp,
     check_for_updates,
+    get_latest_version_from_github,
+    is_newer_version,
+    parse_version,
+    save_version_check_timestamp,
+    should_check_for_updates,
 )
 
 
@@ -46,9 +46,7 @@ class TestVersionParser(unittest.TestCase):
         self.assertIsNone(parse_version("invalid"))
         self.assertIsNone(parse_version("1.2"))
         self.assertIsNone(parse_version("1.2.3.4"))
-        self.assertIsNone(
-            parse_version("v0.6.3")
-        )  # 'v' prefix is not accepted by parse_version
+        self.assertIsNone(parse_version("v0.6.3"))  # 'v' prefix is not accepted by parse_version
         self.assertIsNone(parse_version(""))
 
 
@@ -284,6 +282,7 @@ class TestCachePathPlatform(unittest.TestCase):
     @patch("sys.platform", "linux")
     def test_unix_cache_path(self, mock_home, mock_mkdir):
         from apm_cli.utils.version_checker import get_update_cache_path
+
         result = get_update_cache_path()
         assert result == Path("/home/user") / ".cache" / "apm" / "last_version_check"
 
@@ -292,8 +291,17 @@ class TestCachePathPlatform(unittest.TestCase):
     @patch("sys.platform", "win32")
     def test_windows_cache_path(self, mock_home, mock_mkdir):
         from apm_cli.utils.version_checker import get_update_cache_path
+
         result = get_update_cache_path()
-        assert result == Path("C:/Users/testuser") / "AppData" / "Local" / "apm" / "cache" / "last_version_check"
+        assert (
+            result
+            == Path("C:/Users/testuser")
+            / "AppData"
+            / "Local"
+            / "apm"
+            / "cache"
+            / "last_version_check"
+        )
 
 
 if __name__ == "__main__":

@@ -6,14 +6,14 @@ import sys
 
 import click
 
-
 from ....core.command_logger import CommandLogger
 from ....marketplace.errors import MarketplaceYmlError
 from . import (
-    package,
     _ensure_yml_exists,
     _is_interactive,
+    package,
 )
+
 
 @package.command(help="Remove a package from marketplace authoring config")
 @click.argument("name")

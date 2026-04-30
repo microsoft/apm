@@ -13,7 +13,7 @@ This is the Template Method companion to the Strategy pattern in
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Dict, Optional  # noqa: F401, UP035
 
 from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
 from apm_cli.install.services import integrate_package_primitives
@@ -22,7 +22,7 @@ from apm_cli.install.sources import DependencySource, Materialization
 
 def run_integration_template(
     source: DependencySource,
-) -> Optional[Dict[str, int]]:
+) -> dict[str, int] | None:
     """Run the shared post-acquire integration flow for one dependency.
 
     Returns a counter-delta dict for accumulation by the caller, or
@@ -38,7 +38,7 @@ def run_integration_template(
 def _integrate_materialization(
     source: DependencySource,
     m: Materialization,
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """Apply security gate + primitive integration on a materialised package.
 
     The caller has already populated ``ctx.installed_packages`` /
@@ -64,15 +64,18 @@ def _integrate_materialization(
     try:
         # Pre-deploy security gate
         if not _pre_deploy_security_scan(
-            install_path, diagnostics,
-            package_name=dep_key, force=ctx.force,
+            install_path,
+            diagnostics,
+            package_name=dep_key,
+            force=ctx.force,
             logger=logger,
         ):
             ctx.package_deployed_files[dep_key] = []
             return deltas
 
         int_result = integrate_package_primitives(
-            m.package_info, ctx.project_root,
+            m.package_info,
+            ctx.project_root,
             targets=ctx.targets,
             prompt_integrator=ctx.integrators["prompt"],
             agent_integrator=ctx.integrators["agent"],
@@ -94,15 +97,19 @@ def _integrate_materialization(
             skill_subset=(
                 ctx.skill_subset
                 if ctx.skill_subset_from_cli
-                else (
-                    tuple(dep_ref.skill_subset) if dep_ref.skill_subset else None
-                )
+                else (tuple(dep_ref.skill_subset) if dep_ref.skill_subset else None)
             ),
             ctx=ctx,
         )
         for k in (
-            "prompts", "agents", "skills", "sub_skills",
-            "instructions", "commands", "hooks", "links_resolved",
+            "prompts",
+            "agents",
+            "skills",
+            "sub_skills",
+            "instructions",
+            "commands",
+            "hooks",
+            "links_resolved",
         ):
             deltas[k] = int_result[k]
         ctx.package_deployed_files[dep_key] = int_result["deployed_files"]
@@ -111,11 +118,7 @@ def _integrate_materialization(
         # declares its own INTEGRATE_ERROR_PREFIX (Strategy pattern).
         # Local packages key the diagnostic by local_path; cached/fresh
         # key by dep_key -- a behavioural detail preserved from legacy.
-        package_key = (
-            dep_ref.local_path
-            if (dep_ref.is_local and dep_ref.local_path)
-            else dep_key
-        )
+        package_key = dep_ref.local_path if (dep_ref.is_local and dep_ref.local_path) else dep_key
         diagnostics.error(
             f"{source.INTEGRATE_ERROR_PREFIX}: {e}",
             package=package_key,
@@ -132,8 +135,6 @@ def _integrate_materialization(
             )
         if _err_count > 0:
             noun = "error" if _err_count == 1 else "errors"
-            logger.package_inline_warning(
-                f"    [!] {_err_count} integration {noun}"
-            )
+            logger.package_inline_warning(f"    [!] {_err_count} integration {noun}")
 
     return deltas

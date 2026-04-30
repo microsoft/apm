@@ -24,7 +24,7 @@ and never block resolution.
 import json
 import logging
 import os
-from typing import Optional
+from typing import Optional  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ _PINS_FILENAME = "version-pins.json"
 # ------------------------------------------------------------------
 
 
-def _pins_path(pins_dir: Optional[str] = None) -> str:
+def _pins_path(pins_dir: str | None = None) -> str:
     """Return the full path to the version-pins JSON file.
 
     Args:
@@ -71,7 +71,7 @@ def _pin_key(marketplace_name: str, plugin_name: str, version: str = "") -> str:
 
 
 def load_ref_pins(
-    pins_dir: Optional[str] = None,
+    pins_dir: str | None = None,
     *,
     expect_exists: bool = False,
 ) -> dict:
@@ -96,7 +96,7 @@ def load_ref_pins(
             )
         return {}
     try:
-        with open(path, "r") as fh:
+        with open(path) as fh:
             data = json.load(fh)
         if not isinstance(data, dict):
             logger.debug("version-pins file is not a JSON object; ignoring")
@@ -107,7 +107,7 @@ def load_ref_pins(
         return {}
 
 
-def save_ref_pins(pins: dict, pins_dir: Optional[str] = None) -> None:
+def save_ref_pins(pins: dict, pins_dir: str | None = None) -> None:
     """Persist *pins* to disk atomically.
 
     Writes to a temporary file first, then uses ``os.replace`` to move
@@ -135,8 +135,8 @@ def check_ref_pin(
     plugin_name: str,
     ref: str,
     version: str = "",
-    pins_dir: Optional[str] = None,
-) -> Optional[str]:
+    pins_dir: str | None = None,
+) -> str | None:
     """Check whether *ref* matches the previously-recorded pin.
 
     The *version* parameter is the plugin's declared ``version`` field.
@@ -165,7 +165,7 @@ def record_ref_pin(
     plugin_name: str,
     ref: str,
     version: str = "",
-    pins_dir: Optional[str] = None,
+    pins_dir: str | None = None,
 ) -> None:
     """Store a plugin-to-ref mapping in the pin cache.
 

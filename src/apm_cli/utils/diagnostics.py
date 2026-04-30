@@ -8,8 +8,8 @@ output when many packages are involved.
 """
 
 import threading
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from dataclasses import dataclass, field  # noqa: F401
+from typing import Dict, List, Optional  # noqa: F401, UP035
 
 from apm_cli.utils.console import (
     _get_console,
@@ -61,7 +61,7 @@ class DiagnosticCollector:
 
     def __init__(self, verbose: bool = False) -> None:
         self.verbose = verbose
-        self._diagnostics: List[Diagnostic] = []
+        self._diagnostics: list[Diagnostic] = []
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -209,13 +209,12 @@ class DiagnosticCollector:
     def has_critical_security(self) -> bool:
         """Return True if any critical-severity security finding exists."""
         return any(
-            d.category == CATEGORY_SECURITY and d.severity == "critical"
-            for d in self._diagnostics
+            d.category == CATEGORY_SECURITY and d.severity == "critical" for d in self._diagnostics
         )
 
-    def by_category(self) -> Dict[str, List[Diagnostic]]:
+    def by_category(self) -> dict[str, list[Diagnostic]]:
         """Return diagnostics grouped by category, preserving insertion order."""
-        groups: Dict[str, List[Diagnostic]] = {}
+        groups: dict[str, list[Diagnostic]] = {}
         for d in self._diagnostics:
             groups.setdefault(d.category, []).append(d)
         return groups
@@ -289,15 +288,14 @@ class DiagnosticCollector:
 
     # -- Per-category renderers ------------------------------------
 
-    def _render_security_group(self, items: List[Diagnostic]) -> None:
+    def _render_security_group(self, items: list[Diagnostic]) -> None:
         critical = [d for d in items if d.severity == "critical"]
         warnings = [d for d in items if d.severity == "warning"]
         info = [d for d in items if d.severity == "info"]
 
         if critical:
             _rich_echo(
-                f"  [!] {len(critical)} critical security finding(s) -- "
-                f"hidden characters detected",
+                f"  [!] {len(critical)} critical security finding(s) -- hidden characters detected",
                 color="red",
                 bold=True,
             )
@@ -311,9 +309,7 @@ class DiagnosticCollector:
                         _rich_echo(f"      +- {d.message}", color="red")
 
         if warnings:
-            _rich_warning(
-                f"  [!] {len(warnings)} file(s) contain hidden characters"
-            )
+            _rich_warning(f"  [!] {len(warnings)} file(s) contain hidden characters")
             if not self.verbose:
                 _rich_info("    Run with --verbose to see details")
             else:
@@ -325,11 +321,9 @@ class DiagnosticCollector:
                         _rich_echo(f"      +- {d.message}", color="dim")
 
         if info and self.verbose:
-            _rich_info(
-                f"  [i] {len(info)} file(s) contain unusual characters"
-            )
+            _rich_info(f"  [i] {len(info)} file(s) contain unusual characters")
 
-    def _render_policy_group(self, items: List[Diagnostic]) -> None:
+    def _render_policy_group(self, items: list[Diagnostic]) -> None:
         """Render policy violation diagnostics group.
 
         Blocked items are rendered in red; warnings in yellow.
@@ -360,7 +354,7 @@ class DiagnosticCollector:
                 if d.detail and self.verbose:
                     _rich_echo(f"         {d.detail}", color="dim")
 
-    def _render_auth_group(self, items: List[Diagnostic]) -> None:
+    def _render_auth_group(self, items: list[Diagnostic]) -> None:
         """Render auth diagnostics group."""
         count = len(items)
         noun = "issue" if count == 1 else "issues"
@@ -373,12 +367,10 @@ class DiagnosticCollector:
         if not self.verbose:
             _rich_info("    Run with --verbose for auth resolution details")
 
-    def _render_collision_group(self, items: List[Diagnostic]) -> None:
+    def _render_collision_group(self, items: list[Diagnostic]) -> None:
         count = len(items)
         noun = "file" if count == 1 else "files"
-        _rich_warning(
-            f"  [!] {count} {noun} skipped -- local files exist, not managed by APM"
-        )
+        _rich_warning(f"  [!] {count} {noun} skipped -- local files exist, not managed by APM")
         _rich_info("    Use 'apm install --force' to overwrite")
         if not self.verbose:
             _rich_info("    Run with --verbose to see individual files")
@@ -391,12 +383,10 @@ class DiagnosticCollector:
                 for d in diags:
                     _rich_echo(f"      +- {d.message}", color="dim")
 
-    def _render_overwrite_group(self, items: List[Diagnostic]) -> None:
+    def _render_overwrite_group(self, items: list[Diagnostic]) -> None:
         count = len(items)
         noun = "skill" if count == 1 else "skills"
-        _rich_warning(
-            f"  [!] {count} {noun} replaced by a different package (last installed wins)"
-        )
+        _rich_warning(f"  [!] {count} {noun} replaced by a different package (last installed wins)")
         if not self.verbose:
             _rich_info("    Run with --verbose to see details")
         else:
@@ -409,14 +399,14 @@ class DiagnosticCollector:
                     if d.detail:
                         _rich_echo(f"         {d.detail}", color="dim")
 
-    def _render_warning_group(self, items: List[Diagnostic]) -> None:
+    def _render_warning_group(self, items: list[Diagnostic]) -> None:
         for d in items:
             pkg_prefix = f"[{d.package}] " if d.package else ""
             _rich_warning(f"  [!] {pkg_prefix}{d.message}")
             if d.detail and self.verbose:
                 _rich_echo(f"    +- {d.detail}", color="dim")
 
-    def _render_error_group(self, items: List[Diagnostic]) -> None:
+    def _render_error_group(self, items: list[Diagnostic]) -> None:
         count = len(items)
         noun = "package" if count == 1 else "packages"
         _rich_echo(f"  [x] {count} {noun} failed:", color="red")
@@ -426,19 +416,19 @@ class DiagnosticCollector:
             if d.detail and self.verbose:
                 _rich_echo(f"         {d.detail}", color="dim")
 
-    def _render_info_group(self, items: List[Diagnostic]) -> None:
+    def _render_info_group(self, items: list[Diagnostic]) -> None:
         for d in items:
             _rich_info(f"  [i] {d.message}")
             if d.detail and self.verbose:
                 _rich_echo(f"    +- {d.detail}", color="dim")
 
 
-def _group_by_package(items: List[Diagnostic]) -> Dict[str, List[Diagnostic]]:
+def _group_by_package(items: list[Diagnostic]) -> dict[str, list[Diagnostic]]:
     """Group diagnostics by package, preserving insertion order.
 
     Items with an empty package key are collected under ``""``.
     """
-    groups: Dict[str, List[Diagnostic]] = {}
+    groups: dict[str, list[Diagnostic]] = {}
     for d in items:
         groups.setdefault(d.package, []).append(d)
     return groups

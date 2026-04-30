@@ -5,15 +5,14 @@ import os
 import tempfile
 import types
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
 from click.testing import CliRunner
 
-from apm_cli.models.results import InstallResult
-
 from apm_cli.cli import cli
+from apm_cli.models.results import InstallResult
 
 
 class TestInstallCommandAutoBootstrap:
@@ -82,7 +81,9 @@ class TestInstallCommandAutoBootstrap:
             mock_apm_package.from_apm_yml.return_value = mock_pkg_instance
 
             # Mock the install function to avoid actual installation
-            mock_install_apm.return_value = InstallResult(diagnostics=MagicMock(has_diagnostics=False, has_critical_security=False))
+            mock_install_apm.return_value = InstallResult(
+                diagnostics=MagicMock(has_diagnostics=False, has_critical_security=False)
+            )
 
             result = self.runner.invoke(cli, ["install", "test/package"])
             assert result.exit_code == 0
@@ -118,7 +119,9 @@ class TestInstallCommandAutoBootstrap:
             mock_pkg_instance.get_mcp_dependencies.return_value = []
             mock_apm_package.from_apm_yml.return_value = mock_pkg_instance
 
-            mock_install_apm.return_value = InstallResult(diagnostics=MagicMock(has_diagnostics=False, has_critical_security=False))
+            mock_install_apm.return_value = InstallResult(
+                diagnostics=MagicMock(has_diagnostics=False, has_critical_security=False)
+            )
 
             result = self.runner.invoke(cli, ["install", "org1/pkg1", "org2/pkg2"])
 
@@ -135,9 +138,7 @@ class TestInstallCommandAutoBootstrap:
     @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
     @patch("apm_cli.commands.install.APMPackage")
     @patch("apm_cli.commands.install._install_apm_dependencies")
-    def test_install_existing_apm_yml_preserves_behavior(
-        self, mock_install_apm, mock_apm_package
-    ):
+    def test_install_existing_apm_yml_preserves_behavior(self, mock_install_apm, mock_apm_package):
         """Test that install with existing apm.yml works as before."""
         with self._chdir_tmp():
             # Create existing apm.yml
@@ -158,7 +159,9 @@ class TestInstallCommandAutoBootstrap:
             mock_pkg_instance.get_mcp_dependencies.return_value = []
             mock_apm_package.from_apm_yml.return_value = mock_pkg_instance
 
-            mock_install_apm.return_value = InstallResult(diagnostics=MagicMock(has_diagnostics=False, has_critical_security=False))
+            mock_install_apm.return_value = InstallResult(
+                diagnostics=MagicMock(has_diagnostics=False, has_critical_security=False)
+            )
 
             result = self.runner.invoke(cli, ["install"])
 
@@ -196,7 +199,9 @@ class TestInstallCommandAutoBootstrap:
             mock_pkg_instance.get_mcp_dependencies.return_value = []
             mock_apm_package.from_apm_yml.return_value = mock_pkg_instance
 
-            mock_install_apm.return_value = InstallResult(diagnostics=MagicMock(has_diagnostics=False, has_critical_security=False))
+            mock_install_apm.return_value = InstallResult(
+                diagnostics=MagicMock(has_diagnostics=False, has_critical_security=False)
+            )
 
             result = self.runner.invoke(cli, ["install", "test/package"])
 
@@ -293,14 +298,21 @@ class TestValidationFailureReasonMessages:
             assert "not accessible or doesn't exist" in result.output
             assert "run with --verbose for auth details" not in result.output
 
-    @patch("apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git", return_value=None)
+    @patch(
+        "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+        return_value=None,
+    )
     @patch("urllib.request.urlopen")
     def test_verbose_validation_failure_calls_build_error_context(self, mock_urlopen, _mock_cred):
         """When GitHub validation fails in verbose mode, build_error_context should be invoked."""
         import urllib.error
+
         mock_urlopen.side_effect = urllib.error.HTTPError(
-            url="https://api.github.com/repos/owner/repo", code=404,
-            msg="Not Found", hdrs={}, fp=None,
+            url="https://api.github.com/repos/owner/repo",
+            code=404,
+            msg="Not Found",
+            hdrs={},
+            fp=None,
         )
 
         with patch.object(
@@ -309,6 +321,7 @@ class TestValidationFailureReasonMessages:
             return_value="Authentication failed for accessing owner/repo on github.com.\nNo token available.",
         ) as mock_build_ctx:
             from apm_cli.commands.install import _validate_package_exists
+
             result = _validate_package_exists("owner/repo", verbose=True)
             assert result is False
             mock_build_ctx.assert_called_once()
@@ -320,18 +333,22 @@ class TestValidationFailureReasonMessages:
         """When virtual package validation fails in verbose mode, auth diagnostics are shown."""
         from apm_cli.commands.install import _validate_package_exists
 
-        with patch(
-            "apm_cli.deps.github_downloader.GitHubPackageDownloader.validate_virtual_package_exists",
-            return_value=False,
-        ), patch.object(
-            __import__("apm_cli.core.auth", fromlist=["AuthResolver"]).AuthResolver,
-            "resolve_for_dep",
-            return_value=MagicMock(source="none", token_type="none", token=None),
-        ) as mock_resolve, patch.object(
-            __import__("apm_cli.core.auth", fromlist=["AuthResolver"]).AuthResolver,
-            "build_error_context",
-            return_value="Authentication failed for accessing owner/repo/skills/my-skill on github.com.\nNo token available.",
-        ) as mock_build_ctx:
+        with (
+            patch(
+                "apm_cli.deps.github_downloader.GitHubPackageDownloader.validate_virtual_package_exists",
+                return_value=False,
+            ),
+            patch.object(
+                __import__("apm_cli.core.auth", fromlist=["AuthResolver"]).AuthResolver,
+                "resolve_for_dep",
+                return_value=MagicMock(source="none", token_type="none", token=None),
+            ) as mock_resolve,
+            patch.object(
+                __import__("apm_cli.core.auth", fromlist=["AuthResolver"]).AuthResolver,
+                "build_error_context",
+                return_value="Authentication failed for accessing owner/repo/skills/my-skill on github.com.\nNo token available.",
+            ) as mock_build_ctx,
+        ):
             result = _validate_package_exists("owner/repo/skills/my-skill", verbose=True)
             assert result is False
             mock_resolve.assert_called_once()
@@ -344,12 +361,15 @@ class TestValidationFailureReasonMessages:
         """Virtual package validation should pass its AuthResolver to the downloader."""
         from apm_cli.commands.install import _validate_package_exists
 
-        with patch(
-            "apm_cli.deps.github_downloader.GitHubPackageDownloader.__init__",
-            return_value=None,
-        ) as mock_init, patch(
-            "apm_cli.deps.github_downloader.GitHubPackageDownloader.validate_virtual_package_exists",
-            return_value=True,
+        with (
+            patch(
+                "apm_cli.deps.github_downloader.GitHubPackageDownloader.__init__",
+                return_value=None,
+            ) as mock_init,
+            patch(
+                "apm_cli.deps.github_downloader.GitHubPackageDownloader.validate_virtual_package_exists",
+                return_value=True,
+            ),
         ):
             _validate_package_exists("owner/repo/skills/my-skill", verbose=False)
             mock_init.assert_called_once()
@@ -432,33 +452,43 @@ class TestTransitiveDepParentChain:
         the parent_chain arg is passed through correctly.
         """
         from apm_cli.deps.apm_resolver import APMDependencyResolver
-        from apm_cli.models.apm_package import APMPackage, DependencyReference
+        from apm_cli.models.apm_package import APMPackage, DependencyReference  # noqa: F401
 
         # Set up apm_modules with root-pkg that declares leaf-pkg as dep
         modules_dir = tmp_path / "apm_modules"
         root_dir = modules_dir / "acme" / "root-pkg"
         root_dir.mkdir(parents=True)
-        (root_dir / "apm.yml").write_text(yaml.safe_dump({
-            "name": "root-pkg",
-            "version": "1.0.0",
-            "dependencies": {"apm": ["other-org/leaf-pkg"], "mcp": []},
-        }))
+        (root_dir / "apm.yml").write_text(
+            yaml.safe_dump(
+                {
+                    "name": "root-pkg",
+                    "version": "1.0.0",
+                    "dependencies": {"apm": ["other-org/leaf-pkg"], "mcp": []},
+                }
+            )
+        )
 
         # Write root apm.yml that depends on root-pkg
-        (tmp_path / "apm.yml").write_text(yaml.safe_dump({
-            "name": "test-project",
-            "version": "0.0.1",
-            "dependencies": {"apm": ["acme/root-pkg"], "mcp": []},
-        }))
+        (tmp_path / "apm.yml").write_text(
+            yaml.safe_dump(
+                {
+                    "name": "test-project",
+                    "version": "0.0.1",
+                    "dependencies": {"apm": ["acme/root-pkg"], "mcp": []},
+                }
+            )
+        )
 
         # Track what the callback receives
         callback_calls = []
 
         def tracking_callback(dep_ref, mods_dir, parent_chain=""):
-            callback_calls.append({
-                "dep": dep_ref.get_display_name(),
-                "parent_chain": parent_chain,
-            })
+            callback_calls.append(
+                {
+                    "dep": dep_ref.get_display_name(),
+                    "parent_chain": parent_chain,
+                }
+            )
             if "leaf-pkg" in dep_ref.get_display_name():
                 # Simulate what the real callback does: catch internal error,
                 # return None (non-blocking). The resolver treats None as
@@ -478,19 +508,14 @@ class TestTransitiveDepParentChain:
         # The callback should have been called for leaf-pkg
         leaf_calls = [c for c in callback_calls if "leaf-pkg" in c["dep"]]
         assert len(leaf_calls) == 1, (
-            f"Expected 1 call for leaf-pkg, got {len(leaf_calls)}. "
-            f"All calls: {callback_calls}"
+            f"Expected 1 call for leaf-pkg, got {len(leaf_calls)}. All calls: {callback_calls}"
         )
 
         # The parent chain should contain root-pkg
         chain = leaf_calls[0]["parent_chain"]
-        assert "root-pkg" in chain, (
-            f"Expected 'root-pkg' in parent chain, got: '{chain}'"
-        )
+        assert "root-pkg" in chain, f"Expected 'root-pkg' in parent chain, got: '{chain}'"
         # Chain should show the full path: root > leaf
-        assert ">" in chain, (
-            f"Expected '>' separator in chain, got: '{chain}'"
-        )
+        assert ">" in chain, f"Expected '>' separator in chain, got: '{chain}'"
 
 
 class TestDownloadCallbackErrorMessages:
@@ -504,11 +529,15 @@ class TestDownloadCallbackErrorMessages:
         monkeypatch.chdir(tmp_path)
 
         # Create a minimal apm.yml with a direct dep
-        (tmp_path / "apm.yml").write_text(yaml.safe_dump({
-            "name": "test-project",
-            "version": "0.0.1",
-            "dependencies": {"apm": ["acme/direct-pkg"], "mcp": []},
-        }))
+        (tmp_path / "apm.yml").write_text(
+            yaml.safe_dump(
+                {
+                    "name": "test-project",
+                    "version": "0.0.1",
+                    "dependencies": {"apm": ["acme/direct-pkg"], "mcp": []},
+                }
+            )
+        )
 
         apm_package = APMPackage.from_apm_yml(tmp_path / "apm.yml")
 
@@ -518,7 +547,10 @@ class TestDownloadCallbackErrorMessages:
             mock_dl.download_package.side_effect = RuntimeError("auth failed")
 
             result = _install_apm_dependencies(
-                apm_package, verbose=False, force=False, parallel_downloads=0,
+                apm_package,
+                verbose=False,
+                force=False,
+                parallel_downloads=0,
             )
 
         # Check that the error message says "download dependency", not "transitive dep"
@@ -555,11 +587,15 @@ class TestCallbackFailureDeduplication:
 
         monkeypatch.chdir(tmp_path)
 
-        (tmp_path / "apm.yml").write_text(yaml.safe_dump({
-            "name": "test-project",
-            "version": "0.0.1",
-            "dependencies": {"apm": ["acme/failing-pkg"], "mcp": []},
-        }))
+        (tmp_path / "apm.yml").write_text(
+            yaml.safe_dump(
+                {
+                    "name": "test-project",
+                    "version": "0.0.1",
+                    "dependencies": {"apm": ["acme/failing-pkg"], "mcp": []},
+                }
+            )
+        )
         apm_package = APMPackage.from_apm_yml(tmp_path / "apm.yml")
 
         with patch("apm_cli.deps.github_downloader.GitHubPackageDownloader") as MockDownloader:
@@ -567,14 +603,16 @@ class TestCallbackFailureDeduplication:
             mock_dl.download_package.side_effect = RuntimeError("auth failed")
 
             result = _install_apm_dependencies(
-                apm_package, verbose=False, force=False, parallel_downloads=0,
+                apm_package,
+                verbose=False,
+                force=False,
+                parallel_downloads=0,
             )
 
         errors = result.diagnostics.by_category().get("error", [])
         # Should be exactly 1 error, not 2 (one from callback + one from main loop)
         assert len(errors) == 1, (
-            f"Expected 1 error (deduplicated), got {len(errors)}: "
-            f"{[e.message for e in errors]}"
+            f"Expected 1 error (deduplicated), got {len(errors)}: {[e.message for e in errors]}"
         )
 
 
@@ -752,9 +790,7 @@ class TestInstallGlobalFlag:
     @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
     @patch("apm_cli.commands.install.APMPackage")
     @patch("apm_cli.commands.install._install_apm_dependencies")
-    def test_global_creates_user_apm_yml(
-        self, mock_install_apm, mock_apm_package, mock_validate
-    ):
+    def test_global_creates_user_apm_yml(self, mock_install_apm, mock_apm_package, mock_validate):
         """--global auto-creates ~/.apm/apm.yml when installing packages."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             try:
@@ -776,9 +812,7 @@ class TestInstallGlobalFlag:
                 )
 
                 with patch.object(Path, "home", return_value=fake_home):
-                    result = self.runner.invoke(
-                        cli, ["install", "--global", "test/pkg"]
-                    )
+                    result = self.runner.invoke(cli, ["install", "--global", "test/pkg"])
 
                 assert result.exit_code == 0
                 user_manifest = fake_home / ".apm" / "apm.yml"
@@ -794,8 +828,10 @@ class TestInstallGlobalFlag:
                 os.chdir(tmp_dir)
                 fake_home = Path(tmp_dir) / "fakehome"
                 fake_home.mkdir()
-                with patch.object(Path, "home", return_value=fake_home), \
-                     patch.dict(os.environ, {"COLUMNS": "200"}):
+                with (
+                    patch.object(Path, "home", return_value=fake_home),
+                    patch.dict(os.environ, {"COLUMNS": "200"}),
+                ):
                     result = self.runner.invoke(cli, ["install", "--global"])
                 assert result.exit_code == 1
                 assert "apm.yml" in result.output
@@ -815,9 +851,7 @@ class TestInstallGlobalFlag:
                 (local_pkg / "apm.yml").write_text("name: my-local-pkg\n")
 
                 with patch.object(Path, "home", return_value=fake_home):
-                    result = self.runner.invoke(
-                        cli, ["install", "--global", "./my-local-pkg"]
-                    )
+                    result = self.runner.invoke(cli, ["install", "--global", "./my-local-pkg"])
 
                 # Should fail with clear message about local packages
                 # Use shorter substring to tolerate Rich word-wrapping on
@@ -840,9 +874,7 @@ class TestInstallGlobalFlag:
                 (local_pkg / "apm.yml").write_text("name: abs-pkg\n")
 
                 with patch.object(Path, "home", return_value=fake_home):
-                    result = self.runner.invoke(
-                        cli, ["install", "--global", str(local_pkg)]
-                    )
+                    result = self.runner.invoke(cli, ["install", "--global", str(local_pkg)])
 
                 normalized = " ".join(result.output.split())
                 assert "not supported at user scope" in normalized
@@ -858,17 +890,17 @@ class TestInstallGlobalFlag:
                 fake_home.mkdir()
 
                 with patch.object(Path, "home", return_value=fake_home):
-                    result = self.runner.invoke(
-                        cli, ["install", "--global", "~/some-pkg"]
-                    )
+                    result = self.runner.invoke(cli, ["install", "--global", "~/some-pkg"])
 
                 assert "not supported at user scope" in result.output
             finally:
                 os.chdir(self.original_dir)
 
+
 # ---------------------------------------------------------------------------
 # Generic-host SSH-first validation tests
 # ---------------------------------------------------------------------------
+
 
 class TestGenericHostSshFirstValidation:
     """Tests for the SSH-first ls-remote logic added for generic (non-GitHub/ADO) hosts."""
@@ -889,9 +921,7 @@ class TestGenericHostSshFirstValidation:
         # SSH probe succeeds on the first call
         mock_run.return_value = self._make_completed_process(returncode=0)
 
-        result = _validate_package_exists(
-            "git@git.example.org:org/group/repo.git", verbose=False
-        )
+        result = _validate_package_exists("git@git.example.org:org/group/repo.git", verbose=False)
 
         assert result is True
         # subprocess.run must have been called at least once
@@ -915,14 +945,11 @@ class TestGenericHostSshFirstValidation:
             returncode=128, stderr="ssh: connect to host"
         )
 
-        result = _validate_package_exists(
-            "git@git.example.org:org/group/repo.git", verbose=False
-        )
+        result = _validate_package_exists("git@git.example.org:org/group/repo.git", verbose=False)
 
         assert result is False
         assert mock_run.call_count == 1, (
-            "explicit ssh:// must be strict; got "
-            f"{[c[0][0] for c in mock_run.call_args_list]!r}"
+            f"explicit ssh:// must be strict; got {[c[0][0] for c in mock_run.call_args_list]!r}"
         )
         first_cmd = mock_run.call_args_list[0][0][0]
         assert any("git@git.example.org:" in arg for arg in first_cmd), (
@@ -942,9 +969,7 @@ class TestGenericHostSshFirstValidation:
             self._make_completed_process(returncode=0),
         ]
 
-        result = _validate_package_exists(
-            "git@git.example.org:org/group/repo.git", verbose=False
-        )
+        result = _validate_package_exists("git@git.example.org:org/group/repo.git", verbose=False)
 
         assert result is True
         assert mock_run.call_count == 2
@@ -952,8 +977,7 @@ class TestGenericHostSshFirstValidation:
         assert any("git@git.example.org:" in arg for arg in first_cmd)
         second_cmd = mock_run.call_args_list[1][0][0]
         https_arg_found = any(
-            urlsplit(arg).scheme == "https"
-            and urlsplit(arg).netloc == "git.example.org"
+            urlsplit(arg).scheme == "https" and urlsplit(arg).netloc == "git.example.org"
             for arg in second_cmd
         )
         assert https_arg_found, (
@@ -969,9 +993,7 @@ class TestGenericHostSshFirstValidation:
             returncode=128, stderr="fatal: could not read Username"
         )
 
-        result = _validate_package_exists(
-            "git@git.example.org:org/group/repo.git", verbose=False
-        )
+        result = _validate_package_exists("git@git.example.org:org/group/repo.git", verbose=False)
 
         assert result is False
         assert mock_run.call_count == 1  # strict: SSH only, no HTTPS retry
@@ -1011,23 +1033,27 @@ class TestGenericHostSshFirstValidation:
     @patch("subprocess.run")
     def test_github_host_skips_ssh_attempt(self, mock_run):
         """GitHub.com repositories do NOT go through the SSH-first ls-remote path."""
-      
-        import urllib.request
+
         import urllib.error
+        import urllib.request
 
         from apm_cli.commands.install import _validate_package_exists
 
         with patch("urllib.request.urlopen") as mock_urlopen:
             mock_urlopen.side_effect = urllib.error.HTTPError(
                 url="https://api.github.com/repos/owner/repo",
-                code=404, msg="Not Found", hdrs={}, fp=None,
+                code=404,
+                msg="Not Found",
+                hdrs={},
+                fp=None,
             )
             result = _validate_package_exists("owner/repo", verbose=False)
 
         assert result is False
         # No ls-remote call should have been made for a github.com host
         ls_remote_calls = [
-            call for call in mock_run.call_args_list
+            call
+            for call in mock_run.call_args_list
             if "ls-remote" in (call[0][0] if call[0] else [])
         ]
         assert len(ls_remote_calls) == 0, (
@@ -1041,13 +1067,12 @@ class TestGenericHostSshFirstValidation:
 
         mock_run.return_value = self._make_completed_process(returncode=0)
 
-        result = _validate_package_exists(
-            "company.ghe.com/team/internal-repo", verbose=False
-        )
+        result = _validate_package_exists("company.ghe.com/team/internal-repo", verbose=False)
 
         assert result is True
         ls_remote_calls = [
-            call for call in mock_run.call_args_list
+            call
+            for call in mock_run.call_args_list
             if "ls-remote" in (call[0][0] if call[0] else [])
         ]
         assert len(ls_remote_calls) == 1, (
@@ -1069,6 +1094,7 @@ class TestExplicitTargetDirCreation:
 
     def teardown_method(self):
         import shutil
+
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_explicit_target_creates_dir_for_auto_create_false(self):
@@ -1117,6 +1143,7 @@ class TestExplicitTargetDirCreation:
 
         for _explicit in [None, "copilot"]:
             import shutil
+
             shutil.rmtree(self.project_root / copilot.root_dir, ignore_errors=True)
 
             _targets = [copilot]
@@ -1175,9 +1202,7 @@ class TestContentHashFallback:
             if content_hash and pkg_dir.is_dir():
                 fallback_triggered = verify_package_hash(pkg_dir, content_hash)
 
-            assert not fallback_triggered, (
-                "Fallback must not trigger when content_hash is None"
-            )
+            assert not fallback_triggered, "Fallback must not trigger when content_hash is None"
 
 
 class TestAllowInsecureFlag:
@@ -1199,7 +1224,7 @@ class TestAllowInsecureFlag:
                 with patch("apm_cli.commands.install._validate_package_exists", return_value=True):
                     result = self.runner.invoke(
                         cli, ["install", "http://my-server.example.com/owner/repo"]
-                     )
+                    )
             finally:
                 os.chdir(self.original_dir)
             assert "allow_insecure: true" in result.output
@@ -1245,9 +1270,7 @@ class TestAllowInsecureFlag:
                 mock_pkg_instance.get_mcp_dependencies.return_value = []
                 mock_apm_package.from_apm_yml.return_value = mock_pkg_instance
                 mock_install_apm.return_value = InstallResult(
-                    diagnostics=MagicMock(
-                        has_diagnostics=False, has_critical_security=False
-                    )
+                    diagnostics=MagicMock(has_diagnostics=False, has_critical_security=False)
                 )
 
                 result = self.runner.invoke(
@@ -1286,9 +1309,7 @@ class TestAllowInsecureFlag:
                 mock_pkg_instance.get_dev_apm_dependencies.return_value = []
                 mock_apm_package.from_apm_yml.return_value = mock_pkg_instance
                 mock_install_apm.return_value = InstallResult(
-                    diagnostics=MagicMock(
-                        has_diagnostics=False, has_critical_security=False
-                    )
+                    diagnostics=MagicMock(has_diagnostics=False, has_critical_security=False)
                 )
 
                 result = self.runner.invoke(
@@ -1302,9 +1323,8 @@ class TestAllowInsecureFlag:
                 )
 
                 assert result.exit_code == 0
-                assert (
-                    mock_install_apm.call_args.kwargs["allow_insecure_hosts"]
-                    == ("mirror.example.com",)
+                assert mock_install_apm.call_args.kwargs["allow_insecure_hosts"] == (
+                    "mirror.example.com",
                 )
             finally:
                 os.chdir(self.original_dir)
@@ -1380,8 +1400,8 @@ class TestInsecureDependencyWarnings:
     def test_collect_insecure_dependency_infos_marks_direct_dependency(self):
         """Direct HTTP dependencies are collected without parent provenance."""
         from apm_cli.commands.install import (
-            _InsecureDependencyInfo,
             _collect_insecure_dependency_infos,
+            _InsecureDependencyInfo,
         )
         from apm_cli.models.dependency.reference import DependencyReference
 
@@ -1423,8 +1443,8 @@ class TestInsecureDependencyWarnings:
     def test_format_insecure_dependency_warning_for_transitive_dep(self):
         """Transitive warning strings include the introducer."""
         from apm_cli.commands.install import (
-            _InsecureDependencyInfo,
             _format_insecure_dependency_warning,
+            _InsecureDependencyInfo,
         )
 
         message = _format_insecure_dependency_warning(
@@ -1446,10 +1466,11 @@ class TestTransitiveInsecureDependencyGuard:
     def test_transitive_guard_blocks_unapproved_host(self):
         """Transitive insecure deps are blocked when their host is not approved."""
         from apm_cli.commands.install import (
-            _InsecureDependencyInfo,
             _guard_transitive_insecure_dependencies,
+            _InsecureDependencyInfo,
         )
         from apm_cli.install.insecure_policy import InsecureDependencyPolicyError
+
         logger = MagicMock()
 
         with pytest.raises(InsecureDependencyPolicyError) as exc_info:
@@ -1467,17 +1488,16 @@ class TestTransitiveInsecureDependencyGuard:
             )
 
         message = str(exc_info.value)
-        assert message.startswith(
-            "Re-run with --allow-insecure-host mirror.example.com"
-        )
+        assert message.startswith("Re-run with --allow-insecure-host mirror.example.com")
         assert "unapproved host(s): mirror.example.com" in message
 
     def test_transitive_guard_allows_same_host_as_direct_insecure_dependency(self):
         """A direct insecure dependency host also permits transitive deps on that host."""
         from apm_cli.commands.install import (
-            _InsecureDependencyInfo,
             _guard_transitive_insecure_dependencies,
+            _InsecureDependencyInfo,
         )
+
         logger = MagicMock()
 
         _guard_transitive_insecure_dependencies(
@@ -1501,9 +1521,10 @@ class TestTransitiveInsecureDependencyGuard:
     def test_transitive_guard_accepts_explicit_host(self):
         """Explicitly allowed hosts permit transitive insecure dependencies."""
         from apm_cli.commands.install import (
-            _InsecureDependencyInfo,
             _guard_transitive_insecure_dependencies,
+            _InsecureDependencyInfo,
         )
+
         logger = MagicMock()
 
         _guard_transitive_insecure_dependencies(
@@ -1522,10 +1543,11 @@ class TestTransitiveInsecureDependencyGuard:
     def test_transitive_guard_blocks_different_host_without_explicit_allowance(self):
         """A direct insecure host does not permit transitive deps on other hosts."""
         from apm_cli.commands.install import (
-            _InsecureDependencyInfo,
             _guard_transitive_insecure_dependencies,
+            _InsecureDependencyInfo,
         )
         from apm_cli.install.insecure_policy import InsecureDependencyPolicyError
+
         logger = MagicMock()
 
         with pytest.raises(InsecureDependencyPolicyError) as exc_info:
@@ -1548,9 +1570,7 @@ class TestTransitiveInsecureDependencyGuard:
             )
 
         message = str(exc_info.value)
-        assert message.startswith(
-            "Re-run with --allow-insecure-host mirror.example.com"
-        )
+        assert message.startswith("Re-run with --allow-insecure-host mirror.example.com")
         assert "unapproved host(s): mirror.example.com" in message
 
 
@@ -1602,14 +1622,17 @@ class TestInstallMcpFlag:
     # --- Argv `--` boundary handling ---
 
     def test_mcp_with_double_dash_collects_stdio_command(self):
-        with self._chdir_with_apm_yml() as tmp, \
-             patch("apm_cli.commands.install._get_invocation_argv",
-                   return_value=["apm", "install", "--mcp", "foo", "--",
-                                 "npx", "-y", "server-foo"]), \
-             patch("apm_cli.commands.install.MCPIntegrator"):
+        with (
+            self._chdir_with_apm_yml() as tmp,
+            patch(
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=["apm", "install", "--mcp", "foo", "--", "npx", "-y", "server-foo"],
+            ),
+            patch("apm_cli.commands.install.MCPIntegrator"),
+        ):
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "foo", "--",
-                      "npx", "-y", "server-foo"],
+                cli,
+                ["install", "--mcp", "foo", "--", "npx", "-y", "server-foo"],
             )
             assert result.exit_code == 0, result.output
             assert "Added MCP server 'foo'" in result.output
@@ -1622,16 +1645,34 @@ class TestInstallMcpFlag:
             assert mcp["args"] == ["-y", "server-foo"]
 
     def test_mcp_remote_http(self):
-        with self._chdir_with_apm_yml() as tmp, \
-             patch("apm_cli.commands.install._get_invocation_argv",
-                   return_value=["apm", "install", "--mcp", "api",
-                                 "--transport", "http",
-                                 "--url", "https://x.example/mcp"]), \
-             patch("apm_cli.commands.install.MCPIntegrator"):
+        with (
+            self._chdir_with_apm_yml() as tmp,
+            patch(
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=[
+                    "apm",
+                    "install",
+                    "--mcp",
+                    "api",
+                    "--transport",
+                    "http",
+                    "--url",
+                    "https://x.example/mcp",
+                ],
+            ),
+            patch("apm_cli.commands.install.MCPIntegrator"),
+        ):
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "api",
-                      "--transport", "http",
-                      "--url", "https://x.example/mcp"],
+                cli,
+                [
+                    "install",
+                    "--mcp",
+                    "api",
+                    "--transport",
+                    "http",
+                    "--url",
+                    "https://x.example/mcp",
+                ],
             )
             assert result.exit_code == 0, result.output
             data = yaml.safe_load((tmp / "apm.yml").read_text())
@@ -1640,34 +1681,66 @@ class TestInstallMcpFlag:
             assert mcp["transport"] == "http"
 
     def test_mcp_env_repeats_collect_into_dict(self):
-        with self._chdir_with_apm_yml() as tmp, \
-             patch("apm_cli.commands.install._get_invocation_argv",
-                   return_value=["apm", "install", "--mcp", "foo",
-                                 "--env", "A=1", "--env", "B=2",
-                                 "--", "srv"]), \
-             patch("apm_cli.commands.install.MCPIntegrator"):
+        with (
+            self._chdir_with_apm_yml() as tmp,
+            patch(
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=[
+                    "apm",
+                    "install",
+                    "--mcp",
+                    "foo",
+                    "--env",
+                    "A=1",
+                    "--env",
+                    "B=2",
+                    "--",
+                    "srv",
+                ],
+            ),
+            patch("apm_cli.commands.install.MCPIntegrator"),
+        ):
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "foo",
-                      "--env", "A=1", "--env", "B=2",
-                      "--", "srv"],
+                cli,
+                ["install", "--mcp", "foo", "--env", "A=1", "--env", "B=2", "--", "srv"],
             )
             assert result.exit_code == 0, result.output
             data = yaml.safe_load((tmp / "apm.yml").read_text())
             assert data["dependencies"]["mcp"][0]["env"] == {"A": "1", "B": "2"}
 
     def test_mcp_header_repeats_collect_into_dict(self):
-        with self._chdir_with_apm_yml() as tmp, \
-             patch("apm_cli.commands.install._get_invocation_argv",
-                   return_value=["apm", "install", "--mcp", "api",
-                                 "--url", "https://x/y",
-                                 "--header", "X-A=1",
-                                 "--header", "X-B=2"]), \
-             patch("apm_cli.commands.install.MCPIntegrator"):
+        with (
+            self._chdir_with_apm_yml() as tmp,
+            patch(
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=[
+                    "apm",
+                    "install",
+                    "--mcp",
+                    "api",
+                    "--url",
+                    "https://x/y",
+                    "--header",
+                    "X-A=1",
+                    "--header",
+                    "X-B=2",
+                ],
+            ),
+            patch("apm_cli.commands.install.MCPIntegrator"),
+        ):
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "api",
-                      "--url", "https://x/y",
-                      "--header", "X-A=1",
-                      "--header", "X-B=2"],
+                cli,
+                [
+                    "install",
+                    "--mcp",
+                    "api",
+                    "--url",
+                    "https://x/y",
+                    "--header",
+                    "X-A=1",
+                    "--header",
+                    "X-B=2",
+                ],
             )
             assert result.exit_code == 0, result.output
             data = yaml.safe_load((tmp / "apm.yml").read_text())
@@ -1679,10 +1752,14 @@ class TestInstallMcpFlag:
         # builder returns ``str``, and the install path must not introspect
         # the entry as a dict.
         ref = "io.github.github/github-mcp-server"
-        with self._chdir_with_apm_yml() as tmp, \
-             patch("apm_cli.commands.install._get_invocation_argv",
-                   return_value=["apm", "install", "--mcp", ref]), \
-             patch("apm_cli.install.mcp.command.MCPIntegrator"):
+        with (
+            self._chdir_with_apm_yml() as tmp,
+            patch(
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=["apm", "install", "--mcp", ref],
+            ),
+            patch("apm_cli.install.mcp.command.MCPIntegrator"),
+        ):
             result = self.runner.invoke(cli, ["install", "--mcp", ref])
             assert result.exit_code == 0, result.output
             assert "'str' object has no attribute" not in result.output
@@ -1697,10 +1774,14 @@ class TestInstallMcpFlag:
         a raw exception. CI must see a red run on this code path."""
         ref = "io.github.example/srv"
         boom = RuntimeError("internal token=ghp_SECRET path=/tmp/x.yml")
-        with self._chdir_with_apm_yml() as tmp, \
-             patch("apm_cli.commands.install._get_invocation_argv",
-                   return_value=["apm", "install", "--mcp", ref]), \
-             patch("apm_cli.install.mcp.command.MCPIntegrator") as mock_integ:
+        with (
+            self._chdir_with_apm_yml() as tmp,  # noqa: F841
+            patch(
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=["apm", "install", "--mcp", ref],
+            ),
+            patch("apm_cli.install.mcp.command.MCPIntegrator") as mock_integ,
+        ):
             mock_integ.install.side_effect = boom
             result = self.runner.invoke(cli, ["install", "--mcp", ref])
             assert result.exit_code != 0, result.output
@@ -1716,7 +1797,8 @@ class TestInstallMcpFlag:
     def test_e1_mcp_with_positional_packages(self):
         with self._chdir_with_apm_yml():
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "foo", "owner/repo"],
+                cli,
+                ["install", "--mcp", "foo", "owner/repo"],
             )
             assert result.exit_code == 2
             assert "cannot mix --mcp with positional packages" in result.output
@@ -1730,7 +1812,8 @@ class TestInstallMcpFlag:
     def test_e3_mcp_with_only_apm(self):
         with self._chdir_with_apm_yml():
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "foo", "--only", "apm"],
+                cli,
+                ["install", "--mcp", "foo", "--only", "apm"],
             )
             assert result.exit_code == 2
             assert "--only apm" in result.output
@@ -1761,12 +1844,16 @@ class TestInstallMcpFlag:
             assert "cannot start with '-'" in result.output
 
     def test_e9_header_without_url(self):
-        with self._chdir_with_apm_yml(), \
-             patch("apm_cli.commands.install._get_invocation_argv",
-                   return_value=["apm", "install", "--mcp", "foo",
-                                 "--header", "X-A=1"]):
+        with (
+            self._chdir_with_apm_yml(),
+            patch(
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=["apm", "install", "--mcp", "foo", "--header", "X-A=1"],
+            ),
+        ):
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "foo", "--header", "X-A=1"],
+                cli,
+                ["install", "--mcp", "foo", "--header", "X-A=1"],
             )
             assert result.exit_code == 2
             assert "--header requires --url" in result.output
@@ -1784,13 +1871,26 @@ class TestInstallMcpFlag:
             assert "--url requires --mcp" in result.output
 
     def test_e11_url_with_stdio_command(self):
-        with self._chdir_with_apm_yml(), \
-             patch("apm_cli.commands.install._get_invocation_argv",
-                   return_value=["apm", "install", "--mcp", "foo",
-                                 "--url", "https://x", "--", "npx", "srv"]):
+        with (
+            self._chdir_with_apm_yml(),
+            patch(
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=[
+                    "apm",
+                    "install",
+                    "--mcp",
+                    "foo",
+                    "--url",
+                    "https://x",
+                    "--",
+                    "npx",
+                    "srv",
+                ],
+            ),
+        ):
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "foo",
-                      "--url", "https://x", "--", "npx", "srv"],
+                cli,
+                ["install", "--mcp", "foo", "--url", "https://x", "--", "npx", "srv"],
             )
             assert result.exit_code == 2
             assert "--url and a stdio command" in result.output
@@ -1798,44 +1898,81 @@ class TestInstallMcpFlag:
     def test_e12_stdio_transport_with_url(self):
         with self._chdir_with_apm_yml():
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "foo",
-                      "--transport", "stdio", "--url", "https://x"],
+                cli,
+                ["install", "--mcp", "foo", "--transport", "stdio", "--url", "https://x"],
             )
             assert result.exit_code == 2
             assert "stdio transport doesn't accept --url" in result.output
 
     def test_e13_remote_transport_with_command(self):
-        with self._chdir_with_apm_yml(), \
-             patch("apm_cli.commands.install._get_invocation_argv",
-                   return_value=["apm", "install", "--mcp", "foo",
-                                 "--transport", "http", "--", "npx", "srv"]):
+        with (
+            self._chdir_with_apm_yml(),
+            patch(
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=[
+                    "apm",
+                    "install",
+                    "--mcp",
+                    "foo",
+                    "--transport",
+                    "http",
+                    "--",
+                    "npx",
+                    "srv",
+                ],
+            ),
+        ):
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "foo",
-                      "--transport", "http", "--", "npx", "srv"],
+                cli,
+                ["install", "--mcp", "foo", "--transport", "http", "--", "npx", "srv"],
             )
             assert result.exit_code == 2
             assert "remote transports don't accept stdio command" in result.output
 
     def test_e14_env_with_url(self):
-        with self._chdir_with_apm_yml(), \
-             patch("apm_cli.commands.install._get_invocation_argv",
-                   return_value=["apm", "install", "--mcp", "api",
-                                 "--url", "https://x/y", "--env", "A=1"]):
+        with (
+            self._chdir_with_apm_yml(),
+            patch(
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=[
+                    "apm",
+                    "install",
+                    "--mcp",
+                    "api",
+                    "--url",
+                    "https://x/y",
+                    "--env",
+                    "A=1",
+                ],
+            ),
+        ):
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "api",
-                      "--url", "https://x/y", "--env", "A=1"],
+                cli,
+                ["install", "--mcp", "api", "--url", "https://x/y", "--env", "A=1"],
             )
             assert result.exit_code == 2
             assert "use --header for remote" in result.output
 
     def test_invalid_env_pair_format(self):
-        with self._chdir_with_apm_yml(), \
-             patch("apm_cli.commands.install._get_invocation_argv",
-                   return_value=["apm", "install", "--mcp", "foo",
-                                 "--env", "BAD_NO_EQUALS", "--", "srv"]):
+        with (
+            self._chdir_with_apm_yml(),
+            patch(
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=[
+                    "apm",
+                    "install",
+                    "--mcp",
+                    "foo",
+                    "--env",
+                    "BAD_NO_EQUALS",
+                    "--",
+                    "srv",
+                ],
+            ),
+        ):
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "foo",
-                      "--env", "BAD_NO_EQUALS", "--", "srv"],
+                cli,
+                ["install", "--mcp", "foo", "--env", "BAD_NO_EQUALS", "--", "srv"],
             )
             assert result.exit_code == 2
             assert "expected KEY=VALUE" in result.output
@@ -1843,13 +1980,16 @@ class TestInstallMcpFlag:
     # --- Dry-run path ---
 
     def test_dry_run_does_not_modify_apm_yml(self):
-        with self._chdir_with_apm_yml() as tmp, \
-             patch("apm_cli.commands.install._get_invocation_argv",
-                   return_value=["apm", "install", "--mcp", "foo",
-                                 "--dry-run", "--", "npx", "srv"]):
+        with (
+            self._chdir_with_apm_yml() as tmp,
+            patch(
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=["apm", "install", "--mcp", "foo", "--dry-run", "--", "npx", "srv"],
+            ),
+        ):
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "foo",
-                      "--dry-run", "--", "npx", "srv"],
+                cli,
+                ["install", "--mcp", "foo", "--dry-run", "--", "npx", "srv"],
             )
             assert result.exit_code == 0, result.output
             data = yaml.safe_load((tmp / "apm.yml").read_text())
@@ -1859,13 +1999,16 @@ class TestInstallMcpFlag:
     # --- Validator path: bad NAME via shared MCPDependency.validate ---
 
     def test_invalid_mcp_name_shape(self):
-        with self._chdir_with_apm_yml(), \
-             patch("apm_cli.commands.install._get_invocation_argv",
-                   return_value=["apm", "install", "--mcp", "bad name!",
-                                 "--", "npx", "srv"]):
+        with (
+            self._chdir_with_apm_yml(),
+            patch(
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=["apm", "install", "--mcp", "bad name!", "--", "npx", "srv"],
+            ),
+        ):
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "bad name!",
-                      "--", "npx", "srv"],
+                cli,
+                ["install", "--mcp", "bad name!", "--", "npx", "srv"],
             )
             assert result.exit_code == 2
             assert "Invalid MCP dependency name" in result.output
@@ -1873,15 +2016,25 @@ class TestInstallMcpFlag:
     # --- --registry flag (PR #810 follow-up 4a) ---
 
     def test_registry_https_url_persisted_to_apm_yml(self):
-        with self._chdir_with_apm_yml() as tmp, \
-             patch("apm_cli.commands.install._get_invocation_argv",
-                   return_value=["apm", "install", "--mcp", "srv",
-                                 "--registry", "https://mcp.internal.example.com"]), \
-             patch("apm_cli.commands.install.MCPIntegrator"), \
-             patch("apm_cli.install.mcp.command.MCPIntegrator"):
+        with (
+            self._chdir_with_apm_yml() as tmp,
+            patch(
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=[
+                    "apm",
+                    "install",
+                    "--mcp",
+                    "srv",
+                    "--registry",
+                    "https://mcp.internal.example.com",
+                ],
+            ),
+            patch("apm_cli.commands.install.MCPIntegrator"),
+            patch("apm_cli.install.mcp.command.MCPIntegrator"),
+        ):
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "srv",
-                      "--registry", "https://mcp.internal.example.com"],
+                cli,
+                ["install", "--mcp", "srv", "--registry", "https://mcp.internal.example.com"],
             )
             assert result.exit_code == 0, result.output
             data = yaml.safe_load((tmp / "apm.yml").read_text())
@@ -1892,15 +2045,25 @@ class TestInstallMcpFlag:
             assert mcp["registry"] == "https://mcp.internal.example.com"
 
     def test_registry_http_url_accepted_for_enterprise(self):
-        with self._chdir_with_apm_yml() as tmp, \
-             patch("apm_cli.commands.install._get_invocation_argv",
-                   return_value=["apm", "install", "--mcp", "srv",
-                                 "--registry", "http://mcp.internal.local"]), \
-             patch("apm_cli.commands.install.MCPIntegrator"), \
-             patch("apm_cli.install.mcp.command.MCPIntegrator"):
+        with (
+            self._chdir_with_apm_yml() as tmp,
+            patch(
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=[
+                    "apm",
+                    "install",
+                    "--mcp",
+                    "srv",
+                    "--registry",
+                    "http://mcp.internal.local",
+                ],
+            ),
+            patch("apm_cli.commands.install.MCPIntegrator"),
+            patch("apm_cli.install.mcp.command.MCPIntegrator"),
+        ):
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "srv",
-                      "--registry", "http://mcp.internal.local"],
+                cli,
+                ["install", "--mcp", "srv", "--registry", "http://mcp.internal.local"],
             )
             assert result.exit_code == 0, result.output
             data = yaml.safe_load((tmp / "apm.yml").read_text())
@@ -1908,26 +2071,35 @@ class TestInstallMcpFlag:
             assert mcp["registry"] == "http://mcp.internal.local"
 
     def test_registry_normalizes_trailing_slash(self):
-        with self._chdir_with_apm_yml() as tmp, \
-             patch("apm_cli.commands.install._get_invocation_argv",
-                   return_value=["apm", "install", "--mcp", "srv",
-                                 "--registry", "https://mcp.example.com/"]), \
-             patch("apm_cli.commands.install.MCPIntegrator"), \
-             patch("apm_cli.install.mcp.command.MCPIntegrator"):
+        with (
+            self._chdir_with_apm_yml() as tmp,
+            patch(
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=[
+                    "apm",
+                    "install",
+                    "--mcp",
+                    "srv",
+                    "--registry",
+                    "https://mcp.example.com/",
+                ],
+            ),
+            patch("apm_cli.commands.install.MCPIntegrator"),
+            patch("apm_cli.install.mcp.command.MCPIntegrator"),
+        ):
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "srv",
-                      "--registry", "https://mcp.example.com/"],
+                cli,
+                ["install", "--mcp", "srv", "--registry", "https://mcp.example.com/"],
             )
             assert result.exit_code == 0, result.output
             data = yaml.safe_load((tmp / "apm.yml").read_text())
-            assert data["dependencies"]["mcp"][0]["registry"] == \
-                "https://mcp.example.com"
+            assert data["dependencies"]["mcp"][0]["registry"] == "https://mcp.example.com"
 
     def test_registry_file_scheme_rejected(self):
         with self._chdir_with_apm_yml():
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "srv",
-                      "--registry", "file:///etc/passwd"],
+                cli,
+                ["install", "--mcp", "srv", "--registry", "file:///etc/passwd"],
             )
             assert result.exit_code == 2
             assert "--registry" in result.output
@@ -1938,8 +2110,8 @@ class TestInstallMcpFlag:
     def test_registry_file_with_host_scheme_rejected(self):
         with self._chdir_with_apm_yml():
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "srv",
-                      "--registry", "file://host/etc/passwd"],
+                cli,
+                ["install", "--mcp", "srv", "--registry", "file://host/etc/passwd"],
             )
             assert result.exit_code == 2
             assert "scheme 'file'" in result.output
@@ -1947,8 +2119,8 @@ class TestInstallMcpFlag:
     def test_registry_ws_scheme_rejected(self):
         with self._chdir_with_apm_yml():
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "srv",
-                      "--registry", "ws://mcp.example.com"],
+                cli,
+                ["install", "--mcp", "srv", "--registry", "ws://mcp.example.com"],
             )
             assert result.exit_code == 2
             assert "--registry" in result.output
@@ -1957,8 +2129,8 @@ class TestInstallMcpFlag:
     def test_registry_javascript_scheme_rejected(self):
         with self._chdir_with_apm_yml():
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "srv",
-                      "--registry", "javascript:alert(1)"],
+                cli,
+                ["install", "--mcp", "srv", "--registry", "javascript:alert(1)"],
             )
             assert result.exit_code == 2
             assert "--registry" in result.output
@@ -1966,7 +2138,8 @@ class TestInstallMcpFlag:
     def test_registry_empty_string_rejected(self):
         with self._chdir_with_apm_yml():
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "srv", "--registry", ""],
+                cli,
+                ["install", "--mcp", "srv", "--registry", ""],
             )
             assert result.exit_code == 2
             assert "--registry" in result.output
@@ -1975,36 +2148,59 @@ class TestInstallMcpFlag:
     def test_registry_schemeless_rejected(self):
         with self._chdir_with_apm_yml():
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "srv",
-                      "--registry", "mcp.example.com"],
+                cli,
+                ["install", "--mcp", "srv", "--registry", "mcp.example.com"],
             )
             assert result.exit_code == 2
             assert "scheme://host" in result.output
 
     def test_registry_with_self_defined_url_rejected(self):
         # E15: --registry only applies to registry-resolved entries.
-        with self._chdir_with_apm_yml(), \
-             patch("apm_cli.commands.install._get_invocation_argv",
-                   return_value=["apm", "install", "--mcp", "api",
-                                 "--url", "https://x/y",
-                                 "--registry", "https://r/"]):
+        with (
+            self._chdir_with_apm_yml(),
+            patch(
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=[
+                    "apm",
+                    "install",
+                    "--mcp",
+                    "api",
+                    "--url",
+                    "https://x/y",
+                    "--registry",
+                    "https://r/",
+                ],
+            ),
+        ):
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "api",
-                      "--url", "https://x/y",
-                      "--registry", "https://r/"],
+                cli,
+                ["install", "--mcp", "api", "--url", "https://x/y", "--registry", "https://r/"],
             )
             assert result.exit_code == 2
             assert "--registry only applies" in result.output
 
     def test_registry_with_stdio_command_rejected(self):
         # E15: --registry incompatible with self-defined stdio.
-        with self._chdir_with_apm_yml(), \
-             patch("apm_cli.commands.install._get_invocation_argv",
-                   return_value=["apm", "install", "--mcp", "foo",
-                                 "--registry", "https://r/", "--", "npx", "srv"]):
+        with (
+            self._chdir_with_apm_yml(),
+            patch(
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=[
+                    "apm",
+                    "install",
+                    "--mcp",
+                    "foo",
+                    "--registry",
+                    "https://r/",
+                    "--",
+                    "npx",
+                    "srv",
+                ],
+            ),
+        ):
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "foo",
-                      "--registry", "https://r/", "--", "npx", "srv"],
+                cli,
+                ["install", "--mcp", "foo", "--registry", "https://r/", "--", "npx", "srv"],
             )
             assert result.exit_code == 2
             assert "--registry only applies" in result.output
@@ -2012,45 +2208,71 @@ class TestInstallMcpFlag:
     def test_registry_without_mcp_rejected(self):
         with self._chdir_with_apm_yml():
             result = self.runner.invoke(
-                cli, ["install", "--registry", "https://r/"],
+                cli,
+                ["install", "--registry", "https://r/"],
             )
             assert result.exit_code == 2
             assert "--registry requires --mcp" in result.output
 
     def test_registry_flag_overrides_env_var(self):
         # Precedence: CLI --registry beats MCP_REGISTRY_URL env var.
-        with self._chdir_with_apm_yml() as tmp, \
-             patch("apm_cli.commands.install._get_invocation_argv",
-                   return_value=["apm", "install", "--mcp", "srv",
-                                 "--registry", "https://flag.example.com"]), \
-             patch("apm_cli.commands.install.MCPIntegrator"), \
-             patch("apm_cli.install.mcp.command.MCPIntegrator"), \
-             patch.dict(os.environ, {"MCP_REGISTRY_URL": "https://env.example.com"}):
+        with (
+            self._chdir_with_apm_yml() as tmp,
+            patch(
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=[
+                    "apm",
+                    "install",
+                    "--mcp",
+                    "srv",
+                    "--registry",
+                    "https://flag.example.com",
+                ],
+            ),
+            patch("apm_cli.commands.install.MCPIntegrator"),
+            patch("apm_cli.install.mcp.command.MCPIntegrator"),
+            patch.dict(os.environ, {"MCP_REGISTRY_URL": "https://env.example.com"}),
+        ):
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "srv", "--verbose",
-                      "--registry", "https://flag.example.com"],
+                cli,
+                ["install", "--mcp", "srv", "--verbose", "--registry", "https://flag.example.com"],
             )
             assert result.exit_code == 0, result.output
             data = yaml.safe_load((tmp / "apm.yml").read_text())
-            assert data["dependencies"]["mcp"][0]["registry"] == \
-                "https://flag.example.com"
+            assert data["dependencies"]["mcp"][0]["registry"] == "https://flag.example.com"
 
     def test_registry_with_version_overlay_persists_both(self):
-        with self._chdir_with_apm_yml() as tmp, \
-             patch("apm_cli.commands.install._get_invocation_argv",
-                   return_value=["apm", "install", "--mcp", "srv",
-                                 "--mcp-version", "1.2.3",
-                                 "--registry", "https://mcp.example.com"]), \
-             patch("apm_cli.commands.install.MCPIntegrator"), \
-             patch("apm_cli.install.mcp.command.MCPIntegrator"):
+        with (
+            self._chdir_with_apm_yml() as tmp,
+            patch(
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=[
+                    "apm",
+                    "install",
+                    "--mcp",
+                    "srv",
+                    "--mcp-version",
+                    "1.2.3",
+                    "--registry",
+                    "https://mcp.example.com",
+                ],
+            ),
+            patch("apm_cli.commands.install.MCPIntegrator"),
+            patch("apm_cli.install.mcp.command.MCPIntegrator"),
+        ):
             result = self.runner.invoke(
-                cli, ["install", "--mcp", "srv",
-                      "--mcp-version", "1.2.3",
-                      "--registry", "https://mcp.example.com"],
+                cli,
+                [
+                    "install",
+                    "--mcp",
+                    "srv",
+                    "--mcp-version",
+                    "1.2.3",
+                    "--registry",
+                    "https://mcp.example.com",
+                ],
             )
             assert result.exit_code == 0, result.output
-            mcp = yaml.safe_load((tmp / "apm.yml").read_text())[
-                "dependencies"]["mcp"][0]
+            mcp = yaml.safe_load((tmp / "apm.yml").read_text())["dependencies"]["mcp"][0]
             assert mcp["version"] == "1.2.3"
             assert mcp["registry"] == "https://mcp.example.com"
-

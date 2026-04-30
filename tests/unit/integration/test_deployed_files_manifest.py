@@ -13,32 +13,38 @@ Covers:
 """
 
 import json
-import pytest
 from datetime import datetime
 from pathlib import Path
 
-from apm_cli.deps.lockfile import LockedDependency, LockFile
-from apm_cli.integration.base_integrator import BaseIntegrator
-from apm_cli.integration.prompt_integrator import PromptIntegrator
+import pytest  # noqa: F401
+
+from apm_cli.deps.lockfile import LockedDependency, LockFile  # noqa: F401
 from apm_cli.integration.agent_integrator import AgentIntegrator
+from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.command_integrator import CommandIntegrator
 from apm_cli.integration.hook_integrator import HookIntegrator
+from apm_cli.integration.prompt_integrator import PromptIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.models.apm_package import (
     APMPackage,
+    GitReferenceType,
     PackageInfo,
     ResolvedReference,
-    GitReferenceType,
 )
-from apm_cli.utils.diagnostics import DiagnosticCollector, CATEGORY_COLLISION
+from apm_cli.utils.diagnostics import CATEGORY_COLLISION, DiagnosticCollector
 
 
-def _make_package_info(tmp_path: Path, name: str = "test-pkg",
-                       prompt_files: dict = None, agent_files: dict = None,
-                       command_files: dict = None, hook_files: dict = None,
-                       skill_md: str = None) -> PackageInfo:
+def _make_package_info(
+    tmp_path: Path,
+    name: str = "test-pkg",
+    prompt_files: dict = None,  # noqa: RUF013
+    agent_files: dict = None,  # noqa: RUF013
+    command_files: dict = None,  # noqa: RUF013
+    hook_files: dict = None,  # noqa: RUF013
+    skill_md: str = None,  # noqa: RUF013
+) -> PackageInfo:
     """Create a PackageInfo with optional primitive files on disk.
-    
+
     prompt_files/agent_files: placed in package root (found by integrators)
     command_files: placed in .apm/prompts/ (found by CommandIntegrator)
     hook_files: placed in hooks/ (found by HookIntegrator)
@@ -152,9 +158,7 @@ class TestPromptCollisionDetection:
         prompts_dir.mkdir(parents=True)
         (prompts_dir / "review.prompt.md").write_text("# user version")
 
-        info = _make_package_info(
-            tmp_path, prompt_files={"review.prompt.md": "# pkg version"}
-        )
+        info = _make_package_info(tmp_path, prompt_files={"review.prompt.md": "# pkg version"})
         result = PromptIntegrator().integrate_package_prompts(
             info, tmp_path, force=False, managed_files=None
         )
@@ -168,9 +172,7 @@ class TestPromptCollisionDetection:
         prompts_dir.mkdir(parents=True)
         (prompts_dir / "review.prompt.md").write_text("# user version")
 
-        info = _make_package_info(
-            tmp_path, prompt_files={"review.prompt.md": "# pkg version"}
-        )
+        info = _make_package_info(tmp_path, prompt_files={"review.prompt.md": "# pkg version"})
         result = PromptIntegrator().integrate_package_prompts(
             info, tmp_path, force=False, managed_files=set()
         )
@@ -184,9 +186,7 @@ class TestPromptCollisionDetection:
         prompts_dir.mkdir(parents=True)
         (prompts_dir / "review.prompt.md").write_text("# old")
 
-        info = _make_package_info(
-            tmp_path, prompt_files={"review.prompt.md": "# new"}
-        )
+        info = _make_package_info(tmp_path, prompt_files={"review.prompt.md": "# new"})
         managed = {".github/prompts/review.prompt.md"}
         result = PromptIntegrator().integrate_package_prompts(
             info, tmp_path, force=False, managed_files=managed
@@ -201,9 +201,7 @@ class TestPromptCollisionDetection:
         prompts_dir.mkdir(parents=True)
         (prompts_dir / "review.prompt.md").write_text("# user")
 
-        info = _make_package_info(
-            tmp_path, prompt_files={"review.prompt.md": "# pkg"}
-        )
+        info = _make_package_info(tmp_path, prompt_files={"review.prompt.md": "# pkg"})
         managed = {".github/prompts/OTHER.prompt.md"}
         result = PromptIntegrator().integrate_package_prompts(
             info, tmp_path, force=False, managed_files=managed
@@ -217,9 +215,7 @@ class TestPromptCollisionDetection:
         prompts_dir.mkdir(parents=True)
         (prompts_dir / "review.prompt.md").write_text("# user")
 
-        info = _make_package_info(
-            tmp_path, prompt_files={"review.prompt.md": "# pkg"}
-        )
+        info = _make_package_info(tmp_path, prompt_files={"review.prompt.md": "# pkg"})
         result = PromptIntegrator().integrate_package_prompts(
             info, tmp_path, force=True, managed_files=set()
         )
@@ -312,9 +308,7 @@ class TestAgentCollisionDetection:
         agents_dir.mkdir(parents=True)
         (agents_dir / "security.agent.md").write_text("# user")
 
-        info = _make_package_info(
-            tmp_path, agent_files={"security.agent.md": "# pkg"}
-        )
+        info = _make_package_info(tmp_path, agent_files={"security.agent.md": "# pkg"})
         result = AgentIntegrator().integrate_package_agents(
             info, tmp_path, force=False, managed_files=None
         )
@@ -327,9 +321,7 @@ class TestAgentCollisionDetection:
         agents_dir.mkdir(parents=True)
         (agents_dir / "security.agent.md").write_text("# user")
 
-        info = _make_package_info(
-            tmp_path, agent_files={"security.agent.md": "# pkg"}
-        )
+        info = _make_package_info(tmp_path, agent_files={"security.agent.md": "# pkg"})
         result = AgentIntegrator().integrate_package_agents(
             info, tmp_path, force=False, managed_files=set()
         )
@@ -343,9 +335,7 @@ class TestAgentCollisionDetection:
         agents_dir.mkdir(parents=True)
         (agents_dir / "security.agent.md").write_text("# user")
 
-        info = _make_package_info(
-            tmp_path, agent_files={"security.agent.md": "# pkg"}
-        )
+        info = _make_package_info(tmp_path, agent_files={"security.agent.md": "# pkg"})
         result = AgentIntegrator().integrate_package_agents(
             info, tmp_path, force=True, managed_files=set()
         )
@@ -364,9 +354,7 @@ class TestClaudeAgentCollisionDetection:
         claude_dir.mkdir(parents=True)
         (claude_dir / "security.md").write_text("# user")
 
-        info = _make_package_info(
-            tmp_path, agent_files={"security.agent.md": "# pkg"}
-        )
+        info = _make_package_info(tmp_path, agent_files={"security.agent.md": "# pkg"})
         result = AgentIntegrator().integrate_package_agents_claude(
             info, tmp_path, force=False, managed_files=None
         )
@@ -379,9 +367,7 @@ class TestClaudeAgentCollisionDetection:
         claude_dir.mkdir(parents=True)
         (claude_dir / "security.md").write_text("# user")
 
-        info = _make_package_info(
-            tmp_path, agent_files={"security.agent.md": "# pkg"}
-        )
+        info = _make_package_info(tmp_path, agent_files={"security.agent.md": "# pkg"})
         result = AgentIntegrator().integrate_package_agents_claude(
             info, tmp_path, force=False, managed_files=set()
         )
@@ -395,9 +381,7 @@ class TestClaudeAgentCollisionDetection:
         claude_dir.mkdir(parents=True)
         (claude_dir / "security.md").write_text("# user")
 
-        info = _make_package_info(
-            tmp_path, agent_files={"security.agent.md": "# pkg"}
-        )
+        info = _make_package_info(tmp_path, agent_files={"security.agent.md": "# pkg"})
         result = AgentIntegrator().integrate_package_agents_claude(
             info, tmp_path, force=True, managed_files=set()
         )
@@ -450,9 +434,7 @@ class TestAgentSync:
         (claude_dir / "b.md").write_text("user")
 
         managed = {".claude/agents/a.md"}
-        stats = AgentIntegrator().sync_integration_claude(
-            None, tmp_path, managed_files=managed
-        )
+        stats = AgentIntegrator().sync_integration_claude(None, tmp_path, managed_files=managed)
 
         assert stats["files_removed"] == 1
         assert not (claude_dir / "a.md").exists()
@@ -465,9 +447,7 @@ class TestAgentSync:
         (claude_dir / "sec-apm.md").write_text("old")
         (claude_dir / "custom.md").write_text("user")
 
-        stats = AgentIntegrator().sync_integration_claude(
-            None, tmp_path, managed_files=None
-        )
+        stats = AgentIntegrator().sync_integration_claude(None, tmp_path, managed_files=None)
 
         assert stats["files_removed"] == 1
         assert not (claude_dir / "sec-apm.md").exists()
@@ -491,9 +471,7 @@ class TestCommandCollisionDetection:
         cmds_dir.mkdir(parents=True)
         (cmds_dir / "review.md").write_text("# user version")
 
-        info = _make_package_info(
-            tmp_path, command_files={"review.prompt.md": SAMPLE_PROMPT_MD}
-        )
+        info = _make_package_info(tmp_path, command_files={"review.prompt.md": SAMPLE_PROMPT_MD})
         result = CommandIntegrator().integrate_package_commands(
             info, tmp_path, force=False, managed_files=None
         )
@@ -507,9 +485,7 @@ class TestCommandCollisionDetection:
         cmds_dir.mkdir(parents=True)
         (cmds_dir / "review.md").write_text("# user version")
 
-        info = _make_package_info(
-            tmp_path, command_files={"review.prompt.md": SAMPLE_PROMPT_MD}
-        )
+        info = _make_package_info(tmp_path, command_files={"review.prompt.md": SAMPLE_PROMPT_MD})
         result = CommandIntegrator().integrate_package_commands(
             info, tmp_path, force=False, managed_files=set()
         )
@@ -524,9 +500,7 @@ class TestCommandCollisionDetection:
         cmds_dir.mkdir(parents=True)
         (cmds_dir / "review.md").write_text("# old")
 
-        info = _make_package_info(
-            tmp_path, command_files={"review.prompt.md": SAMPLE_PROMPT_MD}
-        )
+        info = _make_package_info(tmp_path, command_files={"review.prompt.md": SAMPLE_PROMPT_MD})
         managed = {".claude/commands/review.md"}
         result = CommandIntegrator().integrate_package_commands(
             info, tmp_path, force=False, managed_files=managed
@@ -540,9 +514,7 @@ class TestCommandCollisionDetection:
         cmds_dir.mkdir(parents=True)
         (cmds_dir / "review.md").write_text("# user")
 
-        info = _make_package_info(
-            tmp_path, command_files={"review.prompt.md": SAMPLE_PROMPT_MD}
-        )
+        info = _make_package_info(tmp_path, command_files={"review.prompt.md": SAMPLE_PROMPT_MD})
         managed = {".claude/commands/OTHER.md"}
         result = CommandIntegrator().integrate_package_commands(
             info, tmp_path, force=False, managed_files=managed
@@ -557,9 +529,7 @@ class TestCommandCollisionDetection:
         cmds_dir.mkdir(parents=True)
         (cmds_dir / "review.md").write_text("# user")
 
-        info = _make_package_info(
-            tmp_path, command_files={"review.prompt.md": SAMPLE_PROMPT_MD}
-        )
+        info = _make_package_info(tmp_path, command_files={"review.prompt.md": SAMPLE_PROMPT_MD})
         result = CommandIntegrator().integrate_package_commands(
             info, tmp_path, force=True, managed_files=set()
         )
@@ -643,14 +613,18 @@ class TestCommandSync:
 # ---------------------------------------------------------------------------
 
 
-SAMPLE_HOOK_JSON = json.dumps({
-    "hooks": {
-        "PostToolUse": [{
-            "matcher": "write_to_file",
-            "hooks": [{"type": "command", "command": "echo lint", "timeout": 5}]
-        }]
+SAMPLE_HOOK_JSON = json.dumps(
+    {
+        "hooks": {
+            "PostToolUse": [
+                {
+                    "matcher": "write_to_file",
+                    "hooks": [{"type": "command", "command": "echo lint", "timeout": 5}],
+                }
+            ]
+        }
     }
-})
+)
 
 
 class TestHookCollisionDetection:
@@ -662,9 +636,7 @@ class TestHookCollisionDetection:
         hooks_dir.mkdir(parents=True)
         (hooks_dir / "test-pkg-hooks.json").write_text('{"user": true}')
 
-        info = _make_package_info(
-            tmp_path, hook_files={"hooks.json": SAMPLE_HOOK_JSON}
-        )
+        info = _make_package_info(tmp_path, hook_files={"hooks.json": SAMPLE_HOOK_JSON})
         result = HookIntegrator().integrate_package_hooks(
             info, tmp_path, force=False, managed_files=None
         )
@@ -676,9 +648,7 @@ class TestHookCollisionDetection:
         hooks_dir.mkdir(parents=True)
         (hooks_dir / "test-pkg-hooks.json").write_text('{"user": true}')
 
-        info = _make_package_info(
-            tmp_path, hook_files={"hooks.json": SAMPLE_HOOK_JSON}
-        )
+        info = _make_package_info(tmp_path, hook_files={"hooks.json": SAMPLE_HOOK_JSON})
         result = HookIntegrator().integrate_package_hooks(
             info, tmp_path, force=False, managed_files=set()
         )
@@ -693,9 +663,7 @@ class TestHookCollisionDetection:
         hooks_dir.mkdir(parents=True)
         (hooks_dir / "test-pkg-hooks.json").write_text('{"old": true}')
 
-        info = _make_package_info(
-            tmp_path, hook_files={"hooks.json": SAMPLE_HOOK_JSON}
-        )
+        info = _make_package_info(tmp_path, hook_files={"hooks.json": SAMPLE_HOOK_JSON})
         managed = {".github/hooks/test-pkg-hooks.json"}
         result = HookIntegrator().integrate_package_hooks(
             info, tmp_path, force=False, managed_files=managed
@@ -708,9 +676,7 @@ class TestHookCollisionDetection:
         hooks_dir.mkdir(parents=True)
         (hooks_dir / "test-pkg-hooks.json").write_text('{"user": true}')
 
-        info = _make_package_info(
-            tmp_path, hook_files={"hooks.json": SAMPLE_HOOK_JSON}
-        )
+        info = _make_package_info(tmp_path, hook_files={"hooks.json": SAMPLE_HOOK_JSON})
         result = HookIntegrator().integrate_package_hooks(
             info, tmp_path, force=True, managed_files=set()
         )
@@ -828,9 +794,7 @@ class TestCollisionWarningOutput:
         prompts_dir.mkdir(parents=True)
         (prompts_dir / "review.prompt.md").write_text("# user")
 
-        info = _make_package_info(
-            tmp_path, prompt_files={"review.prompt.md": "# pkg"}
-        )
+        info = _make_package_info(tmp_path, prompt_files={"review.prompt.md": "# pkg"})
         PromptIntegrator().integrate_package_prompts(
             info, tmp_path, force=False, managed_files=set()
         )
@@ -845,12 +809,8 @@ class TestCollisionWarningOutput:
         agents_dir.mkdir(parents=True)
         (agents_dir / "security.agent.md").write_text("# user")
 
-        info = _make_package_info(
-            tmp_path, agent_files={"security.agent.md": "# pkg"}
-        )
-        AgentIntegrator().integrate_package_agents(
-            info, tmp_path, force=False, managed_files=set()
-        )
+        info = _make_package_info(tmp_path, agent_files={"security.agent.md": "# pkg"})
+        AgentIntegrator().integrate_package_agents(info, tmp_path, force=False, managed_files=set())
         captured = capsys.readouterr()
         output = captured.out + captured.err
         assert "Skipping" in output
@@ -862,9 +822,7 @@ class TestCollisionWarningOutput:
         cmds_dir.mkdir(parents=True)
         (cmds_dir / "review.md").write_text("# user")
 
-        info = _make_package_info(
-            tmp_path, command_files={"review.prompt.md": SAMPLE_PROMPT_MD}
-        )
+        info = _make_package_info(tmp_path, command_files={"review.prompt.md": SAMPLE_PROMPT_MD})
         CommandIntegrator().integrate_package_commands(
             info, tmp_path, force=False, managed_files=set()
         )
@@ -879,12 +837,8 @@ class TestCollisionWarningOutput:
         hooks_dir.mkdir(parents=True)
         (hooks_dir / "test-pkg-hooks.json").write_text('{"user": true}')
 
-        info = _make_package_info(
-            tmp_path, hook_files={"hooks.json": SAMPLE_HOOK_JSON}
-        )
-        HookIntegrator().integrate_package_hooks(
-            info, tmp_path, force=False, managed_files=set()
-        )
+        info = _make_package_info(tmp_path, hook_files={"hooks.json": SAMPLE_HOOK_JSON})
+        HookIntegrator().integrate_package_hooks(info, tmp_path, force=False, managed_files=set())
         captured = capsys.readouterr()
         output = captured.out + captured.err
         assert "Skipping" in output
@@ -906,8 +860,11 @@ class TestCheckCollisionDiagnostics:
         diag = DiagnosticCollector()
 
         result = BaseIntegrator.check_collision(
-            target, ".github/prompts/review.prompt.md",
-            managed_files=set(), force=False, diagnostics=diag,
+            target,
+            ".github/prompts/review.prompt.md",
+            managed_files=set(),
+            force=False,
+            diagnostics=diag,
         )
 
         assert result is True
@@ -922,8 +879,11 @@ class TestCheckCollisionDiagnostics:
         diag = DiagnosticCollector()
 
         BaseIntegrator.check_collision(
-            target, ".github/agents/agent.md",
-            managed_files=set(), force=False, diagnostics=diag,
+            target,
+            ".github/agents/agent.md",
+            managed_files=set(),
+            force=False,
+            diagnostics=diag,
         )
 
         captured = capsys.readouterr()
@@ -935,8 +895,11 @@ class TestCheckCollisionDiagnostics:
         target.write_text("{}")
 
         result = BaseIntegrator.check_collision(
-            target, ".github/hooks/hook.json",
-            managed_files=set(), force=False, diagnostics=None,
+            target,
+            ".github/hooks/hook.json",
+            managed_files=set(),
+            force=False,
+            diagnostics=None,
         )
 
         assert result is True
@@ -951,8 +914,11 @@ class TestCheckCollisionDiagnostics:
         diag = DiagnosticCollector()
 
         result = BaseIntegrator.check_collision(
-            target, ".github/prompts/missing.md",
-            managed_files=set(), force=False, diagnostics=diag,
+            target,
+            ".github/prompts/missing.md",
+            managed_files=set(),
+            force=False,
+            diagnostics=diag,
         )
 
         assert result is False
@@ -965,8 +931,11 @@ class TestCheckCollisionDiagnostics:
         diag = DiagnosticCollector()
 
         result = BaseIntegrator.check_collision(
-            target, ".claude/commands/cmd.md",
-            managed_files=set(), force=True, diagnostics=diag,
+            target,
+            ".claude/commands/cmd.md",
+            managed_files=set(),
+            force=True,
+            diagnostics=diag,
         )
 
         assert result is False
@@ -979,9 +948,11 @@ class TestCheckCollisionDiagnostics:
         diag = DiagnosticCollector()
 
         result = BaseIntegrator.check_collision(
-            target, ".github/prompts/review.prompt.md",
+            target,
+            ".github/prompts/review.prompt.md",
             managed_files={".github/prompts/review.prompt.md"},
-            force=False, diagnostics=diag,
+            force=False,
+            diagnostics=diag,
         )
 
         assert result is False
@@ -999,8 +970,11 @@ class TestCheckCollisionDiagnostics:
             target = tmp_path / Path(rel).name
             target.write_text("# user")
             BaseIntegrator.check_collision(
-                target, rel, managed_files=set(),
-                force=False, diagnostics=diag,
+                target,
+                rel,
+                managed_files=set(),
+                force=False,
+                diagnostics=diag,
             )
 
         entries = diag.by_category().get(CATEGORY_COLLISION, [])
@@ -1055,9 +1029,7 @@ class TestSuccessfulDeployment:
 
     def test_command_deployed_to_claude(self, tmp_path: Path):
         """Command files are deployed to .claude/commands/."""
-        info = _make_package_info(
-            tmp_path, command_files={"review.prompt.md": SAMPLE_PROMPT_MD}
-        )
+        info = _make_package_info(tmp_path, command_files={"review.prompt.md": SAMPLE_PROMPT_MD})
         result = CommandIntegrator().integrate_package_commands(
             info, tmp_path, force=False, managed_files=set()
         )
@@ -1066,9 +1038,7 @@ class TestSuccessfulDeployment:
 
     def test_hook_deployed_to_github(self, tmp_path: Path):
         """Hook JSON files are deployed to .github/hooks/."""
-        info = _make_package_info(
-            tmp_path, hook_files={"hooks.json": SAMPLE_HOOK_JSON}
-        )
+        info = _make_package_info(tmp_path, hook_files={"hooks.json": SAMPLE_HOOK_JSON})
         result = HookIntegrator().integrate_package_hooks(
             info, tmp_path, force=False, managed_files=set()
         )

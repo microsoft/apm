@@ -31,9 +31,10 @@ takes no logger.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, List, Optional  # noqa: F401, UP035
 
 from .base_integrator import BaseIntegrator
 
@@ -42,22 +43,22 @@ from .base_integrator import BaseIntegrator
 class CleanupResult:
     """Outcome of a stale-file cleanup pass for a single package."""
 
-    deleted: List[str] = field(default_factory=list)
+    deleted: list[str] = field(default_factory=list)
     """Workspace-relative paths actually removed from disk."""
 
-    failed: List[str] = field(default_factory=list)
+    failed: list[str] = field(default_factory=list)
     """Paths that raised during ``unlink``/``rmtree`` and should be
     retained in ``deployed_files`` for retry on the next install."""
 
-    skipped_user_edit: List[str] = field(default_factory=list)
+    skipped_user_edit: list[str] = field(default_factory=list)
     """Paths skipped because the on-disk content no longer matches the
     hash APM recorded at deploy time -- treated as user-edited."""
 
-    skipped_unmanaged: List[str] = field(default_factory=list)
+    skipped_unmanaged: list[str] = field(default_factory=list)
     """Paths refused by the safety gates (validation failure, directory
     entry, etc.). Not retained in ``deployed_files``."""
 
-    deleted_targets: List[Path] = field(default_factory=list)
+    deleted_targets: list[Path] = field(default_factory=list)
     """Absolute paths of deleted entries -- input to
     :meth:`BaseIntegrator.cleanup_empty_parents`."""
 
@@ -69,7 +70,7 @@ def remove_stale_deployed_files(
     dep_key: str,
     targets,
     diagnostics,
-    recorded_hashes: Optional[Dict[str, str]] = None,
+    recorded_hashes: dict[str, str] | None = None,
     failed_path_retained: bool = True,
 ) -> CleanupResult:
     """Remove APM-deployed files that are no longer produced by *dep_key*.
@@ -118,7 +119,7 @@ def remove_stale_deployed_files(
     # Lazy-resolve cowork root at most once per invocation (same
     # pattern as sync_remove_files in base_integrator.py -- PR #926 P4).
     _cowork_root_resolved: bool = False
-    _cowork_root_cached: Optional[Path] = None
+    _cowork_root_cached: Path | None = None
     _cowork_orphans_skipped: int = 0
     _cowork_resolve_errors: int = 0
 
@@ -131,6 +132,7 @@ def remove_stale_deployed_files(
         # do equivalent security checks (no traversal, known prefix,
         # containment via from_lockfile_path) ourselves.
         from .copilot_cowork_paths import COWORK_URI_SCHEME
+
         if stale_path.startswith(COWORK_URI_SCHEME):
             # Basic security: reject path-traversal components.
             if ".." in stale_path:
@@ -138,9 +140,8 @@ def remove_stale_deployed_files(
                 continue
             # Verify the path starts with a known integration prefix.
             from .targets import get_integration_prefixes
-            if not stale_path.startswith(
-                get_integration_prefixes(targets=targets)
-            ):
+
+            if not stale_path.startswith(get_integration_prefixes(targets=targets)):
                 result.skipped_unmanaged.append(stale_path)
                 continue
             # Resolve the cowork:// URI to a real filesystem path.
@@ -149,6 +150,7 @@ def remove_stale_deployed_files(
                     from .copilot_cowork_paths import (
                         resolve_copilot_cowork_skills_dir,
                     )
+
                     _cowork_root_cached = resolve_copilot_cowork_skills_dir()
                     _cowork_root_resolved = True
                 if _cowork_root_cached is None:
@@ -158,9 +160,8 @@ def remove_stale_deployed_files(
                     result.failed.append(stale_path)
                     continue
                 from .copilot_cowork_paths import from_lockfile_path
-                stale_target = from_lockfile_path(
-                    stale_path, _cowork_root_cached
-                )
+
+                stale_target = from_lockfile_path(stale_path, _cowork_root_cached)
             except Exception:
                 # Containment violation or malformed path -- retain in
                 # lockfile for manual inspection.
@@ -170,9 +171,7 @@ def remove_stale_deployed_files(
         else:
             # ── Non-cowork paths ─────────────────────────────────────
             # Gate 1: path validation (traversal, allowed prefix, in-tree).
-            if not BaseIntegrator.validate_deploy_path(
-                stale_path, project_root, targets=targets
-            ):
+            if not BaseIntegrator.validate_deploy_path(stale_path, project_root, targets=targets):
                 result.skipped_unmanaged.append(stale_path)
                 continue
             stale_target = project_root / stale_path

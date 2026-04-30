@@ -1,14 +1,14 @@
 """Tests for installation scope resolution."""
 
-import os
+import os  # noqa: F401
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from apm_cli.core.scope import (
-    InstallScope,
     USER_APM_DIR,
+    InstallScope,
     ensure_user_dirs,
     get_apm_dir,
     get_deploy_root,
@@ -19,7 +19,6 @@ from apm_cli.core.scope import (
     warn_unsupported_user_scope,
 )
 from apm_cli.integration.targets import KNOWN_TARGETS
-
 
 # ---------------------------------------------------------------------------
 # InstallScope enum
@@ -284,12 +283,14 @@ class TestActiveTargetsUserScope:
 
     def test_explicit_copilot(self):
         from apm_cli.integration.targets import active_targets_user_scope
+
         result = active_targets_user_scope(explicit_target="copilot")
         assert len(result) == 1
         assert result[0].name == "copilot"
 
     def test_explicit_all_returns_all_user_capable(self):
         from apm_cli.integration.targets import active_targets_user_scope
+
         result = active_targets_user_scope(explicit_target="all")
         names = {t.name for t in result}
         assert "copilot" in names
@@ -303,6 +304,7 @@ class TestActiveTargetsUserScope:
         from #820 -- both entry points share one validator
         (:func:`apm_cli.core.target_detection.parse_target_field`)."""
         import pytest
+
         from apm_cli.core.target_detection import parse_target_field
 
         with pytest.raises(ValueError, match="not a valid target"):
@@ -310,6 +312,7 @@ class TestActiveTargetsUserScope:
 
     def test_explicit_vscode_alias(self):
         from apm_cli.integration.targets import active_targets_user_scope
+
         result = active_targets_user_scope(explicit_target="vscode")
         assert len(result) == 1
         assert result[0].name == "copilot"
@@ -317,6 +320,7 @@ class TestActiveTargetsUserScope:
     def test_auto_detect_by_dir_presence(self, tmp_path):
         """When cursor dir exists at ~/, it should be detected."""
         from apm_cli.integration.targets import active_targets_user_scope
+
         (tmp_path / ".cursor").mkdir()
         with patch("pathlib.Path.home", return_value=tmp_path):
             result = active_targets_user_scope()
@@ -326,6 +330,7 @@ class TestActiveTargetsUserScope:
     def test_auto_detect_multiple_dirs(self, tmp_path):
         """Detects all targets with existing home dirs."""
         from apm_cli.integration.targets import active_targets_user_scope
+
         (tmp_path / ".cursor").mkdir()
         (tmp_path / ".claude").mkdir()
         with patch("pathlib.Path.home", return_value=tmp_path):
@@ -337,6 +342,7 @@ class TestActiveTargetsUserScope:
     def test_fallback_to_copilot(self, tmp_path):
         """When no target dirs exist, falls back to copilot."""
         from apm_cli.integration.targets import active_targets_user_scope
+
         with patch("pathlib.Path.home", return_value=tmp_path):
             result = active_targets_user_scope()
         assert len(result) == 1
@@ -345,6 +351,7 @@ class TestActiveTargetsUserScope:
     def test_opencode_nested_dir(self, tmp_path):
         """OpenCode uses ~/.config/opencode/ which is nested."""
         from apm_cli.integration.targets import active_targets_user_scope
+
         (tmp_path / ".config" / "opencode").mkdir(parents=True)
         with patch("pathlib.Path.home", return_value=tmp_path):
             result = active_targets_user_scope()

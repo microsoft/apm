@@ -7,21 +7,16 @@ the placeholder line removed (so the hash is not self-referential).
 
 import re
 
-import pytest
+import pytest  # noqa: F401
 
 from apm_cli.compilation.build_id import stabilize_build_id
 from apm_cli.compilation.constants import BUILD_ID_PLACEHOLDER
-
 
 _HASH_LINE_RE = re.compile(r"^<!-- Build ID: [a-f0-9]{12} -->$")
 
 
 def test_replaces_placeholder_with_hash_line():
-    content = (
-        "# AGENTS.md\n"
-        f"{BUILD_ID_PLACEHOLDER}\n"
-        "<!-- APM Version: 1.0.0 -->\n"
-    )
+    content = f"# AGENTS.md\n{BUILD_ID_PLACEHOLDER}\n<!-- APM Version: 1.0.0 -->\n"
 
     result = stabilize_build_id(content)
 
@@ -37,11 +32,7 @@ def test_returns_unchanged_when_no_placeholder():
 
 
 def test_idempotent_after_one_pass():
-    content = (
-        "# AGENTS.md\n"
-        f"{BUILD_ID_PLACEHOLDER}\n"
-        "body\n"
-    )
+    content = f"# AGENTS.md\n{BUILD_ID_PLACEHOLDER}\nbody\n"
 
     once = stabilize_build_id(content)
     twice = stabilize_build_id(once)
@@ -50,11 +41,7 @@ def test_idempotent_after_one_pass():
 
 
 def test_deterministic_for_same_input():
-    content = (
-        "# AGENTS.md\n"
-        f"{BUILD_ID_PLACEHOLDER}\n"
-        "body\n"
-    )
+    content = f"# AGENTS.md\n{BUILD_ID_PLACEHOLDER}\nbody\n"
 
     assert stabilize_build_id(content) == stabilize_build_id(content)
 

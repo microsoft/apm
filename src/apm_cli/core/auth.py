@@ -31,14 +31,15 @@ from __future__ import annotations
 import os
 import sys
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable, Optional, TypeVar
+from typing import TYPE_CHECKING, Optional, TypeVar  # noqa: F401
 
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.utils.github_host import (
     default_host,
     is_azure_devops_hostname,
-    is_github_hostname,
+    is_github_hostname,  # noqa: F401
     is_valid_fqdn,
 )
 
@@ -52,6 +53,7 @@ T = TypeVar("T")
 # Data classes
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class HostInfo:
     """Immutable description of a remote Git host."""
@@ -60,7 +62,7 @@ class HostInfo:
     kind: str  # "github" | "ghe_cloud" | "ghes" | "ado" | "generic"
     has_public_repos: bool
     api_base: str
-    port: Optional[int] = None  # Non-standard git port (e.g. 7999 for Bitbucket DC)
+    port: int | None = None  # Non-standard git port (e.g. 7999 for Bitbucket DC)
 
     @property
     def display_name(self) -> str:
@@ -85,17 +87,20 @@ class AuthContext:
     Not frozen because ``git_env`` is a dict (unhashable).
     """
 
-    token: Optional[str] = field(repr=False)  # B1 #852: never expose JWT/PAT via repr()
+    token: str | None = field(repr=False)  # B1 #852: never expose JWT/PAT via repr()
     source: str  # e.g. "GITHUB_APM_PAT_ORGNAME", "GITHUB_TOKEN", "none"
     token_type: str  # "fine-grained", "classic", "oauth", "github-app", "unknown"
     host_info: HostInfo
     git_env: dict = field(compare=False, repr=False)
-    auth_scheme: str = "basic"  # "basic" | "bearer". Determines how _build_git_env injects credentials.
+    auth_scheme: str = (
+        "basic"  # "basic" | "bearer". Determines how _build_git_env injects credentials.
+    )
 
 
 # ---------------------------------------------------------------------------
 # AuthResolver
 # ---------------------------------------------------------------------------
+
 
 class AuthResolver:
     """Single source of truth for auth resolution.
@@ -106,8 +111,8 @@ class AuthResolver:
 
     def __init__(
         self,
-        token_manager: Optional[GitHubTokenManager] = None,
-        logger: Optional["object"] = None,
+        token_manager: GitHubTokenManager | None = None,
+        logger: object | None = None,
     ):
         self._token_manager = token_manager or GitHubTokenManager()
         self._cache: dict[tuple, AuthContext] = {}
@@ -122,7 +127,7 @@ class AuthResolver:
         # the prior hasattr() guard.
         self._verbose_auth_logged_hosts: set = set()
 
-    def set_logger(self, logger: "object") -> None:
+    def set_logger(self, logger: object) -> None:
         """Wire a CommandLogger (or InstallLogger) into the resolver after
         construction. Idempotent. Used by the install command, which builds
         the logger before it knows it needs an AuthResolver elsewhere."""
@@ -131,7 +136,7 @@ class AuthResolver:
     # -- host classification ------------------------------------------------
 
     @staticmethod
-    def classify_host(host: str, port: Optional[int] = None) -> HostInfo:
+    def classify_host(host: str, port: int | None = None) -> HostInfo:
         """Return a ``HostInfo`` describing *host*.
 
         ``port`` is carried through onto the returned ``HostInfo`` so that
@@ -171,7 +176,12 @@ class AuthResolver:
 
         # GHES: GITHUB_HOST is set to a non-github.com, non-ghe.com FQDN
         ghes_host = os.environ.get("GITHUB_HOST", "").lower()
-        if ghes_host and ghes_host == h and ghes_host != "github.com" and not ghes_host.endswith(".ghe.com"):
+        if (
+            ghes_host
+            and ghes_host == h
+            and ghes_host != "github.com"
+            and not ghes_host.endswith(".ghe.com")
+        ):
             if is_valid_fqdn(ghes_host):
                 return HostInfo(
                     host=host,
@@ -228,9 +238,9 @@ class AuthResolver:
     def resolve(
         self,
         host: str,
-        org: Optional[str] = None,
+        org: str | None = None,
         *,
-        port: Optional[int] = None,
+        port: int | None = None,
     ) -> AuthContext:
         """Resolve auth for *(host, port, org)*.  Cached & thread-safe.
 
@@ -272,14 +282,14 @@ class AuthResolver:
             self._cache[key] = ctx
             return ctx
 
-    def resolve_for_dep(self, dep_ref: "DependencyReference") -> AuthContext:
+    def resolve_for_dep(self, dep_ref: DependencyReference) -> AuthContext:
         """Resolve auth from a ``DependencyReference``.
 
         Threads ``dep_ref.port`` through so the resolver (and any downstream
         git credential helper) can discriminate same-host multi-port setups.
         """
         host = dep_ref.host or default_host()
-        org: Optional[str] = None
+        org: str | None = None
         if dep_ref.repo_url:
             parts = dep_ref.repo_url.split("/")
             if parts:
@@ -293,10 +303,10 @@ class AuthResolver:
         host: str,
         operation: Callable[..., T],
         *,
-        org: Optional[str] = None,
-        port: Optional[int] = None,
+        org: str | None = None,
+        port: int | None = None,
         unauth_first: bool = False,
-        verbose_callback: Optional[Callable[[str], None]] = None,
+        verbose_callback: Callable[[str], None] | None = None,
     ) -> T:
         """Execute *operation* with automatic auth/unauth fallback.
 
@@ -345,8 +355,7 @@ class AuthResolver:
 
         # ADO bearer fallback machinery (PAT was tried first; bearer is the safety net)
         ado_bearer_fallback_available = (
-            auth_ctx.host_info.kind == "ado"
-            and auth_ctx.source == "ADO_APM_PAT"
+            auth_ctx.host_info.kind == "ado" and auth_ctx.source == "ADO_APM_PAT"
         )
 
         def _try_ado_bearer_fallback(exc: Exception) -> T:
@@ -361,6 +370,7 @@ class AuthResolver:
             ):
                 raise exc
             from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
+
             provider = get_bearer_provider()
             if not provider.is_available():
                 raise exc
@@ -407,26 +417,25 @@ class AuthResolver:
                     except Exception as exc:
                         return _try_credential_fallback(exc)
                 raise
+        # Download path: auth-first for higher rate limits
+        elif auth_ctx.token:
+            try:
+                _log(
+                    f"Trying authenticated access to {host_info.display_name} "
+                    f"(source: {auth_ctx.source})"
+                )
+                return operation(auth_ctx.token, git_env)
+            except Exception as exc:
+                if host_info.has_public_repos:
+                    _log("Authenticated failed, retrying without token")
+                    try:
+                        return operation(None, git_env)
+                    except Exception:
+                        return _try_credential_fallback(exc)
+                return _try_credential_fallback(exc)
         else:
-            # Download path: auth-first for higher rate limits
-            if auth_ctx.token:
-                try:
-                    _log(
-                        f"Trying authenticated access to {host_info.display_name} "
-                        f"(source: {auth_ctx.source})"
-                    )
-                    return operation(auth_ctx.token, git_env)
-                except Exception as exc:
-                    if host_info.has_public_repos:
-                        _log("Authenticated failed, retrying without token")
-                        try:
-                            return operation(None, git_env)
-                        except Exception:
-                            return _try_credential_fallback(exc)
-                    return _try_credential_fallback(exc)
-            else:
-                _log(f"No token available, trying unauthenticated access to {host_info.display_name}")
-                return operation(None, git_env)
+            _log(f"No token available, trying unauthenticated access to {host_info.display_name}")
+            return operation(None, git_env)
 
     # -- error context ------------------------------------------------------
 
@@ -434,10 +443,10 @@ class AuthResolver:
         self,
         host: str,
         operation: str,
-        org: Optional[str] = None,
+        org: str | None = None,
         *,
-        port: Optional[int] = None,
-        dep_url: Optional[str] = None,
+        port: int | None = None,
+        dep_url: str | None = None,
     ) -> str:
         """Build an actionable error message for auth failures."""
         auth_ctx = self.resolve(host, org, port=port)
@@ -447,6 +456,7 @@ class AuthResolver:
         # --- ADO-specific error cases ---
         if host_info.kind == "ado":
             from apm_cli.core.azure_cli import get_bearer_provider
+
             provider = get_bearer_provider()
             az_available = provider.is_available()
             pat_set = bool(os.environ.get("ADO_APM_PAT"))
@@ -456,10 +466,16 @@ class AuthResolver:
                 source_url = dep_url or ""
                 if source_url:
                     parts = source_url.replace("https://", "").split("/")
-                    if len(parts) >= 2 and (parts[0] in ("dev.azure.com",) or parts[0].endswith(".visualstudio.com")):
+                    if len(parts) >= 2 and (
+                        parts[0] in ("dev.azure.com",) or parts[0].endswith(".visualstudio.com")
+                    ):
                         org_part = parts[1] if len(parts) > 1 else ""
 
-            token_url = f"https://dev.azure.com/{org_part}/_usersSettings/tokens" if org_part else "https://dev.azure.com/<org>/_usersSettings/tokens"
+            token_url = (
+                f"https://dev.azure.com/{org_part}/_usersSettings/tokens"
+                if org_part
+                else "https://dev.azure.com/<org>/_usersSettings/tokens"
+            )
 
             if pat_set:
                 if az_available:
@@ -468,16 +484,16 @@ class AuthResolver:
                     # a 404, a network error, etc.) so the wording stays
                     # tentative -- see #856 review C6.
                     return (
-                        f"\n    ADO_APM_PAT is set, and Azure CLI credentials may also be available,\n"
-                        f"    but the Azure DevOps request still failed.\n\n"
-                        f"    If this is an authentication failure, the PAT may be expired, revoked,\n"
-                        f"    or scoped to a different org, and Azure CLI credentials may need to\n"
-                        f"    be refreshed.\n\n"
-                        f"    To fix:\n"
-                        f"      1. Unset the PAT to test Azure CLI auth only:  unset ADO_APM_PAT\n"
-                        f"      2. Re-authenticate Azure CLI if needed:        az login\n"
-                        f"      3. Retry:                                       apm install\n\n"
-                        f"    Docs: https://microsoft.github.io/apm/getting-started/authentication/#azure-devops"
+                        f"\n    ADO_APM_PAT is set, and Azure CLI credentials may also be available,\n"  # noqa: F541
+                        f"    but the Azure DevOps request still failed.\n\n"  # noqa: F541
+                        f"    If this is an authentication failure, the PAT may be expired, revoked,\n"  # noqa: F541
+                        f"    or scoped to a different org, and Azure CLI credentials may need to\n"  # noqa: F541
+                        f"    be refreshed.\n\n"  # noqa: F541
+                        f"    To fix:\n"  # noqa: F541
+                        f"      1. Unset the PAT to test Azure CLI auth only:  unset ADO_APM_PAT\n"  # noqa: F541
+                        f"      2. Re-authenticate Azure CLI if needed:        az login\n"  # noqa: F541
+                        f"      3. Retry:                                       apm install\n\n"  # noqa: F541
+                        f"    Docs: https://microsoft.github.io/apm/getting-started/authentication/#azure-devops"  # noqa: F541
                     )
                 # PAT set but rejected, no az -> bare PAT failure
                 return (
@@ -509,13 +525,13 @@ class AuthResolver:
             if tenant is None:
                 # Case 3: az present, not logged in
                 return (
-                    f"\n    Azure DevOps requires authentication. You have two options:\n\n"
-                    f"    1. Sign in with Azure CLI (recommended for Entra ID users):\n"
-                    f"         az login\n"
-                    f"         apm install                   # retry -- no env var needed\n\n"
-                    f"    2. Use a Personal Access Token:\n"
-                    f"         export ADO_APM_PAT=your_token\n\n"
-                    f"    Docs: https://microsoft.github.io/apm/getting-started/authentication/#azure-devops"
+                    f"\n    Azure DevOps requires authentication. You have two options:\n\n"  # noqa: F541
+                    f"    1. Sign in with Azure CLI (recommended for Entra ID users):\n"  # noqa: F541
+                    f"         az login\n"  # noqa: F541
+                    f"         apm install                   # retry -- no env var needed\n\n"  # noqa: F541
+                    f"    2. Use a Personal Access Token:\n"  # noqa: F541
+                    f"         export ADO_APM_PAT=your_token\n\n"  # noqa: F541
+                    f"    Docs: https://microsoft.github.io/apm/getting-started/authentication/#azure-devops"  # noqa: F541
                 )
 
             # Case 2: az returned token (tenant known) but ADO rejected it
@@ -532,7 +548,9 @@ class AuthResolver:
         lines: list[str] = [f"Authentication failed for {operation} on {display}."]
 
         if auth_ctx.token:
-            lines.append(f"Token was provided (source: {auth_ctx.source}, type: {auth_ctx.token_type}).")
+            lines.append(
+                f"Token was provided (source: {auth_ctx.source}, type: {auth_ctx.token_type})."
+            )
             if host_info.kind == "ghe_cloud":
                 lines.append(
                     "GHE Cloud Data Residency hosts (*.ghe.com) require "
@@ -552,9 +570,7 @@ class AuthResolver:
                 )
         else:
             lines.append("No token available.")
-            lines.append(
-                "Set GITHUB_APM_PAT or GITHUB_TOKEN, or run 'gh auth login'."
-            )
+            lines.append("Set GITHUB_APM_PAT or GITHUB_TOKEN, or run 'gh auth login'.")
 
         if org and host_info.kind != "ado":
             lines.append(
@@ -576,9 +592,7 @@ class AuthResolver:
 
     # -- internals ----------------------------------------------------------
 
-    def _resolve_token(
-        self, host_info: HostInfo, org: Optional[str]
-    ) -> tuple[Optional[str], str, str]:
+    def _resolve_token(self, host_info: HostInfo, org: str | None) -> tuple[str | None, str, str]:
         """Walk the token resolution chain.  Returns (token, source, scheme).
 
         Resolution order (GitHub-like hosts):
@@ -604,6 +618,7 @@ class AuthResolver:
                 return pat, "ADO_APM_PAT", "basic"
             # Try AAD bearer via az cli (lazy import to avoid module-load cost on non-ADO paths)
             from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
+
             provider = get_bearer_provider()
             if provider.is_available():
                 try:
@@ -657,7 +672,7 @@ class AuthResolver:
 
     @staticmethod
     def _build_git_env(
-        token: Optional[str] = None,
+        token: str | None = None,
         *,
         scheme: str = "basic",
         host_kind: str = "github",
@@ -677,6 +692,7 @@ class AuthResolver:
             # GIT_CONFIG_VALUE_0 only; GIT_TOKEN here would leak it into every
             # child-process env (visible in /proc/<pid>/environ, ps eww).
             from apm_cli.utils.github_host import build_ado_bearer_git_env
+
             env.update(build_ado_bearer_git_env(token))
         elif token:
             env["GIT_TOKEN"] = token
@@ -694,10 +710,7 @@ class AuthResolver:
         now (#856 follow-up C9) so external modules (validation.py,
         github_downloader.py) do not reach into the underscore API.
         """
-        msg = (
-            f"ADO_APM_PAT was rejected for {host_display} (HTTP 401); "
-            f"fell back to az cli bearer."
-        )
+        msg = f"ADO_APM_PAT was rejected for {host_display} (HTTP 401); fell back to az cli bearer."
         detail = "Consider unsetting the stale variable."
         diagnostics = self._diagnostics_or_none()
         if diagnostics is not None:
@@ -705,6 +718,7 @@ class AuthResolver:
             return
         try:
             from apm_cli.utils.console import _rich_warning
+
             _rich_warning(msg, symbol="warning")
             _rich_warning(f"    {detail}", symbol="warning")
         except ImportError:
@@ -738,15 +752,13 @@ class AuthResolver:
         if ctx is None or getattr(ctx, "source", "none") == "none":
             return
         if getattr(ctx, "auth_scheme", None) == "bearer":
-            line = (
-                f"  [i] {host_key} -- using bearer from az cli "
-                f"(source: {ctx.source})"
-            )
+            line = f"  [i] {host_key} -- using bearer from az cli (source: {ctx.source})"
         else:
             line = f"  [i] {host_key} -- token from {ctx.source}"
         if self._logger is not None and getattr(self._logger, "verbose", False):
             try:
                 from apm_cli.utils.console import _rich_echo
+
                 _rich_echo(line, color="dim")
                 return
             except ImportError:
@@ -808,13 +820,11 @@ class AuthResolver:
             return primary
         try:
             fallback = bearer_op(bearer)
-        except Exception:  # noqa: BLE001 -- fallback is best-effort
+        except Exception:
             return primary
         if fallback is None or is_auth_failure(fallback):
             return primary
-        host_display = (
-            getattr(dep_ref, "host", None) or "dev.azure.com"
-        )
+        host_display = getattr(dep_ref, "host", None) or "dev.azure.com"
         self.emit_stale_pat_diagnostic(host_display)
         return fallback
 
@@ -822,6 +832,7 @@ class AuthResolver:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _org_to_env_suffix(org: str) -> str:
     """Convert an org name to an env-var suffix (upper-case, hyphens → underscores)."""

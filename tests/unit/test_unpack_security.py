@@ -1,16 +1,16 @@
 """Unit tests for content scanning during bundle unpack."""
 
-import os
+import os  # noqa: F401
 from pathlib import Path
-from typing import Union
+from typing import Union  # noqa: F401
 
 import pytest
 
-from apm_cli.bundle.unpacker import unpack_bundle, UnpackResult
-from apm_cli.deps.lockfile import LockFile, LockedDependency
+from apm_cli.bundle.unpacker import UnpackResult, unpack_bundle  # noqa: F401
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 
 
-def _build_bundle_dir(tmp_path: Path, deployed_files: dict[str, Union[str, bytes]]) -> Path:
+def _build_bundle_dir(tmp_path: Path, deployed_files: dict[str, str | bytes]) -> Path:
     """Create a bundle directory with a lockfile and file contents.
 
     Args:
@@ -46,10 +46,13 @@ class TestUnpackSecurity:
 
     def test_unpack_clean_bundle(self, tmp_path):
         """Bundle with no findings unpacks normally."""
-        bundle = _build_bundle_dir(tmp_path, {
-            ".github/prompts/hello.md": "# Hello\nClean ASCII content.\n",
-            ".github/instructions/guide.md": "Follow these steps.\n",
-        })
+        bundle = _build_bundle_dir(
+            tmp_path,
+            {
+                ".github/prompts/hello.md": "# Hello\nClean ASCII content.\n",
+                ".github/instructions/guide.md": "Follow these steps.\n",
+            },
+        )
         output = tmp_path / "target"
         output.mkdir()
 
@@ -63,14 +66,17 @@ class TestUnpackSecurity:
     def test_unpack_critical_blocks(self, tmp_path):
         """Bundle with critical hidden characters raises ValueError."""
         # U+E0001 is a Unicode tag character (critical)
-        malicious = "Innocent text \U000E0001 hidden tag"
-        bundle = _build_bundle_dir(tmp_path, {
-            ".github/prompts/bad.md": malicious,
-        })
+        malicious = "Innocent text \U000e0001 hidden tag"
+        bundle = _build_bundle_dir(
+            tmp_path,
+            {
+                ".github/prompts/bad.md": malicious,
+            },
+        )
         output = tmp_path / "target"
         output.mkdir()
 
-        with pytest.raises(ValueError, match="Blocked.*critical hidden characters"):
+        with pytest.raises(ValueError, match="Blocked.*critical hidden characters"):  # noqa: RUF043
             unpack_bundle(bundle, output_dir=output)
 
         # File must NOT have been deployed
@@ -78,10 +84,13 @@ class TestUnpackSecurity:
 
     def test_unpack_critical_force_allows(self, tmp_path):
         """Bundle with critical findings + force=True still deploys."""
-        malicious = "Text with \U000E0001 tag character"
-        bundle = _build_bundle_dir(tmp_path, {
-            ".github/prompts/bad.md": malicious,
-        })
+        malicious = "Text with \U000e0001 tag character"
+        bundle = _build_bundle_dir(
+            tmp_path,
+            {
+                ".github/prompts/bad.md": malicious,
+            },
+        )
         output = tmp_path / "target"
         output.mkdir()
 
@@ -95,9 +104,12 @@ class TestUnpackSecurity:
         """Bundle with warning-level findings deploys with count in result."""
         # U+200B is a zero-width space (warning)
         content = "Text with \u200b zero-width space"
-        bundle = _build_bundle_dir(tmp_path, {
-            ".github/prompts/warn.md": content,
-        })
+        bundle = _build_bundle_dir(
+            tmp_path,
+            {
+                ".github/prompts/warn.md": content,
+            },
+        )
         output = tmp_path / "target"
         output.mkdir()
 
@@ -110,12 +122,15 @@ class TestUnpackSecurity:
 
     def test_unpack_skips_symlinks(self, tmp_path):
         """Symlinked files in the bundle are not scanned."""
-        bundle = _build_bundle_dir(tmp_path, {
-            ".github/prompts/real.md": "Clean content\n",
-        })
+        bundle = _build_bundle_dir(
+            tmp_path,
+            {
+                ".github/prompts/real.md": "Clean content\n",
+            },
+        )
         # Create a symlink inside the bundle pointing to a file with critical content
         malicious_target = tmp_path / "outside.md"
-        malicious_target.write_text("Text with \U000E0001 tag", encoding="utf-8")
+        malicious_target.write_text("Text with \U000e0001 tag", encoding="utf-8")
         link = bundle / ".github/prompts/linked.md"
         try:
             link.symlink_to(malicious_target)
@@ -141,10 +156,13 @@ class TestUnpackSecurity:
         """Binary files don't cause scan errors."""
         # Random bytes that will fail UTF-8 decode
         binary_data = bytes(range(256))
-        bundle = _build_bundle_dir(tmp_path, {
-            ".github/prompts/clean.md": "Normal text\n",
-            ".github/data/image.bin": binary_data,
-        })
+        bundle = _build_bundle_dir(
+            tmp_path,
+            {
+                ".github/prompts/clean.md": "Normal text\n",
+                ".github/data/image.bin": binary_data,
+            },
+        )
         output = tmp_path / "target"
         output.mkdir()
 

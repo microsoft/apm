@@ -10,20 +10,21 @@ opaque; see #938 for the regression that motivates this rule.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple, Union
+from collections.abc import Mapping, Sequence
+from typing import Any, Dict, Optional, Tuple, Union  # noqa: F401, UP035
 
 
 def build_mcp_entry(
     name: str,
     *,
-    transport: Optional[str],
-    url: Optional[str],
-    env: Optional[Mapping[str, str]],
-    headers: Optional[Mapping[str, str]],
-    version: Optional[str],
-    command_argv: Optional[Sequence[str]],
-    registry_url: Optional[str] = None,
-) -> Tuple[Union[str, Dict[str, Any]], bool]:
+    transport: str | None,
+    url: str | None,
+    env: Mapping[str, str] | None,
+    headers: Mapping[str, str] | None,
+    version: str | None,
+    command_argv: Sequence[str] | None,
+    registry_url: str | None = None,
+) -> tuple[str | dict[str, Any], bool]:
     """Pure builder. Return ``(entry, is_self_defined)``.
 
     Routing:
@@ -44,7 +45,7 @@ def build_mcp_entry(
     if command_argv:
         # Self-defined stdio
         argv = list(command_argv)
-        entry: Dict[str, Any] = {
+        entry: dict[str, Any] = {
             "name": name,
             "registry": False,
             "transport": "stdio",

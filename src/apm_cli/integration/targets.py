@@ -18,8 +18,9 @@ the result is an empty list (no silent ``[copilot]`` fallback).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from collections.abc import Callable
+from dataclasses import dataclass, field  # noqa: F401
+from typing import Dict, List, Optional, Tuple, Union  # noqa: F401, UP035
 
 
 @dataclass(frozen=True)
@@ -37,7 +38,7 @@ class PrimitiveMapping:
     """Opaque tag used by integrators to select the right
     content transformer (e.g. ``"cursor_rules"``)."""
 
-    deploy_root: Optional[str] = None
+    deploy_root: str | None = None
     """Override *root_dir* for this primitive only.
 
     When set, integrators use ``deploy_root`` instead of
@@ -58,7 +59,7 @@ class TargetProfile:
     root_dir: str
     """Top-level directory in the workspace (e.g. ``".github"``)."""
 
-    primitives: Dict[str, PrimitiveMapping]
+    primitives: dict[str, PrimitiveMapping]
     """Mapping from APM primitive name -> deployment spec.
 
     Only primitives listed here are deployed to this target.
@@ -73,7 +74,7 @@ class TargetProfile:
 
     # -- user-scope metadata --------------------------------------------------
 
-    user_supported: Union[bool, str] = False
+    user_supported: bool | str = False
     """Whether this target supports user-scope (``~/``) deployment.
 
     * ``True``  -- fully supported (all primitives work at user scope).
@@ -81,7 +82,7 @@ class TargetProfile:
     * ``False`` -- not supported at user scope.
     """
 
-    user_root_dir: Optional[str] = None
+    user_root_dir: str | None = None
     """Override for *root_dir* at user scope.
 
     When ``None`` the normal *root_dir* is used at both project and user
@@ -90,12 +91,12 @@ class TargetProfile:
     ``~/.github/``).
     """
 
-    unsupported_user_primitives: Tuple[str, ...] = ()
+    unsupported_user_primitives: tuple[str, ...] = ()
     """Primitives that are **not** available at user scope even when the
     target itself is partially supported (e.g. Copilot CLI cannot deploy
     prompts at user scope)."""
 
-    user_root_resolver: Optional[Callable[[], Optional["Path"]]] = None
+    user_root_resolver: Callable[[], Path | None] | None = None  # noqa: F821
     """Optional callable that resolves the deploy root at runtime.
 
     When set, ``for_scope(user_scope=True)`` calls this resolver instead of
@@ -107,7 +108,7 @@ class TargetProfile:
     staticmethod) so ``frozen=True`` is preserved.
     """
 
-    resolved_deploy_root: Optional["Path"] = None
+    resolved_deploy_root: Path | None = None  # noqa: F821
     """Absolute deploy root populated by ``for_scope()`` when
     ``user_root_resolver`` returns a concrete ``Path``.
 
@@ -115,7 +116,7 @@ class TargetProfile:
     through this root instead of ``project_root / root_dir``.
     """
 
-    requires_flag: Optional[str] = None
+    requires_flag: str | None = None
     """When set, the target is only returned by ``active_targets`` /
     ``active_targets_user_scope`` / ``resolve_targets`` when the named
     experimental flag is enabled.  The target entry is always visible
@@ -152,7 +153,7 @@ class TargetProfile:
             return False
         return primitive in self.primitives
 
-    def deploy_path(self, project_root: "Path", *parts: str) -> "Path":
+    def deploy_path(self, project_root: Path, *parts: str) -> Path:  # noqa: F821
         """Return the filesystem path for deployment.
 
         When ``resolved_deploy_root`` is set (dynamic-root targets like
@@ -164,11 +165,13 @@ class TargetProfile:
             *parts: Additional path segments (e.g. ``"skills"``, ``"my-skill"``).
         """
         if self.resolved_deploy_root is not None:
-            return self.resolved_deploy_root.joinpath(*parts) if parts else self.resolved_deploy_root
+            return (
+                self.resolved_deploy_root.joinpath(*parts) if parts else self.resolved_deploy_root
+            )
         base = project_root / self.root_dir
         return base.joinpath(*parts) if parts else base
 
-    def for_scope(self, user_scope: bool = False) -> "TargetProfile | None":
+    def for_scope(self, user_scope: bool = False) -> TargetProfile | None:
         """Return a scope-resolved copy of this profile.
 
         When *user_scope* is ``False``, returns ``self`` unchanged.
@@ -199,7 +202,8 @@ class TargetProfile:
                 return None
             if self.unsupported_user_primitives:
                 filtered = {
-                    k: v for k, v in self.primitives.items()
+                    k: v
+                    for k, v in self.primitives.items()
                     if k not in self.unsupported_user_primitives
                 }
             else:
@@ -214,9 +218,29 @@ class TargetProfile:
             return None
 
         new_root = self.user_root_dir or self.root_dir
+
+        # Claude Code honors CLAUDE_CONFIG_DIR (default ~/.claude); mirror
+        # that at user scope so `apm install -g` lands where Claude reads.
+        if self.name == "claude":
+            import os
+            from pathlib import Path
+
+            env = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+            if env:
+                # ``resolve`` collapses ``..`` so traversal segments cannot
+                # leak into ``root_dir`` and escape ``project_root / root_dir``.
+                abs_path = Path(env).expanduser().resolve(strict=False)
+                home = Path.home().resolve(strict=False)
+                try:
+                    # Keep ``root_dir`` home-relative so cleanup prefix matching holds.
+                    new_root = abs_path.relative_to(home).as_posix()
+                except ValueError:
+                    new_root = str(abs_path)
+
         if self.unsupported_user_primitives:
             filtered = {
-                k: v for k, v in self.primitives.items()
+                k: v
+                for k, v in self.primitives.items()
                 if k not in self.unsupported_user_primitives
             }
         else:
@@ -229,7 +253,7 @@ class TargetProfile:
 # Known targets
 # ------------------------------------------------------------------
 
-KNOWN_TARGETS: Dict[str, TargetProfile] = {
+KNOWN_TARGETS: dict[str, TargetProfile] = {
     # Copilot (GitHub) -- at user scope, Copilot CLI reads ~/.copilot/
     # instead of ~/.github/.  Prompts and instructions are not supported at user scope.
     # Ref: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/create-custom-agents-for-cli
@@ -240,18 +264,10 @@ KNOWN_TARGETS: Dict[str, TargetProfile] = {
             "instructions": PrimitiveMapping(
                 "instructions", ".instructions.md", "github_instructions"
             ),
-            "prompts": PrimitiveMapping(
-                "prompts", ".prompt.md", "github_prompt"
-            ),
-            "agents": PrimitiveMapping(
-                "agents", ".agent.md", "github_agent"
-            ),
-            "skills": PrimitiveMapping(
-                "skills", "/SKILL.md", "skill_standard"
-            ),
-            "hooks": PrimitiveMapping(
-                "hooks", ".json", "github_hooks"
-            ),
+            "prompts": PrimitiveMapping("prompts", ".prompt.md", "github_prompt"),
+            "agents": PrimitiveMapping("agents", ".agent.md", "github_agent"),
+            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "hooks": PrimitiveMapping("hooks", ".json", "github_hooks"),
         },
         auto_create=True,
         detect_by_dir=True,
@@ -259,30 +275,22 @@ KNOWN_TARGETS: Dict[str, TargetProfile] = {
         user_root_dir=".copilot",
         unsupported_user_primitives=("prompts", "instructions"),
     ),
-    # Claude Code -- ~/.claude/ is the documented user-level config directory.
+    # Claude Code -- the user-level config directory is whatever
+    # ``CLAUDE_CONFIG_DIR`` points to (default ``~/.claude``).  The env
+    # var override is honored by ``for_scope(user_scope=True)``.
     # All primitives are supported at user scope.
     # Ref: https://docs.anthropic.com/en/docs/claude-code/settings
-    # Instructions deploy to .claude/rules/*.md with paths: frontmatter.
+    # Instructions deploy to <root>/rules/*.md with paths: frontmatter.
     # Ref: https://code.claude.com/docs/en/memory#organize-rules-with-claude%2Frules%2F
     "claude": TargetProfile(
         name="claude",
         root_dir=".claude",
         primitives={
-            "instructions": PrimitiveMapping(
-                "rules", ".md", "claude_rules"
-            ),
-            "agents": PrimitiveMapping(
-                "agents", ".md", "claude_agent"
-            ),
-            "commands": PrimitiveMapping(
-                "commands", ".md", "claude_command"
-            ),
-            "skills": PrimitiveMapping(
-                "skills", "/SKILL.md", "skill_standard"
-            ),
-            "hooks": PrimitiveMapping(
-                "hooks", ".json", "claude_hooks"
-            ),
+            "instructions": PrimitiveMapping("rules", ".md", "claude_rules"),
+            "agents": PrimitiveMapping("agents", ".md", "claude_agent"),
+            "commands": PrimitiveMapping("commands", ".md", "claude_command"),
+            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "hooks": PrimitiveMapping("hooks", ".json", "claude_hooks"),
         },
         auto_create=False,
         detect_by_dir=True,
@@ -296,18 +304,10 @@ KNOWN_TARGETS: Dict[str, TargetProfile] = {
         name="cursor",
         root_dir=".cursor",
         primitives={
-            "instructions": PrimitiveMapping(
-                "rules", ".mdc", "cursor_rules"
-            ),
-            "agents": PrimitiveMapping(
-                "agents", ".md", "cursor_agent"
-            ),
-            "skills": PrimitiveMapping(
-                "skills", "/SKILL.md", "skill_standard"
-            ),
-            "hooks": PrimitiveMapping(
-                "hooks", ".json", "cursor_hooks"
-            ),
+            "instructions": PrimitiveMapping("rules", ".mdc", "cursor_rules"),
+            "agents": PrimitiveMapping("agents", ".md", "cursor_agent"),
+            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "hooks": PrimitiveMapping("hooks", ".json", "cursor_hooks"),
         },
         auto_create=False,
         detect_by_dir=True,
@@ -321,15 +321,9 @@ KNOWN_TARGETS: Dict[str, TargetProfile] = {
         name="opencode",
         root_dir=".opencode",
         primitives={
-            "agents": PrimitiveMapping(
-                "agents", ".md", "opencode_agent"
-            ),
-            "commands": PrimitiveMapping(
-                "commands", ".md", "opencode_command"
-            ),
-            "skills": PrimitiveMapping(
-                "skills", "/SKILL.md", "skill_standard"
-            ),
+            "agents": PrimitiveMapping("agents", ".md", "opencode_agent"),
+            "commands": PrimitiveMapping("commands", ".md", "opencode_command"),
+            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
         },
         auto_create=False,
         detect_by_dir=True,
@@ -348,15 +342,9 @@ KNOWN_TARGETS: Dict[str, TargetProfile] = {
         name="gemini",
         root_dir=".gemini",
         primitives={
-            "commands": PrimitiveMapping(
-                "commands", ".toml", "gemini_command"
-            ),
-            "skills": PrimitiveMapping(
-                "skills", "/SKILL.md", "skill_standard"
-            ),
-            "hooks": PrimitiveMapping(
-                "hooks", ".json", "gemini_hooks"
-            ),
+            "commands": PrimitiveMapping("commands", ".toml", "gemini_command"),
+            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "hooks": PrimitiveMapping("hooks", ".json", "gemini_hooks"),
         },
         auto_create=False,
         detect_by_dir=True,
@@ -370,16 +358,14 @@ KNOWN_TARGETS: Dict[str, TargetProfile] = {
         name="codex",
         root_dir=".codex",
         primitives={
-            "agents": PrimitiveMapping(
-                "agents", ".toml", "codex_agent"
-            ),
+            "agents": PrimitiveMapping("agents", ".toml", "codex_agent"),
             "skills": PrimitiveMapping(
-                "skills", "/SKILL.md", "skill_standard",
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
                 deploy_root=".agents",
             ),
-            "hooks": PrimitiveMapping(
-                "", "hooks.json", "codex_hooks"
-            ),
+            "hooks": PrimitiveMapping("", "hooks.json", "codex_hooks"),
         },
         auto_create=False,
         detect_by_dir=True,
@@ -395,7 +381,9 @@ KNOWN_TARGETS: Dict[str, TargetProfile] = {
         root_dir="copilot-cowork",  # display grouping placeholder only
         primitives={
             "skills": PrimitiveMapping(
-                "skills", "/SKILL.md", "skill_standard",
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
             ),
         },
         auto_create=False,
@@ -407,13 +395,14 @@ KNOWN_TARGETS: Dict[str, TargetProfile] = {
 }
 
 
-def _resolve_copilot_cowork_root() -> "Path | None":
+def _resolve_copilot_cowork_root() -> Path | None:  # noqa: F821
     """Thin wrapper around ``copilot_cowork_paths.resolve_copilot_cowork_skills_dir()``.
 
     Used as the ``user_root_resolver`` callable for the cowork target.
     Exceptions propagate to the caller (``for_scope`` / install pipeline).
     """
     from apm_cli.integration.copilot_cowork_paths import resolve_copilot_cowork_skills_dir
+
     return resolve_copilot_cowork_skills_dir()
 
 
@@ -423,6 +412,7 @@ def _is_flag_enabled(flag_name: str) -> bool:
     Lazy import to avoid config I/O at module load time.
     """
     from apm_cli.core.experimental import is_enabled
+
     return is_enabled(flag_name)
 
 
@@ -460,6 +450,7 @@ def get_integration_prefixes(targets=None) -> tuple:
         # cowork:// entries pass prefix validation during cleanup/uninstall.
         if t.user_root_resolver is not None:
             from apm_cli.integration.copilot_cowork_paths import COWORK_LOCKFILE_PREFIX
+
             if COWORK_LOCKFILE_PREFIX not in seen:
                 seen.add(COWORK_LOCKFILE_PREFIX)
                 prefixes.append(COWORK_LOCKFILE_PREFIX)
@@ -477,7 +468,7 @@ def get_integration_prefixes(targets=None) -> tuple:
 
 
 def active_targets_user_scope(
-    explicit_target: "Optional[Union[str, List[str]]]" = None,
+    explicit_target: str | list[str] | None = None,
 ) -> list:
     """Return ``TargetProfile`` instances for user-scope deployment.
 
@@ -508,12 +499,14 @@ def active_targets_user_scope(
         for t in raw:
             canonical = "copilot" if t in ("copilot", "vscode", "agents") else t
             if canonical == "all":
-                return [
-                    p for p in KNOWN_TARGETS.values()
-                    if p.user_supported and _flag_gated(p)
-                ]
+                return [p for p in KNOWN_TARGETS.values() if p.user_supported and _flag_gated(p)]
             profile = KNOWN_TARGETS.get(canonical)
-            if profile and profile.user_supported and _flag_gated(profile) and profile.name not in seen:
+            if (
+                profile
+                and profile.user_supported
+                and _flag_gated(profile)
+                and profile.name not in seen
+            ):
                 seen.add(profile.name)
                 profiles.append(profile)
         return profiles
@@ -521,8 +514,10 @@ def active_targets_user_scope(
     # --- auto-detect by directory presence at ~/ ---
     # Targets with detect_by_dir=False (cowork) are never auto-detected.
     detected = [
-        p for p in KNOWN_TARGETS.values()
-        if p.user_supported and p.detect_by_dir
+        p
+        for p in KNOWN_TARGETS.values()
+        if p.user_supported
+        and p.detect_by_dir
         and _flag_gated(p)
         and (home / p.effective_root(user_scope=True)).is_dir()
     ]
@@ -535,7 +530,7 @@ def active_targets_user_scope(
 
 def active_targets(
     project_root,
-    explicit_target: "Optional[Union[str, List[str]]]" = None,
+    explicit_target: str | list[str] | None = None,
 ) -> list:
     """Return the list of ``TargetProfile`` instances that should be
     deployed into *project_root*.
@@ -584,9 +579,9 @@ def active_targets(
     # --- auto-detect by directory presence ---
     # Targets with detect_by_dir=False (cowork) are never auto-detected.
     detected = [
-        p for p in KNOWN_TARGETS.values()
-        if p.detect_by_dir and _flag_gated(p)
-        and (root / p.root_dir).is_dir()
+        p
+        for p in KNOWN_TARGETS.values()
+        if p.detect_by_dir and _flag_gated(p) and (root / p.root_dir).is_dir()
     ]
     if detected:
         return detected
@@ -598,7 +593,7 @@ def active_targets(
 def resolve_targets(
     project_root,
     user_scope: bool = False,
-    explicit_target: "Optional[Union[str, List[str]]]" = None,
+    explicit_target: str | list[str] | None = None,
 ) -> list:
     """Return scope-resolved ``TargetProfile`` instances.
 

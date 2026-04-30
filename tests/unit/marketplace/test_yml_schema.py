@@ -10,12 +10,11 @@ import pytest
 from apm_cli.marketplace.errors import MarketplaceYmlError
 from apm_cli.marketplace.yml_schema import (
     MarketplaceBuild,
-    MarketplaceOwner,
-    MarketplaceYml,
-    PackageEntry,
+    MarketplaceOwner,  # noqa: F401
+    MarketplaceYml,  # noqa: F401
+    PackageEntry,  # noqa: F401
     load_marketplace_yml,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -49,7 +48,7 @@ def _minimal_yml(**overrides: object) -> str:
 
     lines = []
     for k, v in fields.items():
-        lines.append(f"{k}: \"{v}\"" if isinstance(v, str) else f"{k}: {v}")
+        lines.append(f'{k}: "{v}"' if isinstance(v, str) else f"{k}: {v}")
 
     if owner is None:
         lines.append("owner:")
@@ -67,7 +66,7 @@ def _minimal_yml(**overrides: object) -> str:
         lines.append("packages:")
         lines.append("  - name: tool-a")
         lines.append("    source: acme/tool-a")
-        lines.append("    version: \">=1.0.0\"")
+        lines.append('    version: ">=1.0.0"')
     else:
         lines.append(packages)
 
@@ -157,9 +156,7 @@ class TestLoadHappyPath:
 
     def test_metadata_preserved_verbatim(self, tmp_path: Path):
         """Anthropic-standard keys in metadata must round-trip with original casing."""
-        content = _minimal_yml(
-            metadata="metadata:\n  pluginRoot: ./src\n  anotherKey: 42"
-        )
+        content = _minimal_yml(metadata="metadata:\n  pluginRoot: ./src\n  anotherKey: 42")
         yml = _write_yml(tmp_path, content)
         result = load_marketplace_yml(yml)
         assert "pluginRoot" in result.metadata
@@ -205,8 +202,8 @@ class TestLoadHappyPath:
                 "packages:\n"
                 "  - name: tool-a\n"
                 "    source: acme/tool-a\n"
-                "    version: \">=1.0.0\"\n"
-                "    tag_pattern: \"{name}-v{version}\""
+                '    version: ">=1.0.0"\n'
+                '    tag_pattern: "{name}-v{version}"'
             )
         )
         yml = _write_yml(tmp_path, content)
@@ -292,7 +289,7 @@ class TestRequiredFieldRejection:
     def test_missing_owner_name(self, tmp_path: Path):
         content = _minimal_yml(owner="owner:\n  email: x@example.com")
         yml = _write_yml(tmp_path, content)
-        with pytest.raises(MarketplaceYmlError, match="owner.name"):
+        with pytest.raises(MarketplaceYmlError, match="owner.name"):  # noqa: RUF043
             load_marketplace_yml(yml)
 
     def test_empty_name(self, tmp_path: Path):
@@ -366,37 +363,20 @@ class TestPackageEntryRejection:
             load_marketplace_yml(yml)
 
     def test_missing_package_name(self, tmp_path: Path):
-        content = _minimal_yml(
-            packages=(
-                "packages:\n"
-                "  - source: acme/tool\n"
-                "    ref: main"
-            )
-        )
+        content = _minimal_yml(packages=("packages:\n  - source: acme/tool\n    ref: main"))
         yml = _write_yml(tmp_path, content)
         with pytest.raises(MarketplaceYmlError, match="name"):
             load_marketplace_yml(yml)
 
     def test_missing_package_source(self, tmp_path: Path):
-        content = _minimal_yml(
-            packages=(
-                "packages:\n"
-                "  - name: tool-a\n"
-                "    ref: main"
-            )
-        )
+        content = _minimal_yml(packages=("packages:\n  - name: tool-a\n    ref: main"))
         yml = _write_yml(tmp_path, content)
         with pytest.raises(MarketplaceYmlError, match="source"):
             load_marketplace_yml(yml)
 
     def test_invalid_source_shape_no_slash(self, tmp_path: Path):
         content = _minimal_yml(
-            packages=(
-                "packages:\n"
-                "  - name: tool-a\n"
-                "    source: just-a-name\n"
-                "    ref: main"
-            )
+            packages=("packages:\n  - name: tool-a\n    source: just-a-name\n    ref: main")
         )
         yml = _write_yml(tmp_path, content)
         with pytest.raises(MarketplaceYmlError, match="source"):
@@ -404,12 +384,7 @@ class TestPackageEntryRejection:
 
     def test_invalid_source_shape_multiple_slashes(self, tmp_path: Path):
         content = _minimal_yml(
-            packages=(
-                "packages:\n"
-                "  - name: tool-a\n"
-                "    source: acme/repo/extra\n"
-                "    ref: main"
-            )
+            packages=("packages:\n  - name: tool-a\n    source: acme/repo/extra\n    ref: main")
         )
         yml = _write_yml(tmp_path, content)
         with pytest.raises(MarketplaceYmlError, match="source"):
@@ -418,12 +393,7 @@ class TestPackageEntryRejection:
     def test_source_path_traversal(self, tmp_path: Path):
         """Source with '..' segments is rejected (regex catches multi-slash first)."""
         content = _minimal_yml(
-            packages=(
-                "packages:\n"
-                "  - name: tool-a\n"
-                "    source: ../evil/repo\n"
-                "    ref: main"
-            )
+            packages=("packages:\n  - name: tool-a\n    source: ../evil/repo\n    ref: main")
         )
         yml = _write_yml(tmp_path, content)
         with pytest.raises(MarketplaceYmlError, match="source"):
@@ -432,12 +402,7 @@ class TestPackageEntryRejection:
     def test_source_dotdot_as_owner(self, tmp_path: Path):
         """Source with '..' as the owner segment triggers path traversal."""
         content = _minimal_yml(
-            packages=(
-                "packages:\n"
-                "  - name: tool-a\n"
-                "    source: \"../repo\"\n"
-                "    ref: main"
-            )
+            packages=('packages:\n  - name: tool-a\n    source: "../repo"\n    ref: main')
         )
         yml = _write_yml(tmp_path, content)
         with pytest.raises(MarketplaceYmlError, match="traversal"):
@@ -458,15 +423,9 @@ class TestPackageEntryRejection:
             load_marketplace_yml(yml)
 
     def test_neither_version_nor_ref(self, tmp_path: Path):
-        content = _minimal_yml(
-            packages=(
-                "packages:\n"
-                "  - name: tool-a\n"
-                "    source: acme/tool-a"
-            )
-        )
+        content = _minimal_yml(packages=("packages:\n  - name: tool-a\n    source: acme/tool-a"))
         yml = _write_yml(tmp_path, content)
-        with pytest.raises(MarketplaceYmlError, match="version.*ref"):
+        with pytest.raises(MarketplaceYmlError, match="version.*ref"):  # noqa: RUF043
             load_marketplace_yml(yml)
 
     def test_tag_pattern_no_placeholders(self, tmp_path: Path):
@@ -522,35 +481,27 @@ class TestBuildBlockRejection:
     """Build-level validation."""
 
     def test_build_tag_pattern_no_placeholder(self, tmp_path: Path):
-        content = _minimal_yml(
-            build="build:\n  tagPattern: static-only"
-        )
+        content = _minimal_yml(build="build:\n  tagPattern: static-only")
         yml = _write_yml(tmp_path, content)
         with pytest.raises(MarketplaceYmlError, match="tagPattern"):
             load_marketplace_yml(yml)
 
     def test_build_unknown_key(self, tmp_path: Path):
-        content = _minimal_yml(
-            build="build:\n  tagPattern: \"v{version}\"\n  extraKey: oops"
-        )
+        content = _minimal_yml(build='build:\n  tagPattern: "v{version}"\n  extraKey: oops')
         yml = _write_yml(tmp_path, content)
         with pytest.raises(MarketplaceYmlError, match="extraKey"):
             load_marketplace_yml(yml)
 
     def test_build_typo_tag_pattern(self, tmp_path: Path):
         """Common typo: snake_case ``tag_pattern`` instead of ``tagPattern``."""
-        content = _minimal_yml(
-            build="build:\n  tag_pattern: \"v{version}\""
-        )
+        content = _minimal_yml(build='build:\n  tag_pattern: "v{version}"')
         yml = _write_yml(tmp_path, content)
         with pytest.raises(MarketplaceYmlError, match="tag_pattern"):
             load_marketplace_yml(yml)
 
     def test_build_permitted_keys_listed(self, tmp_path: Path):
         """Error message must list the permitted set so maintainers can self-correct."""
-        content = _minimal_yml(
-            build="build:\n  tagPatern: \"v{version}\""
-        )
+        content = _minimal_yml(build='build:\n  tagPatern: "v{version}"')
         yml = _write_yml(tmp_path, content)
         with pytest.raises(MarketplaceYmlError, match="tagPattern"):
             load_marketplace_yml(yml)
@@ -613,10 +564,7 @@ class TestEdgeCases:
     def test_entry_with_only_version_no_ref(self, tmp_path: Path):
         content = _minimal_yml(
             packages=(
-                "packages:\n"
-                "  - name: tool-a\n"
-                "    source: acme/tool-a\n"
-                "    version: \">=2.0.0\""
+                'packages:\n  - name: tool-a\n    source: acme/tool-a\n    version: ">=2.0.0"'
             )
         )
         yml = _write_yml(tmp_path, content)
@@ -626,12 +574,7 @@ class TestEdgeCases:
 
     def test_entry_with_only_ref_no_version(self, tmp_path: Path):
         content = _minimal_yml(
-            packages=(
-                "packages:\n"
-                "  - name: tool-a\n"
-                "    source: acme/tool-a\n"
-                "    ref: v3.0.0"
-            )
+            packages=("packages:\n  - name: tool-a\n    source: acme/tool-a\n    ref: v3.0.0")
         )
         yml = _write_yml(tmp_path, content)
         result = load_marketplace_yml(yml)
@@ -645,7 +588,7 @@ class TestEdgeCases:
                 "packages:\n"
                 "  - name: tool-a\n"
                 "    source: acme/tool-a\n"
-                "    version: \">=1.0.0\"\n"
+                '    version: ">=1.0.0"\n'
                 "    ref: v1.2.3"
             )
         )
@@ -688,13 +631,7 @@ class TestEdgeCases:
 
     def test_local_source_accepted(self, tmp_path: Path):
         """Local-path source './acme' is now valid (no version/ref needed)."""
-        content = _minimal_yml(
-            packages=(
-                "packages:\n"
-                "  - name: tool-a\n"
-                "    source: ./acme"
-            )
-        )
+        content = _minimal_yml(packages=("packages:\n  - name: tool-a\n    source: ./acme"))
         yml = _write_yml(tmp_path, content)
         result = load_marketplace_yml(yml)
         assert result.packages[0].is_local is True
@@ -702,13 +639,7 @@ class TestEdgeCases:
 
     def test_source_double_dot_rejected(self, tmp_path: Path):
         """``..`` traversal is still rejected for both remote and local sources."""
-        content = _minimal_yml(
-            packages=(
-                "packages:\n"
-                "  - name: tool-a\n"
-                "    source: ./../acme"
-            )
-        )
+        content = _minimal_yml(packages=("packages:\n  - name: tool-a\n    source: ./../acme"))
         yml = _write_yml(tmp_path, content)
         with pytest.raises(MarketplaceYmlError):
             load_marketplace_yml(yml)

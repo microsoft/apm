@@ -4,7 +4,7 @@ import re
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional  # noqa: F401, UP035
 
 from ...utils.github_host import (
     default_host,
@@ -16,7 +16,7 @@ from ...utils.github_host import (
     unsupported_host_error,
 )
 from ...utils.path_security import (
-    PathTraversalError,
+    PathTraversalError,  # noqa: F401
     ensure_path_within,
     validate_path_segments,
 )
@@ -29,43 +29,33 @@ class DependencyReference:
     """Represents a reference to an APM dependency."""
 
     repo_url: str  # e.g., "user/repo" for GitHub or "org/project/repo" for Azure DevOps
-    host: Optional[str] = (
-        None  # Optional host (github.com, dev.azure.com, or enterprise host)
-    )
-    port: Optional[int] = None  # Non-standard SSH/HTTPS port (e.g. 7999 for Bitbucket DC)
-    explicit_scheme: Optional[str] = (
+    host: str | None = None  # Optional host (github.com, dev.azure.com, or enterprise host)
+    port: int | None = None  # Non-standard SSH/HTTPS port (e.g. 7999 for Bitbucket DC)
+    explicit_scheme: str | None = (
         None  # User-stated transport: "ssh", "https", "http", or None for shorthand
     )
-    reference: Optional[str] = None  # e.g., "main", "v1.0.0", "abc123"
-    alias: Optional[str] = None  # Optional alias for the dependency
-    virtual_path: Optional[str] = (
-        None  # Path for virtual packages (e.g., "prompts/file.prompt.md")
-    )
-    is_virtual: bool = (
-        False  # True if this is a virtual package (individual file or collection)
-    )
+    reference: str | None = None  # e.g., "main", "v1.0.0", "abc123"
+    alias: str | None = None  # Optional alias for the dependency
+    virtual_path: str | None = None  # Path for virtual packages (e.g., "prompts/file.prompt.md")
+    is_virtual: bool = False  # True if this is a virtual package (individual file or collection)
 
     # Azure DevOps specific fields (ADO uses org/project/repo structure)
-    ado_organization: Optional[str] = None  # e.g., "dmeppiel-org"
-    ado_project: Optional[str] = None  # e.g., "market-js-app"
-    ado_repo: Optional[str] = None  # e.g., "compliance-rules"
+    ado_organization: str | None = None  # e.g., "dmeppiel-org"
+    ado_project: str | None = None  # e.g., "market-js-app"
+    ado_repo: str | None = None  # e.g., "compliance-rules"
 
     # Local path dependency fields
     is_local: bool = False  # True if this is a local filesystem dependency
-    local_path: Optional[str] = (
-        None  # Original local path string (e.g., "./packages/my-pkg")
-    )
+    local_path: str | None = None  # Original local path string (e.g., "./packages/my-pkg")
 
-    artifactory_prefix: Optional[str] = (
-        None  # e.g., "artifactory/github" (repo key path)
-    )
+    artifactory_prefix: str | None = None  # e.g., "artifactory/github" (repo key path)
 
     # HTTP (insecure) dependency fields
     is_insecure: bool = False  # True when the dependency URL uses http://
     allow_insecure: bool = False  # True if this HTTP dep is explicitly allowed
 
     # SKILL_BUNDLE subset selection (persisted in apm.yml `skills:` field)
-    skill_subset: Optional[List[str]] = None  # Sorted skill names, or None = all
+    skill_subset: list[str] | None = None  # Sorted skill names, or None = all
 
     # Supported file extensions for virtual packages
     VIRTUAL_FILE_EXTENSIONS = (
@@ -86,15 +76,13 @@ class DependencyReference:
         return self.host is not None and is_azure_devops_hostname(self.host)
 
     @property
-    def virtual_type(self) -> "Optional[VirtualPackageType]":
+    def virtual_type(self) -> "VirtualPackageType | None":
         """Return the type of virtual package, or None if not virtual."""
         if not self.is_virtual or not self.virtual_path:
             return None
         if any(self.virtual_path.endswith(ext) for ext in self.VIRTUAL_FILE_EXTENSIONS):
             return VirtualPackageType.FILE
-        if "/collections/" in self.virtual_path or self.virtual_path.startswith(
-            "collections/"
-        ):
+        if "/collections/" in self.virtual_path or self.virtual_path.startswith("collections/"):
             return VirtualPackageType.COLLECTION
         return VirtualPackageType.SUBDIRECTORY
 
@@ -162,7 +150,7 @@ class DependencyReference:
     @staticmethod
     def is_local_path(dep_str: str) -> bool:
         """Check if a dependency string looks like a local filesystem path.
-        
+
         Local paths start with './', '../', '/', '~/', '~\\', or a Windows drive
         letter (e.g. 'C:\\' or 'C:/').
         Protocol-relative URLs ('//...') are explicitly excluded.
@@ -171,15 +159,15 @@ class DependencyReference:
         # Reject protocol-relative URLs ('//...')
         if s.startswith("//"):
             return False
-        if s.startswith(('./','../', '/', '~/', '~\\', '.\\', '..\\')):
+        if s.startswith(("./", "../", "/", "~/", "~\\", ".\\", "..\\")):
             return True
         # Windows absolute paths: drive letter + colon + separator (C:\ or C:/).
         # Only ASCII letters A-Z/a-z are valid drive letters.
-        if (
+        if (  # noqa: SIM103
             len(s) >= 3
-            and (('A' <= s[0] <= 'Z') or ('a' <= s[0] <= 'z'))
-            and s[1] == ':'
-            and s[2] in ('\\', '/')
+            and (("A" <= s[0] <= "Z") or ("a" <= s[0] <= "z"))
+            and s[1] == ":"
+            and s[2] in ("\\", "/")
         ):
             return True
         return False
@@ -370,13 +358,11 @@ class DependencyReference:
                 package_name = self.get_virtual_package_name()
                 if self.is_azure_devops() and len(repo_parts) >= 3:
                     # ADO: org/project/virtual-pkg-name
-                    result = (
-                        apm_modules_dir / repo_parts[0] / repo_parts[1] / package_name
-                    )
+                    result = apm_modules_dir / repo_parts[0] / repo_parts[1] / package_name
                 elif len(repo_parts) >= 2:
                     # owner/virtual-pkg-name (use first segment as namespace)
                     result = apm_modules_dir / repo_parts[0] / package_name
-        else:
+        else:  # noqa: PLR5501
             # Regular package: use full repo path
             if self.is_azure_devops() and len(repo_parts) >= 3:
                 # ADO: org/project/repo
@@ -422,8 +408,8 @@ class DependencyReference:
         path = parsed.path.lstrip("/")
         fragment = parsed.fragment
 
-        reference: Optional[str] = None
-        alias: Optional[str] = None
+        reference: str | None = None
+        alias: str | None = None
 
         # Fragment holds "ref" or "ref@alias"
         if fragment:
@@ -445,9 +431,7 @@ class DependencyReference:
         repo_url = path.strip()
 
         # Security: reject traversal sequences in SSH repo paths
-        validate_path_segments(
-            repo_url, context="SSH repository path", reject_empty=True
-        )
+        validate_path_segments(repo_url, context="SSH repository path", reject_empty=True)
 
         return host, port, repo_url, reference, alias
 
@@ -485,16 +469,14 @@ class DependencyReference:
             local = local.strip()
             if not cls.is_local_path(local):
                 raise ValueError(
-                    f"Object-style dependency must have a 'git' field, "
-                    f"or 'path' must be a local filesystem path "
-                    f"(starting with './', '../', '/', or '~')"
+                    f"Object-style dependency must have a 'git' field, "  # noqa: F541
+                    f"or 'path' must be a local filesystem path "  # noqa: F541
+                    f"(starting with './', '../', '/', or '~')"  # noqa: F541
                 )
             return cls.parse(local)
 
         if "git" not in entry:
-            raise ValueError(
-                "Object-style dependency must have a 'git' or 'path' field"
-            )
+            raise ValueError("Object-style dependency must have a 'git' or 'path' field")
 
         git_url = entry["git"]
         if not isinstance(git_url, str) or not git_url.strip():
@@ -546,9 +528,7 @@ class DependencyReference:
         skills_raw = entry.get("skills")
         if skills_raw is not None:
             if not isinstance(skills_raw, (list,)):
-                raise ValueError(
-                    "'skills' field must be a list of skill names"
-                )
+                raise ValueError("'skills' field must be a list of skill names")
             if len(skills_raw) == 0:
                 raise ValueError(
                     "skills: must contain at least one name; "
@@ -558,9 +538,7 @@ class DependencyReference:
             validated: list = []
             for name in skills_raw:
                 if not isinstance(name, str) or not name.strip():
-                    raise ValueError(
-                        "Each entry in 'skills' must be a non-empty string"
-                    )
+                    raise ValueError("Each entry in 'skills' must be a non-empty string")
                 name = name.strip()
                 # Path safety: reject traversal sequences
                 validate_path_segments(name, context="skills/<name>")
@@ -607,13 +585,11 @@ class DependencyReference:
                         if len(path_parts) >= 2:
                             check_str = "/".join(check_str.split("/")[1:])
                     else:
-                        raise ValueError(
-                            unsupported_host_error(hostname or first_segment)
-                        )
+                        raise ValueError(unsupported_host_error(hostname or first_segment))
                 except (ValueError, AttributeError) as e:
                     if isinstance(e, ValueError) and "Invalid Git host" in str(e):
                         raise
-                    raise ValueError(unsupported_host_error(first_segment))
+                    raise ValueError(unsupported_host_error(first_segment))  # noqa: B904
             elif check_str.startswith("gh/"):
                 check_str = "/".join(check_str.split("/")[1:])
 
@@ -644,7 +620,7 @@ class DependencyReference:
                 for seg in path_segments
             )
             has_collection = "collections" in path_segments
-            if has_virtual_ext or has_collection:
+            if has_virtual_ext or has_collection:  # noqa: SIM108
                 min_base_segments = 2
             else:
                 min_base_segments = len(path_segments)
@@ -660,9 +636,11 @@ class DependencyReference:
             # Security: reject path traversal in virtual path
             validate_path_segments(virtual_path, context="virtual path")
 
-            if "/collections/" in check_str or virtual_path.startswith("collections/"):
-                pass
-            elif any(virtual_path.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
+            if (
+                "/collections/" in check_str
+                or virtual_path.startswith("collections/")
+                or any(virtual_path.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS)
+            ):
                 pass
             else:
                 last_segment = virtual_path.split("/")[-1]
@@ -742,9 +720,7 @@ class DependencyReference:
                     )
 
         # Security: reject traversal sequences in SSH repo paths
-        validate_path_segments(
-            repo_url, context="SSH repository path", reject_empty=True
-        )
+        validate_path_segments(repo_url, context="SSH repository path", reject_empty=True)
 
         return host, None, repo_url, reference, alias
 
@@ -816,9 +792,7 @@ class DependencyReference:
             host = parts[0]
             if is_azure_devops_hostname(host) and len(parts) >= 4:
                 user_repo = "/".join(parts[1:4])
-            elif not is_github_hostname(host) and not is_azure_devops_hostname(
-                host
-            ):
+            elif not is_github_hostname(host) and not is_azure_devops_hostname(host):
                 if is_artifactory_path(parts[1:]):
                     art_result = parse_artifactory_path(parts[1:])
                     if art_result:
@@ -834,17 +808,13 @@ class DependencyReference:
                 host = default_host()
             if is_azure_devops_hostname(host) and len(parts) >= 3:
                 user_repo = "/".join(parts[:3])
-            elif (
-                host
-                and not is_github_hostname(host)
-                and not is_azure_devops_hostname(host)
-            ):
+            elif host and not is_github_hostname(host) and not is_azure_devops_hostname(host):
                 user_repo = "/".join(parts)
             else:
                 user_repo = "/".join(parts[:2])
         else:
             raise ValueError(
-                f"Use 'user/repo' or 'github.com/user/repo' or 'dev.azure.com/org/project/repo' format"
+                f"Use 'user/repo' or 'github.com/user/repo' or 'dev.azure.com/org/project/repo' format"  # noqa: F541
             )
 
         if not user_repo or "/" not in user_repo:
@@ -860,18 +830,12 @@ class DependencyReference:
                 raise ValueError(
                     f"Invalid Azure DevOps repository format: {repo_url}. Expected 'org/project/repo'"
                 )
-        else:
+        else:  # noqa: PLR5501
             if len(uparts) < 2:
-                raise ValueError(
-                    f"Invalid repository format: {repo_url}. Expected 'user/repo'"
-                )
+                raise ValueError(f"Invalid repository format: {repo_url}. Expected 'user/repo'")
 
-        allowed_pattern = (
-            r"^[a-zA-Z0-9._\- ]+$" if is_ado_host else r"^[a-zA-Z0-9._-]+$"
-        )
-        validate_path_segments(
-            "/".join(uparts), context="repository path"
-        )
+        allowed_pattern = r"^[a-zA-Z0-9._\- ]+$" if is_ado_host else r"^[a-zA-Z0-9._-]+$"
+        validate_path_segments("/".join(uparts), context="repository path")
         for part in uparts:
             if not re.match(allowed_pattern, part.rstrip(".git")):
                 raise ValueError(f"Invalid repository path component: {part}")
@@ -929,9 +893,7 @@ class DependencyReference:
                         f"Use the dict format with 'path:' for virtual packages in HTTPS URLs"
                     )
 
-        allowed_pattern = (
-            r"^[a-zA-Z0-9._\- ]+$" if is_ado_host else r"^[a-zA-Z0-9._-]+$"
-        )
+        allowed_pattern = r"^[a-zA-Z0-9._\- ]+$" if is_ado_host else r"^[a-zA-Z0-9._-]+$"
         validate_path_segments(
             "/".join(path_parts),
             context="repository URL path",
@@ -975,9 +937,7 @@ class DependencyReference:
 
         # For virtual packages without a URL scheme, narrow to just owner/repo
         if is_virtual_package and not repo_url_lower.startswith(("https://", "http://")):
-            host, repo_url = cls._resolve_virtual_shorthand_repo(
-                repo_url, validated_host
-            )
+            host, repo_url = cls._resolve_virtual_shorthand_repo(repo_url, validated_host)
 
         # Normalize to URL format for secure parsing
         if repo_url_lower.startswith(("https://", "http://")):
@@ -1007,27 +967,19 @@ class DependencyReference:
         """
         is_ado_final = host and is_azure_devops_hostname(host)
         if is_ado_final:
-            if not re.match(
-                r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._\- ]+/[a-zA-Z0-9._\- ]+$", repo_url
-            ):
+            if not re.match(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._\- ]+/[a-zA-Z0-9._\- ]+$", repo_url):
                 raise ValueError(
                     f"Invalid Azure DevOps repository format: {repo_url}. Expected 'org/project/repo'"
                 )
             ado_parts = repo_url.split("/")
-            validate_path_segments(
-                repo_url, context="Azure DevOps repository path"
-            )
+            validate_path_segments(repo_url, context="Azure DevOps repository path")
             return ado_parts[0], ado_parts[1], ado_parts[2]
 
         segments = repo_url.split("/")
         if len(segments) < 2:
-            raise ValueError(
-                f"Invalid repository format: {repo_url}. Expected 'user/repo'"
-            )
+            raise ValueError(f"Invalid repository format: {repo_url}. Expected 'user/repo'")
         if not all(re.match(r"^[a-zA-Z0-9._-]+$", s) for s in segments):
-            raise ValueError(
-                f"Invalid repository format: {repo_url}. Contains invalid characters"
-            )
+            raise ValueError(f"Invalid repository format: {repo_url}. Contains invalid characters")
         validate_path_segments(repo_url, context="repository path")
         for seg in segments:
             if any(seg.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
@@ -1115,9 +1067,7 @@ class DependencyReference:
 
         if dependency_str.startswith("//"):
             raise ValueError(
-                unsupported_host_error(
-                    "//...", context="Protocol-relative URLs are not supported"
-                )
+                unsupported_host_error("//...", context="Protocol-relative URLs are not supported")
             )
 
         # Phase 1: detect virtual packages
@@ -1127,7 +1077,7 @@ class DependencyReference:
 
         # Phase 2: parse SSH (ssh:// URL first -- it preserves port; then SCP
         # shorthand), otherwise fall back to HTTPS/shorthand parsing.
-        explicit_scheme: Optional[str] = None
+        explicit_scheme: str | None = None
         ssh_proto_result = cls._parse_ssh_protocol_url(dependency_str)
         if ssh_proto_result:
             host, port, repo_url, reference, alias = ssh_proto_result
@@ -1148,9 +1098,7 @@ class DependencyReference:
                     explicit_scheme = "http"
 
         # Phase 3: final validation and ADO field extraction
-        ado_organization, ado_project, ado_repo = cls._validate_final_repo_fields(
-            host, repo_url
-        )
+        ado_organization, ado_project, ado_repo = cls._validate_final_repo_fields(host, repo_url)
 
         if alias and not re.match(r"^[a-zA-Z0-9._-]+$", alias):
             raise ValueError(
@@ -1161,9 +1109,7 @@ class DependencyReference:
         is_ado_final = host and is_azure_devops_hostname(host)
         artifactory_prefix = None
         if host and not is_ado_final:
-            artifactory_prefix = cls._extract_artifactory_prefix(
-                dependency_str, host
-            )
+            artifactory_prefix = cls._extract_artifactory_prefix(dependency_str, host)
 
         return cls(
             repo_url=repo_url,

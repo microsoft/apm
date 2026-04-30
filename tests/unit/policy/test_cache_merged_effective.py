@@ -17,28 +17,28 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch  # noqa: F401
 
 from apm_cli.policy.discovery import (
     CACHE_SCHEMA_VERSION,
     DEFAULT_CACHE_TTL,
     MAX_STALE_TTL,
-    PolicyFetchResult,
+    PolicyFetchResult,  # noqa: F401
     _cache_key,
     _detect_garbage,
+    _fetch_from_repo,
+    _fetch_from_url,  # noqa: F401
     _get_cache_dir,
     _is_policy_empty,
     _policy_fingerprint,
-    _policy_to_dict,
+    _policy_to_dict,  # noqa: F401
     _read_cache,
     _read_cache_entry,
     _serialize_policy,
     _stale_fallback_or_error,
     _write_cache,
-    _fetch_from_repo,
-    _fetch_from_url,
 )
-from apm_cli.policy.inheritance import merge_policies, resolve_policy_chain
+from apm_cli.policy.inheritance import merge_policies, resolve_policy_chain  # noqa: F401
 from apm_cli.policy.parser import load_policy
 from apm_cli.policy.schema import (
     ApmPolicy,
@@ -47,7 +47,6 @@ from apm_cli.policy.schema import (
     McpTransportPolicy,
     UnmanagedFilesPolicy,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -166,9 +165,7 @@ class TestCacheInvalidation(unittest.TestCase):
         policy = ApmPolicy(name="old-format")
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            _setup_cache(
-                "test/.github", root, policy, schema_version="1"
-            )
+            _setup_cache("test/.github", root, policy, schema_version="1")
             entry = _read_cache_entry("test/.github", root)
             self.assertIsNone(entry, "Stale schema_version should invalidate cache")
 
@@ -191,9 +188,7 @@ class TestCacheInvalidation(unittest.TestCase):
 
             cache_dir = _get_cache_dir(root)
             key = _cache_key("fp/.github")
-            meta = json.loads(
-                (cache_dir / f"{key}.meta.json").read_text(encoding="utf-8")
-            )
+            meta = json.loads((cache_dir / f"{key}.meta.json").read_text(encoding="utf-8"))
             self.assertIn("fingerprint", meta)
             self.assertTrue(len(meta["fingerprint"]) > 0)
 
@@ -299,8 +294,9 @@ class TestBackdatedMetaOutcomes(unittest.TestCase):
     """Backdated cache metadata triggers correct outcome classification."""
 
     def test_fresh_cache_outcome_found(self):
-        policy = ApmPolicy(name="org-policy", enforcement="block",
-                           dependencies=DependencyPolicy(deny=("bad/pkg",)))
+        policy = ApmPolicy(
+            name="org-policy", enforcement="block", dependencies=DependencyPolicy(deny=("bad/pkg",))
+        )
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             _write_cache("org/.github", policy, root)
@@ -422,7 +418,9 @@ class TestGarbageResponse(unittest.TestCase):
             # Pre-populate cache, then backdate past TTL
             policy = ApmPolicy(name="cached-org", enforcement="block")
             _setup_cache(
-                "contoso/.github", root, policy,
+                "contoso/.github",
+                root,
+                policy,
                 cached_at=time.time() - DEFAULT_CACHE_TTL - 100,
             )
 

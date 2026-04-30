@@ -18,8 +18,8 @@ from __future__ import annotations
 import re
 
 __all__ = [
-    "render_tag",
     "build_tag_regex",
+    "render_tag",
 ]
 
 # Placeholders we recognise.

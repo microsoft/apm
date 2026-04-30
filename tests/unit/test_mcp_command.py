@@ -13,7 +13,6 @@ from click.testing import CliRunner
 
 from apm_cli.commands.mcp import mcp
 
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -63,8 +62,7 @@ def make_runner():
     return CliRunner()
 
 
-def patch_registry(search_result=None, list_result=None, detail_result=None,
-                   detail_raises=None):
+def patch_registry(search_result=None, list_result=None, detail_result=None, detail_raises=None):
     """Return a context manager that patches RegistryIntegration.
 
     RegistryIntegration is imported lazily inside each command function body,
@@ -90,16 +88,18 @@ def patch_registry(search_result=None, list_result=None, detail_result=None,
 # mcp search command
 # ---------------------------------------------------------------------------
 
-class TestMcpSearch:
 
+class TestMcpSearch:
     def test_search_rich_with_results(self):
         """search with Rich console returns results table."""
         runner = make_runner()
         mock_console = MagicMock()
 
-        with patch_registry(search_result=FAKE_SERVERS), \
-             patch("apm_cli.commands.mcp._get_console", return_value=mock_console), \
-             patch("rich.table.Table", MagicMock()):
+        with (
+            patch_registry(search_result=FAKE_SERVERS),
+            patch("apm_cli.commands.mcp._get_console", return_value=mock_console),
+            patch("rich.table.Table", MagicMock()),
+        ):
             result = runner.invoke(mcp, ["search", "cool"])
 
         assert result.exit_code == 0
@@ -110,8 +110,10 @@ class TestMcpSearch:
         runner = make_runner()
         mock_console = MagicMock()
 
-        with patch_registry(search_result=[]), \
-             patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
+        with (
+            patch_registry(search_result=[]),
+            patch("apm_cli.commands.mcp._get_console", return_value=mock_console),
+        ):
             result = runner.invoke(mcp, ["search", "nothing"])
 
         assert result.exit_code == 0
@@ -123,8 +125,10 @@ class TestMcpSearch:
         """search falls back to plain echo when no Rich console."""
         runner = make_runner()
 
-        with patch_registry(search_result=FAKE_SERVERS), \
-             patch("apm_cli.commands.mcp._get_console", return_value=None):
+        with (
+            patch_registry(search_result=FAKE_SERVERS),
+            patch("apm_cli.commands.mcp._get_console", return_value=None),
+        ):
             result = runner.invoke(mcp, ["search", "cool"])
 
         assert result.exit_code == 0
@@ -134,8 +138,10 @@ class TestMcpSearch:
         """search fallback path warns when no results found."""
         runner = make_runner()
 
-        with patch_registry(search_result=[]), \
-             patch("apm_cli.commands.mcp._get_console", return_value=None):
+        with (
+            patch_registry(search_result=[]),
+            patch("apm_cli.commands.mcp._get_console", return_value=None),
+        ):
             result = runner.invoke(mcp, ["search", "nothing"])
 
         assert result.exit_code == 0
@@ -150,9 +156,11 @@ class TestMcpSearch:
         mock_console = MagicMock()
         table_instance = MagicMock()
 
-        with patch_registry(search_result=many_servers), \
-             patch("apm_cli.commands.mcp._get_console", return_value=mock_console), \
-             patch("rich.table.Table", return_value=table_instance):
+        with (
+            patch_registry(search_result=many_servers),
+            patch("apm_cli.commands.mcp._get_console", return_value=mock_console),
+            patch("rich.table.Table", return_value=table_instance),
+        ):
             result = runner.invoke(mcp, ["search", "server", "--limit", "3"])
 
         assert result.exit_code == 0
@@ -168,9 +176,13 @@ class TestMcpSearch:
         runner = make_runner()
         mock_console = MagicMock()
 
-        with patch("apm_cli.registry.integration.RegistryIntegration",
-                   side_effect=RuntimeError("network error")), \
-             patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
+        with (
+            patch(
+                "apm_cli.registry.integration.RegistryIntegration",
+                side_effect=RuntimeError("network error"),
+            ),
+            patch("apm_cli.commands.mcp._get_console", return_value=mock_console),
+        ):
             result = runner.invoke(mcp, ["search", "cool"])
 
         assert result.exit_code == 1
@@ -180,9 +192,11 @@ class TestMcpSearch:
         runner = make_runner()
         mock_console = MagicMock()
 
-        with patch_registry(search_result=FAKE_SERVERS), \
-             patch("apm_cli.commands.mcp._get_console", return_value=mock_console), \
-             patch("rich.table.Table", MagicMock()):
+        with (
+            patch_registry(search_result=FAKE_SERVERS),
+            patch("apm_cli.commands.mcp._get_console", return_value=mock_console),
+            patch("rich.table.Table", MagicMock()),
+        ):
             result = runner.invoke(mcp, ["search", "cool", "--verbose"])
 
         assert result.exit_code == 0
@@ -195,9 +209,11 @@ class TestMcpSearch:
         mock_console = MagicMock()
         mock_table = MagicMock()
 
-        with patch_registry(search_result=servers), \
-             patch("apm_cli.commands.mcp._get_console", return_value=mock_console), \
-             patch("rich.table.Table", return_value=mock_table):
+        with (
+            patch_registry(search_result=servers),
+            patch("apm_cli.commands.mcp._get_console", return_value=mock_console),
+            patch("rich.table.Table", return_value=mock_table),
+        ):
             result = runner.invoke(mcp, ["search", "srv"])
 
         assert result.exit_code == 0
@@ -212,16 +228,18 @@ class TestMcpSearch:
 # mcp show command
 # ---------------------------------------------------------------------------
 
-class TestMcpShow:
 
+class TestMcpShow:
     def test_show_rich_success(self):
         """show with Rich console displays server info tables."""
         runner = make_runner()
         mock_console = MagicMock()
 
-        with patch_registry(detail_result=FAKE_SERVER_DETAIL), \
-             patch("apm_cli.commands.mcp._get_console", return_value=mock_console), \
-             patch("rich.table.Table", MagicMock()):
+        with (
+            patch_registry(detail_result=FAKE_SERVER_DETAIL),
+            patch("apm_cli.commands.mcp._get_console", return_value=mock_console),
+            patch("rich.table.Table", MagicMock()),
+        ):
             result = runner.invoke(mcp, ["show", "io.github.acme/cool-server"])
 
         assert result.exit_code == 0
@@ -231,8 +249,10 @@ class TestMcpShow:
         runner = make_runner()
         mock_console = MagicMock()
 
-        with patch_registry(detail_raises=ValueError("not found")), \
-             patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
+        with (
+            patch_registry(detail_raises=ValueError("not found")),
+            patch("apm_cli.commands.mcp._get_console", return_value=mock_console),
+        ):
             result = runner.invoke(mcp, ["show", "nonexistent"])
 
         assert result.exit_code == 1
@@ -241,8 +261,10 @@ class TestMcpShow:
         """show fallback path echoes server details."""
         runner = make_runner()
 
-        with patch_registry(detail_result=FAKE_SERVER_DETAIL), \
-             patch("apm_cli.commands.mcp._get_console", return_value=None):
+        with (
+            patch_registry(detail_result=FAKE_SERVER_DETAIL),
+            patch("apm_cli.commands.mcp._get_console", return_value=None),
+        ):
             result = runner.invoke(mcp, ["show", "io.github.acme/cool-server"])
 
         assert result.exit_code == 0
@@ -252,8 +274,10 @@ class TestMcpShow:
         """show fallback path exits 1 when server not found."""
         runner = make_runner()
 
-        with patch_registry(detail_raises=ValueError("not found")), \
-             patch("apm_cli.commands.mcp._get_console", return_value=None):
+        with (
+            patch_registry(detail_raises=ValueError("not found")),
+            patch("apm_cli.commands.mcp._get_console", return_value=None),
+        ):
             result = runner.invoke(mcp, ["show", "nonexistent"])
 
         assert result.exit_code == 1
@@ -263,9 +287,12 @@ class TestMcpShow:
         runner = make_runner()
         mock_console = MagicMock()
 
-        with patch("apm_cli.registry.integration.RegistryIntegration",
-                   side_effect=RuntimeError("oops")), \
-             patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
+        with (
+            patch(
+                "apm_cli.registry.integration.RegistryIntegration", side_effect=RuntimeError("oops")
+            ),
+            patch("apm_cli.commands.mcp._get_console", return_value=mock_console),
+        ):
             result = runner.invoke(mcp, ["show", "something"])
 
         assert result.exit_code == 1
@@ -276,9 +303,11 @@ class TestMcpShow:
         mock_console = MagicMock()
         detail = dict(FAKE_SERVER_DETAIL)  # has version_detail
 
-        with patch_registry(detail_result=detail), \
-             patch("apm_cli.commands.mcp._get_console", return_value=mock_console), \
-             patch("rich.table.Table", MagicMock()):
+        with (
+            patch_registry(detail_result=detail),
+            patch("apm_cli.commands.mcp._get_console", return_value=mock_console),
+            patch("rich.table.Table", MagicMock()),
+        ):
             result = runner.invoke(mcp, ["show", "cool"])
 
         assert result.exit_code == 0
@@ -294,9 +323,11 @@ class TestMcpShow:
             "repository": {"url": "https://github.com/x"},
         }
 
-        with patch_registry(detail_result=detail), \
-             patch("apm_cli.commands.mcp._get_console", return_value=mock_console), \
-             patch("rich.table.Table", MagicMock()):
+        with (
+            patch_registry(detail_result=detail),
+            patch("apm_cli.commands.mcp._get_console", return_value=mock_console),
+            patch("rich.table.Table", MagicMock()),
+        ):
             result = runner.invoke(mcp, ["show", "minimal-server"])
 
         assert result.exit_code == 0
@@ -311,9 +342,11 @@ class TestMcpShow:
             "id": "abc123xyz",
         }
 
-        with patch_registry(detail_result=detail), \
-             patch("apm_cli.commands.mcp._get_console", return_value=mock_console), \
-             patch("rich.table.Table", MagicMock()):
+        with (
+            patch_registry(detail_result=detail),
+            patch("apm_cli.commands.mcp._get_console", return_value=mock_console),
+            patch("rich.table.Table", MagicMock()),
+        ):
             result = runner.invoke(mcp, ["show", "bare-server"])
 
         assert result.exit_code == 0
@@ -329,9 +362,11 @@ class TestMcpShow:
             "packages": [{"registry_name": "npm", "name": "a" * 30, "runtime_hint": "node"}],
         }
 
-        with patch_registry(detail_result=detail), \
-             patch("apm_cli.commands.mcp._get_console", return_value=mock_console), \
-             patch("rich.table.Table", return_value=mock_table):
+        with (
+            patch_registry(detail_result=detail),
+            patch("apm_cli.commands.mcp._get_console", return_value=mock_console),
+            patch("rich.table.Table", return_value=mock_table),
+        ):
             result = runner.invoke(mcp, ["show", "pkg-server"])
 
         assert result.exit_code == 0
@@ -348,16 +383,18 @@ class TestMcpShow:
 # mcp list command
 # ---------------------------------------------------------------------------
 
-class TestMcpList:
 
+class TestMcpList:
     def test_list_rich_with_results(self):
         """list with Rich console shows catalog table."""
         runner = make_runner()
         mock_console = MagicMock()
 
-        with patch_registry(list_result=FAKE_SERVERS), \
-             patch("apm_cli.commands.mcp._get_console", return_value=mock_console), \
-             patch("rich.table.Table", MagicMock()):
+        with (
+            patch_registry(list_result=FAKE_SERVERS),
+            patch("apm_cli.commands.mcp._get_console", return_value=mock_console),
+            patch("rich.table.Table", MagicMock()),
+        ):
             result = runner.invoke(mcp, ["list"])
 
         assert result.exit_code == 0
@@ -367,8 +404,10 @@ class TestMcpList:
         runner = make_runner()
         mock_console = MagicMock()
 
-        with patch_registry(list_result=[]), \
-             patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
+        with (
+            patch_registry(list_result=[]),
+            patch("apm_cli.commands.mcp._get_console", return_value=mock_console),
+        ):
             result = runner.invoke(mcp, ["list"])
 
         assert result.exit_code == 0
@@ -379,8 +418,10 @@ class TestMcpList:
         """list falls back to plain echo when no Rich console."""
         runner = make_runner()
 
-        with patch_registry(list_result=FAKE_SERVERS), \
-             patch("apm_cli.commands.mcp._get_console", return_value=None):
+        with (
+            patch_registry(list_result=FAKE_SERVERS),
+            patch("apm_cli.commands.mcp._get_console", return_value=None),
+        ):
             result = runner.invoke(mcp, ["list"])
 
         assert result.exit_code == 0
@@ -390,8 +431,10 @@ class TestMcpList:
         """list fallback path warns when no servers found."""
         runner = make_runner()
 
-        with patch_registry(list_result=[]), \
-             patch("apm_cli.commands.mcp._get_console", return_value=None):
+        with (
+            patch_registry(list_result=[]),
+            patch("apm_cli.commands.mcp._get_console", return_value=None),
+        ):
             result = runner.invoke(mcp, ["list"])
 
         assert result.exit_code == 0
@@ -400,15 +443,16 @@ class TestMcpList:
         """--limit restricts number of servers displayed."""
         runner = make_runner()
         many_servers = [
-            {"name": f"s{i}", "description": f"Srv {i}", "version": "1.0"}
-            for i in range(30)
+            {"name": f"s{i}", "description": f"Srv {i}", "version": "1.0"} for i in range(30)
         ]
         mock_console = MagicMock()
         table_instance = MagicMock()
 
-        with patch_registry(list_result=many_servers), \
-             patch("apm_cli.commands.mcp._get_console", return_value=mock_console), \
-             patch("rich.table.Table", return_value=table_instance):
+        with (
+            patch_registry(list_result=many_servers),
+            patch("apm_cli.commands.mcp._get_console", return_value=mock_console),
+            patch("rich.table.Table", return_value=table_instance),
+        ):
             result = runner.invoke(mcp, ["list", "--limit", "5"])
 
         assert result.exit_code == 0
@@ -424,9 +468,13 @@ class TestMcpList:
         runner = make_runner()
         mock_console = MagicMock()
 
-        with patch("apm_cli.registry.integration.RegistryIntegration",
-                   side_effect=RuntimeError("failure")), \
-             patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
+        with (
+            patch(
+                "apm_cli.registry.integration.RegistryIntegration",
+                side_effect=RuntimeError("failure"),
+            ),
+            patch("apm_cli.commands.mcp._get_console", return_value=mock_console),
+        ):
             result = runner.invoke(mcp, ["list"])
 
         assert result.exit_code == 1
@@ -436,14 +484,13 @@ class TestMcpList:
         runner = make_runner()
         mock_console = MagicMock()
         # Exactly 20 results (default limit)
-        servers = [
-            {"name": f"s{i}", "description": "x", "version": "1.0"}
-            for i in range(20)
-        ]
+        servers = [{"name": f"s{i}", "description": "x", "version": "1.0"} for i in range(20)]
 
-        with patch_registry(list_result=servers), \
-             patch("apm_cli.commands.mcp._get_console", return_value=mock_console), \
-             patch("rich.table.Table", MagicMock()):
+        with (
+            patch_registry(list_result=servers),
+            patch("apm_cli.commands.mcp._get_console", return_value=mock_console),
+            patch("rich.table.Table", MagicMock()),
+        ):
             result = runner.invoke(mcp, ["list"])
 
         assert result.exit_code == 0
@@ -456,8 +503,8 @@ class TestMcpList:
 # mcp group
 # ---------------------------------------------------------------------------
 
-class TestMcpGroup:
 
+class TestMcpGroup:
     def test_mcp_help(self):
         """mcp --help exits 0."""
         runner = make_runner()
@@ -556,11 +603,11 @@ class TestMcpInstallAlias:
         does not re-parse post-``--`` tokens (e.g. ``-y``) as options.
         Regression test for PR #810 item 3."""
         runner = make_runner()
-        fake_argv = ["apm", "mcp", "install", "fetch", "--",
-                      "npx", "-y", "@mcp/server-fetch"]
-        with patch("apm_cli.commands.install._get_invocation_argv",
-                    return_value=fake_argv), \
-             patch("apm_cli.cli.cli.main", return_value=0) as mock_main:
+        fake_argv = ["apm", "mcp", "install", "fetch", "--", "npx", "-y", "@mcp/server-fetch"]
+        with (
+            patch("apm_cli.commands.install._get_invocation_argv", return_value=fake_argv),
+            patch("apm_cli.cli.cli.main", return_value=0) as mock_main,
+        ):
             result = runner.invoke(
                 mcp,
                 ["install", "fetch", "--", "npx", "-y", "@mcp/server-fetch"],
@@ -571,22 +618,31 @@ class TestMcpInstallAlias:
         assert "--" in forwarded
         dd_idx = forwarded.index("--")
         assert forwarded[:dd_idx] == ["install", "--mcp", "fetch"]
-        assert list(forwarded[dd_idx + 1:]) == ["npx", "-y", "@mcp/server-fetch"]
+        assert list(forwarded[dd_idx + 1 :]) == ["npx", "-y", "@mcp/server-fetch"]
 
     def test_dry_run_with_post_dash_args_no_option_error(self):
         """``apm mcp install fetch --dry-run -- npx -y @mcp/server-fetch``
         must not raise ``No such option: -y``.
         Regression test for PR #810 item 3."""
         runner = make_runner()
-        fake_argv = ["apm", "mcp", "install", "fetch", "--dry-run", "--",
-                      "npx", "-y", "@mcp/server-fetch"]
-        with patch("apm_cli.commands.install._get_invocation_argv",
-                    return_value=fake_argv), \
-             patch("apm_cli.cli.cli.main", return_value=0) as mock_main:
+        fake_argv = [
+            "apm",
+            "mcp",
+            "install",
+            "fetch",
+            "--dry-run",
+            "--",
+            "npx",
+            "-y",
+            "@mcp/server-fetch",
+        ]
+        with (
+            patch("apm_cli.commands.install._get_invocation_argv", return_value=fake_argv),
+            patch("apm_cli.cli.cli.main", return_value=0) as mock_main,
+        ):
             result = runner.invoke(
                 mcp,
-                ["install", "fetch", "--dry-run", "--",
-                 "npx", "-y", "@mcp/server-fetch"],
+                ["install", "fetch", "--dry-run", "--", "npx", "-y", "@mcp/server-fetch"],
             )
         assert result.exit_code == 0
         assert "No such option" not in (result.output or "")
@@ -595,7 +651,7 @@ class TestMcpInstallAlias:
         dd_idx = forwarded.index("--")
         # --dry-run must be before the separator
         assert "--dry-run" in forwarded[:dd_idx]
-        assert forwarded[dd_idx + 1:] == ["npx", "-y", "@mcp/server-fetch"]
+        assert forwarded[dd_idx + 1 :] == ["npx", "-y", "@mcp/server-fetch"]
 
     def test_forwards_registry_flag_to_root_install(self):
         """``apm mcp install fetch --registry https://x.io ...`` must
@@ -603,19 +659,36 @@ class TestMcpInstallAlias:
         root ``apm install --mcp`` handler validates and persists it.
         Regression for PR #810 follow-up item 4a."""
         runner = make_runner()
-        fake_argv = ["apm", "mcp", "install", "fetch",
-                     "--registry", "https://r.example.com",
-                     "--transport", "stdio",
-                     "--", "npx", "fetch"]
-        with patch("apm_cli.commands.install._get_invocation_argv",
-                   return_value=fake_argv), \
-             patch("apm_cli.cli.cli.main", return_value=0) as mock_main:
+        fake_argv = [
+            "apm",
+            "mcp",
+            "install",
+            "fetch",
+            "--registry",
+            "https://r.example.com",
+            "--transport",
+            "stdio",
+            "--",
+            "npx",
+            "fetch",
+        ]
+        with (
+            patch("apm_cli.commands.install._get_invocation_argv", return_value=fake_argv),
+            patch("apm_cli.cli.cli.main", return_value=0) as mock_main,
+        ):
             result = runner.invoke(
                 mcp,
-                ["install", "fetch",
-                 "--registry", "https://r.example.com",
-                 "--transport", "stdio",
-                 "--", "npx", "fetch"],
+                [
+                    "install",
+                    "fetch",
+                    "--registry",
+                    "https://r.example.com",
+                    "--transport",
+                    "stdio",
+                    "--",
+                    "npx",
+                    "fetch",
+                ],
             )
         assert result.exit_code == 0
         forwarded = mock_main.call_args.kwargs.get("args")
@@ -626,12 +699,13 @@ class TestMcpInstallAlias:
         # --- separator preserved so post-dash tokens are not re-parsed
         assert "--" in forwarded
         dd = forwarded.index("--")
-        assert forwarded[dd + 1:] == ["npx", "fetch"]
+        assert forwarded[dd + 1 :] == ["npx", "fetch"]
 
 
 # ---------------------------------------------------------------------------
 # Registry env-var honouring (regression for #813)
 # ---------------------------------------------------------------------------
+
 
 class TestMcpRegistryEnvVar:
     """All apm mcp commands must pass `RegistryIntegration()` with no positional URL,
@@ -701,6 +775,7 @@ class TestMcpRegistryEnvVar:
     def test_search_request_exception_mentions_env_var_when_set(self, monkeypatch):
         """RequestException error path names the URL and hints at MCP_REGISTRY_URL when set."""
         import requests as _requests
+
         monkeypatch.setenv("MCP_REGISTRY_URL", "https://busted.internal.example.com")
         runner = make_runner()
         mock_console = MagicMock()

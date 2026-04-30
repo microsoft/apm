@@ -18,13 +18,12 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Optional
-from unittest.mock import MagicMock, patch
+from typing import List, Optional  # noqa: F401, UP035
+from unittest.mock import MagicMock, patch  # noqa: F401
 
 import pytest
 
 from apm_cli.marketplace.ref_resolver import RemoteRef
-
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -34,9 +33,7 @@ from apm_cli.marketplace.ref_resolver import RemoteRef
 _PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 
 # Path to the golden fixture
-_GOLDEN_PATH = (
-    _PROJECT_ROOT / "tests" / "fixtures" / "marketplace" / "golden.json"
-)
+_GOLDEN_PATH = _PROJECT_ROOT / "tests" / "fixtures" / "marketplace" / "golden.json"
 
 # Environment variable that gates the live e2e tests
 _LIVE_ENV_VAR = "APM_E2E_MARKETPLACE"
@@ -138,7 +135,7 @@ def golden_marketplace_json() -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _make_refs_for_code_reviewer() -> List[RemoteRef]:
+def _make_refs_for_code_reviewer() -> list[RemoteRef]:
     """Refs for acme/code-reviewer: tags v2.0.0, v2.1.0, v3.0.0."""
     return [
         RemoteRef(
@@ -157,7 +154,7 @@ def _make_refs_for_code_reviewer() -> List[RemoteRef]:
     ]
 
 
-def _make_refs_for_test_generator() -> List[RemoteRef]:
+def _make_refs_for_test_generator() -> list[RemoteRef]:
     """Refs for acme/test-generator: tags v1.0.0, v1.0.3."""
     return [
         RemoteRef(
@@ -172,7 +169,7 @@ def _make_refs_for_test_generator() -> List[RemoteRef]:
     ]
 
 
-def _ref_side_effect(owner_repo: str) -> List[RemoteRef]:
+def _ref_side_effect(owner_repo: str) -> list[RemoteRef]:
     """Return appropriate refs based on owner/repo slug."""
     mapping = {
         "acme/code-reviewer": _make_refs_for_code_reviewer(),
@@ -215,7 +212,7 @@ def mock_ref_resolver_golden():
     """Patch RefResolver so code-reviewer resolves to v2.1.0 and
     test-generator to v1.0.3 -- the exact SHAs in the golden fixture."""
 
-    def _golden_side_effect(owner_repo: str) -> List[RemoteRef]:
+    def _golden_side_effect(owner_repo: str) -> list[RemoteRef]:
         if owner_repo == "acme/code-reviewer":
             return [
                 RemoteRef(
@@ -273,8 +270,7 @@ def live_marketplace_repo() -> str:
     parts = value.split("/")
     if len(parts) != 2 or not parts[0] or not parts[1]:
         pytest.skip(
-            f"{_LIVE_ENV_VAR}={value!r} is not in 'owner/repo' format. "
-            "Correct it and re-run."
+            f"{_LIVE_ENV_VAR}={value!r} is not in 'owner/repo' format. Correct it and re-run."
         )
 
     return value
@@ -286,9 +282,9 @@ def live_marketplace_repo() -> str:
 
 
 def run_cli(
-    args: List[str],
-    cwd: Optional[Path] = None,
-    env: Optional[dict] = None,
+    args: list[str],
+    cwd: Path | None = None,
+    env: dict | None = None,
     timeout: int = 60,
 ) -> subprocess.CompletedProcess:
     """Invoke ``uv run apm <args>`` via subprocess.
@@ -332,11 +328,11 @@ def run_cli(
     if env:
         base_env.update(env)
 
-    cmd = [sys.executable, "-m", "uv", "run", "apm"] + args
+    cmd = [sys.executable, "-m", "uv", "run", "apm"] + args  # noqa: RUF005
     # Prefer the project-local uv wrapper if available
     uv_bin = _project_uv_bin()
     if uv_bin:
-        cmd = [uv_bin, "run", "apm"] + args
+        cmd = [uv_bin, "run", "apm"] + args  # noqa: RUF005
 
     return subprocess.run(
         cmd,
@@ -348,7 +344,7 @@ def run_cli(
     )
 
 
-def _project_uv_bin() -> Optional[str]:
+def _project_uv_bin() -> str | None:
     """Return path to uv if it is on PATH, else None."""
     import shutil
 

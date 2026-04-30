@@ -8,7 +8,6 @@ import pytest
 
 from apm_cli.marketplace.tag_pattern import build_tag_regex, render_tag
 
-
 # ---------------------------------------------------------------------------
 # render_tag
 # ---------------------------------------------------------------------------

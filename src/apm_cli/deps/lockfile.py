@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional  # noqa: F401, UP035
 
 import yaml
 
@@ -23,28 +23,28 @@ class LockedDependency:
     """A resolved dependency with exact commit/version information."""
 
     repo_url: str
-    host: Optional[str] = None
-    port: Optional[int] = None  # Non-standard SSH/HTTPS port (e.g. 7999 for Bitbucket DC)
-    registry_prefix: Optional[str] = None  # Registry path prefix, e.g. "artifactory/github"
-    resolved_commit: Optional[str] = None
-    resolved_ref: Optional[str] = None
-    version: Optional[str] = None
-    virtual_path: Optional[str] = None
+    host: str | None = None
+    port: int | None = None  # Non-standard SSH/HTTPS port (e.g. 7999 for Bitbucket DC)
+    registry_prefix: str | None = None  # Registry path prefix, e.g. "artifactory/github"
+    resolved_commit: str | None = None
+    resolved_ref: str | None = None
+    version: str | None = None
+    virtual_path: str | None = None
     is_virtual: bool = False
     depth: int = 1
-    resolved_by: Optional[str] = None
-    package_type: Optional[str] = None
-    deployed_files: List[str] = field(default_factory=list)
-    deployed_file_hashes: Dict[str, str] = field(default_factory=dict)
-    source: Optional[str] = None  # "local" for local deps, None/absent for remote
-    local_path: Optional[str] = None  # Original local path (relative to project root)
-    content_hash: Optional[str] = None  # SHA-256 of package file tree
+    resolved_by: str | None = None
+    package_type: str | None = None
+    deployed_files: list[str] = field(default_factory=list)
+    deployed_file_hashes: dict[str, str] = field(default_factory=dict)
+    source: str | None = None  # "local" for local deps, None/absent for remote
+    local_path: str | None = None  # Original local path (relative to project root)
+    content_hash: str | None = None  # SHA-256 of package file tree
     is_dev: bool = False  # True for devDependencies
-    discovered_via: Optional[str] = None  # Marketplace name (provenance)
-    marketplace_plugin_name: Optional[str] = None  # Plugin name in marketplace
+    discovered_via: str | None = None  # Marketplace name (provenance)
+    marketplace_plugin_name: str | None = None  # Plugin name in marketplace
     is_insecure: bool = False  # True when the locked source was http://
     allow_insecure: bool = False  # True when the manifest explicitly allowed HTTP
-    skill_subset: List[str] = field(default_factory=list)  # Sorted skill names for SKILL_BUNDLE
+    skill_subset: list[str] = field(default_factory=list)  # Sorted skill names for SKILL_BUNDLE
 
     def get_unique_key(self) -> str:
         """Returns unique key for this dependency."""
@@ -54,9 +54,9 @@ class LockedDependency:
             return f"{self.repo_url}/{self.virtual_path}"
         return self.repo_url
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for YAML output."""
-        result: Dict[str, Any] = {"repo_url": self.repo_url}
+        result: dict[str, Any] = {"repo_url": self.repo_url}
         if self.host:
             result["host"] = self.host
         if self.port:
@@ -82,9 +82,7 @@ class LockedDependency:
         if self.deployed_files:
             result["deployed_files"] = sorted(self.deployed_files)
         if self.deployed_file_hashes:
-            result["deployed_file_hashes"] = dict(
-                sorted(self.deployed_file_hashes.items())
-            )
+            result["deployed_file_hashes"] = dict(sorted(self.deployed_file_hashes.items()))
         if self.source:
             result["source"] = self.source
         if self.local_path:
@@ -106,7 +104,7 @@ class LockedDependency:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "LockedDependency":
+    def from_dict(cls, data: dict[str, Any]) -> "LockedDependency":
         """Deserialize from dict.
 
         Handles backwards compatibility:
@@ -124,7 +122,7 @@ class LockedDependency:
 
         # Defensive cast: reject non-numeric or out-of-range ports from tampered lockfiles.
         _p_raw = data.get("port")
-        port: Optional[int] = None
+        port: int | None = None
         if _p_raw is not None:
             try:
                 _p_int = int(_p_raw)
@@ -163,9 +161,9 @@ class LockedDependency:
     def from_dependency_ref(
         cls,
         dep_ref: DependencyReference,
-        resolved_commit: Optional[str],
+        resolved_commit: str | None,
         depth: int,
-        resolved_by: Optional[str],
+        resolved_by: str | None,
         is_dev: bool = False,
         registry_config=None,
     ) -> "LockedDependency":
@@ -205,7 +203,9 @@ class LockedDependency:
             is_dev=is_dev,
             is_insecure=dep_ref.is_insecure,
             allow_insecure=dep_ref.allow_insecure,
-            skill_subset=sorted(dep_ref.skill_subset) if isinstance(getattr(dep_ref, "skill_subset", None), list) else [],
+            skill_subset=sorted(dep_ref.skill_subset)
+            if isinstance(getattr(dep_ref, "skill_subset", None), list)
+            else [],
         )
 
     def to_dependency_ref(self) -> DependencyReference:
@@ -230,21 +230,19 @@ class LockFile:
     """APM lock file for reproducible dependency resolution."""
 
     lockfile_version: str = "1"
-    generated_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
-    apm_version: Optional[str] = None
-    dependencies: Dict[str, LockedDependency] = field(default_factory=dict)
-    mcp_servers: List[str] = field(default_factory=list)
-    mcp_configs: Dict[str, dict] = field(default_factory=dict)
-    local_deployed_files: List[str] = field(default_factory=list)
-    local_deployed_file_hashes: Dict[str, str] = field(default_factory=dict)
+    generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    apm_version: str | None = None
+    dependencies: dict[str, LockedDependency] = field(default_factory=dict)
+    mcp_servers: list[str] = field(default_factory=list)
+    mcp_configs: dict[str, dict] = field(default_factory=dict)
+    local_deployed_files: list[str] = field(default_factory=list)
+    local_deployed_file_hashes: dict[str, str] = field(default_factory=dict)
 
     def add_dependency(self, dep: LockedDependency) -> None:
         """Add a dependency to the lock file."""
         self.dependencies[dep.get_unique_key()] = dep
 
-    def get_dependency(self, key: str) -> Optional[LockedDependency]:
+    def get_dependency(self, key: str) -> LockedDependency | None:
         """Get a dependency by its unique key."""
         return self.dependencies.get(key)
 
@@ -252,13 +250,11 @@ class LockFile:
         """Check if a dependency exists."""
         return key in self.dependencies
 
-    def get_all_dependencies(self) -> List[LockedDependency]:
+    def get_all_dependencies(self) -> list[LockedDependency]:
         """Get all dependencies sorted by depth then repo_url."""
-        return sorted(
-            self.dependencies.values(), key=lambda d: (d.depth, d.repo_url)
-        )
+        return sorted(self.dependencies.values(), key=lambda d: (d.depth, d.repo_url))
 
-    def get_package_dependencies(self) -> List[LockedDependency]:
+    def get_package_dependencies(self) -> list[LockedDependency]:
         """Get all dependencies excluding the virtual self-entry."""
         return [d for d in self.get_all_dependencies() if d.local_path != "."]
 
@@ -270,7 +266,7 @@ class LockFile:
         # since the flat fields remain the source of truth in YAML.
         _self_dep = self.dependencies.pop(_SELF_KEY, None)
         try:
-            data: Dict[str, Any] = {
+            data: dict[str, Any] = {
                 "lockfile_version": self.lockfile_version,
                 "generated_at": self.generated_at,
             }
@@ -288,6 +284,7 @@ class LockFile:
                     sorted(self.local_deployed_file_hashes.items())
                 )
             from ..utils.yaml_io import yaml_to_str
+
             return yaml_to_str(data)
         finally:
             if _self_dep is not None:
@@ -311,9 +308,7 @@ class LockFile:
         lock.mcp_servers = list(data.get("mcp_servers", []))
         lock.mcp_configs = dict(data.get("mcp_configs") or {})
         lock.local_deployed_files = list(data.get("local_deployed_files", []))
-        lock.local_deployed_file_hashes = dict(
-            data.get("local_deployed_file_hashes") or {}
-        )
+        lock.local_deployed_file_hashes = dict(data.get("local_deployed_file_hashes") or {})
         # Synthesize a virtual self-entry representing the project's own
         # local content. This unifies traversal across "real" dependencies
         # and the local package, without changing the on-disk YAML shape.
@@ -369,6 +364,7 @@ class LockFile:
         # Get APM version
         try:
             from importlib.metadata import version
+
             apm_version = version("apm-cli")
         except Exception:
             apm_version = "unknown"
@@ -403,7 +399,7 @@ class LockFile:
 
         return lock
 
-    def get_installed_paths(self, apm_modules_dir: Path) -> List[str]:
+    def get_installed_paths(self, apm_modules_dir: Path) -> list[str]:
         """Get relative installed paths for all dependencies in this lockfile.
 
         Computes expected installed paths for all dependencies, including
@@ -419,7 +415,7 @@ class LockFile:
                        ordered by depth then repo_url (no duplicates).
         """
         seen: set = set()
-        paths: List[str] = []
+        paths: list[str] = []
         for dep in self.get_all_dependencies():
             if dep.local_path == _SELF_KEY:
                 continue
@@ -460,12 +456,12 @@ class LockFile:
             return False
         # Issue #887: include hash dict in equivalence so post-install
         # hash updates persist even when the file list is unchanged.
-        if dict(self.local_deployed_file_hashes) != dict(other.local_deployed_file_hashes):
+        if dict(self.local_deployed_file_hashes) != dict(other.local_deployed_file_hashes):  # noqa: SIM103
             return False
         return True
 
     @classmethod
-    def installed_paths_for_project(cls, project_root: Path) -> List[str]:
+    def installed_paths_for_project(cls, project_root: Path) -> list[str]:
         """Load apm.lock.yaml from project_root and return installed paths.
 
         Returns an empty list if the lockfile is missing, corrupt, or
@@ -529,6 +525,6 @@ def migrate_lockfile_if_needed(project_root: Path) -> bool:
     return False
 
 
-def get_lockfile_installed_paths(project_root: Path) -> List[str]:
+def get_lockfile_installed_paths(project_root: Path) -> list[str]:
     """Deprecated: use LockFile.installed_paths_for_project() instead."""
     return LockFile.installed_paths_for_project(project_root)

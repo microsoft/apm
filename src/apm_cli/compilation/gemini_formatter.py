@@ -9,7 +9,7 @@ the AGENTS.md pipeline already produces.
 import builtins
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional  # noqa: F401, UP035
 
 from ..primitives.models import Instruction, PrimitiveCollection
 from ..version import get_version
@@ -24,19 +24,21 @@ dict = builtins.dict
 @dataclass
 class GeminiPlacement:
     """Result of GEMINI.md placement analysis."""
+
     gemini_path: Path
-    instructions: List[Instruction]
+    instructions: builtins.list[Instruction]
 
 
 @dataclass
 class GeminiCompilationResult:
     """Result of GEMINI.md compilation."""
+
     success: bool
-    placements: List[GeminiPlacement]
-    content_map: Dict[Path, str]
-    warnings: List[str] = field(default_factory=list)
-    errors: List[str] = field(default_factory=list)
-    stats: Dict[str, float] = field(default_factory=dict)
+    placements: builtins.list[GeminiPlacement]
+    content_map: builtins.dict[Path, str]
+    warnings: builtins.list[str] = field(default_factory=list)
+    errors: builtins.list[str] = field(default_factory=list)
+    stats: builtins.dict[str, float] = field(default_factory=dict)
 
 
 class GeminiFormatter:
@@ -54,14 +56,14 @@ class GeminiFormatter:
         except (OSError, FileNotFoundError):
             self.base_dir = Path(base_dir).absolute()
 
-        self.warnings: List[str] = []
-        self.errors: List[str] = []
+        self.warnings: builtins.list[str] = []
+        self.errors: builtins.list[str] = []
 
     def format_distributed(
         self,
         primitives: PrimitiveCollection,
-        placement_map: Optional[Dict[Path, List[Instruction]]] = None,
-        config: Optional[dict] = None,
+        placement_map: builtins.dict[Path, builtins.list[Instruction]] | None = None,
+        config: dict | None = None,
     ) -> GeminiCompilationResult:
         """Generate a GEMINI.md stub that imports AGENTS.md.
 
@@ -81,7 +83,7 @@ class GeminiFormatter:
                 instructions=[],
             )
 
-            stats: Dict[str, float] = {
+            stats: builtins.dict[str, float] = {
                 "gemini_files_generated": 1,
                 "primitives_found": primitives.count(),
             }
@@ -95,7 +97,7 @@ class GeminiFormatter:
                 stats=stats,
             )
         except Exception as e:
-            self.errors.append(f"GEMINI.md formatting failed: {str(e)}")
+            self.errors.append(f"GEMINI.md formatting failed: {e!s}")
             return GeminiCompilationResult(
                 success=False,
                 placements=[],

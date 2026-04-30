@@ -22,7 +22,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-
 # ---------------------------------------------------------------------------
 # Markers and skip gates
 # ---------------------------------------------------------------------------
@@ -119,10 +118,10 @@ def _env_with_home(fake_home):
 
 def _run_apm(apm_command, args, cwd, fake_home, timeout=180):
     """Run apm CLI with isolated HOME."""
-    if apm_command:
-        cmd = [apm_command] + args
+    if apm_command:  # noqa: SIM108
+        cmd = [apm_command] + args  # noqa: RUF005
     else:
-        cmd = [sys.executable, "-m", "apm_cli"] + args
+        cmd = [sys.executable, "-m", "apm_cli"] + args  # noqa: RUF005
     return subprocess.run(
         cmd,
         cwd=cwd,
@@ -192,9 +191,7 @@ def test_live_install_classifies_and_succeeds(
     work_dir = tmp_path / "project"
     work_dir.mkdir()
 
-    result = _run_apm(
-        apm_command, ["install", repo, "--verbose"], work_dir, fake_home
-    )
+    result = _run_apm(apm_command, ["install", repo, "--verbose"], work_dir, fake_home)
     assert result.returncode == 0, (
         f"apm install {repo} failed (exit {result.returncode}):\n"
         f"STDOUT:\n{result.stdout[-2000:]}\n"
@@ -204,8 +201,7 @@ def test_live_install_classifies_and_succeeds(
     # Verify lockfile was created and contains the dependency
     lockfile = _read_lockfile(work_dir)
     assert lockfile is not None, (
-        f"apm.lock.yaml not created for {repo}.\n"
-        f"STDOUT:\n{result.stdout[-1000:]}"
+        f"apm.lock.yaml not created for {repo}.\nSTDOUT:\n{result.stdout[-1000:]}"
     )
 
     dep = _get_locked_dep(lockfile, repo)
@@ -372,20 +368,15 @@ def test_skill_subset_persists_to_apm_yml(tmp_path, apm_command, fake_home):
         fake_home,
     )
     assert result.returncode == 0, (
-        f"Install failed:\nSTDOUT:\n{result.stdout[-2000:]}\n"
-        f"STDERR:\n{result.stderr[-2000:]}"
+        f"Install failed:\nSTDOUT:\n{result.stdout[-2000:]}\nSTDERR:\n{result.stderr[-2000:]}"
     )
 
     # Verify apm.yml has skills: field
     manifest = _read_manifest(work_dir)
     assert manifest is not None, "apm.yml not created"
     entry = _get_manifest_entry(manifest, "vercel-labs/agent-skills")
-    assert entry is not None, (
-        f"vercel-labs/agent-skills not in apm.yml: {manifest}"
-    )
-    assert isinstance(entry, dict), (
-        f"Expected dict entry with skills: field, got: {entry}"
-    )
+    assert entry is not None, f"vercel-labs/agent-skills not in apm.yml: {manifest}"
+    assert isinstance(entry, dict), f"Expected dict entry with skills: field, got: {entry}"
     assert "skills" in entry, f"No skills: field in entry: {entry}"
     assert target_skill in entry["skills"], (
         f"Expected '{target_skill}' in skills list: {entry['skills']}"
@@ -406,8 +397,7 @@ def test_skill_subset_persists_to_lockfile(tmp_path, apm_command, fake_home):
         fake_home,
     )
     assert result.returncode == 0, (
-        f"Install failed:\nSTDOUT:\n{result.stdout[-2000:]}\n"
-        f"STDERR:\n{result.stderr[-2000:]}"
+        f"Install failed:\nSTDOUT:\n{result.stdout[-2000:]}\nSTDERR:\n{result.stderr[-2000:]}"
     )
 
     # Verify lockfile has skill_subset
@@ -437,8 +427,7 @@ def test_bare_reinstall_respects_persisted_subset(tmp_path, apm_command, fake_ho
         fake_home,
     )
     assert result.returncode == 0, (
-        f"First install failed:\nSTDOUT:\n{result.stdout[-2000:]}\n"
-        f"STDERR:\n{result.stderr[-2000:]}"
+        f"First install failed:\nSTDOUT:\n{result.stdout[-2000:]}\nSTDERR:\n{result.stderr[-2000:]}"
     )
 
     # Clear deployed skills to simulate fresh state
@@ -500,30 +489,23 @@ def test_star_sentinel_clears_subset(tmp_path, apm_command, fake_home):
         fake_home,
     )
     assert result.returncode == 0, (
-        f"Star install failed:\nSTDOUT:\n{result.stdout[-2000:]}\n"
-        f"STDERR:\n{result.stderr[-2000:]}"
+        f"Star install failed:\nSTDOUT:\n{result.stdout[-2000:]}\nSTDERR:\n{result.stderr[-2000:]}"
     )
 
     # Verify skills: field is cleared from apm.yml
     manifest = _read_manifest(work_dir)
     entry = _get_manifest_entry(manifest, "vercel-labs/agent-skills")
     if isinstance(entry, dict):
-        assert "skills" not in entry, (
-            f"Expected skills: to be cleared with '*', but found: {entry}"
-        )
+        assert "skills" not in entry, f"Expected skills: to be cleared with '*', but found: {entry}"
     # String form also means no skills: (success)
 
     # All skills should be deployed now
     deployed_count = _count_deployed_skills(work_dir)
-    assert deployed_count >= 3, (
-        f"Expected all skills deployed after '*', got {deployed_count}"
-    )
+    assert deployed_count >= 3, f"Expected all skills deployed after '*', got {deployed_count}"
 
 
 @pytest.mark.live
-def test_skill_flag_on_non_bundle_warns_and_does_not_persist(
-    tmp_path, apm_command, fake_home
-):
+def test_skill_flag_on_non_bundle_warns_and_does_not_persist(tmp_path, apm_command, fake_home):
     """--skill on a non-SKILL_BUNDLE warns and does NOT persist skills:."""
     work_dir = tmp_path / "project"
     work_dir.mkdir()
@@ -537,16 +519,17 @@ def test_skill_flag_on_non_bundle_warns_and_does_not_persist(
     )
     # Install should succeed (--skill is a no-op for non-bundles)
     assert result.returncode == 0, (
-        f"Install failed:\nSTDOUT:\n{result.stdout[-2000:]}\n"
-        f"STDERR:\n{result.stderr[-2000:]}"
+        f"Install failed:\nSTDOUT:\n{result.stdout[-2000:]}\nSTDERR:\n{result.stderr[-2000:]}"
     )
 
     # Should have a warning about --skill on non-bundle
     combined_output = result.stdout + result.stderr
-    assert "not a skill_bundle" in combined_output.lower() or \
-           "skill_bundle" in combined_output.lower() or \
-           "ignored" in combined_output.lower() or \
-           "not applicable" in combined_output.lower(), (
+    assert (
+        "not a skill_bundle" in combined_output.lower()
+        or "skill_bundle" in combined_output.lower()
+        or "ignored" in combined_output.lower()
+        or "not applicable" in combined_output.lower()
+    ), (
         f"Expected warning about --skill on non-bundle.\n"
         f"STDOUT:\n{result.stdout[-1000:]}\n"
         f"STDERR:\n{result.stderr[-1000:]}"
@@ -596,7 +579,7 @@ def test_audit_detects_lockfile_drift(tmp_path, apm_command, fake_home):
     manifest_path = work_dir / "apm.yml"
     manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
     deps = manifest["dependencies"]["apm"]
-    for i, entry in enumerate(deps):
+    for i, entry in enumerate(deps):  # noqa: B007
         if isinstance(entry, dict) and "vercel-labs/agent-skills" in entry.get("git", ""):
             entry["skills"] = ["totally-different-skill"]
             break
@@ -616,7 +599,5 @@ def test_audit_detects_lockfile_drift(tmp_path, apm_command, fake_home):
     )
     combined_output = result.stdout + result.stderr
     assert "skill" in combined_output.lower() or "mismatch" in combined_output.lower(), (
-        f"Expected skill subset mismatch in audit output:\n"
-        f"STDOUT:\n{result.stdout[-500:]}"
+        f"Expected skill subset mismatch in audit output:\nSTDOUT:\n{result.stdout[-500:]}"
     )
-

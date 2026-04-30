@@ -13,31 +13,31 @@ Public API::
 """
 
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Union  # noqa: F401, UP035
 
 import yaml
 
 # Shared defaults matching existing codebase convention.
-_DUMP_DEFAULTS: Dict[str, Any] = dict(
+_DUMP_DEFAULTS: dict[str, Any] = dict(
     default_flow_style=False,
     sort_keys=False,
     allow_unicode=True,
 )
 
 
-def load_yaml(path: Union[str, Path]) -> Optional[Dict[str, Any]]:
+def load_yaml(path: str | Path) -> dict[str, Any] | None:
     """Load a YAML file with explicit UTF-8 encoding.
 
     Returns parsed data or ``None`` for empty files.
     Raises ``FileNotFoundError`` or ``yaml.YAMLError`` on failure.
     """
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         return yaml.safe_load(fh)
 
 
 def dump_yaml(
     data: Any,
-    path: Union[str, Path],
+    path: str | Path,
     *,
     sort_keys: bool = False,
 ) -> None:

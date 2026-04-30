@@ -12,7 +12,7 @@ class TestLoadYaml:
     def test_load_utf8_content(self, tmp_path):
         """Non-ASCII content is read correctly."""
         p = tmp_path / "test.yml"
-        p.write_text("author: \"Lopez\"\n", encoding="utf-8")
+        p.write_text('author: "Lopez"\n', encoding="utf-8")
         data = load_yaml(p)
         assert data["author"] == "Lopez"
 
@@ -20,7 +20,7 @@ class TestLoadYaml:
         """Unicode characters (accented, CJK) are preserved."""
         p = tmp_path / "test.yml"
         # YAML \xF3 escape is decoded by the parser into the real char
-        p.write_text("author: \"L\\xF3pez\"\n", encoding="utf-8")
+        p.write_text('author: "L\\xF3pez"\n', encoding="utf-8")
         data = load_yaml(p)
         assert data["author"] == "L\u00f3pez"
 

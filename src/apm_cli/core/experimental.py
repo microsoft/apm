@@ -28,10 +28,10 @@ from __future__ import annotations
 import difflib
 from dataclasses import dataclass
 
-
 # ---------------------------------------------------------------------------
 # Registry dataclass
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class ExperimentalFlag:
@@ -61,7 +61,7 @@ FLAGS: dict[str, ExperimentalFlag] = {
         default=False,
         hint="Run 'apm --version' to see the new output.",
     ),
-"copilot_cowork": ExperimentalFlag(
+    "copilot_cowork": ExperimentalFlag(
         name="copilot_cowork",
         description="Enable Microsoft 365 Copilot Cowork skills deployment via OneDrive.",
         default=False,
@@ -76,6 +76,7 @@ FLAGS: dict[str, ExperimentalFlag] = {
 # ---------------------------------------------------------------------------
 # Name normalisation
 # ---------------------------------------------------------------------------
+
 
 def normalise_flag_name(name: str) -> str:
     """Normalise a CLI flag name to its internal snake_case form.
@@ -94,6 +95,7 @@ def display_name(name: str) -> str:
 # Config access helper
 # ---------------------------------------------------------------------------
 
+
 def _get_experimental_section() -> dict:
     """Return the ``experimental`` section from config as a dict.
 
@@ -109,6 +111,7 @@ def _get_experimental_section() -> dict:
 # ---------------------------------------------------------------------------
 # Core query
 # ---------------------------------------------------------------------------
+
 
 def is_enabled(name: str) -> bool:
     """Check whether an experimental flag is currently enabled.
@@ -130,8 +133,7 @@ def is_enabled(name: str) -> bool:
     """
     if name not in FLAGS:
         raise ValueError(
-            f"Unknown experimental flag: {name!r}. "
-            f"Registered flags: {', '.join(sorted(FLAGS))}"
+            f"Unknown experimental flag: {name!r}. Registered flags: {', '.join(sorted(FLAGS))}"
         )
 
     experimental = _get_experimental_section()
@@ -146,6 +148,7 @@ def is_enabled(name: str) -> bool:
 # ---------------------------------------------------------------------------
 # Mutators (thin wrappers around apm_cli.config.update_config)
 # ---------------------------------------------------------------------------
+
 
 def validate_flag_name(name: str) -> str:
     """Validate and normalise a flag name from CLI input.
@@ -162,7 +165,10 @@ def validate_flag_name(name: str) -> str:
 
     display = display_name(normalised)
     suggestions = difflib.get_close_matches(
-        normalised, FLAGS.keys(), n=3, cutoff=0.6,
+        normalised,
+        FLAGS.keys(),
+        n=3,
+        cutoff=0.6,
     )
     msg = f"Unknown experimental feature: {display}"
     raise ValueError(msg, [display_name(s) for s in suggestions])
@@ -249,10 +255,7 @@ def get_overridden_flags() -> dict[str, bool]:
     Values are the current override booleans.
     """
     experimental = _get_experimental_section()
-    return {
-        k: v for k, v in experimental.items()
-        if k in FLAGS and isinstance(v, bool)
-    }
+    return {k: v for k, v in experimental.items() if k in FLAGS and isinstance(v, bool)}
 
 
 def get_stale_config_keys() -> list[str]:

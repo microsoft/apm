@@ -31,7 +31,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional  # noqa: F401, UP035
 
 from apm_cli.utils.console import _rich_error, _rich_success
 
@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from apm_cli.models.apm_package import PackageInfo
 
 
-def _format_package_type_label(pkg_type) -> Optional[str]:
+def _format_package_type_label(pkg_type) -> str | None:
     """Human-readable label for a detected ``PackageType``.
 
     Centralised so every install path emits the same wording and so
@@ -53,8 +53,7 @@ def _format_package_type_label(pkg_type) -> Optional[str]:
 
     return {
         PackageType.CLAUDE_SKILL: "Skill (SKILL.md detected)",
-        PackageType.MARKETPLACE_PLUGIN:
-            "Marketplace Plugin (plugin.json or agents/skills/commands)",
+        PackageType.MARKETPLACE_PLUGIN: "Marketplace Plugin (plugin.json or agents/skills/commands)",
         PackageType.HYBRID: "Hybrid (apm.yml + SKILL.md)",
         PackageType.APM_PACKAGE: "APM Package (apm.yml)",
         PackageType.HOOK_PACKAGE: "Hook Package (hooks/*.json only)",
@@ -70,10 +69,10 @@ class Materialization:
     gate + primitive integration on a freshly-acquired package.
     """
 
-    package_info: Optional["PackageInfo"]
+    package_info: PackageInfo | None
     install_path: Path
     dep_key: str
-    deltas: Dict[str, int] = field(default_factory=lambda: {"installed": 1})
+    deltas: dict[str, int] = field(default_factory=lambda: {"installed": 1})
 
 
 class DependencySource(ABC):
@@ -91,7 +90,7 @@ class DependencySource(ABC):
 
     def __init__(
         self,
-        ctx: "InstallContext",
+        ctx: InstallContext,
         dep_ref: Any,
         install_path: Path,
         dep_key: str,
@@ -102,7 +101,7 @@ class DependencySource(ABC):
         self.dep_key = dep_key
 
     @abstractmethod
-    def acquire(self) -> Optional[Materialization]:
+    def acquire(self) -> Materialization | None:
         """Materialise the dependency on disk and build PackageInfo.
 
         Returns ``None`` to skip integration entirely (e.g. local dep at
@@ -116,7 +115,7 @@ class LocalDependencySource(DependencySource):
 
     INTEGRATE_ERROR_PREFIX = "Failed to integrate primitives from local package"
 
-    def acquire(self) -> Optional[Materialization]:
+    def acquire(self) -> Materialization | None:
         from apm_cli.core.scope import InstallScope
         from apm_cli.deps.installed_package import InstalledPackage
         from apm_cli.install.phases.local_content import _copy_local_package
@@ -153,9 +152,7 @@ class LocalDependencySource(DependencySource):
                 )
             return None
 
-        result_path = _copy_local_package(
-            dep_ref, install_path, ctx.project_root, logger=logger
-        )
+        result_path = _copy_local_package(dep_ref, install_path, ctx.project_root, logger=logger)
         if not result_path:
             diagnostics.error(
                 f"Failed to copy local package: {dep_ref.local_path}",
@@ -199,6 +196,7 @@ class LocalDependencySource(DependencySource):
         local_info.package_type = pkg_type
         if pkg_type == PackageType.MARKETPLACE_PLUGIN:
             from apm_cli.deps.plugin_parser import normalize_plugin_directory
+
             normalize_plugin_directory(install_path, plugin_json_path)
 
         # Record for lockfile
@@ -206,11 +204,16 @@ class LocalDependencySource(DependencySource):
         depth = node.depth if node else 1
         resolved_by = node.parent.dependency_ref.repo_url if node and node.parent else None
         _is_dev = node.is_dev if node else False
-        ctx.installed_packages.append(InstalledPackage(
-            dep_ref=dep_ref, resolved_commit=None,
-            depth=depth, resolved_by=resolved_by, is_dev=_is_dev,
-            registry_config=None,
-        ))
+        ctx.installed_packages.append(
+            InstalledPackage(
+                dep_ref=dep_ref,
+                resolved_commit=None,
+                depth=depth,
+                resolved_by=resolved_by,
+                is_dev=_is_dev,
+                registry_config=None,
+            )
+        )
         if install_path.is_dir() and not dep_ref.is_local:
             ctx.package_hashes[dep_key] = _compute_hash(install_path)
 
@@ -231,7 +234,7 @@ class CachedDependencySource(DependencySource):
 
     def __init__(
         self,
-        ctx: "InstallContext",
+        ctx: InstallContext,
         dep_ref: Any,
         install_path: Path,
         dep_key: str,
@@ -242,7 +245,7 @@ class CachedDependencySource(DependencySource):
         self.resolved_ref = resolved_ref
         self.dep_locked_chk = dep_locked_chk
 
-    def acquire(self) -> Optional[Materialization]:
+    def acquire(self) -> Materialization | None:
         from apm_cli.constants import APM_YML_FILENAME
         from apm_cli.deps.installed_package import InstalledPackage
         from apm_cli.models.apm_package import (
@@ -274,7 +277,7 @@ class CachedDependencySource(DependencySource):
         if logger:
             logger.download_complete(display_name, ref=_ref, sha=_sha, cached=True)
 
-        deltas: Dict[str, int] = {"installed": 1}
+        deltas: dict[str, int] = {"installed": 1}
         if not dep_ref.reference:
             deltas["unpinned"] = 1
 
@@ -304,11 +307,15 @@ class CachedDependencySource(DependencySource):
                 source=dep_ref.repo_url,
             )
 
-        resolved_or_cached_ref = resolved_ref if resolved_ref else ResolvedReference(
-            original_ref=dep_ref.reference or "default",
-            ref_type=GitReferenceType.BRANCH,
-            resolved_commit="cached",
-            ref_name=dep_ref.reference or "default",
+        resolved_or_cached_ref = (
+            resolved_ref
+            if resolved_ref
+            else ResolvedReference(
+                original_ref=dep_ref.reference or "default",
+                ref_type=GitReferenceType.BRANCH,
+                resolved_commit="cached",
+                ref_name=dep_ref.reference or "default",
+            )
         )
 
         cached_package_info = PackageInfo(
@@ -347,16 +354,21 @@ class CachedDependencySource(DependencySource):
 
         # Determine if cached package came from registry
         _cached_registry = None
-        if dep_locked_chk and dep_locked_chk.registry_prefix:
-            _cached_registry = ctx.registry_config
-        elif ctx.registry_config and not dep_ref.is_local:
+        if (dep_locked_chk and dep_locked_chk.registry_prefix) or (
+            ctx.registry_config and not dep_ref.is_local
+        ):
             _cached_registry = ctx.registry_config
 
-        ctx.installed_packages.append(InstalledPackage(
-            dep_ref=dep_ref, resolved_commit=cached_commit,
-            depth=depth, resolved_by=resolved_by, is_dev=_is_dev,
-            registry_config=_cached_registry,
-        ))
+        ctx.installed_packages.append(
+            InstalledPackage(
+                dep_ref=dep_ref,
+                resolved_commit=cached_commit,
+                depth=depth,
+                resolved_by=resolved_by,
+                is_dev=_is_dev,
+                registry_config=_cached_registry,
+            )
+        )
         if install_path.is_dir():
             ctx.package_hashes[dep_key] = _compute_hash(install_path)
         if cached_package_info.package_type:
@@ -383,7 +395,7 @@ class FreshDependencySource(DependencySource):
 
     def __init__(
         self,
-        ctx: "InstallContext",
+        ctx: InstallContext,
         dep_ref: Any,
         install_path: Path,
         dep_key: str,
@@ -398,10 +410,10 @@ class FreshDependencySource(DependencySource):
         self.ref_changed = ref_changed
         self.progress = progress
 
-    def acquire(self) -> Optional[Materialization]:
+    def acquire(self) -> Materialization | None:
         from apm_cli.deps.installed_package import InstalledPackage
         from apm_cli.drift import build_download_ref
-        from apm_cli.models.apm_package import PackageType
+        from apm_cli.models.apm_package import PackageType  # noqa: F401
         from apm_cli.utils.content_hash import compute_package_hash as _compute_hash
         from apm_cli.utils.path_security import safe_rmtree
 
@@ -417,9 +429,7 @@ class FreshDependencySource(DependencySource):
 
         try:
             display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
-            short_name = (
-                display_name.split("/")[-1] if "/" in display_name else display_name
-            )
+            short_name = display_name.split("/")[-1] if "/" in display_name else display_name
 
             task_id = progress.add_task(
                 description=f"Fetching {short_name}",
@@ -447,7 +457,7 @@ class FreshDependencySource(DependencySource):
             progress.update(task_id, visible=False)
             progress.refresh()
 
-            deltas: Dict[str, int] = {"installed": 1}
+            deltas: dict[str, int] = {"installed": 1}
 
             resolved = getattr(package_info, "resolved_reference", None)
             if logger:
@@ -491,15 +501,18 @@ class FreshDependencySource(DependencySource):
                 resolved_commit = package_info.resolved_reference.resolved_commit
             node = ctx.dependency_graph.dependency_tree.get_node(dep_key)
             depth = node.depth if node else 1
-            resolved_by = (
-                node.parent.dependency_ref.repo_url if node and node.parent else None
-            )
+            resolved_by = node.parent.dependency_ref.repo_url if node and node.parent else None
             _is_dev = node.is_dev if node else False
-            ctx.installed_packages.append(InstalledPackage(
-                dep_ref=dep_ref, resolved_commit=resolved_commit,
-                depth=depth, resolved_by=resolved_by, is_dev=_is_dev,
-                registry_config=ctx.registry_config if not dep_ref.is_local else None,
-            ))
+            ctx.installed_packages.append(
+                InstalledPackage(
+                    dep_ref=dep_ref,
+                    resolved_commit=resolved_commit,
+                    depth=depth,
+                    resolved_by=resolved_by,
+                    is_dev=_is_dev,
+                    registry_config=ctx.registry_config if not dep_ref.is_local else None,
+                )
+            )
             if install_path.is_dir():
                 ctx.package_hashes[dep_key] = _compute_hash(install_path)
 
@@ -555,7 +568,7 @@ class FreshDependencySource(DependencySource):
         except Exception as e:
             display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
             # task_id may not exist if progress.add_task failed; guard it.
-            try:
+            try:  # noqa: SIM105
                 progress.remove_task(task_id)  # type: ignore[name-defined]
             except Exception:
                 pass
@@ -567,7 +580,7 @@ class FreshDependencySource(DependencySource):
 
 
 def make_dependency_source(
-    ctx: "InstallContext",
+    ctx: InstallContext,
     dep_ref: Any,
     install_path: Path,
     dep_key: str,
@@ -588,9 +601,20 @@ def make_dependency_source(
         return LocalDependencySource(ctx, dep_ref, install_path, dep_key)
     if skip_download:
         return CachedDependencySource(
-            ctx, dep_ref, install_path, dep_key, resolved_ref, dep_locked_chk,
+            ctx,
+            dep_ref,
+            install_path,
+            dep_key,
+            resolved_ref,
+            dep_locked_chk,
         )
     return FreshDependencySource(
-        ctx, dep_ref, install_path, dep_key,
-        resolved_ref, dep_locked_chk, ref_changed, progress,
+        ctx,
+        dep_ref,
+        install_path,
+        dep_key,
+        resolved_ref,
+        dep_locked_chk,
+        ref_changed,
+        progress,
     )

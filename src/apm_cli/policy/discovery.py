@@ -27,29 +27,29 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple  # noqa: F401, UP035
 from urllib.parse import urlparse
 
 import requests
 import yaml
 
+from ..utils.path_security import PathTraversalError, ensure_path_within
 from .parser import PolicyValidationError, load_policy
 from .project_config import (
-    ALLOWED_HASH_ALGORITHMS,
     _DEFAULT_HASH_ALGORITHM,
     _HASH_HEX_LEN,
     _HEX_RE,
+    ALLOWED_HASH_ALGORITHMS,
     ProjectPolicyConfigError,
     compute_policy_hash,
     read_project_policy_hash_pin,
 )
 from .schema import ApmPolicy
-from ..utils.path_security import PathTraversalError, ensure_path_within
 
 logger = logging.getLogger(__name__)
 
 
-def _split_hash_pin(expected_hash: str) -> Tuple[str, str]:
+def _split_hash_pin(expected_hash: str) -> tuple[str, str]:
     """Split an ``"<algo>:<hex>"`` pin into (algorithm, lowercase_hex).
 
     Bare hex (no prefix) is interpreted as sha256 for backwards
@@ -68,18 +68,14 @@ def _split_hash_pin(expected_hash: str) -> Tuple[str, str]:
         hex_part = raw
     hex_part = hex_part.strip().lower()
     if algo not in ALLOWED_HASH_ALGORITHMS:
-        raise ProjectPolicyConfigError(
-            f"Unsupported policy.hash algorithm '{algo}'"
-        )
+        raise ProjectPolicyConfigError(f"Unsupported policy.hash algorithm '{algo}'")
     expected_len = _HASH_HEX_LEN[algo]
     if len(hex_part) != expected_len or not _HEX_RE.match(hex_part):
-        raise ProjectPolicyConfigError(
-            f"policy.hash is not a valid {algo} digest"
-        )
+        raise ProjectPolicyConfigError(f"policy.hash is not a valid {algo} digest")
     return algo, hex_part
 
 
-def _compute_hash_normalized(content: str, expected_hash: Optional[str]) -> str:
+def _compute_hash_normalized(content: str, expected_hash: str | None) -> str:
     """Compute the digest of *content* under the algorithm declared by
     *expected_hash*, returning the canonical ``"<algo>:<hex>"`` form.
 
@@ -98,9 +94,9 @@ def _compute_hash_normalized(content: str, expected_hash: Optional[str]) -> str:
 
 def _verify_hash_pin(
     content: object,
-    expected_hash: Optional[str],
+    expected_hash: str | None,
     source_label: str,
-) -> Optional[PolicyFetchResult]:
+) -> PolicyFetchResult | None:
     """Verify fetched policy bytes against the project's pin (#827).
 
     Returns ``None`` when there is no pin, or the digest matches. On
@@ -136,10 +132,7 @@ def _verify_hash_pin(
         return PolicyFetchResult(
             outcome="hash_mismatch",
             source=source_label,
-            error=(
-                f"Policy hash mismatch from {source_label}: "
-                f"invalid pin ({exc})"
-            ),
+            error=(f"Policy hash mismatch from {source_label}: invalid pin ({exc})"),
             expected_hash=expected_hash,
         )
 
@@ -155,12 +148,12 @@ def _verify_hash_pin(
         outcome="hash_mismatch",
         source=source_label,
         error=(
-            f"Policy hash mismatch from {source_label}: "
-            f"expected {expected_norm}, got {actual_norm}"
+            f"Policy hash mismatch from {source_label}: expected {expected_norm}, got {actual_norm}"
         ),
         expected_hash=expected_norm,
         raw_bytes_hash=actual_norm,
     )
+
 
 # Cache location: apm_modules/.policy-cache/<hash>.yml + <hash>.meta.json
 POLICY_CACHE_DIR = ".policy-cache"
@@ -189,23 +182,23 @@ class PolicyFetchResult:
                                  the fetched policy bytes (always fail-closed)
     """
 
-    policy: Optional[ApmPolicy] = None
+    policy: ApmPolicy | None = None
     source: str = ""  # "org:contoso/.github", "file:/path", "url:https://..."
     cached: bool = False  # True if served from cache
-    error: Optional[str] = None  # Error message if fetch failed
+    error: str | None = None  # Error message if fetch failed
 
     # -- Outcome-matrix fields (W1-cache-redesign) --
-    cache_age_seconds: Optional[int] = None  # Age of cache entry in seconds
+    cache_age_seconds: int | None = None  # Age of cache entry in seconds
     cache_stale: bool = False  # True if cache was served past TTL
-    fetch_error: Optional[str] = None  # Network/parse error on refresh attempt
+    fetch_error: str | None = None  # Network/parse error on refresh attempt
     outcome: str = ""  # See docstring for valid values
 
     # -- Hash-pin fields (#827 supply-chain hardening) --
     # raw_bytes_hash is the digest of the leaf policy bytes off the wire,
     # in canonical "<algo>:<hex>" form. Persisted to the cache so subsequent
     # cached reads can verify against the project's pin without re-fetching.
-    raw_bytes_hash: Optional[str] = None
-    expected_hash: Optional[str] = None  # The pin that was checked, if any
+    raw_bytes_hash: str | None = None
+    expected_hash: str | None = None  # The pin that was checked, if any
 
     @property
     def found(self) -> bool:
@@ -215,7 +208,7 @@ class PolicyFetchResult:
 def discover_policy_with_chain(
     project_root: Path,
     *,
-    expected_hash: Optional[str] = None,
+    expected_hash: str | None = None,
 ) -> PolicyFetchResult:
     """Discover policy with full inheritance chain resolution.
 
@@ -292,14 +285,10 @@ def discover_policy_with_chain(
 
 def _strip_source_prefix(src: str) -> str:
     """Strip 'org:' / 'url:' / 'file:' prefix from a PolicyFetchResult.source."""
-    return (
-        src.removeprefix("org:")
-        .removeprefix("url:")
-        .removeprefix("file:")
-    )
+    return src.removeprefix("org:").removeprefix("url:").removeprefix("file:")
 
 
-def _derive_leaf_host(source: str, project_root: Path) -> Optional[str]:
+def _derive_leaf_host(source: str, project_root: Path) -> str | None:
     """Derive the origin host of the leaf policy.
 
     The leaf host pins which host an ``extends:`` reference may resolve
@@ -314,7 +303,7 @@ def _derive_leaf_host(source: str, project_root: Path) -> Optional[str]:
     * ``org:<owner>/<repo>`` (2 slash-segments) -> ``github.com`` (default)
     * ``file:<path>`` -> fall back to git remote of *project_root*
     """
-    if not source:
+    if not source:  # noqa: SIM108
         bare = ""
     else:
         bare = _strip_source_prefix(source)
@@ -346,7 +335,7 @@ def _derive_leaf_host(source: str, project_root: Path) -> Optional[str]:
     return None
 
 
-def _extract_extends_host(ref: str) -> Optional[str]:
+def _extract_extends_host(ref: str) -> str | None:
     """Return the host an ``extends:`` ref resolves against, if explicit.
 
     * Full URL -> URL host (lowercase)
@@ -372,7 +361,7 @@ def _extract_extends_host(ref: str) -> Optional[str]:
     return None
 
 
-def _validate_extends_host(leaf_host: Optional[str], extends_ref: str) -> None:
+def _validate_extends_host(leaf_host: str | None, extends_ref: str) -> None:
     """Reject ``extends:`` refs that point at a different host than the leaf.
 
     Raises :class:`PolicyInheritanceError` (imported lazily to avoid a
@@ -425,8 +414,8 @@ def _resolve_and_persist_chain(
     Called by :func:`discover_policy_with_chain` -- not intended for direct
     use.
     """
-    from . import inheritance as _inheritance_mod
     from ..utils.console import _rich_warning
+    from . import inheritance as _inheritance_mod
 
     leaf_policy = fetch_result.policy
     leaf_source = fetch_result.source
@@ -438,16 +427,16 @@ def _resolve_and_persist_chain(
 
     # Ordered ancestors collected as we walk parents.  Built leaf-first
     # for traversal convenience; reversed before merging.
-    chain_policies: List[ApmPolicy] = [leaf_policy]
-    chain_sources: List[str] = [leaf_source]
+    chain_policies: list[ApmPolicy] = [leaf_policy]
+    chain_sources: list[str] = [leaf_source]
 
     # Track normalized refs we've already followed to break cycles.
     # We seed with the leaf's source so an extends pointing back at the
     # leaf is also detected.
-    visited: List[str] = [_strip_source_prefix(leaf_source)] if leaf_source else []
+    visited: list[str] = [_strip_source_prefix(leaf_source)] if leaf_source else []
 
     current = leaf_policy
-    partial_warning: Optional[Tuple[str, int, int]] = None
+    partial_warning: tuple[str, int, int] | None = None
 
     while current.extends:
         next_ref = current.extends
@@ -458,8 +447,7 @@ def _resolve_and_persist_chain(
 
         if _inheritance_mod.detect_cycle(visited, next_ref):
             raise _inheritance_mod.PolicyInheritanceError(
-                f"Cycle detected in policy extends chain: "
-                f"{' -> '.join(visited)} -> {next_ref}"
+                f"Cycle detected in policy extends chain: {' -> '.join(visited)} -> {next_ref}"
             )
 
         # Depth check: chain_policies already has len() entries; next fetch
@@ -512,9 +500,7 @@ def _resolve_and_persist_chain(
         # see a single consistent error type.
         raise
 
-    chain_refs: List[str] = [
-        _strip_source_prefix(src) for src in ordered_sources if src
-    ]
+    chain_refs: list[str] = [_strip_source_prefix(src) for src in ordered_sources if src]
 
     cache_key = _strip_source_prefix(leaf_source) if leaf_source else ""
     if cache_key:
@@ -525,8 +511,7 @@ def _resolve_and_persist_chain(
     if partial_warning is not None:
         ref, resolved, attempted = partial_warning
         _rich_warning(
-            f"Policy chain incomplete: {ref} unreachable, "
-            f"using {resolved} of {attempted} policies",
+            f"Policy chain incomplete: {ref} unreachable, using {resolved} of {attempted} policies",
             symbol="warning",
         )
 
@@ -534,9 +519,9 @@ def _resolve_and_persist_chain(
 def discover_policy(
     project_root: Path,
     *,
-    policy_override: Optional[str] = None,
+    policy_override: str | None = None,
     no_cache: bool = False,
-    expected_hash: Optional[str] = None,
+    expected_hash: str | None = None,
 ) -> PolicyFetchResult:
     """Discover and load the applicable policy for a project.
 
@@ -584,14 +569,10 @@ def discover_policy(
             )
 
     # Auto-discover from git remote
-    return _auto_discover(
-        project_root, no_cache=no_cache, expected_hash=expected_hash
-    )
+    return _auto_discover(project_root, no_cache=no_cache, expected_hash=expected_hash)
 
 
-def _load_from_file(
-    path: Path, *, expected_hash: Optional[str] = None
-) -> PolicyFetchResult:
+def _load_from_file(path: Path, *, expected_hash: str | None = None) -> PolicyFetchResult:
     """Load policy from a local file."""
     try:
         # Read raw bytes ourselves so we can verify the pin against the
@@ -613,9 +594,7 @@ def _load_from_file(
         policy, _warnings = load_policy(content)
         outcome = "empty" if _is_policy_empty(policy) else "found"
         actual_hash = (
-            _compute_hash_normalized(content, expected_hash)
-            if expected_hash is not None
-            else None
+            _compute_hash_normalized(content, expected_hash) if expected_hash is not None else None
         )
         return PolicyFetchResult(
             policy=policy,
@@ -625,16 +604,14 @@ def _load_from_file(
             expected_hash=expected_hash,
         )
     except PolicyValidationError as e:
-        return PolicyFetchResult(
-            error=f"Invalid policy file {path}: {e}", outcome="malformed"
-        )
+        return PolicyFetchResult(error=f"Invalid policy file {path}: {e}", outcome="malformed")
 
 
 def _auto_discover(
     project_root: Path,
     *,
     no_cache: bool = False,
-    expected_hash: Optional[str] = None,
+    expected_hash: str | None = None,
 ) -> PolicyFetchResult:
     """Auto-discover policy from org's .github repo.
 
@@ -654,14 +631,12 @@ def _auto_discover(
     if host and host != "github.com":
         repo_ref = f"{host}/{repo_ref}"
 
-    return _fetch_from_repo(
-        repo_ref, project_root, no_cache=no_cache, expected_hash=expected_hash
-    )
+    return _fetch_from_repo(repo_ref, project_root, no_cache=no_cache, expected_hash=expected_hash)
 
 
 def _extract_org_from_git_remote(
     project_root: Path,
-) -> Optional[Tuple[str, str]]:
+) -> tuple[str, str] | None:
     """Extract (org, host) from git remote origin URL.
 
     Handles:
@@ -685,7 +660,7 @@ def _extract_org_from_git_remote(
         return None
 
 
-def _parse_remote_url(url: str) -> Optional[Tuple[str, str]]:
+def _parse_remote_url(url: str) -> tuple[str, str] | None:
     """Parse a git remote URL into (org, host).
 
     Returns None if URL can't be parsed.
@@ -711,9 +686,7 @@ def _parse_remote_url(url: str) -> Optional[Tuple[str, str]]:
         try:
             parsed = urlparse(url)
             host = parsed.hostname or ""
-            path_parts = (
-                parsed.path.strip("/").removesuffix(".git").rstrip("/").split("/")
-            )
+            path_parts = parsed.path.strip("/").removesuffix(".git").rstrip("/").split("/")
             if host and path_parts and path_parts[0]:
                 return (path_parts[0], host)
         except Exception:
@@ -727,17 +700,15 @@ def _fetch_from_url(
     project_root: Path,
     *,
     no_cache: bool = False,
-    expected_hash: Optional[str] = None,
+    expected_hash: str | None = None,
 ) -> PolicyFetchResult:
     """Fetch policy YAML from a direct URL."""
     source_label = f"url:{url}"
-    cache_entry: Optional[_CacheEntry] = None
+    cache_entry: _CacheEntry | None = None
 
     # Use URL as cache key
     if not no_cache:
-        cache_entry = _read_cache_entry(
-            url, project_root, expected_hash=expected_hash
-        )
+        cache_entry = _read_cache_entry(url, project_root, expected_hash=expected_hash)
         if cache_entry is not None and not cache_entry.stale:
             outcome = "empty" if _is_policy_empty(cache_entry.policy) else "found"
             return PolicyFetchResult(
@@ -750,8 +721,8 @@ def _fetch_from_url(
                 expected_hash=expected_hash,
             )
 
-    fetch_error: Optional[str] = None
-    content: Optional[str] = None
+    fetch_error: str | None = None
+    content: str | None = None
 
     try:
         resp = requests.get(url, timeout=10, allow_redirects=False)
@@ -766,10 +737,7 @@ def _fetch_from_url(
             # could otherwise bounce us to an attacker-controlled host
             # (SSRF / Referer leakage). Treat as fetch failure.
             location = resp.headers.get("Location", "<no Location header>")
-            fetch_error = (
-                f"Refusing HTTP redirect ({resp.status_code}) "
-                f"from {url} to {location}"
-            )
+            fetch_error = f"Refusing HTTP redirect ({resp.status_code}) from {url} to {location}"
         elif resp.status_code != 200:
             fetch_error = f"HTTP {resp.status_code} fetching {url}"
         else:
@@ -832,19 +800,17 @@ def _fetch_from_repo(
     project_root: Path,
     *,
     no_cache: bool = False,
-    expected_hash: Optional[str] = None,
+    expected_hash: str | None = None,
 ) -> PolicyFetchResult:
     """Fetch apm-policy.yml from a GitHub repo via Contents API.
 
     repo_ref format: "owner/.github" or "host/owner/.github"
     """
     source_label = f"org:{repo_ref}"
-    cache_entry: Optional[_CacheEntry] = None
+    cache_entry: _CacheEntry | None = None
 
     if not no_cache:
-        cache_entry = _read_cache_entry(
-            repo_ref, project_root, expected_hash=expected_hash
-        )
+        cache_entry = _read_cache_entry(repo_ref, project_root, expected_hash=expected_hash)
         if cache_entry is not None and not cache_entry.stale:
             outcome = "empty" if _is_policy_empty(cache_entry.policy) else "found"
             return PolicyFetchResult(
@@ -864,9 +830,7 @@ def _fetch_from_repo(
         if "404" in error:
             return PolicyFetchResult(source=source_label, outcome="absent")
         # Fetch failed -- try stale cache fallback
-        return _stale_fallback_or_error(
-            cache_entry, error, source_label, "cache_miss_fetch_fail"
-        )
+        return _stale_fallback_or_error(cache_entry, error, source_label, "cache_miss_fetch_fail")
 
     if content is None:
         return PolicyFetchResult(source=source_label, outcome="absent")
@@ -912,7 +876,7 @@ def _fetch_from_repo(
 def _fetch_github_contents(
     repo_ref: str,
     file_path: str,
-) -> Tuple[Optional[str], Optional[str]]:
+) -> tuple[str | None, str | None]:
     """Fetch file contents from GitHub API.
 
     Returns (content_string, error_string). One will be None.
@@ -934,9 +898,7 @@ def _fetch_github_contents(
     if host == "github.com":
         api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}"
     else:
-        api_url = (
-            f"https://{host}/api/v3/repos/{owner}/{repo}/contents/{file_path}"
-        )
+        api_url = f"https://{host}/api/v3/repos/{owner}/{repo}/contents/{file_path}"
 
     headers = {"Accept": "application/vnd.github.v3+json"}
     token = _get_token_for_host(host)
@@ -952,8 +914,7 @@ def _fetch_github_contents(
         if 300 <= resp.status_code < 400:
             location = resp.headers.get("Location", "<no Location header>")
             return None, (
-                f"Refusing HTTP redirect ({resp.status_code}) from "
-                f"{api_url} to {location}"
+                f"Refusing HTTP redirect ({resp.status_code}) from {api_url} to {location}"
             )
         if resp.status_code != 200:
             return None, f"HTTP {resp.status_code} fetching policy from {repo_ref}"
@@ -981,12 +942,12 @@ def _is_github_host(host: str) -> bool:
     if host.endswith(".ghe.com"):
         return True
     gh_host = os.environ.get("GITHUB_HOST", "")
-    if gh_host and host == gh_host:
+    if gh_host and host == gh_host:  # noqa: SIM103
         return True
     return False
 
 
-def _get_token_for_host(host: str) -> Optional[str]:
+def _get_token_for_host(host: str) -> str | None:
     """Get authentication token for a given host.
 
     Environment-variable tokens (GITHUB_TOKEN, GITHUB_APM_PAT, GH_TOKEN)
@@ -1020,7 +981,7 @@ class _CacheEntry:
     source: str
     age_seconds: int
     stale: bool  # True if past TTL (but within MAX_STALE_TTL)
-    chain_refs: List[str] = field(default_factory=list)
+    chain_refs: list[str] = field(default_factory=list)
     fingerprint: str = ""
     raw_bytes_hash: str = ""  # "<algo>:<hex>" of leaf bytes off wire (#827)
 
@@ -1047,7 +1008,7 @@ def _get_cache_dir(project_root: Path) -> Path:
     try:
         ensure_path_within(candidate, project_root)
     except PathTraversalError:
-        raise PathTraversalError(
+        raise PathTraversalError(  # noqa: B904
             f"Policy cache path '{candidate}' resolves outside "
             f"project root '{project_root}' -- refusing to read or "
             "write the cache here."
@@ -1063,7 +1024,7 @@ def _cache_key(repo_ref: str) -> str:
 def _policy_to_dict(policy: ApmPolicy) -> dict:
     """Serialize an ApmPolicy to a dict matching the YAML schema."""
 
-    def _opt_list(val: Optional[Tuple[str, ...]]) -> Optional[list]:
+    def _opt_list(val: tuple[str, ...] | None) -> list | None:
         return None if val is None else list(val)
 
     return {
@@ -1114,7 +1075,7 @@ def _serialize_policy(policy: ApmPolicy) -> str:
     """Serialize an ApmPolicy to deterministic YAML for caching."""
     return yaml.dump(
         _policy_to_dict(policy), default_flow_style=False, sort_keys=True
-    )
+    )  # yaml-io-exempt
 
 
 def _policy_fingerprint(serialized: str) -> str:
@@ -1144,7 +1105,7 @@ def _is_policy_empty(policy: ApmPolicy) -> bool:
 
 
 def _stale_fallback_or_error(
-    cache_entry: Optional[_CacheEntry],
+    cache_entry: _CacheEntry | None,
     fetch_error_msg: str,
     source_label: str,
     outcome_on_miss: str,
@@ -1169,11 +1130,11 @@ def _stale_fallback_or_error(
 
 
 def _detect_garbage(
-    content: Optional[str],
+    content: str | None,
     identifier: str,
     source_label: str,
-    cache_entry: Optional[_CacheEntry],
-) -> Optional[PolicyFetchResult]:
+    cache_entry: _CacheEntry | None,
+) -> PolicyFetchResult | None:
     """Detect garbage responses (200 OK with non-YAML body).
 
     Returns a PolicyFetchResult if the content is garbage (stale fallback
@@ -1230,8 +1191,8 @@ def _read_cache_entry(
     project_root: Path,
     ttl: int = DEFAULT_CACHE_TTL,
     *,
-    expected_hash: Optional[str] = None,
-) -> Optional[_CacheEntry]:
+    expected_hash: str | None = None,
+) -> _CacheEntry | None:
     """Read cache entry with stale-awareness.
 
     Returns:
@@ -1306,7 +1267,7 @@ def _read_cache(
     repo_ref: str,
     project_root: Path,
     ttl: int = DEFAULT_CACHE_TTL,
-) -> Optional[PolicyFetchResult]:
+) -> PolicyFetchResult | None:
     """Read policy from cache if still valid (within TTL).
 
     Legacy wrapper around ``_read_cache_entry`` for backward compatibility.
@@ -1330,8 +1291,8 @@ def _write_cache(
     policy: ApmPolicy,
     project_root: Path,
     *,
-    chain_refs: Optional[List[str]] = None,
-    raw_bytes_hash: Optional[str] = None,
+    chain_refs: list[str] | None = None,
+    raw_bytes_hash: str | None = None,
 ) -> None:
     """Write merged effective policy and metadata to cache atomically.
 
@@ -1364,7 +1325,7 @@ def _write_cache(
         os.replace(str(tmp_policy), str(policy_file))
     except OSError:
         # Best-effort cleanup
-        try:
+        try:  # noqa: SIM105
             tmp_policy.unlink(missing_ok=True)
         except OSError:
             pass
@@ -1384,7 +1345,7 @@ def _write_cache(
         tmp_meta.write_text(json.dumps(meta), encoding="utf-8")
         os.replace(str(tmp_meta), str(meta_file))
     except OSError:
-        try:
+        try:  # noqa: SIM105
             tmp_meta.unlink(missing_ok=True)
         except OSError:
             pass

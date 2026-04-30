@@ -2,12 +2,11 @@
 
 import json
 import threading
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch  # noqa: F401
 
 import pytest
 
 from apm_cli.utils.console import _get_console, _reset_console
-
 
 # ---------------------------------------------------------------------------
 # Console singleton tests
@@ -75,9 +74,7 @@ class TestRegistryThreadSafety:
         config_dir = str(tmp_path / ".apm")
         monkeypatch.setattr("apm_cli.marketplace.registry._registry_cache", None)
         monkeypatch.setattr("apm_cli.config.CONFIG_DIR", config_dir)
-        monkeypatch.setattr(
-            "apm_cli.config.CONFIG_FILE", str(tmp_path / ".apm" / "config.json")
-        )
+        monkeypatch.setattr("apm_cli.config.CONFIG_FILE", str(tmp_path / ".apm" / "config.json"))
         monkeypatch.setattr("apm_cli.config._config_cache", None)
         self._tmp_path = tmp_path
         yield
@@ -96,9 +93,7 @@ class TestRegistryThreadSafety:
         """Concurrent _invalidate_cache + _load must not crash."""
         from apm_cli.marketplace import registry as reg
 
-        self._seed_marketplace_file(
-            [{"name": "acme", "owner": "o", "repo": "r"}]
-        )
+        self._seed_marketplace_file([{"name": "acme", "owner": "o", "repo": "r"}])
 
         errors: list = []
         barrier = threading.Barrier(10)
@@ -124,9 +119,7 @@ class TestRegistryThreadSafety:
         """After _load(), _registry_cache is populated."""
         from apm_cli.marketplace import registry as reg
 
-        self._seed_marketplace_file(
-            [{"name": "tools", "owner": "org", "repo": "repo"}]
-        )
+        self._seed_marketplace_file([{"name": "tools", "owner": "org", "repo": "repo"}])
 
         result = reg._load()
         assert len(result) == 1
@@ -141,9 +134,7 @@ class TestRegistryThreadSafety:
         """_load() then _invalidate_cache() causes next _load() to re-read."""
         from apm_cli.marketplace import registry as reg
 
-        self._seed_marketplace_file(
-            [{"name": "v1", "owner": "o", "repo": "r"}]
-        )
+        self._seed_marketplace_file([{"name": "v1", "owner": "o", "repo": "r"}])
 
         first = reg._load()
         assert len(first) == 1

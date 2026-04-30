@@ -12,15 +12,14 @@ Tests the complete lifecycle of deployed_files tracking with real packages:
 Requires network access and GITHUB_TOKEN/GITHUB_APM_PAT for GitHub API.
 """
 
-import json
+import json  # noqa: F401
 import os
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 import yaml
-from pathlib import Path
-
 
 # Skip all tests if no GitHub token is available
 pytestmark = pytest.mark.skipif(
@@ -66,7 +65,7 @@ def temp_project(tmp_path):
 def _run_apm(apm_command, args, cwd, timeout=120):
     """Run an apm CLI command and return the result."""
     return subprocess.run(
-        [apm_command] + args,
+        [apm_command] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -93,7 +92,7 @@ def _get_locked_dep(lockfile, key):
             repo_url = entry.get("repo_url", "")
             virtual_path = entry.get("virtual_path")
             dep_key = f"{repo_url}/{virtual_path}" if virtual_path else repo_url
-            if dep_key == key or repo_url == key:
+            if dep_key == key or repo_url == key:  # noqa: PLR1714
                 return entry
         return None
     # dict format (shouldn't happen, but be safe)
@@ -103,6 +102,7 @@ def _get_locked_dep(lockfile, key):
 # ---------------------------------------------------------------------------
 # Clean filename tests
 # ---------------------------------------------------------------------------
+
 
 class TestCleanFilenames:
     """Verify installed files use clean names (no -apm suffix)."""
@@ -116,9 +116,7 @@ class TestCleanFilenames:
         if prompts_dir.exists():
             prompt_files = list(prompts_dir.glob("*.prompt.md"))
             for f in prompt_files:
-                assert "-apm.prompt.md" not in f.name, (
-                    f"Prompt {f.name} still uses -apm suffix"
-                )
+                assert "-apm.prompt.md" not in f.name, f"Prompt {f.name} still uses -apm suffix"
 
     def test_agents_have_clean_names(self, temp_project, apm_command):
         """Agents should be deployed without -apm suffix."""
@@ -129,14 +127,13 @@ class TestCleanFilenames:
         if agents_dir.exists():
             agent_files = list(agents_dir.glob("*.agent.md"))
             for f in agent_files:
-                assert "-apm.agent.md" not in f.name, (
-                    f"Agent {f.name} still uses -apm suffix"
-                )
+                assert "-apm.agent.md" not in f.name, f"Agent {f.name} still uses -apm suffix"
 
 
 # ---------------------------------------------------------------------------
 # deployed_files lockfile tracking
 # ---------------------------------------------------------------------------
+
 
 class TestDeployedFilesInLockfile:
     """Verify deployed_files are recorded in apm.lock after install."""
@@ -165,9 +162,7 @@ class TestDeployedFilesInLockfile:
 
         for rel_path in dep["deployed_files"]:
             full_path = temp_project / rel_path
-            assert full_path.exists(), (
-                f"Deployed file {rel_path} does not exist on disk"
-            )
+            assert full_path.exists(), f"Deployed file {rel_path} does not exist on disk"
 
     def test_deployed_files_are_under_github_or_claude(self, temp_project, apm_command):
         """deployed_files should only be under .github/ or .claude/ directories."""
@@ -193,9 +188,7 @@ class TestDeployedFilesInLockfile:
         assert dep is not None
 
         for rel_path in dep["deployed_files"]:
-            assert "-apm." not in rel_path, (
-                f"Deployed file path {rel_path} still uses -apm suffix"
-            )
+            assert "-apm." not in rel_path, f"Deployed file path {rel_path} still uses -apm suffix"
 
     def test_skill_deployed_files_tracked(self, temp_project, apm_command):
         """Skill packages should have deployed_files entries for .github/skills/."""
@@ -235,6 +228,7 @@ class TestDeployedFilesInLockfile:
 # Collision detection
 # ---------------------------------------------------------------------------
 
+
 class TestCollisionDetection:
     """Test that user-authored files are not overwritten on re-install."""
 
@@ -254,7 +248,7 @@ class TestCollisionDetection:
             pytest.skip("No prompt files found")
 
         target_file = prompt_files[0]
-        target_name = target_file.name
+        target_name = target_file.name  # noqa: F841
 
         # Delete the lockfile to clear deployed_files tracking, then create
         # a user-authored file at the same path
@@ -314,6 +308,7 @@ class TestCollisionDetection:
 # Re-install preserves manifest
 # ---------------------------------------------------------------------------
 
+
 class TestReinstallPreservesManifest:
     """Verify that re-install updates deployed_files correctly."""
 
@@ -344,6 +339,7 @@ class TestReinstallPreservesManifest:
 # ---------------------------------------------------------------------------
 # Prune cleans deployed files
 # ---------------------------------------------------------------------------
+
 
 class TestPruneDeployedFiles:
     """Verify that prune removes deployed files for pruned packages."""
@@ -382,9 +378,7 @@ class TestPruneDeployedFiles:
         # Verify deployed files were cleaned up
         for rel_path in existing_files:
             full_path = temp_project / rel_path
-            assert not full_path.exists(), (
-                f"Deployed file {rel_path} was not cleaned up by prune"
-            )
+            assert not full_path.exists(), f"Deployed file {rel_path} was not cleaned up by prune"
 
     def test_prune_removes_package_from_lockfile(self, temp_project, apm_command):
         """After prune, the pruned package should not be in apm.lock."""
@@ -394,12 +388,7 @@ class TestPruneDeployedFiles:
 
         # Remove from apm.yml
         apm_yml = temp_project / "apm.yml"
-        apm_yml.write_text(
-            "name: deployed-files-test\n"
-            "version: 1.0.0\n"
-            "dependencies:\n"
-            "  apm: []\n"
-        )
+        apm_yml.write_text("name: deployed-files-test\nversion: 1.0.0\ndependencies:\n  apm: []\n")
 
         # Prune
         result2 = _run_apm(apm_command, ["prune"], temp_project)
@@ -415,6 +404,7 @@ class TestPruneDeployedFiles:
 # ---------------------------------------------------------------------------
 # Uninstall cleans deployed files
 # ---------------------------------------------------------------------------
+
 
 class TestUninstallDeployedFiles:
     """Verify that uninstall removes deployed files for the package."""

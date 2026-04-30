@@ -17,7 +17,7 @@ from apm_cli.primitives.models import (
 from apm_cli.primitives.parser import (
     _extract_primitive_name,
     parse_primitive_file,
-    validate_primitive,
+    validate_primitive,  # noqa: F401
 )
 
 
@@ -96,9 +96,7 @@ class TestPrimitiveModels(unittest.TestCase):
         self.assertEqual(context.validate(), [])
 
         # Empty content
-        context_no_content = Context(
-            name="test", file_path=Path("test.context.md"), content=""
-        )
+        context_no_content = Context(name="test", file_path=Path("test.context.md"), content="")
         errors = context_no_content.validate()
         self.assertEqual(len(errors), 1)
         self.assertIn("content", errors[0])
@@ -178,26 +176,20 @@ class TestPrimitiveModels(unittest.TestCase):
 
     def test_skill_validation_missing_name(self):
         """Test Skill validation with empty name."""
-        skill = Skill(
-            name="", file_path=Path("SKILL.md"), description="desc", content="content"
-        )
+        skill = Skill(name="", file_path=Path("SKILL.md"), description="desc", content="content")
         errors = skill.validate()
         self.assertIn("name", errors[0])
 
     def test_skill_validation_missing_description(self):
         """Test Skill validation with missing description."""
-        skill = Skill(
-            name="test", file_path=Path("SKILL.md"), description="", content="content"
-        )
+        skill = Skill(name="test", file_path=Path("SKILL.md"), description="", content="content")
         errors = skill.validate()
         self.assertEqual(len(errors), 1)
         self.assertIn("description", errors[0])
 
     def test_skill_validation_empty_content(self):
         """Test Skill validation with empty content."""
-        skill = Skill(
-            name="test", file_path=Path("SKILL.md"), description="desc", content=""
-        )
+        skill = Skill(name="test", file_path=Path("SKILL.md"), description="desc", content="")
         errors = skill.validate()
         self.assertEqual(len(errors), 1)
         self.assertIn("content", errors[0])
@@ -474,9 +466,7 @@ Follow these coding standards when writing Python code:
         # Verify it's an Instruction
         self.assertIsInstance(primitive, Instruction)
         self.assertEqual(primitive.name, "python-standards")
-        self.assertEqual(
-            primitive.description, "Python coding standards and conventions"
-        )
+        self.assertEqual(primitive.description, "Python coding standards and conventions")
         self.assertEqual(primitive.apply_to, "**/*.py")
         self.assertEqual(primitive.author, "Development Team")
         self.assertIn("Python Coding Standards", primitive.content)
@@ -532,9 +522,7 @@ This project is a command-line tool for managing AI workflows.
             "code-review",
         )
         self.assertEqual(
-            _extract_primitive_name(
-                Path(".apm/instructions/python-style.instructions.md")
-            ),
+            _extract_primitive_name(Path(".apm/instructions/python-style.instructions.md")),
             "python-style",
         )
         self.assertEqual(
@@ -555,9 +543,7 @@ This project is a command-line tool for managing AI workflows.
         )
 
         # Test generic files
-        self.assertEqual(
-            _extract_primitive_name(Path("my-chatmode.chatmode.md")), "my-chatmode"
-        )
+        self.assertEqual(_extract_primitive_name(Path("my-chatmode.chatmode.md")), "my-chatmode")
 
     def test_malformed_files(self):
         """Test handling of malformed files."""
@@ -588,16 +574,10 @@ class TestPrimitiveDiscovery(unittest.TestCase):
         self.temp_dir_path = self.temp_dir.name
 
         # Create directory structure
-        os.makedirs(
-            os.path.join(self.temp_dir_path, ".apm", "chatmodes"), exist_ok=True
-        )
-        os.makedirs(
-            os.path.join(self.temp_dir_path, ".apm", "instructions"), exist_ok=True
-        )
+        os.makedirs(os.path.join(self.temp_dir_path, ".apm", "chatmodes"), exist_ok=True)
+        os.makedirs(os.path.join(self.temp_dir_path, ".apm", "instructions"), exist_ok=True)
         os.makedirs(os.path.join(self.temp_dir_path, ".apm", "context"), exist_ok=True)
-        os.makedirs(
-            os.path.join(self.temp_dir_path, ".github", "chatmodes"), exist_ok=True
-        )
+        os.makedirs(os.path.join(self.temp_dir_path, ".github", "chatmodes"), exist_ok=True)
 
     def tearDown(self):
         """Tear down test fixtures."""
@@ -630,17 +610,13 @@ description: Test context
 
         # Write files
         with open(
-            os.path.join(
-                self.temp_dir_path, ".apm", "chatmodes", "assistant.chatmode.md"
-            ),
+            os.path.join(self.temp_dir_path, ".apm", "chatmodes", "assistant.chatmode.md"),
             "w",
         ) as f:
             f.write(chatmode_content)
 
         with open(
-            os.path.join(
-                self.temp_dir_path, ".apm", "instructions", "style.instructions.md"
-            ),
+            os.path.join(self.temp_dir_path, ".apm", "instructions", "style.instructions.md"),
             "w",
         ) as f:
             f.write(instruction_content)
@@ -652,9 +628,7 @@ description: Test context
             f.write(context_content)
 
         with open(
-            os.path.join(
-                self.temp_dir_path, ".github", "chatmodes", "vscode.chatmode.md"
-            ),
+            os.path.join(self.temp_dir_path, ".github", "chatmodes", "vscode.chatmode.md"),
             "w",
         ) as f:
             f.write(chatmode_content)
@@ -707,9 +681,7 @@ description: Test context
     def test_find_primitive_files_specific_patterns(self):
         """Test finding primitive files with specific patterns."""
         # Test with .apm specific pattern
-        apm_file = os.path.join(
-            self.temp_dir_path, ".apm", "chatmodes", "test.chatmode.md"
-        )
+        apm_file = os.path.join(self.temp_dir_path, ".apm", "chatmodes", "test.chatmode.md")
         with open(apm_file, "w") as f:
             f.write("---\ndescription: Test\n---\n\n# Test")
 

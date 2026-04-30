@@ -45,6 +45,7 @@ def _make_request(pkg, **overrides):
 class TestInstallRequest:
     def test_request_is_frozen(self, fake_apm_package):
         from dataclasses import FrozenInstanceError
+
         request = _make_request(fake_apm_package)
         with pytest.raises(FrozenInstanceError):
             request.force = True
@@ -103,9 +104,7 @@ class TestInstallServiceDelegation:
         logger = MagicMock()
         auth = MagicMock()
         scope = MagicMock()
-        request = _make_request(
-            fake_apm_package, logger=logger, auth_resolver=auth, scope=scope
-        )
+        request = _make_request(fake_apm_package, logger=logger, auth_resolver=auth, scope=scope)
         with patch("apm_cli.install.pipeline.run_install_pipeline") as mock_run:
             InstallService().run(request)
 
@@ -124,9 +123,7 @@ class TestInstallServiceDelegation:
 
 
 class TestClickWrapperUsesService:
-    def test_install_apm_dependencies_builds_request_and_uses_service(
-        self, fake_apm_package
-    ):
+    def test_install_apm_dependencies_builds_request_and_uses_service(self, fake_apm_package):
         from apm_cli.commands import install as install_mod
 
         with patch("apm_cli.install.service.InstallService.run") as mock_run:

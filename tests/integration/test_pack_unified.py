@@ -11,12 +11,11 @@ import json
 from pathlib import Path
 
 import pytest
-import yaml
+import yaml  # noqa: F401
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import marketplace
 from apm_cli.commands.pack import pack_cmd
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -78,8 +77,7 @@ class TestPackUnified:
         monkeypatch.chdir(tmp_path)
         _write_apm_yml(
             tmp_path,
-            "name: x\nversion: 0.1.0\ndescription: y\n"
-            "dependencies:\n  apm: []\n",
+            "name: x\nversion: 0.1.0\ndescription: y\ndependencies:\n  apm: []\n",
         )
         _write_minimal_lockfile(tmp_path)
 
@@ -152,9 +150,7 @@ marketplace:
         _write_marketplace_block_yml(tmp_path)
 
         out_path = tmp_path / "out" / "m.json"
-        result = runner.invoke(
-            pack_cmd, ["--marketplace-output", str(out_path)]
-        )
+        result = runner.invoke(pack_cmd, ["--marketplace-output", str(out_path)])
 
         assert result.exit_code == 0, result.output
         assert out_path.exists()
@@ -167,9 +163,7 @@ marketplace:
         plugin_dir = tmp_path / ".github" / "plugins" / "azure"
         plugin_dir.mkdir(parents=True)
         # apm.yml has neither dependencies nor marketplace blocks
-        _write_apm_yml(
-            tmp_path, "name: x\nversion: 0.1.0\ndescription: y\n"
-        )
+        _write_apm_yml(tmp_path, "name: x\nversion: 0.1.0\ndescription: y\n")
         (tmp_path / "marketplace.yml").write_text(
             """\
 name: legacy

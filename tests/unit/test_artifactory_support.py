@@ -43,9 +43,7 @@ class TestIsArtifactoryPath:
 
     def test_valid_artifactory_path_with_virtual(self):
         """Artifactory path with virtual sub-path (5+ segments)."""
-        assert is_artifactory_path(
-            ["artifactory", "github", "owner", "repo", "skills", "review"]
-        )
+        assert is_artifactory_path(["artifactory", "github", "owner", "repo", "skills", "review"])
 
     def test_case_insensitive(self):
         """Detection should be case-insensitive on the 'artifactory' segment."""
@@ -142,7 +140,10 @@ class TestBuildArtifactoryArchiveUrl:
         parsed = urlparse(urls[0])
         assert parsed.scheme == "https"
         assert parsed.hostname == "artifactory.example.com"
-        assert parsed.path == "/artifactory/github/microsoft/apm-sample-package/archive/refs/heads/main.zip"
+        assert (
+            parsed.path
+            == "/artifactory/github/microsoft/apm-sample-package/archive/refs/heads/main.zip"
+        )
 
     def test_codeload_upstream_heads_ref(self):
         """When Artifactory upstream targets codeload.github.com, generate codeload-style archive URLs.
@@ -153,9 +154,9 @@ class TestBuildArtifactoryArchiveUrl:
         urls = build_artifactory_archive_url(
             "art.example.com", "artifactory/github", "owner", "repo", ref="main"
         )
-        assert any("/zip/refs/heads/main" in u and not u.endswith("archive/refs/heads/main") for u in urls), (
-            "codeload-style /zip/refs/heads/{ref} URL must be present"
-        )
+        assert any(
+            "/zip/refs/heads/main" in u and not u.endswith("archive/refs/heads/main") for u in urls
+        ), "codeload-style /zip/refs/heads/{ref} URL must be present"
 
     def test_codeload_upstream_tags_ref(self):
         """Tags fallback for codeload-style upstream — /zip/refs/tags/{ref}."""
@@ -215,9 +216,7 @@ class TestDependencyReferenceArtifactory:
 
     def test_parse_with_tag_ref(self):
         """Artifactory FQDN with tag reference."""
-        dep = DependencyReference.parse(
-            "art.example.com/artifactory/github/owner/repo#v1.0.0"
-        )
+        dep = DependencyReference.parse("art.example.com/artifactory/github/owner/repo#v1.0.0")
         assert dep.is_artifactory()
         assert dep.reference == "v1.0.0"
 
@@ -286,9 +285,7 @@ class TestDependencyReferenceArtifactory:
 
     def test_different_repo_keys(self):
         """Different Artifactory repo keys should parse correctly."""
-        dep = DependencyReference.parse(
-            "art.example.com/artifactory/my-proxy/team/project"
-        )
+        dep = DependencyReference.parse("art.example.com/artifactory/my-proxy/team/project")
         assert dep.artifactory_prefix == "artifactory/my-proxy"
         assert dep.repo_url == "team/project"
 
@@ -303,9 +300,7 @@ class TestArtifactoryTokenManager:
         """TOKEN_PRECEDENCE should have artifactory_modules entry."""
         manager = GitHubTokenManager()
         assert "artifactory_modules" in manager.TOKEN_PRECEDENCE
-        assert (
-            "ARTIFACTORY_APM_TOKEN" in manager.TOKEN_PRECEDENCE["artifactory_modules"]
-        )
+        assert "ARTIFACTORY_APM_TOKEN" in manager.TOKEN_PRECEDENCE["artifactory_modules"]
 
     def test_get_artifactory_token(self):
         """get_token_for_purpose should return Artifactory token."""
@@ -340,9 +335,7 @@ class TestArtifactoryDownloader:
 
     def test_artifactory_token_setup(self):
         """Downloader picks up ARTIFACTORY_APM_TOKEN from environment."""
-        with patch.dict(
-            os.environ, {"ARTIFACTORY_APM_TOKEN": "art-token-123"}, clear=True
-        ):
+        with patch.dict(os.environ, {"ARTIFACTORY_APM_TOKEN": "art-token-123"}, clear=True):
             dl = GitHubPackageDownloader()
             assert dl.has_artifactory_token is True
             assert dl.artifactory_token == "art-token-123"
@@ -409,7 +402,7 @@ class TestArtifactoryDownloader:
         ):
             result = self.downloader._parse_artifactory_base_url()
             assert result is not None
-            host, prefix, scheme = result
+            host, prefix, scheme = result  # noqa: RUF059
             assert prefix == "artifactory/github"
 
     def test_parse_artifactory_base_url_not_set(self):
@@ -623,10 +616,16 @@ class TestArtifactoryFileDownload:
         """Archive entry download is tried before the full archive."""
         expected = b"# My Prompt\nDo something useful."
 
-        with patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=expected) as mock_entry:
+        with patch(
+            "apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=expected
+        ) as mock_entry:
             content = self.downloader._download_file_from_artifactory(
-                "art.example.com", "artifactory/github",
-                "owner", "repo", "prompts/deploy.prompt.md", "main",
+                "art.example.com",
+                "artifactory/github",
+                "owner",
+                "repo",
+                "prompts/deploy.prompt.md",
+                "main",
             )
 
         assert content == expected
@@ -634,9 +633,7 @@ class TestArtifactoryFileDownload:
 
     def test_entry_download_failure_falls_back_to_full_archive(self):
         """When entry download returns None, full archive is used."""
-        zip_bytes = self._make_zip_bytes(
-            files={"prompts/deploy.prompt.md": b"# Prompt content"}
-        )
+        zip_bytes = self._make_zip_bytes(files={"prompts/deploy.prompt.md": b"# Prompt content"})
         mock_resp = Mock()
         mock_resp.status_code = 200
         mock_resp.content = zip_bytes
@@ -644,8 +641,12 @@ class TestArtifactoryFileDownload:
         with patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=None):
             with patch.object(self.downloader, "_resilient_get", return_value=mock_resp):
                 content = self.downloader._download_file_from_artifactory(
-                    "art.example.com", "artifactory/github",
-                    "owner", "repo", "prompts/deploy.prompt.md", "main",
+                    "art.example.com",
+                    "artifactory/github",
+                    "owner",
+                    "repo",
+                    "prompts/deploy.prompt.md",
+                    "main",
                 )
 
         assert b"# Prompt content" in content
@@ -659,9 +660,7 @@ class TestArtifactoryResolveReference:
 
     def test_resolve_artifactory_ref_skips_git(self):
         """Artifactory deps should resolve without git clone."""
-        dep = DependencyReference.parse(
-            "art.example.com/artifactory/github/owner/repo#develop"
-        )
+        dep = DependencyReference.parse("art.example.com/artifactory/github/owner/repo#develop")
         ref = self.downloader.resolve_git_reference(str(dep))
         # Should resolve without any git operations
         assert ref is not None
@@ -732,9 +731,7 @@ class TestArtifactoryEdgeCases:
         target = self.temp_dir / "pkg"
         # Set limit to 0 MB so any archive is too large
         with patch.dict(os.environ, {"ARTIFACTORY_MAX_ARCHIVE_MB": "0"}):
-            with patch.object(
-                self.downloader, "_resilient_get", return_value=mock_resp
-            ):
+            with patch.object(self.downloader, "_resilient_get", return_value=mock_resp):
                 with pytest.raises(RuntimeError, match="Failed to download"):
                     self.downloader._download_artifactory_archive(
                         "art.example.com",
@@ -780,9 +777,7 @@ class TestArtifactoryEdgeCases:
         # Manually corrupt the repo_url to simulate edge case
         dep.repo_url = "single-segment"
         with pytest.raises(ValueError, match="expected 'owner/repo' format"):
-            self.downloader._download_package_from_artifactory(
-                dep, self.temp_dir / "pkg"
-            )
+            self.downloader._download_package_from_artifactory(dep, self.temp_dir / "pkg")
 
     def test_no_corporate_values_in_source(self):
         """Verify no corporate/internal hostnames leak into Artifactory-related source files."""
@@ -802,9 +797,9 @@ class TestArtifactoryEdgeCases:
                 continue
             content = py_file.read_text(encoding="utf-8", errors="ignore")
             for term in forbidden:
-                assert (
-                    term.lower() not in content.lower()
-                ), f"Found forbidden term '{term}' in {py_file}"
+                assert term.lower() not in content.lower(), (
+                    f"Found forbidden term '{term}' in {py_file}"
+                )
 
 
 # -- PROXY_REGISTRY_ONLY mode tests --
@@ -850,10 +845,13 @@ class TestProxyRegistryOnlyMode:
 
     def test_resolve_ref_skips_git_when_artifactory_only(self):
         """resolve_git_reference skips git for all deps when PROXY_REGISTRY_ONLY is set."""
-        with patch.dict(os.environ, {
-            "PROXY_REGISTRY_ONLY": "1",
-            "PROXY_REGISTRY_URL": "https://art.example.com/artifactory/github",
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "PROXY_REGISTRY_ONLY": "1",
+                "PROXY_REGISTRY_URL": "https://art.example.com/artifactory/github",
+            },
+        ):
             dl = GitHubPackageDownloader()
             ref = dl.resolve_git_reference("gitlab.com/owner/repo#develop")
             assert ref.ref_name == "develop"
@@ -871,27 +869,21 @@ class TestProxyRegistryOnlyMode:
         with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True):
             dl = GitHubPackageDownloader()
             with pytest.raises(RuntimeError, match="PROXY_REGISTRY_ONLY is set"):
-                dl.download_package(
-                    "owner/repo/prompts/deploy.prompt.md", Path("/tmp/test-pkg")
-                )
+                dl.download_package("owner/repo/prompts/deploy.prompt.md", Path("/tmp/test-pkg"))
 
     def test_virtual_collection_errors_without_base_url(self):
         """PROXY_REGISTRY_ONLY without PROXY_REGISTRY_URL raises for virtual collection packages."""
         with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True):
             dl = GitHubPackageDownloader()
             with pytest.raises(RuntimeError, match="PROXY_REGISTRY_ONLY is set"):
-                dl.download_package(
-                    "owner/repo/collections/my-collection", Path("/tmp/test-pkg")
-                )
+                dl.download_package("owner/repo/collections/my-collection", Path("/tmp/test-pkg"))
 
     def test_virtual_subdirectory_errors_without_base_url(self):
         """PROXY_REGISTRY_ONLY without PROXY_REGISTRY_URL raises for virtual subdirectory packages."""
         with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True):
             dl = GitHubPackageDownloader()
             with pytest.raises(RuntimeError, match="PROXY_REGISTRY_ONLY is set"):
-                dl.download_package(
-                    "owner/repo/skills/my-skill", Path("/tmp/test-pkg")
-                )
+                dl.download_package("owner/repo/skills/my-skill", Path("/tmp/test-pkg"))
 
     def test_explicit_artifactory_fqdn_virtual_file_passes(self):
         """Explicit Artifactory FQDN on virtual file dep is NOT blocked by PROXY_REGISTRY_ONLY."""
@@ -903,7 +895,7 @@ class TestProxyRegistryOnlyMode:
             assert dep.is_artifactory()
             assert dep.is_virtual_file()
             # Should not raise - explicit Artifactory FQDN bypasses the guard
-            with patch.object(dl, 'download_virtual_file_package', return_value=MagicMock()):
+            with patch.object(dl, "download_virtual_file_package", return_value=MagicMock()):
                 dl.download_package(dep, Path("/tmp/test-pkg"))
 
     def test_explicit_artifactory_fqdn_virtual_collection_passes(self):
@@ -916,7 +908,7 @@ class TestProxyRegistryOnlyMode:
             assert dep.is_artifactory()
             assert dep.is_virtual_collection()
             # Should not raise - explicit Artifactory FQDN bypasses the guard
-            with patch.object(dl, 'download_collection_package', return_value=MagicMock()):
+            with patch.object(dl, "download_collection_package", return_value=MagicMock()):
                 dl.download_package(dep, Path("/tmp/test-pkg"))
 
     def test_proxy_registry_only_is_canonical(self):
@@ -962,7 +954,10 @@ class TestRegistryConfig:
 
         dep = DependencyReference.parse("owner/repo")
         locked = LockedDependency.from_dependency_ref(
-            dep_ref=dep, resolved_commit="abc123", depth=1, resolved_by=None,
+            dep_ref=dep,
+            resolved_commit="abc123",
+            depth=1,
+            resolved_by=None,
             registry_config=cfg,
         )
         assert locked.host == "art.example.com"
@@ -986,16 +981,19 @@ class TestRegistryConfig:
     def test_deprecated_artifactory_base_url_alias(self):
         """ARTIFACTORY_BASE_URL still works and emits DeprecationWarning."""
         import warnings
+
         from apm_cli.deps.registry_proxy import RegistryConfig
 
-        with patch.dict(
-            os.environ,
-            {"ARTIFACTORY_BASE_URL": "https://art.example.com/artifactory/github"},
-            clear=True,
+        with (
+            patch.dict(
+                os.environ,
+                {"ARTIFACTORY_BASE_URL": "https://art.example.com/artifactory/github"},
+                clear=True,
+            ),
+            warnings.catch_warnings(record=True) as w,
         ):
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always")
-                cfg = RegistryConfig.from_env()
+            warnings.simplefilter("always")
+            cfg = RegistryConfig.from_env()
         assert cfg is not None
         assert cfg.host == "art.example.com"
         assert any("ARTIFACTORY_BASE_URL" in str(warning.message) for warning in w)
@@ -1015,7 +1013,10 @@ class TestRegistryConfig:
 
         dep = DependencyReference.parse("owner/repo")
         locked = LockedDependency.from_dependency_ref(
-            dep_ref=dep, resolved_commit="abc123", depth=1, resolved_by=None,
+            dep_ref=dep,
+            resolved_commit="abc123",
+            depth=1,
+            resolved_by=None,
             registry_config=cfg,
         )
         lock = LockFile()
@@ -1120,7 +1121,7 @@ class TestRegistryOnlyConflictDetection:
 
     def test_github_com_dep_is_a_conflict(self):
         """github.com host is a direct VCS source -> conflict when enforce_only=True."""
-        from apm_cli.deps.lockfile import LockedDependency, LockFile
+        from apm_cli.deps.lockfile import LockedDependency, LockFile  # noqa: F401
         from apm_cli.deps.registry_proxy import RegistryConfig
 
         with patch.dict(
@@ -1176,9 +1177,7 @@ class TestRegistryOnlyConflictDetection:
         ):
             cfg = RegistryConfig.from_env()
 
-        locked_local = LockedDependency(
-            repo_url="owner/repo", host="github.com", source="local"
-        )
+        locked_local = LockedDependency(repo_url="owner/repo", host="github.com", source="local")
         conflicts = cfg.validate_lockfile_deps([locked_local])
         assert len(conflicts) == 0
 
@@ -1341,8 +1340,12 @@ class TestArchiveEntryDownload:
         mock_get = self._mock_get(content=expected)
 
         result = fetch_entry_from_archive(
-            "art.example.com", "artifactory/github",
-            "owner", "repo", "prompts/deploy.prompt.md", "main",
+            "art.example.com",
+            "artifactory/github",
+            "owner",
+            "repo",
+            "prompts/deploy.prompt.md",
+            "main",
             headers={"Authorization": "Bearer tok"},
             resilient_get=mock_get,
         )
@@ -1360,8 +1363,12 @@ class TestArchiveEntryDownload:
         mock_get = self._mock_get(status_code=404)
 
         result = fetch_entry_from_archive(
-            "art.example.com", "artifactory/github",
-            "owner", "repo", "missing.md", "main",
+            "art.example.com",
+            "artifactory/github",
+            "owner",
+            "repo",
+            "missing.md",
+            "main",
             resilient_get=mock_get,
         )
 
@@ -1372,14 +1379,19 @@ class TestArchiveEntryDownload:
 
     def test_entry_download_returns_none_on_connection_error(self):
         """Returns None when the HTTP call raises an exception."""
-        from apm_cli.deps.artifactory_entry import fetch_entry_from_archive
         import requests as _requests
+
+        from apm_cli.deps.artifactory_entry import fetch_entry_from_archive
 
         mock_get = Mock(side_effect=_requests.ConnectionError("refused"))
 
         result = fetch_entry_from_archive(
-            "art.example.com", "artifactory/github",
-            "owner", "repo", "file.md", "main",
+            "art.example.com",
+            "artifactory/github",
+            "owner",
+            "repo",
+            "file.md",
+            "main",
             resilient_get=mock_get,
         )
 
@@ -1394,8 +1406,12 @@ class TestArchiveEntryDownload:
         mock_get = Mock(side_effect=[resp_404, resp_404, resp_200])
 
         result = fetch_entry_from_archive(
-            "art.example.com", "artifactory/github",
-            "owner", "repo", "SKILL.md", "v1.0",
+            "art.example.com",
+            "artifactory/github",
+            "owner",
+            "repo",
+            "SKILL.md",
+            "v1.0",
             resilient_get=mock_get,
         )
 
@@ -1413,8 +1429,12 @@ class TestArchiveEntryDownload:
         mock_get = self._mock_get()
 
         fetch_entry_from_archive(
-            "art.example.com", "artifactory/github",
-            "owner", "repo", "path with spaces/file.md", "main",
+            "art.example.com",
+            "artifactory/github",
+            "owner",
+            "repo",
+            "path with spaces/file.md",
+            "main",
             resilient_get=mock_get,
         )
 
@@ -1430,8 +1450,12 @@ class TestArchiveEntryDownload:
         headers = {"Authorization": "Bearer my-token"}
 
         fetch_entry_from_archive(
-            "art.example.com", "artifactory/github",
-            "owner", "repo", "file.md", "main",
+            "art.example.com",
+            "artifactory/github",
+            "owner",
+            "repo",
+            "file.md",
+            "main",
             headers=headers,
             resilient_get=mock_get,
         )
@@ -1446,8 +1470,12 @@ class TestArchiveEntryDownload:
         mock_get = self._mock_get(content=b"first hit")
 
         result = fetch_entry_from_archive(
-            "art.example.com", "artifactory/github",
-            "owner", "repo", "file.md", "main",
+            "art.example.com",
+            "artifactory/github",
+            "owner",
+            "repo",
+            "file.md",
+            "main",
             resilient_get=mock_get,
         )
 
@@ -1461,8 +1489,12 @@ class TestArchiveEntryDownload:
         mock_get = self._mock_get()
 
         result = fetch_entry_from_archive(
-            "art.example.com", "artifactory/github",
-            "owner", "repo", "../../etc/passwd", "main",
+            "art.example.com",
+            "artifactory/github",
+            "owner",
+            "repo",
+            "../../etc/passwd",
+            "main",
             resilient_get=mock_get,
         )
 
@@ -1476,8 +1508,12 @@ class TestArchiveEntryDownload:
         mock_get = self._mock_get()
 
         result = fetch_entry_from_archive(
-            "art.example.com", "artifactory/github",
-            "owner", "repo", "subdir/../../../secret", "main",
+            "art.example.com",
+            "artifactory/github",
+            "owner",
+            "repo",
+            "subdir/../../../secret",
+            "main",
             resilient_get=mock_get,
         )
 
@@ -1491,8 +1527,12 @@ class TestArchiveEntryDownload:
         mock_get = self._mock_get()
 
         result = fetch_entry_from_archive(
-            "art.example.com", "artifactory/github",
-            "owner", "repo", "subdir/./file.md", "main",
+            "art.example.com",
+            "artifactory/github",
+            "owner",
+            "repo",
+            "subdir/./file.md",
+            "main",
             resilient_get=mock_get,
         )
 
@@ -1506,8 +1546,12 @@ class TestArchiveEntryDownload:
         mock_get = self._mock_get()
 
         result = fetch_entry_from_archive(
-            "art.example.com", "artifactory/github",
-            "owner", "repo", "subdir//file.md", "main",
+            "art.example.com",
+            "artifactory/github",
+            "owner",
+            "repo",
+            "subdir//file.md",
+            "main",
             resilient_get=mock_get,
         )
 
@@ -1521,8 +1565,12 @@ class TestArchiveEntryDownload:
         mock_get = self._mock_get(content=b"tagged content")
 
         result = fetch_entry_from_archive(
-            "art.example.com", "artifactory/github",
-            "owner", "my-repo", "README.md", "v2.1.0",
+            "art.example.com",
+            "artifactory/github",
+            "owner",
+            "my-repo",
+            "README.md",
+            "v2.1.0",
             resilient_get=mock_get,
         )
 
@@ -1541,8 +1589,12 @@ class TestArchiveEntryDownload:
         mock_get = Mock(side_effect=[resp_404, resp_200])
 
         result = fetch_entry_from_archive(
-            "art.example.com", "artifactory/github",
-            "owner", "repo", "file.md", "feature/foo",
+            "art.example.com",
+            "artifactory/github",
+            "owner",
+            "repo",
+            "file.md",
+            "feature/foo",
             resilient_get=mock_get,
         )
 
@@ -1560,8 +1612,12 @@ class TestArchiveEntryDownload:
         mock_get = self._mock_get(content=b"public")
 
         result = fetch_entry_from_archive(
-            "art.example.com", "artifactory/github",
-            "owner", "repo", "file.md", "main",
+            "art.example.com",
+            "artifactory/github",
+            "owner",
+            "repo",
+            "file.md",
+            "main",
             resilient_get=mock_get,
         )
 
@@ -1590,7 +1646,7 @@ class TestParseArtifactoryBaseUrlCanonicalVar:
         ):
             result = self.downloader._parse_artifactory_base_url()
             assert result is not None
-            host, prefix, scheme = result
+            host, prefix, scheme = result  # noqa: RUF059
             assert host == "proxy.example.com"
             assert prefix == "registry/github"
 
@@ -1652,9 +1708,7 @@ class TestVirtualSubdirectoryLockfileReinstall:
 
     def test_subdirectory_uses_lockfile_fqdn(self):
         """When dep_ref.is_artifactory(), subdirectory download uses FQDN, not env var."""
-        dep = DependencyReference.parse(
-            "art.example.com/artifactory/github/owner/repo//subdir"
-        )
+        dep = DependencyReference.parse("art.example.com/artifactory/github/owner/repo//subdir")
         assert dep.is_artifactory()
         assert dep.is_virtual_subdirectory()
 
@@ -1672,35 +1726,35 @@ class TestVirtualSubdirectoryLockfileReinstall:
 
     def test_subdirectory_fqdn_no_env_var_needed(self):
         """Lockfile FQDN path works without any env var set."""
-        dep = DependencyReference.parse(
-            "art.example.com/artifactory/github/owner/repo//subdir"
-        )
+        dep = DependencyReference.parse("art.example.com/artifactory/github/owner/repo//subdir")
         target = Path("/tmp/test-subdir")
-        with patch.dict(os.environ, {}, clear=True):
-            with patch.object(
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
                 self.downloader,
                 "_download_subdirectory_from_artifactory",
                 return_value=Mock(),
-            ) as mock_dl:
-                self.downloader.download_package(dep, target)
-                mock_dl.assert_called_once()
+            ) as mock_dl,
+        ):
+            self.downloader.download_package(dep, target)
+            mock_dl.assert_called_once()
 
     def test_subdirectory_fqdn_takes_precedence_over_only_mode(self):
         """Mode 1 FQDN takes precedence even when PROXY_REGISTRY_ONLY is set."""
-        dep = DependencyReference.parse(
-            "art.example.com/artifactory/github/owner/repo//subdir"
-        )
+        dep = DependencyReference.parse("art.example.com/artifactory/github/owner/repo//subdir")
         target = Path("/tmp/test-subdir")
-        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True):
-            with patch.object(
+        with (
+            patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True),
+            patch.object(
                 self.downloader,
                 "_download_subdirectory_from_artifactory",
                 return_value=Mock(),
-            ) as mock_dl:
-                self.downloader.download_package(dep, target)
-                mock_dl.assert_called_once()
-                proxy_info = mock_dl.call_args[0][2]
-                assert proxy_info[0] == "art.example.com"
+            ) as mock_dl,
+        ):
+            self.downloader.download_package(dep, target)
+            mock_dl.assert_called_once()
+            proxy_info = mock_dl.call_args[0][2]
+            assert proxy_info[0] == "art.example.com"
 
 
 # -- Backward compat: deprecated ARTIFACTORY_ONLY still works --

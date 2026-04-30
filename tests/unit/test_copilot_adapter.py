@@ -19,15 +19,11 @@ class TestCopilotRemoteTransportValidation(unittest.TestCase):
         with open(self.temp_path, "w") as f:
             json.dump({"mcpServers": {}}, f)
 
-        self.mock_registry_patcher = patch(
-            "apm_cli.adapters.client.copilot.SimpleRegistryClient"
-        )
+        self.mock_registry_patcher = patch("apm_cli.adapters.client.copilot.SimpleRegistryClient")
         self.mock_registry_class = self.mock_registry_patcher.start()
         self.mock_registry_class.return_value = MagicMock()
 
-        self.mock_integration_patcher = patch(
-            "apm_cli.adapters.client.copilot.RegistryIntegration"
-        )
+        self.mock_integration_patcher = patch("apm_cli.adapters.client.copilot.RegistryIntegration")
         self.mock_integration_class = self.mock_integration_patcher.start()
         self.mock_integration_class.return_value = MagicMock()
 
