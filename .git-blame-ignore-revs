@@ -1,0 +1,11 @@
+# This file lists bulk formatting or mechanical refactoring commits that should
+# be ignored by git blame.
+#
+# To enable locally:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# Apply code formatting with Black
+2340fc778563d8b5c78b3458b9c26c5441c96c4b
+
+# Apply Black formatting to new files
+962fffd3e6974ed1e0cc44170fe796541d213739
