@@ -556,7 +556,9 @@ class TestIntegratePackagePrimitivesTargetGating:
 
     def test_cursor_target_dispatches_commands(self):
         """When targets=[cursor], commands must be dispatched."""
-        import tempfile, shutil
+        import shutil
+        import tempfile
+
         from apm_cli.commands.install import _integrate_package_primitives
         from apm_cli.integration.targets import KNOWN_TARGETS
         from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -614,14 +616,14 @@ class TestCursorCommandEndToEnd:
     def test_full_dispatch_deploys_to_cursor(self, temp_project):
         """Prompt files deploy to .cursor/commands/ via full dispatch pipeline."""
         from apm_cli.install.services import integrate_package_primitives
-        from apm_cli.integration.targets import KNOWN_TARGETS
         from apm_cli.integration import (
-            PromptIntegrator,
             AgentIntegrator,
-            SkillIntegrator,
-            InstructionIntegrator,
             HookIntegrator,
+            InstructionIntegrator,
+            PromptIntegrator,
+            SkillIntegrator,
         )
+        from apm_cli.integration.targets import KNOWN_TARGETS
         from apm_cli.utils.diagnostics import DiagnosticCollector
 
         pkg_info = self._make_package(temp_project, {
