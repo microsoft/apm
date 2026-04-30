@@ -783,41 +783,27 @@ jobs:
               }
             }
 
-  # Update Scoop bucket (only stable releases from public repo)
-  update-scoop:
-    name: Update Scoop Bucket
-    runs-on: ubuntu-latest
+  # Update WinGet package at microsoft/winget-pkgs (only stable releases from public repo)
+  # Uses Microsoft's official wingetcreate tool (https://github.com/microsoft/winget-create)
+  # to generate updated manifests and open a PR to microsoft/winget-pkgs.
+  # Requires WINGET_TOKEN secret: classic PAT with public_repo scope.
+  update-winget:
+    name: Update WinGet Package
+    runs-on: windows-latest
     needs: [build-and-test, build-and-validate-macos-intel, build-and-validate-macos-arm, integration-tests, release-validation, create-release, publish-pypi]
-    # TODO: Enable once downstream repository and secrets are configured (see #88)
-    if: false && github.ref_type == 'tag' && needs.create-release.outputs.is_private_repo != 'true' && needs.create-release.outputs.is_prerelease != 'true'
+    if: github.ref_type == 'tag' && needs.create-release.outputs.is_private_repo != 'true' && needs.create-release.outputs.is_prerelease != 'true'
     permissions:
       contents: read
 
     steps:
-      - name: Extract Windows checksum from GitHub release
-        id: checksums
+      - name: Update WinGet manifest
         run: |
-          RELEASE_TAG="${{ github.ref_name }}"
-          curl -L -o apm-windows-x86_64.zip.sha256 \
-            "https://github.com/${{ github.repository }}/releases/download/$RELEASE_TAG/apm-windows-x86_64.zip.sha256"
-          WINDOWS_X86_64_SHA=$(cat apm-windows-x86_64.zip.sha256 | cut -d' ' -f1)
-          echo "windows-x86_64-sha=$WINDOWS_X86_64_SHA" >> $GITHUB_OUTPUT
-          echo "Windows x86_64 SHA: $WINDOWS_X86_64_SHA"
-
-      - name: Trigger Scoop bucket repository update
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.GH_PKG_PAT }}
-          repository: microsoft/scoop-apm
-          event-type: bucket-update
-          client-payload: |
-            {
-              "release": {
-                "version": "${{ github.ref_name }}",
-                "tag": "${{ github.ref_name }}",
-                "repository": "${{ github.repository }}"
-              },
-              "checksums": {
-                "windows_x86_64": "${{ steps.checksums.outputs.windows-x86_64-sha }}"
-              }
-            }
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          $url = "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/apm-windows-x86_64.zip"
+          Invoke-WebRequest -Uri "https://aka.ms/wingetcreate/latest" -OutFile wingetcreate.exe
+          .\wingetcreate.exe update Microsoft.APM `
+            --version $version `
+            --urls $url `
+            --submit `
+            --token ${{ secrets.WINGET_TOKEN }}
+        shell: pwsh

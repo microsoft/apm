@@ -27,7 +27,7 @@ Verify it worked:
 apm --version
 ```
 
-For Homebrew (macOS/Linux), Scoop (Windows), pip, or manual install, see the [Installation guide](../installation/).
+For Homebrew (macOS/Linux), WinGet (Windows), pip, or manual install, see the [Installation guide](../installation/).
 
 ## Start a project
 
