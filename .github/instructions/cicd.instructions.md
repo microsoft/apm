@@ -6,7 +6,7 @@ description: "CI/CD Pipeline configuration for PyInstaller binary packaging and 
 # CI/CD Pipeline Instructions
 
 ## Workflow Architecture (Tiered + Merge Queue)
-Four workflows split by trigger and tier. PRs get fast feedback; the heavy
+Five workflows split by trigger and tier. PRs get fast feedback; the heavy
 integration suite runs only at merge time via GitHub Merge Queue
 (microsoft/apm#770).
 
@@ -24,27 +24,28 @@ integration suite runs only at merge time via GitHub Merge Queue
      cross-workflow artifact plumbing across triggers.
    - **Never add a `pull_request` or `pull_request_target` trigger here.**
      This file holds production secrets (`GH_CLI_PAT`, `ADO_APM_PAT`).
-     Required-check satisfaction at PR time is handled by the inert stub
-     `ci-integration-pr-stub.yml` instead.
-3. **`ci-integration-pr-stub.yml`** - inert PR-time stub for required checks
-   - Triggers on `pull_request_target` so the YAML is read from `main`
-     (admin-controlled) regardless of PR head contents - applies retroactively
-     to existing fork PRs without rebase.
-   - `permissions: {}`, no secrets, no checkout, four no-op `echo` jobs whose
-     names match the four Tier 2 required checks. Reports success in seconds.
-   - Concurrency group keyed on PR number cancels in-flight stub runs on
-     subsequent pushes.
-   - Activity types include `labeled/unlabeled/edited` so maintainers can
-     re-trigger the stub without forcing contributors to push commits.
+     Required-check satisfaction at PR time is handled by `merge-gate.yml`,
+     which aggregates all required signals into a single `gate` check.
+3. **`merge-gate.yml`** - single-authority PR-time aggregator
+   - Triggers on `pull_request` only (single trigger - dual-trigger with
+     `pull_request_target` produces SUCCESS+CANCELLED check-run twins via
+     `cancel-in-progress` and poisons branch protection's rollup).
+   - One job named `gate`. Polls the Checks API for all entries in the
+     workflow's `EXPECTED_CHECKS` env var; aggregates pass/fail into a
+     single check-run.
+   - Branch protection requires ONLY this one check (`gate`). Adding,
+     renaming, or removing an underlying check is a `merge-gate.yml` edit,
+     never a ruleset edit. Tide / bors single-authority pattern.
+   - Recovery if the `pull_request` webhook is dropped: empty commit,
+     `gh workflow run merge-gate.yml -f pr_number=NNN`, or close+reopen.
    - `.github/CODEOWNERS` requires Lead Maintainer review for any change
-     to `.github/workflows/**` to prevent inadvertent additions of secrets,
-     checkout, or PR-data interpolation to this file.
-3. **`build-release.yml`** - `push` to main, tags, schedule, `workflow_dispatch`
-   - **Linux + Windows** run combined `build-and-test` (unit tests + binary build in one job).
+     to `.github/workflows/**`.
+4. **`build-release.yml`** - `push` to main, tags, schedule, `workflow_dispatch`
+   - **Linux + Windows** run combined `build-and-test` (unit tests + binary build in one job). Unit tests run on every push for platform-regression signal; **smoke tests are gated to tag/schedule/dispatch only** (promotion boundaries) to avoid duplicating `ci-integration.yml`'s merge-time smoke and to cut redundant codex-binary downloads.
    - **macOS Intel** uses `build-and-validate-macos-intel` (root node, runs own unit tests - no dependency on `build-and-test`). Builds the binary on every push for early regression feedback; integration + release-validation phases conditional on tag/schedule/dispatch.
    - **macOS ARM** uses `build-and-validate-macos-arm` (root node, tag/schedule/dispatch only - ARM runners are extremely scarce with 2-4h+ queue waits). Only requested when the binary is actually needed for a release.
    - Secrets always available. Full 5-platform binary output (linux x86_64/arm64, darwin x86_64/arm64, windows x86_64).
-4. **`ci-runtime.yml`** - nightly schedule, manual dispatch, path-filtered push
+5. **`ci-runtime.yml`** - nightly schedule, manual dispatch, path-filtered push
    - **Linux x86_64 only**. Live inference smoke tests (`apm run`) isolated from release pipeline.
    - Uses `GH_MODELS_PAT` for GitHub Models API access.
    - Failures do not block releases - annotated as warnings.
@@ -85,6 +86,12 @@ integration suite runs only at merge time via GitHub Merge Queue
 - **Tag Triggers**: Only `v*.*.*` tags trigger full release pipeline
 - **Artifact Retention**: 30 days for debugging failed releases
 - **Cross-workflow artifacts**: ci-integration.yml builds the binary inline (no cross-workflow artifact transfer); build-release.yml jobs share artifacts within the same workflow run.
+
+## Branch Protection & Required Checks
+- **Single required check**: branch protection (`main-protection` ruleset id 9294522) requires exactly one status check context: `gate` from `merge-gate.yml`. All other PR-time signals are aggregated by that workflow's poll loop.
+- **CRITICAL ruleset gotcha**: the ruleset `context` must be the literal check-run name `gate`. `Merge Gate / gate` is only how GitHub may render the workflow and job together in the UI; it is not the context value to store in the ruleset. If the ruleset stores `Merge Gate / gate`, GitHub waits forever with "Expected - Waiting for status to be reported" because no check-run with that literal name is posted.
+- **How the name is derived**: GitHub matches the check by `integration_id` (`15368` = github-actions) plus the emitted check-run name. That emitted name comes from the job `name:` if one is set; otherwise it falls back to the job id. In `merge-gate.yml` the job id is `gate` and `name: gate`, so the emitted check-run name is `gate` -- that is the exact string the ruleset must require.
+- **Adding a new aggregated check**: add it to `EXPECTED_CHECKS` in `merge-gate.yml`. Do not change the ruleset unless you intentionally rename the merge gate job's emitted check-run name, in which case the ruleset `context` must be updated to the new exact name.
 
 ## Trust Model
 - **PR push (any contributor, including forks)**: Runs Tier 1 only. No CI secrets exposed. PR code is checked out and tested in an unprivileged context.

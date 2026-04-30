@@ -10,28 +10,35 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
 from urllib.parse import urlparse
 
 import pytest
 from git.exc import GitCommandError
 
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
-from apm_cli.models.apm_package import DependencyReference, APMPackage
-
+from apm_cli.models.apm_package import APMPackage, DependencyReference
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_downloader(github_token=None, ado_token=None):
     """Create a GitHubPackageDownloader with controlled tokens."""
-    with patch.dict(os.environ, {
-        **({"GITHUB_APM_PAT": github_token} if github_token else {}),
-        **({"ADO_APM_PAT": ado_token} if ado_token else {}),
-    }, clear=True), patch(
-        "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
-        return_value=None,
+    with (
+        patch.dict(
+            os.environ,
+            {
+                **({"GITHUB_APM_PAT": github_token} if github_token else {}),
+                **({"ADO_APM_PAT": ado_token} if ado_token else {}),
+            },
+            clear=True,
+        ),
+        patch(
+            "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+            return_value=None,
+        ),
     ):
         return GitHubPackageDownloader()
 
@@ -55,6 +62,7 @@ def _url_host(url: str) -> str:
 # ===========================================================================
 # _build_repo_url – token scoping
 # ===========================================================================
+
 
 class TestBuildRepoUrlTokenScoping:
     """Verify _build_repo_url sends GitHub tokens only to GitHub hosts."""
@@ -117,6 +125,7 @@ class TestBuildRepoUrlTokenScoping:
 # _clone_with_fallback – env relaxation for generic hosts
 # ===========================================================================
 
+
 class TestCloneWithFallbackEnv:
     """Verify that env lockdown is based on token availability, not host type."""
 
@@ -147,12 +156,14 @@ class TestCloneWithFallbackEnv:
         # controlled env rather than returning stale entries.
         dl.auth_resolver._cache.clear()
 
-        with patch.dict(os.environ, env_vars, clear=True), \
-             patch(
-                 "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
-                 return_value=None,
-             ), \
-             patch('apm_cli.deps.github_downloader.Repo') as MockRepo:
+        with (
+            patch.dict(os.environ, env_vars, clear=True),
+            patch(
+                "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+                return_value=None,
+            ),
+            patch("apm_cli.deps.github_downloader.Repo") as MockRepo,
+        ):
             MockRepo.clone_from.side_effect = effects
             target = Path(tempfile.mkdtemp())
             try:
@@ -161,6 +172,7 @@ class TestCloneWithFallbackEnv:
                 pass  # all methods failed is OK here
             finally:
                 import shutil
+
                 shutil.rmtree(target, ignore_errors=True)
             return MockRepo.clone_from.call_args_list
 
@@ -223,7 +235,9 @@ class TestCloneWithFallbackEnv:
         for call in calls:
             url = call[0][0]
             assert "git@" not in url, f"explicit https:// must not fall back to SSH, got {url}"
-            assert not url.startswith("ssh://"), f"explicit https:// must not fall back to ssh://, got {url}"
+            assert not url.startswith("ssh://"), (
+                f"explicit https:// must not fall back to ssh://, got {url}"
+            )
 
     def test_generic_host_legacy_chain_with_allow_fallback(self):
         """APM_ALLOW_PROTOCOL_FALLBACK=1 restores cross-protocol fallback so
@@ -258,12 +272,14 @@ class TestCloneWithFallbackEnv:
         dep = _dep("http://gitlab.company.internal/acme/rules.git")
 
         dl.auth_resolver._cache.clear()
-        with patch.dict(os.environ, {"GITHUB_APM_PAT": "ghp_TESTTOKEN"}, clear=True), \
-             patch(
-                 "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
-                 return_value=None,
-             ), \
-             patch('apm_cli.deps.github_downloader.Repo') as MockRepo:
+        with (
+            patch.dict(os.environ, {"GITHUB_APM_PAT": "ghp_TESTTOKEN"}, clear=True),
+            patch(
+                "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+                return_value=None,
+            ),
+            patch("apm_cli.deps.github_downloader.Repo") as MockRepo,
+        ):
             MockRepo.clone_from.side_effect = GitCommandError("clone", "failed")
             target = Path(tempfile.mkdtemp())
             try:
@@ -271,6 +287,7 @@ class TestCloneWithFallbackEnv:
                     dl._clone_with_fallback(dep.repo_url, target, dep_ref=dep)
             finally:
                 import shutil
+
                 shutil.rmtree(target, ignore_errors=True)
 
             assert MockRepo.clone_from.call_count == 1
@@ -292,12 +309,14 @@ class TestCloneWithFallbackEnv:
         dep = _dep("http://gitlab.company.internal/acme/rules.git")
 
         dl.auth_resolver._cache.clear()
-        with patch.dict(os.environ, {"GITHUB_APM_PAT": "ghp_TESTTOKEN"}, clear=True), \
-             patch(
-                 "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
-                 return_value=None,
-             ), \
-             patch('apm_cli.deps.github_downloader.Repo') as MockRepo:
+        with (
+            patch.dict(os.environ, {"GITHUB_APM_PAT": "ghp_TESTTOKEN"}, clear=True),
+            patch(
+                "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+                return_value=None,
+            ),
+            patch("apm_cli.deps.github_downloader.Repo") as MockRepo,
+        ):
             MockRepo.clone_from.side_effect = [
                 GitCommandError("clone", "http failed"),
                 GitCommandError("clone", "ssh failed"),
@@ -308,6 +327,7 @@ class TestCloneWithFallbackEnv:
                     dl._clone_with_fallback(dep.repo_url, target, dep_ref=dep)
             finally:
                 import shutil
+
                 shutil.rmtree(target, ignore_errors=True)
 
             urls = [c[0][0] for c in MockRepo.clone_from.call_args_list]
@@ -334,12 +354,14 @@ class TestCloneWithFallbackEnv:
         dep = _dep("https://gitlab.com/acme/rules.git")
 
         dl.auth_resolver._cache.clear()
-        with patch.dict(os.environ, {"GITHUB_APM_PAT": "ghp_TESTTOKEN"}, clear=True), \
-             patch(
-                 "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
-                 return_value=None,
-             ), \
-             patch('apm_cli.deps.github_downloader.Repo') as MockRepo:
+        with (
+            patch.dict(os.environ, {"GITHUB_APM_PAT": "ghp_TESTTOKEN"}, clear=True),
+            patch(
+                "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+                return_value=None,
+            ),
+            patch("apm_cli.deps.github_downloader.Repo") as MockRepo,
+        ):
             MockRepo.clone_from.side_effect = GitCommandError("clone", "failed")
             target = Path(tempfile.mkdtemp())
             try:
@@ -347,6 +369,7 @@ class TestCloneWithFallbackEnv:
                     dl._clone_with_fallback(dep.repo_url, target, dep_ref=dep)
             finally:
                 import shutil
+
                 shutil.rmtree(target, ignore_errors=True)
 
     def test_clone_env_includes_ssh_connect_timeout(self):
@@ -358,8 +381,11 @@ class TestCloneWithFallbackEnv:
         assert "ConnectTimeout" in dl.git_env["GIT_SSH_COMMAND"]
 
         # Relaxed env built for no-token paths keeps GIT_SSH_COMMAND
-        relaxed = {k: v for k, v in dl.git_env.items()
-                   if k not in ("GIT_ASKPASS", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM")}
+        relaxed = {
+            k: v
+            for k, v in dl.git_env.items()
+            if k not in ("GIT_ASKPASS", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM")
+        }
         assert "GIT_SSH_COMMAND" in relaxed
         assert "ConnectTimeout" in relaxed["GIT_SSH_COMMAND"]
 
@@ -382,10 +408,14 @@ class TestCloneWithFallbackEnv:
         # Fail every attempt so we capture envs from all of them.
         effects = [GitCommandError("clone", "failed")] * 5
 
-        with patch.dict(os.environ, {"GITHUB_APM_PAT": "ghp_TESTTOKEN"}, clear=True), \
-             patch("apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
-                   return_value=None), \
-             patch('apm_cli.deps.github_downloader.Repo') as MockRepo:
+        with (
+            patch.dict(os.environ, {"GITHUB_APM_PAT": "ghp_TESTTOKEN"}, clear=True),
+            patch(
+                "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+                return_value=None,
+            ),
+            patch("apm_cli.deps.github_downloader.Repo") as MockRepo,
+        ):
             MockRepo.clone_from.side_effect = effects
             dl.auth_resolver._cache.clear()
             target = Path(tempfile.mkdtemp())
@@ -394,6 +424,7 @@ class TestCloneWithFallbackEnv:
                     dl._clone_with_fallback(dep.repo_url, target, dep_ref=dep)
             finally:
                 import shutil
+
                 shutil.rmtree(target, ignore_errors=True)
             calls = MockRepo.clone_from.call_args_list
 
@@ -436,6 +467,7 @@ class TestCloneWithFallbackEnv:
 # Regression: ssh:// URLs with custom ports (issues #661, #731)
 # ===========================================================================
 
+
 class TestCloneWithFallbackPortPreservation:
     """Verify that custom SSH/HTTPS ports are preserved across all clone attempts.
 
@@ -467,12 +499,14 @@ class TestCloneWithFallbackPortPreservation:
             mock_repo.head.commit.hexsha = "abc123"
             return mock_repo
 
-        with patch.dict(os.environ, {}, clear=True), \
-             patch(
-                 "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
-                 return_value=None,
-             ), \
-             patch('apm_cli.deps.github_downloader.Repo') as MockRepo:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+                return_value=None,
+            ),
+            patch("apm_cli.deps.github_downloader.Repo") as MockRepo,
+        ):
             MockRepo.clone_from.side_effect = _fake_clone
             target = Path(tempfile.mkdtemp())
             try:
@@ -481,6 +515,7 @@ class TestCloneWithFallbackPortPreservation:
                 pass
             finally:
                 import shutil
+
                 shutil.rmtree(target, ignore_errors=True)
         return called_urls
 
@@ -506,12 +541,8 @@ class TestCloneWithFallbackPortPreservation:
         https_urls = [u for u in urls if u.startswith("https://")]
         assert https_urls, f"no https:// fallback attempted, got: {urls!r}"
         parsed = urlparse(https_urls[0])
-        assert parsed.hostname == "bitbucket.example.com", (
-            f"HTTPS host mismatch: {https_urls[0]!r}"
-        )
-        assert parsed.port == 7999, (
-            f"HTTPS URL should preserve port 7999, got: {https_urls[0]!r}"
-        )
+        assert parsed.hostname == "bitbucket.example.com", f"HTTPS host mismatch: {https_urls[0]!r}"
+        assert parsed.port == 7999, f"HTTPS URL should preserve port 7999, got: {https_urls[0]!r}"
 
     def test_ssh_no_port_keeps_scp_shorthand(self):
         """Without a port, SSH builder uses scp shorthand (git@host:path)."""
@@ -542,17 +573,14 @@ class TestCloneWithFallbackPortPreservation:
         https_urls = [u for u in urls if u.startswith("https://")]
         assert https_urls, f"no HTTPS URL attempted, got: {urls!r}"
         parsed = urlparse(https_urls[0])
-        assert parsed.hostname == "git.company.internal", (
-            f"HTTPS host mismatch: {https_urls[0]!r}"
-        )
-        assert parsed.port == 8443, (
-            f"HTTPS URL should preserve port 8443, got: {https_urls[0]!r}"
-        )
+        assert parsed.hostname == "git.company.internal", f"HTTPS host mismatch: {https_urls[0]!r}"
+        assert parsed.port == 8443, f"HTTPS URL should preserve port 8443, got: {https_urls[0]!r}"
 
 
 # ===========================================================================
 # Object-style dependency entries (parse_from_dict)
 # ===========================================================================
+
 
 class TestParseFromDict:
     """Test DependencyReference.parse_from_dict for object-style entries."""
@@ -565,38 +593,46 @@ class TestParseFromDict:
         assert dep.reference is None
 
     def test_git_url_with_path(self):
-        dep = DependencyReference.parse_from_dict({
-            "git": "https://gitlab.com/acme/rules.git",
-            "path": "instructions/security",
-        })
+        dep = DependencyReference.parse_from_dict(
+            {
+                "git": "https://gitlab.com/acme/rules.git",
+                "path": "instructions/security",
+            }
+        )
         assert dep.host == "gitlab.com"
         assert dep.repo_url == "acme/rules"
         assert dep.virtual_path == "instructions/security"
         assert dep.is_virtual is True
 
     def test_git_url_with_ref(self):
-        dep = DependencyReference.parse_from_dict({
-            "git": "https://bitbucket.org/team/standards.git",
-            "ref": "v2.0",
-        })
+        dep = DependencyReference.parse_from_dict(
+            {
+                "git": "https://bitbucket.org/team/standards.git",
+                "ref": "v2.0",
+            }
+        )
         assert dep.host == "bitbucket.org"
         assert dep.reference == "v2.0"
 
     def test_git_url_with_alias(self):
-        dep = DependencyReference.parse_from_dict({
-            "git": "git@gitlab.com:acme/rules.git",
-            "alias": "my-rules",
-        })
+        dep = DependencyReference.parse_from_dict(
+            {
+                "git": "git@gitlab.com:acme/rules.git",
+                "alias": "my-rules",
+            }
+        )
         assert dep.alias == "my-rules"
         assert dep.host == "gitlab.com"
 
     def test_git_url_with_all_fields(self):
-        dep = DependencyReference.parse_from_dict({
-            "git": "https://gitlab.com/acme/rules.git",
-            "path": "prompts/review.prompt.md",
-            "ref": "main",
-            "alias": "review",
-        })
+        dep = DependencyReference.parse_from_dict(
+            {
+                "git": "https://gitlab.com/acme/rules.git",
+                "path": "prompts/review.prompt.md",
+                "ref": "main",
+                "alias": "review",
+            }
+        )
         assert dep.host == "gitlab.com"
         assert dep.repo_url == "acme/rules"
         assert dep.virtual_path == "prompts/review.prompt.md"
@@ -605,27 +641,33 @@ class TestParseFromDict:
         assert dep.alias == "review"
 
     def test_ssh_git_url(self):
-        dep = DependencyReference.parse_from_dict({
-            "git": "git@bitbucket.org:team/rules.git",
-            "path": "security",
-        })
+        dep = DependencyReference.parse_from_dict(
+            {
+                "git": "git@bitbucket.org:team/rules.git",
+                "path": "security",
+            }
+        )
         assert dep.host == "bitbucket.org"
         assert dep.repo_url == "team/rules"
         assert dep.virtual_path == "security"
 
     def test_path_strips_slashes(self):
-        dep = DependencyReference.parse_from_dict({
-            "git": "https://gitlab.com/acme/rules.git",
-            "path": "/prompts/file.md/",
-        })
+        dep = DependencyReference.parse_from_dict(
+            {
+                "git": "https://gitlab.com/acme/rules.git",
+                "path": "/prompts/file.md/",
+            }
+        )
         assert dep.virtual_path == "prompts/file.md"
 
     def test_ref_in_url_overridden_by_field(self):
         """'ref' field takes precedence over inline #ref in git URL."""
-        dep = DependencyReference.parse_from_dict({
-            "git": "https://gitlab.com/acme/rules.git#v1.0",
-            "ref": "v2.0",
-        })
+        dep = DependencyReference.parse_from_dict(
+            {
+                "git": "https://gitlab.com/acme/rules.git#v1.0",
+                "ref": "v2.0",
+            }
+        )
         assert dep.reference == "v2.0"
 
     # --- Error cases ---
@@ -661,6 +703,7 @@ class TestParseFromDict:
 # from_apm_yml – mixed string + dict dependencies
 # ===========================================================================
 
+
 class TestFromApmYmlMixedDeps:
     """Test APMPackage.from_apm_yml with both string and object-style deps."""
 
@@ -671,14 +714,17 @@ class TestFromApmYmlMixedDeps:
         return yml_file
 
     def test_string_only_deps(self, tmp_path):
-        yml = self._write_yml(tmp_path, """
+        yml = self._write_yml(
+            tmp_path,
+            """
 name: test-pkg
 version: 1.0.0
 dependencies:
   apm:
     - owner/repo
     - gitlab.com/acme/rules
-""")
+""",
+        )
         pkg = APMPackage.from_apm_yml(yml)
         deps = pkg.get_apm_dependencies()
         assert len(deps) == 2
@@ -686,7 +732,9 @@ dependencies:
         assert deps[1].host == "gitlab.com"
 
     def test_dict_only_deps(self, tmp_path):
-        yml = self._write_yml(tmp_path, """
+        yml = self._write_yml(
+            tmp_path,
+            """
 name: test-pkg
 version: 1.0.0
 dependencies:
@@ -694,7 +742,8 @@ dependencies:
     - git: https://gitlab.com/acme/rules.git
       path: instructions/security
       ref: v2.0
-""")
+""",
+        )
         pkg = APMPackage.from_apm_yml(yml)
         deps = pkg.get_apm_dependencies()
         assert len(deps) == 1
@@ -703,7 +752,9 @@ dependencies:
         assert deps[0].reference == "v2.0"
 
     def test_mixed_string_and_dict_deps(self, tmp_path):
-        yml = self._write_yml(tmp_path, """
+        yml = self._write_yml(
+            tmp_path,
+            """
 name: test-pkg
 version: 1.0.0
 dependencies:
@@ -712,7 +763,8 @@ dependencies:
     - git: https://gitlab.com/acme/rules.git
       path: prompts/review.prompt.md
     - bitbucket.org/team/standards
-""")
+""",
+        )
         pkg = APMPackage.from_apm_yml(yml)
         deps = pkg.get_apm_dependencies()
         assert len(deps) == 3
@@ -722,20 +774,24 @@ dependencies:
         assert deps[2].host == "bitbucket.org"
 
     def test_invalid_dict_dep_raises(self, tmp_path):
-        yml = self._write_yml(tmp_path, """
+        yml = self._write_yml(
+            tmp_path,
+            """
 name: test-pkg
 version: 1.0.0
 dependencies:
   apm:
     - path: foo/bar
-""")
-        with pytest.raises(ValueError, match="'git' field|local filesystem path"):
+""",
+        )
+        with pytest.raises(ValueError, match="'git' field|local filesystem path"):  # noqa: RUF043
             APMPackage.from_apm_yml(yml)
 
 
 # ===========================================================================
 # Dict-style duplicate detection in _validate_and_add_packages_to_apm_yml
 # ===========================================================================
+
 
 class TestDictIdentityDuplicateDetection:
     """Verify that dict-style deps with 'path' get distinct identities.
@@ -753,15 +809,19 @@ class TestDictIdentityDuplicateDetection:
     @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
     def test_dict_dep_with_path_not_duplicate_of_base(self, mock_validate, tmp_path):
         """A dict dep {git: X, path: Y} should not block adding the base repo X."""
-        import yaml
-        yml = self._write_yml(tmp_path, """
+        import yaml  # noqa: F401
+
+        yml = self._write_yml(  # noqa: F841
+            tmp_path,
+            """
 name: test
 version: 1.0.0
 dependencies:
   apm:
     - git: https://gitlab.com/acme/rules.git
       path: instructions/security
-""")
+""",
+        )
         with patch("apm_cli.commands.install.Path") as MockPath:
             # Make Path("apm.yml") return our test file
             MockPath.return_value.exists.return_value = True
@@ -782,23 +842,29 @@ dependencies:
         """Two dict deps from same repo but different paths have distinct identities."""
         from apm_cli.models.apm_package import DependencyReference
 
-        dep1 = DependencyReference.parse_from_dict({
-            "git": "https://gitlab.com/acme/rules.git",
-            "path": "instructions/security",
-        })
-        dep2 = DependencyReference.parse_from_dict({
-            "git": "https://gitlab.com/acme/rules.git",
-            "path": "prompts/review.prompt.md",
-        })
+        dep1 = DependencyReference.parse_from_dict(
+            {
+                "git": "https://gitlab.com/acme/rules.git",
+                "path": "instructions/security",
+            }
+        )
+        dep2 = DependencyReference.parse_from_dict(
+            {
+                "git": "https://gitlab.com/acme/rules.git",
+                "path": "prompts/review.prompt.md",
+            }
+        )
         assert dep1.get_identity() != dep2.get_identity()
 
     def test_dict_dep_no_path_same_identity_as_string(self):
         """A dict dep without path has the same identity as the string form."""
         from apm_cli.models.apm_package import DependencyReference
 
-        dep_dict = DependencyReference.parse_from_dict({
-            "git": "https://gitlab.com/acme/rules.git",
-        })
+        dep_dict = DependencyReference.parse_from_dict(
+            {
+                "git": "https://gitlab.com/acme/rules.git",
+            }
+        )
         dep_str = DependencyReference.parse("gitlab.com/acme/rules")
         assert dep_dict.get_identity() == dep_str.get_identity()
 
@@ -806,6 +872,7 @@ dependencies:
 # ===========================================================================
 # _validate_package_exists env scoping for generic hosts
 # ===========================================================================
+
 
 class TestValidatePackageExistsEnv:
     """Verify _validate_package_exists uses the right env for generic hosts.
@@ -816,7 +883,10 @@ class TestValidatePackageExistsEnv:
     git cannot rewrite them to SSH before the first transport attempt.
     """
 
-    @patch("apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git", return_value=None)
+    @patch(
+        "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+        return_value=None,
+    )
     @patch("subprocess.run")
     @patch.dict(os.environ, {}, clear=True)
     def test_generic_host_validation_allows_credential_helpers(self, mock_run, _mock_cred):
@@ -832,15 +902,20 @@ class TestValidatePackageExistsEnv:
         env_used = call_kwargs.kwargs.get("env") or call_kwargs[1].get("env", {})
 
         # GIT_ASKPASS must NOT be set to 'echo' (that blocks credential helpers)
-        assert env_used.get("GIT_ASKPASS") != "echo", \
+        assert env_used.get("GIT_ASKPASS") != "echo", (
             "Generic host validation should not set GIT_ASKPASS=echo"
+        )
         # GIT_CONFIG_NOSYSTEM must NOT be '1' (allows system git config)
-        assert env_used.get("GIT_CONFIG_NOSYSTEM") != "1", \
+        assert env_used.get("GIT_CONFIG_NOSYSTEM") != "1", (
             "Generic host validation should not set GIT_CONFIG_NOSYSTEM=1"
+        )
         # GIT_TERMINAL_PROMPT should still be '0' (no interactive prompts)
         assert env_used.get("GIT_TERMINAL_PROMPT") == "0"
 
-    @patch("apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git", return_value=None)
+    @patch(
+        "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+        return_value=None,
+    )
     @patch("subprocess.run")
     @patch.dict(os.environ, {}, clear=True)
     def test_explicit_http_validation_preserves_config_isolation(self, mock_run, _mock_cred):
@@ -862,7 +937,10 @@ class TestValidatePackageExistsEnv:
         assert env_used.get("GIT_CONFIG_VALUE_0") == ""
         assert env_used.get("GIT_TERMINAL_PROMPT") == "0"
 
-    @patch("apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git", return_value=None)
+    @patch(
+        "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+        return_value=None,
+    )
     @patch("subprocess.run")
     @patch.dict(os.environ, {"ADO_APM_PAT": "test-ado-token"}, clear=True)
     def test_ado_host_validation_uses_locked_env(self, mock_run, _mock_cred):
@@ -884,12 +962,13 @@ class TestValidatePackageExistsEnv:
 # is_github classification edge cases
 # ===========================================================================
 
+
 class TestIsGitHubClassification:
     """Verify is_github is correctly determined for edge-case hosts."""
 
     def test_empty_host_defaults_to_github(self):
         """When no host is set, packages default to GitHub behavior."""
-        downloader = _make_downloader(github_token="ghp_test123")
+        downloader = _make_downloader(github_token="ghp_test123")  # noqa: F841
         dep_ref = _dep("microsoft/apm-sample-package")
 
         # No host set → is_github should be True
@@ -897,7 +976,8 @@ class TestIsGitHubClassification:
         # Original bug: `dep_host and is_github_hostname(dep_host) or (not dep_host)`
         # With empty/None dep_host, this should return True
         from apm_cli.utils.github_host import is_github_hostname
-        if dep_host:
+
+        if dep_host:  # noqa: SIM108
             is_github = is_github_hostname(dep_host)
         else:
             is_github = True
@@ -907,18 +987,21 @@ class TestIsGitHubClassification:
         """GitLab host should NOT be classified as GitHub."""
         dep_ref = _dep("gitlab.com/acme/rules")
         from apm_cli.utils.github_host import is_github_hostname
+
         assert is_github_hostname(dep_ref.host) is False
 
     def test_ghe_host_is_github(self):
         """GitHub Enterprise host should be classified as GitHub."""
         dep_ref = _dep("https://company.ghe.com/org/repo.git")
         from apm_cli.utils.github_host import is_github_hostname
+
         assert is_github_hostname(dep_ref.host) is True
 
 
 # ===========================================================================
 # _try_sparse_checkout -- per-dep token resolution
 # ===========================================================================
+
 
 class TestSparseCheckoutTokenResolution:
     """Verify _try_sparse_checkout uses resolve_for_dep() for per-dep tokens."""
@@ -928,12 +1011,19 @@ class TestSparseCheckoutTokenResolution:
         org_token = "ghp_ORG_SPECIFIC"
         global_token = "ghp_GLOBAL"
 
-        with patch.dict(os.environ, {
-            "GITHUB_APM_PAT": global_token,
-            "GITHUB_APM_PAT_ACME": org_token,
-        }, clear=True), patch(
-            "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
-            return_value=None,
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GITHUB_APM_PAT": global_token,
+                    "GITHUB_APM_PAT_ACME": org_token,
+                },
+                clear=True,
+            ),
+            patch(
+                "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+                return_value=None,
+            ),
         ):
             dl = GitHubPackageDownloader()
             dep = _dep("acme/mono-repo/subdir")
@@ -955,7 +1045,6 @@ class TestSparseCheckoutTokenResolution:
             assert len(captured_urls) == 1, f"Expected 1 URL capture, got {captured_urls}"
             # The per-org token should be in the URL, not the global one
             assert org_token in captured_urls[0], (
-                f"Expected org-specific token in sparse checkout URL, "
-                f"got: {captured_urls[0]}"
+                f"Expected org-specific token in sparse checkout URL, got: {captured_urls[0]}"
             )
             assert global_token not in captured_urls[0]

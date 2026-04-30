@@ -8,7 +8,7 @@ import click
 from ..core.command_logger import CommandLogger
 from ..utils.console import (
     STATUS_SYMBOLS,
-    _rich_echo,
+    _rich_echo,  # noqa: F401
     _rich_panel,
 )
 from ._helpers import HIGHLIGHT, RESET, _get_console, _list_available_scripts
@@ -19,7 +19,7 @@ list = builtins.list
 
 @click.command(help="List available scripts in the current project")
 @click.pass_context
-def list(ctx):
+def list(ctx):  # noqa: F811
     """List all available scripts from apm.yml."""
     logger = CommandLogger("list")
     try:

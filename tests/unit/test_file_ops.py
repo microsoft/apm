@@ -4,25 +4,25 @@ import errno
 import os
 import shutil
 import stat
-import sys
-from pathlib import Path
+import sys  # noqa: F401
+from pathlib import Path  # noqa: F401
 from unittest.mock import patch
 
 import pytest
 
 from apm_cli.utils.file_ops import (
     _is_transient_lock_error,
-    _retry_on_lock,
     _on_readonly_retry,
-    robust_rmtree,
-    robust_copytree,
+    _retry_on_lock,
     robust_copy2,
+    robust_copytree,
+    robust_rmtree,
 )
-
 
 # ---------------------------------------------------------------------------
 # _is_transient_lock_error
 # ---------------------------------------------------------------------------
+
 
 class TestIsTransientLockError:
     """Test the error classification predicate."""
@@ -72,6 +72,7 @@ class TestIsTransientLockError:
 # _retry_on_lock
 # ---------------------------------------------------------------------------
 
+
 class TestRetryOnLock:
     """Test the generic retry loop."""
 
@@ -102,8 +103,7 @@ class TestRetryOnLock:
         def always_fail():
             raise exc
 
-        with patch("apm_cli.utils.file_ops.time.sleep"), \
-             pytest.raises(OSError, match="busy"):
+        with patch("apm_cli.utils.file_ops.time.sleep"), pytest.raises(OSError, match="busy"):
             _retry_on_lock(always_fail, "test op", max_retries=2)
 
     def test_non_transient_error_raises_immediately(self):
@@ -132,11 +132,15 @@ class TestRetryOnLock:
                 raise exc
             return "ok"
 
-        with patch("apm_cli.utils.file_ops.time.sleep",
-                    side_effect=lambda d: sleep_calls.append(d)):
+        with patch(
+            "apm_cli.utils.file_ops.time.sleep", side_effect=lambda d: sleep_calls.append(d)
+        ):
             _retry_on_lock(
-                fail_three_times, "test",
-                initial_delay=0.1, backoff_factor=2.0, max_delay=10.0,
+                fail_three_times,
+                "test",
+                initial_delay=0.1,
+                backoff_factor=2.0,
+                max_delay=10.0,
                 max_retries=5,
             )
 
@@ -157,11 +161,15 @@ class TestRetryOnLock:
                 raise exc
             return "ok"
 
-        with patch("apm_cli.utils.file_ops.time.sleep",
-                    side_effect=lambda d: sleep_calls.append(d)):
+        with patch(
+            "apm_cli.utils.file_ops.time.sleep", side_effect=lambda d: sleep_calls.append(d)
+        ):
             _retry_on_lock(
-                fail_many, "test",
-                initial_delay=1.0, backoff_factor=2.0, max_delay=2.0,
+                fail_many,
+                "test",
+                initial_delay=1.0,
+                backoff_factor=2.0,
+                max_delay=2.0,
                 max_retries=5,
             )
 
@@ -206,7 +214,10 @@ class TestRetryOnLock:
 
         with patch("apm_cli.utils.file_ops.time.sleep"):
             result = _retry_on_lock(
-                fail_once, "test", before_retry=bad_cleanup, max_retries=3,
+                fail_once,
+                "test",
+                before_retry=bad_cleanup,
+                max_retries=3,
             )
         assert result == "ok"
 
@@ -221,8 +232,7 @@ class TestRetryOnLock:
                 raise exc
             return "ok"
 
-        with patch("apm_cli.utils.file_ops.time.sleep"), \
-             patch.dict(os.environ, {"APM_DEBUG": "1"}):
+        with patch("apm_cli.utils.file_ops.time.sleep"), patch.dict(os.environ, {"APM_DEBUG": "1"}):
             _retry_on_lock(fail_once, "test op", max_retries=3)
 
         captured = capsys.readouterr()
@@ -233,6 +243,7 @@ class TestRetryOnLock:
 # ---------------------------------------------------------------------------
 # robust_rmtree
 # ---------------------------------------------------------------------------
+
 
 class TestRobustRmtree:
     """Test the retry-aware rmtree wrapper."""
@@ -261,8 +272,7 @@ class TestRobustRmtree:
 
     def test_raises_without_ignore_errors(self, tmp_path):
         exc = OSError(errno.ENOENT, "not found")
-        with patch("shutil.rmtree", side_effect=exc), \
-             pytest.raises(OSError):
+        with patch("shutil.rmtree", side_effect=exc), pytest.raises(OSError):
             robust_rmtree(tmp_path / "nonexistent-dir-for-test")
 
     def test_retries_on_transient_error(self, tmp_path):
@@ -281,8 +291,10 @@ class TestRobustRmtree:
                 raise exc
             return original_rmtree(*args, **kwargs)
 
-        with patch("apm_cli.utils.file_ops.shutil.rmtree", side_effect=flaky_rmtree), \
-             patch("apm_cli.utils.file_ops.time.sleep"):
+        with (
+            patch("apm_cli.utils.file_ops.shutil.rmtree", side_effect=flaky_rmtree),
+            patch("apm_cli.utils.file_ops.time.sleep"),
+        ):
             robust_rmtree(d)
 
         assert rmtree_calls == 2
@@ -297,6 +309,7 @@ class TestRobustRmtree:
 # ---------------------------------------------------------------------------
 # robust_copytree
 # ---------------------------------------------------------------------------
+
 
 class TestRobustCopytree:
     """Test the retry-aware copytree wrapper."""
@@ -334,8 +347,10 @@ class TestRobustCopytree:
                 raise exc
             return original_copytree(*args, **kwargs)
 
-        with patch("apm_cli.utils.file_ops.shutil.copytree", side_effect=flaky_copytree), \
-             patch("apm_cli.utils.file_ops.time.sleep"):
+        with (
+            patch("apm_cli.utils.file_ops.shutil.copytree", side_effect=flaky_copytree),
+            patch("apm_cli.utils.file_ops.time.sleep"),
+        ):
             result = robust_copytree(src, dst)
 
         assert copytree_calls == 2
@@ -367,9 +382,11 @@ class TestRobustCopytree:
             cleanup_called = True
             return original_rmtree(*args, **kwargs)
 
-        with patch("apm_cli.utils.file_ops.shutil.copytree", side_effect=flaky_copytree), \
-             patch("apm_cli.utils.file_ops.shutil.rmtree", side_effect=spy_rmtree), \
-             patch("apm_cli.utils.file_ops.time.sleep"):
+        with (
+            patch("apm_cli.utils.file_ops.shutil.copytree", side_effect=flaky_copytree),
+            patch("apm_cli.utils.file_ops.shutil.rmtree", side_effect=spy_rmtree),
+            patch("apm_cli.utils.file_ops.time.sleep"),
+        ):
             robust_copytree(src, dst, dirs_exist_ok=True)
 
         # Cleanup should NOT have been called because dirs_exist_ok=True
@@ -379,6 +396,7 @@ class TestRobustCopytree:
 # ---------------------------------------------------------------------------
 # robust_copy2
 # ---------------------------------------------------------------------------
+
 
 class TestRobustCopy2:
     """Test the retry-aware copy2 wrapper."""
@@ -408,9 +426,11 @@ class TestRobustCopy2:
                 raise exc
             return original_copy2(*args, **kwargs)
 
-        with patch("apm_cli.utils.file_ops.shutil.copy2", side_effect=flaky_copy2), \
-             patch("apm_cli.utils.file_ops.time.sleep"):
-            result = robust_copy2(src, dst)
+        with (
+            patch("apm_cli.utils.file_ops.shutil.copy2", side_effect=flaky_copy2),
+            patch("apm_cli.utils.file_ops.time.sleep"),
+        ):
+            result = robust_copy2(src, dst)  # noqa: F841
 
         assert copy_calls == 2
         assert dst.read_text() == "content"
@@ -426,6 +446,7 @@ class TestRobustCopy2:
 # ---------------------------------------------------------------------------
 # _on_readonly_retry callback
 # ---------------------------------------------------------------------------
+
 
 class TestOnReadonlyRetry:
     """Test the onerror callback for read-only file removal."""
@@ -448,6 +469,7 @@ class TestOnReadonlyRetry:
 # ---------------------------------------------------------------------------
 # Integration: _rmtree in github_downloader uses robust_rmtree
 # ---------------------------------------------------------------------------
+
 
 class TestRmtreeIntegration:
     """Verify that github_downloader._rmtree delegates to robust_rmtree."""
@@ -478,7 +500,6 @@ class TestRmtreeIntegration:
         """_rmtree should not raise (ignore_errors=True)."""
         from apm_cli.deps.github_downloader import _rmtree
 
-        with patch("apm_cli.utils.file_ops.shutil.rmtree",
-                    side_effect=PermissionError("denied")):
+        with patch("apm_cli.utils.file_ops.shutil.rmtree", side_effect=PermissionError("denied")):
             # Should not raise
             _rmtree(str(tmp_path / "nonexistent-apm-test-dir"))

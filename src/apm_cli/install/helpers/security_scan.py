@@ -29,9 +29,7 @@ def _pre_deploy_security_scan(
     """
     from apm_cli.security.gate import BLOCK_POLICY, SecurityGate
 
-    verdict = SecurityGate.scan_files(
-        install_path, policy=BLOCK_POLICY, force=force
-    )
+    verdict = SecurityGate.scan_files(install_path, policy=BLOCK_POLICY, force=force)
     if not verdict.has_findings:
         return True
 
@@ -41,8 +39,7 @@ def _pre_deploy_security_scan(
     if verdict.should_block:
         if logger:
             logger.error(
-                f"  Blocked: {package_name or 'package'} contains "
-                f"critical hidden character(s)"
+                f"  Blocked: {package_name or 'package'} contains critical hidden character(s)"
             )
             logger.tree_item(f"  |-- Inspect source: {install_path}")
             logger.tree_item("  |-- Use --force to deploy anyway")

@@ -11,7 +11,7 @@ An internal advocacy toolkit. The lead section frames the problem; the rest is d
 
 ## The problem at scale
 
-Consider a mid-to-large engineering organization: 50 repositories, 200 developers, four AI coding tools (Copilot, Claude, Cursor, OpenCode).
+Consider a mid-to-large engineering organization: 50 repositories, 200 developers, five AI coding tools (Copilot, Claude, Cursor, OpenCode, Gemini).
 
 Without centralized configuration management, a predictable set of problems emerges:
 
@@ -49,7 +49,7 @@ Running `apm install` resolves every dependency and writes `apm.lock.yaml`, whic
 
 ### Install
 
-`apm install` reads the lock file and deploys configuration into the native formats expected by each tool -- `.github/` for Copilot, `.claude/` for Claude, `.cursor/` for Cursor, `.opencode/` for OpenCode. APM generates static files and then gets out of the way. There is no runtime, no daemon, no background process.
+`apm install` reads the lock file and deploys configuration into the native formats expected by each tool -- `.github/` for Copilot, `.claude/` for Claude, `.cursor/` for Cursor, `.opencode/` for OpenCode, `.gemini/` for Gemini. APM generates static files and then gets out of the way. There is no runtime, no daemon, no background process.
 
 ### Audit
 
@@ -109,7 +109,7 @@ For the full forensic and compliance recipes, see the [Lock File Specification](
 
 Plugins handle single-tool installation for a single AI platform. APM adds capabilities that plugins do not provide:
 
-- **Cross-tool composition.** One manifest manages configuration for Copilot, Claude, Cursor, OpenCode, and any other agent runtime simultaneously.
+- **Cross-tool composition.** One manifest manages configuration for Copilot, Claude, Cursor, OpenCode, Gemini, and any other agent runtime simultaneously.
 - **Consumer-side lock files.** Plugins install the latest version. APM pins exact versions so your team stays synchronized.
 - **CI enforcement.** Content scanning is built into `apm install` -- no plugin equivalent exists. `apm audit --ci` adds lockfile consistency checks and `--policy org` enforces organizational rules.
 - **Multi-source dependency resolution.** APM resolves transitive dependencies across packages from multiple git hosts.

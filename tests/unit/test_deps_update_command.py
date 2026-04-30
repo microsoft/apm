@@ -11,17 +11,17 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
+import pytest  # noqa: F401
 import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.models.results import InstallResult
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _minimal_apm_yml(deps=None, dev_deps=None):
     """Return a minimal apm.yml dict with the given APM deps."""
@@ -162,8 +162,13 @@ class TestDepsUpdateCommand:
     @patch(_PATCH_ENGINE)
     @patch(_PATCH_APM_PACKAGE)
     def test_update_all_passes_update_refs_true(
-        self, mock_pkg_cls, mock_engine, mock_lockfile_cls,
-        mock_get_path, mock_migrate, mock_auth,
+        self,
+        mock_pkg_cls,
+        mock_engine,
+        mock_lockfile_cls,
+        mock_get_path,
+        mock_migrate,
+        mock_auth,
     ):
         """update_refs=True passed when no packages specified."""
         with self._chdir_tmp() as tmp:
@@ -191,8 +196,13 @@ class TestDepsUpdateCommand:
     @patch(_PATCH_ENGINE)
     @patch(_PATCH_APM_PACKAGE)
     def test_update_single_passes_only_packages(
-        self, mock_pkg_cls, mock_engine, mock_lockfile_cls,
-        mock_get_path, mock_migrate, mock_auth,
+        self,
+        mock_pkg_cls,
+        mock_engine,
+        mock_lockfile_cls,
+        mock_get_path,
+        mock_migrate,
+        mock_auth,
     ):
         """only_packages=['org/pkg'] passed when package arg given."""
         with self._chdir_tmp() as tmp:
@@ -219,8 +229,13 @@ class TestDepsUpdateCommand:
     @patch(_PATCH_ENGINE)
     @patch(_PATCH_APM_PACKAGE)
     def test_short_name_normalized_to_canonical_key(
-        self, mock_pkg_cls, mock_engine, mock_lockfile_cls,
-        mock_get_path, mock_migrate, mock_auth,
+        self,
+        mock_pkg_cls,
+        mock_engine,
+        mock_lockfile_cls,
+        mock_get_path,
+        mock_migrate,
+        mock_auth,
     ):
         """Short repo basename is normalized to canonical owner/repo key."""
         with self._chdir_tmp() as tmp:
@@ -248,8 +263,13 @@ class TestDepsUpdateCommand:
     @patch(_PATCH_ENGINE)
     @patch(_PATCH_APM_PACKAGE)
     def test_force_flag_propagates(
-        self, mock_pkg_cls, mock_engine, mock_lockfile_cls,
-        mock_get_path, mock_migrate, mock_auth,
+        self,
+        mock_pkg_cls,
+        mock_engine,
+        mock_lockfile_cls,
+        mock_get_path,
+        mock_migrate,
+        mock_auth,
     ):
         """--force propagates to engine."""
         with self._chdir_tmp() as tmp:
@@ -275,8 +295,13 @@ class TestDepsUpdateCommand:
     @patch(_PATCH_ENGINE)
     @patch(_PATCH_APM_PACKAGE)
     def test_target_flag_propagates(
-        self, mock_pkg_cls, mock_engine, mock_lockfile_cls,
-        mock_get_path, mock_migrate, mock_auth,
+        self,
+        mock_pkg_cls,
+        mock_engine,
+        mock_lockfile_cls,
+        mock_get_path,
+        mock_migrate,
+        mock_auth,
     ):
         """--target propagates to engine."""
         with self._chdir_tmp() as tmp:
@@ -302,8 +327,13 @@ class TestDepsUpdateCommand:
     @patch(_PATCH_ENGINE)
     @patch(_PATCH_APM_PACKAGE)
     def test_logger_passed_to_engine(
-        self, mock_pkg_cls, mock_engine, mock_lockfile_cls,
-        mock_get_path, mock_migrate, mock_auth,
+        self,
+        mock_pkg_cls,
+        mock_engine,
+        mock_lockfile_cls,
+        mock_get_path,
+        mock_migrate,
+        mock_auth,
     ):
         """An InstallLogger is passed to the engine for verbose output."""
         with self._chdir_tmp() as tmp:
@@ -332,8 +362,13 @@ class TestDepsUpdateCommand:
     @patch(_PATCH_ENGINE)
     @patch(_PATCH_APM_PACKAGE)
     def test_verbose_flag_propagates(
-        self, mock_pkg_cls, mock_engine, mock_lockfile_cls,
-        mock_get_path, mock_migrate, mock_auth,
+        self,
+        mock_pkg_cls,
+        mock_engine,
+        mock_lockfile_cls,
+        mock_get_path,
+        mock_migrate,
+        mock_auth,
     ):
         """--verbose propagates to engine and to the logger."""
         with self._chdir_tmp() as tmp:
@@ -364,8 +399,13 @@ class TestDepsUpdateCommand:
     @patch(_PATCH_ENGINE)
     @patch(_PATCH_APM_PACKAGE)
     def test_sha_diff_shown_when_changed(
-        self, mock_pkg_cls, mock_engine, mock_lockfile_cls,
-        mock_get_path, mock_migrate, mock_auth,
+        self,
+        mock_pkg_cls,
+        mock_engine,
+        mock_lockfile_cls,
+        mock_get_path,
+        mock_migrate,
+        mock_auth,
     ):
         """Output contains 'old_sha -> new_sha' when packages change."""
         with self._chdir_tmp() as tmp:
@@ -405,8 +445,13 @@ class TestDepsUpdateCommand:
     @patch(_PATCH_ENGINE)
     @patch(_PATCH_APM_PACKAGE)
     def test_already_latest_message(
-        self, mock_pkg_cls, mock_engine, mock_lockfile_cls,
-        mock_get_path, mock_migrate, mock_auth,
+        self,
+        mock_pkg_cls,
+        mock_engine,
+        mock_lockfile_cls,
+        mock_get_path,
+        mock_migrate,
+        mock_auth,
     ):
         """Shows 'already at latest refs' when SHAs unchanged."""
         with self._chdir_tmp() as tmp:
@@ -437,8 +482,13 @@ class TestDepsUpdateCommand:
     @patch(_PATCH_ENGINE)
     @patch(_PATCH_APM_PACKAGE)
     def test_engine_failure_exits_1(
-        self, mock_pkg_cls, mock_engine, mock_lockfile_cls,
-        mock_get_path, mock_migrate, mock_auth,
+        self,
+        mock_pkg_cls,
+        mock_engine,
+        mock_lockfile_cls,
+        mock_get_path,
+        mock_migrate,
+        mock_auth,
     ):
         """sys.exit(1) when engine raises an exception."""
         with self._chdir_tmp() as tmp:
@@ -467,14 +517,17 @@ class TestDepsUpdateCommand:
     @patch(_PATCH_ENGINE)
     @patch(_PATCH_APM_PACKAGE)
     def test_multiple_packages_propagate(
-        self, mock_pkg_cls, mock_engine, mock_lockfile_cls,
-        mock_get_path, mock_migrate, mock_auth,
+        self,
+        mock_pkg_cls,
+        mock_engine,
+        mock_lockfile_cls,
+        mock_get_path,
+        mock_migrate,
+        mock_auth,
     ):
         """Multiple package args propagate as only_packages list."""
         with self._chdir_tmp() as tmp:
-            (tmp / "apm.yml").write_text(
-                _minimal_apm_yml(deps=["org/pkg-a", "org/pkg-b"])
-            )
+            (tmp / "apm.yml").write_text(_minimal_apm_yml(deps=["org/pkg-a", "org/pkg-b"]))
             mock_pkg = MagicMock()
             mock_pkg.get_apm_dependencies.return_value = [
                 _mock_dep("org/pkg-a"),
@@ -487,9 +540,7 @@ class TestDepsUpdateCommand:
             mock_lockfile_cls.read.return_value = None
             mock_engine.return_value = InstallResult()
 
-            result = self.runner.invoke(
-                cli, ["deps", "update", "org/pkg-a", "org/pkg-b"]
-            )
+            result = self.runner.invoke(cli, ["deps", "update", "org/pkg-a", "org/pkg-b"])
             assert result.exit_code == 0
             _, kwargs = mock_engine.call_args
             assert kwargs["only_packages"] == ["org/pkg-a", "org/pkg-b"]
@@ -501,16 +552,19 @@ class TestDeadCodeRemoval:
     def test_update_single_package_removed(self):
         """_update_single_package deleted from _utils.py."""
         from apm_cli.commands.deps import _utils as utils
+
         assert not hasattr(utils, "_update_single_package")
 
     def test_update_all_packages_removed(self):
         """_update_all_packages deleted from _utils.py."""
         from apm_cli.commands.deps import _utils as utils
+
         assert not hasattr(utils, "_update_all_packages")
 
     def test_not_in_package_exports(self):
         """Dead functions not exported from __init__.py."""
         import apm_cli.commands.deps as deps_mod
+
         all_names = getattr(deps_mod, "__all__", [])
         assert "_update_single_package" not in all_names
         assert "_update_all_packages" not in all_names

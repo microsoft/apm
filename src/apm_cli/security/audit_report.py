@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List  # noqa: F401, UP035
 
 from .content_scanner import ScanFinding
 
@@ -21,8 +21,7 @@ def relative_path_for_report(file_path: str) -> str:
 # SARIF schema version
 _SARIF_VERSION = "2.1.0"
 _SARIF_SCHEMA = (
-    "https://docs.oasis-open.org/sarif/sarif/v2.1.0/"
-    "cos02/schemas/sarif-schema-2.1.0.json"
+    "https://docs.oasis-open.org/sarif/sarif/v2.1.0/cos02/schemas/sarif-schema-2.1.0.json"
 )
 _TOOL_NAME = "apm-audit"
 _TOOL_INFO_URI = "https://apm.github.io/apm/enterprise/security/"
@@ -41,7 +40,7 @@ def _rule_id(category: str) -> str:
 
 
 def findings_to_json(
-    findings_by_file: Dict[str, List[ScanFinding]],
+    findings_by_file: dict[str, list[ScanFinding]],
     files_scanned: int,
     exit_code: int,
 ) -> dict:
@@ -58,15 +57,17 @@ def findings_to_json(
 
     items = []
     for finding in all_findings:
-        items.append({
-            "severity": finding.severity,
-            "file": relative_path_for_report(finding.file),
-            "line": finding.line,
-            "column": finding.column,
-            "codepoint": finding.codepoint,
-            "category": finding.category,
-            "description": finding.description,
-        })
+        items.append(
+            {
+                "severity": finding.severity,
+                "file": relative_path_for_report(finding.file),
+                "line": finding.line,
+                "column": finding.column,
+                "codepoint": finding.codepoint,
+                "category": finding.category,
+                "description": finding.description,
+            }
+        )
 
     return {
         "version": "1",
@@ -77,7 +78,7 @@ def findings_to_json(
 
 
 def findings_to_sarif(
-    findings_by_file: Dict[str, List[ScanFinding]],
+    findings_by_file: dict[str, list[ScanFinding]],
     files_scanned: int,
 ) -> dict:
     """Convert scan findings to SARIF 2.1.0 format.
@@ -88,7 +89,7 @@ def findings_to_sarif(
     all_findings = [f for ff in findings_by_file.values() for f in ff]
 
     # Collect unique rules from categories
-    seen_rules: Dict[str, dict] = {}
+    seen_rules: dict[str, dict] = {}
     for f in all_findings:
         rid = _rule_id(f.category)
         if rid not in seen_rules:
@@ -106,7 +107,7 @@ def findings_to_sarif(
     # Build results
     results = []
     for finding in all_findings:
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "ruleId": _rule_id(finding.category),
             "level": _SEVERITY_MAP.get(finding.severity, "note"),
             "message": {"text": f"{finding.description} ({finding.codepoint})"},
@@ -171,7 +172,7 @@ def serialize_report(report: dict) -> str:
 
 
 def findings_to_markdown(
-    findings_by_file: Dict[str, List[ScanFinding]],
+    findings_by_file: dict[str, list[ScanFinding]],
     files_scanned: int,
 ) -> str:
     """Convert scan findings to GitHub-Flavored Markdown.
@@ -225,9 +226,10 @@ def findings_to_markdown(
     ]
     for f in sorted_findings:
         sev = f.severity.upper()
+        escaped_desc = f.description.replace("|", "\\|")
         lines.append(
             f"| {sev} | `{relative_path_for_report(f.file)}` | {f.line}:{f.column}"
-            f" | `{f.codepoint}` | {f.description.replace('|', '\\|')} |"
+            f" | `{f.codepoint}` | {escaped_desc} |"
         )
     lines.append("")
     lines.append("Run `apm audit --strip` to remove flagged characters.\n")

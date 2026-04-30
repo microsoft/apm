@@ -122,7 +122,7 @@ jobs:
 
 ### Separate Jobs for Granular Status
 
-If your project uses `apm compile` (for Codex, Gemini, or other tools without native APM integration), you can add audit and compile as separate required checks:
+If your project uses `apm compile` (for Codex, Gemini, or other tools whose instructions require compilation), you can add audit and compile as separate required checks:
 
 ```yaml
 jobs:

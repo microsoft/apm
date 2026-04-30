@@ -7,7 +7,7 @@ import unittest
 
 from apm_cli.workflow.discovery import create_workflow_template, discover_workflows
 from apm_cli.workflow.parser import WorkflowDefinition, parse_workflow_file
-from apm_cli.workflow.runner import collect_parameters, substitute_parameters
+from apm_cli.workflow.runner import collect_parameters, substitute_parameters  # noqa: F401
 
 
 class TestWorkflowParser(unittest.TestCase):
@@ -150,7 +150,7 @@ input:
         template_path = create_workflow_template("test-template", self.temp_dir_path)
 
         self.assertTrue(os.path.exists(template_path))
-        with open(template_path, "r") as f:
+        with open(template_path) as f:
             content = f.read()
             self.assertIn("description:", content)
             self.assertIn("author:", content)

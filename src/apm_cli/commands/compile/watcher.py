@@ -2,8 +2,8 @@
 
 import time
 
-from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_YML_FILENAME
 from ...compilation import AgentsCompiler, CompilationConfig
+from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
 
 
@@ -32,7 +32,9 @@ def _watch_mode(output, chatmode, no_links, dry_run, verbose=False):
                 if event.is_directory:
                     return
                 # Only react to relevant files
-                if not event.src_path.endswith(".md") and not event.src_path.endswith(APM_YML_FILENAME):
+                if not event.src_path.endswith(".md") and not event.src_path.endswith(
+                    APM_YML_FILENAME
+                ):
                     return
                 # Debounce rapid changes
                 current_time = time.time()
@@ -116,9 +118,7 @@ def _watch_mode(output, chatmode, no_links, dry_run, verbose=False):
 
         # Start watching
         observer.start()
-        logger.progress(
-            f" Watching for changes in: {', '.join(watch_paths)}", symbol="eyes"
-        )
+        logger.progress(f" Watching for changes in: {', '.join(watch_paths)}", symbol="eyes")
         logger.progress("Press Ctrl+C to stop watching...", symbol="info")
 
         # Do initial compilation
@@ -136,9 +136,7 @@ def _watch_mode(output, chatmode, no_links, dry_run, verbose=False):
 
         if result.success:
             if dry_run:
-                logger.success(
-                    "Initial compilation successful (dry run)", symbol="sparkles"
-                )
+                logger.success("Initial compilation successful (dry run)", symbol="sparkles")
             else:
                 logger.success(
                     f"Initial compilation complete: {result.output_path}",
@@ -161,12 +159,12 @@ def _watch_mode(output, chatmode, no_links, dry_run, verbose=False):
     except ImportError:
         logger.error("Watch mode requires the 'watchdog' library")
         logger.progress("Install it with: uv pip install watchdog")
-        logger.progress(
-            "Or reinstall APM: uv pip install -e . (from the apm directory)"
-        )
+        logger.progress("Or reinstall APM: uv pip install -e . (from the apm directory)")
         import sys
+
         sys.exit(1)
     except Exception as e:
         logger.error(f"Error in watch mode: {e}")
         import sys
+
         sys.exit(1)

@@ -10,18 +10,18 @@ checks to isolate the phase logic.
 
 from __future__ import annotations
 
-import os
+import os  # noqa: F401
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
-from unittest.mock import MagicMock, call, patch
+from typing import Any, Dict, List, Optional, Set, Tuple  # noqa: F401, UP035
+from unittest.mock import MagicMock, call, patch  # noqa: F401
 
 import pytest
 
-from apm_cli.policy.discovery import PolicyFetchResult
-from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
-from apm_cli.policy.models import CIAuditResult, CheckResult
 from apm_cli.install.phases.policy_gate import PolicyViolationError, run
+from apm_cli.policy.discovery import PolicyFetchResult
+from apm_cli.policy.models import CheckResult, CIAuditResult
+from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
 
 # Patch targets:
 # _discover_with_chain is a module-level function in policy_gate
@@ -32,6 +32,7 @@ _PATCH_CHECKS = "apm_cli.policy.policy_checks.run_dependency_policy_checks"
 
 # -- Minimal synthetic InstallContext ---------------------------------
 
+
 @dataclass
 class _FakeContext:
     """Minimal stand-in for InstallContext with only the fields policy_gate reads."""
@@ -40,28 +41,37 @@ class _FakeContext:
     apm_dir: Path = field(default_factory=lambda: Path("/tmp/fake-project/.apm"))
     verbose: bool = False
     logger: Any = None
-    deps_to_install: List[Any] = field(default_factory=list)
+    deps_to_install: list[Any] = field(default_factory=list)
     existing_lockfile: Any = None
 
     # policy_gate fields
     policy_fetch: Any = None
     policy_enforcement_active: bool = False
     no_policy: bool = False
+    apm_package: Any = None
 
 
-def _make_ctx(*, logger=None, no_policy=False, deps=None):
+def _make_ctx(*, logger=None, no_policy=False, deps=None, apm_package=None):
     """Build a _FakeContext with defaults."""
     return _FakeContext(
         logger=logger or MagicMock(),
         no_policy=no_policy,
         deps_to_install=deps or [],
+        apm_package=apm_package,
     )
 
 
-def _make_fetch_result(outcome, *, enforcement="warn", policy=None,
-                       source="org:contoso/.github", cached=False,
-                       cache_age_seconds=None, fetch_error=None,
-                       error=None):
+def _make_fetch_result(
+    outcome,
+    *,
+    enforcement="warn",
+    policy=None,
+    source="org:contoso/.github",
+    cached=False,
+    cache_age_seconds=None,
+    fetch_error=None,
+    error=None,
+):
     """Build a PolicyFetchResult for the given outcome."""
     if policy is None and outcome in ("found", "cached_stale", "empty"):
         policy = ApmPolicy(enforcement=enforcement)
@@ -79,21 +89,25 @@ def _make_fetch_result(outcome, *, enforcement="warn", policy=None,
 
 def _passing_audit():
     """CIAuditResult with all checks passed."""
-    return CIAuditResult(checks=[
-        CheckResult(name="dependency-allowlist", passed=True, message="OK"),
-    ])
+    return CIAuditResult(
+        checks=[
+            CheckResult(name="dependency-allowlist", passed=True, message="OK"),
+        ]
+    )
 
 
 def _failing_audit(*, name="dependency-denylist", message="Denied", details=None):
     """CIAuditResult with one failing check."""
-    return CIAuditResult(checks=[
-        CheckResult(
-            name=name,
-            passed=False,
-            message=message,
-            details=details or ["test-blocked/evil"],
-        ),
-    ])
+    return CIAuditResult(
+        checks=[
+            CheckResult(
+                name=name,
+                passed=False,
+                message=message,
+                details=details or ["test-blocked/evil"],
+            ),
+        ]
+    )
 
 
 # =====================================================================
@@ -203,9 +217,7 @@ class TestOutcomeNoGitRemote:
 
     @patch(_PATCH_DISCOVER)
     def test_no_git_remote(self, mock_discover):
-        mock_discover.return_value = _make_fetch_result(
-            "no_git_remote", source=""
-        )
+        mock_discover.return_value = _make_fetch_result("no_git_remote", source="")
         ctx = _make_ctx()
 
         run(ctx)
@@ -236,9 +248,7 @@ class TestOutcomeMalformed:
 
     @patch(_PATCH_DISCOVER)
     def test_malformed_warns_and_proceeds(self, mock_discover):
-        mock_discover.return_value = _make_fetch_result(
-            "malformed", policy=None, error="bad yaml"
-        )
+        mock_discover.return_value = _make_fetch_result("malformed", policy=None, error="bad yaml")
 
         ctx = _make_ctx()
         run(ctx)  # should NOT raise or sys.exit
@@ -350,7 +360,9 @@ class TestEnforcementBlock:
         # Violation routed through logger with severity="block"
         ctx.logger.policy_violation.assert_called_once()
         call_kwargs = ctx.logger.policy_violation.call_args
-        assert call_kwargs[1]["severity"] == "block" or call_kwargs.kwargs.get("severity") == "block"
+        assert (
+            call_kwargs[1]["severity"] == "block" or call_kwargs.kwargs.get("severity") == "block"
+        )
 
 
 class TestEnforcementWarn:
@@ -368,14 +380,12 @@ class TestEnforcementWarn:
 
         assert ctx.policy_enforcement_active is True
         ctx.logger.policy_violation.assert_called_once()
-        args, kwargs = ctx.logger.policy_violation.call_args
+        args, kwargs = ctx.logger.policy_violation.call_args  # noqa: RUF059
         assert kwargs.get("severity") == "warn"
 
     @patch(_PATCH_CHECKS)
     @patch(_PATCH_DISCOVER)
-    def test_warn_violation_recorded_on_logger_diagnostics(
-        self, mock_discover, mock_checks
-    ):
+    def test_warn_violation_recorded_on_logger_diagnostics(self, mock_discover, mock_checks):
         """microsoft/apm#834 -- warn-mode violations must reach the
         DiagnosticCollector that the install summary will render.
 
@@ -400,10 +410,7 @@ class TestEnforcementWarn:
         # The violation lands in the collector that the install pipeline
         # also reuses for its end-of-install summary.
         assert logger.diagnostics.policy_count >= 1
-        policy_diags = [
-            d for d in logger.diagnostics._diagnostics
-            if d.category == CATEGORY_POLICY
-        ]
+        policy_diags = [d for d in logger.diagnostics._diagnostics if d.category == CATEGORY_POLICY]
         assert any(d.severity == "warn" for d in policy_diags), (
             f"Expected at least one warn-severity policy diagnostic, got: "
             f"{[(d.severity, d.message) for d in policy_diags]}"
@@ -467,7 +474,8 @@ class TestChainRefs:
 
         ctx = _make_ctx()
         from apm_cli.install.phases.policy_gate import _discover_with_chain
-        result = _discover_with_chain(ctx)
+
+        result = _discover_with_chain(ctx)  # noqa: F841
 
         # _write_cache should have been called with chain_refs covering both
         assert mock_write_cache.called
@@ -494,7 +502,8 @@ class TestChainRefs:
 
         ctx = _make_ctx()
         from apm_cli.install.phases.policy_gate import _discover_with_chain
-        result = _discover_with_chain(ctx)
+
+        result = _discover_with_chain(ctx)  # noqa: F841
 
         # _write_cache should NOT be called by _discover_with_chain
         # (it's already cached by discover_policy itself)
@@ -515,7 +524,8 @@ class TestChainRefs:
 
         ctx = _make_ctx()
         from apm_cli.install.phases.policy_gate import _discover_with_chain
-        result = _discover_with_chain(ctx)
+
+        result = _discover_with_chain(ctx)  # noqa: F841
 
         mock_write_cache.assert_not_called()
 
@@ -538,9 +548,7 @@ class TestSeverityLiteral:
         run(ctx)
 
         _, kwargs = ctx.logger.policy_violation.call_args
-        assert kwargs["severity"] == "warn", (
-            f"Expected severity='warn', got '{kwargs['severity']}'"
-        )
+        assert kwargs["severity"] == "warn", f"Expected severity='warn', got '{kwargs['severity']}'"
 
     @patch(_PATCH_CHECKS)
     @patch(_PATCH_DISCOVER)
@@ -562,18 +570,21 @@ class TestSeverityLiteral:
 
 
 class TestMultipleViolations:
-
     @patch(_PATCH_CHECKS)
     @patch(_PATCH_DISCOVER)
     def test_block_mode_multiple_violations_raises(self, mock_discover, mock_checks):
         mock_discover.return_value = _make_fetch_result("found", enforcement="block")
-        mock_checks.return_value = CIAuditResult(checks=[
-            CheckResult(name="dep-allow", passed=False, message="Not allowed",
-                        details=["acme/evil"]),
-            CheckResult(name="dep-deny", passed=False, message="Denied",
-                        details=["acme/banned"]),
-            CheckResult(name="dep-require", passed=True, message="OK"),
-        ])
+        mock_checks.return_value = CIAuditResult(
+            checks=[
+                CheckResult(
+                    name="dep-allow", passed=False, message="Not allowed", details=["acme/evil"]
+                ),
+                CheckResult(
+                    name="dep-deny", passed=False, message="Denied", details=["acme/banned"]
+                ),
+                CheckResult(name="dep-require", passed=True, message="OK"),
+            ]
+        )
         ctx = _make_ctx()
 
         with pytest.raises(PolicyViolationError):
@@ -586,12 +597,16 @@ class TestMultipleViolations:
     @patch(_PATCH_DISCOVER)
     def test_warn_mode_multiple_violations_continues(self, mock_discover, mock_checks):
         mock_discover.return_value = _make_fetch_result("found", enforcement="warn")
-        mock_checks.return_value = CIAuditResult(checks=[
-            CheckResult(name="dep-allow", passed=False, message="Not allowed",
-                        details=["acme/evil"]),
-            CheckResult(name="dep-deny", passed=False, message="Denied",
-                        details=["acme/banned"]),
-        ])
+        mock_checks.return_value = CIAuditResult(
+            checks=[
+                CheckResult(
+                    name="dep-allow", passed=False, message="Not allowed", details=["acme/evil"]
+                ),
+                CheckResult(
+                    name="dep-deny", passed=False, message="Denied", details=["acme/banned"]
+                ),
+            ]
+        )
         ctx = _make_ctx()
 
         # Should NOT raise
@@ -607,7 +622,6 @@ class TestMultipleViolations:
 
 
 class TestCheckInvocation:
-
     @patch(_PATCH_CHECKS)
     @patch(_PATCH_DISCOVER)
     def test_check_receives_deps_and_policy(self, mock_discover, mock_checks):
@@ -668,9 +682,7 @@ class TestWarnModeFailFast:
     @patch(_PATCH_DISCOVER)
     def test_warn_mode_passes_fail_fast_false(self, mock_discover, mock_checks):
         policy = ApmPolicy(enforcement="warn")
-        mock_discover.return_value = _make_fetch_result(
-            "found", policy=policy, enforcement="warn"
-        )
+        mock_discover.return_value = _make_fetch_result("found", policy=policy, enforcement="warn")
         ctx = _make_ctx()
         run(ctx)
 
@@ -681,9 +693,7 @@ class TestWarnModeFailFast:
     @patch(_PATCH_DISCOVER)
     def test_block_mode_passes_fail_fast_true(self, mock_discover, mock_checks):
         policy = ApmPolicy(enforcement="block")
-        mock_discover.return_value = _make_fetch_result(
-            "found", policy=policy, enforcement="block"
-        )
+        mock_discover.return_value = _make_fetch_result("found", policy=policy, enforcement="block")
         ctx = _make_ctx()
         run(ctx)
 
@@ -704,18 +714,18 @@ class TestProjectWinsWarnings:
     @patch(_PATCH_DISCOVER)
     def test_passed_with_details_emits_warning(self, mock_discover, mock_checks):
         policy = ApmPolicy(enforcement="warn")
-        mock_discover.return_value = _make_fetch_result(
-            "found", policy=policy, enforcement="warn"
-        )
+        mock_discover.return_value = _make_fetch_result("found", policy=policy, enforcement="warn")
         # Simulate a project-wins check: passed=True, but with warning details
-        audit = CIAuditResult(checks=[
-            CheckResult(
-                name="required-package-version",
-                passed=True,
-                message="Required package versions match (warnings: 1)",
-                details=["acme/pkg: required 1.0.0, installed 1.1.0 (project-wins)"],
-            ),
-        ])
+        audit = CIAuditResult(
+            checks=[
+                CheckResult(
+                    name="required-package-version",
+                    passed=True,
+                    message="Required package versions match (warnings: 1)",
+                    details=["acme/pkg: required 1.0.0, installed 1.1.0 (project-wins)"],
+                ),
+            ]
+        )
         mock_checks.return_value = audit
 
         mock_logger = MagicMock()
@@ -732,16 +742,16 @@ class TestProjectWinsWarnings:
     @patch(_PATCH_DISCOVER)
     def test_passed_without_details_no_warning(self, mock_discover, mock_checks):
         policy = ApmPolicy(enforcement="warn")
-        mock_discover.return_value = _make_fetch_result(
-            "found", policy=policy, enforcement="warn"
+        mock_discover.return_value = _make_fetch_result("found", policy=policy, enforcement="warn")
+        audit = CIAuditResult(
+            checks=[
+                CheckResult(
+                    name="dependency-allowlist",
+                    passed=True,
+                    message="No dependency allow list configured",
+                ),
+            ]
         )
-        audit = CIAuditResult(checks=[
-            CheckResult(
-                name="dependency-allowlist",
-                passed=True,
-                message="No dependency allow list configured",
-            ),
-        ])
         mock_checks.return_value = audit
 
         mock_logger = MagicMock()
@@ -764,9 +774,7 @@ class TestDirectMCPDepsWired:
     @patch(_PATCH_DISCOVER)
     def test_direct_mcp_deps_passed_to_checks(self, mock_discover, mock_checks):
         policy = ApmPolicy(enforcement="block")
-        mock_discover.return_value = _make_fetch_result(
-            "found", policy=policy, enforcement="block"
-        )
+        mock_discover.return_value = _make_fetch_result("found", policy=policy, enforcement="block")
         fake_mcp = [MagicMock(name="evil-server")]
         ctx = _make_ctx()
         ctx.direct_mcp_deps = fake_mcp
@@ -780,9 +788,7 @@ class TestDirectMCPDepsWired:
     @patch(_PATCH_DISCOVER)
     def test_no_direct_mcp_deps_passes_none(self, mock_discover, mock_checks):
         policy = ApmPolicy(enforcement="block")
-        mock_discover.return_value = _make_fetch_result(
-            "found", policy=policy, enforcement="block"
-        )
+        mock_discover.return_value = _make_fetch_result("found", policy=policy, enforcement="block")
         ctx = _make_ctx()
         # direct_mcp_deps not set -> getattr returns None
 
@@ -790,3 +796,61 @@ class TestDirectMCPDepsWired:
 
         mock_checks.assert_called_once()
         assert mock_checks.call_args[1]["mcp_deps"] is None
+
+
+class TestExplicitIncludesWiring:
+    """policy_gate threads ctx.apm_package.includes into the dep seam."""
+
+    @patch(_PATCH_CHECKS)
+    @patch(_PATCH_DISCOVER)
+    def test_no_apm_package_omits_kwarg(self, mock_discover, mock_checks):
+        # When ctx.apm_package is None the seam kwarg must NOT be set,
+        # so legacy "skip" behaviour is preserved.
+        mock_discover.return_value = _make_fetch_result("found", enforcement="warn")
+        mock_checks.return_value = _passing_audit()
+        ctx = _make_ctx(apm_package=None)
+
+        run(ctx)
+
+        kwargs = mock_checks.call_args[1]
+        assert "manifest_includes" not in kwargs
+
+    @patch(_PATCH_CHECKS)
+    @patch(_PATCH_DISCOVER)
+    def test_apm_package_threads_includes(self, mock_discover, mock_checks):
+        mock_discover.return_value = _make_fetch_result("found", enforcement="block")
+        mock_checks.return_value = _passing_audit()
+        fake_pkg = MagicMock()
+        fake_pkg.includes = "auto"
+        ctx = _make_ctx(apm_package=fake_pkg)
+
+        run(ctx)
+
+        kwargs = mock_checks.call_args[1]
+        assert kwargs.get("manifest_includes") == "auto"
+
+    @patch(_PATCH_CHECKS)
+    @patch(_PATCH_DISCOVER)
+    def test_explicit_includes_violation_raises(self, mock_discover, mock_checks):
+        # Simulate the seam returning an explicit-includes violation;
+        # under enforcement=block, run() must raise PolicyViolationError.
+        mock_discover.return_value = _make_fetch_result("found", enforcement="block")
+        mock_checks.return_value = CIAuditResult(
+            checks=[
+                CheckResult(
+                    name="explicit-includes",
+                    passed=False,
+                    message=(
+                        "Policy requires explicit 'includes:' paths but manifest has "
+                        "'includes: auto' or no includes field."
+                    ),
+                    details=["includes: 'auto', require_explicit_includes: true"],
+                ),
+            ]
+        )
+        fake_pkg = MagicMock()
+        fake_pkg.includes = "auto"
+        ctx = _make_ctx(apm_package=fake_pkg)
+
+        with pytest.raises(PolicyViolationError):
+            run(ctx)

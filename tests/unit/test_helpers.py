@@ -1,7 +1,7 @@
 """Tests for helper utility functions."""
 
 import json
-import sys
+import sys  # noqa: F401
 import unittest
 from pathlib import Path
 
@@ -44,7 +44,7 @@ class TestHelpers(unittest.TestCase):
 
         # On most Unix systems, at least one package manager should be available
         # This is a reasonable expectation but not guaranteed on minimal systems
-        import sys
+        import sys  # noqa: F811
 
         if sys.platform != "win32":
             # Skip this assertion on Windows since it might not have any

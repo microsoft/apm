@@ -19,9 +19,9 @@ from __future__ import annotations
 import os
 import subprocess
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field  # noqa: F401
 from enum import Enum
-from typing import List, Optional, Protocol, runtime_checkable
+from typing import List, Optional, Protocol, runtime_checkable  # noqa: F401, UP035
 
 # Public env vars (also recognized by CLI flag plumbing).
 ENV_PROTOCOL = "APM_GIT_PROTOCOL"
@@ -46,7 +46,7 @@ class ProtocolPreference(Enum):
     HTTPS = "https"
 
     @classmethod
-    def from_str(cls, value: Optional[str]) -> "ProtocolPreference":
+    def from_str(cls, value: str | None) -> ProtocolPreference:
         if not value:
             return cls.NONE
         v = value.strip().lower()
@@ -88,9 +88,9 @@ class TransportPlan:
             strict-mode attempt fails. Surfaces the escape-hatch flag.
     """
 
-    attempts: List[TransportAttempt]
+    attempts: list[TransportAttempt]
     strict: bool
-    fallback_hint: Optional[str] = None
+    fallback_hint: str | None = None
 
 
 @runtime_checkable
@@ -103,7 +103,7 @@ class InsteadOfResolver(Protocol):
     install without re-shelling to git.
     """
 
-    def resolve(self, candidate_url: str) -> Optional[str]:  # pragma: no cover - Protocol
+    def resolve(self, candidate_url: str) -> str | None:  # pragma: no cover - Protocol
         ...
 
 
@@ -114,7 +114,7 @@ class NoOpInsteadOfResolver:
     degradation when ``git`` is missing.
     """
 
-    def resolve(self, candidate_url: str) -> Optional[str]:
+    def resolve(self, candidate_url: str) -> str | None:
         return None
 
 
@@ -128,10 +128,10 @@ class GitConfigInsteadOfResolver:
     """
 
     def __init__(self) -> None:
-        self._rewrites: Optional[List[tuple]] = None  # list of (insteadof_value, target_base)
+        self._rewrites: list[tuple] | None = None  # list of (insteadof_value, target_base)
         self._lock = threading.Lock()
 
-    def resolve(self, candidate_url: str) -> Optional[str]:
+    def resolve(self, candidate_url: str) -> str | None:
         if self._rewrites is None:
             with self._lock:
                 if self._rewrites is None:
@@ -139,18 +139,17 @@ class GitConfigInsteadOfResolver:
         best_prefix = ""
         best_base = ""
         for insteadof_value, target_base in self._rewrites:
-            if (
-                candidate_url.startswith(insteadof_value)
-                and len(insteadof_value) > len(best_prefix)
+            if candidate_url.startswith(insteadof_value) and len(insteadof_value) > len(
+                best_prefix
             ):
                 best_prefix = insteadof_value
                 best_base = target_base
         if best_prefix:
-            return best_base + candidate_url[len(best_prefix):]
+            return best_base + candidate_url[len(best_prefix) :]
         return None
 
     @staticmethod
-    def _load_rewrites() -> List[tuple]:
+    def _load_rewrites() -> list[tuple]:
         """Load all ``url.*.insteadof`` entries from the user's git config.
 
         Returns an empty list if git is missing, exits non-zero, or no
@@ -167,7 +166,7 @@ class GitConfigInsteadOfResolver:
             return []
         if result.returncode != 0 or not result.stdout.strip():
             return []
-        rewrites: List[tuple] = []
+        rewrites: list[tuple] = []
         suffix = ".insteadof"
         for line in result.stdout.splitlines():
             parts = line.split(None, 1)
@@ -177,13 +176,13 @@ class GitConfigInsteadOfResolver:
             key_lower = key.lower()
             if not (key_lower.startswith("url.") and key_lower.endswith(suffix)):
                 continue
-            base = key[4:-len(suffix)]
+            base = key[4 : -len(suffix)]
             if base:
                 rewrites.append((insteadof_value, base))
         return rewrites
 
 
-def is_fallback_allowed(cli_flag: bool = False, env: Optional[dict] = None) -> bool:
+def is_fallback_allowed(cli_flag: bool = False, env: dict | None = None) -> bool:
     """Return ``True`` when the user opted into cross-protocol fallback.
 
     Truthy via either the CLI flag or ``APM_ALLOW_PROTOCOL_FALLBACK=1``.
@@ -195,7 +194,7 @@ def is_fallback_allowed(cli_flag: bool = False, env: Optional[dict] = None) -> b
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
-def protocol_pref_from_env(env: Optional[dict] = None) -> ProtocolPreference:
+def protocol_pref_from_env(env: dict | None = None) -> ProtocolPreference:
     """Read :class:`ProtocolPreference` from ``APM_GIT_PROTOCOL`` env."""
     env_map = env if env is not None else os.environ
     return ProtocolPreference.from_str(env_map.get(ENV_PROTOCOL))
@@ -209,10 +208,10 @@ _HTTP = TransportAttempt(scheme="http", use_token=False, label="insecure HTTP")
 _SSH = TransportAttempt(scheme="ssh", use_token=False, label="SSH")
 
 
-def _dedup_attempts(attempts: List[TransportAttempt]) -> List[TransportAttempt]:
+def _dedup_attempts(attempts: list[TransportAttempt]) -> list[TransportAttempt]:
     """Deduplicate attempts while preserving order."""
     seen = set()
-    unique_attempts: List[TransportAttempt] = []
+    unique_attempts: list[TransportAttempt] = []
     for attempt in attempts:
         key = (attempt.scheme, attempt.use_token)
         if key in seen:
@@ -234,7 +233,7 @@ class TransportSelector:
             Inject :class:`NoOpInsteadOfResolver` (or a fake) in tests.
     """
 
-    def __init__(self, insteadof_resolver: Optional[InsteadOfResolver] = None) -> None:
+    def __init__(self, insteadof_resolver: InsteadOfResolver | None = None) -> None:
         self._resolver: InsteadOfResolver = insteadof_resolver or GitConfigInsteadOfResolver()
 
     def select(

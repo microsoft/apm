@@ -8,6 +8,8 @@ APM supports plugins through the `plugin.json` format. Plugins are automatically
 
 ## Plugin authoring
 
+For where plugins fit relative to APM's source layout, see [Anatomy -- Why not just ship a `plugin.json`?](../../introduction/anatomy-of-an-apm-package/#why-not-just-ship-a-pluginjson).
+
 Plugin ecosystems handle distribution but lack dependency management, security scanning, version locking, and dev/prod separation. As plugins depend on shared primitives, these gaps compound.
 
 APM is the supply-chain layer. Author packages with full tooling — transitive dependencies, lockfile pinning, [security scanning](../../enterprise/security/), [`devDependencies`](../../reference/manifest-schema/#5-devdependencies) — then export as standard plugins. Consumers never need APM installed.
@@ -28,10 +30,10 @@ APM is the supply-chain layer. Author packages with full tooling — transitive 
 apm init my-plugin --plugin    # Creates both apm.yml and plugin.json
 apm install --dev owner/helpers # Dev-only dependency (excluded from export)
 apm install owner/core-rules   # Production dependency
-apm pack --format plugin       # Export — dev deps excluded, security scanned
+apm pack                       # Export -- plugin format is the default; dev deps excluded, security scanned
 ```
 
-The exported plugin directory contains no APM-specific files. See [Pack & Distribute — Plugin format](../../guides/pack-distribute/#plugin-format) for the output mapping.
+The exported plugin directory contains no APM-specific files. See [Pack & Distribute -- Plugin format](../../guides/pack-distribute/#plugin-format-vs-apm-format) for the output mapping.
 
 ## Overview
 
@@ -207,6 +209,31 @@ By default APM looks for `agents/`, `skills/`, `commands/`, and `hooks/` directo
 - For **agents**, directory contents are flattened into `.apm/agents/` (agents are flat files, not named directories)
 - `hooks` also accepts an inline object: `"hooks": {"hooks": {"PreToolUse": [...]}}`
 
+##### Target-specific hook files
+
+When a package ships hooks for multiple tools, use target-specific filenames so
+each tool receives only its own hooks:
+
+| Filename pattern | Deployed to |
+|---|---|
+| `*-copilot-hooks.json` | GitHub Copilot only |
+| `*-cursor-hooks.json` | Cursor only |
+| `*-claude-hooks.json` | Claude Code only |
+| `*-codex-hooks.json` | Codex CLI only |
+| `*-gemini-hooks.json` | Gemini CLI only |
+| Any other name (e.g. `hooks.json`, `telemetry-hooks.json`) | All targets |
+
+Example directory tree for a multi-target hook package:
+
+```
+my-hooks-pkg/
+  hooks/
+    hooks.json              # deployed to all targets
+    copilot-hooks.json      # Copilot only
+    cursor-hooks.json       # Cursor only
+    claude-hooks.json       # Claude Code only
+```
+
 #### MCP Server Definitions
 
 Plugins can ship MCP servers that are automatically deployed through APM's MCP pipeline. Define servers using `mcpServers` in `plugin.json`:
@@ -335,7 +362,7 @@ This:
 
 ## Exporting APM packages as plugins
 
-Use the [hybrid authoring workflow](#hybrid-authoring-workflow) to develop plugins with APM's full tooling and export them as standalone plugin directories. See [Pack & Distribute — Plugin format](../../guides/pack-distribute/#plugin-format) for the output mapping and structure.
+Use the [hybrid authoring workflow](#hybrid-authoring-workflow) to develop plugins with APM's full tooling and export them as standalone plugin directories. See [Pack & Distribute -- Plugin format](../../guides/pack-distribute/#plugin-format-vs-apm-format) for the output mapping and structure.
 
 ## Finding Plugins
 

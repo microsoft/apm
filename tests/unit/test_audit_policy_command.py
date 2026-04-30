@@ -15,7 +15,6 @@ from apm_cli.models.apm_package import clear_apm_yml_cache
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.schema import ApmPolicy
 
-
 # -- Fixtures -------------------------------------------------------
 
 
@@ -101,8 +100,10 @@ class TestCiWithPolicyFlag:
         )
         assert result.exit_code == 0
         data = json.loads(result.output)
-        # Baseline: up to 6 checks, Policy: 16 checks -> total > 6
-        assert data["summary"]["total"] > 6
+        # Baseline: up to 7 checks, Policy: 17 checks -> total > 7 when
+        # policy evaluation actually ran.  Asserting > 7 (not > 6) catches
+        # the regression where only baseline checks are returned.
+        assert data["summary"]["total"] > 7
 
     def test_ci_with_policy_deny_fails(self, runner, tmp_path, monkeypatch):
         """Policy deny list causing failure -> exit 1."""
@@ -136,7 +137,9 @@ class TestCiWithPolicyOrg:
 
         mock_result = PolicyFetchResult(policy=ApmPolicy(), source="org:test/.github")
 
-        with patch("apm_cli.policy.discovery.discover_policy", return_value=mock_result) as mock_disc:
+        with patch(
+            "apm_cli.policy.discovery.discover_policy", return_value=mock_result
+        ) as mock_disc:
             result = runner.invoke(
                 audit,
                 ["--ci", "--policy", "org"],
@@ -200,7 +203,9 @@ class TestNoCacheFlag:
 
         mock_result = PolicyFetchResult(policy=ApmPolicy(), source="org:test/.github")
 
-        with patch("apm_cli.policy.discovery.discover_policy", return_value=mock_result) as mock_disc:
+        with patch(
+            "apm_cli.policy.discovery.discover_policy", return_value=mock_result
+        ) as mock_disc:
             result = runner.invoke(
                 audit,
                 ["--ci", "--policy", "org", "--no-cache"],
@@ -236,5 +241,5 @@ class TestCiWithoutPolicy:
         )
         assert result.exit_code == 0
         data = json.loads(result.output)
-        # Only baseline checks (max 6)
-        assert data["summary"]["total"] <= 6
+        # Only baseline checks (max 8 incl. skill-subset + includes-consent)
+        assert data["summary"]["total"] <= 8

@@ -8,6 +8,7 @@ import click
 
 from ..core.command_logger import CommandLogger
 from ..update_policy import get_self_update_disabled_message, is_self_update_enabled
+from ..utils.subprocess_env import external_process_env
 from ..version import get_version
 
 
@@ -29,10 +30,7 @@ def _get_update_installer_suffix() -> str:
 def _get_manual_update_command() -> str:
     """Return the manual update command for the current platform."""
     if _is_windows_platform():
-        return (
-            'powershell -ExecutionPolicy Bypass -c '
-            '"irm https://aka.ms/apm-windows | iex"'
-        )
+        return 'powershell -ExecutionPolicy Bypass -c "irm https://aka.ms/apm-windows | iex"'
     return "curl -sSL https://aka.ms/apm-unix | sh"
 
 
@@ -75,9 +73,7 @@ def update(check):
 
         # Skip check for development versions
         if current_version == "unknown":
-            logger.warning(
-                "Cannot determine current version. Running in development mode?"
-            )
+            logger.warning("Cannot determine current version. Running in development mode?")
             if not check:
                 logger.progress("To update, reinstall from the repository.")
             return
@@ -124,24 +120,36 @@ def update(check):
 
             # Create temporary file for install script
             from ..config import get_apm_temp_dir
+
             with tempfile.NamedTemporaryFile(
-                mode="w", suffix=_get_update_installer_suffix(), delete=False,
-                dir=get_apm_temp_dir()
+                mode="w",
+                suffix=_get_update_installer_suffix(),
+                delete=False,
+                dir=get_apm_temp_dir(),
             ) as f:
                 temp_script = f.name
                 f.write(response.text)
 
             if not _is_windows_platform():
-                os.chmod(temp_script, 0o755)
+                os.chmod(temp_script, 0o755)  # noqa: S103
 
             # Run install script
             logger.progress("Running installer...", symbol="gear")
 
             # Note: We don't capture output so the installer can prompt when needed.
-            result = subprocess.run(_get_installer_run_command(temp_script), check=False)
+            # Sanitise the environment so the installer (and the system binaries
+            # it spawns -- curl, tar, sudo) do not inherit the PyInstaller
+            # bootloader's LD_LIBRARY_PATH / DYLD_* overrides, which would
+            # otherwise redirect system linkers at this binary's bundled
+            # _internal directory.  See issue #894.
+            result = subprocess.run(
+                _get_installer_run_command(temp_script),
+                check=False,
+                env=external_process_env(),
+            )
 
             # Clean up temp file
-            try:
+            try:  # noqa: SIM105
                 os.unlink(temp_script)
             except Exception:
                 # Non-fatal: failed to delete temp install script
@@ -151,9 +159,7 @@ def update(check):
                 logger.success(
                     f"Successfully updated to version {latest_version}!",
                 )
-                logger.progress(
-                    "Please restart your terminal or run 'apm --version' to verify"
-                )
+                logger.progress("Please restart your terminal or run 'apm --version' to verify")
             else:
                 logger.error("Installation failed - see output above for details")
                 sys.exit(1)

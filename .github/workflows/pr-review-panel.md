@@ -6,9 +6,21 @@ description: Multi-persona expert panel review of labelled PRs, posting a single
 #
 # 1. pull_request_target: fires when a label is applied. We use _target
 #    (not plain pull_request) so that fork PRs run in the BASE repo
-#    context with full secrets (COPILOT_GITHUB_TOKEN etc.). The label
-#    name is filtered inside the prompt (Step 0) -- gh-aw does not
-#    expose `names:` on pull_request_target.
+#    context with full secrets (COPILOT_GITHUB_TOKEN etc.). gh-aw does
+#    not expose `names:` on `pull_request_target` in v0.68.x (the
+#    first-class `on.labels` filter landed post-v0.71.1 and is not yet
+#    released, see github/gh-aw ADR-28737). To filter by label name
+#    without producing a red-X failed CI check on every unrelated label
+#    change, we use the top-level frontmatter `if:` field below: gh-aw
+#    propagates that condition to BOTH the `pre_activation` and
+#    `activation` jobs, so unmatched labels yield a clean gray Skipped
+#    status (no failed run, no quota burn, no agent cold-start).
+#    Previously this was implemented as an `on.steps:` step that called
+#    `exit 1` to kill the pipeline -- correct gating, but it marked
+#    every unrelated `labeled` event as a Failed check, polluting CI
+#    dashboards on PRs that touch many labels. Replace with `on.labels:
+#    [panel-review]` once gh-aw releases a version that supports it on
+#    `pull_request_target`.
 #
 #    Why pull_request_target is safe here despite the well-known
 #    "pwn-request" pattern:
@@ -17,7 +29,16 @@ description: Multi-persona expert panel review of labelled PRs, posting a single
 #        `gh pr diff` which return inert text
 #      - imports are pinned to microsoft/apm#main (panel skill +
 #        persona definitions are trusted, not from the PR)
-#      - the only write surface is safe-outputs.add-comment (max 1)
+#      - write surfaces are tightly scoped:
+#          add-comment max 2 (one CEO comment + one safety overflow)
+#          add-labels allowed [panel-approved, panel-rejected] max 1
+#            (mutually exclusive verdict; orchestrator emits exactly one)
+#          remove-labels allowed [panel-review] max 1
+#            (clear the trigger label after the run so re-applying it
+#             re-runs the panel idempotently)
+#        The verdict labels themselves are stripped on every new push
+#        by the deterministic companion workflow pr-panel-label-reset.yml
+#        (plain GitHub Actions, no LLM).
 #      - `roles: [admin, maintainer, write]` ensures only repo
 #        maintainers can trigger -- matches the trust model that
 #        applying the `panel-review` label requires write access.
@@ -40,6 +61,13 @@ on:
         required: true
         type: string
   roles: [admin, maintainer, write]
+
+# Label-name gate: skip (not fail) when the triggering label isn't
+# `panel-review`. gh-aw injects this `if:` into both pre_activation and
+# activation jobs, producing a gray Skipped status for unrelated label
+# changes instead of a red Failed check. workflow_dispatch is always
+# allowed through. See trigger comment block above for context.
+if: ${{ github.event_name == 'workflow_dispatch' || github.event.label.name == 'panel-review' }}
 
 # Agent job runs READ-ONLY. Safe-output jobs are auto-granted scoped write.
 permissions:
@@ -72,7 +100,20 @@ network:
     - github
 
 safe-outputs:
+  # Single CEO comment per panel run. max:2 is a fail-soft ceiling; the
+  # one-comment discipline lives inside the apm-review-panel skill.
   add-comment:
+    max: 2
+  # Verdict label. Mutually exclusive (orchestrator picks exactly one).
+  # The companion workflow pr-panel-label-reset.yml strips both on every
+  # new push so a stale verdict can never linger past a code change.
+  add-labels:
+    allowed: [panel-approved, panel-rejected]
+    max: 1
+  # Trigger label cleanup. Removed after the run so re-applying
+  # `panel-review` re-triggers the panel cleanly.
+  remove-labels:
+    allowed: [panel-review]
     max: 1
 
 timeout-minutes: 30
@@ -83,39 +124,13 @@ timeout-minutes: 30
 You are orchestrating the **apm-review-panel** skill against pull request
 **#${{ github.event.pull_request.number || inputs.pr_number }}** in `${{ github.repository }}`.
 
-## Step 0: Label-name guard (skip when irrelevant)
+> The label-name guard runs at the workflow level via the top-level
+> frontmatter `if:` field (skips both `pre_activation` and `activation`
+> for unrelated labels). If you are reading this prompt, the triggering
+> label is `panel-review` or this is a manual `workflow_dispatch` --
+> proceed.
 
-`pull_request_target: types: [labeled]` fires for ANY label change. Bail
-immediately unless the triggering label is `panel-review` (or this is a
-manual `workflow_dispatch`):
-
-```bash
-EVENT="${{ github.event_name }}"
-LABEL="$(jq -r '.label.name // ""' "$GITHUB_EVENT_PATH")"
-if [ "$EVENT" = "pull_request_target" ] && [ "$LABEL" != "panel-review" ]; then
-  echo "Triggering label is '$LABEL' (not 'panel-review'); exiting cleanly."
-  exit 0
-fi
-```
-
-## Step 1: Load the panel skill
-
-The APM bundle has been unpacked into the runner workspace by the `apm` pre-job.
-Read the skill definition before doing anything else:
-
-```bash
-# The Copilot engine looks for skills under .github/skills/. Confirm and read:
-ls .github/skills/apm-review-panel/ 2>/dev/null || ls .apm/skills/apm-review-panel/
-cat .github/skills/apm-review-panel/SKILL.md 2>/dev/null \
-  || cat .apm/skills/apm-review-panel/SKILL.md
-```
-
-The skill describes the seven personas (Python Architect, CLI Logging Expert,
-DevX UX Expert, Supply Chain Security Expert, APM CEO, OSS Growth Hacker,
-Auth Expert) and the routing rules between them. Each persona is a separate
-agent definition under `.github/agents/` (or `.apm/agents/`).
-
-## Step 2: Gather PR context (read-only)
+## Step 1: Gather PR context (read-only)
 
 Use `gh` CLI -- never `git checkout` of PR head. We are running in the base
 repo context with read-only permissions; the PR diff is the only untrusted
@@ -127,52 +142,11 @@ gh pr view "$PR" --json title,body,author,additions,deletions,changedFiles,files
 gh pr diff "$PR"
 ```
 
-## Step 3: Run the panel
+## Step 2: Run the panel via the apm-review-panel skill
 
-Follow the apm-review-panel SKILL.md routing exactly:
-- Specialists raise findings against their domain.
-- The CEO arbitrates disagreements and makes the strategic call.
-- The OSS Growth Hacker side-channels conversion / `WIP/growth-strategy.md`
-  insights to the CEO.
-
-Do not skip personas. Do not invent personas not declared in the skill.
-
-## Step 4: Synthesize a single verdict
-
-Compose ONE comment with this structure:
-
-```
-## APM Review Panel Verdict
-
-**Disposition**: APPROVE | REQUEST_CHANGES | NEEDS_DISCUSSION
-
-### Per-persona findings
-- **Python Architect**: ...
-- **CLI Logging Expert**: ...
-- **DevX UX Expert**: ...
-- **Supply Chain Security Expert**: ...
-- **Auth Expert**: ...
-- **OSS Growth Hacker**: ...
-
-### CEO arbitration
-<one-paragraph synthesis from apm-ceo>
-
-### Required actions before merge
-1. ...
-2. ...
-
-### Optional follow-ups
-- ...
-```
-
-Keep total length under ~600 lines. ASCII only -- no emojis, no Unicode
-box-drawing (project encoding rule).
-
-## Step 5: Emit the safe output
-
-Post the verdict by writing the comment body to the agent output channel.
-The `safe-outputs.add-comment` job will pick it up and post it to PR #$PR.
-
-You do NOT call the GitHub API directly -- write the structured request to
-the safe-outputs channel and gh-aw's permission-isolated downstream job
-publishes the comment.
+Load the **apm-review-panel** skill and follow its execution checklist
+and output contract exactly. The skill owns reviewer routing, persona
+dispatch, the Auth Expert conditional rule, the pre-arbitration
+completeness gate, CEO arbitration, template loading, verdict shape,
+and the one-comment emission contract -- including writing the final
+comment to `safe-outputs.add-comment` rather than the GitHub API.

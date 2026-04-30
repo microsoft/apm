@@ -15,16 +15,19 @@ import pytest
 
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_downloader():
     """Create a GitHubPackageDownloader with stubbed auth (no network needed)."""
-    with patch.dict(os.environ, {}, clear=True), patch(
-        "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
-        return_value=None,
+    with (
+        patch.dict(os.environ, {}, clear=True),
+        patch(
+            "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+            return_value=None,
+        ),
     ):
         return GitHubPackageDownloader()
 
@@ -43,6 +46,7 @@ def _make_virtual_dep_ref(subdir="src/agent", ref="main"):
 # Tests
 # ---------------------------------------------------------------------------
 
+
 class TestDownloadSubdirectoryPermissionError:
     """PermissionError / OSError handling in download_subdirectory_package."""
 
@@ -56,9 +60,7 @@ class TestDownloadSubdirectoryPermissionError:
             ),
             patch("apm_cli.deps.github_downloader._rmtree"),
         ):
-            return downloader.download_subdirectory_package(
-                dep_ref, tmp_path / "target"
-            )
+            return downloader.download_subdirectory_package(dep_ref, tmp_path / "target")
 
     def test_permission_error_raises_runtime_error_with_suggestion(self, tmp_path):
         """PermissionError from mkdtemp is converted to RuntimeError with temp-dir hint."""
@@ -158,9 +160,7 @@ class TestDownloadSubdirectoryPermissionError:
             patch("apm_cli.deps.github_downloader._rmtree"),
         ):
             with pytest.raises(PermissionError) as exc_info:
-                downloader.download_subdirectory_package(
-                    dep_ref, tmp_path / "target"
-                )
+                downloader.download_subdirectory_package(dep_ref, tmp_path / "target")
             assert exc_info.value is target_exc
 
     def test_invalid_dep_ref_not_virtual_raises_value_error(self):

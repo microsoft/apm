@@ -5,5 +5,4 @@ README.md @danielmeppiel
 
 # Workflow files - Lead Maintainer review required for any change to CI
 # definitions, especially anything touching `pull_request_target` or secrets.
-# See .github/workflows/ci-integration-pr-stub.yml for the security rationale.
 .github/workflows/** @danielmeppiel

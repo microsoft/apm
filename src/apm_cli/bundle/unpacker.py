@@ -6,9 +6,9 @@ import tarfile
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List  # noqa: F401, UP035
 
-from ..deps.lockfile import LockFile, LOCKFILE_NAME, LEGACY_LOCKFILE_NAME
+from ..deps.lockfile import LEGACY_LOCKFILE_NAME, LOCKFILE_NAME, LockFile
 
 
 @dataclass
@@ -16,13 +16,13 @@ class UnpackResult:
     """Result of an unpack operation."""
 
     extracted_dir: Path
-    files: List[str] = field(default_factory=list)
+    files: list[str] = field(default_factory=list)
     verified: bool = False
-    dependency_files: Dict[str, List[str]] = field(default_factory=dict)
+    dependency_files: dict[str, list[str]] = field(default_factory=dict)
     skipped_count: int = 0
     security_warnings: int = 0
     security_critical: int = 0
-    pack_meta: Dict = field(default_factory=dict)
+    pack_meta: dict = field(default_factory=dict)
 
 
 def unpack_bundle(
@@ -57,6 +57,7 @@ def unpack_bundle(
     cleanup_temp = False
     if bundle_path.is_file() and bundle_path.name.endswith(".tar.gz"):
         from ..config import get_apm_temp_dir
+
         temp_dir = Path(tempfile.mkdtemp(prefix="apm-unpack-", dir=get_apm_temp_dir()))
         cleanup_temp = True
         try:
@@ -64,25 +65,21 @@ def unpack_bundle(
                 # Security: prevent path traversal and special entries
                 for member in tar.getmembers():
                     if member.name.startswith("/") or ".." in member.name:
-                        raise ValueError(
-                            f"Refusing to extract path-traversal entry: {member.name}"
-                        )
+                        raise ValueError(f"Refusing to extract path-traversal entry: {member.name}")
                     if member.issym() or member.islnk():
-                        raise ValueError(
-                            f"Refusing to extract symlink/hardlink: {member.name}"
-                        )
+                        raise ValueError(f"Refusing to extract symlink/hardlink: {member.name}")
                 # filter="data" was added in Python 3.12; use it when available
                 if sys.version_info >= (3, 12):
                     tar.extractall(temp_dir, filter="data")
                 else:
-                    tar.extractall(temp_dir)  # noqa: S202  -- manual checks above
+                    tar.extractall(temp_dir)  # noqa: S202
         except Exception:
             shutil.rmtree(temp_dir, ignore_errors=True)
             raise
 
         # Locate inner directory (the archive wraps a single top-level dir)
         children = list(temp_dir.iterdir())
-        if len(children) == 1 and children[0].is_dir():
+        if len(children) == 1 and children[0].is_dir():  # noqa: SIM108
             source_dir = children[0]
         else:
             source_dir = temp_dir
@@ -102,9 +99,10 @@ def unpack_bundle(
                 lockfile_path = legacy_lockfile_path
 
         # Extract pack: metadata (written by apm pack) before structured parse
-        pack_meta: Dict = {}
+        pack_meta: dict = {}
         try:
             import yaml
+
             raw = yaml.safe_load(lockfile_path.read_text(encoding="utf-8"))
             if isinstance(raw, dict):
                 val = raw.get("pack", {})
@@ -123,7 +121,7 @@ def unpack_bundle(
             )
 
         # Collect deployed_files per dependency and deduplicated global list
-        dep_file_map: Dict[str, List[str]] = {}
+        dep_file_map: dict[str, list[str]] = {}
         seen: set[str] = set()
         unique_files: list[str] = []
         for dep in lockfile.get_all_dependencies():
@@ -140,14 +138,11 @@ def unpack_bundle(
         # 3. Verify completeness
         verified = True
         if not skip_verify:
-            missing = [
-                f for f in unique_files if not (source_dir / f).exists()
-            ]
+            missing = [f for f in unique_files if not (source_dir / f).exists()]
             if missing:
                 raise ValueError(
                     "Bundle verification failed  -- the following deployed files "
-                    "are missing from the bundle:\n"
-                    + "\n".join(f"  - {m}" for m in missing)
+                    "are missing from the bundle:\n" + "\n".join(f"  - {m}" for m in missing)
                 )
 
         if skip_verify:
@@ -158,9 +153,7 @@ def unpack_bundle(
 
         # Scan all files under source_dir (SecurityGate handles symlink
         # skipping, directory recursion, and OSError resilience)
-        verdict = SecurityGate.scan_files(
-            source_dir, policy=BLOCK_POLICY, force=force
-        )
+        verdict = SecurityGate.scan_files(source_dir, policy=BLOCK_POLICY, force=force)
         security_warnings = verdict.warning_count
         security_critical = verdict.critical_count
 
@@ -219,9 +212,8 @@ def unpack_bundle(
                 continue  # skip_verify may allow missing files
             if src.is_dir():
                 from ..security.gate import ignore_symlinks
-                shutil.copytree(
-                    src, dest, dirs_exist_ok=True, ignore=ignore_symlinks
-                )
+
+                shutil.copytree(src, dest, dirs_exist_ok=True, ignore=ignore_symlinks)
             else:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, dest, follow_symlinks=False)

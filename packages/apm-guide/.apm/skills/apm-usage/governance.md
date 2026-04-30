@@ -50,11 +50,24 @@ manifest:
   scripts: allow                        # allow | deny
   content_types:
     allow: []                           # instructions | skill | hybrid | prompts
+  require_explicit_includes: false      # mandate explicit `includes:` list in apm.yml (rejects `auto` and undeclared)
 
 unmanaged_files:
   action: ignore                        # ignore | warn | deny
   directories: []                       # directories to scan
 ```
+
+## Local content governance
+
+The `includes:` field in `apm.yml` controls which local `.apm/` content the
+package publishes:
+
+- `includes: auto` -- publish all local `.apm/` content (default, convenient).
+- `includes: [path/to/file, ...]` -- explicit list of paths (governance-friendly).
+
+For compliance, prefer the explicit list and pair it with
+`policy.manifest.require_explicit_includes: true`, which rejects `auto` and
+undeclared local content at install / audit time.
 
 ## Enforcement modes
 
@@ -340,6 +353,12 @@ Discovery outcomes APM can emit (see `PolicyFetchResult.outcome`):
 `hash_mismatch` is always fail-closed; the other fetch-failure outcomes
 are fail-open by default and become fail-closed when the project opts in
 via `policy.fetch_failure_default: block`.
+
+A malformed project manifest (`apm.yml`) is a separate concern from a
+malformed policy file. When `apm.yml` cannot be parsed (invalid YAML or
+non-mapping content), both `run_policy_checks()` and
+`run_baseline_checks()` produce a failing `manifest-parse` check. This
+is unconditionally fail-closed and cannot be relaxed.
 
 Violation classes:
 

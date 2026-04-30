@@ -8,11 +8,10 @@ Covers:
 
 from unittest.mock import MagicMock, patch
 
-import pytest
+import pytest  # noqa: F401
 
 from apm_cli.commands.install import _has_local_apm_content, _integrate_local_content
 from apm_cli.deps.lockfile import LockFile
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -174,10 +173,26 @@ class TestIntegrateLocalContent:
 
     @patch("apm_cli.install.services.integrate_package_primitives")
     def test_package_info_install_path_is_project_root(self, mock_integrate, tmp_path):
-        """The synthetic PackageInfo must point to project_root, not .apm/."""
+        """The synthetic PackageInfo must point to project_root at project scope."""
         mock_integrate.return_value = _zero_counters()
 
         _integrate_local_content(tmp_path, **_make_integrators())
+
+        package_info = mock_integrate.call_args[0][0]
+        assert package_info.install_path == tmp_path
+
+    @patch("apm_cli.install.services.integrate_package_primitives")
+    def test_user_scope_install_path_stays_project_root(self, mock_integrate, tmp_path):
+        """At user scope, install_path must remain project_root so that
+        integrators can still find <project_root>/.apm/<type>/.
+        The recursive-glob fix lives in init_link_resolver, not here.
+        Regression check for #830."""
+        from apm_cli.core.scope import InstallScope
+
+        mock_integrate.return_value = _zero_counters()
+        (tmp_path / ".apm").mkdir(exist_ok=True)
+
+        _integrate_local_content(tmp_path, **_make_integrators(), scope=InstallScope.USER)
 
         package_info = mock_integrate.call_args[0][0]
         assert package_info.install_path == tmp_path
@@ -267,7 +282,11 @@ class TestLockFileLocalDeployedFiles:
         """from_yaml with no local_deployed_files key defaults to empty list."""
         import yaml
 
-        raw = {"lockfile_version": "1", "generated_at": "2024-01-01T00:00:00+00:00", "dependencies": []}
+        raw = {
+            "lockfile_version": "1",
+            "generated_at": "2024-01-01T00:00:00+00:00",
+            "dependencies": [],
+        }
         lock = LockFile.from_yaml(yaml.dump(raw))
         assert lock.local_deployed_files == []
 

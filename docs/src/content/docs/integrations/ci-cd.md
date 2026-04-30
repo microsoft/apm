@@ -28,7 +28,7 @@ jobs:
       - name: Install APM packages
         uses: microsoft/apm-action@v1
         # Optional: add compile: true if targeting Codex, Gemini,
-        # or other tools without native APM integration
+        # or other tools whose instructions require compilation
 ```
 
 ### Private Dependencies
@@ -44,13 +44,13 @@ For private repositories, pass a token via the workflow `env:` block. See the [A
 
 ### Verify Compiled Output (Optional)
 
-If your project uses `apm compile` to target tools like Cursor, Codex, or Gemini, add a check to ensure compiled output stays in sync:
+If your project uses `apm compile` to target tools like Codex or Gemini, add a check to ensure compiled output stays in sync:
 
 ```yaml
       - name: Check for drift
         run: |
           apm compile
-          if [ -n "$(git status --porcelain -- AGENTS.md CLAUDE.md)" ]; then
+          if [ -n "$(git status --porcelain -- AGENTS.md CLAUDE.md GEMINI.md)" ]; then
             echo "Compiled output is out of date. Run 'apm compile' locally and commit."
             exit 1
           fi
@@ -60,13 +60,13 @@ This step is not needed if your team only uses GitHub Copilot and Claude, which 
 
 ### Verify Deployed Primitives
 
-To ensure `.github/`, `.claude/`, `.cursor/`, and `.opencode/` integration files stay in sync with `apm.yml`, add a drift check:
+To ensure `.github/`, `.claude/`, `.cursor/`, `.opencode/`, and `.gemini/` integration files stay in sync with `apm.yml`, add a drift check:
 
 ```yaml
       - name: Check APM integration drift
         run: |
           apm install
-          if [ -n "$(git status --porcelain -- .github/ .claude/ .cursor/ .opencode/)" ]; then
+          if [ -n "$(git status --porcelain -- .github/ .claude/ .cursor/ .opencode/ .gemini/)" ]; then
             echo "APM integration files are out of date. Run 'apm install' and commit."
             exit 1
           fi
@@ -74,12 +74,17 @@ To ensure `.github/`, `.claude/`, `.cursor/`, and `.opencode/` integration files
 
 This catches cases where a developer updates `apm.yml` but forgets to re-run `apm install`.
 
+:::tip[We dogfood this]
+APM's own repo uses the `APM Self-Check` job in [`microsoft/apm`'s `ci.yml`](https://github.com/microsoft/apm/blob/main/.github/workflows/ci.yml) as a reference implementation for installing APM, running CI validation commands such as `apm audit --ci`, and checking for drift with `git status --porcelain`. Use it as a practical example when wiring these checks into your own workflow.
+:::
+
 ## Azure Pipelines
 
 ```yaml
 steps:
   - script: |
       curl -sSL https://aka.ms/apm-unix | sh
+      export PATH="$HOME/.apm/bin:$PATH"
       apm install
       # Optional: only if targeting Codex, Gemini, or similar tools
       # apm compile
@@ -87,6 +92,47 @@ steps:
     env:
       ADO_APM_PAT: $(ADO_PAT)
 ```
+
+### ADO with AAD bearer (no PAT)
+
+In orgs that disable PAT creation, use a Workload Identity Federation (WIF) service connection and let APM consume the `az` session inherited from `AzureCLI@2`. Do NOT set `ADO_APM_PAT` -- APM falls back to the bearer cleanly only when no PAT env var is present.
+
+```yaml
+steps:
+  - task: AzureCLI@2
+    displayName: 'APM Install (AAD bearer)'
+    inputs:
+      azureSubscription: 'my-wif-service-connection'
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        curl -sSL https://aka.ms/apm-unix | sh
+        export PATH="$HOME/.apm/bin:$PATH"
+        apm install
+```
+
+For GitHub Actions targeting ADO repos, use [`azure/login@v2`](https://github.com/marketplace/actions/azure-login) with OIDC federated credentials so `az` is signed in before `apm install` runs:
+
+```yaml
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - uses: microsoft/apm-action@v1
+        # Do not set ADO_APM_PAT -- APM picks up the az session.
+```
+
+See [Authentication: AAD bearer tokens](../../getting-started/authentication/#authenticating-with-microsoft-entra-id-aad-bearer-tokens) for resolution precedence and verbose output.
 
 ## General CI
 
@@ -101,7 +147,7 @@ apm install
 
 ## Governance with `apm audit`
 
-`apm audit --ci` verifies lockfile consistency in CI (6 baseline checks, no configuration). Add `--policy org` to enforce organizational rules (16 additional checks). For full setup including SARIF integration and GitHub Code Scanning, see the [CI Policy Enforcement guide](../../guides/ci-policy-setup/).
+`apm audit --ci` verifies lockfile consistency in CI (7 baseline checks, no configuration). Add `--policy org` to enforce organizational rules (17 additional checks). For full setup including SARIF integration and GitHub Code Scanning, see the [CI Policy Enforcement guide](../../guides/ci-policy-setup/).
 
 For content scanning and hidden Unicode detection, `apm install` automatically blocks critical findings. Run `apm audit` for on-demand reporting. See [Governance](../../enterprise/governance-guide/) for the full governance model.
 
@@ -110,6 +156,8 @@ For content scanning and hidden Unicode detection, `apm install` automatically b
 Use `apm pack` in CI to build a distributable bundle once, then consume it in downstream jobs without needing APM installed.
 
 ### Pack in CI (build once)
+
+`apm-action@v1` with `pack: true` emits an APM-format bundle (`--format apm --archive`) so downstream jobs can restore it via `tar xzf` or the action's restore mode.
 
 ```yaml
 - uses: microsoft/apm-action@v1
@@ -124,15 +172,17 @@ Use `apm pack` in CI to build a distributable bundle once, then consume it in do
 ### Pack as standalone plugin
 
 ```yaml
-# Export as standalone plugin
-- run: apm pack --format plugin
+# Export as a Claude Code plugin directory (default format)
+- run: apm pack
 - uses: actions/upload-artifact@v4
   with:
     name: plugin-bundle
-    path: build/*.tar.gz
+    path: build/
 ```
 
 ### Consume in another job (no APM needed)
+
+The APM bundle layout below assumes the upstream job ran `apm-action@v1` with `pack: true` (or `apm pack --format apm --archive`). Plugin-format output cannot be restored this way because it does not carry the install-time directory tree.
 
 ```yaml
 - uses: actions/download-artifact@v4
@@ -155,6 +205,6 @@ See the [Pack & Distribute guide](../../guides/pack-distribute/) for the full wo
 
 - **Pin APM version** in CI to avoid unexpected changes: `pip install apm-cli==0.7.7`
 - **Commit `apm.lock.yaml`** so CI resolves the same dependency versions as local development
-- **Commit `.github/`, `.claude/`, `.cursor/`, and `.opencode/` deployed files** so contributors and cloud-based Copilot get agent context without running `apm install`
-- **If using `apm compile`** (for Codex, Gemini), run it in CI and fail the build if the output differs from what's committed
+- **Commit `.github/`, `.claude/`, `.cursor/`, `.opencode/`, and `.gemini/` deployed files** so contributors and cloud-based Copilot get agent context without running `apm install`
+- **If using `apm compile`** (for Codex, Gemini instructions), run it in CI and fail the build if the output differs from what's committed
 - **Use `GITHUB_APM_PAT`** for private dependencies; never use the default `GITHUB_TOKEN` for cross-repo access

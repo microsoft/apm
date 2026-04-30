@@ -23,8 +23,9 @@ from __future__ import annotations
 
 import os
 import warnings
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, List, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, List, Optional, Protocol, runtime_checkable  # noqa: F401, UP035
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
@@ -51,8 +52,8 @@ class RegistryClient(Protocol):
         repo: str,
         file_path: str,
         ref: str = "main",
-        resilient_get: Optional[Callable] = None,
-    ) -> Optional[bytes]:
+        resilient_get: Callable | None = None,
+    ) -> bytes | None:
         """Fetch a single file from the registry.
 
         Returns raw file bytes on success, or ``None`` when the file
@@ -94,13 +95,13 @@ class RegistryConfig:
     host: str
     prefix: str
     scheme: str
-    token: Optional[str]
+    token: str | None
     enforce_only: bool
 
     # -- factory ------------------------------------------------------------
 
     @classmethod
-    def from_env(cls) -> Optional["RegistryConfig"]:
+    def from_env(cls) -> RegistryConfig | None:
         """Build a :class:`RegistryConfig` from the current environment.
 
         Reads the canonical ``PROXY_REGISTRY_*`` variables first; falls
@@ -155,7 +156,7 @@ class RegistryConfig:
             return {"Authorization": f"Bearer {self.token}"}
         return {}
 
-    def get_client(self) -> "RegistryClient":
+    def get_client(self) -> RegistryClient:
         """Return a :class:`RegistryClient` for this configuration.
 
         Currently returns an Artifactory backend.  When additional
@@ -166,9 +167,7 @@ class RegistryConfig:
 
         return ArtifactoryRegistryClient(config=self)
 
-    def validate_lockfile_deps(
-        self, locked_deps: "List[LockedDependency]"
-    ) -> "List[LockedDependency]":
+    def validate_lockfile_deps(self, locked_deps: list[LockedDependency]) -> list[LockedDependency]:
         """Return locked dependencies that conflict with registry-only mode.
 
         A *conflict* is a non-local dependency whose host is a direct VCS
@@ -193,7 +192,7 @@ class RegistryConfig:
 
         from apm_cli.core.auth import AuthResolver
 
-        conflicts: List[LockedDependency] = []
+        conflicts: list[LockedDependency] = []
         for dep in locked_deps:
             if dep.source == "local":
                 continue
@@ -203,16 +202,14 @@ class RegistryConfig:
                 conflicts.append(dep)
         return conflicts
 
-    def find_missing_hashes(
-        self, locked_deps: "List[LockedDependency]"
-    ) -> "List[LockedDependency]":
+    def find_missing_hashes(self, locked_deps: list[LockedDependency]) -> list[LockedDependency]:
         """Return registry-proxy entries that lack a ``content_hash``.
 
         A missing hash on a proxy entry means a tampered lockfile
         could redirect downloads without detection.  Callers should
         warn or error when this list is non-empty.
         """
-        missing: List[LockedDependency] = []
+        missing: list[LockedDependency] = []
         for dep in locked_deps:
             if dep.source == "local":
                 continue
@@ -246,7 +243,7 @@ def is_enforce_only() -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _read_deprecated_token() -> Optional[str]:
+def _read_deprecated_token() -> str | None:
     token = os.environ.get("ARTIFACTORY_APM_TOKEN")
     if token:
         warnings.warn(

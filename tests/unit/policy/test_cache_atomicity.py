@@ -7,23 +7,22 @@ and metadata sidecar.  No torn writes, no truncated JSON, no partial YAML.
 
 from __future__ import annotations
 
-import json
+import json  # noqa: F401
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from apm_cli.policy.discovery import (
-    CACHE_SCHEMA_VERSION,
-    _cache_key,
+    CACHE_SCHEMA_VERSION,  # noqa: F401
+    _cache_key,  # noqa: F401
     _get_cache_dir,
     _read_cache,
     _read_cache_entry,
     _write_cache,
 )
-from apm_cli.policy.parser import load_policy
+from apm_cli.policy.parser import load_policy  # noqa: F401
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
-
 
 NUM_WRITERS = 16
 
@@ -77,7 +76,7 @@ class TestCacheAtomicity(unittest.TestCase):
                     if result:
                         errors.append(result)
 
-            self.assertEqual(errors, [], f"Torn writes detected:\n" + "\n".join(errors))
+            self.assertEqual(errors, [], f"Torn writes detected:\n" + "\n".join(errors))  # noqa: F541
 
             # Final validation: cache must be readable by the public API
             final = _read_cache(repo_ref, root)
@@ -100,10 +99,7 @@ class TestCacheAtomicity(unittest.TestCase):
                 if entry is None:
                     return f"idx={idx}: cache entry is None after write"
                 if entry.policy.name != f"writer-{idx}":
-                    return (
-                        f"idx={idx}: expected name 'writer-{idx}' "
-                        f"got {entry.policy.name!r}"
-                    )
+                    return f"idx={idx}: expected name 'writer-{idx}' got {entry.policy.name!r}"
                 return ""
 
             with ThreadPoolExecutor(max_workers=NUM_WRITERS) as pool:
@@ -113,7 +109,7 @@ class TestCacheAtomicity(unittest.TestCase):
                     if result:
                         errors.append(result)
 
-            self.assertEqual(errors, [], f"Cross-key interference:\n" + "\n".join(errors))
+            self.assertEqual(errors, [], f"Cross-key interference:\n" + "\n".join(errors))  # noqa: F541
 
     def test_rapid_overwrite_cycle(self):
         """100 rapid sequential overwrites -- last writer wins, no corruption."""
@@ -145,7 +141,8 @@ class TestCacheAtomicity(unittest.TestCase):
             cache_dir = _get_cache_dir(root)
             tmp_files = list(cache_dir.glob("*.tmp"))
             self.assertEqual(
-                tmp_files, [],
+                tmp_files,
+                [],
                 f"Leftover .tmp files: {[f.name for f in tmp_files]}",
             )
 

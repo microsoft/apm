@@ -5,7 +5,7 @@ import os
 import tempfile
 from pathlib import Path
 
-import pytest
+import pytest  # noqa: F401
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
