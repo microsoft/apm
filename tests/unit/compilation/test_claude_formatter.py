@@ -201,14 +201,27 @@ class TestDependenciesImportSyntax:
 
     @pytest.fixture
     def temp_project_with_deps(self):
-        """Create a temporary project with apm_modules dependencies."""
+        """Create a temporary project with apm_modules containing packages with and without CLAUDE.md."""
         temp_dir = tempfile.mkdtemp()
         temp_path = Path(temp_dir).resolve()
 
         # Create apm_modules structure
         apm_modules = temp_path / "apm_modules"
+        # Packages WITH CLAUDE.md - should be included
         (apm_modules / "owner1" / "package1").mkdir(parents=True)
+        (apm_modules / "owner1" / "package1" / "CLAUDE.md").write_text(
+            "# Package 1", encoding="utf-8"
+        )
         (apm_modules / "owner2" / "package2").mkdir(parents=True)
+        (apm_modules / "owner2" / "package2" / "CLAUDE.md").write_text(
+            "# Package 2", encoding="utf-8"
+        )
+        # Packages WITHOUT CLAUDE.md - should be excluded
+        (apm_modules / "owner1" / "no-claude").mkdir(parents=True)
+        (apm_modules / "owner1" / "no-claude" / "README.md").write_text(
+            "# No Claude", encoding="utf-8"
+        )
+        (apm_modules / "owner3" / "skills-only").mkdir(parents=True)
 
         yield temp_path
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -253,6 +266,14 @@ class TestDependenciesImportSyntax:
         deps = formatter._collect_dependencies()
 
         assert deps == []
+
+    def test_skips_packages_without_claude_md(self, temp_project_with_deps):
+        """Test that packages without a CLAUDE.md file are not listed as dependencies."""
+        formatter = ClaudeFormatter(str(temp_project_with_deps))
+        deps = formatter._collect_dependencies()
+
+        assert "@apm_modules/owner1/no-claude/CLAUDE.md" not in deps
+        assert "@apm_modules/owner3/skills-only/CLAUDE.md" not in deps
 
 
 class TestAgentsExcludedFromClaudeMd:

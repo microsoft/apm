@@ -5,7 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-
 ## [Unreleased]
 
 ### Changed
@@ -18,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`apm pack` marketplace builder hardening.** Local source paths are now emitted relative to `metadata.pluginRoot` (fixes double-prefix bug). New pass-through fields: `author`, `license`, `repository`, `keywords` (alias for `tags`). Curator-wins override semantics for `description`/`version` on remote entries. Security guards reject path traversal and absolute paths post-subtraction. (#1061)
 - **Plugin manifest schema-conformance tests.** `tests/unit/test_plugin_exporter_schema.py` validates every shape of `plugin.json` produced by `apm pack` (synthesized, authored, and authored-with-stale-keys) against the vendored official schema. Companion marketplace conformance lives in `tests/unit/marketplace/test_schema_conformance.py`. (#1061)
 - Slash commands installed from APM packages now surface argument hints in Claude Code -- `apm install` automatically maps prompt `input:` to Claude's `arguments:` front-matter, rewrites `${input:name}` references to `$name`, and auto-generates `argument-hint`. Argument names are validated against an allowlist to prevent YAML injection from third-party packages, and the mapping is reported at install time. (#1039)
+
+### Fixed
+
+- `apm compile --targets claude` no longer lists `@apm_modules/{owner}/{package}/CLAUDE.md` dependencies for packages that don't have a `CLAUDE.md` file on disk (#1047)
 
 ## [0.11.0] - 2026-04-29
 
