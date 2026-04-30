@@ -305,7 +305,7 @@ When you run `apm install`, APM automatically integrates primitives from install
 After installation completes, APM prints a grouped diagnostic summary instead of inline warnings. Categories include collisions (skipped files), cross-package skill replacements, warnings, and errors.
 
 - **Normal mode**: Shows counts and actionable tips (e.g., "9 files skipped -- use `apm install --force` to overwrite")
-- **Verbose mode** (`--verbose`): Additionally lists individual file paths grouped by package, full error details, and **the resolved auth source per remote host** (e.g., `[i] dev.azure.com -- using bearer from az cli (source: AAD_BEARER_AZ_CLI)` or `[i] github.com -- token from GITHUB_APM_PAT`). Useful for diagnosing PAT vs. Entra-ID-bearer behaviour against Azure DevOps.
+- **Verbose mode** (`--verbose`): Additionally lists individual file paths grouped by package, full error details, and **the resolved auth source per remote host** (e.g., `[i] dev.azure.com -- using bearer from az cli (source: AAD_BEARER_AZ_CLI)` or `[i] github.com -- token from GITHUB_APM_PAT`). Useful for diagnosing PAT vs. Entra-ID-bearer behaviour against Azure DevOps. For subdirectory packages with an explicit `#ref` (e.g. `owner/repo/sub#v1.2.0`), `--verbose` also shows each validation probe attempt -- marker-file lookups, the Contents API directory probe, and the `git ls-remote` fallback -- including which auth step (token, credential-helper, SSH) resolved the ref.
 
 ```bash
 # See exactly which files were skipped or had issues, and which auth source was used

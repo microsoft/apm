@@ -47,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm install owner/repo/sub#ref` validation now mirrors `_clone_with_fallback`'s auth chain (Contents API directory probe + `git ls-remote` fallback) so virtual subdirectory packages with an explicit `#ref` no longer false-fail when an env-var PAT is narrower than the user's git credential helper. (#941)
+- **`apm install owner/repo/sub#ref` no longer false-rejects packages whose git credentials differ from your API token** -- validation now walks the same auth chain as the actual install (token, credential-helper, SSH), so EMU/SSO users with a narrower env-var PAT no longer see spurious failures the lockfile-driven install would have handled silently. (#941)
 - **`shared/apm.md` single-credential-group runs no longer fail validation** with a spurious `missing APM bundles: apm-default` -- a normalisation step recreates the per-group subdir layout that `actions/download-artifact@v5+` flattens away. (#1051)
 - **`apm pack` works against GitHub Enterprise and other Git hosts** -- honors `GITHUB_HOST` for GHES auth and accepts GitHub / GHES / GitLab / Bitbucket / ADO / SSH URL forms. (#1008)
 - **ADO Entra ID auth no longer silently fails.** Bearer tokens from `az account get-access-token` are plumbed through, errors are typed + actionable (4-case diagnostic), and `apm install --update` pre-flights auth before touching files. (#1015)

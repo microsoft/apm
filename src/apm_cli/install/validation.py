@@ -189,9 +189,20 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
                     f"Auth resolved: host={host}, org={org}, source={ctx.source}, type={ctx.token_type}"
                 )
             virtual_downloader = GitHubPackageDownloader(auth_resolver=auth_resolver)
+
+            def _warn(msg: str) -> None:
+                # Always-visible warning (independent of verbose mode) so
+                # users notice when the ls-remote fallback resolved the
+                # ref but path validation was deferred to install-time.
+                if logger:
+                    logger.warning(msg)
+                else:
+                    _rich_echo(msg, color="yellow")
+
             result = virtual_downloader.validate_virtual_package_exists(
                 dep_ref,
                 verbose_callback=verbose_log,
+                warn_callback=_warn,
             )
             if not result and verbose_log:
                 try:
