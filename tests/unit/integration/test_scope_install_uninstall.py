@@ -7,6 +7,7 @@ For each target x scope combination, verifies:
 - Files at wrong-scope paths are never created
 """
 
+import os
 import shutil
 import tempfile
 from datetime import datetime
@@ -22,6 +23,23 @@ from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
 from apm_cli.models.validation import PackageType
+
+
+def _set_home(monkeypatch, home: Path) -> None:
+    """Portably set the user's home directory for ``Path.home()``.
+
+    On Windows, ``Path.home()`` ignores ``HOME`` and uses ``USERPROFILE``
+    (or ``HOMEDRIVE`` + ``HOMEPATH``).
+    """
+    home_str = str(home)
+    monkeypatch.setenv("HOME", home_str)
+    if os.name == "nt":
+        monkeypatch.setenv("USERPROFILE", home_str)
+        drive, _, tail = home_str.partition(":")
+        if tail:
+            monkeypatch.setenv("HOMEDRIVE", f"{drive}:")
+            monkeypatch.setenv("HOMEPATH", tail)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -380,7 +398,7 @@ class TestClaudeInstallUninstallCycle:
 
     def test_user_scope_with_claude_config_dir(self, monkeypatch):
         """CLAUDE_CONFIG_DIR override: deploy lands at custom root and uninstall cleans it."""
-        monkeypatch.setenv("HOME", str(self.project_root))
+        _set_home(monkeypatch, self.project_root)
         custom = self.project_root / ".config" / "test-claude"
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(custom))
         custom.mkdir(parents=True)
