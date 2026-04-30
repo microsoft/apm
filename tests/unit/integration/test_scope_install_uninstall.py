@@ -693,10 +693,29 @@ class TestCodexInstallUninstallCycle:
         for p in deployed:
             assert not (self.project_root / p).exists()
 
-    def test_user_scope_returns_none(self):
-        """Codex does not support user scope -- for_scope returns None."""
-        result = KNOWN_TARGETS["codex"].for_scope(user_scope=True)
-        assert result is None
+    def test_user_scope(self):
+        """Codex agents deploy to .codex/agents/ at user scope as well."""
+        target = KNOWN_TARGETS["codex"].for_scope(user_scope=True)
+        assert target is not None
+        (self.project_root / ".codex").mkdir()
+
+        pkg_info = _make_pkg(
+            self.project_root,
+            instructions=False,
+            agents=True,
+            commands=False,
+        )
+
+        agent_integrator = AgentIntegrator()
+        agent_result = agent_integrator.integrate_agents_for_target(
+            target, pkg_info, self.project_root
+        )
+
+        assert agent_result.files_integrated >= 1
+
+        deployed = _posix_relpaths(self.project_root, agent_result.target_paths)
+        assert any(p.startswith(".codex/agents/") for p in deployed)
+        assert any(p.endswith(".toml") for p in deployed)
 
 
 # ---------------------------------------------------------------------------
@@ -878,6 +897,29 @@ class TestSkillInstallUninstallCycle:
         assert sync["files_removed"] >= 1
         for p in deployed:
             assert not (self.project_root / p).exists()
+
+    def test_codex_user_scope(self):
+        """Codex skills keep using .agents/skills/ at user scope."""
+        target = KNOWN_TARGETS["codex"].for_scope(user_scope=True)
+        assert target is not None
+        (self.project_root / ".codex").mkdir()
+
+        pkg_info = _make_pkg(
+            self.project_root,
+            name="test-skill",
+            instructions=False,
+            agents=False,
+            skills=True,
+        )
+
+        integrator = SkillIntegrator()
+        result = integrator.integrate_package_skill(
+            pkg_info, self.project_root, targets=[target]
+        )
+
+        assert result.skill_created or result.skill_updated
+        deployed = _posix_relpaths(self.project_root, result.target_paths)
+        assert any(p.startswith(".agents/skills/") for p in deployed)
 
     def test_claude_project_scope(self):
         """Skill deploys to .claude/skills/ at project scope."""

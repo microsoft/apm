@@ -250,6 +250,143 @@ class TestMCPServerOperationsValidation(unittest.TestCase):
         self.assertEqual(sorted(valid), ["flaky", "found"])
         self.assertEqual(invalid, ["missing"])
 
+    def test_check_servers_needing_installation_reads_each_runtime_once(self):
+        """Installed server IDs are cached per runtime across server checks."""
+        ops = self._make_ops()
+
+        def find_server(ref):
+            return {"id": f"id-{ref}", "name": ref}
+
+        ops.registry_client.find_server_by_reference.side_effect = find_server
+        ops._get_installed_server_ids = mock.MagicMock(
+            side_effect=[
+                {"id-s1"},
+                set(),
+            ]
+        )
+
+        result = ops.check_servers_needing_installation(
+            ["codex", "cursor"],
+            ["s1", "s2"],
+        )
+
+        self.assertEqual(sorted(result), ["s1", "s2"])
+        self.assertEqual(ops._get_installed_server_ids.call_count, 2)
+        self.assertEqual(
+            [call.args[0] for call in ops._get_installed_server_ids.call_args_list],
+            [["codex"], ["cursor"]],
+        )
+
+    @mock.patch("apm_cli.factory.ClientFactory.create_client")
+    def test_get_installed_server_ids_reads_vscode_servers_key(self, mock_create_client):
+        """VS Code installed IDs should be read from .vscode/mcp.json's servers key."""
+        from apm_cli.registry.operations import MCPServerOperations
+
+        ops = MCPServerOperations.__new__(MCPServerOperations)
+        mock_client = mock.MagicMock()
+        mock_client.get_current_config.return_value = {
+            "servers": {
+                "example": {"id": "server-123"},
+            }
+        }
+        mock_create_client.return_value = mock_client
+
+        installed = ops._get_installed_server_ids(["vscode"])
+
+        self.assertEqual(installed, {"server-123"})
+
+
+class TestCheckServersNeedingInstallation(unittest.TestCase):
+    """Tests for MCPServerOperations.check_servers_needing_installation caching."""
+
+    def _make_ops(self):
+        from apm_cli.registry.operations import MCPServerOperations
+        ops = MCPServerOperations.__new__(MCPServerOperations)
+        ops.registry_client = mock.MagicMock()
+        return ops
+
+    def test_caches_runtime_lookups(self):
+        """_get_installed_server_ids is called once per runtime, not once per server*runtime."""
+        ops = self._make_ops()
+
+        # 3 servers, 2 runtimes → old code would call 6 times, new code 2
+        ops.registry_client.find_server_by_reference.side_effect = [
+            {"id": "id-a", "name": "srv-a"},
+            {"id": "id-b", "name": "srv-b"},
+            {"id": "id-c", "name": "srv-c"},
+        ]
+        # Runtime "r1" has id-a installed, "r2" has none
+        ops._get_installed_server_ids = mock.MagicMock(side_effect=[
+            {"id-a"},   # r1
+            set(),      # r2
+        ])
+
+        result = ops.check_servers_needing_installation(
+            target_runtimes=["r1", "r2"],
+            server_references=["srv-a", "srv-b", "srv-c"],
+        )
+
+        # _get_installed_server_ids called exactly once per runtime
+        self.assertEqual(ops._get_installed_server_ids.call_count, 2)
+        ops._get_installed_server_ids.assert_any_call(
+            ["r1"],
+            project_root=None,
+            user_scope=False,
+        )
+        ops._get_installed_server_ids.assert_any_call(
+            ["r2"],
+            project_root=None,
+            user_scope=False,
+        )
+
+        # All three need installation because none are installed in *all* runtimes:
+        #   srv-a: installed in r1 but missing from r2 → needs install
+        #   srv-b: missing from r1 → needs install
+        #   srv-c: missing from r1 → needs install
+        self.assertEqual(sorted(result), ["srv-a", "srv-b", "srv-c"])
+
+    def test_server_installed_everywhere_excluded(self):
+        """A server installed in every target runtime is NOT returned."""
+        ops = self._make_ops()
+
+        ops.registry_client.find_server_by_reference.return_value = {"id": "id-x", "name": "srv-x"}
+        ops._get_installed_server_ids = mock.MagicMock(return_value={"id-x"})
+
+        result = ops.check_servers_needing_installation(
+            target_runtimes=["r1"],
+            server_references=["srv-x"],
+        )
+
+        self.assertEqual(result, [])
+
+    def test_server_not_in_registry(self):
+        """Server not found in registry is flagged for installation."""
+        ops = self._make_ops()
+
+        ops.registry_client.find_server_by_reference.return_value = None
+        ops._get_installed_server_ids = mock.MagicMock(return_value=set())
+
+        result = ops.check_servers_needing_installation(
+            target_runtimes=["r1"],
+            server_references=["unknown-srv"],
+        )
+
+        self.assertEqual(result, ["unknown-srv"])
+
+    def test_registry_error_flags_for_installation(self):
+        """Exception during registry lookup flags server for installation."""
+        ops = self._make_ops()
+
+        ops.registry_client.find_server_by_reference.side_effect = RuntimeError("boom")
+        ops._get_installed_server_ids = mock.MagicMock(return_value=set())
+
+        result = ops.check_servers_needing_installation(
+            target_runtimes=["r1"],
+            server_references=["err-srv"],
+        )
+
+        self.assertEqual(result, ["err-srv"])
+
 
 if __name__ == "__main__":
     unittest.main()

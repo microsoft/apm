@@ -20,6 +20,7 @@ from typing import List, Optional
 import click
 
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.utils.console import (
     _get_console,
     _rich_error,
@@ -31,16 +32,21 @@ from apm_cli.utils.console import (
 _log = logging.getLogger(__name__)
 
 
-def _is_vscode_available() -> bool:
+def _is_vscode_available(project_root: Path | str | None = None) -> bool:
     """Return True when VS Code can be targeted for MCP configuration.
 
     VS Code is considered available when either:
     - the ``code`` CLI command is on PATH (the standard case), or
-    - a ``.vscode/`` directory exists in the current working directory
+    - a ``.vscode/`` directory exists in the resolved project root
       (common on macOS where the user hasn't run "Install 'code' command
       in PATH" from the VS Code command palette).
+
+    Args:
+        project_root: Project root to inspect for a `.vscode/` directory when
+            explicit project context is provided. Falls back to CWD when unset.
     """
-    return shutil.which("code") is not None or (Path.cwd() / ".vscode").is_dir()
+    root = Path(project_root) if project_root is not None else Path.cwd()
+    return shutil.which("code") is not None or (root / ".vscode").is_dir()
 
 
 class MCPIntegrator:
@@ -74,6 +80,8 @@ class MCPIntegrator:
         dependencies (depth > 1) are skipped with a warning unless
         *trust_private* is True.
         """
+        if logger is None:
+            logger = NullCommandLogger()
         if not apm_modules_dir.exists():
             return []
 
@@ -115,27 +123,15 @@ class MCPIntegrator:
                     for dep in mcp:
                         if hasattr(dep, "is_self_defined") and dep.is_self_defined:
                             if is_direct:
-                                if logger:
-                                    logger.verbose_detail(
-                                        f"Trusting direct dependency MCP '{dep.name}' "
-                                        f"from '{pkg.name}'"
-                                    )
-                                else:
-                                    _rich_info(
-                                        f"Trusting direct dependency MCP '{dep.name}' "
-                                        f"from '{pkg.name}'"
-                                    )
+                                logger.progress(
+                                    f"Trusting direct dependency MCP '{dep.name}' "
+                                    f"from '{pkg.name}'"
+                                )
                             elif trust_private:
-                                if logger:
-                                    logger.verbose_detail(
-                                        f"Trusting self-defined MCP server '{dep.name}' "
-                                        f"from transitive package '{pkg.name}' (--trust-transitive-mcp)"
-                                    )
-                                else:
-                                    _rich_info(
-                                        f"Trusting self-defined MCP server '{dep.name}' "
-                                        f"from transitive package '{pkg.name}' (--trust-transitive-mcp)"
-                                    )
+                                logger.progress(
+                                    f"Trusting self-defined MCP server '{dep.name}' "
+                                    f"from transitive package '{pkg.name}' (--trust-transitive-mcp)"
+                                )
                             else:
                                 _trust_msg = (
                                     f"Transitive package '{pkg.name}' declares self-defined "
@@ -144,10 +140,8 @@ class MCPIntegrator:
                                 )
                                 if diagnostics:
                                     diagnostics.warn(_trust_msg)
-                                elif logger:
-                                    logger.warning(_trust_msg)
                                 else:
-                                    _rich_warning(_trust_msg)
+                                    logger.warning(_trust_msg)
                                 continue
                         collected.append(dep)
             except Exception:
@@ -399,6 +393,8 @@ class MCPIntegrator:
     def _check_self_defined_servers_needing_installation(
         dep_names: list,
         target_runtimes: list,
+        project_root=None,
+        user_scope: bool = False,
     ) -> list:
         """Return self-defined MCP servers missing from at least one runtime.
 
@@ -416,7 +412,11 @@ class MCPIntegrator:
         runtime_failures = []
         for runtime in target_runtimes:
             try:
-                client = ClientFactory.create_client(runtime)
+                client = ClientFactory.create_client(
+                    runtime,
+                    project_root=project_root,
+                    user_scope=user_scope,
+                )
                 detector = MCPConflictDetector(client)
                 runtime_existing[runtime] = detector.get_existing_server_configs()
             except Exception:
@@ -443,6 +443,8 @@ class MCPIntegrator:
         stale_names: builtins.set,
         runtime: str = None,
         exclude: str = None,
+        project_root=None,
+        user_scope: bool = False,
         logger=None,
         scope=None,
     ) -> None:
@@ -458,6 +460,8 @@ class MCPIntegrator:
             scope: InstallScope (PROJECT or USER).  When USER, only
                 global-capable runtimes are cleaned.
         """
+        if logger is None:
+            logger = NullCommandLogger()
         if not stale_names:
             return
 
@@ -493,9 +497,11 @@ class MCPIntegrator:
             if "/" in n:
                 expanded_stale.add(n.rsplit("/", 1)[-1])
 
+        project_root_path = Path(project_root) if project_root is not None else Path.cwd()
+
         # Clean .vscode/mcp.json
         if "vscode" in target_runtimes:
-            vscode_mcp = Path.cwd() / ".vscode" / "mcp.json"
+            vscode_mcp = project_root_path / ".vscode" / "mcp.json"
             if vscode_mcp.exists():
                 try:
                     import json as _json
@@ -510,15 +516,9 @@ class MCPIntegrator:
                             _json.dumps(config, indent=2), encoding="utf-8"
                         )
                         for name in removed:
-                            if logger:
-                                logger.progress(
-                                    f"Removed stale MCP server '{name}' from .vscode/mcp.json"
-                                )
-                            else:
-                                _rich_success(
-                                    f"Removed stale MCP server '{name}' from .vscode/mcp.json",
-                                    symbol="check",
-                                )
+                            logger.progress(
+                                f"Removed stale MCP server '{name}' from .vscode/mcp.json"
+                            )
                 except Exception:
                     _log.debug(
                         "Failed to clean stale MCP servers from .vscode/mcp.json",
@@ -552,9 +552,17 @@ class MCPIntegrator:
                         exc_info=True,
                     )
 
-        # Clean ~/.codex/config.toml (mcp_servers section)
+        # Clean the scope-resolved Codex config.toml (mcp_servers section)
         if "codex" in target_runtimes:
-            codex_cfg = Path.home() / ".codex" / "config.toml"
+            from apm_cli.factory import ClientFactory
+
+            codex_cfg = Path(
+                ClientFactory.create_client(
+                    "codex",
+                    project_root=project_root,
+                    user_scope=user_scope,
+                ).get_config_path()
+            )
             if codex_cfg.exists():
                 try:
                     import toml as _toml
@@ -579,7 +587,7 @@ class MCPIntegrator:
 
         # Clean .cursor/mcp.json (only if .cursor/ directory exists)
         if "cursor" in target_runtimes:
-            cursor_mcp = Path.cwd() / ".cursor" / "mcp.json"
+            cursor_mcp = project_root_path / ".cursor" / "mcp.json"
             if cursor_mcp.exists():
                 try:
                     import json as _json
@@ -606,8 +614,8 @@ class MCPIntegrator:
 
         # Clean opencode.json (only if .opencode/ directory exists)
         if "opencode" in target_runtimes:
-            opencode_cfg = Path.cwd() / "opencode.json"
-            if opencode_cfg.exists() and (Path.cwd() / ".opencode").is_dir():
+            opencode_cfg = project_root_path / "opencode.json"
+            if opencode_cfg.exists() and (project_root_path / ".opencode").is_dir():
                 try:
                     import json as _json
 
@@ -621,15 +629,9 @@ class MCPIntegrator:
                             _json.dumps(config, indent=2), encoding="utf-8"
                         )
                         for name in removed:
-                            if logger:
-                                logger.progress(
-                                    f"Removed stale MCP server '{name}' from opencode.json"
-                                )
-                            else:
-                                _rich_success(
-                                    f"Removed stale MCP server '{name}' from opencode.json",
-                                    symbol="check",
-                                )
+                            logger.progress(
+                                f"Removed stale MCP server '{name}' from opencode.json"
+                            )
                 except Exception:
                     _log.debug(
                         "Failed to clean stale MCP servers from opencode.json",
@@ -761,7 +763,9 @@ class MCPIntegrator:
 
         except ImportError:
             mcp_compatible = [
-                rt for rt in detected_runtimes if rt in ["vscode", "copilot", "cursor", "opencode", "gemini"]
+                rt
+                for rt in detected_runtimes
+                if rt in ["vscode", "copilot", "codex", "cursor", "opencode", "gemini"]
             ]
             return [rt for rt in mcp_compatible if shutil.which(rt)]
 
@@ -776,25 +780,22 @@ class MCPIntegrator:
         shared_env_vars: dict = None,
         server_info_cache: dict = None,
         shared_runtime_vars: dict = None,
+        project_root=None,
+        user_scope: bool = False,
         logger=None,
     ) -> bool:
         """Install MCP dependencies for a specific runtime.
 
         Returns True if all deps were configured successfully, False otherwise.
         """
+        if logger is None:
+            logger = NullCommandLogger()
         try:
             from apm_cli.core.operations import install_package
-            from apm_cli.factory import ClientFactory
-
-            # Get the appropriate client for the runtime
-            client = ClientFactory.create_client(runtime)
 
             all_ok = True
             for dep in mcp_deps:
-                if logger:
-                    logger.verbose_detail(f"  Installing {dep}...")
-                else:
-                    click.echo(f"  Installing {dep}...")
+                logger.verbose_detail(f"  Installing {dep}...")
                 try:
                     result = install_package(
                         runtime,
@@ -802,13 +803,22 @@ class MCPIntegrator:
                         shared_env_vars=shared_env_vars,
                         server_info_cache=server_info_cache,
                         shared_runtime_vars=shared_runtime_vars,
+                        project_root=project_root,
+                        user_scope=user_scope,
                     )
                     if result["failed"]:
-                        if logger:
-                            logger.error(f"  Failed to install {dep}")
-                        else:
-                            click.echo(f"  x Failed to install {dep}")
+                        logger.error(f"  Failed to install {dep}")
                         all_ok = False
+                    elif logger and runtime == "codex":
+                        from apm_cli.factory import ClientFactory
+
+                        config_path = ClientFactory.create_client(
+                            runtime,
+                            project_root=project_root,
+                            user_scope=user_scope,
+                        ).get_config_path()
+                        _log.debug("Codex config written to %s", config_path)
+                        logger.verbose_detail(f"  Codex config: {config_path}")
                 except Exception as install_error:
                     _log.debug(
                         "Failed to install MCP dep %s for runtime %s",
@@ -816,37 +826,23 @@ class MCPIntegrator:
                         runtime,
                         exc_info=True,
                     )
-                    if logger:
-                        logger.error(f"  Failed to install {dep}: {install_error}")
-                    else:
-                        click.echo(f"  x Failed to install {dep}: {install_error}")
+                    logger.error(f"  Failed to install {dep}: {install_error}")
                     all_ok = False
             return all_ok
 
         except ImportError as e:
-            if logger:
-                logger.warning(f"Core operations not available for runtime {runtime}: {e}")
-                logger.progress(f"Dependencies for {runtime}: {', '.join(mcp_deps)}")
-            else:
-                _rich_warning(f"Core operations not available for runtime {runtime}: {e}")
-                _rich_info(f"Dependencies for {runtime}: {', '.join(mcp_deps)}")
+            logger.warning(f"Core operations not available for runtime {runtime}: {e}")
+            logger.progress(f"Dependencies for {runtime}: {', '.join(mcp_deps)}")
             return False
         except ValueError as e:
-            if logger:
-                logger.warning(f"Runtime {runtime} not supported: {e}")
-                logger.progress("Supported runtimes: vscode, copilot, codex, cursor, opencode, gemini, llm")
-            else:
-                _rich_warning(f"Runtime {runtime} not supported: {e}")
-                _rich_info("Supported runtimes: vscode, copilot, codex, cursor, opencode, gemini, llm")
+            logger.warning(f"Runtime {runtime} not supported: {e}")
+            logger.progress("Supported runtimes: vscode, copilot, codex, cursor, opencode, gemini, llm")
             return False
         except Exception as e:
             _log.debug(
                 "Unexpected error installing for runtime %s", runtime, exc_info=True
             )
-            if logger:
-                logger.error(f"Error installing for runtime {runtime}: {e}")
-            else:
-                _rich_error(f"Error installing for runtime {runtime}: {e}")
+            logger.error(f"Error installing for runtime {runtime}: {e}")
             return False
 
     # ------------------------------------------------------------------
@@ -861,6 +857,9 @@ class MCPIntegrator:
         verbose: bool = False,
         apm_config: dict = None,
         stored_mcp_configs: dict = None,
+        project_root=None,
+        user_scope: bool = False,
+        explicit_target: str | None = None,
         logger=None,
         diagnostics=None,
         scope=None,
@@ -878,19 +877,31 @@ class MCPIntegrator:
             stored_mcp_configs: Previously stored MCP configs from lockfile
                 for diff-aware installation.  When provided, servers whose
                 manifest config has changed are re-applied automatically.
-            scope: InstallScope (PROJECT or USER).  When USER, only
+            project_root: Project root for repo-local runtime configs.
+            user_scope: Whether runtime configuration is being resolved at user scope.
+            explicit_target: Explicit target selected by CLI or manifest.
+            scope: InstallScope (PROJECT or USER). When USER, only
                 runtimes whose adapter declares ``supports_user_scope``
                 are targeted; workspace-only runtimes are skipped.
 
         Returns:
             Number of MCP servers newly configured or updated.
         """
+        if logger is None:
+            logger = NullCommandLogger()
         if not mcp_deps:
-            if logger:
-                logger.warning("No MCP dependencies found in apm.yml")
-            else:
-                _rich_warning("No MCP dependencies found in apm.yml")
+            logger.warning("No MCP dependencies found in apm.yml")
             return 0
+
+        from apm_cli.core.scope import InstallScope
+
+        # The explicit scope enum takes precedence over the raw user_scope bool
+        # so callers cannot accidentally mix user-scope runtime filtering with
+        # project-scope config writes (or the inverse).
+        if scope is InstallScope.USER:
+            user_scope = True
+        elif scope is InstallScope.PROJECT:
+            user_scope = False
 
         # Split into registry-resolved and self-defined deps
         # Backward compat: plain strings are treated as registry deps
@@ -932,29 +943,22 @@ class MCPIntegrator:
                 header.append(")", style="cyan")
                 console.print(header)
             except Exception:
-                if logger:
-                    logger.progress(f"Installing MCP dependencies ({len(mcp_deps)})...")
-                else:
-                    _rich_info(f"Installing MCP dependencies ({len(mcp_deps)})...")
-        else:
-            if logger:
                 logger.progress(f"Installing MCP dependencies ({len(mcp_deps)})...")
-            else:
-                _rich_info(f"Installing MCP dependencies ({len(mcp_deps)})...")
+        else:
+            logger.progress(f"Installing MCP dependencies ({len(mcp_deps)})...")
 
         # Runtime detection and multi-runtime installation
         if runtime:
             # Single runtime mode
             target_runtimes = [runtime]
-            if logger:
-                logger.progress(f"Targeting specific runtime: {runtime}")
-            else:
-                _rich_info(f"Targeting specific runtime: {runtime}")
+            logger.progress(f"Targeting specific runtime: {runtime}")
         else:
+            project_root_path = Path(project_root) if project_root is not None else Path.cwd()
+
             if apm_config is None:
                 # Lazy load  -- only when the caller doesn't provide it
                 try:
-                    apm_yml = Path("apm.yml")
+                    apm_yml = project_root_path / "apm.yml"
                     if apm_yml.exists():
                         from apm_cli.utils.yaml_io import load_yaml
                         apm_config = load_yaml(apm_yml)
@@ -972,17 +976,17 @@ class MCPIntegrator:
                 for runtime_name in ["copilot", "codex", "vscode", "cursor", "opencode", "gemini"]:
                     try:
                         if runtime_name == "vscode":
-                            if _is_vscode_available():
+                            if _is_vscode_available(project_root=project_root_path):
                                 ClientFactory.create_client(runtime_name)
                                 installed_runtimes.append(runtime_name)
                         elif runtime_name == "cursor":
                             # Cursor is opt-in: only target when .cursor/ exists
-                            if (Path.cwd() / ".cursor").is_dir():
+                            if (project_root_path / ".cursor").is_dir():
                                 ClientFactory.create_client(runtime_name)
                                 installed_runtimes.append(runtime_name)
                         elif runtime_name == "opencode":
                             # OpenCode is opt-in: only target when .opencode/ exists
-                            if (Path.cwd() / ".opencode").is_dir():
+                            if (project_root_path / ".opencode").is_dir():
                                 ClientFactory.create_client(runtime_name)
                                 installed_runtimes.append(runtime_name)
                         elif runtime_name == "gemini":
@@ -1003,13 +1007,13 @@ class MCPIntegrator:
                     if shutil.which(rt) is not None
                 ]
                 # VS Code: check binary on PATH or .vscode/ directory presence
-                if _is_vscode_available():
+                if _is_vscode_available(project_root=project_root_path):
                     installed_runtimes.append("vscode")
                 # Cursor is directory-presence based, not binary-based
-                if (Path.cwd() / ".cursor").is_dir():
+                if (project_root_path / ".cursor").is_dir():
                     installed_runtimes.append("cursor")
                 # OpenCode is directory-presence based
-                if (Path.cwd() / ".opencode").is_dir():
+                if (project_root_path / ".opencode").is_dir():
                     installed_runtimes.append("opencode")
                 # Gemini CLI is directory-presence based
                 if (Path.cwd() / ".gemini").is_dir():
@@ -1041,7 +1045,7 @@ class MCPIntegrator:
                                 f"(available + used in scripts)"
                             )
                         console.print("|")
-                    elif logger:
+                    else:
                         logger.verbose_detail(
                             f"Installed runtimes: {', '.join(installed_runtimes)}"
                         )
@@ -1050,56 +1054,27 @@ class MCPIntegrator:
                         )
                         if target_runtimes:
                             logger.verbose_detail(
-                                f"Target runtimes: {', '.join(target_runtimes)}"
-                            )
-                    else:
-                        _rich_info(
-                            f"Installed runtimes: {', '.join(installed_runtimes)}"
-                        )
-                        _rich_info(
-                            f"Script runtimes: {', '.join(script_runtimes)}"
-                        )
-                        if target_runtimes:
-                            _rich_info(
                                 f"Target runtimes: {', '.join(target_runtimes)}"
                             )
 
                 if not target_runtimes:
-                    if logger:
-                        logger.warning(
-                            "Scripts reference runtimes that are not installed"
-                        )
-                        logger.progress(
-                            "Install missing runtimes with: apm runtime setup <runtime>"
-                        )
-                    else:
-                        _rich_warning(
-                            "Scripts reference runtimes that are not installed"
-                        )
-                        _rich_info(
-                            "Install missing runtimes with: apm runtime setup <runtime>"
-                        )
+                    logger.warning(
+                        "Scripts reference runtimes that are not installed"
+                    )
+                    logger.progress(
+                        "Install missing runtimes with: apm runtime setup <runtime>"
+                    )
             else:
                 target_runtimes = installed_runtimes
                 if target_runtimes:
                     if verbose:
-                        if logger:
-                            logger.verbose_detail(
-                                f"No scripts detected, using all installed runtimes: "
-                                f"{', '.join(target_runtimes)}"
-                            )
-                        else:
-                            _rich_info(
-                                f"No scripts detected, using all installed runtimes: "
-                                f"{', '.join(target_runtimes)}"
-                            )
+                        logger.verbose_detail(
+                            f"No scripts detected, using all installed runtimes: "
+                            f"{', '.join(target_runtimes)}"
+                        )
                 else:
-                    if logger:
-                        logger.warning("No MCP-compatible runtimes installed")
-                        logger.progress("Install a runtime with: apm runtime setup copilot")
-                    else:
-                        _rich_warning("No MCP-compatible runtimes installed")
-                        _rich_info("Install a runtime with: apm runtime setup copilot")
+                    logger.warning("No MCP-compatible runtimes installed")
+                    logger.progress("Install a runtime with: apm runtime setup copilot")
 
             # Apply exclusions
             if exclude:
@@ -1107,30 +1082,46 @@ class MCPIntegrator:
 
             # All runtimes excluded  -- nothing to configure
             if not target_runtimes and installed_runtimes:
-                if logger:
-                    logger.warning(
-                        f"All installed runtimes excluded (--exclude {exclude}), "
-                        "skipping MCP configuration"
-                    )
-                else:
-                    _rich_warning(
-                        f"All installed runtimes excluded (--exclude {exclude}), "
-                        "skipping MCP configuration"
-                    )
+                logger.warning(
+                    f"All installed runtimes excluded (--exclude {exclude}), "
+                    "skipping MCP configuration"
+                )
                 return 0
 
             # Fall back to VS Code only if no runtimes are installed at all
             if not target_runtimes and not installed_runtimes:
                 target_runtimes = ["vscode"]
+                logger.progress("No runtimes installed, using VS Code as fallback")
+
+        # Codex MCP is project-scoped: only configure it when Codex is an
+        # active project target, mirroring Cursor/OpenCode opt-in behavior.
+        if not user_scope and "codex" in target_runtimes:
+            from apm_cli.integration.targets import active_targets
+
+            root = project_root or Path.cwd()
+            config_target = (
+                explicit_target
+                or (apm_config.get("target") if apm_config else None)
+            )
+            active = {t.name for t in active_targets(root, config_target)}
+            if "codex" not in active:
+                _log.debug("Codex gated out: active_targets=%s", sorted(active))
+                target_runtimes = [r for r in target_runtimes if r != "codex"]
+                message = (
+                    "Codex not an active project target -- skipping MCP config "
+                    "(create .codex/ or set target: codex in apm.yml)"
+                )
                 if logger:
-                    logger.progress("No runtimes installed, using VS Code as fallback")
+                    logger.progress(message)
                 else:
-                    _rich_info("No runtimes installed, using VS Code as fallback")
+                    _rich_info(message, symbol="info")
+
+        # Explicit runtime/exclusion/gating can leave nothing to configure.
+        if not target_runtimes:
+            return 0
 
         # Scope filtering: at USER scope, keep only global-capable runtimes.
         # Applied after both explicit --runtime and auto-discovery paths.
-        from apm_cli.core.scope import InstallScope
-
         if scope is InstallScope.USER:
             from apm_cli.factory import ClientFactory as _CF
 
@@ -1151,22 +1142,12 @@ class MCPIntegrator:
                     f"{', '.join(sorted(skipped))}"
                     f" -- omit --global to install these"
                 )
-                if logger:
-                    logger.warning(msg)
-                else:
-                    _rich_info(msg, symbol="info")
+                logger.warning(msg)
             if not target_runtimes:
-                if logger:
-                    logger.warning(
-                        "No runtimes support user-scope MCP installation "
-                        "(supported: copilot, codex)"
-                    )
-                else:
-                    _rich_warning(
-                        "No runtimes support user-scope MCP installation "
-                        "(supported: copilot, codex)",
-                        symbol="warning",
-                    )
+                logger.warning(
+                    "No runtimes support user-scope MCP installation "
+                    "(supported: copilot, codex)"
+                )
                 return 0
 
         # Use the new registry operations module for better server detection
@@ -1181,33 +1162,20 @@ class MCPIntegrator:
 
                 # Early validation: check all servers exist in registry (fail-fast)
                 if verbose:
-                    if logger:
-                        logger.verbose_detail(
-                            f"Validating {len(registry_deps)} registry servers..."
-                        )
-                    else:
-                        _rich_info(
-                            f"Validating {len(registry_deps)} registry servers..."
-                        )
+                    logger.verbose_detail(
+                        f"Validating {len(registry_deps)} registry servers..."
+                    )
                 valid_servers, invalid_servers = operations.validate_servers_exist(
                     registry_dep_names
                 )
 
                 if invalid_servers:
-                    if logger:
-                        logger.error(
-                            f"Server(s) not found in registry: {', '.join(invalid_servers)}"
-                        )
-                        logger.progress(
-                            "Run 'apm mcp search <query>' to find available servers"
-                        )
-                    else:
-                        _rich_error(
-                            f"Server(s) not found in registry: {', '.join(invalid_servers)}"
-                        )
-                        _rich_info(
-                            "Run 'apm mcp search <query>' to find available servers"
-                        )
+                    logger.error(
+                        f"Server(s) not found in registry: {', '.join(invalid_servers)}"
+                    )
+                    logger.progress(
+                        "Run 'apm mcp search <query>' to find available servers"
+                    )
                     raise RuntimeError(
                         f"Cannot install {len(invalid_servers)} missing server(s)"
                     )
@@ -1215,7 +1183,10 @@ class MCPIntegrator:
                 if valid_servers:
                     servers_to_install = (
                         operations.check_servers_needing_installation(
-                            target_runtimes, valid_servers
+                            target_runtimes,
+                            valid_servers,
+                            project_root=project_root,
+                            user_scope=user_scope,
                         )
                     )
                     already_configured_candidates = [
@@ -1250,12 +1221,8 @@ class MCPIntegrator:
                                     f"|  [green]+[/green] {dep} "
                                     f"[dim](already configured)[/dim]"
                                 )
-                        elif logger:
-                            logger.success(
-                                "All registry MCP servers already configured"
-                            )
                         else:
-                            _rich_success(
+                            logger.success(
                                 "All registry MCP servers already configured"
                             )
                     else:
@@ -1266,27 +1233,17 @@ class MCPIntegrator:
                                         f"|  [green]+[/green] {dep} "
                                         f"[dim](already configured)[/dim]"
                                     )
-                            elif logger:
+                            else:
                                 logger.verbose_detail(
-                                    "Already configured registry MCP servers: "
-                                    f"{', '.join(already_configured_servers)}"
-                                )
-                            elif verbose:
-                                _rich_info(
                                     "Already configured registry MCP servers: "
                                     f"{', '.join(already_configured_servers)}"
                                 )
 
                         # Batch fetch server info once
                         if verbose:
-                            if logger:
-                                logger.verbose_detail(
-                                    f"Installing {len(servers_to_install)} servers..."
-                                )
-                            else:
-                                _rich_info(
-                                    f"Installing {len(servers_to_install)} servers..."
-                                )
+                            logger.verbose_detail(
+                                f"Installing {len(servers_to_install)} servers..."
+                            )
                         server_info_cache = operations.batch_fetch_server_info(
                             servers_to_install
                         )
@@ -1329,16 +1286,15 @@ class MCPIntegrator:
                             any_ok = False
                             for rt in target_runtimes:
                                 if verbose:
-                                    if logger:
-                                        logger.verbose_detail(f"Configuring {rt}...")
-                                    else:
-                                        _rich_info(f"Configuring {rt}...")
+                                    logger.verbose_detail(f"Configuring {rt}...")
                                 if MCPIntegrator._install_for_runtime(
                                     rt,
                                     [dep],
                                     shared_env_vars,
                                     server_info_cache,
                                     shared_runtime_vars,
+                                    project_root=project_root,
+                                    user_scope=user_scope,
                                     logger=logger,
                                 ):
                                     any_ok = True
@@ -1361,16 +1317,10 @@ class MCPIntegrator:
                                 )
 
             except ImportError:
-                if logger:
-                    logger.warning("Registry operations not available")
-                    logger.error(
-                        "Cannot validate MCP servers without registry operations"
-                    )
-                else:
-                    _rich_warning("Registry operations not available")
-                    _rich_error(
-                        "Cannot validate MCP servers without registry operations"
-                    )
+                logger.warning("Registry operations not available")
+                logger.error(
+                    "Cannot validate MCP servers without registry operations"
+                )
                 raise RuntimeError(
                     "Registry operations module required for MCP installation"
                 )
@@ -1382,6 +1332,8 @@ class MCPIntegrator:
                 MCPIntegrator._check_self_defined_servers_needing_installation(
                     self_defined_names,
                     target_runtimes,
+                    project_root=project_root,
+                    user_scope=user_scope,
                 )
             )
             already_configured_candidates_sd = [
@@ -1415,18 +1367,13 @@ class MCPIntegrator:
                             f"|  [green]+[/green] {name} "
                             f"[dim](already configured)[/dim]"
                         )
-                elif logger:
+                else:
+                    count = len(already_configured_self_defined)
+                    logger.success(
+                        f"{count} self-defined server(s) already configured"
+                    )
                     for name in already_configured_self_defined:
                         logger.verbose_detail(f"{name} already configured, skipping")
-                elif verbose:
-                    for name in already_configured_self_defined:
-                        _rich_info(f"{name} already configured, skipping")
-                else:
-                    names_str = ", ".join(already_configured_self_defined)
-                    _rich_success(
-                        f"{len(already_configured_self_defined)} self-defined "
-                        f"server(s) already configured, skipping: {names_str}"
-                    )
 
             for dep in self_defined_deps:
                 if dep.name not in self_defined_to_install:
@@ -1452,15 +1399,14 @@ class MCPIntegrator:
                 any_ok = False
                 for rt in target_runtimes:
                     if verbose:
-                        if logger:
-                            logger.verbose_detail(f"Configuring {dep.name} for {rt}...")
-                        else:
-                            _rich_info(f"Configuring {dep.name} for {rt}...")
+                        logger.verbose_detail(f"Configuring {dep.name} for {rt}...")
                     if MCPIntegrator._install_for_runtime(
                         rt,
                         [dep.name],
                         self_defined_env,
                         self_defined_cache,
+                        project_root=project_root,
+                        user_scope=user_scope,
                         logger=logger,
                     ):
                         any_ok = True

@@ -27,6 +27,7 @@ from .validation import (
     ValidationResult,
     validate_apm_package,
 )
+from ..core.target_detection import parse_target_field
 
 # Re-export all moved symbols so `from apm_cli.models.apm_package import X` keeps working
 __all__ = [
@@ -78,6 +79,50 @@ class APMPackage:
     includes: Optional[Union[str, List[str]]] = None  # Include-only manifest: 'auto' or list of repo paths
 
     @classmethod
+    def _parse_dependency_dict(cls, raw_deps: dict, label: str = "") -> dict:
+        """Parse a dependencies or devDependencies dict from apm.yml.
+
+        Args:
+            raw_deps: Raw dict mapping dep type -> list of entries.
+            label: Prefix for error messages (e.g. "dev " for devDependencies).
+        """
+        from .dependency.reference import DependencyReference
+        from .dependency.mcp import MCPDependency
+
+        parsed: dict = {}
+        for dep_type, dep_list in raw_deps.items():
+            if not isinstance(dep_list, list):
+                continue
+            if dep_type == 'apm':
+                parsed_deps: list = []
+                for dep_entry in dep_list:
+                    if isinstance(dep_entry, str):
+                        try:
+                            parsed_deps.append(DependencyReference.parse(dep_entry))
+                        except ValueError as e:
+                            raise ValueError(f"Invalid {label}APM dependency '{dep_entry}': {e}")
+                    elif isinstance(dep_entry, dict):
+                        try:
+                            parsed_deps.append(DependencyReference.parse_from_dict(dep_entry))
+                        except ValueError as e:
+                            raise ValueError(f"Invalid {label}APM dependency {dep_entry}: {e}")
+                parsed[dep_type] = parsed_deps
+            elif dep_type == 'mcp':
+                parsed_mcp: list = []
+                for dep in dep_list:
+                    if isinstance(dep, str):
+                        parsed_mcp.append(MCPDependency.from_string(dep))
+                    elif isinstance(dep, dict):
+                        try:
+                            parsed_mcp.append(MCPDependency.from_dict(dep))
+                        except ValueError as e:
+                            raise ValueError(f"Invalid {label}MCP dependency: {e}")
+                parsed[dep_type] = parsed_mcp
+            else:
+                parsed[dep_type] = [dep for dep in dep_list if isinstance(dep, (str, dict))]
+        return parsed
+
+    @classmethod
     def from_apm_yml(cls, apm_yml_path: Path) -> "APMPackage":
         """Load APM package from apm.yml file.
         
@@ -119,72 +164,12 @@ class APMPackage:
         # Parse dependencies
         dependencies = None
         if 'dependencies' in data and isinstance(data['dependencies'], dict):
-            dependencies = {}
-            for dep_type, dep_list in data['dependencies'].items():
-                if isinstance(dep_list, list):
-                    if dep_type == 'apm':
-                        # APM dependencies need to be parsed as DependencyReference objects
-                        parsed_deps = []
-                        for dep_entry in dep_list:
-                            if isinstance(dep_entry, str):
-                                try:
-                                    parsed_deps.append(DependencyReference.parse(dep_entry))
-                                except ValueError as e:
-                                    raise ValueError(f"Invalid APM dependency '{dep_entry}': {e}")
-                            elif isinstance(dep_entry, dict):
-                                try:
-                                    parsed_deps.append(DependencyReference.parse_from_dict(dep_entry))
-                                except ValueError as e:
-                                    raise ValueError(f"Invalid APM dependency {dep_entry}: {e}")
-                        dependencies[dep_type] = parsed_deps
-                    elif dep_type == 'mcp':
-                        parsed_mcp = []
-                        for dep in dep_list:
-                            if isinstance(dep, str):
-                                parsed_mcp.append(MCPDependency.from_string(dep))
-                            elif isinstance(dep, dict):
-                                try:
-                                    parsed_mcp.append(MCPDependency.from_dict(dep))
-                                except ValueError as e:
-                                    raise ValueError(f"Invalid MCP dependency: {e}")
-                        dependencies[dep_type] = parsed_mcp
-                    else:
-                        # Other dependency types: keep as-is
-                        dependencies[dep_type] = [dep for dep in dep_list if isinstance(dep, (str, dict))]
-        
+            dependencies = cls._parse_dependency_dict(data['dependencies'], label="")
+
         # Parse devDependencies (same structure as dependencies)
         dev_dependencies = None
         if 'devDependencies' in data and isinstance(data['devDependencies'], dict):
-            dev_dependencies = {}
-            for dep_type, dep_list in data['devDependencies'].items():
-                if isinstance(dep_list, list):
-                    if dep_type == 'apm':
-                        parsed_deps = []
-                        for dep_entry in dep_list:
-                            if isinstance(dep_entry, str):
-                                try:
-                                    parsed_deps.append(DependencyReference.parse(dep_entry))
-                                except ValueError as e:
-                                    raise ValueError(f"Invalid dev APM dependency '{dep_entry}': {e}")
-                            elif isinstance(dep_entry, dict):
-                                try:
-                                    parsed_deps.append(DependencyReference.parse_from_dict(dep_entry))
-                                except ValueError as e:
-                                    raise ValueError(f"Invalid dev APM dependency {dep_entry}: {e}")
-                        dev_dependencies[dep_type] = parsed_deps
-                    elif dep_type == 'mcp':
-                        parsed_mcp = []
-                        for dep in dep_list:
-                            if isinstance(dep, str):
-                                parsed_mcp.append(MCPDependency.from_string(dep))
-                            elif isinstance(dep, dict):
-                                try:
-                                    parsed_mcp.append(MCPDependency.from_dict(dep))
-                                except ValueError as e:
-                                    raise ValueError(f"Invalid dev MCP dependency: {e}")
-                        dev_dependencies[dep_type] = parsed_mcp
-                    else:
-                        dev_dependencies[dep_type] = [dep for dep in dep_list if isinstance(dep, (str, dict))]
+            dev_dependencies = cls._parse_dependency_dict(data['devDependencies'], label="dev ")
 
         # Parse package content type
         pkg_type = None
@@ -212,6 +197,15 @@ class APMPackage:
             else:
                 raise ValueError("'includes' must be 'auto' or a list of strings")
 
+        # Parse target field through the same validator as --target so a CSV
+        # string like ``target: "claude,copilot"`` resolves identically to
+        # ``--target claude,copilot`` and unknown tokens fail at parse time
+        # (see apm_cli.core.target_detection.parse_target_field).
+        target_value = parse_target_field(
+            data.get('target'),
+            source_path=apm_yml_path,
+        )
+
         result = cls(
             name=data['name'],
             version=data['version'],
@@ -222,7 +216,7 @@ class APMPackage:
             dev_dependencies=dev_dependencies,
             scripts=data.get('scripts'),
             package_path=apm_yml_path.parent,
-            target=data.get('target'),
+            target=target_value,
             type=pkg_type,
             includes=includes,
         )

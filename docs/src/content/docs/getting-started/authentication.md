@@ -126,6 +126,15 @@ Setting `GITHUB_HOST` makes bare package names (without explicit host) resolve a
 
 ## Azure DevOps
 
+The recommended way to authenticate with Azure DevOps is via `az login`:
+
+```bash
+az login --tenant <your-tenant-id>
+apm install dev.azure.com/myorg/myproject/myrepo
+```
+
+Alternatively, set an explicit PAT:
+
 ```bash
 export ADO_APM_PAT=your_ado_pat
 apm install dev.azure.com/myorg/myproject/myrepo
@@ -157,6 +166,8 @@ az login --tenant <your-tenant-id>
 apm install dev.azure.com/myorg/myproject/myrepo
 ```
 
+**Finding your tenant ID:** if you are unsure which tenant owns the ADO org, visit `https://dev.azure.com/{org}/_settings/organizationAad` in a browser, or ask your admin. You can also run `az login` without `--tenant` and inspect `az account show --query tenantId -o tsv`.
+
 **Resolution precedence for ADO hosts** (`dev.azure.com`, `*.visualstudio.com`):
 
 1. `ADO_APM_PAT` env var if set
@@ -178,6 +189,10 @@ apm install dev.azure.com/myorg/myproject/myrepo
 ```
 
 Bearer tokens are short-lived (~60 minutes), acquired on demand, never persisted by APM. See [Security Model: Token handling](../../enterprise/security/#token-handling) for the full posture.
+
+### Auth-failure diagnostics
+
+When authentication fails, APM prints a targeted diagnostic instead of a generic "not accessible or doesn't exist" message. The diagnostic tells you exactly which path failed and what to do next. For `--update` operations, APM verifies auth *before* modifying any files -- if the pre-flight check fails, you will see `No files were modified` and your `apm.yml`, `apm.lock.yaml`, and `apm_modules/` directory remain untouched.
 
 ## Package source behavior
 

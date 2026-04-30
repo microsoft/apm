@@ -126,6 +126,69 @@ def set_temp_dir(path: str) -> None:
     update_config({"temp_dir": resolved})
 
 
+def unset_temp_dir() -> None:
+    """Remove the ``temp_dir`` key from the config file.
+
+    No-op if the key is not present.
+    """
+    _invalidate_config_cache()
+    config = get_config()
+    if "temp_dir" in config:
+        del config["temp_dir"]
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(config, f, indent=2)
+    _invalidate_config_cache()
+
+
+# ---------------------------------------------------------------------------
+# Cowork skills directory
+# ---------------------------------------------------------------------------
+
+def get_copilot_cowork_skills_dir() -> Optional[str]:
+    """Get the configured cowork skills directory.
+
+    Returns:
+        The stored ``copilot_cowork_skills_dir`` config value, or ``None`` if not set.
+    """
+    return get_config().get("copilot_cowork_skills_dir")
+
+
+def set_copilot_cowork_skills_dir(path: str) -> None:
+    """Set the cowork skills directory after validation.
+
+    The path is expanded (``~``) and verified to be absolute.  The
+    directory does **not** need to exist on disk (OneDrive may not yet
+    be synced).
+
+    Args:
+        path: Filesystem path to use as the cowork skills directory.
+
+    Raises:
+        ValueError: If *path* is empty, whitespace-only, or relative
+            after expansion.
+    """
+    if not path or not path.strip():
+        raise ValueError("Path cannot be empty")
+    expanded = os.path.normpath(os.path.expanduser(path))
+    if not os.path.isabs(expanded):
+        raise ValueError(f"Path must be absolute: {expanded}")
+    update_config({"copilot_cowork_skills_dir": expanded})
+
+
+def unset_copilot_cowork_skills_dir() -> None:
+    """Remove the ``copilot_cowork_skills_dir`` key from the config file.
+
+    No-op if the key is not present.
+    """
+    _invalidate_config_cache()
+    config = get_config()
+    if "copilot_cowork_skills_dir" in config:
+        del config["copilot_cowork_skills_dir"]
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(config, f, indent=2)
+    _invalidate_config_cache()
+
+
 def get_apm_temp_dir() -> Optional[str]:
     """Return the effective temporary directory for APM operations.
 

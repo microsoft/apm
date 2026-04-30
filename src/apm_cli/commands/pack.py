@@ -5,96 +5,208 @@ from pathlib import Path
 
 import click
 
-from ..bundle.packer import pack_bundle
 from ..bundle.unpacker import unpack_bundle
+from ..core.build_orchestrator import (
+    BuildError,
+    BuildOptions,
+    BuildOrchestrator,
+    OutputKind,
+)
 from ..core.command_logger import CommandLogger
 from ..core.target_detection import TargetParamType
 
 
-@click.command(name="pack", help="Create a self-contained bundle from installed dependencies")
+_PACK_HELP = """\
+Pack distributable artifacts from your APM project.
+
+Reads apm.yml to decide what to produce:
+
+  dependencies: block  ->  bundle (directory or .tar.gz)
+  marketplace: block   ->  .claude-plugin/marketplace.json
+  both blocks present  ->  both artifacts
+
+The lockfile (apm.lock.yaml) pins bundle contents. An enriched copy
+is embedded in each bundle.
+
+Examples:
+
+  # Bundle only (most common -- just dependencies: in apm.yml):
+  apm pack
+  apm pack --target claude --archive
+  apm pack --format plugin -o ./dist
+
+  # Marketplace only (marketplace: in apm.yml, no dependencies:):
+  apm pack
+  apm pack --offline --dry-run
+
+  # Both (apm.yml has dependencies: AND marketplace: blocks):
+  apm pack
+  apm pack --archive --offline
+
+  # Override marketplace.json location:
+  apm pack --marketplace-output ./build/marketplace.json
+
+Exit codes:
+  0  Success
+  1  Build or runtime error
+  2  Manifest schema validation error
+"""
+
+
+@click.command(name="pack", help=_PACK_HELP)
 @click.option(
     "--format",
     "fmt",
     type=click.Choice(["apm", "plugin"]),
     default="apm",
-    help="Bundle format",
+    help="Bundle format: 'apm' (default) for standard bundles, 'plugin' for standalone plugin directories with plugin.json.",
 )
 @click.option(
     "--target",
     "-t",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Auto-detects if not specified",
+    help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Auto-detects if not specified.",
 )
-@click.option("--archive", is_flag=True, default=False, help="Produce a .tar.gz archive")
+@click.option("--archive", is_flag=True, default=False, help="Produce a .tar.gz archive instead of a directory.")
 @click.option(
     "-o",
     "--output",
     type=click.Path(),
     default="./build",
-    help="Output directory (default: ./build)",
+    help="Bundle output directory (default: ./build).",
 )
 @click.option("--dry-run", is_flag=True, default=False, help="Show what would be packed without writing")
-@click.option("--force", is_flag=True, default=False, help="On collision, last writer wins")
-@click.option("--verbose", "-v", is_flag=True, help="Show detailed packing information")
+@click.option("--force", is_flag=True, default=False, help="On collision (plugin format), last writer wins.")
+@click.option("--verbose", "-v", is_flag=True, help="Show detailed packing information.")
+@click.option(
+    "--offline",
+    is_flag=True,
+    default=False,
+    help="Marketplace: use cached refs, skip network.",
+)
+@click.option(
+    "--include-prerelease",
+    is_flag=True,
+    default=False,
+    help="Marketplace: include pre-release version tags.",
+)
+@click.option(
+    "--marketplace-output",
+    "marketplace_output",
+    type=click.Path(),
+    default=None,
+    help="Marketplace: override output path (default: .claude-plugin/marketplace.json).",
+)
 @click.pass_context
-def pack_cmd(ctx, fmt, target, archive, output, dry_run, force, verbose):
-    """Create a self-contained APM bundle."""
+def pack_cmd(
+    ctx,
+    fmt,
+    target,
+    archive,
+    output,
+    dry_run,
+    force,
+    verbose,
+    offline,
+    include_prerelease,
+    marketplace_output,
+):
+    """Pack APM artifacts: bundle and/or marketplace.json."""
     logger = CommandLogger("pack", verbose=verbose, dry_run=dry_run)
+    project_root = Path(".").resolve()
+    options = BuildOptions(
+        project_root=project_root,
+        apm_yml_path=project_root / "apm.yml",
+        bundle_format=fmt,
+        bundle_target=target,
+        bundle_archive=archive,
+        bundle_output=Path(output),
+        bundle_force=force,
+        marketplace_offline=offline,
+        marketplace_include_prerelease=include_prerelease,
+        marketplace_output=Path(marketplace_output) if marketplace_output else None,
+        dry_run=dry_run,
+        verbose=verbose,
+    )
+
     try:
-        result = pack_bundle(
-            project_root=Path("."),
-            output_dir=Path(output),
-            fmt=fmt,
-            target=target,
-            archive=archive,
-            dry_run=dry_run,
-            force=force,
-            logger=logger,
-        )
+        result = BuildOrchestrator().run(options, logger=logger)
+    except BuildError as exc:
+        raise click.ClickException(str(exc))
 
-        mapping_summary = _mapping_summary(result.path_mappings)
+    for sub in result.producer_results:
+        if sub.kind is OutputKind.BUNDLE:
+            _render_bundle_result(logger, sub.payload, fmt, target, dry_run)
+        elif sub.kind is OutputKind.MARKETPLACE:
+            _render_marketplace_result(logger, sub.payload, dry_run, sub.warnings)
 
-        if dry_run:
-            if result.mapped_count:
-                logger.dry_run_notice(
-                    f"Would remap {result.mapped_count} file(s){mapping_summary}"
-                )
-                for mapped, original in result.path_mappings.items():
-                    logger.verbose_detail(f"    {original} -> {mapped}")
-            if result.files:
-                logger.dry_run_notice(
-                    f"Would pack {len(result.files)} file(s) -> {result.bundle_path}"
-                )
-                for f in result.files:
-                    logger.tree_item(f"  {f}")
-            else:
-                _warn_empty(logger, target, result)
-            return
 
-        if result.mapped_count:
-            logger.progress(
-                f"Mapped {result.mapped_count} file(s){mapping_summary}"
+def _render_bundle_result(logger, pack_result, fmt, target, dry_run):
+    """Mirror the legacy ``apm pack`` output for the bundle producer."""
+    if pack_result is None:
+        return
+
+    mapping_summary = _mapping_summary(pack_result.path_mappings)
+
+    if dry_run:
+        if pack_result.mapped_count:
+            logger.dry_run_notice(
+                f"Would remap {pack_result.mapped_count} file(s){mapping_summary}"
             )
-            for mapped, original in result.path_mappings.items():
+            for mapped, original in pack_result.path_mappings.items():
                 logger.verbose_detail(f"    {original} -> {mapped}")
-
-        if not result.files:
-            _warn_empty(logger, target, result)
+        if pack_result.files:
+            logger.dry_run_notice(
+                f"Would pack {len(pack_result.files)} file(s) -> {pack_result.bundle_path}"
+            )
+            for f in pack_result.files:
+                logger.tree_item(f"  {f}")
         else:
-            logger.success(f"Packed {len(result.files)} file(s) -> {result.bundle_path}")
-            for f in result.files:
-                logger.verbose_detail(f"    {f}")
-            if fmt == "plugin":
-                logger.progress(
-                    "Plugin bundle ready -- contains plugin.json and "
-                    "plugin-native directories (agents/, skills/, commands/, ...). "
-                    "No APM-specific files included."
-                )
+            _warn_empty(logger, target, pack_result)
+        return
 
-    except (FileNotFoundError, ValueError) as exc:
-        logger.error(str(exc))
-        sys.exit(1)
+    if pack_result.mapped_count:
+        logger.progress(
+            f"Mapped {pack_result.mapped_count} file(s){mapping_summary}"
+        )
+        for mapped, original in pack_result.path_mappings.items():
+            logger.verbose_detail(f"    {original} -> {mapped}")
+
+    if not pack_result.files:
+        _warn_empty(logger, target, pack_result)
+    else:
+        logger.success(
+            f"Packed {len(pack_result.files)} file(s) -> {pack_result.bundle_path}"
+        )
+        for f in pack_result.files:
+            logger.verbose_detail(f"    {f}")
+        if fmt == "plugin":
+            logger.progress(
+                "Plugin bundle ready -- contains plugin.json and "
+                "plugin-native directories (agents/, skills/, commands/, ...). "
+                "No APM-specific files included."
+            )
+
+
+def _render_marketplace_result(logger, report, dry_run, extra_warnings=None):
+    """Render the marketplace producer's report (one-liner summary)."""
+    if report is None:
+        return
+    for warn_msg in (extra_warnings or []):
+        logger.warning(warn_msg)
+    for warn_msg in report.warnings:
+        logger.warning(warn_msg)
+    if dry_run or report.dry_run:
+        logger.dry_run_notice(
+            f"Would write marketplace.json ({len(report.resolved)} package(s)) "
+            f"-> {report.output_path}"
+        )
+        return
+    logger.success(
+        f"Built marketplace.json ({len(report.resolved)} package(s)) "
+        f"-> {report.output_path}"
+    )
 
 
 @click.command(name="unpack", help="Extract an APM bundle into the current project")

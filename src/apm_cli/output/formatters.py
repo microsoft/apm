@@ -280,7 +280,7 @@ class CompilationFormatter:
                         # Get relative path from base directory if possible
                         rel_path = decision.instruction.file_path.name  # Just filename for brevity
                         source_display = rel_path
-                    except:
+                    except Exception:
                         source_display = str(decision.instruction.file_path)[-20:]  # Last 20 chars
                 
                 ratio_display = f"{decision.matching_directories}/{decision.total_directories}"
@@ -323,7 +323,7 @@ class CompilationFormatter:
                 if decision.instruction and hasattr(decision.instruction, 'file_path'):
                     try:
                         source_display = decision.instruction.file_path.name
-                    except:
+                    except Exception:
                         source_display = "unknown"
                 
                 ratio_display = f"{decision.matching_directories}/{decision.total_directories} dirs"
@@ -482,7 +482,7 @@ class CompilationFormatter:
                 if decision.instruction and hasattr(decision.instruction, 'file_path'):
                     try:
                         source_display = decision.instruction.file_path.name
-                    except:
+                    except Exception:
                         source_display = "unknown"
                 
                 # Distribution score with threshold classification
@@ -571,7 +571,7 @@ hierarchical inheritance. Coverage takes priority over efficiency."""
                     panel_output = capture.get()
                     if panel_output.strip():
                         lines.extend(panel_output.split('\n'))
-                except:
+                except Exception:
                     # Fallback to simple text
                     lines.append("Coverage-Constrained Optimization:")
                     for line in foundation_text.split('\n'):
@@ -733,7 +733,7 @@ Example: 36.7% efficiency means agents working in specific directories see only 
                     panel_output = capture.get()
                     if panel_output.strip():
                         lines.extend(panel_output.split('\n'))
-                except:
+                except Exception:
                     # Fallback to simple text
                     lines.extend([
                         "Metrics Guide:",

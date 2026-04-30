@@ -125,6 +125,7 @@ class InstallContext:
     no_policy: bool = False  # W2-escape-hatch will wire --no-policy here
     skill_subset: Optional[Tuple[str, ...]] = None  # --skill filter for SKILL_BUNDLE packages
     skill_subset_from_cli: bool = False  # True when user passed --skill (even --skill '*')
+    early_lockfile: Any = None  # LockFile read before pipeline phases (avoids re-read)
     direct_mcp_deps: Optional[List[Any]] = None  # Direct MCP deps from apm.yml for policy gate
 
     # ------------------------------------------------------------------
@@ -133,3 +134,8 @@ class InstallContext:
     old_local_deployed: List[str] = field(default_factory=list)  # pipeline setup
     local_deployed_files: List[str] = field(default_factory=list)  # integrate (root)
     local_content_errors_before: int = 0  # integrate (pre-root)
+
+    # ------------------------------------------------------------------
+    # Cowork integration state
+    # ------------------------------------------------------------------
+    cowork_nonsupported_warned: bool = False  # integrate (once-per-run guard)

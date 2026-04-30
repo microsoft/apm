@@ -2,6 +2,7 @@
 
 import click
 import sys
+import threading
 from typing import Optional, Any
 from contextlib import contextmanager
 
@@ -55,14 +56,33 @@ STATUS_SYMBOLS = {
 }
 
 
+# Thread-safe console singleton ------------------------------------------------
+_console_instance: Optional[Any] = None
+_console_lock = threading.Lock()
+
+
 def _get_console() -> Optional[Any]:
-    """Get Rich console instance if available."""
-    if RICH_AVAILABLE:
+    """Get Rich console instance if available (singleton, thread-safe)."""
+    global _console_instance
+    if _console_instance is not None:
+        return _console_instance
+    if not RICH_AVAILABLE:
+        return None
+    with _console_lock:
+        if _console_instance is not None:
+            return _console_instance
         try:
-            return Console()
+            _console_instance = Console()
         except Exception:
             pass
-    return None
+    return _console_instance
+
+
+def _reset_console() -> None:
+    """Reset the console singleton. For testing only."""
+    global _console_instance
+    with _console_lock:
+        _console_instance = None
 
 
 def _rich_echo(message: str, color: str = "white", style: str = None, bold: bool = False, symbol: str = None):

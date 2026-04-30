@@ -54,10 +54,15 @@ jobs:
         run: npm run build
 
       - name: Upload build artifacts
+        # NOTE: in a reusable workflow, github.event_name reflects the CALLER's
+        # event (here: 'push' of a v* tag from build-release.yml), NOT
+        # 'workflow_call'. Detect the workflow_call invocation via the tag-push
+        # context instead. PR runs (event_name == 'pull_request') correctly
+        # build-only because none of the three branches match.
         if: |
           github.event_name == 'workflow_dispatch' ||
           (github.event_name == 'release' && github.event.release.prerelease == false) ||
-          (github.event_name == 'workflow_call' && inputs.is_prerelease == false)
+          (github.event_name == 'push' && github.ref_type == 'tag' && inputs.is_prerelease == false)
         uses: actions/upload-pages-artifact@v3
         with:
           path: docs/dist
@@ -66,10 +71,12 @@ jobs:
     needs: build
     # Only stable releases (or manual dispatch) update the public docs site,
     # so prerelease tags (vX.Y.Z-rc1, etc.) don't clobber published docs.
+    # NOTE: in a reusable workflow, github.event_name reflects the CALLER's
+    # event ('push' of a v* tag from build-release.yml), NOT 'workflow_call'.
     if: |
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'release' && github.event.release.prerelease == false) ||
-      (github.event_name == 'workflow_call' && inputs.is_prerelease == false)
+      (github.event_name == 'push' && github.ref_type == 'tag' && inputs.is_prerelease == false)
     runs-on: ubuntu-latest
     permissions:
       pages: write

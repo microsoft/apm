@@ -58,6 +58,30 @@ my-package/
         resource2.md
 ```
 
+## Manifest fields: `target:` validation contract
+
+The `target:` field in `apm.yml` controls which output runtimes the package
+compiles and installs to. Both `apm.yml`'s `target:` and the `--target` CLI
+flag share the same validator, so identical input is rejected or accepted
+the same way at every entry point. Invalid values fail at parse time with a
+message naming the apm.yml path and the offending token -- they do **not**
+silently fall through to auto-detect.
+
+| Form | Behaviour |
+|------|-----------|
+| `target: copilot` | Single token; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `all` |
+| `target: [claude, copilot]` | List form; only listed targets are compiled/installed |
+| `target: claude,copilot` | CSV-string form; parses identically to the list form (the shared validator splits on `,`). Before #820 was fixed, this silently produced zero deployment |
+| `target:` omitted entirely | Auto-detect from project folders (`.github/`, `.claude/`, `.codex/`) |
+| `target: bogus` (unknown token) | **Parse error** -- fix the typo |
+| `target: ""` or `target: []` (empty) | **Parse error** -- remove the line if you meant auto-detect |
+| `target: [all, claude]` (`all` mixed with other targets) | **Parse error** -- use `all` alone |
+
+Error messages always name the `apm.yml` path and the offending token, so the
+fix point is unambiguous. The list form (`target: [a, b]`) is the recommended
+shape; the CSV-string form is supported for parity with `--target a,b` on the
+CLI but reads less cleanly in YAML.
+
 ## The 7 primitive types
 
 ### 1. Instruction (`*.instructions.md`)
@@ -98,18 +122,22 @@ applyTo: "**/*"
 
 ### 4. Prompt / Agent Workflow (`*.prompt.md`)
 
-Executable workflows with parameters.
+Executable workflows with parameters. Use the `input:` key to declare
+parameters, and `${input:name}` to reference them in the prompt body.
 
 ```yaml
 ---
 description: "Code review workflow"
-model: "gpt-4"
-parameters:
-  - name: pr_url
-    description: "GitHub PR URL"
-    required: true
+input:
+  - pr_url
+  - focus_areas
 ---
+Review ${input:pr_url} focusing on ${input:focus_areas}.
 ```
+
+When installed as a Claude Code slash command, APM maps `input:` to
+Claude's `arguments:` frontmatter and converts `${input:name}` to `$name`
+placeholders. An `argument-hint` is auto-generated unless one is already set.
 
 ### 5. Agent (`*.agent.md`)
 
@@ -168,6 +196,109 @@ git tag v1.0.0 && git push --tags
 # 6. Consumers install via
 apm install org/my-package#v1.0.0
 ```
+
+## Marketplace authoring
+
+A **marketplace** is a curated index of plugins that consumers install via
+`apm install <name>@<marketplace>`. Maintainers declare the marketplace in a
+`marketplace:` block inside `apm.yml`; running `apm pack` builds an
+Anthropic-compliant `.claude-plugin/marketplace.json`. Both files are committed.
+
+### When to run `apm marketplace init`
+
+- The user is setting up a new marketplace repository.
+- The user wants to convert an ad-hoc list of plugins into a proper index.
+
+`apm marketplace init` appends a `marketplace:` block to the project's
+`apm.yml` and creates `.claude-plugin/`. It does NOT scaffold a standalone
+`marketplace.yml`. Use `apm init --marketplace` when starting a brand-new
+project that will publish its own marketplace.
+
+### apm.yml `marketplace:` block
+
+```yaml
+name: my-project
+version: 0.1.0
+description: Short summary
+
+marketplace:
+  # name / description / version inherit from apm.yml top level
+  # (omit unless you need to override).
+  owner:
+    name: acme-org
+    url: https://github.com/acme-org
+  build:                       # APM-only, stripped at compile time
+    tagPattern: "v{version}"
+  metadata:                    # pass-through, copied verbatim
+    homepage: https://example.com
+  plugins:
+    - name: example-plugin
+      description: What this plugin does
+      source: acme-org/example-plugin    # owner/repo (remote)
+      version: "^1.0.0"                  # semver range OR 'ref:' below
+      # ref: 3f2a9b1c                    # explicit SHA/tag/branch
+      # subdir: tools/x                  # optional subdirectory
+      # tag_pattern: "{name}-v{version}" # optional per-plugin override
+      # include_prerelease: false        # optional
+
+    - name: local-tool
+      description: Plugin shipped alongside this repo
+      source: ./plugins/local-tool       # local path (no remote fetch)
+      version: 0.1.0
+```
+
+Schema rules:
+- `owner.name` is required. `name`, `description`, `version` are
+  optional inside the block (inherited from apm.yml top level).
+- Each remote plugin needs either `version` or `ref`.
+- `ref` takes precedence over `version`.
+- `source: ./...` marks a local-path entry: skips git resolution,
+  emits the path verbatim into `marketplace.json`.
+- Unknown keys raise a schema error -- do not invent fields.
+
+### Build semantics
+
+`apm pack` runs `git ls-remote` against each remote plugin source, picks the
+highest tag satisfying the range (under the applicable `tagPattern`), leaves
+local-path entries untouched, and writes `.claude-plugin/marketplace.json`.
+The compiler:
+
+1. Emits `plugins:` verbatim (Anthropic's key name).
+2. Copies `metadata:` byte-for-byte.
+3. Strips `build:`, per-plugin `version`, `tag_pattern`, `include_prerelease`.
+4. Omits empty `tags:` and inherited top-level `description`/`version`
+   from the output (matches Anthropic's canonical hand-authored shape,
+   e.g. microsoft/azure-skills).
+5. Does not emit `versions[]` -- each plugin carries a single resolved ref.
+
+`apm pack` also produces a bundle if `apm.yml` declares `dependencies:`. With
+only a `marketplace:` block present, bundle flags (`--archive`, `-o`, `--format`,
+`--target`, `--force`) are silent no-ops.
+
+Marketplace-relevant flags on `apm pack`: `--dry-run`, `--offline`,
+`--include-prerelease`, `--marketplace-output PATH`, `-v`.
+
+Exit codes: `0` success, `1` build error, `2` schema error.
+
+### Migrating from legacy `marketplace.yml`
+
+Earlier APM versions stored this configuration in a standalone
+`marketplace.yml`. That file is deprecated; `apm marketplace init` no longer
+creates one. Run the one-shot migration:
+
+```bash
+apm marketplace migrate --dry-run    # preview the apm.yml change
+apm marketplace migrate --yes        # apply: rewrite apm.yml, delete marketplace.yml
+```
+
+`--force`, `--yes`, and `-y` are equivalent. Both files present at once
+is a hard error -- run `migrate` to consolidate.
+
+### Full guide
+
+See [docs/guides/marketplace-authoring](../../../../../docs/src/content/docs/guides/marketplace-authoring.md)
+for the complete maintainer workflow (quickstart, version ranges, `check`,
+`doctor`, `outdated`, and `publish`).
 
 ## Org-wide packages
 

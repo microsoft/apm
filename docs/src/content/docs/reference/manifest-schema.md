@@ -57,7 +57,10 @@ devDependencies:
   mcp:         <list<McpDependency>>
 compilation:   <CompilationConfig>
 policy:        <PolicyConfig>
+marketplace:   <MarketplaceConfig>           # OPTIONAL; marketplace authoring
 ```
+
+`marketplace:` is the source for `apm pack`'s marketplace output and is OPTIONAL. Repositories that do not publish a marketplace omit it entirely. The block, its schema, and the build flow are documented in the [Authoring a marketplace guide](../../guides/marketplace-authoring/). Within `marketplace:`, the inheritable fields `name`, `description`, and `version` default to the top-level values above and SHOULD be omitted unless an override is required.
 
 ---
 
@@ -113,7 +116,7 @@ policy:        <PolicyConfig>
 | **Default** | Auto-detect: `vscode` if `.github/` exists, `claude` if `.claude/` exists, `codex` if `.codex/` exists, `all` if multiple target folders exist, `minimal` if none |
 | **Allowed values** | `vscode` · `agents` · `copilot` · `claude` · `cursor` · `opencode` · `codex` · `all` |
 
-Controls which output targets are generated during compilation and installation. Accepts a single string or a list of strings. When unset, a conforming resolver SHOULD auto-detect based on folder presence. Unknown values MUST be silently ignored (auto-detection takes over).
+Controls which output targets are generated during compilation and installation. Accepts a single string or a list of strings. When unset, a conforming resolver SHOULD auto-detect based on folder presence. Unknown values MUST raise a parse error pointing at the offending token. Auto-detection applies only when `target:` is unset.
 
 ```yaml
 # Single target

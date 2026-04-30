@@ -5,6 +5,7 @@ This module must NOT import from any command module.
 
 import builtins
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -43,6 +44,17 @@ INFO = f"{Fore.BLUE}"
 WARNING = f"{Fore.YELLOW}"
 HIGHLIGHT = f"{Fore.MAGENTA}{Style.BRIGHT}"
 RESET = Style.RESET_ALL
+
+
+# -------------------------------------------------------------------
+# TTY detection
+# -------------------------------------------------------------------
+
+
+def _is_interactive():
+    """Return True when both stdin and stdout are attached to a TTY."""
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
 
 # Lazy loading for Rich components to improve startup performance
 _console = None
