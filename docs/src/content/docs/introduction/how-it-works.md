@@ -251,7 +251,7 @@ These tools support the full set of APM primitives. Running `apm install` deploy
 - **GitHub Copilot** (AGENTS.md + .github/) - instructions, prompts, chat modes, context, hooks, MCP
 - **Claude Code** (CLAUDE.md + .claude/) - commands, skills, MCP configuration
 
-APM auto-detects targets based on project structure -- deploying to every recognized directory (`.github/`, `.claude/`, `.cursor/`, `.opencode/`) that exists, falling back to `.github/` when none do. Set `target` in `apm.yml` to restrict to specific targets (single string or list).
+APM auto-detects targets based on project structure -- deploying to every recognized directory (`.github/`, `.claude/`, `.cursor/`, `.opencode/`) that exists, falling back to minimal (AGENTS.md only) when none do. For `.github/`, APM requires Copilot-specific markers (instructions, prompts, skills, agents, hooks, or chatmodes) to avoid false positives from repos that only use `.github/` for CI workflows. Set `target` in `apm.yml` to restrict to specific targets (single string or list).
 
 ### Compiled instructions
 

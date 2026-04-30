@@ -57,7 +57,7 @@ For running agentic workflows locally, see the [Agent Workflows guide](../../gui
 
 APM works natively with VS Code's GitHub Copilot implementation.
 
-> **Auto-Detection**: VS Code integration is automatically enabled when a `.github/` folder exists in your project. If neither `.github/` nor `.claude/` exists, `apm install` skips folder integration (packages are still installed to `apm_modules/`). To force integration regardless of folder presence, pass an explicit target (e.g. `apm install --target copilot`) or set `target:` in `apm.yml` -- the target's root folder will be created automatically.
+> **Auto-Detection**: VS Code integration is automatically enabled when a `.github/` folder contains Copilot-specific markers (instructions, prompts, skills, agents, hooks, or chatmodes). A bare `.github/` with only CI workflows or CODEOWNERS will NOT trigger Copilot auto-detection. If no target folder is detected, `apm install` falls back to minimal mode (AGENTS.md only, no folder integration). To force integration regardless of folder presence, pass an explicit target (e.g. `apm install --target copilot`) or set `target:` in `apm.yml` -- the target's root folder will be created automatically.
 
 ### Native VS Code Primitives
 

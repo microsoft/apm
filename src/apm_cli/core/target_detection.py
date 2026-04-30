@@ -117,6 +117,9 @@ def detect_target(  # noqa: PLR0911
         ".github/skills",
         ".github/agents",
         ".github/prompts",
+        ".github/instructions",
+        ".github/hooks",
+        ".github/chatmodes",
     ]
     github_exists = any(
         (project_root / marker).exists() for marker in github_copilot_markers

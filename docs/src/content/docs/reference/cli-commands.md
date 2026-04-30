@@ -278,7 +278,7 @@ apm install --dry-run
 
 APM automatically detects which integrations to enable based on your project structure:
 
-- **VSCode integration**: Enabled when `.github/` directory exists
+- **VSCode integration**: Enabled when `.github/` contains Copilot-specific markers (instructions, prompts, skills, agents, hooks, or chatmodes)
 - **Claude integration**: Enabled when `.claude/` directory exists
 - **Cursor integration**: Enabled when `.cursor/` directory exists
 - **OpenCode integration**: Enabled when `.opencode/` directory exists

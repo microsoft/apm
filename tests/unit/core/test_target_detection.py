@@ -135,6 +135,45 @@ class TestDetectTarget:
         assert target == "vscode"
         assert "detected .github/ folder" in reason
 
+    def test_auto_detect_github_instructions_marker(self, tmp_path):
+        """Auto-detect vscode when .github/instructions/ exists."""
+        (tmp_path / ".github" / "instructions").mkdir(parents=True)
+
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target=None,
+        )
+
+        assert target == "vscode"
+        assert "detected .github/ folder" in reason
+
+    def test_auto_detect_github_hooks_marker(self, tmp_path):
+        """Auto-detect vscode when .github/hooks/ exists."""
+        (tmp_path / ".github" / "hooks").mkdir(parents=True)
+
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target=None,
+        )
+
+        assert target == "vscode"
+        assert "detected .github/ folder" in reason
+
+    def test_auto_detect_github_chatmodes_marker(self, tmp_path):
+        """Auto-detect vscode when .github/chatmodes/ exists."""
+        (tmp_path / ".github" / "chatmodes").mkdir(parents=True)
+
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target=None,
+        )
+
+        assert target == "vscode"
+        assert "detected .github/ folder" in reason
+
     def test_auto_detect_claude_only(self, tmp_path):
         """Auto-detect claude when only .claude/ exists."""
         (tmp_path / ".claude").mkdir()
@@ -187,7 +226,6 @@ class TestDetectTarget:
 
         assert target == "minimal"
         assert reason == REASON_NO_TARGET_FOLDER
-        assert "no target folder found" in reason
 
 
 class TestShouldCompileAgentsMd:
