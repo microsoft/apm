@@ -10,6 +10,40 @@ _header:
     repository.
 
     The `apm` source code itself is licensed under the MIT License; see `LICENSE`.
+_third_party_submissions:
+  preamble: |
+    Before this repository transferred from `danielmeppiel/awd-cli` to the
+    `microsoft` organization, several pull requests were merged from
+    contributors for whom the Microsoft Contributor License Agreement was
+    never recorded by the `microsoft-github-policy-service` bot. We could
+    not retroactively reach all of them. Per the convention used by
+    CNCF-hosted projects (see, for example, the `kubernetes-sigs/kro` and
+    `kubernetes-sigs/headlamp` NOTICE files), and mirroring section 7 of
+    common Contributor License Agreement texts:
+
+      "Should You wish to submit work that is not Your original creation,
+      You may submit it to the Foundation separately from any Contribution,
+      identifying the complete details of its source and of any license or
+      other restriction (including, but not limited to, related patents,
+      trademarks, and license agreements) of which you are personally
+      aware, and conspicuously marking the work as 'Submitted on behalf
+      of a third-party: [named here]'."
+
+    The contributions below are accordingly identified as submitted on
+    behalf of a third party. If you are listed here and have since signed
+    the Microsoft CLA (or wish to), please open an issue so we can update
+    this file.
+  contributors:
+    - github: pofallon
+      prs: [4]
+    - github: richgo
+      prs: [8, 25, 26, 33, 34]
+    - github: ryanfk
+      prs: [92]
+    - github: foutoucour
+      prs: [108]
+    - github: Jah-yee
+      prs: [184]
 components:
   - name: click
     pyproject_name: click

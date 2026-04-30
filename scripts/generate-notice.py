@@ -79,9 +79,9 @@ from ruamel.yaml import YAML
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 METADATA_YAML = REPO_ROOT / "scripts" / "notice-metadata.yaml"
-NOTICE_OUT = REPO_ROOT / "NOTICE.md"
+NOTICE_OUT = REPO_ROOT / "NOTICE"
 
-# Header that prefixes every NOTICE.md. The explanatory paragraph is in
+# Header that prefixes every NOTICE file. The explanatory paragraph is in
 # the YAML (`_header.preamble`) so legal-review of wording lives next
 # to the per-component data, not in code.
 _FIXED_TOP = (
@@ -153,8 +153,16 @@ def parse_dependencies(pyproject_path: Path) -> list[DepSpec]:
     return out
 
 
-def load_metadata(yaml_path: Path) -> tuple[str, dict[str, ComponentMeta]]:
-    """Return (preamble_text, name->ComponentMeta map keyed by pyproject_name)."""
+@dataclass(frozen=True)
+class ThirdPartySubmissions:
+    preamble: str
+    contributors: list[dict]  # [{github: str, prs: [int, ...]}, ...]
+
+
+def load_metadata(
+    yaml_path: Path,
+) -> tuple[str, dict[str, ComponentMeta], ThirdPartySubmissions | None]:
+    """Return (preamble, name->ComponentMeta map, third-party submissions block)."""
     yaml = YAML(typ="rt")
     data = yaml.load(yaml_path.read_text(encoding="utf-8"))
     preamble = str(data["_header"]["preamble"]).rstrip("\n")
@@ -186,7 +194,20 @@ def load_metadata(yaml_path: Path) -> tuple[str, dict[str, ComponentMeta]]:
                 else None
             ),
         )
-    return preamble, out
+    raw_tps = data.get("_third_party_submissions")
+    tps: ThirdPartySubmissions | None = None
+    if raw_tps is not None:
+        tps = ThirdPartySubmissions(
+            preamble=str(raw_tps["preamble"]).rstrip("\n"),
+            contributors=[
+                {
+                    "github": str(c["github"]),
+                    "prs": [int(n) for n in c.get("prs", [])],
+                }
+                for c in raw_tps.get("contributors", [])
+            ],
+        )
+    return preamble, out, tps
 
 
 # ---------------------------------------------------------------------------
@@ -289,8 +310,29 @@ def _normalize(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def render_notice(deps: list[DepSpec], preamble: str,
-                  metas: dict[str, ComponentMeta]) -> str:
+def render_third_party_submissions(tps: ThirdPartySubmissions) -> str:
+    lines = [
+        "---\n",
+        "\n",
+        "Submitted on behalf of a third-party\n",
+        "\n",
+        tps.preamble,
+        "\n\n",
+    ]
+    for entry in tps.contributors:
+        prs = ", ".join(f"#{n}" for n in entry["prs"])
+        suffix = f" (PRs: {prs})" if prs else ""
+        lines.append(f"Submitted on behalf of a third-party: @{entry['github']}{suffix}\n")
+    lines.append("\n")
+    return "".join(lines)
+
+
+def render_notice(
+    deps: list[DepSpec],
+    preamble: str,
+    metas: dict[str, ComponentMeta],
+    tps: ThirdPartySubmissions | None = None,
+) -> str:
     norm_metas = {_normalize(k): v for k, v in metas.items()}
     out: list[str] = [_FIXED_TOP, preamble, "\n\n---\n\n"]
     for dep in deps:
@@ -317,6 +359,8 @@ def render_notice(deps: list[DepSpec], preamble: str,
         # Trailing blank line between components (and after the last one)
         # to match the CELA template -- the file ends `---\n\n`.
         out.append("\n")
+    if tps is not None and tps.contributors:
+        out.append(render_third_party_submissions(tps))
     return "".join(out)
 
 
@@ -326,19 +370,19 @@ def render_notice(deps: list[DepSpec], preamble: str,
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
-        description="Regenerate or validate NOTICE.md for apm-cli.",
+        description="Regenerate or validate NOTICE for apm-cli.",
     )
     p.add_argument(
         "--check",
         action="store_true",
-        help="Do not write; exit 1 with unified diff if NOTICE.md is stale.",
+        help="Do not write; exit 1 with unified diff if NOTICE is stale.",
     )
     args = p.parse_args(argv)
 
     try:
         deps = parse_dependencies(PYPROJECT)
-        preamble, metas = load_metadata(METADATA_YAML)
-        rendered = render_notice(deps, preamble, metas)
+        preamble, metas, tps = load_metadata(METADATA_YAML)
+        rendered = render_notice(deps, preamble, metas, tps)
     except SystemExit:
         raise
     except Exception as e:  # pragma: no cover -- defensive
@@ -356,7 +400,7 @@ def main(argv: list[str] | None = None) -> int:
             tofile=str(NOTICE_OUT.relative_to(REPO_ROOT)) + " (regenerated)",
         )
         sys.stderr.write(
-            "NOTICE.md is out of date with pyproject.toml + notice-metadata.yaml.\n"
+            "NOTICE is out of date with pyproject.toml + notice-metadata.yaml.\n"
             "Run `make notice` (or `python scripts/generate-notice.py`) and commit.\n\n"
         )
         sys.stderr.writelines(diff)
