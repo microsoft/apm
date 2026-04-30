@@ -385,11 +385,12 @@ def add(repo, name, branch, host, verbose):
         except PathTraversalError as exc:
             logger.error(
                 f"Invalid format: '{repo}'. Path-traversal sequence rejected: {exc}. "
-                f"Remove '..', '.', or '~' from the repository path."
+                f"Remove '..', '.', or '~' from the repository path.",
+                symbol="error",
             )
             sys.exit(1)
         except ValueError as exc:
-            logger.error(str(exc))
+            logger.error(str(exc), symbol="error")
             sys.exit(1)
 
         # Resolve the effective host: explicit --host wins, then host embedded
@@ -399,7 +400,8 @@ def add(repo, name, branch, host, verbose):
             if not is_valid_fqdn(normalized_host):
                 logger.error(
                     f"Invalid host: '{host}'. Expected a valid host FQDN "
-                    f"(for example, 'github.com')."
+                    f"(for example, 'github.com').",
+                    symbol="error",
                 )
                 sys.exit(1)
             resolved_host = normalized_host
@@ -423,7 +425,8 @@ def add(repo, name, branch, host, verbose):
                 f"GitLab, Bitbucket, and other generic Git hosts are tracked "
                 f"separately -- registering them today would silently fail at "
                 f"fetch time and may forward GitHub credentials to an "
-                f"unintended host."
+                f"unintended host.",
+                symbol="error",
             )
             sys.exit(1)
 
@@ -434,7 +437,8 @@ def add(repo, name, branch, host, verbose):
             logger.error(
                 f"Invalid marketplace name: '{name}'. "
                 f"Names must only contain letters, digits, '.', '_', and '-' "
-                f"(required for 'apm install plugin@marketplace' syntax)."
+                f"(required for 'apm install plugin@marketplace' syntax).",
+                symbol="error",
             )
             sys.exit(1)
 
@@ -453,7 +457,8 @@ def add(repo, name, branch, host, verbose):
             logger.error(
                 f"No marketplace.json found in '{owner}/{repo_name}'. "
                 f"Checked: marketplace.json, .github/plugin/marketplace.json, "
-                f".claude-plugin/marketplace.json"
+                f".claude-plugin/marketplace.json",
+                symbol="error",
             )
             sys.exit(1)
 
@@ -486,7 +491,8 @@ def add(repo, name, branch, host, verbose):
                 logger.warning(
                     f"Manifest declares name '{manifest_name}' which is not a "
                     f"valid alias (must match [a-zA-Z0-9._-]+). "
-                    f"Falling back to repo name."
+                    f"Falling back to repo name.",
+                    symbol="warning",
                 )
                 alias_source = f"repo name (manifest.name '{manifest_name}' invalid)"
             else:

@@ -226,6 +226,24 @@ def _fetch_file(
         )
         return None
 
+    # Defense-in-depth host-kind guard. Marketplace registration already
+    # rejects non-trusted hosts, but if a generic / non-GitHub host slips
+    # through (legacy registry entries, manual registry edits, future
+    # callers) we MUST NOT issue a GitHub Contents API request: doing so
+    # would attach Authorization: token <github_pat> headers to a request
+    # aimed at an unrelated host, leaking GitHub credentials. Fail closed.
+    from ..core.auth import AuthResolver as _AuthResolver
+
+    host_info = _AuthResolver.classify_host(source.host)
+    if host_info.kind not in ("github", "ghe_cloud", "ghes"):
+        raise MarketplaceFetchError(
+            source.name,
+            f"Host {source.host!r} is not a supported marketplace source. "
+            f"Only GitHub, GitHub Enterprise Cloud (*.ghe.com), and GHES "
+            f"(GITHUB_HOST) are supported. Refusing to fetch to avoid "
+            f"forwarding GitHub credentials to a non-GitHub host.",
+        )
+
     # Fallback: GitHub Contents API
     url = _github_contents_url(source, file_path)
 
@@ -234,7 +252,11 @@ def _fetch_file(
             "Accept": "application/vnd.github.v3.raw",
             "User-Agent": "apm-cli",
         }
-        if token:
+        # Only attach GitHub-namespaced credentials when the resolver-derived
+        # host kind is a GitHub variant. The outer guard already enforces
+        # this, but keep the conditional explicit so the credential-attach
+        # site is locally auditable.
+        if token and host_info.kind in ("github", "ghe_cloud", "ghes"):
             headers["Authorization"] = f"token {token}"
         resp = requests.get(url, headers=headers, timeout=30)
         if resp.status_code == 404:
