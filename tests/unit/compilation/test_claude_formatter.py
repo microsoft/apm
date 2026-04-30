@@ -1,4 +1,4 @@
-"""Unit tests for ClaudeFormatter - CLAUDE.md generation and commands."""
+"""Unit tests for ClaudeFormatter - CLAUDE.md generation."""
 
 import tempfile
 import shutil
@@ -10,9 +10,7 @@ from apm_cli.compilation.claude_formatter import (
     ClaudeFormatter,
     ClaudePlacement,
     ClaudeCompilationResult,
-    CommandGenerationResult,
     format_claude_md,
-    generate_claude_commands,
     CLAUDE_HEADER,
 )
 from apm_cli.compilation.constants import BUILD_ID_PLACEHOLDER
@@ -395,262 +393,6 @@ class TestAgentsExcludedFromClaudeMd:
         assert "Test instruction content" in content
 
 
-class TestGenerateCommands:
-    """Tests for generate_commands() method - .claude/commands/ generation."""
-
-    @pytest.fixture
-    def temp_project(self):
-        """Create a temporary project directory."""
-        temp_dir = tempfile.mkdtemp()
-        yield Path(temp_dir).resolve()
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-    def test_generate_commands_creates_directory(self, temp_project):
-        """Test that .claude/commands/ directory is created."""
-        formatter = ClaudeFormatter(str(temp_project))
-        
-        # Create a prompt file
-        prompts_dir = temp_project / ".github" / "prompts"
-        prompts_dir.mkdir(parents=True)
-        prompt_file = prompts_dir / "code-review.prompt.md"
-        prompt_file.write_text("""---
-description: Review code for issues
----
-Review the following code for bugs and security issues.
-""")
-        
-        result = formatter.generate_commands([prompt_file], dry_run=False)
-        
-        assert result.success
-        assert result.files_written == 1
-        assert result.commands_dir.exists()
-        assert (result.commands_dir / "code-review.md").exists()
-
-    def test_generate_commands_dry_run(self, temp_project):
-        """Test that dry_run mode doesn't write files."""
-        formatter = ClaudeFormatter(str(temp_project))
-        
-        prompts_dir = temp_project / ".github" / "prompts"
-        prompts_dir.mkdir(parents=True)
-        prompt_file = prompts_dir / "test.prompt.md"
-        prompt_file.write_text("""---
-description: Test prompt
----
-Test content.
-""")
-        
-        result = formatter.generate_commands([prompt_file], dry_run=True)
-        
-        assert result.success
-        assert result.files_written == 0
-        assert len(result.commands_generated) == 1
-        assert not result.commands_dir.exists()
-
-    def test_generate_commands_preserves_frontmatter(self, temp_project):
-        """Test that command files preserve frontmatter."""
-        formatter = ClaudeFormatter(str(temp_project))
-        
-        prompts_dir = temp_project / ".github" / "prompts"
-        prompts_dir.mkdir(parents=True)
-        prompt_file = prompts_dir / "review.prompt.md"
-        prompt_file.write_text("""---
-description: Review code thoroughly
-model: claude-3-opus
-allowed-tools: Read, Write
-argument-hint: <file-path>
----
-Review this code: $ARGUMENTS
-""")
-        
-        result = formatter.generate_commands([prompt_file], dry_run=True)
-        
-        # Get content by finding the command in the generated dict
-        content = list(result.commands_generated.values())[0]
-        
-        assert "---" in content
-        assert "description: Review code thoroughly" in content
-        assert "model: claude-3-opus" in content
-        assert "allowed-tools: Read, Write" in content
-        assert "argument-hint: <file-path>" in content
-
-    def test_generate_commands_adds_arguments_placeholder(self, temp_project):
-        """Test that $ARGUMENTS placeholder is added when missing."""
-        formatter = ClaudeFormatter(str(temp_project))
-        
-        prompts_dir = temp_project / ".github" / "prompts"
-        prompts_dir.mkdir(parents=True)
-        prompt_file = prompts_dir / "simple.prompt.md"
-        prompt_file.write_text("""---
-description: Simple prompt
----
-Do something simple.
-""")
-        
-        result = formatter.generate_commands([prompt_file], dry_run=True)
-        
-        content = list(result.commands_generated.values())[0]
-        
-        assert "$ARGUMENTS" in content
-        assert any("Added $ARGUMENTS placeholder" in w for w in result.warnings)
-
-    def test_generate_commands_preserves_existing_arguments(self, temp_project):
-        """Test that existing $ARGUMENTS is not duplicated."""
-        formatter = ClaudeFormatter(str(temp_project))
-        
-        prompts_dir = temp_project / ".github" / "prompts"
-        prompts_dir.mkdir(parents=True)
-        prompt_file = prompts_dir / "with-args.prompt.md"
-        prompt_file.write_text("""---
-description: Prompt with arguments
----
-Process this input: $ARGUMENTS
-""")
-        
-        result = formatter.generate_commands([prompt_file], dry_run=True)
-        
-        content = list(result.commands_generated.values())[0]
-        
-        # Should have exactly one $ARGUMENTS
-        assert content.count("$ARGUMENTS") == 1
-        # No warning about adding placeholder
-        assert not any("Added $ARGUMENTS" in w for w in result.warnings)
-
-    def test_generate_commands_preserves_positional_args(self, temp_project):
-        """Test that positional args ($1, $2, etc.) are preserved without adding $ARGUMENTS."""
-        formatter = ClaudeFormatter(str(temp_project))
-        
-        prompts_dir = temp_project / ".github" / "prompts"
-        prompts_dir.mkdir(parents=True)
-        prompt_file = prompts_dir / "positional.prompt.md"
-        prompt_file.write_text("""---
-description: Prompt with positional args
----
-Compare $1 with $2.
-""")
-        
-        result = formatter.generate_commands([prompt_file], dry_run=True)
-        
-        content = list(result.commands_generated.values())[0]
-        
-        assert "$1" in content
-        assert "$2" in content
-        # Should not add $ARGUMENTS when positional args exist
-        assert not any("Added $ARGUMENTS" in w for w in result.warnings)
-
-    def test_generate_commands_extracts_name_from_filename(self, temp_project):
-        """Test that command name is extracted from filename correctly."""
-        formatter = ClaudeFormatter(str(temp_project))
-        
-        prompts_dir = temp_project / ".github" / "prompts"
-        prompts_dir.mkdir(parents=True)
-        
-        prompt_file = prompts_dir / "my-custom-command.prompt.md"
-        prompt_file.write_text("""---
-description: Custom command
----
-Content.
-""")
-        
-        result = formatter.generate_commands([prompt_file], dry_run=True)
-        
-        # Check that the command name is correct by looking at the keys
-        command_names = [p.name for p in result.commands_generated.keys()]
-        assert "my-custom-command.md" in command_names
-
-    def test_generate_commands_maps_camelcase_frontmatter(self, temp_project):
-        """Test that camelCase frontmatter is mapped correctly."""
-        formatter = ClaudeFormatter(str(temp_project))
-        
-        prompts_dir = temp_project / ".github" / "prompts"
-        prompts_dir.mkdir(parents=True)
-        prompt_file = prompts_dir / "camel.prompt.md"
-        prompt_file.write_text("""---
-description: Test camelCase
-allowedTools: Read, Write, Bash
-argumentHint: <path>
----
-Content here.
-""")
-        
-        result = formatter.generate_commands([prompt_file], dry_run=True)
-        
-        content = list(result.commands_generated.values())[0]
-        
-        # Should convert to kebab-case
-        assert "allowed-tools: Read, Write, Bash" in content
-        assert "argument-hint: <path>" in content
-
-
-class TestDiscoverPromptFiles:
-    """Tests for discover_prompt_files() method."""
-
-    @pytest.fixture
-    def temp_project(self):
-        """Create a temporary project directory."""
-        temp_dir = tempfile.mkdtemp()
-        yield Path(temp_dir)
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-    def test_discovers_prompts_in_github_prompts(self, temp_project):
-        """Test discovery in .github/prompts/."""
-        prompts_dir = temp_project / ".github" / "prompts"
-        prompts_dir.mkdir(parents=True)
-        (prompts_dir / "test.prompt.md").write_text("Test content")
-        
-        formatter = ClaudeFormatter(str(temp_project))
-        files = formatter.discover_prompt_files()
-        
-        assert len(files) == 1
-        assert "test.prompt.md" in str(files[0])
-
-    def test_discovers_prompts_in_apm_prompts(self, temp_project):
-        """Test discovery in .apm/prompts/."""
-        prompts_dir = temp_project / ".apm" / "prompts"
-        prompts_dir.mkdir(parents=True)
-        (prompts_dir / "apm-test.prompt.md").write_text("APM test")
-        
-        formatter = ClaudeFormatter(str(temp_project))
-        files = formatter.discover_prompt_files()
-        
-        assert len(files) == 1
-        assert "apm-test.prompt.md" in str(files[0])
-
-    def test_discovers_prompts_in_root(self, temp_project):
-        """Test discovery of prompts in root directory."""
-        (temp_project / "root-prompt.prompt.md").write_text("Root prompt")
-        
-        formatter = ClaudeFormatter(str(temp_project))
-        files = formatter.discover_prompt_files()
-        
-        assert len(files) == 1
-        assert "root-prompt.prompt.md" in str(files[0])
-
-    def test_discovers_prompts_in_apm_modules(self, temp_project):
-        """Test discovery in apm_modules dependencies."""
-        prompts_dir = temp_project / "apm_modules" / "owner" / "package" / "prompts"
-        prompts_dir.mkdir(parents=True)
-        (prompts_dir / "dep-prompt.prompt.md").write_text("Dependency prompt")
-        
-        formatter = ClaudeFormatter(str(temp_project))
-        files = formatter.discover_prompt_files()
-        
-        assert len(files) == 1
-        assert "dep-prompt.prompt.md" in str(files[0])
-
-    def test_no_duplicates_in_discovery(self, temp_project):
-        """Test that duplicate files are not returned."""
-        prompts_dir = temp_project / ".github" / "prompts"
-        prompts_dir.mkdir(parents=True)
-        (prompts_dir / "unique.prompt.md").write_text("Unique")
-        
-        formatter = ClaudeFormatter(str(temp_project))
-        files = formatter.discover_prompt_files()
-        
-        # Even if we call it twice, should have unique files
-        files2 = formatter.discover_prompt_files()
-        assert len(files) == len(files2) == 1
-
-
 class TestConvenienceFunctions:
     """Tests for module-level convenience functions."""
 
@@ -664,7 +406,7 @@ class TestConvenienceFunctions:
     def test_format_claude_md_function(self, temp_project):
         """Test the format_claude_md convenience function."""
         primitives = PrimitiveCollection()
-        
+
         instruction = Instruction(
             name="test",
             file_path=temp_project / "test.instructions.md",
@@ -674,48 +416,13 @@ class TestConvenienceFunctions:
             author="test"
         )
         primitives.add_primitive(instruction)
-        
+
         placement_map = {temp_project: [instruction]}
-        
+
         result = format_claude_md(primitives, placement_map, str(temp_project))
-        
+
         assert result.success
         assert len(result.content_map) == 1
-
-    def test_generate_claude_commands_function(self, temp_project):
-        """Test the generate_claude_commands convenience function."""
-        prompts_dir = temp_project / ".github" / "prompts"
-        prompts_dir.mkdir(parents=True)
-        (prompts_dir / "test.prompt.md").write_text("""---
-description: Test
----
-Test content.
-""")
-        
-        result = generate_claude_commands(str(temp_project), dry_run=True)
-        
-        assert result.success
-        assert len(result.commands_generated) == 1
-
-    def test_generate_claude_commands_with_explicit_files(self, temp_project):
-        """Test generate_claude_commands with explicit file list."""
-        prompts_dir = temp_project / ".github" / "prompts"
-        prompts_dir.mkdir(parents=True)
-        prompt_file = prompts_dir / "explicit.prompt.md"
-        prompt_file.write_text("""---
-description: Explicit
----
-Explicit content.
-""")
-        
-        result = generate_claude_commands(
-            str(temp_project),
-            prompt_files=[prompt_file],
-            dry_run=True
-        )
-        
-        assert result.success
-        assert len(result.commands_generated) == 1
 
 
 class TestDataclasses:
@@ -727,7 +434,7 @@ class TestDataclasses:
             claude_path=Path("test/CLAUDE.md"),
             instructions=[]
         )
-        
+
         assert placement.agents == []
         assert placement.dependencies == []
         assert placement.coverage_patterns == set()
@@ -740,22 +447,10 @@ class TestDataclasses:
             placements=[],
             content_map={}
         )
-        
+
         assert result.warnings == []
         assert result.errors == []
         assert result.stats == {}
-
-    def test_command_generation_result_defaults(self):
-        """Test CommandGenerationResult default values."""
-        result = CommandGenerationResult(
-            success=True,
-            commands_generated={},
-            commands_dir=Path(".claude/commands"),
-            files_written=0
-        )
-        
-        assert result.warnings == []
-        assert result.errors == []
 
 
 class TestErrorHandling:
@@ -771,11 +466,9 @@ class TestErrorHandling:
     def test_format_distributed_handles_exceptions(self, temp_project):
         """Test that format_distributed handles exceptions gracefully."""
         formatter = ClaudeFormatter(str(temp_project))
-        
-        # Pass invalid data that might cause an error
+
         primitives = PrimitiveCollection()
-        
-        # Create instruction with None for required field to potentially cause error
+
         instruction = Instruction(
             name="test",
             file_path=temp_project / "test.md",
@@ -785,40 +478,7 @@ class TestErrorHandling:
             author="test"
         )
         primitives.add_primitive(instruction)
-        
+
         result = formatter.format_distributed(primitives, {temp_project: [instruction]})
-        
-        # Should succeed or fail gracefully
+
         assert isinstance(result, ClaudeCompilationResult)
-
-    def test_generate_commands_handles_invalid_file(self, temp_project):
-        """Test that generate_commands handles invalid prompt files."""
-        formatter = ClaudeFormatter(str(temp_project))
-        
-        # Try to process a non-existent file
-        nonexistent = temp_project / "nonexistent.prompt.md"
-        
-        result = formatter.generate_commands([nonexistent], dry_run=True)
-        
-        # Should report error but not crash
-        assert len(result.errors) > 0
-
-    def test_generate_commands_handles_malformed_frontmatter(self, temp_project):
-        """Test handling of malformed frontmatter in prompt files."""
-        formatter = ClaudeFormatter(str(temp_project))
-        
-        prompts_dir = temp_project / ".github" / "prompts"
-        prompts_dir.mkdir(parents=True)
-        
-        # Create file with invalid YAML frontmatter
-        prompt_file = prompts_dir / "malformed.prompt.md"
-        prompt_file.write_text("""---
-description: [unclosed bracket
----
-Content here.
-""")
-        
-        result = formatter.generate_commands([prompt_file], dry_run=True)
-        
-        # Should handle gracefully (either error or skip)
-        assert isinstance(result, CommandGenerationResult)

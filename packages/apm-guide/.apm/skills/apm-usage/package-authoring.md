@@ -122,18 +122,22 @@ applyTo: "**/*"
 
 ### 4. Prompt / Agent Workflow (`*.prompt.md`)
 
-Executable workflows with parameters.
+Executable workflows with parameters. Use the `input:` key to declare
+parameters, and `${input:name}` to reference them in the prompt body.
 
 ```yaml
 ---
 description: "Code review workflow"
-model: "gpt-4"
-parameters:
-  - name: pr_url
-    description: "GitHub PR URL"
-    required: true
+input:
+  - pr_url
+  - focus_areas
 ---
+Review ${input:pr_url} focusing on ${input:focus_areas}.
 ```
+
+When installed as a Claude Code slash command, APM maps `input:` to
+Claude's `arguments:` frontmatter and converts `${input:name}` to `$name`
+placeholders. An `argument-hint` is auto-generated unless one is already set.
 
 ### 5. Agent (`*.agent.md`)
 
