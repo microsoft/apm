@@ -6,7 +6,7 @@ from apm_cli.utils.console — no new output primitives.
 """
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional  # noqa: F401
 
 from apm_cli.utils.console import (
     _rich_echo,
@@ -111,6 +111,10 @@ class CommandLogger:
         """
         _rich_echo(message, color="green")
 
+    def blank_line(self):
+        """Log a blank line through the shared console output path."""
+        _rich_echo("")
+
     def package_inline_warning(self, message: str):
         """Log an inline warning under a package block (verbose only).
 
@@ -152,9 +156,7 @@ class CommandLogger:
             token_type = getattr(ctx, "token_type", "unknown")
             has_token = getattr(ctx, "token", None) is not None
             if has_token:
-                _rich_echo(
-                    f"  auth: resolved via {source} (type: {token_type})", color="dim"
-                )
+                _rich_echo(f"  auth: resolved via {source} (type: {token_type})", color="dim")
             else:
                 _rich_echo("  auth: no credentials available", color="dim")
 
@@ -173,9 +175,7 @@ class InstallLogger(CommandLogger):
     full install (all deps from apm.yml). Adjusts messages accordingly.
     """
 
-    def __init__(
-        self, verbose: bool = False, dry_run: bool = False, partial: bool = False
-    ):
+    def __init__(self, verbose: bool = False, dry_run: bool = False, partial: bool = False):
         super().__init__("install", verbose=verbose, dry_run=dry_run)
         self.partial = partial  # True when specific packages are passed to `apm install`
         self._stale_cleaned_total = 0  # Accumulated by stale_cleanup / orphan_cleanup
@@ -210,9 +210,7 @@ class InstallLogger(CommandLogger):
         if outcome.has_failures:
             failed_count = len(outcome.invalid)
             noun = "package" if failed_count == 1 else "packages"
-            _rich_warning(
-                f"{failed_count} {noun} failed validation and will be skipped."
-            )
+            _rich_warning(f"{failed_count} {noun} failed validation and will be skipped.")
 
         return True
 
@@ -222,9 +220,7 @@ class InstallLogger(CommandLogger):
         """Log start of dependency resolution."""
         if self.partial:
             noun = "package" if to_install_count == 1 else "packages"
-            _rich_info(
-                f"Installing {to_install_count} new {noun}...", symbol="running"
-            )
+            _rich_info(f"Installing {to_install_count} new {noun}...", symbol="running")
             if lockfile_count > 0 and self.verbose:
                 _rich_echo(
                     f"  ({lockfile_count} existing dependencies in lockfile)",
@@ -233,9 +229,7 @@ class InstallLogger(CommandLogger):
         else:
             _rich_info("Installing dependencies from apm.yml...", symbol="running")
             if lockfile_count > 0:
-                _rich_info(
-                    f"Using apm.lock.yaml ({lockfile_count} locked dependencies)"
-                )
+                _rich_info(f"Using apm.lock.yaml ({lockfile_count} locked dependencies)")
 
     def nothing_to_install(self):
         """Log when there's nothing to install — context-aware message."""
@@ -254,7 +248,11 @@ class InstallLogger(CommandLogger):
             _rich_info(f"  Downloading: {dep_name}", symbol="download")
 
     def download_complete(
-        self, dep_name: str, ref: str = "", sha: str = "", cached: bool = False,
+        self,
+        dep_name: str,
+        ref: str = "",
+        sha: str = "",
+        cached: bool = False,
         # Legacy compat: if callers pass ref_suffix= we handle it
         ref_suffix: str = "",
     ):
@@ -372,7 +370,7 @@ class InstallLogger(CommandLogger):
         source: str,
         cached: bool,
         enforcement: str,
-        age_seconds: Optional[int] = None,
+        age_seconds: int | None = None,
     ):
         """Log policy discovery outcome.
 
@@ -409,8 +407,8 @@ class InstallLogger(CommandLogger):
         self,
         outcome: str,
         source: str = "",
-        error: Optional[str] = None,
-        host_org: Optional[str] = None,
+        error: str | None = None,
+        host_org: str | None = None,
     ):
         """Log a policy-discovery non-success outcome.
 
@@ -450,8 +448,7 @@ class InstallLogger(CommandLogger):
             if not self.verbose:
                 return
             _rich_info(
-                "Could not determine org from git remote; "
-                "policy auto-discovery skipped",
+                "Could not determine org from git remote; policy auto-discovery skipped",
                 symbol="info",
             )
             return
@@ -459,8 +456,7 @@ class InstallLogger(CommandLogger):
         if outcome == "empty":
             src = source or "this project"
             _rich_warning(
-                f"Org policy at {src} is present but empty; "
-                "no enforcement applied",
+                f"Org policy at {src} is present but empty; no enforcement applied",
                 symbol="warning",
             )
             return
@@ -527,7 +523,7 @@ class InstallLogger(CommandLogger):
         dep_ref: str,
         reason: str,
         severity: str,
-        source: Optional[str] = None,
+        source: str | None = None,
     ):
         """Record a policy violation for a dependency.
 
@@ -545,14 +541,14 @@ class InstallLogger(CommandLogger):
                 hint).  When provided, a dim secondary line with
                 remediation guidance is rendered under the inline error.
         """
-        from apm_cli.utils.diagnostics import CATEGORY_POLICY
+        from apm_cli.utils.diagnostics import CATEGORY_POLICY  # noqa: F401
 
         # F9 dedupe: some callers pass reason with a "{dep_ref}: " prefix
         # (the detail strings produced by policy_checks.py do this).
         # Strip it defensively so the inline error reads cleanly.
         prefix = f"{dep_ref}: "
         if reason.startswith(prefix):
-            reason = reason[len(prefix):]
+            reason = reason[len(prefix) :]
 
         self.diagnostics.policy(
             message=reason,
@@ -603,10 +599,7 @@ class InstallLogger(CommandLogger):
     @staticmethod
     def _policy_reason_malformed(source: str) -> str:
         """Actionable reason for malformed policy file."""
-        return (
-            f"Policy at {source} is malformed "
-            "-- contact your org admin to fix the policy file"
-        )
+        return f"Policy at {source} is malformed -- contact your org admin to fix the policy file"
 
     @staticmethod
     def _policy_reason_blocked(dep_ref: str, source: str) -> str:
@@ -657,10 +650,6 @@ class InstallLogger(CommandLogger):
                     symbol="warning",
                 )
             else:
-                _rich_success(
-                    f"Installed {summary}{cleanup_suffix}.", symbol="sparkles"
-                )
+                _rich_success(f"Installed {summary}{cleanup_suffix}.", symbol="sparkles")
         elif errors > 0:
-            _rich_error(
-                f"Installation failed with {errors} error(s).", symbol="error"
-            )
+            _rich_error(f"Installation failed with {errors} error(s).", symbol="error")

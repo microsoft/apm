@@ -176,7 +176,7 @@ scannable.
 | 3 | Problem (WHY) | Observed failure modes; max 6 bullets, max 3 quoted anchors |
 | 4 | Approach (WHAT) | Table or 3-7 bullets; may say "additive: see Implementation" |
 | 5 | Implementation (HOW) | One short paragraph per file or a table |
-| 6 | Diagrams | 1-3 validated mermaid blocks, each with a legend |
+| 6 | Diagrams | 1-3 validated mermaid blocks, each with a legend; diagram type chosen per intent (`assets/mermaid-conventions.md`) |
 | 7 | Trade-offs | 3-5 bullets (1-2 if mechanical) |
 | 8 | Benefits | 3-5 numbered, measurable items |
 | 9 | Validation | Real command output, ideally inside `<details>` if long |
@@ -224,8 +224,12 @@ Run these steps in order. Tick each before moving on.
 4. [ ] Fill in the template top-to-bottom using only facts from
        the activation contract. Every WHY-claim gets a verbatim
        quoted anchor. If you cannot anchor a claim, drop it.
-5. [ ] Generate 1-3 mermaid diagrams. Add a one-sentence legend
-       above each.
+5. [ ] Generate 1-3 mermaid diagrams. **Before drafting any block,
+       load `assets/mermaid-conventions.md`** to pick the right
+       diagram type per intent (sequenceDiagram for execution flow,
+       flowchart LR for pipeline / architecture, stateDiagram-v2 for
+       state machines) and apply the boxing convention for NEW
+       behavior. Add a one-sentence legend above each diagram.
 6. [ ] **Validate every mermaid block deterministically (see
        below). Do NOT save the draft until every block validates.**
 7. [ ] Load `assets/section-rubric.md` and run the self-check pass.
@@ -255,24 +259,26 @@ done
 If `mmdc` reports any error, fix the diagram and re-run. The skill
 MUST NOT save the draft until every mermaid block validates.
 
-### Common mermaid pitfalls
+### Diagram type and pitfalls reference
 
-- **Semicolons in `classDiagram` link labels break the parser.** A
-  label like `dispatches; verifies 3 artifacts` errors at the
-  semicolon. Use commas or rephrase: `dispatches, verifies 3 artifacts`.
-- **`note right of X` in `stateDiagram-v2`** must close with
-  `end note` on its own line. A note that bleeds into the next
-  state declaration is a parse error.
-- **Round brackets `()` in flowchart node labels** need quoting:
-  write `A["foo (bar)"]`, not `A[foo (bar)]`.
-- **Double quotes inside node labels** must be HTML-escaped as
-  `&quot;`. Mermaid does not support nested or escaped double
-  quotes inside `"..."` labels.
-- **Pipes `|` and angle brackets `<>` inside labels** also need
-  quoting or HTML escapes; they are operators in mermaid syntax.
-- **Edge labels with colons** can confuse `stateDiagram-v2`; prefer
-  arrow-then-label form: `A --> B : trigger received`, not
-  `A --> B[trigger: received]`.
+The full diagram-type-by-intent table, canonical templates, and the
+GitHub-renderer gotcha list (`mmdc` does NOT always catch GitHub
+rejections) live in `assets/mermaid-conventions.md`. Load it whenever
+a PR body needs a mermaid block.
+
+Critical drift-known gotcha (the one most likely to bite, captured
+inline because it is not obvious from `mmdc` output):
+
+- **Square brackets in flowchart edge labels MUST be quoted.**
+  `A -->|[EXEC] work| B` parses on `mmdc` but is rejected by
+  GitHub's renderer (`Expecting 'TAGEND', ..., got 'SQS'`). Quote
+  the label: `A -->|"[EXEC] work"| B`. The same rule applies to
+  parentheses, colons, slashes, and pipes in edge labels.
+
+For everything else (semicolons in classDiagram links, `note right
+of` closing rules, round brackets in node labels, inline
+`:::cssClass` failing in classDiagram on GitHub), see
+`assets/mermaid-conventions.md`.
 
 ## Output contract
 

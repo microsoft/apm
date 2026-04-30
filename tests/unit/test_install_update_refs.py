@@ -13,7 +13,6 @@ Covers two code paths fixed in issue #548:
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Pure-logic helpers that mirror the two changed conditions in install.py.
 # Tested in isolation -- the full _install_apm_dependencies() stack is not
@@ -69,10 +68,13 @@ class TestDownloadCallbackUpdateRefs:
         When update_refs=False and a locked ref exists, _should_use_locked_ref
         must return True so the download is pinned to the known commit SHA.
         """
-        assert _should_use_locked_ref(
-            locked_ref="abc1234def5678901234567890abcdef01234567",
-            update_refs=False,
-        ) is True
+        assert (
+            _should_use_locked_ref(
+                locked_ref="abc1234def5678901234567890abcdef01234567",
+                update_refs=False,
+            )
+            is True
+        )
 
     def test_callback_uses_manifest_ref_during_update(self):
         """--update: download_callback uses manifest ref, ignoring locked SHA.
@@ -81,10 +83,13 @@ class TestDownloadCallbackUpdateRefs:
         must return False so the download resolves against the manifest ref.
         Before the fix this returned True, silently locking to the stale SHA.
         """
-        assert _should_use_locked_ref(
-            locked_ref="abc1234def5678901234567890abcdef01234567",
-            update_refs=True,
-        ) is False
+        assert (
+            _should_use_locked_ref(
+                locked_ref="abc1234def5678901234567890abcdef01234567",
+                update_refs=True,
+            )
+            is False
+        )
 
     def test_callback_uses_manifest_ref_when_no_lockfile(self):
         """No lockfile: callback uses manifest ref regardless of update_refs.
@@ -140,13 +145,16 @@ class TestAlreadyResolvedSkipLogic:
         When update_refs=False a package already fetched by the BFS callback
         does not need to be downloaded again in the sequential loop.
         """
-        assert _compute_skip_download(
-            install_path_exists=True,
-            is_cacheable=False,
-            update_refs=False,
-            already_resolved=True,
-            lockfile_match=False,
-        ) is True
+        assert (
+            _compute_skip_download(
+                install_path_exists=True,
+                is_cacheable=False,
+                update_refs=False,
+                already_resolved=True,
+                lockfile_match=False,
+            )
+            is True
+        )
 
     def test_already_resolved_no_skip_during_update(self):
         """--update: already_resolved=True does NOT cause skip_download=True.
@@ -156,13 +164,16 @@ class TestAlreadyResolvedSkipLogic:
         than blindly accepting the cached fetch from the callback.
         Bug before fix: (already_resolved) without not update_refs guard.
         """
-        assert _compute_skip_download(
-            install_path_exists=True,
-            is_cacheable=False,
-            update_refs=True,
-            already_resolved=True,
-            lockfile_match=False,
-        ) is False
+        assert (
+            _compute_skip_download(
+                install_path_exists=True,
+                is_cacheable=False,
+                update_refs=True,
+                already_resolved=True,
+                lockfile_match=False,
+            )
+            is False
+        )
 
     # --- lockfile_match is the correct skip path during --update ---
 
@@ -172,13 +183,16 @@ class TestAlreadyResolvedSkipLogic:
         SHA comparison confirmed the remote ref resolves to the same commit
         already checked out, so downloading again would be wasteful.
         """
-        assert _compute_skip_download(
-            install_path_exists=True,
-            is_cacheable=False,
-            update_refs=True,
-            already_resolved=False,
-            lockfile_match=True,
-        ) is True
+        assert (
+            _compute_skip_download(
+                install_path_exists=True,
+                is_cacheable=False,
+                update_refs=True,
+                already_resolved=False,
+                lockfile_match=True,
+            )
+            is True
+        )
 
     def test_lockfile_match_skips_even_with_already_resolved_during_update(self):
         """--update: lockfile_match=True skips regardless of already_resolved.
@@ -186,25 +200,31 @@ class TestAlreadyResolvedSkipLogic:
         When both flags are True in update mode, lockfile_match still wins and
         skip_download is True -- no content change was detected.
         """
-        assert _compute_skip_download(
-            install_path_exists=True,
-            is_cacheable=False,
-            update_refs=True,
-            already_resolved=True,
-            lockfile_match=True,
-        ) is True
+        assert (
+            _compute_skip_download(
+                install_path_exists=True,
+                is_cacheable=False,
+                update_refs=True,
+                already_resolved=True,
+                lockfile_match=True,
+            )
+            is True
+        )
 
     # --- is_cacheable gate ---
 
     def test_cacheable_skips_normal_install(self):
         """Normal install: is_cacheable=True (tag/commit ref) causes skip."""
-        assert _compute_skip_download(
-            install_path_exists=True,
-            is_cacheable=True,
-            update_refs=False,
-            already_resolved=False,
-            lockfile_match=False,
-        ) is True
+        assert (
+            _compute_skip_download(
+                install_path_exists=True,
+                is_cacheable=True,
+                update_refs=False,
+                already_resolved=False,
+                lockfile_match=False,
+            )
+            is True
+        )
 
     def test_cacheable_no_skip_during_update(self):
         """--update: is_cacheable alone does NOT cause skip_download=True.
@@ -212,13 +232,16 @@ class TestAlreadyResolvedSkipLogic:
         Even pinned tag refs must be re-resolved when the user explicitly
         requests an update; the is_cacheable guard is gated on not update_refs.
         """
-        assert _compute_skip_download(
-            install_path_exists=True,
-            is_cacheable=True,
-            update_refs=True,
-            already_resolved=False,
-            lockfile_match=False,
-        ) is False
+        assert (
+            _compute_skip_download(
+                install_path_exists=True,
+                is_cacheable=True,
+                update_refs=True,
+                already_resolved=False,
+                lockfile_match=False,
+            )
+            is False
+        )
 
     # --- install_path existence gate ---
 
@@ -228,13 +251,16 @@ class TestAlreadyResolvedSkipLogic:
         No combination of flags can skip a package that has never been
         installed; the outer install_path.exists() guard prevents it.
         """
-        assert _compute_skip_download(
-            install_path_exists=False,
-            is_cacheable=True,
-            update_refs=False,
-            already_resolved=True,
-            lockfile_match=True,
-        ) is False
+        assert (
+            _compute_skip_download(
+                install_path_exists=False,
+                is_cacheable=True,
+                update_refs=False,
+                already_resolved=True,
+                lockfile_match=True,
+            )
+            is False
+        )
 
     def test_skip_when_path_not_exists_regardless_of_flags(self):
         """Exhaustive check: install_path_exists=False always yields False.
@@ -262,13 +288,16 @@ class TestAlreadyResolvedSkipLogic:
 
     def test_no_flags_set_no_skip(self):
         """All boolean inputs False: skip_download must be False."""
-        assert _compute_skip_download(
-            install_path_exists=False,
-            is_cacheable=False,
-            update_refs=False,
-            already_resolved=False,
-            lockfile_match=False,
-        ) is False
+        assert (
+            _compute_skip_download(
+                install_path_exists=False,
+                is_cacheable=False,
+                update_refs=False,
+                already_resolved=False,
+                lockfile_match=False,
+            )
+            is False
+        )
 
     # --- parametrized truth table ---
 
@@ -283,18 +312,18 @@ class TestAlreadyResolvedSkipLogic:
         ),
         [
             # path missing -> never skip
-            (False, True,  False, True,  True,  False),
+            (False, True, False, True, True, False),
             (False, False, False, False, False, False),
             # normal install: each individual skip condition fires
-            (True,  True,  False, False, False, True),   # is_cacheable
-            (True,  False, False, True,  False, True),   # already_resolved
-            (True,  False, False, False, True,  True),   # lockfile_match
+            (True, True, False, False, False, True),  # is_cacheable
+            (True, False, False, True, False, True),  # already_resolved
+            (True, False, False, False, True, True),  # lockfile_match
             # update mode: only lockfile_match may skip
-            (True,  True,  True,  False, False, False),  # is_cacheable gated
-            (True,  False, True,  True,  False, False),  # already_resolved gated (the fix)
-            (True,  False, True,  False, True,  True),   # lockfile_match still works
-            (True,  True,  True,  True,  False, False),  # both gated, no lockfile_match
-            (True,  True,  True,  True,  True,  True),   # all True -> lockfile_match wins
+            (True, True, True, False, False, False),  # is_cacheable gated
+            (True, False, True, True, False, False),  # already_resolved gated (the fix)
+            (True, False, True, False, True, True),  # lockfile_match still works
+            (True, True, True, True, False, False),  # both gated, no lockfile_match
+            (True, True, True, True, True, True),  # all True -> lockfile_match wins
         ],
         ids=[
             "path-missing-all-true",

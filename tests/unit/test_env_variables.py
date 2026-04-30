@@ -25,16 +25,12 @@ class TestEnvironmentVariablesHandling(unittest.TestCase):
             json.dump({"servers": {}}, f)
 
         # Create mock clients
-        self.mock_registry_patcher = patch(
-            "apm_cli.adapters.client.vscode.SimpleRegistryClient"
-        )
+        self.mock_registry_patcher = patch("apm_cli.adapters.client.vscode.SimpleRegistryClient")
         self.mock_registry_class = self.mock_registry_patcher.start()
         self.mock_registry = MagicMock()
         self.mock_registry_class.return_value = self.mock_registry
 
-        self.mock_integration_patcher = patch(
-            "apm_cli.adapters.client.vscode.RegistryIntegration"
-        )
+        self.mock_integration_patcher = patch("apm_cli.adapters.client.vscode.RegistryIntegration")
         self.mock_integration_class = self.mock_integration_patcher.start()
         self.mock_integration = MagicMock()
         self.mock_integration_class.return_value = self.mock_integration
@@ -81,7 +77,7 @@ class TestEnvironmentVariablesHandling(unittest.TestCase):
         self.assertTrue(result)
 
         # Read the config file and verify the content
-        with open(self.temp_path, "r") as f:
+        with open(self.temp_path) as f:
             updated_config = json.load(f)
 
         # Check the server configuration
@@ -93,9 +89,7 @@ class TestEnvironmentVariablesHandling(unittest.TestCase):
         # Verify environment variables were added
         self.assertIn("env", server_config)
         self.assertIn("AGENTQL_API_KEY", server_config["env"])
-        self.assertEqual(
-            server_config["env"]["AGENTQL_API_KEY"], "${input:agentql-api-key}"
-        )
+        self.assertEqual(server_config["env"]["AGENTQL_API_KEY"], "${input:agentql-api-key}")
 
         # Verify input variables were added
         self.assertIn("inputs", updated_config)

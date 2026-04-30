@@ -269,6 +269,8 @@ devDependencies:
 
 Dev dependencies install to `apm_modules/` like production deps but are excluded from `apm pack --format plugin` output. See [Pack & Distribute](../pack-distribute/) for details.
 
+**Important:** plain `apm install` (no flag) deploys both `dependencies` and `devDependencies` -- there is currently no `--omit=dev` flag. The dev/prod separation kicks in at `apm pack --format plugin`. Maintainer-only primitives that you author yourself MUST live outside `.apm/` to be excluded from plugin bundles, because the local-content scanner operates on `.apm/` regardless of the devDep marker. See [Dev-only Primitives](../dev-only-primitives/) for the canonical pattern.
+
 ## Local Path Dependencies
 
 Install packages from the local filesystem for fast iteration during development.
@@ -333,13 +335,15 @@ Coverage varies by target and primitive type:
 
 | Target | Status | User-level dir | Primitives | Not supported |
 |--------|--------|---------------|------------|---------------|
-| Claude Code | Supported | `~/.claude/` | Skills, agents, commands, hooks, instructions | -- |
+| Claude Code | Supported | `~/.claude/` (or `$CLAUDE_CONFIG_DIR`) | Skills, agents, commands, hooks, instructions | -- |
 | Copilot CLI | Partial | `~/.copilot/` | Skills, agents, hooks | Prompts, instructions |
 | Cursor | Partial | `~/.cursor/` | Skills, agents, hooks | Rules |
 | OpenCode | Partial | `~/.config/opencode/` | Skills, agents, commands | Hooks |
 
 Target detection mirrors project scope: APM auto-detects by `~/.<target>/` directory presence,
 falling back to Copilot. Security scanning runs for global installs.
+
+For Claude Code, if `CLAUDE_CONFIG_DIR` is set (and points inside `$HOME`), `apm install -g --target claude` deploys there instead of `~/.claude/` so primitives land where Claude Code reads them.
 
 ### When to use each scope
 

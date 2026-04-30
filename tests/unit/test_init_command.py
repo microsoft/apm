@@ -1,13 +1,14 @@
 """Tests for the apm init command."""
 
-import json
-import pytest
-import tempfile
+import json  # noqa: F401
 import os
-import yaml
+import tempfile
 from pathlib import Path
-from click.testing import CliRunner
 from unittest.mock import patch
+
+import pytest  # noqa: F401
+import yaml
+from click.testing import CliRunner
 
 from apm_cli.cli import cli
 
@@ -40,7 +41,6 @@ class TestInitCommand:
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
-
                 result = self.runner.invoke(cli, ["init", "--yes"])
 
                 assert result.exit_code == 0
@@ -59,7 +59,6 @@ class TestInitCommand:
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
-
                 result = self.runner.invoke(cli, ["init", ".", "--yes"])
 
                 assert result.exit_code == 0
@@ -76,7 +75,6 @@ class TestInitCommand:
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
-
                 result = self.runner.invoke(cli, ["init", "my-project", "--yes"])
 
                 assert result.exit_code == 0
@@ -99,7 +97,6 @@ class TestInitCommand:
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
-
                 # Create existing apm.yml
                 Path("apm.yml").write_text("name: existing-project\nversion: 0.1.0\n")
 
@@ -117,7 +114,6 @@ class TestInitCommand:
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
-
                 # Create existing apm.yml
                 Path("apm.yml").write_text("name: existing-project\nversion: 0.1.0\n")
 
@@ -141,7 +137,6 @@ class TestInitCommand:
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
-
                 # Create existing apm.yml with custom values
                 existing_config = {
                     "name": "my-custom-project",
@@ -165,7 +160,6 @@ class TestInitCommand:
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
-
                 # Simulate user input
                 user_input = "my-test-project\n1.5.0\nTest description\nTest Author\ny\n"
 
@@ -193,7 +187,6 @@ class TestInitCommand:
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
-
                 # Simulate user input with 'no' to confirmation
                 user_input = "my-test-project\n1.5.0\nTest description\nTest Author\nn\n"
 
@@ -210,7 +203,6 @@ class TestInitCommand:
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
-
                 # Create existing apm.yml
                 Path("apm.yml").write_text("name: existing-project\nversion: 0.1.0\n")
 
@@ -233,7 +225,6 @@ class TestInitCommand:
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
-
                 # Create existing apm.yml
                 Path("apm.yml").write_text("name: existing-project\nversion: 0.1.0\n")
 
@@ -252,16 +243,19 @@ class TestInitCommand:
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
-
                 # Create existing apm.yml
                 Path("apm.yml").write_text("name: existing-project\nversion: 0.1.0\n")
 
-                with patch("apm_cli.commands.init.click.confirm", return_value=True) as mock_confirm:
+                with patch(
+                    "apm_cli.commands.init.click.confirm", return_value=True
+                ) as mock_confirm:
                     result = self.runner.invoke(cli, ["init", "--yes"])
                     # --yes skips the prompt entirely, so confirm should NOT be called
                     mock_confirm.assert_not_called()
 
-                with patch("apm_cli.commands.init.click.confirm", return_value=False) as mock_confirm:
+                with patch(
+                    "apm_cli.commands.init.click.confirm", return_value=False
+                ) as mock_confirm:
                     result = self.runner.invoke(cli, ["init"])
                     mock_confirm.assert_called_once_with("Continue and overwrite?")
                     assert "Initialization cancelled" in result.output
@@ -273,7 +267,6 @@ class TestInitCommand:
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
-
                 result = self.runner.invoke(cli, ["init", "test-project", "--yes"])
 
                 assert result.exit_code == 0
@@ -305,7 +298,6 @@ class TestInitCommand:
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
-
                 # Initialize git repo and set author
                 import subprocess
 
@@ -315,9 +307,7 @@ class TestInitCommand:
                 git_config = subprocess.run(
                     ["git", "config", "user.name", "Test User"], capture_output=True
                 )
-                assert (
-                    git_config.returncode == 0
-                ), f"git config failed: {git_config.stderr}"
+                assert git_config.returncode == 0, f"git config failed: {git_config.stderr}"
 
                 result = self.runner.invoke(cli, ["init", "--yes"])
 
@@ -337,7 +327,6 @@ class TestInitCommand:
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
-
                 result = self.runner.invoke(cli, ["init", "--yes"])
 
                 assert result.exit_code == 0
@@ -377,7 +366,6 @@ class TestInitCommand:
                 assert "start.prompt.md" not in result.output
             finally:
                 os.chdir(self.original_dir)
-
 
 
 class TestPluginNameValidation:

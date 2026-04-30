@@ -7,16 +7,16 @@ remaining package still needs them.
 
 import os
 import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest
+import pytest  # noqa: F401
 import yaml
 from click.testing import CliRunner
-from pathlib import Path
 
 from apm_cli.cli import cli
-from apm_cli.deps.lockfile import LockFile, LockedDependency
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency import DependencyReference
 
@@ -46,9 +46,7 @@ def _make_apm_modules_dir(base: Path, repo_url: str):
     for part in parts:
         pkg_dir = pkg_dir / part
     pkg_dir.mkdir(parents=True, exist_ok=True)
-    (pkg_dir / "apm.yml").write_text(
-        f"name: {parts[-1]}\nversion: 1.0.0\n"
-    )
+    (pkg_dir / "apm.yml").write_text(f"name: {parts[-1]}\nversion: 1.0.0\n")
     return pkg_dir
 
 
@@ -81,10 +79,18 @@ class TestUninstallTransitiveDependencyCleanup:
                 _make_apm_modules_dir(root, "acme/pkg-a")
                 _make_apm_modules_dir(root, "acme/pkg-b")  # transitive dep
 
-                _write_lockfile(root / "apm.lock.yaml", [
-                    LockedDependency(repo_url="acme/pkg-a", depth=1, resolved_commit="aaa"),
-                    LockedDependency(repo_url="acme/pkg-b", depth=2, resolved_by="acme/pkg-a", resolved_commit="bbb"),
-                ])
+                _write_lockfile(
+                    root / "apm.lock.yaml",
+                    [
+                        LockedDependency(repo_url="acme/pkg-a", depth=1, resolved_commit="aaa"),
+                        LockedDependency(
+                            repo_url="acme/pkg-b",
+                            depth=2,
+                            resolved_by="acme/pkg-a",
+                            resolved_commit="bbb",
+                        ),
+                    ],
+                )
 
                 result = self.runner.invoke(cli, ["uninstall", "acme/pkg-a"])
 
@@ -94,7 +100,9 @@ class TestUninstallTransitiveDependencyCleanup:
                 assert not (root / "apm_modules" / "acme" / "pkg-b").exists()
                 assert "transitive dependency" in result.output.lower()
             finally:
-                os.chdir(os.path.dirname(os.path.abspath(__file__)))  # restore CWD before TemporaryDirectory cleanup
+                os.chdir(
+                    os.path.dirname(os.path.abspath(__file__))
+                )  # restore CWD before TemporaryDirectory cleanup
 
     def test_uninstall_keeps_shared_transitive_dep(self):
         """Transitive dep used by another remaining package is NOT removed."""
@@ -109,11 +117,19 @@ class TestUninstallTransitiveDependencyCleanup:
                 _make_apm_modules_dir(root, "acme/pkg-c")
                 _make_apm_modules_dir(root, "acme/shared-lib")
 
-                _write_lockfile(root / "apm.lock.yaml", [
-                    LockedDependency(repo_url="acme/pkg-a", depth=1, resolved_commit="aaa"),
-                    LockedDependency(repo_url="acme/pkg-c", depth=1, resolved_commit="ccc"),
-                    LockedDependency(repo_url="acme/shared-lib", depth=2, resolved_by="acme/pkg-a", resolved_commit="sss"),
-                ])
+                _write_lockfile(
+                    root / "apm.lock.yaml",
+                    [
+                        LockedDependency(repo_url="acme/pkg-a", depth=1, resolved_commit="aaa"),
+                        LockedDependency(repo_url="acme/pkg-c", depth=1, resolved_commit="ccc"),
+                        LockedDependency(
+                            repo_url="acme/shared-lib",
+                            depth=2,
+                            resolved_by="acme/pkg-a",
+                            resolved_commit="sss",
+                        ),
+                    ],
+                )
 
                 # Uninstall only pkg-a
                 result = self.runner.invoke(cli, ["uninstall", "acme/pkg-a"])
@@ -130,7 +146,9 @@ class TestUninstallTransitiveDependencyCleanup:
                 # which would show up as resolved_by=acme/pkg-c in the lockfile.
                 assert not (root / "apm_modules" / "acme" / "shared-lib").exists()
             finally:
-                os.chdir(os.path.dirname(os.path.abspath(__file__)))  # restore CWD before TemporaryDirectory cleanup
+                os.chdir(
+                    os.path.dirname(os.path.abspath(__file__))
+                )  # restore CWD before TemporaryDirectory cleanup
 
     def test_uninstall_removes_deeply_nested_transitive_deps(self):
         """Transitive deps of transitive deps are also removed (recursive)."""
@@ -145,11 +163,24 @@ class TestUninstallTransitiveDependencyCleanup:
                 _make_apm_modules_dir(root, "acme/pkg-b")
                 _make_apm_modules_dir(root, "acme/pkg-c")
 
-                _write_lockfile(root / "apm.lock.yaml", [
-                    LockedDependency(repo_url="acme/pkg-a", depth=1, resolved_commit="aaa"),
-                    LockedDependency(repo_url="acme/pkg-b", depth=2, resolved_by="acme/pkg-a", resolved_commit="bbb"),
-                    LockedDependency(repo_url="acme/pkg-c", depth=3, resolved_by="acme/pkg-b", resolved_commit="ccc"),
-                ])
+                _write_lockfile(
+                    root / "apm.lock.yaml",
+                    [
+                        LockedDependency(repo_url="acme/pkg-a", depth=1, resolved_commit="aaa"),
+                        LockedDependency(
+                            repo_url="acme/pkg-b",
+                            depth=2,
+                            resolved_by="acme/pkg-a",
+                            resolved_commit="bbb",
+                        ),
+                        LockedDependency(
+                            repo_url="acme/pkg-c",
+                            depth=3,
+                            resolved_by="acme/pkg-b",
+                            resolved_commit="ccc",
+                        ),
+                    ],
+                )
 
                 result = self.runner.invoke(cli, ["uninstall", "acme/pkg-a"])
 
@@ -158,7 +189,9 @@ class TestUninstallTransitiveDependencyCleanup:
                 assert not (root / "apm_modules" / "acme" / "pkg-b").exists()
                 assert not (root / "apm_modules" / "acme" / "pkg-c").exists()
             finally:
-                os.chdir(os.path.dirname(os.path.abspath(__file__)))  # restore CWD before TemporaryDirectory cleanup
+                os.chdir(
+                    os.path.dirname(os.path.abspath(__file__))
+                )  # restore CWD before TemporaryDirectory cleanup
 
     def test_uninstall_updates_lockfile(self):
         """Lockfile is updated to remove uninstalled deps and their transitives."""
@@ -172,11 +205,19 @@ class TestUninstallTransitiveDependencyCleanup:
                 _make_apm_modules_dir(root, "acme/pkg-b")
                 _make_apm_modules_dir(root, "acme/pkg-d")
 
-                _write_lockfile(root / "apm.lock.yaml", [
-                    LockedDependency(repo_url="acme/pkg-a", depth=1, resolved_commit="aaa"),
-                    LockedDependency(repo_url="acme/pkg-b", depth=2, resolved_by="acme/pkg-a", resolved_commit="bbb"),
-                    LockedDependency(repo_url="acme/pkg-d", depth=1, resolved_commit="ddd"),
-                ])
+                _write_lockfile(
+                    root / "apm.lock.yaml",
+                    [
+                        LockedDependency(repo_url="acme/pkg-a", depth=1, resolved_commit="aaa"),
+                        LockedDependency(
+                            repo_url="acme/pkg-b",
+                            depth=2,
+                            resolved_by="acme/pkg-a",
+                            resolved_commit="bbb",
+                        ),
+                        LockedDependency(repo_url="acme/pkg-d", depth=1, resolved_commit="ddd"),
+                    ],
+                )
 
                 result = self.runner.invoke(cli, ["uninstall", "acme/pkg-a"])
 
@@ -188,7 +229,9 @@ class TestUninstallTransitiveDependencyCleanup:
                 assert not updated_lock.has_dependency("acme/pkg-a")
                 assert not updated_lock.has_dependency("acme/pkg-b")
             finally:
-                os.chdir(os.path.dirname(os.path.abspath(__file__)))  # restore CWD before TemporaryDirectory cleanup
+                os.chdir(
+                    os.path.dirname(os.path.abspath(__file__))
+                )  # restore CWD before TemporaryDirectory cleanup
 
     def test_uninstall_removes_lockfile_when_no_deps_remain(self):
         """Lockfile is deleted when all deps are removed."""
@@ -200,16 +243,21 @@ class TestUninstallTransitiveDependencyCleanup:
                 _write_apm_yml(root / "apm.yml", ["acme/pkg-a"])
                 _make_apm_modules_dir(root, "acme/pkg-a")
 
-                _write_lockfile(root / "apm.lock.yaml", [
-                    LockedDependency(repo_url="acme/pkg-a", depth=1, resolved_commit="aaa"),
-                ])
+                _write_lockfile(
+                    root / "apm.lock.yaml",
+                    [
+                        LockedDependency(repo_url="acme/pkg-a", depth=1, resolved_commit="aaa"),
+                    ],
+                )
 
                 result = self.runner.invoke(cli, ["uninstall", "acme/pkg-a"])
 
                 assert result.exit_code == 0
                 assert not (root / "apm.lock.yaml").exists()
             finally:
-                os.chdir(os.path.dirname(os.path.abspath(__file__)))  # restore CWD before TemporaryDirectory cleanup
+                os.chdir(
+                    os.path.dirname(os.path.abspath(__file__))
+                )  # restore CWD before TemporaryDirectory cleanup
 
     def test_dry_run_shows_transitive_deps(self):
         """Dry run shows transitive deps that would be removed."""
@@ -222,10 +270,18 @@ class TestUninstallTransitiveDependencyCleanup:
                 _make_apm_modules_dir(root, "acme/pkg-a")
                 _make_apm_modules_dir(root, "acme/pkg-b")
 
-                _write_lockfile(root / "apm.lock.yaml", [
-                    LockedDependency(repo_url="acme/pkg-a", depth=1, resolved_commit="aaa"),
-                    LockedDependency(repo_url="acme/pkg-b", depth=2, resolved_by="acme/pkg-a", resolved_commit="bbb"),
-                ])
+                _write_lockfile(
+                    root / "apm.lock.yaml",
+                    [
+                        LockedDependency(repo_url="acme/pkg-a", depth=1, resolved_commit="aaa"),
+                        LockedDependency(
+                            repo_url="acme/pkg-b",
+                            depth=2,
+                            resolved_by="acme/pkg-a",
+                            resolved_commit="bbb",
+                        ),
+                    ],
+                )
 
                 result = self.runner.invoke(cli, ["uninstall", "acme/pkg-a", "--dry-run"])
 
@@ -236,7 +292,9 @@ class TestUninstallTransitiveDependencyCleanup:
                 assert (root / "apm_modules" / "acme" / "pkg-a").exists()
                 assert (root / "apm_modules" / "acme" / "pkg-b").exists()
             finally:
-                os.chdir(os.path.dirname(os.path.abspath(__file__)))  # restore CWD before TemporaryDirectory cleanup
+                os.chdir(
+                    os.path.dirname(os.path.abspath(__file__))
+                )  # restore CWD before TemporaryDirectory cleanup
 
     def test_uninstall_no_lockfile_still_works(self):
         """Uninstall works gracefully when no lockfile exists (no transitive cleanup)."""
@@ -253,7 +311,9 @@ class TestUninstallTransitiveDependencyCleanup:
                 assert result.exit_code == 0
                 assert not (root / "apm_modules" / "acme" / "pkg-a").exists()
             finally:
-                os.chdir(os.path.dirname(os.path.abspath(__file__)))  # restore CWD before TemporaryDirectory cleanup
+                os.chdir(
+                    os.path.dirname(os.path.abspath(__file__))
+                )  # restore CWD before TemporaryDirectory cleanup
 
     def test_uninstall_dry_run_supports_object_style_dependency_entries(self):
         """Dry-run accepts dict dependency entries without crashing."""
@@ -280,7 +340,9 @@ class TestUninstallTransitiveDependencyCleanup:
                 assert "Dry run complete" in result.output
                 assert (root / "apm_modules" / "acme" / "pkg-a").exists()
             finally:
-                os.chdir(os.path.dirname(os.path.abspath(__file__)))  # restore CWD before TemporaryDirectory cleanup
+                os.chdir(
+                    os.path.dirname(os.path.abspath(__file__))
+                )  # restore CWD before TemporaryDirectory cleanup
 
     def test_uninstall_reintegrates_remaining_object_style_dependency_from_canonical_path(self):
         """Remaining dict-style deps re-integrate from DependencyReference install paths."""
@@ -321,19 +383,25 @@ class TestUninstallTransitiveDependencyCleanup:
                         package_type=None,
                     )
 
-                with patch(
-                    "apm_cli.models.apm_package.validate_apm_package",
-                    side_effect=_capture_validate,
-                ), patch(
-                    "apm_cli.integration.targets.active_targets",
-                    return_value=[],
-                ), patch(
-                    "apm_cli.integration.skill_integrator.SkillIntegrator.integrate_package_skill",
-                    return_value=None,
+                with (
+                    patch(
+                        "apm_cli.models.apm_package.validate_apm_package",
+                        side_effect=_capture_validate,
+                    ),
+                    patch(
+                        "apm_cli.integration.targets.active_targets",
+                        return_value=[],
+                    ),
+                    patch(
+                        "apm_cli.integration.skill_integrator.SkillIntegrator.integrate_package_skill",
+                        return_value=None,
+                    ),
                 ):
                     result = self.runner.invoke(cli, ["uninstall", "acme/pkg-a"])
 
                 assert result.exit_code == 0
                 assert remaining_install_path in observed_paths
             finally:
-                os.chdir(os.path.dirname(os.path.abspath(__file__)))  # restore CWD before TemporaryDirectory cleanup
+                os.chdir(
+                    os.path.dirname(os.path.abspath(__file__))
+                )  # restore CWD before TemporaryDirectory cleanup

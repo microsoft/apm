@@ -1,15 +1,15 @@
 """Plugin management data models."""
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Dict, Any
-import json
+from typing import Any, Dict, List, Optional  # noqa: F401, UP035
 
 
 @dataclass
 class PluginMetadata:
     """Metadata for a plugin.
-    
+
     Attributes:
         id: Unique plugin identifier (e.g., "awesome-copilot")
         name: Human-readable plugin name
@@ -22,18 +22,19 @@ class PluginMetadata:
         tags: List of tags for categorization
         dependencies: List of plugin dependencies (plugin IDs)
     """
+
     id: str
     name: str
     version: str
     description: str
     author: str
-    repository: Optional[str] = None
-    homepage: Optional[str] = None
-    license: Optional[str] = None
-    tags: List[str] = field(default_factory=list)
-    dependencies: List[str] = field(default_factory=list)
+    repository: str | None = None
+    homepage: str | None = None
+    license: str | None = None
+    tags: list[str] = field(default_factory=list)
+    dependencies: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert metadata to dictionary."""
         return {
             "id": self.id,
@@ -49,7 +50,7 @@ class PluginMetadata:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "PluginMetadata":
+    def from_dict(cls, data: dict[str, Any]) -> "PluginMetadata":
         """Create metadata from dictionary."""
         return cls(
             id=data["id"],
@@ -68,7 +69,7 @@ class PluginMetadata:
 @dataclass
 class Plugin:
     """Represents an installed plugin.
-    
+
     Attributes:
         metadata: Plugin metadata
         path: Path to the plugin directory
@@ -77,56 +78,60 @@ class Plugin:
         hooks: List of hook script paths
         skills: List of skill file paths (*.skill.md)
     """
+
     metadata: PluginMetadata
     path: Path
-    commands: List[Path] = field(default_factory=list)
-    agents: List[Path] = field(default_factory=list)
-    hooks: List[Path] = field(default_factory=list)
-    skills: List[Path] = field(default_factory=list)
+    commands: list[Path] = field(default_factory=list)
+    agents: list[Path] = field(default_factory=list)
+    hooks: list[Path] = field(default_factory=list)
+    skills: list[Path] = field(default_factory=list)
 
     @classmethod
     def from_path(cls, plugin_path: Path) -> "Plugin":
         """Load a plugin from its installation directory.
-        
+
         Plugin structure: plugin.json can be in root, .github/plugin/, or .claude-plugin/.
         Primitives (agents, skills, etc.) are always at the repository root.
-        
+
         Args:
             plugin_path: Path to the plugin directory
-            
+
         Returns:
             Plugin: The loaded plugin instance
-            
+
         Raises:
             FileNotFoundError: If plugin.json is not found
             ValueError: If plugin.json is invalid
         """
         # Find plugin.json using centralized helper
         from ..utils.helpers import find_plugin_json
+
         metadata_file = find_plugin_json(plugin_path)
-        
+
         if metadata_file is None:
-            raise FileNotFoundError(f"Plugin metadata not found in any expected location: {plugin_path}")
-        
-        with open(metadata_file, "r") as f:
+            raise FileNotFoundError(
+                f"Plugin metadata not found in any expected location: {plugin_path}"
+            )
+
+        with open(metadata_file) as f:
             metadata_dict = json.load(f)
-        
+
         metadata = PluginMetadata.from_dict(metadata_dict)
-        
+
         # Primitives are always at the repository root
         base_dir = plugin_path
-        
+
         # Discover plugin components in plugins/ subdirectory (including subdirectories)
-        commands = list((base_dir / "commands").rglob("*.py")) if (base_dir / "commands").exists() else []
+        commands = (
+            list((base_dir / "commands").rglob("*.py")) if (base_dir / "commands").exists() else []
+        )
         # Agents: include both .agent.md and plain .md (plugins may omit the
-        # .agent.md convention). 
+        # .agent.md convention).
         agents = []
         if (base_dir / "agents").exists():
-            agents = [
-                f for f in (base_dir / "agents").rglob("*.md")
-            ]
+            agents = [f for f in (base_dir / "agents").rglob("*.md")]
         hooks = list((base_dir / "hooks").rglob("*.py")) if (base_dir / "hooks").exists() else []
-        
+
         # Skills: each subdirectory in skills/ must contain a SKILL.md
         skills = []
         skills_dir = base_dir / "skills"
@@ -136,7 +141,7 @@ class Plugin:
                     skill_file = skill_subdir / "SKILL.md"
                     if skill_file.exists():
                         skills.append(skill_file)
-        
+
         return cls(
             metadata=metadata,
             path=plugin_path,

@@ -78,6 +78,16 @@ CLI equivalent: `--target claude,copilot` (comma-separated).
 | Multiple target folders | `all` |
 | Neither exists | `minimal` (AGENTS.md only) |
 
+Auto-detection only applies when `target:` is omitted entirely. Invalid `target:` values fail at parse time with a message naming the apm.yml path and the offending token. The same shared validator runs for both `apm.yml`'s `target:` and the `--target` CLI flag, so identical input produces identical results at every entry point.
+
+| Input | Result |
+|-------|--------|
+| `target: bogus` (unknown token) | parse error -- fix the typo |
+| `target: ""` or `target: []` (empty) | parse error -- remove the line if you meant auto-detect |
+| `target: [all, claude]` (`all` mixed with other targets) | parse error -- use `all` alone |
+| `target: opencode,claude,copilot,agents` (CSV string in YAML) | accepted; parses identically to the list form `target: [opencode, claude, copilot, agents]` (used to silently zero-deploy before #820 was fixed) |
+| `target:` line omitted | auto-detect from folders (table above) |
+
 ## What to commit
 
 | Path | Commit? | Why |

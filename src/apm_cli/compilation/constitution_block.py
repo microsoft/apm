@@ -1,17 +1,17 @@
 """Rendering & parsing of injected constitution block in AGENTS.md."""
+
 from __future__ import annotations
 
 import hashlib
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional  # noqa: F401
 
 from .constants import (
     CONSTITUTION_MARKER_BEGIN,
     CONSTITUTION_MARKER_END,
     CONSTITUTION_RELATIVE_PATH,
 )
-
 
 HASH_PREFIX = "hash:"
 
@@ -43,7 +43,7 @@ def render_block(constitution_content: str) -> str:
 @dataclass
 class ExistingBlock:
     raw: str
-    hash: Optional[str]
+    hash: str | None
     start_index: int
     end_index: int
 
@@ -56,7 +56,7 @@ BLOCK_REGEX = re.compile(
 HASH_LINE_REGEX = re.compile(r"hash:\s*([0-9a-fA-F]{6,64})")
 
 
-def find_existing_block(content: str) -> Optional[ExistingBlock]:
+def find_existing_block(content: str) -> ExistingBlock | None:
     """Locate existing constitution block and extract its hash if present."""
     match = BLOCK_REGEX.search(content)
     if not match:
@@ -67,7 +67,9 @@ def find_existing_block(content: str) -> Optional[ExistingBlock]:
     return ExistingBlock(raw=block_text, hash=h, start_index=match.start(), end_index=match.end())
 
 
-def inject_or_update(existing_agents: str, new_block: str, place_top: bool = True) -> tuple[str, str]:
+def inject_or_update(
+    existing_agents: str, new_block: str, place_top: bool = True
+) -> tuple[str, str]:
     """Insert or update constitution block in existing AGENTS.md content.
 
     Args:
@@ -82,7 +84,11 @@ def inject_or_update(existing_agents: str, new_block: str, place_top: bool = Tru
         if existing_block.raw == new_block.rstrip():  # exclude trailing blank block newline
             return existing_agents, "UNCHANGED"
         # Replace existing block span with new block
-        updated = existing_agents[: existing_block.start_index] + new_block.rstrip() + existing_agents[existing_block.end_index :]
+        updated = (
+            existing_agents[: existing_block.start_index]
+            + new_block.rstrip()
+            + existing_agents[existing_block.end_index :]
+        )
         # Ensure trailing newline after block + rest
         if not updated.startswith(new_block):
             # If markers were not at top previously and we want top placement, move them
@@ -93,4 +99,6 @@ def inject_or_update(existing_agents: str, new_block: str, place_top: bool = Tru
     # No existing block
     if place_top:
         return new_block + existing_agents.lstrip("\n"), "CREATED"
-    return existing_agents + ("\n" if not existing_agents.endswith("\n") else "") + new_block, "CREATED"
+    return existing_agents + (
+        "\n" if not existing_agents.endswith("\n") else ""
+    ) + new_block, "CREATED"

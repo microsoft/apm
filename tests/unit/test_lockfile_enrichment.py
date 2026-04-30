@@ -3,7 +3,7 @@
 import yaml
 
 from apm_cli.bundle.lockfile_enrichment import enrich_lockfile_for_pack
-from apm_cli.deps.lockfile import LockFile, LockedDependency
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 
 
 def _make_lockfile() -> LockFile:
@@ -237,7 +237,7 @@ class TestFilterFilesByTarget:
         # A crafted file path with traversal should only remap the prefix,
         # the traversal components remain as literal path segments
         files = [".github/skills/../../etc/passwd"]
-        filtered, mappings = _filter_files_by_target(files, "claude")
+        filtered, mappings = _filter_files_by_target(files, "claude")  # noqa: RUF059
         # The mapping still happens (prefix replacement) but the packer's
         # bundle-escape check will catch the bad destination path
         if filtered:
@@ -275,7 +275,7 @@ class TestFilterFilesByTargetList:
         from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
 
         files = [".claude/skills/s1/SKILL.md", ".cursor/rules/r.md", ".github/agents/a.md"]
-        filtered, mappings = _filter_files_by_target(files, ["claude", "cursor"])
+        filtered, mappings = _filter_files_by_target(files, ["claude", "cursor"])  # noqa: RUF059
         assert ".claude/skills/s1/SKILL.md" in filtered
         assert ".cursor/rules/r.md" in filtered
         # .github/ is not a direct prefix for either claude or cursor

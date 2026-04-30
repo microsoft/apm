@@ -57,7 +57,10 @@ devDependencies:
   mcp:         <list<McpDependency>>
 compilation:   <CompilationConfig>
 policy:        <PolicyConfig>
+marketplace:   <MarketplaceConfig>           # OPTIONAL; marketplace authoring
 ```
+
+`marketplace:` is the source for `apm pack`'s marketplace output and is OPTIONAL. Repositories that do not publish a marketplace omit it entirely. The block, its schema, and the build flow are documented in the [Authoring a marketplace guide](../../guides/marketplace-authoring/). Within `marketplace:`, the inheritable fields `name`, `description`, and `version` default to the top-level values above and SHOULD be omitted unless an override is required.
 
 ---
 
@@ -113,7 +116,7 @@ policy:        <PolicyConfig>
 | **Default** | Auto-detect: `vscode` if `.github/` exists, `claude` if `.claude/` exists, `codex` if `.codex/` exists, `all` if multiple target folders exist, `minimal` if none |
 | **Allowed values** | `vscode` · `agents` · `copilot` · `claude` · `cursor` · `opencode` · `codex` · `all` |
 
-Controls which output targets are generated during compilation and installation. Accepts a single string or a list of strings. When unset, a conforming resolver SHOULD auto-detect based on folder presence. Unknown values MUST be silently ignored (auto-detection takes over).
+Controls which output targets are generated during compilation and installation. Accepts a single string or a list of strings. When unset, a conforming resolver SHOULD auto-detect based on folder presence. Unknown values MUST raise a parse error pointing at the offending token. Auto-detection applies only when `target:` is unset.
 
 ```yaml
 # Single target
@@ -192,6 +195,8 @@ includes: auto
 #   - .apm/instructions/
 #   - .apm/skills/my-skill/
 ```
+
+**`includes:` is allow-list only.** There is no `exclude:` form. The field controls which `.apm/` content the project consents to publish; it cannot be used to fence off subdirectories of `.apm/` from the scanner. To keep maintainer-only primitives out of shipped artifacts, author them OUTSIDE `.apm/` and reference them via a local-path devDependency -- see [Dev-only Primitives](../../guides/dev-only-primitives/).
 
 When `policy.manifest.require_explicit_includes` is `true` (see [Governance guide](../../enterprise/governance-guide/)), only form 3 passes the policy check; `auto` and undeclared are rejected at install/audit time by the `explicit-includes` policy check (not at YAML parse time).
 
@@ -354,12 +359,12 @@ A plain registry reference: `io.github.github/github-mcp-server`
 |---|---|---|---|---|
 | `name` | `string` | REQUIRED | Non-empty | Server identifier (registry name or custom name). |
 | `transport` | `enum<string>` | Conditional | `stdio` · `sse` · `http` · `streamable-http` | Transport protocol. REQUIRED when `registry: false`. Values are MCP transport names, not URL schemes: remote variants connect over HTTPS. |
-| `env` | `map<string, string>` | OPTIONAL | | Environment variable overrides. Values may contain `${input:<id>}` references (VS Code only — see §4.2.4). |
+| `env` | `map<string, string>` | OPTIONAL | | Environment variable overrides. Values may contain `${VAR}`, `${env:VAR}`, or `${input:<id>}` references — see §4.2.4. |
 | `args` | `dict` or `list` | OPTIONAL | | Dict for overlay variable overrides (registry), list for positional args (self-defined). |
 | `version` | `string` | OPTIONAL | | Pin to a specific server version. |
 | `registry` | `bool` or `string` | OPTIONAL | Default: `true` (public registry) | `false` = self-defined (private) server. String = custom registry URL. |
 | `package` | `enum<string>` | OPTIONAL | `npm` · `pypi` · `oci` | Package manager type hint. |
-| `headers` | `map<string, string>` | OPTIONAL | | Custom HTTP headers for remote endpoints. Values may contain `${input:<id>}` references (VS Code only — see §4.2.4). |
+| `headers` | `map<string, string>` | OPTIONAL | | Custom HTTP headers for remote endpoints. Values may contain `${VAR}`, `${env:VAR}`, or `${input:<id>}` references — see §4.2.4. |
 | `tools` | `list<string>` | OPTIONAL | Default: `["*"]` | Restrict which tools are exposed. |
 | `url` | `string` | Conditional | | Endpoint URL. REQUIRED when `registry: false` and `transport` is `http`, `sse`, or `streamable-http`. |
 | `command` | `string` | Conditional | Single binary path; no embedded whitespace unless `args` is also present | Binary path. REQUIRED when `registry: false` and `transport` is `stdio`. |
@@ -395,12 +400,25 @@ dependencies:
         API_KEY: ${{ secrets.KEY }}
 ```
 
-#### 4.2.4. `${input:...}` Variables
+#### 4.2.4. Variable References in `headers` and `env`
 
-Values in `headers` and `env` may contain VS Code input variable references using the syntax `${input:<variable-id>}`. At runtime, VS Code prompts the user for each referenced input before starting the server.
+Values in `headers` and `env` may contain three placeholder syntaxes. APM resolves them per-target so secrets stay out of generated config files where possible.
 
-- **Registry-backed servers** — APM auto-generates input prompts from registry metadata.
+| Syntax | Source | VS Code | Copilot CLI / Codex |
+|---|---|---|---|
+| `${VAR}` | host environment | Translated to `${env:VAR}` (resolved at server-start by VS Code) | Resolved at install time from env (or interactive prompt) |
+| `${env:VAR}` | host environment | Native — passed through verbatim | Resolved at install time from env (or interactive prompt) |
+| `${input:<id>}` | user prompt | Native — VS Code prompts at runtime | Not supported — use `${VAR}` or `${env:VAR}` instead |
+| `<VAR>` (legacy) | host environment | Not recognized | Resolved at install time (kept for back-compat) |
+
+- **VS Code** has native `${env:VAR}` and `${input:VAR}` interpolation, so APM emits placeholders rather than baking secrets into `mcp.json`. Bare `${VAR}` is normalized to `${env:VAR}` for you.
+- **Copilot CLI** has no runtime interpolation, so APM resolves `${VAR}`, `${env:VAR}`, and the legacy `<VAR>` at install time using `os.environ` (or an interactive prompt when missing). Resolved values are not re-scanned, so a value containing literal `${...}` text is preserved.
+- **Codex** currently resolves only the legacy `<VAR>` placeholder at install time; `${VAR}` / `${env:VAR}` are passed through verbatim in the Codex adapter today.
+- **Recommended:** Use `${VAR}` or `${env:VAR}` in all new manifests — they work on every target that supports remote MCP servers. `<VAR>` is legacy and only resolved by Copilot CLI and Codex; in VS Code it would silently render as literal text in the generated config.
+- **Registry-backed servers** — APM auto-generates input prompts from registry metadata for `${input:...}`.
 - **Self-defined servers** — APM detects `${input:...}` patterns in `apm.yml` and generates matching input definitions automatically.
+
+GitHub Actions templates (`${{ ... }}`) are intentionally left untouched.
 
 ```yaml
 dependencies:
@@ -410,15 +428,10 @@ dependencies:
       transport: http
       url: https://my-server.example.com/mcp/
       headers:
-        Authorization: "Bearer ${input:my-server-token}"
-        X-Project: "${input:my-server-project}"
+        Authorization: "Bearer ${MY_SECRET_TOKEN}"      # bare env-var
+        X-Tenant: "${env:TENANT_ID}"                    # env-prefixed
+        X-Project: "${input:my-server-project}"         # VS Code input prompt
 ```
-
-| Runtime | `${input:...}` support |
-|---------|----------------------|
-| VS Code | Yes — prompts user at runtime |
-| Copilot CLI | No — use environment variables |
-| Codex | No — use environment variables |
 
 ---
 
@@ -443,6 +456,16 @@ Created automatically by `apm init --plugin`. Use [`apm install --dev`](../cli-c
 
 ```bash
 apm install --dev owner/test-helpers
+```
+
+Plain `apm install` (no flag) deploys both `dependencies` and `devDependencies`. There is currently no `--omit=dev` flag -- the dev/prod separation kicks in at `apm pack --format plugin` time. The local-content scanner that builds plugin bundles also operates on `.apm/` only and does not consult the devDep marker. To keep maintainer-only primitives out of shipped artifacts, author them outside `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../../guides/dev-only-primitives/).
+
+Local-path devDependency example:
+
+```yaml
+devDependencies:
+  apm:
+    - path: ./dev/skills/release-checklist
 ```
 
 ---

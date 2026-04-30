@@ -15,9 +15,9 @@ lists two remediations (pin the URL scheme, or drop
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch  # noqa: F401
 
-import pytest
+import pytest  # noqa: F401
 from git.exc import GitCommandError
 
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
@@ -25,9 +25,12 @@ from apm_cli.models.apm_package import DependencyReference
 
 
 def _make_downloader():
-    with patch.dict(os.environ, {}, clear=True), patch(
-        "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
-        return_value=None,
+    with (
+        patch.dict(os.environ, {}, clear=True),
+        patch(
+            "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+            return_value=None,
+        ),
     ):
         return GitHubPackageDownloader()
 
@@ -51,13 +54,14 @@ def _run_clone_capture_warnings(dep, allow_fallback=False):
     def _capture(message, symbol=None):
         captured.append((message, symbol))
 
-    with patch.dict(os.environ, {}, clear=True), patch(
-        "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
-        return_value=None,
-    ), patch(
-        "apm_cli.deps.github_downloader.Repo"
-    ) as MockRepo, patch(
-        "apm_cli.deps.github_downloader._rich_warning", side_effect=_capture
+    with (
+        patch.dict(os.environ, {}, clear=True),
+        patch(
+            "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+            return_value=None,
+        ),
+        patch("apm_cli.deps.github_downloader.Repo") as MockRepo,
+        patch("apm_cli.deps.github_downloader._rich_warning", side_effect=_capture),
     ):
         MockRepo.clone_from.side_effect = _fake_clone
         target = Path(tempfile.mkdtemp())
@@ -67,6 +71,7 @@ def _run_clone_capture_warnings(dep, allow_fallback=False):
             pass
         finally:
             import shutil
+
             shutil.rmtree(target, ignore_errors=True)
     return captured
 
@@ -81,9 +86,7 @@ class TestProtocolFallbackPortWarning:
         """ssh:// URL with port + allow_fallback => plan has SSH and HTTPS =>
         exactly one warning naming the offender, both schemes, both
         remediations, and the docs URL."""
-        dep = DependencyReference.parse(
-            "ssh://git@bitbucket.example.com:7999/project/repo.git"
-        )
+        dep = DependencyReference.parse("ssh://git@bitbucket.example.com:7999/project/repo.git")
         assert dep.port == 7999
 
         calls = _run_clone_capture_warnings(dep, allow_fallback=True)
@@ -100,9 +103,7 @@ class TestProtocolFallbackPortWarning:
             f"warning must name the offender in 'Custom port {{port}} on "
             f"{{host}}/{{repo}}:' form: {msg!r}"
         )
-        assert "SSH" in msg and "HTTPS" in msg, (
-            f"warning must name both planned schemes: {msg!r}"
-        )
+        assert "SSH" in msg and "HTTPS" in msg, f"warning must name both planned schemes: {msg!r}"
         assert "Pin the URL scheme" in msg, (
             f"warning must offer the 'pin the URL scheme' remediation: {msg!r}"
         )
@@ -117,32 +118,24 @@ class TestProtocolFallbackPortWarning:
     def test_warning_fires_on_https_url_with_port_when_fallback_allowed(self):
         """https:// URL with port + allow_fallback => plan has HTTPS and SSH =>
         warning fires, naming the offender and schemes."""
-        dep = DependencyReference.parse(
-            "https://git.company.internal:8443/team/repo.git"
-        )
+        dep = DependencyReference.parse("https://git.company.internal:8443/team/repo.git")
         assert dep.port == 8443
 
         calls = _run_clone_capture_warnings(dep, allow_fallback=True)
         port_warnings = self._port_warnings(calls)
-        assert len(port_warnings) == 1, (
-            f"expected exactly one port warning, got: {port_warnings!r}"
-        )
+        assert len(port_warnings) == 1, f"expected exactly one port warning, got: {port_warnings!r}"
         msg = port_warnings[0]
         assert "Custom port 8443 on git.company.internal/team/repo:" in msg, (
             f"warning must name the offender in 'Custom port {{port}} on "
             f"{{host}}/{{repo}}:' form: {msg!r}"
         )
-        assert "SSH" in msg and "HTTPS" in msg, (
-            f"warning must name both planned schemes: {msg!r}"
-        )
+        assert "SSH" in msg and "HTTPS" in msg, f"warning must name both planned schemes: {msg!r}"
 
     def test_warning_silent_in_strict_mode_even_with_custom_port(self):
         """Strict mode (default) only plans one attempt; the warning must not
         fire even when a custom port is set. This is the whole point of
         strict-by-default (#778)."""
-        dep = DependencyReference.parse(
-            "ssh://git@bitbucket.example.com:7999/project/repo.git"
-        )
+        dep = DependencyReference.parse("ssh://git@bitbucket.example.com:7999/project/repo.git")
         assert dep.port == 7999
 
         calls = _run_clone_capture_warnings(dep, allow_fallback=False)
@@ -165,9 +158,7 @@ class TestProtocolFallbackPortWarning:
     def test_warning_fires_once_not_per_attempt(self):
         """Regression guard: the warning must be emitted once per dep (before
         the attempt loop), not per clone attempt in the plan."""
-        dep = DependencyReference.parse(
-            "ssh://git@bitbucket.example.com:7999/project/repo.git"
-        )
+        dep = DependencyReference.parse("ssh://git@bitbucket.example.com:7999/project/repo.git")
         calls = _run_clone_capture_warnings(dep, allow_fallback=True)
         port_warnings = self._port_warnings(calls)
         assert len(port_warnings) == 1, (
@@ -179,9 +170,7 @@ class TestProtocolFallbackPortWarning:
         ``_clone_with_fallback`` multiple times for the same dep (ref-
         resolution clone, then the actual dep clone). The warning must still
         fire only once per (host, repo, port) across all those calls."""
-        dep = DependencyReference.parse(
-            "ssh://git@bitbucket.example.com:7999/project/repo.git"
-        )
+        dep = DependencyReference.parse("ssh://git@bitbucket.example.com:7999/project/repo.git")
         dl = _make_downloader()
         dl.auth_resolver._cache.clear()
         dl._allow_fallback = True
@@ -194,13 +183,14 @@ class TestProtocolFallbackPortWarning:
         def _capture(message, symbol=None):
             captured.append((message, symbol))
 
-        with patch.dict(os.environ, {}, clear=True), patch(
-            "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
-            return_value=None,
-        ), patch(
-            "apm_cli.deps.github_downloader.Repo"
-        ) as MockRepo, patch(
-            "apm_cli.deps.github_downloader._rich_warning", side_effect=_capture
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+                return_value=None,
+            ),
+            patch("apm_cli.deps.github_downloader.Repo") as MockRepo,
+            patch("apm_cli.deps.github_downloader._rich_warning", side_effect=_capture),
         ):
             MockRepo.clone_from.side_effect = _fake_clone
             for _ in range(3):
@@ -211,6 +201,7 @@ class TestProtocolFallbackPortWarning:
                     pass
                 finally:
                     import shutil
+
                     shutil.rmtree(target, ignore_errors=True)
 
         port_warnings = [m for m, _s in captured if "Custom port" in m]
@@ -222,12 +213,8 @@ class TestProtocolFallbackPortWarning:
     def test_warning_fires_again_for_different_dep(self):
         """Dedup must be per-dep, not global: a second dep with a different
         (host, repo, port) identity gets its own warning."""
-        dep_a = DependencyReference.parse(
-            "ssh://git@bitbucket.example.com:7999/project/repo.git"
-        )
-        dep_b = DependencyReference.parse(
-            "https://git.other.example:8443/team/repo.git"
-        )
+        dep_a = DependencyReference.parse("ssh://git@bitbucket.example.com:7999/project/repo.git")
+        dep_b = DependencyReference.parse("https://git.other.example:8443/team/repo.git")
         dl = _make_downloader()
         dl.auth_resolver._cache.clear()
         dl._allow_fallback = True
@@ -240,13 +227,14 @@ class TestProtocolFallbackPortWarning:
         def _capture(message, symbol=None):
             captured.append((message, symbol))
 
-        with patch.dict(os.environ, {}, clear=True), patch(
-            "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
-            return_value=None,
-        ), patch(
-            "apm_cli.deps.github_downloader.Repo"
-        ) as MockRepo, patch(
-            "apm_cli.deps.github_downloader._rich_warning", side_effect=_capture
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+                return_value=None,
+            ),
+            patch("apm_cli.deps.github_downloader.Repo") as MockRepo,
+            patch("apm_cli.deps.github_downloader._rich_warning", side_effect=_capture),
         ):
             MockRepo.clone_from.side_effect = _fake_clone
             for dep in (dep_a, dep_a, dep_b, dep_b):
@@ -257,6 +245,7 @@ class TestProtocolFallbackPortWarning:
                     pass
                 finally:
                     import shutil
+
                     shutil.rmtree(target, ignore_errors=True)
 
         port_warnings = [m for m, _s in captured if "Custom port" in m]
@@ -303,13 +292,14 @@ class TestProtocolFallbackPortWarning:
         def _capture(message, symbol=None):
             captured.append((message, symbol))
 
-        with patch.dict(os.environ, {}, clear=True), patch(
-            "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
-            return_value=None,
-        ), patch(
-            "apm_cli.deps.github_downloader.Repo"
-        ) as MockRepo, patch(
-            "apm_cli.deps.github_downloader._rich_warning", side_effect=_capture
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+                return_value=None,
+            ),
+            patch("apm_cli.deps.github_downloader.Repo") as MockRepo,
+            patch("apm_cli.deps.github_downloader._rich_warning", side_effect=_capture),
         ):
             MockRepo.clone_from.side_effect = _fake_clone
             for dep in (dep_lower, dep_mixed):
@@ -320,6 +310,7 @@ class TestProtocolFallbackPortWarning:
                     pass
                 finally:
                     import shutil
+
                     shutil.rmtree(target, ignore_errors=True)
 
         port_warnings = [m for m, _s in captured if "Custom port" in m]
@@ -356,13 +347,14 @@ class TestProtocolFallbackPortWarning:
         def _capture(message, symbol=None):
             captured.append((message, symbol))
 
-        with patch.dict(os.environ, {}, clear=True), patch(
-            "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
-            return_value=None,
-        ), patch(
-            "apm_cli.deps.github_downloader.Repo"
-        ) as MockRepo, patch(
-            "apm_cli.deps.github_downloader._rich_warning", side_effect=_capture
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+                return_value=None,
+            ),
+            patch("apm_cli.deps.github_downloader.Repo") as MockRepo,
+            patch("apm_cli.deps.github_downloader._rich_warning", side_effect=_capture),
         ):
             MockRepo.clone_from.side_effect = _fake_clone
             for dep in (dep_a, dep_b):
@@ -373,6 +365,7 @@ class TestProtocolFallbackPortWarning:
                     pass
                 finally:
                     import shutil
+
                     shutil.rmtree(target, ignore_errors=True)
 
         port_warnings = [m for m, _s in captured if "Custom port" in m]

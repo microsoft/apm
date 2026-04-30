@@ -1,9 +1,18 @@
 """Base adapter interface for MCP clients."""
 
+import os
 import re
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 _INPUT_VAR_RE = re.compile(r"\$\{input:([^}]+)\}")
+
+# Matches ${VAR} and ${env:VAR}, capturing VAR. Intentionally does NOT match
+# ${input:VAR} (the optional ``env:`` group cannot also satisfy ``input:``),
+# nor GitHub Actions ``${{ ... }}`` templates (the second ``{`` fails the
+# identifier class). This keeps env-var handling fully disjoint from input
+# variable handling, so existing _INPUT_VAR_RE call sites are unaffected.
+_ENV_VAR_RE = re.compile(r"\$\{(?:env:)?([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
 class MCPClientAdapter(ABC):
@@ -15,14 +24,42 @@ class MCPClientAdapter(ABC):
     # so that ``apm install --global`` can install MCP servers to them.
     supports_user_scope: bool = False
 
+    def __init__(
+        self,
+        project_root: Path | str | None = None,
+        user_scope: bool = False,
+    ):
+        """Initialize the adapter with optional scope-aware path context.
+
+        Args:
+            project_root: Project root used to resolve project-local config paths.
+                When not provided, adapters fall back to the current working
+                directory for project-scoped paths.
+            user_scope: Whether the adapter should resolve user-scope config
+                paths instead of project-local paths when supported.
+        """
+        self._project_root = Path(project_root) if project_root is not None else None
+        self.user_scope = user_scope
+
+    @property
+    def project_root(self) -> Path:
+        """Return the explicit project root or the current working directory."""
+        if self._project_root is not None:
+            return self._project_root
+        return Path(os.getcwd())
+
     @abstractmethod
     def get_config_path(self):
         """Get the path to the MCP configuration file."""
         pass
 
     @abstractmethod
-    def update_config(self, config_updates):
-        """Update the MCP configuration."""
+    def update_config(self, config_updates) -> bool | None:
+        """Update the MCP configuration.
+
+        Returns ``False`` or ``None`` when the config write was skipped
+        (for example because the existing file could not be parsed safely).
+        """
         pass
 
     @abstractmethod
@@ -31,7 +68,15 @@ class MCPClientAdapter(ABC):
         pass
 
     @abstractmethod
-    def configure_mcp_server(self, server_url, server_name=None, enabled=True, env_overrides=None, server_info_cache=None, runtime_vars=None):
+    def configure_mcp_server(
+        self,
+        server_url,
+        server_name=None,
+        enabled=True,
+        env_overrides=None,
+        server_info_cache=None,
+        runtime_vars=None,
+    ):
         """Configure an MCP server in the client configuration.
 
         Args:
@@ -120,6 +165,16 @@ class MCPClientAdapter(ABC):
                 seen.add(var_id)
                 print(
                     f"[!]  Warning: ${{input:{var_id}}} in server "
-                    f"'{server_name}' will not be resolved \u2014 "
+                    f"'{server_name}' will not be resolved -- "
                     f"{runtime_label} does not support input variable prompts"
                 )
+
+    def normalize_project_arg(self, value):
+        """Normalize workspace placeholders for project-local runtimes."""
+        if (
+            not self.user_scope
+            and isinstance(value, str)
+            and value in {"${workspaceFolder}", "${projectRoot}", "${workspaceRoot}"}
+        ):
+            return "."
+        return value

@@ -1,6 +1,6 @@
 """Tests for GitHubPackageDownloader.list_remote_refs() and helpers."""
 
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch  # noqa: F401
 
 import pytest
 from git.exc import GitCommandError
@@ -8,7 +8,6 @@ from git.exc import GitCommandError
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -64,6 +63,7 @@ def _build_downloader():
 # _parse_ls_remote_output
 # ---------------------------------------------------------------------------
 
+
 class TestParseLsRemoteOutput:
     """Tests for the static ls-remote parser."""
 
@@ -102,10 +102,7 @@ class TestParseLsRemoteOutput:
         assert refs[0].name == "main"
 
     def test_malformed_lines_skipped(self):
-        output = (
-            "no-tab-here\n"
-            "aaa1111111111111111111111111111111111111\trefs/heads/main\n"
-        )
+        output = "no-tab-here\naaa1111111111111111111111111111111111111\trefs/heads/main\n"
         refs = GitHubPackageDownloader._parse_ls_remote_output(output)
         assert len(refs) == 1
 
@@ -137,6 +134,7 @@ class TestParseLsRemoteOutput:
 # ---------------------------------------------------------------------------
 # _semver_sort_key / _sort_remote_refs
 # ---------------------------------------------------------------------------
+
 
 class TestSorting:
     """Tests for semver sorting logic."""
@@ -234,6 +232,7 @@ class TestSorting:
 # list_remote_refs -- Artifactory
 # ---------------------------------------------------------------------------
 
+
 class TestListRemoteRefsArtifactory:
     """Artifactory dependencies should return an empty list."""
 
@@ -248,6 +247,7 @@ class TestListRemoteRefsArtifactory:
 # list_remote_refs -- GitHub / generic (git ls-remote path)
 # ---------------------------------------------------------------------------
 
+
 class TestListRemoteRefsGitHub:
     """Tests for the git ls-remote code path."""
 
@@ -259,7 +259,9 @@ class TestListRemoteRefsGitHub:
 
         dl._resolve_dep_token = MagicMock(return_value="ghp_test_token")
         dl._resolve_dep_auth_ctx = MagicMock(return_value=None)
-        dl._build_repo_url = MagicMock(return_value="https://x-access-token:ghp_test_token@github.com/owner/repo.git")
+        dl._build_repo_url = MagicMock(
+            return_value="https://x-access-token:ghp_test_token@github.com/owner/repo.git"
+        )
 
         mock_git = MockGitCmd.return_value
         mock_git.ls_remote.return_value = SAMPLE_LS_REMOTE
@@ -268,7 +270,10 @@ class TestListRemoteRefsGitHub:
 
         dl._resolve_dep_token.assert_called_once_with(dep)
         dl._build_repo_url.assert_called_once_with(
-            "owner/repo", use_ssh=False, dep_ref=dep, token="ghp_test_token",
+            "owner/repo",
+            use_ssh=False,
+            dep_ref=dep,
+            token="ghp_test_token",
             auth_scheme="basic",
         )
         mock_git.ls_remote.assert_called_once()
@@ -378,6 +383,7 @@ class TestListRemoteRefsGitHub:
 # list_remote_refs -- Azure DevOps (git ls-remote path)
 # ---------------------------------------------------------------------------
 
+
 class TestListRemoteRefsADO:
     """Tests for ADO deps going through the unified git ls-remote path."""
 
@@ -400,7 +406,10 @@ class TestListRemoteRefsADO:
 
         dl._resolve_dep_token.assert_called_once_with(dep)
         dl._build_repo_url.assert_called_once_with(
-            "owner/repo", use_ssh=False, dep_ref=dep, token="ado_pat_token",
+            "owner/repo",
+            use_ssh=False,
+            dep_ref=dep,
+            token="ado_pat_token",
             auth_scheme="basic",
         )
         mock_git.ls_remote.assert_called_once()
@@ -435,6 +444,7 @@ class TestListRemoteRefsADO:
 # ---------------------------------------------------------------------------
 # Auth token resolution
 # ---------------------------------------------------------------------------
+
 
 class TestAuthTokenResolution:
     """Verify correct token resolution per host type."""
@@ -481,7 +491,10 @@ class TestAuthTokenResolution:
         dl._resolve_dep_token.assert_called_once_with(dep)
         # _build_repo_url should receive token=None for generic hosts
         dl._build_repo_url.assert_called_once_with(
-            "owner/repo", use_ssh=False, dep_ref=dep, token=None,
+            "owner/repo",
+            use_ssh=False,
+            dep_ref=dep,
+            token=None,
             auth_scheme="basic",
         )
 
@@ -489,6 +502,7 @@ class TestAuthTokenResolution:
 # ---------------------------------------------------------------------------
 # RemoteRef dataclass basics
 # ---------------------------------------------------------------------------
+
 
 class TestRemoteRefDataclass:
     """Smoke tests for the RemoteRef dataclass."""
@@ -507,4 +521,5 @@ class TestRemoteRefDataclass:
     def test_import_from_apm_package(self):
         """RemoteRef should be importable via the backward-compat re-export path."""
         from apm_cli.models.apm_package import RemoteRef as Imported
+
         assert Imported is RemoteRef

@@ -32,10 +32,10 @@ from __future__ import annotations
 
 import hashlib
 import os
-from dataclasses import replace
+from dataclasses import replace  # noqa: F401
 from pathlib import Path
-from typing import Any, Optional
-from unittest.mock import MagicMock, patch
+from typing import Any, Optional  # noqa: F401
+from unittest.mock import MagicMock, patch  # noqa: F401
 
 import pytest
 import yaml
@@ -92,12 +92,12 @@ def _load_fixture_policy(name: str) -> ApmPolicy:
 def _make_fetch_result(
     outcome: str = "found",
     *,
-    policy: Optional[ApmPolicy] = None,
+    policy: ApmPolicy | None = None,
     source: str = "org:test-org/.github",
     cached: bool = False,
-    cache_age_seconds: Optional[int] = None,
-    fetch_error: Optional[str] = None,
-    error: Optional[str] = None,
+    cache_age_seconds: int | None = None,
+    fetch_error: str | None = None,
+    error: str | None = None,
 ) -> PolicyFetchResult:
     """Build a PolicyFetchResult for mocking discover_policy_with_chain."""
     return PolicyFetchResult(
@@ -116,7 +116,7 @@ def _build_policy(
     *,
     enforcement: str = "block",
     deny: tuple = (),
-    allow: Optional[tuple] = None,
+    allow: tuple | None = None,
     require: tuple = (),
 ) -> ApmPolicy:
     """Build an ApmPolicy with specific dep rules (frozen-safe)."""
@@ -128,9 +128,9 @@ def _write_apm_yml(
     path: Path,
     *,
     name: str = "test-project",
-    deps: Optional[list] = None,
-    mcp: Optional[list] = None,
-    target: Optional[str] = None,
+    deps: list | None = None,
+    mcp: list | None = None,
+    target: str | None = None,
 ) -> None:
     """Write a minimal apm.yml."""
     data: dict = {"name": name, "version": "1.0.0", "dependencies": {}}
@@ -148,9 +148,9 @@ def _make_pkg(
     apm_modules: Path,
     repo_url: str,
     *,
-    name: Optional[str] = None,
-    mcp: Optional[list] = None,
-    apm_deps: Optional[list] = None,
+    name: str | None = None,
+    mcp: list | None = None,
+    apm_deps: list | None = None,
 ) -> None:
     """Create a package directory with apm.yml under apm_modules."""
     pkg_dir = apm_modules / repo_url
@@ -164,9 +164,9 @@ def _make_pkg(
     )
 
 
-def _seed_lockfile(path: Path, locked_deps: list, mcp_servers: Optional[list] = None):
+def _seed_lockfile(path: Path, locked_deps: list, mcp_servers: list | None = None):
     """Write a lockfile pre-populated with given dependencies."""
-    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.deps.lockfile import LockedDependency, LockFile  # noqa: F401
 
     lf = LockFile()
     for dep in locked_deps:
@@ -178,8 +178,8 @@ def _seed_lockfile(path: Path, locked_deps: list, mcp_servers: Optional[list] = 
 
 def _invoke_install(
     runner: CliRunner,
-    args: Optional[list] = None,
-    env: Optional[dict] = None,
+    args: list | None = None,
+    env: dict | None = None,
 ) -> Any:
     """Invoke ``apm install`` via CliRunner and return the result."""
     from apm_cli.cli import cli
@@ -189,14 +189,17 @@ def _invoke_install(
 
 def _patch_both_discover(mock_return):
     """Return stacked decorators that patch both discovery entry points."""
+
     def decorator(func):
         @patch(_PATCH_DISCOVER_PREFLIGHT, return_value=mock_return)
         @patch(_PATCH_DISCOVER_GATE, return_value=mock_return)
         def wrapper(*args, **kwargs):
             return func(*args, **kwargs)
+
         wrapper.__name__ = func.__name__
         wrapper.__qualname__ = func.__qualname__
         return wrapper
+
     return decorator
 
 
@@ -224,6 +227,7 @@ def project(tmp_path):
 # I1: block + denied direct dep -> install fails non-zero,
 #     deny detail rendered, lockfile NOT updated
 # =====================================================================
+
 
 class TestI1BlockDeniedDirectDep:
     """Policy enforcement=block + denied dep -> hard fail."""
@@ -262,6 +266,7 @@ class TestI1BlockDeniedDirectDep:
 # I2: block + denied dep + --no-policy -> install succeeds, loud warning
 # =====================================================================
 
+
 class TestI2NoPolicyFlag:
     """--no-policy bypasses policy enforcement with loud warning."""
 
@@ -283,9 +288,7 @@ class TestI2NoPolicyFlag:
         result = _invoke_install(runner, ["--no-policy"])
 
         out = result.output
-        assert "policy" in out.lower(), (
-            f"Expected loud policy-disabled warning:\n{out}"
-        )
+        assert "policy" in out.lower(), f"Expected loud policy-disabled warning:\n{out}"
         # Policy should not block
         assert "blocked by org policy" not in out.lower(), (
             f"Policy enforcement was NOT bypassed by --no-policy:\n{out}"
@@ -295,6 +298,7 @@ class TestI2NoPolicyFlag:
 # =====================================================================
 # I3: warn + denied dep -> install succeeds with warning rendered
 # =====================================================================
+
 
 class TestI3WarnDeniedDep:
     """Policy enforcement=warn + denied dep -> install proceeds with warning."""
@@ -322,9 +326,7 @@ class TestI3WarnDeniedDep:
 
         out = result.output
         # Should NOT hard-fail due to policy (warn mode)
-        assert "blocked by org policy" not in out.lower(), (
-            f"Warn-mode should NOT block:\n{out}"
-        )
+        assert "blocked by org policy" not in out.lower(), f"Warn-mode should NOT block:\n{out}"
         # Policy diagnostic should be visible (violation rendered as warning)
         assert "test-blocked" in out or "denied" in out.lower() or "warn" in out.lower(), (
             f"Expected policy warning in output:\n{out}"
@@ -334,6 +336,7 @@ class TestI3WarnDeniedDep:
 # =====================================================================
 # I4: block + allowlist + dep not in allowlist -> fails with guidance
 # =====================================================================
+
 
 class TestI4AllowlistBlocked:
     """Dep not in allowlist triggers a block with allowlist guidance."""
@@ -372,16 +375,15 @@ class TestI4AllowlistBlocked:
 # I5: block + transport SSH denied -> fails with transport detail
 # =====================================================================
 
+
 class TestI5TransportDenied:
     """MCP policy denying SSH transport blocks the install."""
 
     @patch(_PATCH_UPDATES, return_value=None)
     @patch(_PATCH_DISCOVER_PREFLIGHT)
     @patch(_PATCH_DISCOVER_GATE)
-    def test_ssh_transport_blocked(
-        self, mock_gate, mock_preflight, mock_updates, project
-    ):
-        project_dir, runner = project
+    def test_ssh_transport_blocked(self, mock_gate, mock_preflight, mock_updates, project):
+        project_dir, runner = project  # noqa: RUF059
 
         policy = _load_fixture_policy("apm-policy-mcp.yml")
         # Fixture allows [stdio, http] but NOT ssh.  enforcement=block.
@@ -390,11 +392,17 @@ class TestI5TransportDenied:
         mock_preflight.return_value = fetch
 
         # Install an MCP server with ssh transport -- should be blocked
-        result = _invoke_install(runner, [
-            "--mcp", "evil-ssh-server",
-            "--transport", "ssh",
-            "--url", "ssh://example.com/srv",
-        ])
+        result = _invoke_install(
+            runner,
+            [
+                "--mcp",
+                "evil-ssh-server",
+                "--transport",
+                "ssh",
+                "--url",
+                "ssh://example.com/srv",
+            ],
+        )
 
         assert result.exit_code != 0, (
             f"Expected SSH transport block, got {result.exit_code}\n{result.output}"
@@ -408,6 +416,7 @@ class TestI5TransportDenied:
 # =====================================================================
 # I6: block + target mismatch -> fails after targets phase
 # =====================================================================
+
 
 class TestI6TargetMismatch:
     """Policy target allow=[vscode] but project target=claude -> blocked."""
@@ -437,14 +446,15 @@ class TestI6TargetMismatch:
             f"Expected target mismatch block, got {result.exit_code}\n{result.output}"
         )
         out = result.output
-        assert "target" in out.lower() or "compilation" in out.lower() or "blocked" in out.lower(), (
-            f"Expected target mismatch detail:\n{out}"
-        )
+        assert (
+            "target" in out.lower() or "compilation" in out.lower() or "blocked" in out.lower()
+        ), f"Expected target mismatch detail:\n{out}"
 
 
 # =====================================================================
 # I7: CLI --target override fixes I6 -> succeeds
 # =====================================================================
+
 
 class TestI7TargetOverrideFixes:
     """CLI --target=vscode overrides manifest target=claude -> passes."""
@@ -481,6 +491,7 @@ class TestI7TargetOverrideFixes:
 # I8: block + transitive MCP denied -> APM installed, MCP NOT written
 # =====================================================================
 
+
 class TestI8TransitiveMCPDenied:
     """Transitive MCP dep denied -> APM packages installed,
     MCP configs NOT written, exit non-zero."""
@@ -491,8 +502,7 @@ class TestI8TransitiveMCPDenied:
     @patch(_PATCH_DISCOVER_PREFLIGHT)
     @patch(_PATCH_DISCOVER_GATE)
     def test_transitive_mcp_blocked(
-        self, mock_gate, mock_preflight, mock_dl, mock_mcp_install,
-        mock_updates, project
+        self, mock_gate, mock_preflight, mock_dl, mock_mcp_install, mock_updates, project
     ):
         project_dir, runner = project
         apm_modules = project_dir / "apm_modules"
@@ -528,9 +538,7 @@ class TestI8TransitiveMCPDenied:
         result = _invoke_install(runner, ["--trust-transitive-mcp"])
 
         out = result.output
-        assert result.exit_code != 0, (
-            f"Expected non-zero exit for transitive MCP block:\n{out}"
-        )
+        assert result.exit_code != 0, f"Expected non-zero exit for transitive MCP block:\n{out}"
         assert "mcp" in out.lower() or "transitive" in out.lower(), (
             f"Expected transitive MCP error detail:\n{out}"
         )
@@ -540,6 +548,7 @@ class TestI8TransitiveMCPDenied:
 # I9: block + APM_POLICY_DISABLE=1 env var -> succeeds with loud warning
 # =====================================================================
 
+
 class TestI9EnvVarDisable:
     """APM_POLICY_DISABLE=1 env var bypasses enforcement with loud warning."""
 
@@ -548,8 +557,13 @@ class TestI9EnvVarDisable:
     @patch(_PATCH_DISCOVER_PREFLIGHT)
     @patch(_PATCH_DISCOVER_GATE)
     def test_env_var_bypasses_block(
-        self, mock_gate, mock_preflight, mock_dl, mock_updates,
-        project, monkeypatch,
+        self,
+        mock_gate,
+        mock_preflight,
+        mock_dl,
+        mock_updates,
+        project,
+        monkeypatch,
     ):
         project_dir, runner = project
         _write_apm_yml(project_dir / "apm.yml", deps=["test-blocked/forbidden-package"])
@@ -563,9 +577,7 @@ class TestI9EnvVarDisable:
         result = _invoke_install(runner)
 
         out = result.output
-        assert "policy" in out.lower(), (
-            f"Expected loud policy-disabled warning:\n{out}"
-        )
+        assert "policy" in out.lower(), f"Expected loud policy-disabled warning:\n{out}"
         assert "blocked by org policy" not in out.lower(), (
             f"Policy enforcement was NOT bypassed by env var:\n{out}"
         )
@@ -576,15 +588,14 @@ class TestI9EnvVarDisable:
 #      no fs mutation
 # =====================================================================
 
+
 class TestI10DryRunDenied:
     """Dry-run shows 'Would be blocked' without mutating the filesystem."""
 
     @patch(_PATCH_UPDATES, return_value=None)
     @patch(_PATCH_DISCOVER_PREFLIGHT)
     @patch(_PATCH_DISCOVER_GATE)
-    def test_dry_run_shows_would_be_blocked(
-        self, mock_gate, mock_preflight, mock_updates, project
-    ):
+    def test_dry_run_shows_would_be_blocked(self, mock_gate, mock_preflight, mock_updates, project):
         project_dir, runner = project
         _write_apm_yml(project_dir / "apm.yml", deps=["test-blocked/evil-pkg"])
 
@@ -596,9 +607,7 @@ class TestI10DryRunDenied:
         result = _invoke_install(runner, ["--dry-run"])
 
         out = result.output
-        assert result.exit_code == 0, (
-            f"Dry-run should exit 0, got {result.exit_code}\n{out}"
-        )
+        assert result.exit_code == 0, f"Dry-run should exit 0, got {result.exit_code}\n{out}"
         # The preflight runs checks and emits "Would be blocked" via
         # logger.warning().  It may appear as "[!] Would be blocked" or
         # the policy enforcement line shows enforcement=block.  Either
@@ -608,21 +617,16 @@ class TestI10DryRunDenied:
             or "enforcement=block" in out.lower()
             or "enforcement: block" in out.lower()
         )
-        assert has_policy_info, (
-            f"Expected policy enforcement info in dry-run output:\n{out}"
-        )
+        assert has_policy_info, f"Expected policy enforcement info in dry-run output:\n{out}"
         # No filesystem mutation
-        assert not (project_dir / "apm.lock.yaml").exists(), (
-            "Dry-run should NOT create lockfile"
-        )
-        assert not (project_dir / "apm_modules").exists(), (
-            "Dry-run should NOT create apm_modules/"
-        )
+        assert not (project_dir / "apm.lock.yaml").exists(), "Dry-run should NOT create lockfile"
+        assert not (project_dir / "apm_modules").exists(), "Dry-run should NOT create apm_modules/"
 
 
 # =====================================================================
 # I11: dry-run + 6+ denied deps -> 5 lines + tail "and N more"
 # =====================================================================
+
 
 class TestI11DryRunOverflow:
     """Dry-run caps output at 5 lines and appends 'and N more'."""
@@ -630,9 +634,7 @@ class TestI11DryRunOverflow:
     @patch(_PATCH_UPDATES, return_value=None)
     @patch(_PATCH_DISCOVER_PREFLIGHT)
     @patch(_PATCH_DISCOVER_GATE)
-    def test_dry_run_caps_at_five_lines(
-        self, mock_gate, mock_preflight, mock_updates, project
-    ):
+    def test_dry_run_caps_at_five_lines(self, mock_gate, mock_preflight, mock_updates, project):
         project_dir, runner = project
         # 7 denied deps -> should overflow (5 shown + "and 2 more")
         denied_deps = [f"test-blocked/pkg-{i}" for i in range(7)]
@@ -646,9 +648,7 @@ class TestI11DryRunOverflow:
         result = _invoke_install(runner, ["--dry-run"])
 
         out = result.output
-        assert result.exit_code == 0, (
-            f"Dry-run should exit 0, got {result.exit_code}\n{out}"
-        )
+        assert result.exit_code == 0, f"Dry-run should exit 0, got {result.exit_code}\n{out}"
         # Verify at minimum: the policy enforcement info is visible.
         # If the preflight emits individual "Would be blocked" lines,
         # overflow should produce "and N more".
@@ -659,14 +659,13 @@ class TestI11DryRunOverflow:
             or "would be blocked" in out.lower()
             or "enforcement=block" in out.lower()
         )
-        assert has_policy_info, (
-            f"Expected policy overflow or enforcement info:\n{out}"
-        )
+        assert has_policy_info, f"Expected policy overflow or enforcement info:\n{out}"
 
 
 # =====================================================================
 # I12: install <pkg> + policy violation -> apm.yml restored byte-equal
 # =====================================================================
+
 
 class TestI12ManifestRollback:
     """install <pkg> rolls back apm.yml byte-for-byte on policy block."""
@@ -677,8 +676,13 @@ class TestI12ManifestRollback:
     @patch(_PATCH_DISCOVER_PREFLIGHT)
     @patch(_PATCH_DISCOVER_GATE)
     def test_manifest_restored_byte_equal(
-        self, mock_gate, mock_preflight, mock_dl, mock_validate,
-        mock_updates, project,
+        self,
+        mock_gate,
+        mock_preflight,
+        mock_dl,
+        mock_validate,
+        mock_updates,
+        project,
     ):
         project_dir, runner = project
         manifest_path = project_dir / "apm.yml"
@@ -713,6 +717,7 @@ class TestI12ManifestRollback:
 # =====================================================================
 # I13: enforcement: off + denied deps -> succeeds silently
 # =====================================================================
+
 
 class TestI13EnforcementOff:
     """enforcement=off -> install proceeds, no policy output."""
@@ -749,6 +754,7 @@ class TestI13EnforcementOff:
 # I14: no policy at all -> succeeds silently
 # =====================================================================
 
+
 class TestI14NoPolicyPresent:
     """No apm-policy.yml anywhere -> install proceeds silently."""
 
@@ -769,14 +775,13 @@ class TestI14NoPolicyPresent:
         result = _invoke_install(runner)
 
         out = result.output
-        assert "blocked by org policy" not in out.lower(), (
-            f"Absent policy should not block:\n{out}"
-        )
+        assert "blocked by org policy" not in out.lower(), f"Absent policy should not block:\n{out}"
 
 
 # =====================================================================
 # I15: cache stale-but-fresh-enough (<7d) + offline -> uses cache
 # =====================================================================
+
 
 class TestI15CachedStale:
     """Stale cache within MAX_STALE_TTL serves policy with warning."""
@@ -810,9 +815,7 @@ class TestI15CachedStale:
 
         out = result.output
         # Should proceed (dep passes allow list)
-        assert "blocked by org policy" not in out.lower(), (
-            f"Stale cache should still allow:\n{out}"
-        )
+        assert "blocked by org policy" not in out.lower(), f"Stale cache should still allow:\n{out}"
         # Check for stale/cached warning in output
         assert "stale" in out.lower() or "cached" in out.lower(), (
             f"Expected stale/cached warning in output:\n{out}"
@@ -824,6 +827,7 @@ class TestI15CachedStale:
 #      NOTE: This tests the garbage_response outcome specifically.
 #      True malformed outcome is tested in I19.
 # =====================================================================
+
 
 class TestI16GarbageResponsePolicy:
     """Garbage response (e.g. captive portal) -> fail-open (warn), install proceeds."""
@@ -862,6 +866,7 @@ class TestI16GarbageResponsePolicy:
 # I17: local-only repo (no git remote, no policy) -> succeeds silently
 # =====================================================================
 
+
 class TestI17NoGitRemote:
     """No git remote -> outcome no_git_remote -> install proceeds."""
 
@@ -882,15 +887,14 @@ class TestI17NoGitRemote:
         result = _invoke_install(runner)
 
         out = result.output
-        assert "blocked by org policy" not in out.lower(), (
-            f"no_git_remote should not block:\n{out}"
-        )
+        assert "blocked by org policy" not in out.lower(), f"no_git_remote should not block:\n{out}"
 
 
 # =====================================================================
 # I18: direct MCP block on `apm install` (no APM deps, --only=mcp)
 #      Exit non-zero, MCP configs NOT written
 # =====================================================================
+
 
 class TestI18DirectMCPBlocked:
     """Direct MCP entry in apm.yml denied by policy -> blocked before
@@ -906,8 +910,12 @@ class TestI18DirectMCPBlocked:
     @patch(_PATCH_DISCOVER_PREFLIGHT)
     @patch(_PATCH_DISCOVER_GATE)
     def test_direct_mcp_denied_blocks_install(
-        self, mock_gate, mock_preflight, mock_mcp_install,
-        mock_updates, project,
+        self,
+        mock_gate,
+        mock_preflight,
+        mock_mcp_install,
+        mock_updates,
+        project,
     ):
         project_dir, runner = project
 
@@ -926,12 +934,11 @@ class TestI18DirectMCPBlocked:
         result = _invoke_install(runner)
 
         out = result.output
-        assert result.exit_code != 0, (
-            f"Expected non-zero exit for direct MCP block:\n{out}"
-        )
+        assert result.exit_code != 0, f"Expected non-zero exit for direct MCP block:\n{out}"
         # MCPIntegrator.install should NOT have been called
-        mock_mcp_install.assert_not_called(), (
-            "MCPIntegrator.install should not run when direct MCP is blocked"
+        (
+            mock_mcp_install.assert_not_called(),
+            ("MCPIntegrator.install should not run when direct MCP is blocked"),
         )
 
 
@@ -939,6 +946,7 @@ class TestI18DirectMCPBlocked:
 # I19: malformed policy outcome on install path -> warn-and-proceed
 #      (fail-open posture per CEO mandate)
 # =====================================================================
+
 
 class TestI19MalformedPolicyFailOpen:
     """Malformed policy outcome -> fail-open with loud warning,
@@ -953,7 +961,12 @@ class TestI19MalformedPolicyFailOpen:
     @patch(_PATCH_DISCOVER_PREFLIGHT)
     @patch(_PATCH_DISCOVER_GATE)
     def test_malformed_outcome_warns_and_proceeds(
-        self, mock_gate, mock_preflight, mock_dl, mock_updates, project,
+        self,
+        mock_gate,
+        mock_preflight,
+        mock_dl,
+        mock_updates,
+        project,
     ):
         project_dir, runner = project
         _write_apm_yml(project_dir / "apm.yml", deps=["DevExpGbb/some-package"])
@@ -977,13 +990,8 @@ class TestI19MalformedPolicyFailOpen:
             f"Malformed policy should fail-open, not block:\n{out}"
         )
         # Should emit a warning about the malformed policy
-        has_warning = (
-            "malformed" in out.lower()
-            or "policy" in out.lower()
-        )
-        assert has_warning, (
-            f"Expected malformed policy warning in output:\n{out}"
-        )
+        has_warning = "malformed" in out.lower() or "policy" in out.lower()
+        assert has_warning, f"Expected malformed policy warning in output:\n{out}"
 
     @patch(_PATCH_UPDATES, return_value=None)
     @patch(_PATCH_VALIDATE_PKG, return_value=True)
@@ -991,8 +999,13 @@ class TestI19MalformedPolicyFailOpen:
     @patch(_PATCH_DISCOVER_PREFLIGHT)
     @patch(_PATCH_DISCOVER_GATE)
     def test_malformed_policy_does_not_bypass_rollback(
-        self, mock_gate, mock_preflight, mock_dl, mock_validate,
-        mock_updates, project,
+        self,
+        mock_gate,
+        mock_preflight,
+        mock_dl,
+        mock_validate,
+        mock_updates,
+        project,
     ):
         """install <pkg> with malformed policy must NOT sys.exit(1)
         from inside policy_gate (which would bypass the rollback handler).
@@ -1030,6 +1043,7 @@ class TestI19MalformedPolicyFailOpen:
 # I20: warn mode + multiple violations -> ALL warnings emitted, exit 0
 # =====================================================================
 
+
 class TestI20WarnModeAllViolations:
     """Warn mode with fail_fast=False collects ALL violations
     and emits all of them, not just the first.
@@ -1050,11 +1064,14 @@ class TestI20WarnModeAllViolations:
         project_dir, runner = project
 
         # Multiple denied deps -- warn mode should report ALL
-        _write_apm_yml(project_dir / "apm.yml", deps=[
-            "test-blocked/evil-pkg-1",
-            "test-blocked/evil-pkg-2",
-            "test-blocked/evil-pkg-3",
-        ])
+        _write_apm_yml(
+            project_dir / "apm.yml",
+            deps=[
+                "test-blocked/evil-pkg-1",
+                "test-blocked/evil-pkg-2",
+                "test-blocked/evil-pkg-3",
+            ],
+        )
 
         policy = _build_policy(
             enforcement="warn",
@@ -1068,9 +1085,7 @@ class TestI20WarnModeAllViolations:
 
         out = result.output
         # Should NOT block (warn mode)
-        assert "blocked by org policy" not in out.lower(), (
-            f"Warn-mode should NOT block:\n{out}"
-        )
+        assert "blocked by org policy" not in out.lower(), f"Warn-mode should NOT block:\n{out}"
         # Install should proceed (exit 0 or exit due to mock errors,
         # but NOT due to policy)
         # The 3 deps should all be attempted (not short-circuited
@@ -1091,6 +1106,7 @@ class TestI20WarnModeAllViolations:
 # =====================================================================
 # I21: 3-level extends chain (#831) end-to-end through install pipeline
 # =====================================================================
+
 
 class TestI21ThreeLevelExtendsChain:
     """leaf -> mid -> root resolves all three policies at install time.
@@ -1134,12 +1150,8 @@ class TestI21ThreeLevelExtendsChain:
             dependencies=DependencyPolicy(deny=("enterprise-blocked/*",)),
         )
 
-        leaf_fetch = _make_fetch_result(
-            "found", policy=leaf_policy, source="org:contoso/.github"
-        )
-        mid_fetch = _make_fetch_result(
-            "found", policy=mid_policy, source="org:org-mid/.github"
-        )
+        leaf_fetch = _make_fetch_result("found", policy=leaf_policy, source="org:contoso/.github")
+        mid_fetch = _make_fetch_result("found", policy=mid_policy, source="org:org-mid/.github")
         root_fetch = _make_fetch_result(
             "found", policy=root_policy, source="org:enterprise-root/.github"
         )

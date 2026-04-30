@@ -10,9 +10,9 @@ Covers:
 """
 
 import logging
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch  # noqa: F401
 
-import pytest
+import pytest  # noqa: F401
 
 from apm_cli.marketplace.models import (
     MarketplaceManifest,
@@ -20,7 +20,6 @@ from apm_cli.marketplace.models import (
     MarketplaceSource,
 )
 from apm_cli.marketplace.shadow_detector import ShadowMatch, detect_shadows
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -92,9 +91,7 @@ class TestDetectShadows:
             result = detect_shadows("my-plugin", "primary")
 
         assert len(result) == 1
-        assert result[0] == ShadowMatch(
-            marketplace_name="community", plugin_name="my-plugin"
-        )
+        assert result[0] == ShadowMatch(marketplace_name="community", plugin_name="my-plugin")
 
     def test_multiple_shadows(self):
         """Plugin in 3 marketplaces -- returns 2 matches (excludes primary)."""
@@ -224,9 +221,7 @@ class TestShadowDetectionInResolver:
             name="sec-check",
             source={"type": "github", "repo": "acme/sec-check", "ref": "main"},
         )
-        manifest = MarketplaceManifest(
-            name="acme", plugins=(plugin,)
-        )
+        manifest = MarketplaceManifest(name="acme", plugins=(plugin,))
         source = MarketplaceSource(name="acme", owner="acme", repo="marketplace")
 
         shadow = ShadowMatch(marketplace_name="community", plugin_name="sec-check")
@@ -246,18 +241,14 @@ class TestShadowDetectionInResolver:
             ) as mock_detect,
             caplog.at_level(logging.WARNING, logger="apm_cli.marketplace.resolver"),
         ):
-            canonical, resolved = resolve_marketplace_plugin(
-                "sec-check", "acme"
-            )
+            canonical, resolved = resolve_marketplace_plugin("sec-check", "acme")
 
         # Resolution succeeded
         assert canonical == "acme/sec-check#main"
         assert resolved.name == "sec-check"
 
         # Shadow detection was called with correct args
-        mock_detect.assert_called_once_with(
-            "sec-check", "acme", auth_resolver=None
-        )
+        mock_detect.assert_called_once_with("sec-check", "acme", auth_resolver=None)
 
         # Warning emitted for the shadow
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
@@ -293,9 +284,7 @@ class TestProvenanceSetOnMarketplaceDeps:
         # Simulate what install.py produces
         dep = LockedDependency(repo_url="acme/sec-check")
         dep.discovered_via = marketplace_provenance["discovered_via"]
-        dep.marketplace_plugin_name = marketplace_provenance[
-            "marketplace_plugin_name"
-        ]
+        dep.marketplace_plugin_name = marketplace_provenance["marketplace_plugin_name"]
 
         # Security-critical: all provenance fields must be set
         assert dep.discovered_via == "acme-tools"

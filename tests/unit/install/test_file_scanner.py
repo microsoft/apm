@@ -27,7 +27,6 @@ import pytest
 
 from apm_cli.install.phases.lockfile import compute_deployed_hashes
 
-
 _SHA256_PREFIXED = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -69,10 +68,12 @@ def _build_fixture_project(root: Path) -> tuple[list[str], set[str], set[str]]:
         full.parent.mkdir(parents=True, exist_ok=True)
         full.write_bytes(payload)
         expected_files.add(rel)
-    expected_files.update({
-        ".github/skills/skill-a/SKILL.md",
-        ".github/skills/skill-b/SKILL.md",
-    })
+    expected_files.update(
+        {
+            ".github/skills/skill-a/SKILL.md",
+            ".github/skills/skill-b/SKILL.md",
+        }
+    )
 
     expected_dirs: set[str] = {
         ".github/skills/skill-a",
@@ -90,17 +91,13 @@ class TestComputeDeployedHashesCoverage:
         deployed_files, _expected_dirs, expected_files = _build_fixture_project(tmp_path)
         hashes = compute_deployed_hashes(deployed_files, tmp_path)
         missing = expected_files - set(hashes.keys())
-        assert missing == set(), (
-            f"regular files missing from hashes: {sorted(missing)}"
-        )
+        assert missing == set(), f"regular files missing from hashes: {sorted(missing)}"
 
     def test_directories_excluded_from_hashes(self, tmp_path: Path) -> None:
         deployed_files, expected_dirs, _expected_files = _build_fixture_project(tmp_path)
         hashes = compute_deployed_hashes(deployed_files, tmp_path)
         leaked = expected_dirs & set(hashes.keys())
-        assert leaked == set(), (
-            f"directory entries leaked into hashes: {sorted(leaked)}"
-        )
+        assert leaked == set(), f"directory entries leaked into hashes: {sorted(leaked)}"
 
     def test_set_difference_equals_directory_entries(self, tmp_path: Path) -> None:
         """The canonical invariant: ``files - hashes.keys() == dirs``."""
@@ -125,9 +122,7 @@ class TestComputeDeployedHashesCoverage:
         deployed_files, _expected_dirs, _expected_files = _build_fixture_project(tmp_path)
         hashes = compute_deployed_hashes(deployed_files, tmp_path)
         rel = ".github/prompts/empty.prompt.md"
-        assert rel in hashes, (
-            f"empty file {rel!r} missing from hashes (regular file coverage gap)"
-        )
+        assert rel in hashes, f"empty file {rel!r} missing from hashes (regular file coverage gap)"
         # SHA-256 of empty bytes is well-known.
         assert hashes[rel] == (
             "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -137,9 +132,7 @@ class TestComputeDeployedHashesCoverage:
         """Dotfiles like ``.mcp.json`` must not be silently skipped."""
         deployed_files, _expected_dirs, _expected_files = _build_fixture_project(tmp_path)
         hashes = compute_deployed_hashes(deployed_files, tmp_path)
-        assert ".mcp.json" in hashes, (
-            "hidden dotfile coverage gap: .mcp.json not hashed"
-        )
+        assert ".mcp.json" in hashes, "hidden dotfile coverage gap: .mcp.json not hashed"
 
     @pytest.mark.skipif(
         sys.platform.startswith("win"),
@@ -171,18 +164,14 @@ class TestComputeDeployedHashesCoverage:
 
         rel_link = ".apm/agents/alias.agent.md"
         hashes = compute_deployed_hashes([rel_link], tmp_path)
-        assert rel_link not in hashes, (
-            "symlink leaked into hashes -- contract violated"
-        )
+        assert rel_link not in hashes, "symlink leaked into hashes -- contract violated"
 
     def test_no_extra_hashes_beyond_deployed_files(self, tmp_path: Path) -> None:
         """Hash dict must never contain keys absent from ``deployed_files``."""
         deployed_files, _expected_dirs, _expected_files = _build_fixture_project(tmp_path)
         hashes = compute_deployed_hashes(deployed_files, tmp_path)
         extras = set(hashes.keys()) - set(deployed_files)
-        assert extras == set(), (
-            f"hashes contain entries not in deployed_files: {sorted(extras)}"
-        )
+        assert extras == set(), f"hashes contain entries not in deployed_files: {sorted(extras)}"
 
     def test_missing_files_are_skipped_silently(self, tmp_path: Path) -> None:
         """Paths in ``deployed_files`` that don't exist on disk produce no hash.

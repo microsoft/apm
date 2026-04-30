@@ -52,6 +52,13 @@ def install_root_redirect(root: Optional[str | os.PathLike]) -> Iterator[None]:
         set_source_root_override(None)
 
 
-# Alias used by ``apm compile --root``; semantics are identical so the
-# two commands share a single implementation.
+# ``apm compile --root`` and ``apm install --root`` need exactly the
+# same chdir + source-root-pin pair: both commands write into *root*
+# while reading sources from the captured ``$PWD``.  The alias keeps
+# them on a single implementation so the two flags can never drift.
+#
+# Split the alias into its own ``contextmanager`` only if compile
+# develops needs that install doesn't (e.g. compile-only environment
+# tweaks, an output-only sandbox).  Until then, sharing prevents
+# silent divergence.
 compile_root_redirect = install_root_redirect

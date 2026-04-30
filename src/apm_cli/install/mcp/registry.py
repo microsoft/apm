@@ -22,13 +22,13 @@ from __future__ import annotations
 import contextlib
 import ipaddress
 import os
-from typing import Iterator, Optional, Tuple
+from collections.abc import Iterator, Mapping, Sequence
+from typing import Any, Optional, Tuple  # noqa: F401, UP035
 from urllib.parse import urlparse, urlunparse
 
 import click
 
-from ..models.dependency.mcp import _ALLOWED_URL_SCHEMES
-
+from ...models.dependency.mcp import _ALLOWED_URL_SCHEMES
 
 # Defensive cap on registry URL length to keep apm.yml diffs reviewable
 # and to bound any downstream URL parsing/logging surface.
@@ -59,7 +59,7 @@ def _redact_url_credentials(url: str) -> str:
         return url
 
 
-def _is_local_or_metadata_host(host: Optional[str]) -> bool:
+def _is_local_or_metadata_host(host: str | None) -> bool:
     """Return True for loopback, link-local, RFC1918, or cloud-metadata IPs.
 
     Used to surface a soft warning when ``--registry`` points at the local
@@ -90,7 +90,7 @@ def _is_local_or_metadata_host(host: Optional[str]) -> bool:
     )
 
 
-def validate_registry_url(value: Optional[str]) -> Optional[str]:
+def validate_registry_url(value: str | None) -> str | None:
     """Validate a ``--registry`` URL value. Return the normalized URL.
 
     Reuses the same scheme allowlist as :class:`MCPDependency` (``http``,
@@ -119,15 +119,19 @@ def validate_registry_url(value: Optional[str]) -> Optional[str]:
             f"{_MAX_REGISTRY_URL_LENGTH} characters)"
         )
     parsed = urlparse(normalized)
+    # Redact credentials before echoing the URL back to the user: any
+    # ``user:password@`` segment in `value` would otherwise land in
+    # `UsageError` text and be captured by CI logs / shell history.
+    safe_value = _redact_url_credentials(value)
     if not parsed.scheme or not parsed.netloc:
         raise click.UsageError(
-            f"--registry: Invalid URL '{value}': expected scheme://host "
+            f"--registry: Invalid URL '{safe_value}': expected scheme://host "
             f"(e.g. https://mcp.internal.example.com)"
         )
     scheme = parsed.scheme.lower()
     if scheme not in _ALLOWED_URL_SCHEMES:
         raise click.UsageError(
-            f"--registry: Invalid URL '{value}': scheme '{scheme}' is not "
+            f"--registry: Invalid URL '{safe_value}': scheme '{scheme}' is not "
             f"supported; use http:// or https://. WebSocket URLs (ws/wss) "
             f"and file:// paths are rejected for security."
         )
@@ -135,10 +139,10 @@ def validate_registry_url(value: Optional[str]) -> Optional[str]:
 
 
 def resolve_registry_url(
-    cli_value: Optional[str],
+    cli_value: str | None,
     *,
     logger=None,
-) -> Tuple[Optional[str], str]:
+) -> tuple[str | None, str]:
     """Apply precedence chain: CLI flag > ``MCP_REGISTRY_URL`` env > default.
 
     Returns ``(resolved_url_or_None, source)`` where source is one of
@@ -158,8 +162,7 @@ def resolve_registry_url(
         if env_value and env_value.rstrip("/") != cli_value:
             if logger is not None:
                 logger.progress(
-                    f"--registry overrides MCP_REGISTRY_URL "
-                    f"({_redact_url_credentials(env_value)})",
+                    f"--registry overrides MCP_REGISTRY_URL ({_redact_url_credentials(env_value)})",
                     symbol="info",
                 )
         _maybe_warn_local_host(cli_value, logger)
@@ -170,8 +173,7 @@ def resolve_registry_url(
         # change package resolution. Always emitted (not verbose-gated).
         if logger is not None:
             logger.progress(
-                f"Using MCP registry: {_redact_url_credentials(env_value)} "
-                f"(from MCP_REGISTRY_URL)",
+                f"Using MCP registry: {_redact_url_credentials(env_value)} (from MCP_REGISTRY_URL)",
                 symbol="info",
             )
         _maybe_warn_local_host(env_value, logger)
@@ -202,7 +204,7 @@ _REGISTRY_ENV_KEYS = ("MCP_REGISTRY_URL", "MCP_REGISTRY_ALLOW_HTTP")
 
 
 @contextlib.contextmanager
-def registry_env_override(registry_url: Optional[str]) -> Iterator[None]:
+def registry_env_override(registry_url: str | None) -> Iterator[None]:
     """Temporarily export ``MCP_REGISTRY_URL`` for the duration of a call.
 
     ``MCPIntegrator.install`` constructs ``MCPServerOperations()`` deep in
@@ -237,20 +239,39 @@ def registry_env_override(registry_url: Optional[str]) -> Iterator[None]:
                 os.environ[k] = v
 
 
-def validate_mcp_dry_run_entry(name, **kwargs) -> None:
+def validate_mcp_dry_run_entry(
+    name: str,
+    *,
+    transport: str | None = None,
+    url: str | None = None,
+    env: Mapping[str, str] | None = None,
+    headers: Mapping[str, str] | None = None,
+    version: str | None = None,
+    command_argv: Sequence[str] | None = None,
+    registry_url: str | None = None,
+) -> None:
     """C1: validate the MCP entry that ``apm install --mcp ... --dry-run``
     would persist, raising :class:`click.UsageError` on rejection.
 
-    Mirrors the validation that real install runs via ``_build_mcp_entry``,
+    Mirrors the validation that real install runs via ``build_mcp_entry``,
     so dry-run never previews "success" for an entry the real install
     would reject. Lives here (not in commands/install.py) per the LOC-budget
-    invariant on that module.
+    invariant on that module. The keyword-only signature matches
+    :func:`build_mcp_entry` exactly so unknown kwargs surface as
+    ``TypeError`` at the boundary instead of being silently swallowed.
     """
-    # Local import: ``_build_mcp_entry`` lives in commands/install.py and
-    # imports from this module, so the import must be deferred to call time
-    # to avoid a circular import.
-    from ..commands.install import _build_mcp_entry
+    from .entry import build_mcp_entry
+
     try:
-        _build_mcp_entry(name, **kwargs)
+        build_mcp_entry(
+            name,
+            transport=transport,
+            url=url,
+            env=env,
+            headers=headers,
+            version=version,
+            command_argv=command_argv,
+            registry_url=registry_url,
+        )
     except ValueError as exc:
-        raise click.UsageError(str(exc))
+        raise click.UsageError(str(exc))  # noqa: B904

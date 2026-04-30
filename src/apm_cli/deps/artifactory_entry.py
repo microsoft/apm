@@ -19,7 +19,8 @@ pipeline can fetch files without knowing which registry type is in use.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Callable, List, Optional
+from collections.abc import Callable
+from typing import TYPE_CHECKING, List, Optional  # noqa: F401, UP035
 from urllib.parse import quote
 
 import requests as _requests
@@ -37,7 +38,7 @@ class ArtifactoryRegistryClient:
     with the :class:`RegistryClient` protocol, not this class directly.
     """
 
-    def __init__(self, config: "RegistryConfig") -> None:
+    def __init__(self, config: RegistryConfig) -> None:
         self._config = config
 
     # -- RegistryClient protocol ---------------------------------------------
@@ -48,8 +49,8 @@ class ArtifactoryRegistryClient:
         repo: str,
         file_path: str,
         ref: str = "main",
-        resilient_get: Optional[Callable] = None,
-    ) -> Optional[bytes]:
+        resilient_get: Callable | None = None,
+    ) -> bytes | None:
         """Fetch a single file via the Archive Entry Download API.
 
         Tries each candidate archive URL (GitHub heads, GitLab, GitHub
@@ -84,9 +85,9 @@ def fetch_entry_from_archive(
     file_path: str,
     ref: str = "main",
     scheme: str = "https",
-    headers: Optional[dict] = None,
-    resilient_get: Optional[Callable] = None,
-) -> Optional[bytes]:
+    headers: dict | None = None,
+    resilient_get: Callable | None = None,
+) -> bytes | None:
     """Fetch a single file from an Artifactory-proxied archive.
 
     Convenience wrapper around the core entry-download logic for callers
@@ -121,9 +122,9 @@ def _fetch_entry(
     file_path: str,
     ref: str,
     scheme: str,
-    headers: Optional[dict],
-    resilient_get: Optional[Callable],
-) -> Optional[bytes]:
+    headers: dict | None,
+    resilient_get: Callable | None,
+) -> bytes | None:
     """Core entry-download logic shared by the class and standalone helper."""
     from ..utils.github_host import build_artifactory_archive_url
     from ..utils.path_security import PathTraversalError, validate_path_segments
@@ -140,12 +141,17 @@ def _fetch_entry(
         return None
 
     archive_urls = build_artifactory_archive_url(
-        host, prefix, owner, repo, ref, scheme=scheme,
+        host,
+        prefix,
+        owner,
+        repo,
+        ref,
+        scheme=scheme,
     )
 
     # Root directory inside the archive is typically "{repo}-{ref}", but
     # hosting platforms may normalize refs (e.g. "feature/foo" -> "feature-foo").
-    root_prefixes: List[str] = [f"{repo}-{ref}"]
+    root_prefixes: list[str] = [f"{repo}-{ref}"]
     normalized_ref = ref.replace("/", "-")
     if normalized_ref != ref:
         normalized_root = f"{repo}-{normalized_ref}"
@@ -164,7 +170,9 @@ def _fetch_entry(
                     resp = resilient_get(entry_url, headers=req_headers, timeout=30)
                 else:
                     resp = _requests.get(
-                        entry_url, headers=req_headers, timeout=30,
+                        entry_url,
+                        headers=req_headers,
+                        timeout=30,
                     )
                 if resp.status_code == 200:
                     logger.debug("Archive entry download OK: %s", entry_url)
@@ -176,7 +184,9 @@ def _fetch_entry(
                 )
             except _requests.RequestException:
                 logger.debug(
-                    "Archive entry download failed: %s", entry_url, exc_info=True,
+                    "Archive entry download failed: %s",
+                    entry_url,
+                    exc_info=True,
                 )
                 continue
 

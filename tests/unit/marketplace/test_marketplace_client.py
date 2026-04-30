@@ -6,9 +6,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.marketplace import client as client_mod
 from apm_cli.marketplace.errors import MarketplaceFetchError
 from apm_cli.marketplace.models import MarketplaceSource
-from apm_cli.marketplace import client as client_mod
 
 
 @pytest.fixture(autouse=True)
@@ -135,9 +135,7 @@ class TestFetchMarketplace:
         mock_resolver.try_with_fallback.side_effect = Exception("Network error")
         mock_resolver.classify_host.return_value = MagicMock(api_base="https://api.github.com")
 
-        manifest = client_mod.fetch_marketplace(
-            source, auth_resolver=mock_resolver
-        )
+        manifest = client_mod.fetch_marketplace(source, auth_resolver=mock_resolver)
         assert manifest.name == "Stale"  # Falls back to stale cache
 
     def test_no_cache_no_network_raises(self, tmp_path):
@@ -147,9 +145,7 @@ class TestFetchMarketplace:
         mock_resolver.classify_host.return_value = MagicMock(api_base="https://api.github.com")
 
         with pytest.raises(MarketplaceFetchError):
-            client_mod.fetch_marketplace(
-                source, force_refresh=True, auth_resolver=mock_resolver
-            )
+            client_mod.fetch_marketplace(source, force_refresh=True, auth_resolver=mock_resolver)
 
 
 class TestAutoDetectPath:
@@ -201,7 +197,7 @@ class TestAutoDetectPath:
 class TestProxyAwareFetch:
     """Proxy-aware marketplace fetch via Artifactory Archive Entry Download."""
 
-    _MARKETPLACE_JSON = {"name": "Test", "plugins": [{"name": "p1", "repository": "o/r"}]}
+    _MARKETPLACE_JSON = {"name": "Test", "plugins": [{"name": "p1", "repository": "o/r"}]}  # noqa: RUF012
 
     def _make_cfg(self, enforce_only=False):
         cfg = MagicMock()
@@ -217,8 +213,12 @@ class TestProxyAwareFetch:
         source = _make_source()
         cfg = self._make_cfg()
         raw = json.dumps(self._MARKETPLACE_JSON).encode()
-        with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg), \
-             patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=raw) as mock_fetch:
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg),
+            patch(
+                "apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=raw
+            ) as mock_fetch,
+        ):
             result = client_mod._fetch_file(source, "marketplace.json")
 
         assert result == self._MARKETPLACE_JSON
@@ -237,8 +237,10 @@ class TestProxyAwareFetch:
         """Proxy returns None, no enforce_only -- falls through to GitHub API."""
         source = _make_source()
         cfg = self._make_cfg(enforce_only=False)
-        with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg), \
-             patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=None):
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg),
+            patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=None),
+        ):
             mock_resolver = MagicMock()
             mock_resolver.try_with_fallback.return_value = self._MARKETPLACE_JSON
             mock_resolver.classify_host.return_value = MagicMock(api_base="https://api.github.com")
@@ -251,8 +253,10 @@ class TestProxyAwareFetch:
         """Proxy returns None + enforce_only -- returns None, no GitHub call."""
         source = _make_source()
         cfg = self._make_cfg(enforce_only=True)
-        with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg), \
-             patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=None):
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg),
+            patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=None),
+        ):
             mock_resolver = MagicMock()
             result = client_mod._fetch_file(source, "marketplace.json", auth_resolver=mock_resolver)
 
@@ -274,8 +278,13 @@ class TestProxyAwareFetch:
         """Proxy returns non-JSON bytes -- treated as failure, falls to GitHub."""
         source = _make_source()
         cfg = self._make_cfg(enforce_only=False)
-        with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg), \
-             patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=b"\x89PNG binary"):
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg),
+            patch(
+                "apm_cli.deps.artifactory_entry.fetch_entry_from_archive",
+                return_value=b"\x89PNG binary",
+            ),
+        ):
             mock_resolver = MagicMock()
             mock_resolver.try_with_fallback.return_value = self._MARKETPLACE_JSON
             mock_resolver.classify_host.return_value = MagicMock(api_base="https://api.github.com")
@@ -297,8 +306,12 @@ class TestProxyAwareFetch:
 
         mock_resolver = MagicMock()
         mock_resolver.try_with_fallback.return_value = None
-        with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg), \
-             patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", side_effect=mock_entry):
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg),
+            patch(
+                "apm_cli.deps.artifactory_entry.fetch_entry_from_archive", side_effect=mock_entry
+            ),
+        ):
             path = client_mod._auto_detect_path(source, auth_resolver=mock_resolver)
 
         assert path == ".github/plugin/marketplace.json"
@@ -308,8 +321,10 @@ class TestProxyAwareFetch:
         source = _make_source()
         cfg = self._make_cfg()
         raw = json.dumps(self._MARKETPLACE_JSON).encode()
-        with patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg), \
-             patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=raw):
+        with (
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=cfg),
+            patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=raw),
+        ):
             manifest = client_mod.fetch_marketplace(source, force_refresh=True)
 
         assert manifest.name == "Test"
@@ -327,7 +342,7 @@ class TestPrivateRepoAuth:
     is used on the first attempt.
     """
 
-    _MARKETPLACE_JSON = {"name": "Private Plugins", "plugins": []}
+    _MARKETPLACE_JSON = {"name": "Private Plugins", "plugins": []}  # noqa: RUF012
 
     def test_fetch_file_private_repo_auth_first(self, _proxy):
         """_fetch_file passes unauth_first=False so private repos are reached via auth first."""

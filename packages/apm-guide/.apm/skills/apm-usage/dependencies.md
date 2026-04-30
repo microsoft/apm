@@ -155,6 +155,13 @@ dependencies:
       package: npm                              # npm|pypi|oci
       headers:
         X-Custom: "value"
+        # Env-var placeholders in headers/env values:
+        #   ${VAR} or ${env:VAR}  -> resolved from host env at install time
+        #                            by Copilot (VS Code resolves at runtime;
+        #                            Codex passes ${...} through unchanged)
+        #   ${input:<id>}         -> VS Code prompts user at runtime
+        #   <VAR>                 -> legacy Copilot syntax (still supported)
+        Authorization: "Bearer ${MY_TOKEN}"
       tools: ["repos", "issues"]
 
     # Self-defined server (not in registry)

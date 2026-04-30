@@ -3,14 +3,29 @@
 import builtins
 from pathlib import Path
 
-from ...constants import APM_MODULES_DIR, APM_YML_FILENAME
-from ...core.command_logger import CommandLogger
+from ...constants import APM_MODULES_DIR, APM_YML_FILENAME  # noqa: F401
+from ...core.command_logger import CommandLogger  # noqa: F401
+from ...deps.lockfile import LockFile  # noqa: F401
+from ...integration.mcp_integrator import MCPIntegrator
+from ...models.apm_package import APMPackage, DependencyReference  # noqa: F401
 from ...utils.path_security import PathTraversalError, safe_rmtree
 from ...utils.paths import portable_relpath
 
-from ...deps.lockfile import LockFile
-from ...models.apm_package import APMPackage, DependencyReference
-from ...integration.mcp_integrator import MCPIntegrator
+
+def _build_children_index(lockfile):
+    """Build parent_url -> [child_deps] index in a single O(n) pass.
+
+    Returns a dict mapping each ``resolved_by`` URL to the list of
+    dependency objects that claim it as their parent.
+    """
+    children = {}
+    for dep in lockfile.get_package_dependencies():
+        parent = dep.resolved_by
+        if parent:
+            if parent not in children:
+                children[parent] = []
+            children[parent].append(dep)
+    return children
 
 
 def _parse_dependency_entry(dep_entry):
@@ -77,7 +92,8 @@ def _dry_run_uninstall(packages_to_remove, apm_modules_dir, logger):
         if apm_modules_dir.exists() and package_path.exists():
             logger.progress(f"  - {pkg} from apm_modules/")
 
-    from ...deps.lockfile import LockFile, get_lockfile_path
+    from ...deps.lockfile import LockFile, get_lockfile_path  # noqa: F811
+
     lockfile_path = get_lockfile_path(Path("."))
     lockfile = LockFile.read(lockfile_path)
     if lockfile:
@@ -88,19 +104,19 @@ def _dry_run_uninstall(packages_to_remove, apm_modules_dir, logger):
                 removed_repo_urls.add(ref.repo_url)
             except (ValueError, TypeError, AttributeError, KeyError):
                 removed_repo_urls.add(pkg)
+        children_index = _build_children_index(lockfile)
         queue = builtins.list(removed_repo_urls)
         potential_orphans = builtins.set()
         while queue:
             parent_url = queue.pop()
-            for dep in lockfile.get_package_dependencies():
+            for dep in children_index.get(parent_url, []):
                 key = dep.get_unique_key()
                 if key in potential_orphans:
                     continue
-                if dep.resolved_by and dep.resolved_by == parent_url:
-                    potential_orphans.add(key)
-                    queue.append(dep.repo_url)
+                potential_orphans.add(key)
+                queue.append(dep.repo_url)
         if potential_orphans:
-            logger.progress(f"  Transitive dependencies that would be removed:")
+            logger.progress(f"  Transitive dependencies that would be removed:")  # noqa: F541
             for orphan_key in sorted(potential_orphans):
                 logger.progress(f"    - {orphan_key}")
 
@@ -118,7 +134,7 @@ def _remove_packages_from_disk(packages_to_remove, apm_modules_dir, logger):
         try:
             dep_ref = _parse_dependency_entry(package)
             package_path = dep_ref.get_install_path(apm_modules_dir)
-        except (PathTraversalError,) as e:
+        except PathTraversalError as e:
             logger.error(f"Refusing to remove {package}: {e}")
             continue
         except (ValueError, TypeError, AttributeError, KeyError):
@@ -133,7 +149,9 @@ def _remove_packages_from_disk(packages_to_remove, apm_modules_dir, logger):
             try:
                 safe_rmtree(package_path, apm_modules_dir)
                 logger.progress(f"Removed {package} from apm_modules/")
-                logger.verbose_detail(f"    Path: {portable_relpath(package_path, apm_modules_dir)}")
+                logger.verbose_detail(
+                    f"    Path: {portable_relpath(package_path, apm_modules_dir)}"
+                )
                 removed += 1
                 deleted_pkg_paths.append(package_path)
             except Exception as e:
@@ -142,11 +160,14 @@ def _remove_packages_from_disk(packages_to_remove, apm_modules_dir, logger):
             logger.warning(f"Package {package} not found in apm_modules/")
 
     from ...integration.base_integrator import BaseIntegrator as _BI2
+
     _BI2.cleanup_empty_parents(deleted_pkg_paths, stop_at=apm_modules_dir)
     return removed
 
 
-def _cleanup_transitive_orphans(lockfile, packages_to_remove, apm_modules_dir, apm_yml_path, logger):
+def _cleanup_transitive_orphans(
+    lockfile, packages_to_remove, apm_modules_dir, apm_yml_path, logger
+):
     """Remove orphaned transitive deps and return (removed_count, actual_orphan_keys)."""
 
     if not lockfile or not apm_modules_dir.exists():
@@ -161,17 +182,17 @@ def _cleanup_transitive_orphans(lockfile, packages_to_remove, apm_modules_dir, a
             removed_repo_urls.add(pkg)
 
     # Find transitive orphans recursively
+    children_index = _build_children_index(lockfile)
     orphans = builtins.set()
     queue = builtins.list(removed_repo_urls)
     while queue:
         parent_url = queue.pop()
-        for dep in lockfile.get_package_dependencies():
+        for dep in children_index.get(parent_url, []):
             key = dep.get_unique_key()
             if key in orphans:
                 continue
-            if dep.resolved_by and dep.resolved_by == parent_url:
-                orphans.add(key)
-                queue.append(dep.repo_url)
+            orphans.add(key)
+            queue.append(dep.repo_url)
 
     if not orphans:
         return 0, builtins.set()
@@ -180,6 +201,7 @@ def _cleanup_transitive_orphans(lockfile, packages_to_remove, apm_modules_dir, a
     remaining_deps = builtins.set()
     try:
         from ...utils.yaml_io import load_yaml
+
         updated_data = load_yaml(apm_yml_path) or {}
         for dep_str in updated_data.get("dependencies", {}).get("apm", []) or []:
             try:
@@ -207,7 +229,11 @@ def _cleanup_transitive_orphans(lockfile, packages_to_remove, apm_modules_dir, a
             orphan_path = orphan_ref.get_install_path(apm_modules_dir)
         except ValueError:
             parts = orphan_key.split("/")
-            orphan_path = apm_modules_dir.joinpath(*parts) if len(parts) >= 2 else apm_modules_dir / orphan_key
+            orphan_path = (
+                apm_modules_dir.joinpath(*parts)
+                if len(parts) >= 2
+                else apm_modules_dir / orphan_key
+            )
 
         if orphan_path.exists():
             try:
@@ -220,20 +246,23 @@ def _cleanup_transitive_orphans(lockfile, packages_to_remove, apm_modules_dir, a
                 logger.error(f"Failed to remove transitive dep {orphan_key}: {e}")
 
     from ...integration.base_integrator import BaseIntegrator as _BI
+
     _BI.cleanup_empty_parents(deleted_orphan_paths, stop_at=apm_modules_dir)
     return removed, actual_orphans
 
 
-def _sync_integrations_after_uninstall(apm_package, project_root, all_deployed_files, logger, user_scope=False):
+def _sync_integrations_after_uninstall(
+    apm_package, project_root, all_deployed_files, logger, user_scope=False
+):
     """Remove deployed files and re-integrate from remaining packages.
 
     When *user_scope* is ``True``, targets are resolved for user-level
     deployment so cleanup and re-integration use the correct paths.
     """
     from ...integration.base_integrator import BaseIntegrator
-    from ...models.apm_package import PackageInfo, validate_apm_package
     from ...integration.dispatch import get_dispatch_table
     from ...integration.targets import resolve_targets
+    from ...models.apm_package import PackageInfo, validate_apm_package
 
     _dispatch = get_dispatch_table()
     _integrators = {name: entry.integrator_class() for name, entry in _dispatch.items()}
@@ -241,7 +270,9 @@ def _sync_integrations_after_uninstall(apm_package, project_root, all_deployed_f
     # Resolve targets once -- used for both Phase 1 removal and Phase 2 re-integration.
     config_target = apm_package.target
     _explicit = config_target or None
-    _resolved_targets = resolve_targets(project_root, user_scope=user_scope, explicit_target=_explicit)
+    _resolved_targets = resolve_targets(
+        project_root, user_scope=user_scope, explicit_target=_explicit
+    )
 
     sync_managed = all_deployed_files if all_deployed_files else None
     if sync_managed is not None:
@@ -278,12 +309,12 @@ def _sync_integrations_after_uninstall(apm_package, project_root, all_deployed_f
                 continue
             _managed_subset = None
             if _buckets is not None:
-                _bucket_key = BaseIntegrator.partition_bucket_key(
-                    _prim_name, _target.name
-                )
+                _bucket_key = BaseIntegrator.partition_bucket_key(_prim_name, _target.name)
                 _managed_subset = _buckets.get(_bucket_key, set())
             result = _integrators[_prim_name].sync_for_target(
-                _target, apm_package, project_root,
+                _target,
+                apm_package,
+                project_root,
                 managed_files=_managed_subset,
             )
             counts[_entry.counter_key] += result.get("files_removed", 0)
@@ -298,27 +329,59 @@ def _sync_integrations_after_uninstall(apm_package, project_root, all_deployed_f
             if (project_root / er / "skills").exists():
                 _skill_dirs_exist = True
                 break
-    if _skill_dirs_exist:
+
+    # Scan sync_managed DIRECTLY for cowork:// entries.
+    # partition_managed_files() uses resolved_deploy_root to detect
+    # dynamic-root targets, but the static KNOWN_TARGETS["copilot-cowork"]
+    # always has resolved_deploy_root=None (it is only set after for_scope()
+    # resolves the OneDrive path at install time).  As a result, cowork://
+    # paths are never routed into _buckets["skills"] by the partition, so
+    # the bucket-based _has_cowork_skills check in the previous fix always
+    # returned False.  Bypassing the bucket and scanning sync_managed
+    # directly is the correct approach: no partition logic is involved.
+    _cowork_skill_files: set = set()
+    if sync_managed:
+        from ...integration.copilot_cowork_paths import COWORK_URI_SCHEME
+
+        _cowork_skill_files = {p for p in sync_managed if p.startswith(COWORK_URI_SCHEME)}
+    _has_cowork_skills = bool(_cowork_skill_files)
+
+    if _skill_dirs_exist or _has_cowork_skills:
+        # Merge cowork entries into the skills bucket so sync_integration
+        # receives them via managed_files.
+        if _has_cowork_skills and _buckets is not None:
+            _buckets.setdefault("skills", set()).update(_cowork_skill_files)
+        elif _has_cowork_skills:
+            _buckets = {"skills": _cowork_skill_files, "hooks": set()}
+
+        # When cowork entries are present, pass targets=None so
+        # sync_integration builds skill_prefix_tuple from KNOWN_TARGETS
+        # (which includes the copilot-cowork target with user_root_resolver
+        # set).  Using _resolved_targets alone would yield only the local
+        # prefix (.copilot/skills/) and cowork:// paths would be silently
+        # skipped by the startswith() guard inside sync_integration.
+        _sync_targets = None if _has_cowork_skills else _resolved_targets
         result = _integrators["skills"].sync_integration(
-            apm_package, project_root,
+            apm_package,
+            project_root,
             managed_files=_buckets["skills"] if _buckets else None,
-            targets=_resolved_targets,
+            targets=_sync_targets,
         )
         counts["skills"] = result.get("files_removed", 0)
 
     # Hooks (multi-target sync_integration handles all targets)
     result = _integrators["hooks"].sync_integration(
-        apm_package, project_root,
+        apm_package,
+        project_root,
         managed_files=_buckets["hooks"] if _buckets else None,
     )
     counts["hooks"] = result.get("files_removed", 0)
-
 
     # Phase 2: Re-integrate from remaining installed packages
     _targets = _resolved_targets
 
     for dep in apm_package.get_apm_dependencies():
-        dep_ref = dep if hasattr(dep, 'repo_url') else None
+        dep_ref = dep if hasattr(dep, "repo_url") else None
         if not dep_ref:
             continue
         install_path = dep_ref.get_install_path(Path(APM_MODULES_DIR))
@@ -330,7 +393,8 @@ def _sync_integrations_after_uninstall(apm_package, project_root, all_deployed_f
         if not pkg:
             continue
         pkg_info = PackageInfo(
-            package=pkg, install_path=install_path,
+            package=pkg,
+            install_path=install_path,
             dependency_ref=dep_ref,
             package_type=result.package_type if result else None,
         )
@@ -342,10 +406,14 @@ def _sync_integrations_after_uninstall(apm_package, project_root, all_deployed_f
                     if not _entry or _entry.multi_target:
                         continue
                     getattr(_integrators[_prim_name], _entry.integrate_method)(
-                        _target, pkg_info, project_root,
+                        _target,
+                        pkg_info,
+                        project_root,
                     )
             _integrators["skills"].integrate_package_skill(
-                pkg_info, project_root, targets=_targets,
+                pkg_info,
+                project_root,
+                targets=_targets,
             )
         except Exception:
             pkg_id = dep_ref.get_identity() if hasattr(dep_ref, "get_identity") else str(dep_ref)
@@ -354,12 +422,23 @@ def _sync_integrations_after_uninstall(apm_package, project_root, all_deployed_f
     return counts
 
 
-def _cleanup_stale_mcp(apm_package, lockfile, lockfile_path, old_mcp_servers, modules_dir=None, scope=None):
+def _cleanup_stale_mcp(
+    apm_package,
+    lockfile,
+    lockfile_path,
+    old_mcp_servers,
+    modules_dir=None,
+    project_root=None,
+    user_scope: bool = False,
+    scope=None,
+):
     """Remove MCP servers that are no longer needed after uninstall."""
     if not old_mcp_servers:
         return
     apm_modules_path = modules_dir if modules_dir is not None else Path.cwd() / APM_MODULES_DIR
-    remaining_mcp = MCPIntegrator.collect_transitive(apm_modules_path, lockfile_path, trust_private=True)
+    remaining_mcp = MCPIntegrator.collect_transitive(
+        apm_modules_path, lockfile_path, trust_private=True
+    )
     try:
         remaining_root_mcp = apm_package.get_mcp_dependencies()
     except Exception:
@@ -368,5 +447,10 @@ def _cleanup_stale_mcp(apm_package, lockfile, lockfile_path, old_mcp_servers, mo
     new_mcp_servers = MCPIntegrator.get_server_names(all_remaining_mcp)
     stale_servers = old_mcp_servers - new_mcp_servers
     if stale_servers:
-        MCPIntegrator.remove_stale(stale_servers, scope=scope)
+        MCPIntegrator.remove_stale(
+            stale_servers,
+            project_root=project_root,
+            user_scope=user_scope,
+            scope=scope,
+        )
     MCPIntegrator.update_lockfile(new_mcp_servers, lockfile_path)

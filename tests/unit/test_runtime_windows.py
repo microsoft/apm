@@ -1,13 +1,15 @@
 """Tests for Windows platform support in RuntimeManager and ScriptRunner."""
 
-import sys
-from unittest.mock import patch, MagicMock
-import pytest
+import sys  # noqa: F401
+from unittest.mock import MagicMock, patch
+
+import pytest  # noqa: F401
+
+from apm_cli.core.script_runner import ScriptRunner
 
 # Import modules at module level BEFORE any sys.platform patching,
 # to avoid triggering Windows-only import paths (msvcrt, CREATE_NO_WINDOW) on Unix.
 from apm_cli.runtime.manager import RuntimeManager
-from apm_cli.core.script_runner import ScriptRunner
 
 
 def _make_manager(platform: str) -> RuntimeManager:
@@ -42,15 +44,19 @@ class TestRuntimeManagerPlatformDetection:
 
     def test_common_script_is_ps1_on_windows(self):
         manager = _make_manager("win32")
-        with patch("sys.platform", "win32"), \
-             patch.object(manager, "get_embedded_script", return_value="# ps1 content") as mock:
+        with (
+            patch("sys.platform", "win32"),
+            patch.object(manager, "get_embedded_script", return_value="# ps1 content") as mock,
+        ):
             manager.get_common_script()
             mock.assert_called_once_with("setup-common.ps1")
 
     def test_common_script_is_sh_on_unix(self):
         manager = _make_manager("darwin")
-        with patch("sys.platform", "darwin"), \
-             patch.object(manager, "get_embedded_script", return_value="# sh content") as mock:
+        with (
+            patch("sys.platform", "darwin"),
+            patch.object(manager, "get_embedded_script", return_value="# sh content") as mock,
+        ):
             manager.get_common_script()
             mock.assert_called_once_with("setup-common.sh")
 
@@ -66,9 +72,11 @@ class TestRuntimeManagerTokenHelper:
 
     def test_token_helper_loads_script_on_unix(self):
         manager = _make_manager("darwin")
-        with patch("sys.platform", "darwin"), \
-             patch("pathlib.Path.exists", return_value=True), \
-             patch("pathlib.Path.read_text", return_value="#!/bin/bash\n# token helper"):
+        with (
+            patch("sys.platform", "darwin"),
+            patch("pathlib.Path.exists", return_value=True),
+            patch("pathlib.Path.read_text", return_value="#!/bin/bash\n# token helper"),
+        ):
             result = manager.get_token_helper_script()
             assert result == "#!/bin/bash\n# token helper"
 
@@ -79,10 +87,15 @@ class TestRuntimeManagerExecution:
     def test_uses_powershell_on_windows(self):
         """Verify PowerShell is used for script execution on Windows."""
         manager = _make_manager("win32")
-        with patch("sys.platform", "win32"), \
-             patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run, \
-             patch("shutil.which", return_value=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"), \
-             patch.object(manager, "get_token_helper_script", return_value=""):
+        with (
+            patch("sys.platform", "win32"),
+            patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run,
+            patch(
+                "shutil.which",
+                return_value=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            ),
+            patch.object(manager, "get_token_helper_script", return_value=""),
+        ):
             manager.run_embedded_script("# script", "# common")
 
         cmd = mock_run.call_args[0][0]
@@ -93,10 +106,15 @@ class TestRuntimeManagerExecution:
     def test_powershell_uses_bypass_execution_policy(self):
         """Verify -ExecutionPolicy Bypass is passed on Windows."""
         manager = _make_manager("win32")
-        with patch("sys.platform", "win32"), \
-             patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run, \
-             patch("shutil.which", return_value=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"), \
-             patch.object(manager, "get_token_helper_script", return_value=""):
+        with (
+            patch("sys.platform", "win32"),
+            patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run,
+            patch(
+                "shutil.which",
+                return_value=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            ),
+            patch.object(manager, "get_token_helper_script", return_value=""),
+        ):
             manager.run_embedded_script("# script", "# common")
 
         cmd = mock_run.call_args[0][0]
@@ -106,10 +124,15 @@ class TestRuntimeManagerExecution:
     def test_windows_writes_ps1_temp_files(self):
         """Verify temp files use .ps1 extension on Windows."""
         manager = _make_manager("win32")
-        with patch("sys.platform", "win32"), \
-             patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run, \
-             patch("shutil.which", return_value=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"), \
-             patch.object(manager, "get_token_helper_script", return_value=""):
+        with (
+            patch("sys.platform", "win32"),
+            patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run,
+            patch(
+                "shutil.which",
+                return_value=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            ),
+            patch.object(manager, "get_token_helper_script", return_value=""),
+        ):
             manager.run_embedded_script("# script content", "# common content")
 
         cmd = mock_run.call_args[0][0]
@@ -121,10 +144,12 @@ class TestRuntimeManagerExecution:
     def test_uses_bash_on_unix(self):
         """Verify bash is used for script execution on Unix."""
         manager = _make_manager("linux")
-        with patch("sys.platform", "linux"), \
-             patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run, \
-             patch("pathlib.Path.exists", return_value=True), \
-             patch("pathlib.Path.read_text", return_value="#!/bin/bash\n# token helper"):
+        with (
+            patch("sys.platform", "linux"),
+            patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run,
+            patch("pathlib.Path.exists", return_value=True),
+            patch("pathlib.Path.read_text", return_value="#!/bin/bash\n# token helper"),
+        ):
             manager.run_embedded_script("# script", "# common")
 
         cmd = mock_run.call_args[0][0]
@@ -133,10 +158,12 @@ class TestRuntimeManagerExecution:
     def test_unix_writes_sh_temp_files(self):
         """Verify temp files use .sh extension on Unix."""
         manager = _make_manager("linux")
-        with patch("sys.platform", "linux"), \
-             patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run, \
-             patch("pathlib.Path.exists", return_value=True), \
-             patch("pathlib.Path.read_text", return_value="#!/bin/bash"):
+        with (
+            patch("sys.platform", "linux"),
+            patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run,
+            patch("pathlib.Path.exists", return_value=True),
+            patch("pathlib.Path.read_text", return_value="#!/bin/bash"),
+        ):
             manager.run_embedded_script("# script content", "# common content")
 
         cmd = mock_run.call_args[0][0]
@@ -145,10 +172,15 @@ class TestRuntimeManagerExecution:
     def test_script_args_forwarded_on_windows(self):
         """Verify script arguments are forwarded to PowerShell."""
         manager = _make_manager("win32")
-        with patch("sys.platform", "win32"), \
-             patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run, \
-             patch("shutil.which", return_value=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"), \
-             patch.object(manager, "get_token_helper_script", return_value=""):
+        with (
+            patch("sys.platform", "win32"),
+            patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run,
+            patch(
+                "shutil.which",
+                return_value=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            ),
+            patch.object(manager, "get_token_helper_script", return_value=""),
+        ):
             manager.run_embedded_script("# script", "# common", ["-Vanilla"])
 
         cmd = mock_run.call_args[0][0]
@@ -157,10 +189,12 @@ class TestRuntimeManagerExecution:
     def test_setup_runtime_uses_ps_args_on_windows(self):
         """Verify setup_runtime translates args to PowerShell style on Windows."""
         manager = _make_manager("win32")
-        with patch("sys.platform", "win32"), \
-             patch.object(manager, "get_embedded_script", return_value="# ps1"), \
-             patch.object(manager, "get_common_script", return_value="# common"), \
-             patch.object(manager, "run_embedded_script", return_value=True) as mock_run:
+        with (
+            patch("sys.platform", "win32"),
+            patch.object(manager, "get_embedded_script", return_value="# ps1"),
+            patch.object(manager, "get_common_script", return_value="# common"),
+            patch.object(manager, "run_embedded_script", return_value=True) as mock_run,
+        ):
             manager.setup_runtime("codex", version="0.1.0", vanilla=True)
 
         args = mock_run.call_args[0][2]  # script_args is the 3rd positional arg
@@ -172,10 +206,12 @@ class TestRuntimeManagerExecution:
     def test_setup_runtime_uses_unix_args_on_linux(self):
         """Verify setup_runtime keeps Unix-style args on Linux."""
         manager = _make_manager("linux")
-        with patch("sys.platform", "linux"), \
-             patch.object(manager, "get_embedded_script", return_value="# bash"), \
-             patch.object(manager, "get_common_script", return_value="# common"), \
-             patch.object(manager, "run_embedded_script", return_value=True) as mock_run:
+        with (
+            patch("sys.platform", "linux"),
+            patch.object(manager, "get_embedded_script", return_value="# bash"),
+            patch.object(manager, "get_common_script", return_value="# common"),
+            patch.object(manager, "run_embedded_script", return_value=True) as mock_run,
+        ):
             manager.setup_runtime("codex", version="0.1.0", vanilla=True)
 
         args = mock_run.call_args[0][2]
@@ -192,9 +228,11 @@ class TestScriptRunnerWindowsParsing:
         runner = ScriptRunner()
         env = {"PATH": "/usr/bin"}
 
-        with patch("sys.platform", "win32"), \
-             patch("apm_cli.core.script_runner.shutil.which", return_value=None), \
-             patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run:
+        with (
+            patch("sys.platform", "win32"),
+            patch("apm_cli.core.script_runner.shutil.which", return_value=None),
+            patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run,
+        ):
             runner._execute_runtime_command("codex --quiet", "prompt content", env)
             call_args = mock_run.call_args[0][0]
             assert "codex" in call_args
@@ -205,12 +243,12 @@ class TestScriptRunnerWindowsParsing:
         runner = ScriptRunner()
         env = {"PATH": "/usr/bin"}
 
-        with patch("sys.platform", "win32"), \
-             patch("apm_cli.core.script_runner.shutil.which", return_value=None), \
-             patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run:
-            runner._execute_runtime_command(
-                'codex --model "gpt-4o mini"', "prompt content", env
-            )
+        with (
+            patch("sys.platform", "win32"),
+            patch("apm_cli.core.script_runner.shutil.which", return_value=None),
+            patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run,
+        ):
+            runner._execute_runtime_command('codex --model "gpt-4o mini"', "prompt content", env)
             call_args = mock_run.call_args[0][0]
             assert "codex" in call_args
             # shlex.split(posix=False) keeps the quotes around the value
@@ -221,8 +259,10 @@ class TestScriptRunnerWindowsParsing:
         runner = ScriptRunner()
         env = {"PATH": "/usr/bin"}
 
-        with patch("sys.platform", "linux"), \
-             patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run:
+        with (
+            patch("sys.platform", "linux"),
+            patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run,
+        ):
             runner._execute_runtime_command("codex --quiet", "prompt content", env)
             call_args = mock_run.call_args[0][0]
             assert "codex" in call_args
