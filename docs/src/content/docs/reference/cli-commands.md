@@ -1162,11 +1162,15 @@ Register a GitHub repository as a plugin marketplace.
 ```bash
 apm marketplace add OWNER/REPO [OPTIONS]
 apm marketplace add HOST/OWNER/REPO [OPTIONS]
+apm marketplace add HOST/group/sub/.../REPO [OPTIONS]
+apm marketplace add https://HOST/owner/.../repo[.git] [OPTIONS]
 ```
 
 **Arguments:**
 - `OWNER/REPO` - GitHub repository containing `marketplace.json`
 - `HOST/OWNER/REPO` - Repository on a non-github.com host (e.g., GitHub Enterprise)
+- `HOST/group/sub/.../REPO` - Repository nested under sub-paths (e.g., GHES org/team/repo)
+- `https://HOST/owner/.../repo[.git]` - Full HTTPS URL pasted from the browser. The `.git` suffix is stripped.
 
 **Options:**
 - `-n, --name TEXT` - Custom display name for the marketplace
@@ -1174,17 +1178,25 @@ apm marketplace add HOST/OWNER/REPO [OPTIONS]
 - `--host TEXT` - Git host FQDN (default: github.com or `GITHUB_HOST` env var)
 - `-v, --verbose` - Show detailed output
 
+> **Supported hosts.** `apm marketplace add` currently fetches `marketplace.json` via the GitHub Contents API, so only `github.com`, GitHub Enterprise Cloud (`*.ghe.com`), and the host configured via `GITHUB_HOST` are accepted. GitLab, Bitbucket, and other generic Git hosts are rejected at registration time with an actionable error -- this prevents silent fetch failures and avoids forwarding GitHub credentials to unintended hosts. Native non-GitHub support is tracked separately.
+
 **Examples:**
 ```bash
 # Register a marketplace
 apm marketplace add acme/plugin-marketplace
 
+# Register from a full HTTPS URL pasted from the browser
+apm marketplace add https://github.com/acme/plugin-marketplace
+
 # Register with a custom name and branch
 apm marketplace add acme/plugin-marketplace --name acme-plugins --branch release
 
-# Register from a GitHub Enterprise host
+# Register from a GitHub Enterprise host (Cloud or Server)
 apm marketplace add acme/plugin-marketplace --host ghes.corp.example.com
 apm marketplace add ghes.corp.example.com/acme/plugin-marketplace
+
+# Register a repo nested under sub-paths on a GHES instance
+apm marketplace add ghes.corp.example.com/org/team/plugin-marketplace
 ```
 
 #### `apm marketplace list` - List registered marketplaces

@@ -14,8 +14,8 @@ class MarketplaceNotFoundError(MarketplaceError):
         self.name = name
         super().__init__(
             f"Marketplace '{name}' is not registered. "
-            f"Run 'apm marketplace add OWNER/REPO' to register it, "
-            f"or 'apm marketplace list' to see registered marketplaces."
+            f"Run 'apm marketplace add OWNER/REPO' (or pass a full HTTPS URL) "
+            f"to register it, or 'apm marketplace list' to see registered marketplaces."
         )
 
 
