@@ -16,11 +16,10 @@ Coverage:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch  # noqa: F401
 
 import pytest
 from click.testing import CliRunner
-
 
 # ---------------------------------------------------------------------------
 # Module-level fixtures
@@ -66,23 +65,16 @@ def _isolate_config(tmp_path, monkeypatch) -> None:
 class TestListCommand:
     """Tests for `apm experimental list` and the default-to-list behaviour."""
 
-    def test_no_subcommand_invokes_list_and_shows_table_header(
-        self, runner: CliRunner
-    ) -> None:
+    def test_no_subcommand_invokes_list_and_shows_table_header(self, runner: CliRunner) -> None:
         """Invoking the group with no subcommand defaults to `list`."""
         from apm_cli.commands.experimental import experimental
 
         result = runner.invoke(experimental, [])
         assert result.exit_code == 0
         # The Rich table title or flag name must be present.
-        assert (
-            "Experimental Features" in result.output
-            or "verbose-version" in result.output
-        )
+        assert "Experimental Features" in result.output or "verbose-version" in result.output
 
-    def test_list_shows_verbose_version_disabled_by_default(
-        self, runner: CliRunner
-    ) -> None:
+    def test_list_shows_verbose_version_disabled_by_default(self, runner: CliRunner) -> None:
         """verbose-version appears with 'disabled' status when no override is set."""
         from apm_cli.commands.experimental import experimental
 
@@ -101,9 +93,7 @@ class TestListCommand:
         assert result.exit_code == 0
         assert "No experimental flags are enabled." in result.output
 
-    def test_list_disabled_filter_shows_flag_at_default(
-        self, runner: CliRunner
-    ) -> None:
+    def test_list_disabled_filter_shows_flag_at_default(self, runner: CliRunner) -> None:
         """--disabled shows verbose-version when it is at its default (disabled)."""
         from apm_cli.commands.experimental import experimental
 
@@ -111,9 +101,7 @@ class TestListCommand:
         assert result.exit_code == 0
         assert "verbose-version" in result.output
 
-    def test_list_after_enable_appears_in_enabled_not_in_disabled(
-        self, runner: CliRunner
-    ) -> None:
+    def test_list_after_enable_appears_in_enabled_not_in_disabled(self, runner: CliRunner) -> None:
         """After enabling, --enabled shows the flag and --disabled does not."""
         from apm_cli.commands.experimental import experimental
 
@@ -128,9 +116,8 @@ class TestListCommand:
         result_dis = runner.invoke(experimental, ["list", "--disabled"])
         assert result_dis.exit_code == 0
         assert "verbose-version" not in result_dis.output
-    def test_list_enabled_and_disabled_are_mutually_exclusive(
-        self, runner: CliRunner
-    ) -> None:
+
+    def test_list_enabled_and_disabled_are_mutually_exclusive(self, runner: CliRunner) -> None:
         """Passing both --enabled and --disabled produces a UsageError."""
         from apm_cli.commands.experimental import experimental
 
@@ -147,9 +134,7 @@ class TestListCommand:
 class TestEnableCommand:
     """Tests for `apm experimental enable <name>`."""
 
-    def test_enable_exits_0_emits_success_and_hint(
-        self, runner: CliRunner
-    ) -> None:
+    def test_enable_exits_0_emits_success_and_hint(self, runner: CliRunner) -> None:
         """Successful enable exits 0, emits [+] success line and hint."""
         from apm_cli.commands.experimental import experimental
 
@@ -159,9 +144,7 @@ class TestEnableCommand:
         # hint line must follow success
         assert "apm --version" in result.output
 
-    def test_enable_already_enabled_emits_warning_not_success(
-        self, runner: CliRunner
-    ) -> None:
+    def test_enable_already_enabled_emits_warning_not_success(self, runner: CliRunner) -> None:
         """Enabling an already-enabled flag emits warning [!], not a false success."""
         from apm_cli.commands.experimental import experimental
 
@@ -182,9 +165,7 @@ class TestEnableCommand:
         assert result.exit_code == 0
         assert "Enabled experimental feature: verbose-version" in result.output
 
-    def test_enable_typo_exits_1_with_suggestion_and_recovery_hint(
-        self, runner: CliRunner
-    ) -> None:
+    def test_enable_typo_exits_1_with_suggestion_and_recovery_hint(self, runner: CliRunner) -> None:
         """One-character typo produces exit 1, error message, suggestion, recovery hint."""
         from apm_cli.commands.experimental import experimental
 
@@ -194,9 +175,7 @@ class TestEnableCommand:
         assert "Did you mean: verbose-version?" in result.output
         assert "apm experimental list" in result.output
 
-    def test_enable_bogus_flag_exits_1_without_suggestion(
-        self, runner: CliRunner
-    ) -> None:
+    def test_enable_bogus_flag_exits_1_without_suggestion(self, runner: CliRunner) -> None:
         """A flag name with no similarity produces no 'Did you mean' line."""
         from apm_cli.commands.experimental import experimental
 
@@ -214,9 +193,7 @@ class TestEnableCommand:
 class TestDisableCommand:
     """Tests for `apm experimental disable <name>`."""
 
-    def test_disable_after_enable_exits_0_emits_success(
-        self, runner: CliRunner
-    ) -> None:
+    def test_disable_after_enable_exits_0_emits_success(self, runner: CliRunner) -> None:
         """disable exits 0 and emits the [+] disabled confirmation."""
         from apm_cli.commands.experimental import experimental
 
@@ -225,9 +202,7 @@ class TestDisableCommand:
         assert result.exit_code == 0
         assert "[+] Disabled experimental feature: verbose-version" in result.output
 
-    def test_disable_already_disabled_emits_warning_not_success(
-        self, runner: CliRunner
-    ) -> None:
+    def test_disable_already_disabled_emits_warning_not_success(self, runner: CliRunner) -> None:
         """Disabling an already-disabled flag emits warning [!], not a false success."""
         from apm_cli.commands.experimental import experimental
 
@@ -247,9 +222,7 @@ class TestDisableCommand:
 class TestResetCommand:
     """Tests for `apm experimental reset [name] [--yes]`."""
 
-    def test_reset_single_flag_exits_0_emits_confirmation(
-        self, runner: CliRunner
-    ) -> None:
+    def test_reset_single_flag_exits_0_emits_confirmation(self, runner: CliRunner) -> None:
         """reset <name> exits 0 and emits the per-flag reset confirmation."""
         from apm_cli.commands.experimental import experimental
 
@@ -258,9 +231,7 @@ class TestResetCommand:
         assert result.exit_code == 0
         assert "[+] Reset verbose-version to default" in result.output
 
-    def test_reset_single_flag_already_at_default_prints_noop(
-        self, runner: CliRunner
-    ) -> None:
+    def test_reset_single_flag_already_at_default_prints_noop(self, runner: CliRunner) -> None:
         """reset <name> on a pristine config prints nothing-to-do, not success."""
         from apm_cli.commands.experimental import experimental
 
@@ -271,18 +242,13 @@ class TestResetCommand:
         # Must NOT falsely claim a reset occurred
         assert "Reset verbose-version to default" not in result.output
 
-    def test_reset_no_overrides_prints_nothing_to_reset(
-        self, runner: CliRunner
-    ) -> None:
+    def test_reset_no_overrides_prints_nothing_to_reset(self, runner: CliRunner) -> None:
         """reset with no overrides active emits the 'nothing to reset' message."""
         from apm_cli.commands.experimental import experimental
 
         result = runner.invoke(experimental, ["reset"])
         assert result.exit_code == 0
-        assert (
-            "All features already at default settings. Nothing to reset."
-            in result.output
-        )
+        assert "All features already at default settings. Nothing to reset." in result.output
 
     def test_reset_with_overrides_declining_confirmation_does_not_reset(
         self, runner: CliRunner
@@ -292,9 +258,10 @@ class TestResetCommand:
 
         runner.invoke(experimental, ["enable", "verbose-version"])
 
-        with patch(
-            "apm_cli.commands.experimental._reset_flags"
-        ) as mock_reset, patch("rich.prompt.Confirm.ask", return_value=False):
+        with (
+            patch("apm_cli.commands.experimental._reset_flags") as mock_reset,
+            patch("rich.prompt.Confirm.ask", return_value=False),
+        ):
             result = runner.invoke(experimental, ["reset"])
 
         assert result.exit_code == 0
@@ -303,9 +270,7 @@ class TestResetCommand:
         bulk_calls = [c for c in mock_reset.call_args_list if c.args == (None,)]
         assert len(bulk_calls) == 0
 
-    def test_reset_yes_flag_skips_prompt_and_resets(
-        self, runner: CliRunner
-    ) -> None:
+    def test_reset_yes_flag_skips_prompt_and_resets(self, runner: CliRunner) -> None:
         """--yes bypasses the confirmation prompt and resets all overrides."""
         from apm_cli.commands.experimental import experimental
 
@@ -314,9 +279,7 @@ class TestResetCommand:
         assert result.exit_code == 0
         assert "[+] Reset all experimental features to defaults" in result.output
 
-    def test_reset_redundant_override_shows_removing_wording(
-        self, runner: CliRunner
-    ) -> None:
+    def test_reset_redundant_override_shows_removing_wording(self, runner: CliRunner) -> None:
         """When override equals default, confirmation uses 'redundant override - removing'."""
         from apm_cli.commands.experimental import experimental
 
@@ -332,9 +295,7 @@ class TestResetCommand:
         # Must NOT contain the old arrow format for redundant overrides
         assert "currently disabled -> disabled" not in result.output
 
-    def test_reset_singular_uses_its_default(
-        self, runner: CliRunner
-    ) -> None:
+    def test_reset_singular_uses_its_default(self, runner: CliRunner) -> None:
         """When resetting exactly 1 flag, summary says 'its default' not 'their defaults'."""
         from apm_cli.commands.experimental import experimental
 
@@ -388,10 +349,7 @@ class TestIntroLine:
 
         result = runner.invoke(experimental, ["list"])
         assert result.exit_code == 0
-        assert (
-            "Experimental features let you try new behaviour"
-            not in result.output
-        )
+        assert "Experimental features let you try new behaviour" not in result.output
 
     def test_list_verbose_emits_intro_line(self, runner: CliRunner) -> None:
         """With --verbose, `list` prints the intro description."""
@@ -477,7 +435,7 @@ class TestJsonOutput:
         result = runner.invoke(experimental, ["list", "--json"])
         rows = json.loads(result.output)
 
-        vv = [r for r in rows if r["name"] == "verbose_version"][0]
+        vv = [r for r in rows if r["name"] == "verbose_version"][0]  # noqa: RUF015
         assert vv["enabled"] is False
         assert vv["source"] == "default"
 
@@ -491,7 +449,7 @@ class TestJsonOutput:
         result = runner.invoke(experimental, ["list", "--json"])
         rows = json.loads(result.output)
 
-        vv = [r for r in rows if r["name"] == "verbose_version"][0]
+        vv = [r for r in rows if r["name"] == "verbose_version"][0]  # noqa: RUF015
         assert vv["enabled"] is True
         assert vv["source"] == "config"
 
@@ -521,8 +479,7 @@ class TestMalformedValueReset:
         """reset --yes removes a registered flag with a string value (e.g. 'true')."""
         import json as _json
 
-        import apm_cli.config as _conf
-
+        import apm_cli.config as _conf  # noqa: F401
         from apm_cli.commands.experimental import experimental
 
         # Write a malformed config directly
@@ -561,8 +518,7 @@ class TestMalformedValueReset:
         """reset --yes handles bool override + malformed value + stale key together."""
         import json as _json
 
-        import apm_cli.config as _conf
-
+        import apm_cli.config as _conf  # noqa: F401
         from apm_cli.commands.experimental import experimental
 
         config_dir = tmp_path / ".apm-mixed"
@@ -570,12 +526,14 @@ class TestMalformedValueReset:
         config_file = config_dir / "config.json"
         # One valid bool override, one malformed string, one stale unknown key
         config_file.write_text(
-            _json.dumps({
-                "experimental": {
-                    "verbose_version": "true",     # malformed (string, not bool)
-                    "old_removed_flag": True,       # stale (not in FLAGS)
+            _json.dumps(
+                {
+                    "experimental": {
+                        "verbose_version": "true",  # malformed (string, not bool)
+                        "old_removed_flag": True,  # stale (not in FLAGS)
+                    }
                 }
-            }),
+            ),
             encoding="utf-8",
         )
 

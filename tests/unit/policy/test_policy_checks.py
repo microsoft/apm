@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
-import textwrap
+import textwrap  # noqa: F401
 from pathlib import Path
 
 import pytest
 import yaml
 
 from apm_cli.models.apm_package import clear_apm_yml_cache
-from apm_cli.policy.models import CIAuditResult, CheckResult
+from apm_cli.policy.models import CheckResult, CIAuditResult  # noqa: F401
 from apm_cli.policy.policy_checks import (
     _check_compilation_strategy,
     _check_compilation_target,
     _check_dependency_allowlist,
     _check_dependency_denylist,
-    _check_includes_explicit,
+    _check_includes_explicit,  # noqa: F401
     _check_mcp_allowlist,
     _check_mcp_denylist,
     _check_mcp_self_defined,
@@ -43,15 +43,12 @@ from apm_cli.policy.schema import (
     UnmanagedFilesPolicy,
 )
 
-
 # -- Helpers --------------------------------------------------------
 
 
 def _write_apm_yml(project: Path, data: dict) -> None:
     """Write apm.yml from a dict."""
-    (project / "apm.yml").write_text(
-        yaml.dump(data, default_flow_style=False), encoding="utf-8"
-    )
+    (project / "apm.yml").write_text(yaml.dump(data, default_flow_style=False), encoding="utf-8")
 
 
 def _write_lockfile(project: Path, data: dict) -> None:
@@ -83,7 +80,7 @@ def _make_mcp_deps(mcp_list: list):
 
 def _make_lockfile(deps_data: list[dict]):
     """Create a LockFile from a list of dependency dicts."""
-    from apm_cli.deps.lockfile import LockFile, LockedDependency
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
 
     lock = LockFile()
     for d in deps_data:
@@ -206,9 +203,7 @@ class TestRequiredPackagesDeployed:
 
     def test_pass_deployed(self):
         deps = _make_dep_refs(["org/pkg"])
-        lock = _make_lockfile(
-            [{"repo_url": "org/pkg", "deployed_files": [".github/prompts/x.md"]}]
-        )
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": [".github/prompts/x.md"]}])
         policy = DependencyPolicy(require=["org/pkg"])
         result = _check_required_packages_deployed(deps, lock, policy)
         assert result.passed
@@ -242,44 +237,30 @@ class TestRequiredPackageVersion:
 
     def test_pass_version_matches(self):
         deps = _make_dep_refs(["org/pkg#v1.0.0"])
-        lock = _make_lockfile(
-            [{"repo_url": "org/pkg", "resolved_ref": "v1.0.0"}]
-        )
+        lock = _make_lockfile([{"repo_url": "org/pkg", "resolved_ref": "v1.0.0"}])
         policy = DependencyPolicy(require=["org/pkg#v1.0.0"])
         result = _check_required_package_version(deps, lock, policy)
         assert result.passed
 
     def test_fail_block_mismatch(self):
         deps = _make_dep_refs(["org/pkg#v2.0.0"])
-        lock = _make_lockfile(
-            [{"repo_url": "org/pkg", "resolved_ref": "v2.0.0"}]
-        )
-        policy = DependencyPolicy(
-            require=["org/pkg#v1.0.0"], require_resolution="block"
-        )
+        lock = _make_lockfile([{"repo_url": "org/pkg", "resolved_ref": "v2.0.0"}])
+        policy = DependencyPolicy(require=["org/pkg#v1.0.0"], require_resolution="block")
         result = _check_required_package_version(deps, lock, policy)
         assert not result.passed
         assert "expected ref 'v1.0.0'" in result.details[0]
 
     def test_fail_policy_wins_mismatch(self):
         deps = _make_dep_refs(["org/pkg"])
-        lock = _make_lockfile(
-            [{"repo_url": "org/pkg", "resolved_ref": "v2.0.0"}]
-        )
-        policy = DependencyPolicy(
-            require=["org/pkg#v1.0.0"], require_resolution="policy-wins"
-        )
+        lock = _make_lockfile([{"repo_url": "org/pkg", "resolved_ref": "v2.0.0"}])
+        policy = DependencyPolicy(require=["org/pkg#v1.0.0"], require_resolution="policy-wins")
         result = _check_required_package_version(deps, lock, policy)
         assert not result.passed
 
     def test_pass_project_wins_mismatch(self):
         deps = _make_dep_refs(["org/pkg"])
-        lock = _make_lockfile(
-            [{"repo_url": "org/pkg", "resolved_ref": "v2.0.0"}]
-        )
-        policy = DependencyPolicy(
-            require=["org/pkg#v1.0.0"], require_resolution="project-wins"
-        )
+        lock = _make_lockfile([{"repo_url": "org/pkg", "resolved_ref": "v2.0.0"}])
+        policy = DependencyPolicy(require=["org/pkg#v1.0.0"], require_resolution="project-wins")
         result = _check_required_package_version(deps, lock, policy)
         assert result.passed
         # Should have warnings in details
@@ -291,26 +272,20 @@ class TestRequiredPackageVersion:
 
 class TestTransitiveDepth:
     def test_pass_default_limit(self):
-        lock = _make_lockfile(
-            [{"repo_url": "org/pkg", "depth": 3}]
-        )
+        lock = _make_lockfile([{"repo_url": "org/pkg", "depth": 3}])
         policy = DependencyPolicy()  # max_depth=50 (default)
         result = _check_transitive_depth(lock, policy)
         assert result.passed
         assert "No transitive depth limit" in result.message
 
     def test_pass_within_limit(self):
-        lock = _make_lockfile(
-            [{"repo_url": "org/pkg", "depth": 2}]
-        )
+        lock = _make_lockfile([{"repo_url": "org/pkg", "depth": 2}])
         policy = DependencyPolicy(max_depth=3)
         result = _check_transitive_depth(lock, policy)
         assert result.passed
 
     def test_fail_exceeds_limit(self):
-        lock = _make_lockfile(
-            [{"repo_url": "org/deep-pkg", "depth": 5}]
-        )
+        lock = _make_lockfile([{"repo_url": "org/deep-pkg", "depth": 5}])
         policy = DependencyPolicy(max_depth=3)
         result = _check_transitive_depth(lock, policy)
         assert not result.passed
@@ -435,44 +410,32 @@ class TestMcpSelfDefined:
 
 class TestCompilationTarget:
     def test_pass_no_restrictions(self):
-        result = _check_compilation_target(
-            {"target": "vscode"}, CompilationPolicy()
-        )
+        result = _check_compilation_target({"target": "vscode"}, CompilationPolicy())
         assert result.passed
 
     def test_pass_enforce_match(self):
-        policy = CompilationPolicy(
-            target=CompilationTargetPolicy(enforce="vscode")
-        )
+        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
         result = _check_compilation_target({"target": "vscode"}, policy)
         assert result.passed
 
     def test_fail_enforce_mismatch(self):
-        policy = CompilationPolicy(
-            target=CompilationTargetPolicy(enforce="vscode")
-        )
+        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
         result = _check_compilation_target({"target": "claude"}, policy)
         assert not result.passed
         assert "enforced" in result.details[0]
 
     def test_pass_in_allow_list(self):
-        policy = CompilationPolicy(
-            target=CompilationTargetPolicy(allow=["vscode", "claude"])
-        )
+        policy = CompilationPolicy(target=CompilationTargetPolicy(allow=["vscode", "claude"]))
         result = _check_compilation_target({"target": "claude"}, policy)
         assert result.passed
 
     def test_fail_not_in_allow_list(self):
-        policy = CompilationPolicy(
-            target=CompilationTargetPolicy(allow=["vscode"])
-        )
+        policy = CompilationPolicy(target=CompilationTargetPolicy(allow=["vscode"]))
         result = _check_compilation_target({"target": "claude"}, policy)
         assert not result.passed
 
     def test_pass_no_target_in_manifest(self):
-        policy = CompilationPolicy(
-            target=CompilationTargetPolicy(enforce="vscode")
-        )
+        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
         result = _check_compilation_target({}, policy)
         assert result.passed
 
@@ -480,64 +443,42 @@ class TestCompilationTarget:
 
     def test_target_list_enforce_present(self):
         """List target containing the enforced value passes."""
-        policy = CompilationPolicy(
-            target=CompilationTargetPolicy(enforce="claude")
-        )
-        result = _check_compilation_target(
-            {"target": ["claude", "copilot"]}, policy
-        )
+        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="claude"))
+        result = _check_compilation_target({"target": ["claude", "copilot"]}, policy)
         assert result.passed
 
     def test_target_list_enforce_missing(self):
         """List target missing the enforced value fails."""
-        policy = CompilationPolicy(
-            target=CompilationTargetPolicy(enforce="claude")
-        )
-        result = _check_compilation_target(
-            {"target": ["cursor", "copilot"]}, policy
-        )
+        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="claude"))
+        result = _check_compilation_target({"target": ["cursor", "copilot"]}, policy)
         assert not result.passed
         assert "enforced" in result.details[0]
 
     def test_target_list_allow_all_in(self):
         """All items in list target within allow set passes."""
         policy = CompilationPolicy(
-            target=CompilationTargetPolicy(
-                allow=["claude", "copilot", "cursor"]
-            )
+            target=CompilationTargetPolicy(allow=["claude", "copilot", "cursor"])
         )
-        result = _check_compilation_target(
-            {"target": ["claude", "copilot"]}, policy
-        )
+        result = _check_compilation_target({"target": ["claude", "copilot"]}, policy)
         assert result.passed
 
     def test_target_list_allow_some_disallowed(self):
         """List target with items outside allow set fails."""
-        policy = CompilationPolicy(
-            target=CompilationTargetPolicy(allow=["claude"])
-        )
-        result = _check_compilation_target(
-            {"target": ["claude", "copilot"]}, policy
-        )
+        policy = CompilationPolicy(target=CompilationTargetPolicy(allow=["claude"]))
+        result = _check_compilation_target({"target": ["claude", "copilot"]}, policy)
         assert not result.passed
         assert "copilot" in result.message
 
     def test_target_string_still_works(self):
         """Backward compat: single string target with enforce."""
-        policy = CompilationPolicy(
-            target=CompilationTargetPolicy(enforce="copilot")
-        )
+        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="copilot"))
         result = _check_compilation_target({"target": "copilot"}, policy)
         assert result.passed
 
     def test_target_list_single_item(self):
         """Single-element list target with matching enforce passes."""
-        policy = CompilationPolicy(
-            target=CompilationTargetPolicy(enforce="copilot")
-        )
-        result = _check_compilation_target(
-            {"target": ["copilot"]}, policy
-        )
+        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="copilot"))
+        result = _check_compilation_target({"target": ["copilot"]}, policy)
         assert result.passed
 
 
@@ -552,27 +493,17 @@ class TestCompilationStrategy:
         assert result.passed
 
     def test_pass_enforce_match(self):
-        policy = CompilationPolicy(
-            strategy=CompilationStrategyPolicy(enforce="distributed")
-        )
-        result = _check_compilation_strategy(
-            {"compilation": {"strategy": "distributed"}}, policy
-        )
+        policy = CompilationPolicy(strategy=CompilationStrategyPolicy(enforce="distributed"))
+        result = _check_compilation_strategy({"compilation": {"strategy": "distributed"}}, policy)
         assert result.passed
 
     def test_fail_enforce_mismatch(self):
-        policy = CompilationPolicy(
-            strategy=CompilationStrategyPolicy(enforce="single-file")
-        )
-        result = _check_compilation_strategy(
-            {"compilation": {"strategy": "distributed"}}, policy
-        )
+        policy = CompilationPolicy(strategy=CompilationStrategyPolicy(enforce="single-file"))
+        result = _check_compilation_strategy({"compilation": {"strategy": "distributed"}}, policy)
         assert not result.passed
 
     def test_pass_no_strategy_in_manifest(self):
-        policy = CompilationPolicy(
-            strategy=CompilationStrategyPolicy(enforce="distributed")
-        )
+        policy = CompilationPolicy(strategy=CompilationStrategyPolicy(enforce="distributed"))
         result = _check_compilation_strategy({}, policy)
         assert result.passed
 
@@ -587,9 +518,7 @@ class TestSourceAttribution:
 
     def test_pass_enabled(self):
         policy = CompilationPolicy(source_attribution=True)
-        result = _check_source_attribution(
-            {"compilation": {"source_attribution": True}}, policy
-        )
+        result = _check_source_attribution({"compilation": {"source_attribution": True}}, policy)
         assert result.passed
 
     def test_fail_not_enabled(self):
@@ -608,24 +537,18 @@ class TestRequiredManifestFields:
 
     def test_pass_fields_present(self):
         policy = ManifestPolicy(required_fields=["description", "author"])
-        result = _check_required_manifest_fields(
-            {"description": "A pkg", "author": "Me"}, policy
-        )
+        result = _check_required_manifest_fields({"description": "A pkg", "author": "Me"}, policy)
         assert result.passed
 
     def test_fail_field_missing(self):
         policy = ManifestPolicy(required_fields=["description", "license"])
-        result = _check_required_manifest_fields(
-            {"description": "A pkg"}, policy
-        )
+        result = _check_required_manifest_fields({"description": "A pkg"}, policy)
         assert not result.passed
         assert "license" in result.details
 
     def test_fail_field_empty(self):
         policy = ManifestPolicy(required_fields=["description"])
-        result = _check_required_manifest_fields(
-            {"description": ""}, policy
-        )
+        result = _check_required_manifest_fields({"description": ""}, policy)
         assert not result.passed
 
 
@@ -634,9 +557,7 @@ class TestRequiredManifestFields:
 
 class TestScriptsPolicy:
     def test_pass_scripts_allowed(self):
-        result = _check_scripts_policy(
-            {"scripts": {"build": "echo hi"}}, ManifestPolicy()
-        )
+        result = _check_scripts_policy({"scripts": {"build": "echo hi"}}, ManifestPolicy())
         assert result.passed
 
     def test_pass_deny_no_scripts(self):
@@ -646,9 +567,7 @@ class TestScriptsPolicy:
 
     def test_fail_deny_with_scripts(self):
         policy = ManifestPolicy(scripts="deny")
-        result = _check_scripts_policy(
-            {"scripts": {"build": "echo hi"}}, policy
-        )
+        result = _check_scripts_policy({"scripts": {"build": "echo hi"}}, policy)
         assert not result.passed
         assert "build" in result.details
 
@@ -674,43 +593,31 @@ class TestUnmanagedFiles:
                 }
             ]
         )
-        policy = UnmanagedFilesPolicy(
-            action="deny", directories=[".github/prompts"]
-        )
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/prompts"])
         result = _check_unmanaged_files(tmp_path, lock, policy)
         assert result.passed
 
     def test_fail_deny_unmanaged(self, tmp_path):
         # Create a governance file NOT in lockfile
         (tmp_path / ".github" / "agents").mkdir(parents=True)
-        (tmp_path / ".github" / "agents" / "rogue.md").write_text(
-            "rogue", encoding="utf-8"
-        )
+        (tmp_path / ".github" / "agents" / "rogue.md").write_text("rogue", encoding="utf-8")
         lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
-        policy = UnmanagedFilesPolicy(
-            action="deny", directories=[".github/agents"]
-        )
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
         result = _check_unmanaged_files(tmp_path, lock, policy)
         assert not result.passed
         assert ".github/agents/rogue.md" in result.details
 
     def test_warn_unmanaged(self, tmp_path):
         (tmp_path / ".cursor" / "rules").mkdir(parents=True)
-        (tmp_path / ".cursor" / "rules" / "extra.md").write_text(
-            "extra", encoding="utf-8"
-        )
+        (tmp_path / ".cursor" / "rules" / "extra.md").write_text("extra", encoding="utf-8")
         lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
-        policy = UnmanagedFilesPolicy(
-            action="warn", directories=[".cursor/rules"]
-        )
+        policy = UnmanagedFilesPolicy(action="warn", directories=[".cursor/rules"])
         result = _check_unmanaged_files(tmp_path, lock, policy)
         assert result.passed
         assert len(result.details) > 0
 
     def test_pass_empty_directory(self, tmp_path):
-        policy = UnmanagedFilesPolicy(
-            action="deny", directories=[".github/agents"]
-        )
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
         result = _check_unmanaged_files(tmp_path, None, policy)
         assert result.passed
 
@@ -728,9 +635,7 @@ class TestUnmanagedFiles:
                 }
             ]
         )
-        policy = UnmanagedFilesPolicy(
-            action="deny", directories=[".github/skills"]
-        )
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/skills"])
         result = _check_unmanaged_files(tmp_path, lock, policy)
         assert result.passed
 
@@ -743,9 +648,7 @@ class TestUnmanagedFiles:
         gov.mkdir(parents=True)
         for i in range(5):
             (gov / f"file{i}.md").write_text("x", encoding="utf-8")
-        policy = UnmanagedFilesPolicy(
-            action="deny", directories=[".github/agents"]
-        )
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
         result = _check_unmanaged_files(tmp_path, None, policy)
         assert result.passed
         assert "capped" in result.message.lower()
@@ -799,15 +702,11 @@ class TestRunPolicyChecks:
             {
                 "lockfile_version": "1",
                 "generated_at": "2025-01-01T00:00:00Z",
-                "dependencies": [
-                    {"repo_url": "evil/malware", "deployed_files": ["x.md"]}
-                ],
+                "dependencies": [{"repo_url": "evil/malware", "deployed_files": ["x.md"]}],
             },
         )
 
-        policy = ApmPolicy(
-            dependencies=DependencyPolicy(deny=["evil/*"])
-        )
+        policy = ApmPolicy(dependencies=DependencyPolicy(deny=["evil/*"]))
         result = run_policy_checks(tmp_path, policy)
         assert not result.passed
         failed_names = {c.name for c in result.checks if not c.passed}
@@ -835,17 +734,13 @@ class TestRunPolicyChecks:
             {
                 "lockfile_version": "1",
                 "generated_at": "2025-01-01T00:00:00Z",
-                "dependencies": [
-                    {"repo_url": "evil/pkg", "deployed_files": ["x.md"]}
-                ],
+                "dependencies": [{"repo_url": "evil/pkg", "deployed_files": ["x.md"]}],
             },
         )
 
         policy = ApmPolicy(
             dependencies=DependencyPolicy(deny=["evil/*"]),
-            manifest=ManifestPolicy(
-                scripts="deny", required_fields=["license"]
-            ),
+            manifest=ManifestPolicy(scripts="deny", required_fields=["license"]),
         )
         result = run_policy_checks(tmp_path, policy, fail_fast=False)
         failed_names = {c.name for c in result.checks if not c.passed}
@@ -915,9 +810,7 @@ class TestLoadRawApmYml:
 
     def test_valid_yaml_returns_dict(self, tmp_path: Path) -> None:
         """Valid YAML mapping is returned as a dict unchanged."""
-        (tmp_path / "apm.yml").write_text(
-            "name: test\nversion: '1.0'\n", encoding="utf-8"
-        )
+        (tmp_path / "apm.yml").write_text("name: test\nversion: '1.0'\n", encoding="utf-8")
         result = _load_raw_apm_yml(tmp_path)
         assert result == {"name": "test", "version": "1.0"}
 
@@ -962,9 +855,7 @@ class TestRunPolicyChecksMalformedManifest:
         assert len(parse_checks) == 1
         assert not parse_checks[0].passed
 
-    def test_missing_apm_yml_returns_empty_passing_result(
-        self, tmp_path: Path
-    ) -> None:
+    def test_missing_apm_yml_returns_empty_passing_result(self, tmp_path: Path) -> None:
         """No apm.yml means nothing to check -- result is empty and passes."""
         clear_apm_yml_cache()
         policy = ApmPolicy()
@@ -984,6 +875,4 @@ class TestRunPolicyChecksMalformedManifest:
         clear_apm_yml_cache()
         policy = ApmPolicy()
         result = run_policy_checks(tmp_path, policy)
-        assert not result.passed, (
-            "Malformed apm.yml must not silently pass policy checks"
-        )
+        assert not result.passed, "Malformed apm.yml must not silently pass policy checks"

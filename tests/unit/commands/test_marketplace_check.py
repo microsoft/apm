@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import textwrap
-from pathlib import Path
+from pathlib import Path  # noqa: F401
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,7 +12,7 @@ from click.testing import CliRunner
 from apm_cli.commands.marketplace import marketplace
 from apm_cli.marketplace.errors import (
     GitLsRemoteError,
-    MarketplaceYmlError,
+    MarketplaceYmlError,  # noqa: F401
     OfflineMissError,
 )
 from apm_cli.marketplace.ref_resolver import RemoteRef
@@ -21,7 +21,6 @@ from apm_cli.marketplace.yml_schema import (
     MarketplaceYml,
     PackageEntry,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -179,9 +178,7 @@ class TestCheckFailures:
         # First package OK, second fails
         mock_inst.list_remote_refs.side_effect = [
             _REFS_GOOD,
-            GitLsRemoteError(
-                package="pkg-beta", summary="Auth failed", hint="Check token"
-            ),
+            GitLsRemoteError(package="pkg-beta", summary="Auth failed", hint="Check token"),
         ]
         mock_inst.close = MagicMock()
 
@@ -358,28 +355,40 @@ class TestCheckDuplicateNames:
     @patch("apm_cli.commands.marketplace.check.RefResolver")
     @patch("apm_cli.commands.marketplace.check._load_config_or_exit")
     def test_duplicate_names_warned(
-        self, mock_load, MockResolver, runner, tmp_path, monkeypatch,
+        self,
+        mock_load,
+        MockResolver,
+        runner,
+        tmp_path,
+        monkeypatch,
     ):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "marketplace.yml").write_text("---\n", encoding="utf-8")
 
         # Return a MarketplaceYml with duplicate package names
-        mock_load.return_value = (tmp_path, MarketplaceYml(
-            name="test",
-            description="Test",
-            version="1.0.0",
-            owner=MarketplaceOwner(name="Owner"),
-            packages=(
-                PackageEntry(
-                    name="learning", source="acme/repo", subdir="general",
-                    version="^1.0.0",
-                ),
-                PackageEntry(
-                    name="learning", source="acme/repo", subdir="special",
-                    version="^1.0.0",
+        mock_load.return_value = (
+            tmp_path,
+            MarketplaceYml(
+                name="test",
+                description="Test",
+                version="1.0.0",
+                owner=MarketplaceOwner(name="Owner"),
+                packages=(
+                    PackageEntry(
+                        name="learning",
+                        source="acme/repo",
+                        subdir="general",
+                        version="^1.0.0",
+                    ),
+                    PackageEntry(
+                        name="learning",
+                        source="acme/repo",
+                        subdir="special",
+                        version="^1.0.0",
+                    ),
                 ),
             ),
-        ))
+        )
 
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.return_value = [
@@ -393,25 +402,37 @@ class TestCheckDuplicateNames:
     @patch("apm_cli.commands.marketplace.check.RefResolver")
     @patch("apm_cli.commands.marketplace.check._load_config_or_exit")
     def test_no_warning_when_unique(
-        self, mock_load, MockResolver, runner, tmp_path, monkeypatch,
+        self,
+        mock_load,
+        MockResolver,
+        runner,
+        tmp_path,
+        monkeypatch,
     ):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "marketplace.yml").write_text("---\n", encoding="utf-8")
 
-        mock_load.return_value = (tmp_path, MarketplaceYml(
-            name="test",
-            description="Test",
-            version="1.0.0",
-            owner=MarketplaceOwner(name="Owner"),
-            packages=(
-                PackageEntry(
-                    name="alpha", source="acme/alpha", version="^1.0.0",
-                ),
-                PackageEntry(
-                    name="beta", source="acme/beta", version="^1.0.0",
+        mock_load.return_value = (
+            tmp_path,
+            MarketplaceYml(
+                name="test",
+                description="Test",
+                version="1.0.0",
+                owner=MarketplaceOwner(name="Owner"),
+                packages=(
+                    PackageEntry(
+                        name="alpha",
+                        source="acme/alpha",
+                        version="^1.0.0",
+                    ),
+                    PackageEntry(
+                        name="beta",
+                        source="acme/beta",
+                        version="^1.0.0",
+                    ),
                 ),
             ),
-        ))
+        )
 
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.return_value = [

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 from apm_cli.policy.ci_checks import (
     _check_config_consistency,
     _check_content_integrity,
@@ -16,9 +17,7 @@ from apm_cli.policy.ci_checks import (
     _check_ref_consistency,
     run_baseline_checks,
 )
-from apm_cli.policy.models import CIAuditResult, CheckResult
-from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
-
+from apm_cli.policy.models import CheckResult, CIAuditResult
 
 # -- Helpers --------------------------------------------------------
 
@@ -32,7 +31,9 @@ def _parse_manifest(project: Path):
     return APMPackage.from_apm_yml(apm_yml)
 
 
-def _write_apm_yml(project: Path, *, deps: list[str] | None = None, mcp: list | None = None) -> None:
+def _write_apm_yml(
+    project: Path, *, deps: list[str] | None = None, mcp: list | None = None
+) -> None:
     """Write a minimal apm.yml with optional dependencies."""
     lines = ["name: test-project", "version: '1.0.0'"]
     if deps or mcp:
@@ -137,8 +138,8 @@ class TestRefConsistency:
                     deployed_files: []
             """),
         )
-        from apm_cli.models.apm_package import APMPackage
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
 
         manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
         lock = LockFile.read(get_lockfile_path(tmp_path))
@@ -158,8 +159,8 @@ class TestRefConsistency:
                     deployed_files: []
             """),
         )
-        from apm_cli.models.apm_package import APMPackage
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
 
         manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
         lock = LockFile.read(get_lockfile_path(tmp_path))
@@ -177,8 +178,8 @@ class TestRefConsistency:
                 dependencies: []
             """),
         )
-        from apm_cli.models.apm_package import APMPackage
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
 
         manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
         lock = LockFile.read(get_lockfile_path(tmp_path))
@@ -246,8 +247,8 @@ class TestNoOrphans:
                     deployed_files: []
             """),
         )
-        from apm_cli.models.apm_package import APMPackage
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
 
         manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
         lock = LockFile.read(get_lockfile_path(tmp_path))
@@ -268,8 +269,8 @@ class TestNoOrphans:
                     deployed_files: []
             """),
         )
-        from apm_cli.models.apm_package import APMPackage
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
 
         manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
         lock = LockFile.read(get_lockfile_path(tmp_path))
@@ -294,8 +295,8 @@ class TestConfigConsistency:
                     deployed_files: []
             """),
         )
-        from apm_cli.models.apm_package import APMPackage
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
 
         manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
         lock = LockFile.read(get_lockfile_path(tmp_path))
@@ -315,8 +316,8 @@ class TestConfigConsistency:
                     name: my-server
             """),
         )
-        from apm_cli.models.apm_package import APMPackage
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
 
         manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
         lock = LockFile.read(get_lockfile_path(tmp_path))
@@ -340,8 +341,8 @@ class TestConfigConsistency:
                     name: my-server
             """),
         )
-        from apm_cli.models.apm_package import APMPackage
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
 
         manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
         lock = LockFile.read(get_lockfile_path(tmp_path))
@@ -377,7 +378,7 @@ class TestContentIntegrity:
         _make_deployed_file(
             tmp_path,
             ".github/prompts/evil.md",
-            "Normal text\U000E0001\U000E0068hidden\n",
+            "Normal text\U000e0001\U000e0068hidden\n",
         )
         _write_lockfile(
             tmp_path,
@@ -426,9 +427,7 @@ class TestContentIntegrity:
     def test_hash_fail_on_hand_edit(self, tmp_path):
         from apm_cli.utils.content_hash import compute_file_hash
 
-        _make_deployed_file(
-            tmp_path, ".github/prompts/installed.md", "Original content\n"
-        )
+        _make_deployed_file(tmp_path, ".github/prompts/installed.md", "Original content\n")
         recorded_hash = compute_file_hash(tmp_path / ".github/prompts/installed.md")
         _write_lockfile(
             tmp_path,
@@ -453,9 +452,9 @@ class TestContentIntegrity:
         lock = LockFile.read(get_lockfile_path(tmp_path))
         result = _check_content_integrity(tmp_path, lock)
         assert not result.passed
-        assert any(
-            "hash-drift" in d and "installed.md" in d for d in result.details
-        ), result.details
+        assert any("hash-drift" in d and "installed.md" in d for d in result.details), (
+            result.details
+        )
 
     def test_hash_skips_missing_file(self, tmp_path):
         # Lockfile records a file with a hash, but the file is missing on
@@ -503,7 +502,8 @@ class TestContentIntegrity:
 
     def test_hash_skips_symlink(self, tmp_path):
         import os
-        from apm_cli.utils.content_hash import compute_file_hash
+
+        from apm_cli.utils.content_hash import compute_file_hash  # noqa: F401
 
         # Create a real target file outside the deployed path
         target = tmp_path / "target.md"
@@ -554,18 +554,14 @@ class TestContentIntegrity:
             """),
         )
         # Mutate local file
-        (tmp_path / ".github/prompts/local.md").write_text(
-            "local v2 tampered\n", encoding="utf-8"
-        )
+        (tmp_path / ".github/prompts/local.md").write_text("local v2 tampered\n", encoding="utf-8")
 
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 
         lock = LockFile.read(get_lockfile_path(tmp_path))
         result = _check_content_integrity(tmp_path, lock)
         assert not result.passed
-        assert any(
-            "hash-drift" in d and "local.md" in d for d in result.details
-        ), result.details
+        assert any("hash-drift" in d and "local.md" in d for d in result.details), result.details
 
 
 # -- Aggregate runner ----------------------------------------------
@@ -819,9 +815,7 @@ class TestLocalOnlyRepoSupport:
             """),
         )
         result = run_baseline_checks(tmp_path, fail_fast=False)
-        assert result.passed, [
-            (c.name, c.message, c.details) for c in result.failed_checks
-        ]
+        assert result.passed, [(c.name, c.message, c.details) for c in result.failed_checks]
         check_names = {c.name for c in result.checks}
         assert "deployed-files-present" in check_names
         assert "no-orphaned-packages" in check_names
@@ -840,8 +834,8 @@ class TestLocalOnlyRepoSupport:
                   - .github/prompts/local.prompt.md
             """),
         )
+        from apm_cli.deps.lockfile import _SELF_KEY, LockFile, get_lockfile_path
         from apm_cli.models.apm_package import APMPackage
-        from apm_cli.deps.lockfile import LockFile, get_lockfile_path, _SELF_KEY
 
         manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
         lock = LockFile.read(get_lockfile_path(tmp_path))
@@ -855,9 +849,7 @@ class TestLocalOnlyRepoSupport:
         # Create the local package directory so manifest parsing accepts it.
         local_pkg = tmp_path / "packages" / "shared"
         local_pkg.mkdir(parents=True)
-        (local_pkg / "apm.yml").write_text(
-            "name: shared\nversion: '1.0.0'\n", encoding="utf-8"
-        )
+        (local_pkg / "apm.yml").write_text("name: shared\nversion: '1.0.0'\n", encoding="utf-8")
 
         _write_apm_yml(tmp_path, deps=["./packages/shared"])
         _write_lockfile(
@@ -874,8 +866,8 @@ class TestLocalOnlyRepoSupport:
                   - .github/prompts/local.prompt.md
             """),
         )
-        from apm_cli.models.apm_package import APMPackage
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
 
         manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
         lock = LockFile.read(get_lockfile_path(tmp_path))
@@ -897,8 +889,8 @@ class TestLocalOnlyRepoSupport:
                   - .github/prompts/local.prompt.md
             """),
         )
+        from apm_cli.deps.lockfile import _SELF_KEY, LockFile, get_lockfile_path
         from apm_cli.models.apm_package import APMPackage
-        from apm_cli.deps.lockfile import LockFile, get_lockfile_path, _SELF_KEY
 
         manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
         lock = LockFile.read(get_lockfile_path(tmp_path))
@@ -925,12 +917,16 @@ class TestIncludesConsent:
     def _write_local_lock(self, project: Path, files: list[str]) -> None:
         if files:
             file_lines = "\n".join(f"  - {f}" for f in files)
-            body = textwrap.dedent("""\
+            body = (
+                textwrap.dedent("""\
                 lockfile_version: '1'
                 generated_at: '2025-01-01T00:00:00Z'
                 dependencies: []
                 local_deployed_files:
-                """) + file_lines + "\n"
+                """)
+                + file_lines
+                + "\n"
+            )
         else:
             body = textwrap.dedent("""\
                 lockfile_version: '1'
@@ -940,8 +936,8 @@ class TestIncludesConsent:
         _write_lockfile(project, body)
 
     def _load(self, project: Path):
-        from apm_cli.models.apm_package import APMPackage
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
 
         manifest = APMPackage.from_apm_yml(project / "apm.yml")
         lock = LockFile.read(get_lockfile_path(project))
@@ -1022,9 +1018,7 @@ class TestIncludesConsent:
         self._write_local_lock(tmp_path, [".github/prompts/local.prompt.md"])
 
         result = run_baseline_checks(tmp_path, fail_fast=False)
-        assert result.passed, [
-            (c.name, c.message, c.details) for c in result.failed_checks
-        ]
+        assert result.passed, [(c.name, c.message, c.details) for c in result.failed_checks]
         names = [c.name for c in result.checks]
         assert "includes-consent" in names
         assert names[-1] == "includes-consent"  # appears last

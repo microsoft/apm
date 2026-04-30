@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
 
 
-def run(ctx: "InstallContext") -> None:
+def run(ctx: InstallContext) -> None:
     """Execute the parallel download phase.
 
     On return ``ctx.pre_download_results`` and ``ctx.pre_downloaded_keys``
@@ -46,13 +46,18 @@ def run(ctx: "InstallContext") -> None:
     # Phase 4 (#171): Parallel package downloads using ThreadPoolExecutor
     # Pre-download all non-cached packages in parallel for wall-clock speedup.
     # Results are stored and consumed by the sequential integration loop below.
-    from concurrent.futures import ThreadPoolExecutor, as_completed as _futures_completed
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import as_completed as _futures_completed
 
-    _pre_download_results = {}   # dep_key -> PackageInfo
+    _pre_download_results = {}  # dep_key -> PackageInfo
     _need_download = []
     for _pd_ref in deps_to_install:
         _pd_key = _pd_ref.get_unique_key()
-        _pd_path = (apm_modules_dir / _pd_ref.alias) if _pd_ref.alias else _pd_ref.get_install_path(apm_modules_dir)
+        _pd_path = (
+            (apm_modules_dir / _pd_ref.alias)
+            if _pd_ref.alias
+            else _pd_ref.get_install_path(apm_modules_dir)
+        )
         # Skip local packages -- they are copied, not downloaded
         if _pd_ref.is_local:
             continue
@@ -61,25 +66,23 @@ def run(ctx: "InstallContext") -> None:
             continue
         # Detect if manifest ref changed from what's recorded in the lockfile.
         # detect_ref_change() handles all transitions including None->ref.
-        _pd_locked_chk = (
-            existing_lockfile.get_dependency(_pd_key)
-            if existing_lockfile
-            else None
-        )
-        _pd_ref_changed = detect_ref_change(
-            _pd_ref, _pd_locked_chk, update_refs=update_refs
-        )
+        _pd_locked_chk = existing_lockfile.get_dependency(_pd_key) if existing_lockfile else None
+        _pd_ref_changed = detect_ref_change(_pd_ref, _pd_locked_chk, update_refs=update_refs)
         # Skip if lockfile SHA matches local HEAD.
         # Normal mode: only when the ref hasn't changed in the manifest.
         # Update mode: defer to the sequential loop which resolves the
         # remote ref and compares -- if unchanged, the download is skipped
         # entirely; if changed, it falls back to sequential download.
-        if (_pd_path.exists() and _pd_locked_chk
-                and _pd_locked_chk.resolved_commit
-                and _pd_locked_chk.resolved_commit != "cached"
-                and (update_refs or not _pd_ref_changed)):
+        if (
+            _pd_path.exists()
+            and _pd_locked_chk
+            and _pd_locked_chk.resolved_commit
+            and _pd_locked_chk.resolved_commit != "cached"
+            and (update_refs or not _pd_ref_changed)
+        ):
             try:
                 from git import Repo as _PDGitRepo
+
                 if _PDGitRepo(_pd_path).head.commit.hexsha == _pd_locked_chk.resolved_commit:
                     continue
             except Exception:
@@ -88,6 +91,7 @@ def run(ctx: "InstallContext") -> None:
                 # installed packages are not re-downloaded every run (#763).
                 if _pd_locked_chk.content_hash and _pd_path.is_dir():
                     from apm_cli.utils.content_hash import verify_package_hash as _pd_verify_hash
+
                     if _pd_verify_hash(_pd_path, _pd_locked_chk.content_hash):
                         continue
         # Build download ref (use locked commit for reproducibility).
@@ -99,11 +103,11 @@ def run(ctx: "InstallContext") -> None:
 
     if _need_download and parallel_downloads > 0:
         from rich.progress import (
+            BarColumn,
             Progress,
             SpinnerColumn,
-            TextColumn,
-            BarColumn,
             TaskProgressColumn,
+            TextColumn,
         )
 
         with Progress(
@@ -121,8 +125,11 @@ def run(ctx: "InstallContext") -> None:
                     _pd_short = _pd_disp.split("/")[-1] if "/" in _pd_disp else _pd_disp
                     _pd_tid = _dl_progress.add_task(description=f"Fetching {_pd_short}", total=None)
                     _pd_fut = _executor.submit(
-                        downloader.download_package, _pd_dlref, _pd_path,
-                        progress_task_id=_pd_tid, progress_obj=_dl_progress,
+                        downloader.download_package,
+                        _pd_dlref,
+                        _pd_path,
+                        progress_task_id=_pd_tid,
+                        progress_obj=_dl_progress,
                     )
                     _futures[_pd_fut] = (_pd_ref, _pd_tid, _pd_disp)
                 for _pd_fut in _futures_completed(_futures):

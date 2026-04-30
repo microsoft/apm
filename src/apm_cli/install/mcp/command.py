@@ -10,8 +10,9 @@ user-visible install flow:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Optional  # noqa: F401
 
 import click
 
@@ -20,7 +21,6 @@ from .entry import build_mcp_entry
 from .registry import registry_env_override
 from .warnings import warn_shell_metachars, warn_ssrf_url
 from .writer import add_mcp_to_apm_yml
-
 
 # APM Dependencies (conditional import for graceful degradation).
 # Mirrors the pattern in ``commands/install.py`` so the success/log
@@ -39,22 +39,22 @@ except ImportError:
 def run_mcp_install(
     *,
     mcp_name: str,
-    transport: Optional[str],
-    url: Optional[str],
-    env_pairs: Optional[Sequence[str]],
-    header_pairs: Optional[Sequence[str]],
-    mcp_version: Optional[str],
-    command_argv: Optional[Sequence[str]],
+    transport: str | None,
+    url: str | None,
+    env_pairs: Sequence[str] | None,
+    header_pairs: Sequence[str] | None,
+    mcp_version: str | None,
+    command_argv: Sequence[str] | None,
     dev: bool,
     force: bool,
-    runtime: Optional[str],
-    exclude: Optional[str],
+    runtime: str | None,
+    exclude: str | None,
     verbose: bool,
     logger,
     manifest_path: Path,
     apm_dir: Path,
-    scope: Optional[str],
-    registry_url: Optional[str] = None,
+    scope: str | None,
+    registry_url: str | None = None,
 ) -> None:
     """Execute the --mcp install path. ``registry_url`` is the validated
     --registry value; the caller resolved precedence vs MCP_REGISTRY_URL."""
@@ -77,7 +77,7 @@ def run_mcp_install(
             registry_url=registry_url,
         )
     except ValueError as exc:
-        raise click.UsageError(str(exc))
+        raise click.UsageError(str(exc))  # noqa: B904
 
     # F5 + F7 warnings -- do not block.  Source the stdio command from the
     # CLI input rather than the built ``entry``: ``entry`` is ``str`` for
@@ -120,7 +120,10 @@ def run_mcp_install(
                 old_servers = set(_existing_lock.mcp_servers) if _existing_lock else set()
                 old_configs = dict(_existing_lock.mcp_configs) if _existing_lock else {}
                 MCPIntegrator.install(
-                    [dep], runtime, exclude, verbose,
+                    [dep],
+                    runtime,
+                    exclude,
+                    verbose,
                     stored_mcp_configs=old_configs,
                     scope=scope,
                 )
@@ -142,9 +145,7 @@ def run_mcp_install(
                     "MCP server written to apm.yml but tool integration "
                     "failed. Run with --verbose for details."
                 )
-                raise click.ClickException(
-                    f"MCP integration failed for '{mcp_name}'"
-                )
+                raise click.ClickException(f"MCP integration failed for '{mcp_name}'")  # noqa: B904
 
     verb = "Replaced" if status == "replaced" else "Added"
     logger.success(f"{verb} MCP server '{mcp_name}'", symbol="check")

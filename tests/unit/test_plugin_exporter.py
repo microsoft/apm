@@ -10,9 +10,9 @@ import pytest
 import yaml
 
 from apm_cli.bundle.plugin_exporter import (
-    PackResult,
+    PackResult,  # noqa: F401
     _collect_apm_components,
-    _collect_bare_skill,
+    _collect_bare_skill,  # noqa: F401
     _collect_hooks_from_apm,
     _collect_hooks_from_root,
     _collect_mcp,
@@ -25,9 +25,8 @@ from apm_cli.bundle.plugin_exporter import (
     _validate_output_rel,
     export_plugin_bundle,
 )
-from apm_cli.deps.lockfile import LockFile, LockedDependency
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.deps.plugin_parser import synthesize_plugin_json_from_apm_yml
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -122,9 +121,7 @@ def _setup_plugin_project(
         commands=commands,
     )
     if plugin_json is not None:
-        (project / "plugin.json").write_text(
-            json.dumps(plugin_json), encoding="utf-8"
-        )
+        (project / "plugin.json").write_text(json.dumps(plugin_json), encoding="utf-8")
     return project
 
 
@@ -279,7 +276,7 @@ class TestCollectBareSkill:
 
     def test_bare_skill_detected(self, tmp_path):
         """A SKILL.md at root with no skills/ subdir is collected."""
-        from apm_cli.bundle.plugin_exporter import _collect_bare_skill
+        from apm_cli.bundle.plugin_exporter import _collect_bare_skill  # noqa: F811
 
         (tmp_path / "SKILL.md").write_text("# My Skill")
         (tmp_path / "LICENSE.txt").write_text("MIT")
@@ -296,7 +293,7 @@ class TestCollectBareSkill:
 
     def test_virtual_path_used_as_slug(self, tmp_path):
         """virtual_path is preferred over repo_url for the skill slug."""
-        from apm_cli.bundle.plugin_exporter import _collect_bare_skill
+        from apm_cli.bundle.plugin_exporter import _collect_bare_skill  # noqa: F811
 
         (tmp_path / "SKILL.md").write_text("# Frontend")
         dep = LockedDependency(
@@ -312,7 +309,7 @@ class TestCollectBareSkill:
 
     def test_skills_prefix_stripped_from_virtual_path(self, tmp_path):
         """A skills/ virtual path should not produce skills/skills/ nesting."""
-        from apm_cli.bundle.plugin_exporter import _collect_bare_skill
+        from apm_cli.bundle.plugin_exporter import _collect_bare_skill  # noqa: F811
 
         (tmp_path / "SKILL.md").write_text("# Jest")
         dep = LockedDependency(
@@ -330,11 +327,13 @@ class TestCollectBareSkill:
 
     def test_skips_when_no_skill_md(self, tmp_path):
         """No SKILL.md at root means nothing collected."""
-        from apm_cli.bundle.plugin_exporter import _collect_bare_skill
+        from apm_cli.bundle.plugin_exporter import _collect_bare_skill  # noqa: F811
 
         (tmp_path / "README.md").write_text("hello")
         dep = LockedDependency(
-            repo_url="owner/pkg", resolved_commit="abc", depth=1,
+            repo_url="owner/pkg",
+            resolved_commit="abc",
+            depth=1,
         )
         out: list = []
         _collect_bare_skill(tmp_path, dep, out)
@@ -342,11 +341,13 @@ class TestCollectBareSkill:
 
     def test_skips_when_skills_already_collected(self, tmp_path):
         """If skills/ was already collected via normal paths, bare skill is skipped."""
-        from apm_cli.bundle.plugin_exporter import _collect_bare_skill
+        from apm_cli.bundle.plugin_exporter import _collect_bare_skill  # noqa: F811
 
         (tmp_path / "SKILL.md").write_text("# Root skill")
         dep = LockedDependency(
-            repo_url="owner/pkg", resolved_commit="abc", depth=1,
+            repo_url="owner/pkg",
+            resolved_commit="abc",
+            depth=1,
         )
         out = [(tmp_path / "skills" / "sub" / "SKILL.md", "skills/sub/SKILL.md")]
         _collect_bare_skill(tmp_path, dep, out)
@@ -355,14 +356,16 @@ class TestCollectBareSkill:
 
     def test_excludes_apm_files(self, tmp_path):
         """apm.yml, apm.lock.yaml, plugin.json are excluded from bare skill output."""
-        from apm_cli.bundle.plugin_exporter import _collect_bare_skill
+        from apm_cli.bundle.plugin_exporter import _collect_bare_skill  # noqa: F811
 
         (tmp_path / "SKILL.md").write_text("# Skill")
         (tmp_path / "apm.yml").write_text("name: x")
         (tmp_path / "plugin.json").write_text("{}")
         (tmp_path / "apm.lock.yaml").write_text("deps: []")
         dep = LockedDependency(
-            repo_url="owner/pkg", resolved_commit="abc", depth=1,
+            repo_url="owner/pkg",
+            resolved_commit="abc",
+            depth=1,
         )
         out: list = []
         _collect_bare_skill(tmp_path, dep, out)
@@ -422,11 +425,13 @@ class TestDevDependencyUrls:
     def test_simple_list(self, tmp_path):
         apm_yml = tmp_path / "apm.yml"
         apm_yml.write_text(
-            yaml.dump({
-                "name": "test",
-                "version": "1.0.0",
-                "devDependencies": {"apm": ["owner/dev-tool", "other/helper"]},
-            })
+            yaml.dump(
+                {
+                    "name": "test",
+                    "version": "1.0.0",
+                    "devDependencies": {"apm": ["owner/dev-tool", "other/helper"]},
+                }
+            )
         )
         urls = _get_dev_dependency_urls(apm_yml)
         assert ("owner/dev-tool", "") in urls
@@ -436,13 +441,13 @@ class TestDevDependencyUrls:
         """Deps from the same repo but different virtual paths are distinct."""
         apm_yml = tmp_path / "apm.yml"
         apm_yml.write_text(
-            yaml.dump({
-                "name": "test",
-                "version": "1.0.0",
-                "devDependencies": {
-                    "apm": ["owner/repo/sub/dev-tool"]
-                },
-            })
+            yaml.dump(
+                {
+                    "name": "test",
+                    "version": "1.0.0",
+                    "devDependencies": {"apm": ["owner/repo/sub/dev-tool"]},
+                }
+            )
         )
         keys = _get_dev_dependency_urls(apm_yml)
         assert ("owner/repo", "sub/dev-tool") in keys
@@ -526,19 +531,54 @@ class TestSynthesizePluginJson:
 
 
 class TestUpdatePluginJsonPaths:
-    def test_adds_present_directories(self):
+    def test_strips_convention_dir_keys(self):
+        """Convention dirs are auto-discovered; keys must be absent for schema validity."""
         pj = {"name": "test"}
         files = ["agents/a.md", "commands/b.md"]
         result = _update_plugin_json_paths(pj, files)
-        assert result["agents"] == ["agents/"]
-        assert result["commands"] == ["commands/"]
+        assert "agents" not in result
+        assert "commands" not in result
         assert "skills" not in result
 
-    def test_removes_absent_directories(self):
-        pj = {"name": "test", "skills": ["skills/"]}
+    def test_strips_existing_invalid_keys(self):
+        """Pre-existing invalid convention-dir entries are stripped."""
+        pj = {"name": "test", "skills": ["skills/"], "agents": ["agents/"]}
         files = ["agents/a.md"]
         result = _update_plugin_json_paths(pj, files)
         assert "skills" not in result
+        assert "agents" not in result
+        assert result["name"] == "test"
+
+    def test_warns_when_stripping_authored_keys(self):
+        """When authored plugin.json has the keys, emit a warning naming what was stripped."""
+        import logging
+
+        pj = {"name": "test", "skills": ["skills/"], "agents": ["agents/"]}
+        captured = []
+
+        class _StubLogger:
+            def warning(self, msg):
+                captured.append(msg)
+
+        _update_plugin_json_paths(pj, [], logger=_StubLogger())
+        assert len(captured) == 1
+        assert "Stripped schema-invalid keys" in captured[0]
+        assert "skills" in captured[0]
+        assert "agents" in captured[0]
+        assert "auto-discovered" in captured[0]
+        del logging  # silence unused
+
+    def test_no_warning_when_no_authored_keys(self):
+        """Synthesized manifests don't carry the keys; no warning to noise the user."""
+        pj = {"name": "test"}
+        captured = []
+
+        class _StubLogger:
+            def warning(self, msg):
+                captured.append(msg)
+
+        _update_plugin_json_paths(pj, [], logger=_StubLogger())
+        assert captured == []
 
 
 # ---------------------------------------------------------------------------
@@ -677,15 +717,9 @@ class TestExportPluginBundle:
         out = tmp_path / "build"
         result = export_plugin_bundle(project, out)
 
-        assert (
-            result.bundle_path / "skills" / "javascript-typescript-jest" / "SKILL.md"
-        ).exists()
+        assert (result.bundle_path / "skills" / "javascript-typescript-jest" / "SKILL.md").exists()
         assert not (
-            result.bundle_path
-            / "skills"
-            / "skills"
-            / "javascript-typescript-jest"
-            / "SKILL.md"
+            result.bundle_path / "skills" / "skills" / "javascript-typescript-jest" / "SKILL.md"
         ).exists()
 
     def test_dev_dependency_excluded(self, tmp_path):
@@ -756,9 +790,7 @@ class TestExportPluginBundle:
         # Root hooks
         root_hooks_dir = project / ".apm" / "hooks"
         root_hooks_dir.mkdir(parents=True, exist_ok=True)
-        (root_hooks_dir / "hooks.json").write_text(
-            json.dumps({"preCommit": ["root-lint"]})
-        )
+        (root_hooks_dir / "hooks.json").write_text(json.dumps({"preCommit": ["root-lint"]}))
 
         # Dep hooks
         dep = LockedDependency(repo_url="acme/hooks-pkg", depth=1)
@@ -837,7 +869,7 @@ class TestExportPluginBundle:
         project = _setup_plugin_project(tmp_path, agents=["sneaky.agent.md"])
         # Inject hidden Unicode
         sneaky = project / ".apm" / "agents" / "sneaky.agent.md"
-        sneaky.write_text(f"Hello \U000E0001 world", encoding="utf-8")
+        sneaky.write_text("Hello \U000e0001 world", encoding="utf-8")
 
         out = tmp_path / "build"
         with patch("apm_cli.bundle.plugin_exporter._rich_warning") as mock_warn:
@@ -846,7 +878,9 @@ class TestExportPluginBundle:
         assert result.bundle_path.exists()
         assert any("hidden character" in str(c) for c in mock_warn.call_args_list)
 
-    def test_plugin_json_updated_with_component_dirs(self, tmp_path):
+    def test_plugin_json_omits_convention_dir_keys(self, tmp_path):
+        """plugin.json must NOT include convention-dir keys (schema requires
+        ``./*.md`` paths for these arrays; convention dirs are auto-discovered)."""
         project = _setup_plugin_project(
             tmp_path,
             agents=["a.agent.md"],
@@ -857,8 +891,13 @@ class TestExportPluginBundle:
         result = export_plugin_bundle(project, out)
 
         pj = json.loads((result.bundle_path / "plugin.json").read_text())
-        assert pj["agents"] == ["agents/"]
-        assert pj["skills"] == ["skills/"]
+        assert "agents" not in pj
+        assert "skills" not in pj
+        assert "commands" not in pj
+        assert "instructions" not in pj
+        # Files still land in convention dirs
+        assert (result.bundle_path / "agents" / "a.agent.md").exists()
+        assert (result.bundle_path / "skills" / "s1" / "SKILL.md").exists()
 
     def test_root_level_plugin_dirs_collected(self, tmp_path):
         """Root-level agents/ commands/ etc. are picked up for plugin-native repos."""

@@ -6,16 +6,16 @@ import sys
 
 import click
 
-
 from ....core.command_logger import CommandLogger
 from ....marketplace.errors import MarketplaceYmlError
 from . import (
-    package,
+    _SHA_RE,
     _ensure_yml_exists,
     _parse_tags,
     _resolve_ref,
-    _SHA_RE,
+    package,
 )
+
 
 @package.command("set", help="Update a package entry in marketplace authoring config")
 @click.argument("name")
@@ -97,8 +97,7 @@ def set_cmd(
 
     if not fields:
         logger.error(
-            "No fields specified. Pass at least one option "
-            "(e.g. --version, --ref, --subdir).",
+            "No fields specified. Pass at least one option (e.g. --version, --ref, --subdir).",
             symbol="error",
         )
         sys.exit(1)

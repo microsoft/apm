@@ -91,26 +91,32 @@ class TestValidation:
 
     def test_unknown_key_in_block_rejected(self, tmp_path: Path) -> None:
         apm = tmp_path / "apm.yml"
-        _write(apm, """\
+        _write(
+            apm,
+            """\
             name: my-project
             marketplace:
               owner:
                 name: A
               bogus: 1
               packages: []
-            """)
+            """,
+        )
         with pytest.raises(MarketplaceYmlError, match="bogus"):
             load_marketplace_from_apm_yml(apm)
 
     def test_missing_owner_rejected(self, tmp_path: Path) -> None:
         apm = tmp_path / "apm.yml"
-        _write(apm, """\
+        _write(
+            apm,
+            """\
             name: foo
             version: 1.0.0
             description: x
             marketplace:
               packages: []
-            """)
+            """,
+        )
         with pytest.raises(MarketplaceYmlError, match="owner"):
             load_marketplace_from_apm_yml(apm)
 
@@ -118,7 +124,9 @@ class TestValidation:
 class TestLocalPackages:
     def test_local_source_skips_version_requirement(self, tmp_path: Path) -> None:
         apm = tmp_path / "apm.yml"
-        _write(apm, """\
+        _write(
+            apm,
+            """\
             name: my-project
             version: 1.0.0
             marketplace:
@@ -127,7 +135,8 @@ class TestLocalPackages:
               packages:
                 - name: local-tool
                   source: ./packages/local-tool
-            """)
+            """,
+        )
         config = load_marketplace_from_apm_yml(apm)
         pkg = config.packages[0]
         assert pkg.is_local is True

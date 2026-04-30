@@ -15,7 +15,6 @@ import pytest
 from apm_cli.integration.mcp_integrator import MCPIntegrator, _is_vscode_available
 from apm_cli.models.dependency.mcp import MCPDependency
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -45,25 +44,33 @@ def _make_self_defined(name, transport="stdio", command=None, url=None, **kwargs
 
 class TestIsVscodeAvailable:
     def test_returns_true_when_code_on_path(self, tmp_path):
-        with patch("apm_cli.integration.mcp_integrator.shutil.which", return_value="/usr/bin/code"), \
-             patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path):
+        with (
+            patch("apm_cli.integration.mcp_integrator.shutil.which", return_value="/usr/bin/code"),
+            patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
+        ):
             assert _is_vscode_available() is True
 
     def test_returns_true_when_vscode_dir_exists(self, tmp_path):
         (tmp_path / ".vscode").mkdir()
-        with patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None), \
-             patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path):
+        with (
+            patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None),
+            patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
+        ):
             assert _is_vscode_available() is True
 
     def test_returns_false_when_neither_available(self, tmp_path):
-        with patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None), \
-             patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path):
+        with (
+            patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None),
+            patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
+        ):
             assert _is_vscode_available() is False
 
     def test_code_on_path_takes_precedence_over_missing_dir(self, tmp_path):
         # No .vscode dir, but 'code' is on PATH
-        with patch("apm_cli.integration.mcp_integrator.shutil.which", return_value="/usr/bin/code"), \
-             patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path):
+        with (
+            patch("apm_cli.integration.mcp_integrator.shutil.which", return_value="/usr/bin/code"),
+            patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
+        ):
             assert _is_vscode_available() is True
 
 
@@ -308,9 +315,7 @@ class TestBuildSelfDefinedInfo:
         assert info["_raw_stdio"]["env"] == {"TOKEN": "secret"}
 
     def test_http_transport_builds_remote(self):
-        dep = _make_self_defined(
-            "remote-svc", transport="http", url="https://example.com/mcp"
-        )
+        dep = _make_self_defined("remote-svc", transport="http", url="https://example.com/mcp")
         info = MCPIntegrator._build_self_defined_info(dep)
         assert "remotes" in info
         assert info["remotes"][0]["url"] == "https://example.com/mcp"
@@ -318,9 +323,7 @@ class TestBuildSelfDefinedInfo:
         assert "packages" not in info
 
     def test_sse_transport_builds_remote(self):
-        dep = _make_self_defined(
-            "sse-svc", transport="sse", url="https://example.com/sse"
-        )
+        dep = _make_self_defined("sse-svc", transport="sse", url="https://example.com/sse")
         info = MCPIntegrator._build_self_defined_info(dep)
         assert "remotes" in info
 
@@ -390,7 +393,9 @@ class TestApplyOverlay:
         return {
             name: {
                 "name": name,
-                "packages": [{"runtime_hint": name, "runtime_arguments": [], "registry_name": "npm"}],
+                "packages": [
+                    {"runtime_hint": name, "runtime_arguments": [], "registry_name": "npm"}
+                ],
                 "remotes": [{"transport_type": "sse", "url": "https://example.com"}],
             }
         }
@@ -502,6 +507,7 @@ class TestUpdateLockfile:
         MCPIntegrator.update_lockfile({"server-a", "server-b"}, lock_path=lock_path)
 
         from apm_cli.deps.lockfile import LockFile
+
         lf = LockFile.read(lock_path)
         assert set(lf.mcp_servers) == {"server-a", "server-b"}
 
@@ -513,6 +519,7 @@ class TestUpdateLockfile:
         MCPIntegrator.update_lockfile({"server-a"}, lock_path=lock_path, mcp_configs=configs)
 
         from apm_cli.deps.lockfile import LockFile
+
         lf = LockFile.read(lock_path)
         assert lf.mcp_configs == configs
 
@@ -528,6 +535,7 @@ class TestUpdateLockfile:
         MCPIntegrator.update_lockfile({"z-svc", "a-svc", "m-svc"}, lock_path=lock_path)
 
         from apm_cli.deps.lockfile import LockFile
+
         lf = LockFile.read(lock_path)
         assert lf.mcp_servers == sorted(lf.mcp_servers)
 
@@ -540,6 +548,7 @@ class TestUpdateLockfile:
         MCPIntegrator.update_lockfile(set(), lock_path=lock_path)
 
         from apm_cli.deps.lockfile import LockFile
+
         lf = LockFile.read(lock_path)
         assert lf.mcp_servers == []
 
@@ -559,8 +568,10 @@ class TestRemoveStaleVscode:
         vscode_dir = tmp_path / ".vscode"
         self._write_vscode_mcp(vscode_dir, {"old-server": {}, "keep-server": {}})
 
-        with patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path), \
-             patch("pathlib.Path.home", return_value=tmp_path):
+        with (
+            patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
+            patch("pathlib.Path.home", return_value=tmp_path),
+        ):
             MCPIntegrator.remove_stale({"old-server"}, runtime="vscode")
 
         remaining = json.loads((vscode_dir / "mcp.json").read_text())
@@ -571,11 +582,11 @@ class TestRemoveStaleVscode:
         vscode_dir = tmp_path / ".vscode"
         self._write_vscode_mcp(vscode_dir, {"github-mcp-server": {}, "keep": {}})
 
-        with patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path), \
-             patch("pathlib.Path.home", return_value=tmp_path):
-            MCPIntegrator.remove_stale(
-                {"io.github.github/github-mcp-server"}, runtime="vscode"
-            )
+        with (
+            patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
+            patch("pathlib.Path.home", return_value=tmp_path),
+        ):
+            MCPIntegrator.remove_stale({"io.github.github/github-mcp-server"}, runtime="vscode")
 
         remaining = json.loads((vscode_dir / "mcp.json").read_text())
         assert "github-mcp-server" not in remaining["servers"]
@@ -585,8 +596,10 @@ class TestRemoveStaleVscode:
         self._write_vscode_mcp(vscode_dir, {"server": {}})
         original_mtime = (vscode_dir / "mcp.json").stat().st_mtime
 
-        with patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path), \
-             patch("pathlib.Path.home", return_value=tmp_path):
+        with (
+            patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
+            patch("pathlib.Path.home", return_value=tmp_path),
+        ):
             MCPIntegrator.remove_stale(set(), runtime="vscode")
 
         # File unchanged when stale set is empty (early return)
@@ -594,8 +607,10 @@ class TestRemoveStaleVscode:
 
     def test_missing_vscode_mcp_json_is_noop(self, tmp_path):
         # No .vscode/mcp.json at all - should not raise
-        with patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path), \
-             patch("pathlib.Path.home", return_value=tmp_path):
+        with (
+            patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
+            patch("pathlib.Path.home", return_value=tmp_path),
+        ):
             MCPIntegrator.remove_stale({"ghost"}, runtime="vscode")
 
     def test_target_restricted_to_requested_runtime(self, tmp_path):
@@ -606,8 +621,10 @@ class TestRemoveStaleVscode:
         copilot_mcp = copilot_dir / "mcp-config.json"
         copilot_mcp.write_text(json.dumps({"mcpServers": {"stale": {}}}), encoding="utf-8")
 
-        with patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path), \
-             patch("pathlib.Path.home", return_value=tmp_path):
+        with (
+            patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
+            patch("pathlib.Path.home", return_value=tmp_path),
+        ):
             MCPIntegrator.remove_stale({"stale"}, runtime="vscode")
 
         # vscode cleaned; copilot untouched
@@ -621,8 +638,10 @@ class TestRemoveStaleVscode:
         vscode_dir = nested / ".vscode"
         self._write_vscode_mcp(vscode_dir, {"old-server": {}, "keep-server": {}})
 
-        with patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path), \
-             patch("pathlib.Path.home", return_value=tmp_path):
+        with (
+            patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
+            patch("pathlib.Path.home", return_value=tmp_path),
+        ):
             MCPIntegrator.remove_stale(
                 {"old-server"},
                 runtime="vscode",
@@ -687,8 +706,10 @@ class TestRemoveStaleCopilot:
     def test_removes_stale_from_copilot(self, tmp_path):
         cfg = self._write_copilot_mcp(tmp_path, {"old": {}, "keep": {}})
 
-        with patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path), \
-             patch("pathlib.Path.home", return_value=tmp_path):
+        with (
+            patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
+            patch("pathlib.Path.home", return_value=tmp_path),
+        ):
             MCPIntegrator.remove_stale({"old"}, runtime="copilot")
 
         remaining = json.loads(cfg.read_text())

@@ -12,10 +12,10 @@ import yaml
 from ....core.command_logger import CommandLogger
 from ....marketplace.errors import (
     GitLsRemoteError,
-    MarketplaceYmlError,
+    MarketplaceYmlError,  # noqa: F401
     OfflineMissError,
 )
-from ..._helpers import _is_interactive
+from ..._helpers import _is_interactive  # noqa: F401
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -31,6 +31,7 @@ def _yml_path() -> Path:
     if legacy_path.exists():
         return legacy_path
     return apm_path
+
 
 def _ensure_yml_exists(logger: CommandLogger) -> Path:
     """Return the yml path or exit with guidance if it does not exist."""
@@ -50,12 +51,12 @@ def _ensure_yml_exists(logger: CommandLogger) -> Path:
     path = _yml_path()
     if not path.exists() or (path == apm_path and not _has_marketplace_block(path)):
         logger.error(
-            "No marketplace authoring config found. "
-            "Run 'apm marketplace init' to scaffold one.",
+            "No marketplace authoring config found. Run 'apm marketplace init' to scaffold one.",
             symbol="error",
         )
         sys.exit(1)
     return path
+
 
 def _has_marketplace_block(apm_path: Path) -> bool:
     """Return True when *apm_path* has a populated ``marketplace:`` block."""
@@ -65,11 +66,8 @@ def _has_marketplace_block(apm_path: Path) -> bool:
         data = yaml.safe_load(apm_path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError):
         return False
-    return (
-        isinstance(data, dict)
-        and "marketplace" in data
-        and data["marketplace"] is not None
-    )
+    return isinstance(data, dict) and "marketplace" in data and data["marketplace"] is not None
+
 
 def _parse_tags(raw: str | None) -> list[str] | None:
     """Split a comma-separated tag string into a list, or return None."""
@@ -77,6 +75,7 @@ def _parse_tags(raw: str | None) -> list[str] | None:
         return None
     parts = [t.strip() for t in raw.split(",") if t.strip()]
     return parts if parts else None
+
 
 def _verify_source(logger: CommandLogger, source: str) -> None:
     """Run ``git ls-remote`` against *source* to verify reachability."""
@@ -96,6 +95,7 @@ def _verify_source(logger: CommandLogger, source: str) -> None:
             f"Cannot verify source '{source}' (offline / no cache).",
             symbol="warning",
         )
+
 
 def _resolve_ref(
     logger: CommandLogger,
@@ -124,8 +124,7 @@ def _resolve_ref(
     if is_head:
         if no_verify:
             logger.error(
-                "Cannot resolve HEAD ref without network access. "
-                "Provide an explicit --ref SHA.",
+                "Cannot resolve HEAD ref without network access. Provide an explicit --ref SHA.",
                 symbol="error",
             )
             sys.exit(2)
@@ -172,8 +171,7 @@ def _resolve_ref(
                 )
                 sys.exit(2)
             logger.warning(
-                f"'{ref}' is a branch (mutable ref). "
-                "Resolving to current SHA for safety.",
+                f"'{ref}' is a branch (mutable ref). Resolving to current SHA for safety.",
                 symbol="warning",
             )
             logger.progress(
@@ -185,10 +183,10 @@ def _resolve_ref(
     # Not a branch - tag or unknown ref; store as-is.
     return ref
 
+
 @click.group(help="Manage packages in marketplace authoring config")
 def package():
     """Add, update, or remove packages in marketplace authoring config."""
-
 
 
 from .add import add  # noqa: E402
@@ -196,16 +194,15 @@ from .remove import remove  # noqa: E402
 from .set import set_cmd  # noqa: E402
 
 __all__ = [
-    "package",
-    "add",
-    "set_cmd",
-    "remove",
     "_SHA_RE",
-    "_yml_path",
     "_ensure_yml_exists",
     "_has_marketplace_block",
     "_parse_tags",
-    "_verify_source",
     "_resolve_ref",
+    "_verify_source",
+    "_yml_path",
+    "add",
+    "package",
+    "remove",
+    "set_cmd",
 ]
-

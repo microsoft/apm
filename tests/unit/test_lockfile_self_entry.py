@@ -14,11 +14,10 @@ Covers:
 import yaml
 
 from apm_cli.deps.lockfile import (
-    LockFile,
-    LockedDependency,
     _SELF_KEY,
+    LockedDependency,
+    LockFile,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -148,9 +147,7 @@ class TestSelfEntryNotSerialized:
         lock = LockFile.from_yaml(_make_lockfile_with_local_content().to_yaml())
         assert _SELF_KEY in lock.dependencies
         _ = lock.to_yaml()
-        assert _SELF_KEY in lock.dependencies, (
-            "to_yaml() must restore the popped self-entry"
-        )
+        assert _SELF_KEY in lock.dependencies, "to_yaml() must restore the popped self-entry"
 
     def test_to_yaml_restores_self_entry_even_on_exception(self, monkeypatch):
         """If serialization raises, the self-entry must still be restored."""
@@ -163,13 +160,11 @@ class TestSelfEntryNotSerialized:
             raise RuntimeError("simulated dump failure")
 
         monkeypatch.setattr(yaml_io, "yaml_to_str", _boom)
-        try:
+        try:  # noqa: SIM105
             lock.to_yaml()
         except RuntimeError:
             pass
-        assert _SELF_KEY in lock.dependencies, (
-            "to_yaml() must restore self-entry even on exception"
-        )
+        assert _SELF_KEY in lock.dependencies, "to_yaml() must restore self-entry even on exception"
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +260,7 @@ class TestSemanticEquivalenceWithSelfEntry:
         lock_a = LockFile.from_yaml(_make_lockfile_with_local_content().to_yaml())
 
         other = _make_lockfile_with_local_content()
-        other.local_deployed_files = list(other.local_deployed_files) + [
+        other.local_deployed_files = list(other.local_deployed_files) + [  # noqa: RUF005
             ".github/skills/extra/SKILL.md"
         ]
         other.local_deployed_file_hashes = dict(other.local_deployed_file_hashes)

@@ -6,16 +6,16 @@ import sys
 
 import click
 
-
 from ....core.command_logger import CommandLogger
 from ....marketplace.errors import MarketplaceYmlError
 from . import (
-    package,
     _ensure_yml_exists,
     _parse_tags,
     _resolve_ref,
     _verify_source,
+    package,
 )
+
 
 @package.command(help="Add a package to marketplace authoring config")
 @click.argument("source")
@@ -29,9 +29,7 @@ from . import (
 @click.option("-s", "--subdir", default=None, help="Subdirectory inside source repo")
 @click.option("--tag-pattern", default=None, help="Tag pattern (e.g. 'v{version}')")
 @click.option("--tags", default=None, help="Comma-separated tags")
-@click.option(
-    "--include-prerelease", is_flag=True, help="Include prerelease versions"
-)
+@click.option("--include-prerelease", is_flag=True, help="Include prerelease versions")
 @click.option("--no-verify", is_flag=True, help="Skip remote reachability check")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def add(

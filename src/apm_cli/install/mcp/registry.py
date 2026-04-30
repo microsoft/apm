@@ -22,13 +22,13 @@ from __future__ import annotations
 import contextlib
 import ipaddress
 import os
-from typing import Any, Iterator, Mapping, Optional, Sequence, Tuple
+from collections.abc import Iterator, Mapping, Sequence
+from typing import Any, Optional, Tuple  # noqa: F401, UP035
 from urllib.parse import urlparse, urlunparse
 
 import click
 
 from ...models.dependency.mcp import _ALLOWED_URL_SCHEMES
-
 
 # Defensive cap on registry URL length to keep apm.yml diffs reviewable
 # and to bound any downstream URL parsing/logging surface.
@@ -59,7 +59,7 @@ def _redact_url_credentials(url: str) -> str:
         return url
 
 
-def _is_local_or_metadata_host(host: Optional[str]) -> bool:
+def _is_local_or_metadata_host(host: str | None) -> bool:
     """Return True for loopback, link-local, RFC1918, or cloud-metadata IPs.
 
     Used to surface a soft warning when ``--registry`` points at the local
@@ -90,7 +90,7 @@ def _is_local_or_metadata_host(host: Optional[str]) -> bool:
     )
 
 
-def validate_registry_url(value: Optional[str]) -> Optional[str]:
+def validate_registry_url(value: str | None) -> str | None:
     """Validate a ``--registry`` URL value. Return the normalized URL.
 
     Reuses the same scheme allowlist as :class:`MCPDependency` (``http``,
@@ -139,10 +139,10 @@ def validate_registry_url(value: Optional[str]) -> Optional[str]:
 
 
 def resolve_registry_url(
-    cli_value: Optional[str],
+    cli_value: str | None,
     *,
     logger=None,
-) -> Tuple[Optional[str], str]:
+) -> tuple[str | None, str]:
     """Apply precedence chain: CLI flag > ``MCP_REGISTRY_URL`` env > default.
 
     Returns ``(resolved_url_or_None, source)`` where source is one of
@@ -162,8 +162,7 @@ def resolve_registry_url(
         if env_value and env_value.rstrip("/") != cli_value:
             if logger is not None:
                 logger.progress(
-                    f"--registry overrides MCP_REGISTRY_URL "
-                    f"({_redact_url_credentials(env_value)})",
+                    f"--registry overrides MCP_REGISTRY_URL ({_redact_url_credentials(env_value)})",
                     symbol="info",
                 )
         _maybe_warn_local_host(cli_value, logger)
@@ -174,8 +173,7 @@ def resolve_registry_url(
         # change package resolution. Always emitted (not verbose-gated).
         if logger is not None:
             logger.progress(
-                f"Using MCP registry: {_redact_url_credentials(env_value)} "
-                f"(from MCP_REGISTRY_URL)",
+                f"Using MCP registry: {_redact_url_credentials(env_value)} (from MCP_REGISTRY_URL)",
                 symbol="info",
             )
         _maybe_warn_local_host(env_value, logger)
@@ -206,7 +204,7 @@ _REGISTRY_ENV_KEYS = ("MCP_REGISTRY_URL", "MCP_REGISTRY_ALLOW_HTTP")
 
 
 @contextlib.contextmanager
-def registry_env_override(registry_url: Optional[str]) -> Iterator[None]:
+def registry_env_override(registry_url: str | None) -> Iterator[None]:
     """Temporarily export ``MCP_REGISTRY_URL`` for the duration of a call.
 
     ``MCPIntegrator.install`` constructs ``MCPServerOperations()`` deep in
@@ -244,13 +242,13 @@ def registry_env_override(registry_url: Optional[str]) -> Iterator[None]:
 def validate_mcp_dry_run_entry(
     name: str,
     *,
-    transport: Optional[str] = None,
-    url: Optional[str] = None,
-    env: Optional[Mapping[str, str]] = None,
-    headers: Optional[Mapping[str, str]] = None,
-    version: Optional[str] = None,
-    command_argv: Optional[Sequence[str]] = None,
-    registry_url: Optional[str] = None,
+    transport: str | None = None,
+    url: str | None = None,
+    env: Mapping[str, str] | None = None,
+    headers: Mapping[str, str] | None = None,
+    version: str | None = None,
+    command_argv: Sequence[str] | None = None,
+    registry_url: str | None = None,
 ) -> None:
     """C1: validate the MCP entry that ``apm install --mcp ... --dry-run``
     would persist, raising :class:`click.UsageError` on rejection.
@@ -263,6 +261,7 @@ def validate_mcp_dry_run_entry(
     ``TypeError`` at the boundary instead of being silently swallowed.
     """
     from .entry import build_mcp_entry
+
     try:
         build_mcp_entry(
             name,
@@ -275,4 +274,4 @@ def validate_mcp_dry_run_entry(
             registry_url=registry_url,
         )
     except ValueError as exc:
-        raise click.UsageError(str(exc))
+        raise click.UsageError(str(exc))  # noqa: B904

@@ -10,24 +10,24 @@ Covers the bottlenecks identified in the complexity audit:
 Run with: uv run pytest tests/benchmarks/test_audit_benchmarks.py -v -m benchmark
 """
 
-import os
+import os  # noqa: F401
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
-from unittest.mock import patch, MagicMock
+from typing import Dict, List, Optional  # noqa: F401, UP035
+from unittest.mock import MagicMock, patch  # noqa: F401
 
 import pytest
 
-from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 from apm_cli.commands.uninstall.engine import _build_children_index
+from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 from apm_cli.primitives.discovery import find_primitive_files
 from apm_cli.utils.console import _get_console, _reset_console
-
 
 # ---------------------------------------------------------------------------
 # Helpers to build synthetic data
 # ---------------------------------------------------------------------------
+
 
 def _write_apm_yml_with_deps(path: Path, dep_count: int) -> Path:
     """Write an apm.yml with N APM dependencies."""
@@ -47,12 +47,13 @@ def _write_apm_yml_with_deps(path: Path, dep_count: int) -> Path:
 @dataclass
 class _FakeDep:
     """Minimal stand-in for LockedDependency used by _build_children_index."""
+
     repo_url: str
-    resolved_by: Optional[str] = None
-    virtual_path: Optional[str] = None
+    resolved_by: str | None = None
+    virtual_path: str | None = None
     is_virtual: bool = False
-    source: Optional[str] = None
-    local_path: Optional[str] = None
+    source: str | None = None
+    local_path: str | None = None
 
     def get_unique_key(self) -> str:
         if self.source == "local" and self.local_path:
@@ -65,9 +66,10 @@ class _FakeDep:
 @dataclass
 class _FakeLockFile:
     """Minimal stand-in for LockFile used by _build_children_index."""
-    dependencies: Dict[str, "_FakeDep"] = field(default_factory=dict)
 
-    def get_package_dependencies(self) -> List["_FakeDep"]:
+    dependencies: dict[str, "_FakeDep"] = field(default_factory=dict)
+
+    def get_package_dependencies(self) -> list["_FakeDep"]:
         return sorted(self.dependencies.values(), key=lambda d: d.repo_url)
 
 
@@ -111,6 +113,7 @@ def _create_file_tree(base: Path, file_count: int) -> None:
 # Benchmark: Phase 0 -- Dependency parsing deduplication
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.benchmark
 class TestDependencyParsingPerf:
     """Benchmark APMPackage.from_apm_yml() with many dependencies."""
@@ -131,9 +134,7 @@ class TestDependencyParsingPerf:
         assert pkg.name == "bench-pkg"
         apm_deps = pkg.get_apm_dependencies()
         assert len(apm_deps) == dep_count
-        assert elapsed < 1.0, (
-            f"Parsing {dep_count} deps took {elapsed:.3f}s (limit 1.0s)"
-        )
+        assert elapsed < 1.0, f"Parsing {dep_count} deps took {elapsed:.3f}s (limit 1.0s)"
 
     def test_cache_hit_after_parse(self, tmp_path: Path):
         """Second parse of same file should be near-instant (cache hit)."""
@@ -159,6 +160,7 @@ class TestDependencyParsingPerf:
 # ---------------------------------------------------------------------------
 # Benchmark: Phase 2 -- Uninstall engine children index
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.benchmark
 class TestChildrenIndexPerf:
@@ -205,6 +207,7 @@ class TestChildrenIndexPerf:
 # Benchmark: Phase 6 -- Primitive discovery scanning
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.benchmark
 class TestPrimitiveDiscoveryPerf:
     """Benchmark find_primitive_files with large directory trees."""
@@ -224,9 +227,7 @@ class TestPrimitiveDiscoveryPerf:
         assert len(found) >= expected_min
         thresholds = {100: 0.5, 500: 2.0}
         limit = thresholds[file_count]
-        assert elapsed < limit, (
-            f"Scanning {file_count} files took {elapsed:.3f}s (limit {limit}s)"
-        )
+        assert elapsed < limit, f"Scanning {file_count} files took {elapsed:.3f}s (limit {limit}s)"
 
     def test_no_matches_returns_empty(self, tmp_path: Path):
         """Directory with no matching files returns empty list quickly."""
@@ -244,6 +245,7 @@ class TestPrimitiveDiscoveryPerf:
 # ---------------------------------------------------------------------------
 # Benchmark: Registry config cache
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.benchmark
 class TestRegistryConfigCachePerf:
@@ -294,6 +296,7 @@ class TestRegistryConfigCachePerf:
 # Benchmark: Console singleton
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.benchmark
 class TestConsoleSingletonPerf:
     """Benchmark _get_console singleton -- repeated calls should be instant."""
@@ -316,23 +319,24 @@ class TestConsoleSingletonPerf:
 
         # After the first call, every subsequent call is a simple
         # identity check on the module-level variable.
-        assert elapsed < 0.05, (
-            f"1000 _get_console() calls took {elapsed:.3f}s (limit 0.05s)"
-        )
+        assert elapsed < 0.05, f"1000 _get_console() calls took {elapsed:.3f}s (limit 0.05s)"
         # All calls should return the same object
         assert c is console
 
     def test_concurrent_singleton_identity(self):
         """50 threads calling _get_console() should all get the same object."""
         import threading
+
         _reset_console()
         results = []
         errors = []
+
         def worker():
             try:
                 results.append(_get_console())
             except Exception as e:
                 errors.append(e)
+
         threads = [threading.Thread(target=worker) for _ in range(50)]
         for t in threads:
             t.start()
@@ -354,6 +358,7 @@ class TestConsoleSingletonPerf:
 # Benchmark: NullCommandLogger dispatch overhead
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.benchmark
 class TestNullCommandLoggerPerf:
     """Verify NullCommandLogger dispatch overhead is negligible."""
@@ -361,6 +366,7 @@ class TestNullCommandLoggerPerf:
     def test_null_logger_dispatch_overhead(self):
         """10,000 calls to NullCommandLogger methods should be near-instant."""
         from apm_cli.core.null_logger import NullCommandLogger
+
         logger = NullCommandLogger()
         start = time.perf_counter()
         for _ in range(10_000):

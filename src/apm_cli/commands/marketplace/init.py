@@ -10,9 +10,10 @@ import click
 
 from ...core.command_logger import CommandLogger
 from . import (
-    marketplace,
     _check_gitignore_for_marketplace_json,
+    marketplace,
 )
+
 
 @marketplace.command(help="Add a 'marketplace:' block to apm.yml (scaffolds apm.yml if missing)")
 @click.option(
@@ -59,7 +60,7 @@ def init(force, no_gitignore_check, name, owner, verbose):
         rt.preserve_quotes = True
         rt.indent(mapping=2, sequence=4, offset=2)
         data = rt.load(apm_path.read_text(encoding="utf-8"))
-    except Exception as exc:  # noqa: BLE001 -- guard malformed apm.yml
+    except Exception as exc:
         logger.error(f"Failed to parse apm.yml: {exc}", symbol="error")
         sys.exit(1)
 
@@ -69,17 +70,12 @@ def init(force, no_gitignore_check, name, owner, verbose):
         data = CommentedMap()
     elif not isinstance(data, dict):
         logger.error(
-            "apm.yml must be a YAML mapping at the top level "
-            f"(got {type(data).__name__}).",
+            f"apm.yml must be a YAML mapping at the top level (got {type(data).__name__}).",
             symbol="error",
         )
         sys.exit(1)
 
-    if (
-        "marketplace" in data
-        and data["marketplace"] is not None
-        and not force
-    ):
+    if "marketplace" in data and data["marketplace"] is not None and not force:
         logger.warning(
             "apm.yml already has a 'marketplace:' block. Use --force to overwrite.",
             symbol="warning",

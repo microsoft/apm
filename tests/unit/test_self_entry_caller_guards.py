@@ -6,12 +6,12 @@ remote packages (paths via to_dependency_ref(), apm_modules/<repo_url>, etc.)
 must skip it. These tests pin the contract for representative call sites.
 """
 
-from pathlib import Path
+from pathlib import Path  # noqa: F401
 from unittest.mock import patch
 
 from apm_cli.commands.uninstall.engine import _validate_uninstall_packages
 from apm_cli.core.command_logger import CommandLogger
-from apm_cli.deps.lockfile import LockFile, LockedDependency, _SELF_KEY
+from apm_cli.deps.lockfile import _SELF_KEY, LockedDependency, LockFile
 from apm_cli.integration.skill_integrator import SkillIntegrator
 
 
@@ -82,7 +82,7 @@ class TestUninstallRejectsSelfKey:
         """Trying to uninstall the literal '.' returns 'not found', no crash."""
         logger = CommandLogger(command="uninstall", verbose=False)
         # current_deps are real apm.yml dependency entries; "." is not one.
-        to_remove, not_found = _validate_uninstall_packages(
+        to_remove, not_found = _validate_uninstall_packages(  # noqa: RUF059
             packages=["."],
             current_deps=["owner/repo"],
             logger=logger,
@@ -109,11 +109,12 @@ class TestSkillIntegratorSkipsSelfEntry:
         # The self-entry has a deployed skill file that would otherwise land
         # in owned_by under owner '<self>'.
 
-        with patch(
-            "apm_cli.deps.lockfile.LockFile.read", return_value=lock
-        ), patch(
-            "apm_cli.deps.lockfile.get_lockfile_path",
-            return_value=tmp_path / "apm.lock",
+        with (
+            patch("apm_cli.deps.lockfile.LockFile.read", return_value=lock),
+            patch(
+                "apm_cli.deps.lockfile.get_lockfile_path",
+                return_value=tmp_path / "apm.lock",
+            ),
         ):
             owned_by, native_owners = SkillIntegrator._build_ownership_maps(tmp_path)
 

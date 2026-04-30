@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import builtins
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional  # noqa: F401
 
 if TYPE_CHECKING:
     from ..core.command_logger import InstallLogger
@@ -65,8 +65,9 @@ def _deployed_path_entry(
             for _t in targets:
                 if _t.resolved_deploy_root is not None:
                     from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
+
                     return to_lockfile_path(target_path, _t.resolved_deploy_root)
-        raise RuntimeError(
+        raise RuntimeError(  # noqa: B904
             f"Cannot translate {target_path!r} to a lockfile path: "
             f"path is outside the project tree and no dynamic-root "
             f"target matched. This is a bug — please report it."
@@ -86,12 +87,12 @@ def integrate_package_primitives(
     hook_integrator: Any,
     force: bool,
     managed_files: Any,
-    diagnostics: "DiagnosticCollector",
+    diagnostics: DiagnosticCollector,
     package_name: str = "",
-    logger: Optional["InstallLogger"] = None,
-    scope: Optional["InstallScope"] = None,
-    skill_subset: "Optional[tuple]" = None,
-    ctx: Optional["InstallContext"] = None,
+    logger: InstallLogger | None = None,
+    scope: InstallScope | None = None,
+    skill_subset: tuple | None = None,
+    ctx: InstallContext | None = None,
 ) -> dict:
     """Run the full integration pipeline for a single package.
 
@@ -144,7 +145,8 @@ def integrate_package_primitives(
             # misleading duplicate warnings.
         }
         _found_types = [
-            ptype for ptype, subdir in _NON_SKILL_DIRS.items()
+            ptype
+            for ptype, subdir in _NON_SKILL_DIRS.items()
             if (_apm_dir / subdir).is_dir() and any((_apm_dir / subdir).iterdir())
         ]
         if _found_types:
@@ -181,16 +183,26 @@ def integrate_package_primitives(
 
             _integrator = _INTEGRATOR_KWARGS[_prim_name]
             _int_result = getattr(_integrator, _entry.integrate_method)(
-                _target, package_info, project_root,
-                force=force, managed_files=managed_files,
+                _target,
+                package_info,
+                project_root,
+                force=force,
+                managed_files=managed_files,
                 diagnostics=diagnostics,
             )
 
             if _int_result.files_integrated > 0:
                 result[_entry.counter_key] += _int_result.files_integrated
                 _effective_root = _mapping.deploy_root or _target.root_dir
-                _deploy_dir = f"{_effective_root}/{_mapping.subdir}/" if _mapping.subdir else f"{_effective_root}/"
-                if _prim_name == "instructions" and _mapping.format_id in ("cursor_rules", "claude_rules"):
+                _deploy_dir = (
+                    f"{_effective_root}/{_mapping.subdir}/"
+                    if _mapping.subdir
+                    else f"{_effective_root}/"
+                )
+                if _prim_name == "instructions" and _mapping.format_id in (
+                    "cursor_rules",
+                    "claude_rules",
+                ):
                     _label = "rule(s)"
                 elif _prim_name == "instructions":
                     _label = "instruction(s)"
@@ -212,9 +224,13 @@ def integrate_package_primitives(
                 deployed.append(_deployed_path_entry(tp, project_root, targets))
 
     skill_result = skill_integrator.integrate_package_skill(
-        package_info, project_root,
-        diagnostics=diagnostics, managed_files=managed_files, force=force,
-        targets=targets, skill_subset=skill_subset,
+        package_info,
+        project_root,
+        diagnostics=diagnostics,
+        managed_files=managed_files,
+        force=force,
+        targets=targets,
+        skill_subset=skill_subset,
     )
     _skill_target_dirs: set = builtins.set()
     for tp in skill_result.target_paths:
@@ -232,7 +248,9 @@ def integrate_package_primitives(
         _log_integration(f"  |-- Skill integrated -> {_skill_target_str}")
     if skill_result.sub_skills_promoted > 0:
         result["sub_skills"] += skill_result.sub_skills_promoted
-        _log_integration(f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_target_str}")
+        _log_integration(
+            f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_target_str}"
+        )
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))
 
@@ -251,10 +269,10 @@ def integrate_local_content(
     hook_integrator: Any,
     force: bool,
     managed_files: Any,
-    diagnostics: "DiagnosticCollector",
-    logger: Optional["InstallLogger"] = None,
-    scope: Optional["InstallScope"] = None,
-    ctx: Optional["InstallContext"] = None,
+    diagnostics: DiagnosticCollector,
+    logger: InstallLogger | None = None,
+    scope: InstallScope | None = None,
+    ctx: InstallContext | None = None,
 ) -> dict:
     """Integrate primitives from the project's own .apm/ directory.
 

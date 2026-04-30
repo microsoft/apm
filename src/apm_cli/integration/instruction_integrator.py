@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Dict, List, Optional, Set  # noqa: F401, UP035
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.utils.paths import portable_relpath
@@ -31,7 +31,7 @@ class InstructionIntegrator(BaseIntegrator):
     * Gemini CLI: compile-only (GEMINI.md) -- no per-file rule deployment
     """
 
-    def find_instruction_files(self, package_path: Path) -> List[Path]:
+    def find_instruction_files(self, package_path: Path) -> list[Path]:
         """Find all .instructions.md files in a package.
 
         Searches in .apm/instructions/ subdirectory.
@@ -47,9 +47,9 @@ class InstructionIntegrator(BaseIntegrator):
 
         Preserves applyTo: frontmatter and all content as-is.
         """
-        content = source.read_text(encoding='utf-8')
+        content = source.read_text(encoding="utf-8")
         content, links_resolved = self.resolve_links(content, source, target)
-        target.write_text(content, encoding='utf-8')
+        target.write_text(content, encoding="utf-8")
         return links_resolved
 
     # ------------------------------------------------------------------
@@ -58,12 +58,12 @@ class InstructionIntegrator(BaseIntegrator):
 
     def integrate_instructions_for_target(
         self,
-        target: "TargetProfile",
+        target: TargetProfile,
         package_info,
         project_root: Path,
         *,
         force: bool = False,
-        managed_files: Optional[Set[str]] = None,
+        managed_files: set[str] | None = None,
         diagnostics=None,
     ) -> IntegrationResult:
         """Integrate instructions for a single *target*.
@@ -96,7 +96,7 @@ class InstructionIntegrator(BaseIntegrator):
 
         files_integrated = 0
         files_skipped = 0
-        target_paths: List[Path] = []
+        target_paths: list[Path] = []
         total_links_resolved = 0
 
         for source_file in instruction_files:
@@ -112,7 +112,10 @@ class InstructionIntegrator(BaseIntegrator):
             rel_path = portable_relpath(target_path, project_root)
 
             if self.check_collision(
-                target_path, rel_path, managed_files, force,
+                target_path,
+                rel_path,
+                managed_files,
+                force,
                 diagnostics=diagnostics,
             ):
                 files_skipped += 1
@@ -139,11 +142,11 @@ class InstructionIntegrator(BaseIntegrator):
 
     def sync_for_target(
         self,
-        target: "TargetProfile",
+        target: TargetProfile,
         apm_package,
         project_root: Path,
-        managed_files: Optional[Set[str]] = None,
-    ) -> Dict[str, int]:
+        managed_files: set[str] | None = None,
+    ) -> dict[str, int]:
         """Remove APM-managed instruction files for a single *target*."""
         mapping = target.primitives.get("instructions")
         if not mapping:
@@ -185,15 +188,19 @@ class InstructionIntegrator(BaseIntegrator):
         package_info,
         project_root: Path,
         force: bool = False,
-        managed_files: Optional[Set[str]] = None,
+        managed_files: set[str] | None = None,
         diagnostics=None,
         logger=None,
     ) -> IntegrationResult:
         """Integrate instructions into .github/instructions/."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         return self.integrate_instructions_for_target(
-            KNOWN_TARGETS["copilot"], package_info, project_root,
-            force=force, managed_files=managed_files,
+            KNOWN_TARGETS["copilot"],
+            package_info,
+            project_root,
+            force=force,
+            managed_files=managed_files,
             diagnostics=diagnostics,
         )
 
@@ -202,12 +209,15 @@ class InstructionIntegrator(BaseIntegrator):
         self,
         apm_package,
         project_root: Path,
-        managed_files: Optional[Set[str]] = None,
-    ) -> Dict[str, int]:
+        managed_files: set[str] | None = None,
+    ) -> dict[str, int]:
         """Remove APM-managed instruction files from .github/instructions/."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         return self.sync_for_target(
-            KNOWN_TARGETS["copilot"], apm_package, project_root,
+            KNOWN_TARGETS["copilot"],
+            apm_package,
+            project_root,
             managed_files=managed_files,
         )
 
@@ -228,17 +238,17 @@ class InstructionIntegrator(BaseIntegrator):
         description = ""
 
         # Parse existing frontmatter
-        fm_match = re.match(r'^---\s*\n(.*?)\n---\s*\n?', content, re.DOTALL)
+        fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
         if fm_match:
             fm_block = fm_match.group(1)
-            body = content[fm_match.end():]
+            body = content[fm_match.end() :]
 
             for line in fm_block.splitlines():
                 line_stripped = line.strip()
                 if line_stripped.startswith("applyTo:"):
-                    apply_to = line_stripped[len("applyTo:"):].strip().strip("'\"")
+                    apply_to = line_stripped[len("applyTo:") :].strip().strip("'\"")
                 elif line_stripped.startswith("description:"):
-                    description = line_stripped[len("description:"):].strip().strip("'\"")
+                    description = line_stripped[len("description:") :].strip().strip("'\"")
 
         # Generate description from first content sentence if missing
         if not description:
@@ -263,10 +273,10 @@ class InstructionIntegrator(BaseIntegrator):
 
         Converts ``applyTo:`` → ``globs:`` frontmatter and resolves links.
         """
-        content = source.read_text(encoding='utf-8')
+        content = source.read_text(encoding="utf-8")
         content = self._convert_to_cursor_rules(content)
         content, links_resolved = self.resolve_links(content, source, target)
-        target.write_text(content, encoding='utf-8')
+        target.write_text(content, encoding="utf-8")
         return links_resolved
 
     # DEPRECATED: use integrate_instructions_for_target(KNOWN_TARGETS["cursor"], ...) instead.
@@ -275,15 +285,19 @@ class InstructionIntegrator(BaseIntegrator):
         package_info,
         project_root: Path,
         force: bool = False,
-        managed_files: Optional[Set[str]] = None,
+        managed_files: set[str] | None = None,
         diagnostics=None,
         logger=None,
     ) -> IntegrationResult:
         """Integrate instructions as Cursor Rules into ``.cursor/rules/``."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         return self.integrate_instructions_for_target(
-            KNOWN_TARGETS["cursor"], package_info, project_root,
-            force=force, managed_files=managed_files,
+            KNOWN_TARGETS["cursor"],
+            package_info,
+            project_root,
+            force=force,
+            managed_files=managed_files,
             diagnostics=diagnostics,
         )
 
@@ -292,12 +306,15 @@ class InstructionIntegrator(BaseIntegrator):
         self,
         apm_package,
         project_root: Path,
-        managed_files: Optional[Set[str]] = None,
-    ) -> Dict[str, int]:
+        managed_files: set[str] | None = None,
+    ) -> dict[str, int]:
         """Remove APM-managed Cursor Rules files from ``.cursor/rules/``."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         return self.sync_for_target(
-            KNOWN_TARGETS["cursor"], apm_package, project_root,
+            KNOWN_TARGETS["cursor"],
+            apm_package,
+            project_root,
             managed_files=managed_files,
         )
 
@@ -320,15 +337,15 @@ class InstructionIntegrator(BaseIntegrator):
         apply_to = ""
 
         # Parse existing frontmatter
-        fm_match = re.match(r'^---\s*\n(.*?)\n---\s*\n?', content, re.DOTALL)
+        fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
         if fm_match:
             fm_block = fm_match.group(1)
-            body = content[fm_match.end():]
+            body = content[fm_match.end() :]
 
             for line in fm_block.splitlines():
                 line_stripped = line.strip()
                 if line_stripped.startswith("applyTo:"):
-                    apply_to = line_stripped[len("applyTo:"):].strip().strip("'\"")
+                    apply_to = line_stripped[len("applyTo:") :].strip().strip("'\"")
 
         # Build Claude rules frontmatter (only when path-scoped)
         if apply_to:
@@ -346,10 +363,10 @@ class InstructionIntegrator(BaseIntegrator):
 
         Converts ``applyTo:`` to ``paths:`` frontmatter and resolves links.
         """
-        content = source.read_text(encoding='utf-8')
+        content = source.read_text(encoding="utf-8")
         content = self._convert_to_claude_rules(content)
         content, links_resolved = self.resolve_links(content, source, target)
-        target.write_text(content, encoding='utf-8')
+        target.write_text(content, encoding="utf-8")
         return links_resolved
 
     # DEPRECATED: use integrate_instructions_for_target(KNOWN_TARGETS["claude"], ...) instead.
@@ -358,15 +375,19 @@ class InstructionIntegrator(BaseIntegrator):
         package_info,
         project_root: Path,
         force: bool = False,
-        managed_files: Optional[Set[str]] = None,
+        managed_files: set[str] | None = None,
         diagnostics=None,
         logger=None,
     ) -> IntegrationResult:
         """Integrate instructions as Claude Code rules into ``.claude/rules/``."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         return self.integrate_instructions_for_target(
-            KNOWN_TARGETS["claude"], package_info, project_root,
-            force=force, managed_files=managed_files,
+            KNOWN_TARGETS["claude"],
+            package_info,
+            project_root,
+            force=force,
+            managed_files=managed_files,
             diagnostics=diagnostics,
         )
 
@@ -375,12 +396,14 @@ class InstructionIntegrator(BaseIntegrator):
         self,
         apm_package,
         project_root: Path,
-        managed_files: Optional[Set[str]] = None,
-    ) -> Dict[str, int]:
+        managed_files: set[str] | None = None,
+    ) -> dict[str, int]:
         """Remove APM-managed Claude Code rules files from ``.claude/rules/``."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         return self.sync_for_target(
-            KNOWN_TARGETS["claude"], apm_package, project_root,
+            KNOWN_TARGETS["claude"],
+            apm_package,
+            project_root,
             managed_files=managed_files,
         )
-

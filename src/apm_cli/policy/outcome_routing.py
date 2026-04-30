@@ -24,7 +24,7 @@ and the exact gating semantics match the pre-extraction behaviour.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional  # noqa: F401
 
 from apm_cli.install.errors import PolicyViolationError
 
@@ -55,12 +55,12 @@ _NON_FOUND_LOGGED_OUTCOMES = (
 
 
 def route_discovery_outcome(
-    fetch_result: "PolicyFetchResult",
+    fetch_result: PolicyFetchResult,
     *,
     logger,
     fetch_failure_default: str,
     raise_blocking_errors: bool = True,
-) -> "Optional[ApmPolicy]":
+) -> ApmPolicy | None:
     """Route a :class:`PolicyFetchResult` to logging + fail-closed decisions.
 
     Parameters
@@ -161,11 +161,7 @@ def route_discovery_outcome(
                 source=source,
                 error=fetch_result.fetch_error,
             )
-        if (
-            raise_blocking_errors
-            and policy is not None
-            and policy.fetch_failure == "block"
-        ):
+        if raise_blocking_errors and policy is not None and policy.fetch_failure == "block":
             raise PolicyViolationError(
                 "Install blocked: org policy refresh failed and the cached "
                 "policy declares fetch_failure=block "

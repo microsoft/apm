@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import textwrap
-from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from pathlib import Path  # noqa: F401
+from unittest.mock import MagicMock, call, patch  # noqa: F401
 
 import pytest
 from click.testing import CliRunner
@@ -18,7 +18,6 @@ from apm_cli.marketplace.publisher import (
     PublishPlan,
     TargetResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures and helpers
@@ -44,10 +43,12 @@ _TARGETS_YML = textwrap.dedent("""\
         branch: develop
 """)
 
-_MARKETPLACE_JSON = json.dumps({
-    "name": "test-marketplace",
-    "plugins": [],
-})
+_MARKETPLACE_JSON = json.dumps(
+    {
+        "name": "test-marketplace",
+        "plugins": [],
+    }
+)
 
 
 def _fake_plan(targets=None):
@@ -114,9 +115,7 @@ class TestPublishHappyPath:
 
     @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
     @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
-    def test_happy_path_exit_0(
-        self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
-    ):
+    def test_happy_path_exit_0(self, MockPublisher, MockPr, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_fixtures(tmp_path)
 
@@ -180,9 +179,7 @@ class TestPublishNoPr:
     """--no-pr: publisher runs but PR integrator is not called."""
 
     @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
-    def test_no_pr_skips_pr_integration(
-        self, MockPublisher, runner, tmp_path, monkeypatch
-    ):
+    def test_no_pr_skips_pr_integration(self, MockPublisher, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_fixtures(tmp_path)
 
@@ -239,7 +236,9 @@ class TestPublishDryRun:
 
         # Verify dry_run=True was passed to execute
         mock_pub.execute.assert_called_once_with(
-            plan, dry_run=True, parallel=4,
+            plan,
+            dry_run=True,
+            parallel=4,
         )
 
     @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
@@ -272,9 +271,7 @@ class TestPublishDryRun:
 
     @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
     @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
-    def test_dry_run_shows_info_note(
-        self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
-    ):
+    def test_dry_run_shows_info_note(self, MockPublisher, MockPr, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_fixtures(tmp_path)
 
@@ -330,9 +327,7 @@ class TestPublishMissingFiles:
 
 
 class TestPublishMissingTargets:
-    def test_missing_targets_file_exit_1_with_guidance(
-        self, runner, tmp_path, monkeypatch
-    ):
+    def test_missing_targets_file_exit_1_with_guidance(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "marketplace.yml").write_text(_BASIC_YML, encoding="utf-8")
         (tmp_path / "marketplace.json").write_text(_MARKETPLACE_JSON, encoding="utf-8")
@@ -344,9 +339,7 @@ class TestPublishMissingTargets:
 
     @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
     @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
-    def test_explicit_targets_file(
-        self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
-    ):
+    def test_explicit_targets_file(self, MockPublisher, MockPr, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "marketplace.yml").write_text(_BASIC_YML, encoding="utf-8")
         (tmp_path / "marketplace.json").write_text(_MARKETPLACE_JSON, encoding="utf-8")
@@ -371,9 +364,7 @@ class TestPublishMissingTargets:
         )
         assert result.exit_code == 0, result.output
 
-    def test_explicit_targets_file_not_found(
-        self, runner, tmp_path, monkeypatch
-    ):
+    def test_explicit_targets_file_not_found(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "marketplace.yml").write_text(_BASIC_YML, encoding="utf-8")
         (tmp_path / "marketplace.json").write_text(_MARKETPLACE_JSON, encoding="utf-8")
@@ -436,9 +427,7 @@ class TestPublishInvalidTargets:
 
 class TestPublishGhAvailability:
     @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
-    def test_gh_not_available_exit_1(
-        self, MockPr, runner, tmp_path, monkeypatch
-    ):
+    def test_gh_not_available_exit_1(self, MockPr, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_fixtures(tmp_path)
 
@@ -670,9 +659,7 @@ class TestPublishPlanFlags:
 class TestPublishParallel:
     @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
     @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
-    def test_parallel_passed_to_execute(
-        self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
-    ):
+    def test_parallel_passed_to_execute(self, MockPublisher, MockPr, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_fixtures(tmp_path)
 
@@ -691,7 +678,9 @@ class TestPublishParallel:
         runner.invoke(marketplace, ["publish", "--yes", "--parallel", "2"])
 
         mock_pub.execute.assert_called_once_with(
-            plan, dry_run=False, parallel=2,
+            plan,
+            dry_run=False,
+            parallel=2,
         )
 
 
@@ -703,9 +692,7 @@ class TestPublishParallel:
 class TestPublishMixedOutcomes:
     @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
     @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
-    def test_mixed_outcomes_exit_1(
-        self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
-    ):
+    def test_mixed_outcomes_exit_1(self, MockPublisher, MockPr, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
 
         targets_yml = textwrap.dedent("""\
@@ -795,9 +782,7 @@ class TestPublishMixedOutcomes:
 class TestPublishVerbose:
     @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
     @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
-    def test_verbose_does_not_crash(
-        self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
-    ):
+    def test_verbose_does_not_crash(self, MockPublisher, MockPr, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_fixtures(tmp_path)
 
@@ -825,9 +810,7 @@ class TestPublishVerbose:
 class TestPublishStateFile:
     @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
     @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
-    def test_state_file_path_printed(
-        self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
-    ):
+    def test_state_file_path_printed(self, MockPublisher, MockPr, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_fixtures(tmp_path)
 
@@ -886,9 +869,7 @@ class TestPublishPlanRendering:
 class TestPublishNoChange:
     @patch("apm_cli.commands.marketplace.publish.PrIntegrator")
     @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
-    def test_all_no_change_exit_0(
-        self, MockPublisher, MockPr, runner, tmp_path, monkeypatch
-    ):
+    def test_all_no_change_exit_0(self, MockPublisher, MockPr, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_fixtures(tmp_path)
 
@@ -916,9 +897,7 @@ class TestPublishNoChange:
 
 class TestPublishDryRunNoPr:
     @patch("apm_cli.commands.marketplace.publish.MarketplacePublisher")
-    def test_dry_run_no_pr_exit_0(
-        self, MockPublisher, runner, tmp_path, monkeypatch
-    ):
+    def test_dry_run_no_pr_exit_0(self, MockPublisher, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_fixtures(tmp_path)
 
@@ -931,7 +910,8 @@ class TestPublishDryRunNoPr:
         ]
 
         result = runner.invoke(
-            marketplace, ["publish", "--yes", "--dry-run", "--no-pr"],
+            marketplace,
+            ["publish", "--yes", "--dry-run", "--no-pr"],
         )
         assert result.exit_code == 0, result.output
 

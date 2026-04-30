@@ -1,10 +1,11 @@
 """Unit tests for cowork target gating in apm_cli.integration.targets."""
+
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
-from typing import Any, Dict
-from unittest.mock import patch, MagicMock
+from typing import Any, Dict  # noqa: F401, UP035
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -16,7 +17,6 @@ from apm_cli.integration.targets import (
     get_integration_prefixes,
     resolve_targets,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures (same pattern as test_experimental.py)
@@ -38,7 +38,7 @@ def inject_config(monkeypatch: pytest.MonkeyPatch):
     """Directly inject a dict into the config cache -- no disk I/O."""
     import apm_cli.config as _conf
 
-    def _set(cfg: Dict[str, Any]) -> None:
+    def _set(cfg: dict[str, Any]) -> None:
         monkeypatch.setattr(_conf, "_config_cache", cfg)
 
     return _set
@@ -57,9 +57,7 @@ class TestTargetProfileForScope:
         result = profile.for_scope(user_scope=False)
         assert result is profile
 
-    def test_for_scope_user_scope_resolver_returns_path(
-        self, tmp_path: Path
-    ) -> None:
+    def test_for_scope_user_scope_resolver_returns_path(self, tmp_path: Path) -> None:
         with patch(
             "apm_cli.integration.targets._resolve_copilot_cowork_root",
             return_value=tmp_path,
@@ -115,9 +113,7 @@ class TestTargetProfileForScope:
 class TestDeployPath:
     """Tests for TargetProfile.deploy_path()."""
 
-    def test_deploy_path_with_resolved_root_and_parts(
-        self, tmp_path: Path
-    ) -> None:
+    def test_deploy_path_with_resolved_root_and_parts(self, tmp_path: Path) -> None:
         cowork = replace(
             KNOWN_TARGETS["copilot-cowork"],
             resolved_deploy_root=tmp_path,
@@ -125,9 +121,7 @@ class TestDeployPath:
         result = cowork.deploy_path(Path("/unused"), "sub", "file.md")
         assert result == tmp_path / "sub" / "file.md"
 
-    def test_deploy_path_with_resolved_root_no_parts(
-        self, tmp_path: Path
-    ) -> None:
+    def test_deploy_path_with_resolved_root_no_parts(self, tmp_path: Path) -> None:
         cowork = replace(
             KNOWN_TARGETS["copilot-cowork"],
             resolved_deploy_root=tmp_path,
@@ -135,9 +129,7 @@ class TestDeployPath:
         result = cowork.deploy_path(Path("/unused"))
         assert result == tmp_path
 
-    def test_deploy_path_without_resolved_root_uses_project(
-        self, tmp_path: Path
-    ) -> None:
+    def test_deploy_path_without_resolved_root_uses_project(self, tmp_path: Path) -> None:
         copilot = KNOWN_TARGETS["copilot"]
         result = copilot.deploy_path(tmp_path)
         assert result == tmp_path / ".github"
@@ -167,9 +159,7 @@ class TestActiveTargetsGating:
         results = active_targets(tmp_path, explicit_target="copilot-cowork")
         assert results == []
 
-    def test_cowork_absent_from_all_when_flag_off(
-        self, tmp_path: Path, inject_config: Any
-    ) -> None:
+    def test_cowork_absent_from_all_when_flag_off(self, tmp_path: Path, inject_config: Any) -> None:
         inject_config({"experimental": {"copilot_cowork": False}})
         results = active_targets(tmp_path, explicit_target="all")
         names = [t.name for t in results]
@@ -198,18 +188,14 @@ class TestActiveTargetsGating:
         names = [t.name for t in results]
         assert "copilot-cowork" not in names
 
-    def test_cowork_never_auto_detected(
-        self, tmp_path: Path, inject_config: Any
-    ) -> None:
+    def test_cowork_never_auto_detected(self, tmp_path: Path, inject_config: Any) -> None:
         inject_config({"experimental": {"copilot_cowork": True}})
         (tmp_path / "copilot-cowork").mkdir()
         results = active_targets(tmp_path)
         names = [t.name for t in results]
         assert "copilot-cowork" not in names
 
-    def test_cowork_present_when_flag_on_explicit(
-        self, tmp_path: Path, inject_config: Any
-    ) -> None:
+    def test_cowork_present_when_flag_on_explicit(self, tmp_path: Path, inject_config: Any) -> None:
         inject_config({"experimental": {"copilot_cowork": True}})
         results = active_targets(tmp_path, explicit_target="copilot-cowork")
         assert len(results) == 1
@@ -235,9 +221,7 @@ class TestActiveTargetsGating:
         resolved_names = [t.name for t in resolved]
         assert "copilot-cowork" in resolved_names
 
-    def test_all_user_scope_excludes_cowork_when_flag_off(
-        self, inject_config: Any
-    ) -> None:
+    def test_all_user_scope_excludes_cowork_when_flag_off(self, inject_config: Any) -> None:
         inject_config({"experimental": {"copilot_cowork": False}})
         results = active_targets_user_scope(explicit_target="all")
         names = [t.name for t in results]
@@ -273,9 +257,7 @@ class TestActiveTargetsGating:
 class TestGetIntegrationPrefixes:
     """Tests for get_integration_prefixes with cowork targets."""
 
-    def test_cowork_prefix_present_when_resolved_root_set(
-        self, tmp_path: Path
-    ) -> None:
+    def test_cowork_prefix_present_when_resolved_root_set(self, tmp_path: Path) -> None:
         cowork = replace(
             KNOWN_TARGETS["copilot-cowork"],
             resolved_deploy_root=tmp_path,
@@ -286,9 +268,7 @@ class TestGetIntegrationPrefixes:
     def test_cowork_prefix_absent_when_no_resolved_root(self) -> None:
         copilot = KNOWN_TARGETS["copilot"]
         prefixes = get_integration_prefixes([copilot])
-        assert all(
-            not p.startswith("cowork://") for p in prefixes
-        )
+        assert all(not p.startswith("cowork://") for p in prefixes)
 
     def test_standard_prefixes_unchanged_when_cowork_absent(self) -> None:
         copilot = KNOWN_TARGETS["copilot"]
@@ -323,9 +303,7 @@ class TestGetIntegrationPrefixes:
         prefixes = get_integration_prefixes([static_cowork])
         assert "cowork://skills/" in prefixes
 
-    def test_get_integration_prefixes_resolved_target_still_works(
-        self, tmp_path: Path
-    ) -> None:
+    def test_get_integration_prefixes_resolved_target_still_works(self, tmp_path: Path) -> None:
         """A fully-resolved per-install target (resolved_deploy_root set)
         must still produce the cowork prefix -- regression guard for the
         normal install path.
@@ -352,8 +330,8 @@ class TestExplicitCoworkFlagOff:
     ) -> None:
         """User-scope + explicit cowork + flag OFF -> info hint, no error."""
         inject_config({"experimental": {"copilot_cowork": False}})
-        from apm_cli.install.phases.targets import run
         from apm_cli.core.scope import InstallScope
+        from apm_cli.install.phases.targets import run
 
         ctx = MagicMock()
         ctx.project_root = tmp_path
@@ -375,8 +353,8 @@ class TestExplicitCoworkFlagOff:
     ) -> None:
         """Project-scope + explicit cowork + flag OFF -> info hint, no error."""
         inject_config({"experimental": {"copilot_cowork": False}})
-        from apm_cli.install.phases.targets import run
         from apm_cli.core.scope import InstallScope
+        from apm_cli.install.phases.targets import run
 
         ctx = MagicMock()
         ctx.project_root = tmp_path
@@ -392,13 +370,11 @@ class TestExplicitCoworkFlagOff:
         hint_msg = ctx.logger.progress.call_args[0][0]
         assert "experimental flag" in hint_msg
 
-    def test_auto_detect_silent_when_flag_off(
-        self, tmp_path: Path, inject_config: Any
-    ) -> None:
+    def test_auto_detect_silent_when_flag_off(self, tmp_path: Path, inject_config: Any) -> None:
         """Auto-detect path (no explicit target) stays silent when flag OFF."""
         inject_config({"experimental": {"copilot_cowork": False}})
-        from apm_cli.install.phases.targets import run
         from apm_cli.core.scope import InstallScope
+        from apm_cli.install.phases.targets import run
 
         ctx = MagicMock()
         ctx.project_root = tmp_path
@@ -420,8 +396,8 @@ class TestExplicitCoworkFlagOff:
     ) -> None:
         """cowork + copilot targets, flag OFF: cowork dropped, copilot proceeds."""
         inject_config({"experimental": {"copilot_cowork": False}})
-        from apm_cli.install.phases.targets import run
         from apm_cli.core.scope import InstallScope
+        from apm_cli.install.phases.targets import run
 
         ctx = MagicMock()
         ctx.project_root = tmp_path
@@ -443,8 +419,7 @@ class TestExplicitCoworkFlagOff:
 
         # Cowork hint was logged
         hint_calls = [
-            c for c in ctx.logger.progress.call_args_list
-            if "experimental flag" in str(c)
+            c for c in ctx.logger.progress.call_args_list if "experimental flag" in str(c)
         ]
         assert len(hint_calls) == 1
         # Copilot target proceeds
@@ -465,8 +440,8 @@ class TestExplicitCoworkUnresolvable:
     ) -> None:
         """Linux + flag ON + explicit cowork + no env + no config -> error."""
         inject_config({"experimental": {"copilot_cowork": True}})
-        from apm_cli.install.phases.targets import run
         from apm_cli.core.scope import InstallScope
+        from apm_cli.install.phases.targets import run
 
         ctx = MagicMock()
         ctx.project_root = tmp_path
@@ -501,8 +476,8 @@ class TestExplicitCoworkUnresolvable:
     ) -> None:
         """Linux + flag ON + explicit cowork + env var set -> success."""
         inject_config({"experimental": {"copilot_cowork": True}})
-        from apm_cli.install.phases.targets import run
         from apm_cli.core.scope import InstallScope
+        from apm_cli.install.phases.targets import run
 
         cowork_root = tmp_path / "cowork-skills"
         cowork_root.mkdir()
@@ -528,8 +503,8 @@ class TestExplicitCoworkUnresolvable:
     ) -> None:
         """Linux + flag OFF + explicit cowork -> info hint (not error)."""
         inject_config({"experimental": {"copilot_cowork": False}})
-        from apm_cli.install.phases.targets import run
         from apm_cli.core.scope import InstallScope
+        from apm_cli.install.phases.targets import run
 
         ctx = MagicMock()
         ctx.project_root = tmp_path
@@ -552,8 +527,8 @@ class TestExplicitCoworkUnresolvable:
     ) -> None:
         """Auto-detect + flag ON + no resolution -> still silent."""
         inject_config({"experimental": {"copilot_cowork": True}})
-        from apm_cli.install.phases.targets import run
         from apm_cli.core.scope import InstallScope
+        from apm_cli.install.phases.targets import run
 
         ctx = MagicMock()
         ctx.project_root = tmp_path

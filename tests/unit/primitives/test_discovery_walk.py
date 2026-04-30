@@ -9,12 +9,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from apm_cli.constants import DEFAULT_SKIP_DIRS
 from apm_cli.primitives.discovery import (
     _exclude_matches_dir,
     _glob_match,
     find_primitive_files,
 )
-from apm_cli.constants import DEFAULT_SKIP_DIRS
 
 
 def _write(path: Path, content: str = "---\ndescription: stub\n---\n\n# Stub\n") -> None:
@@ -59,17 +59,27 @@ class TestGlobMatch(unittest.TestCase):
 
     # -- ** in the middle of a pattern --
     def test_doublestar_middle(self):
-        self.assertTrue(_glob_match(".apm/instructions/style.instructions.md",
-                                    "**/.apm/instructions/*.instructions.md"))
+        self.assertTrue(
+            _glob_match(
+                ".apm/instructions/style.instructions.md", "**/.apm/instructions/*.instructions.md"
+            )
+        )
 
     def test_doublestar_middle_nested(self):
-        self.assertTrue(_glob_match("sub/dir/.apm/instructions/style.instructions.md",
-                                    "**/.apm/instructions/*.instructions.md"))
+        self.assertTrue(
+            _glob_match(
+                "sub/dir/.apm/instructions/style.instructions.md",
+                "**/.apm/instructions/*.instructions.md",
+            )
+        )
 
     def test_doublestar_middle_zero(self):
         """Leading **/ should also match zero segments when pattern has a middle path."""
-        self.assertTrue(_glob_match(".apm/instructions/style.instructions.md",
-                                    "**/.apm/instructions/*.instructions.md"))
+        self.assertTrue(
+            _glob_match(
+                ".apm/instructions/style.instructions.md", "**/.apm/instructions/*.instructions.md"
+            )
+        )
 
     # -- no match --
     def test_no_match_extension(self):
@@ -98,14 +108,10 @@ class TestExcludeMatchesDir(unittest.TestCase):
         self.assertFalse(_exclude_matches_dir(Path("/p/node_modules"), Path("/p"), []))
 
     def test_matching_pattern(self):
-        self.assertTrue(
-            _exclude_matches_dir(Path("/p/Binaries"), Path("/p"), ["Binaries"])
-        )
+        self.assertTrue(_exclude_matches_dir(Path("/p/Binaries"), Path("/p"), ["Binaries"]))
 
     def test_non_matching_pattern(self):
-        self.assertFalse(
-            _exclude_matches_dir(Path("/p/src"), Path("/p"), ["Binaries"])
-        )
+        self.assertFalse(_exclude_matches_dir(Path("/p/src"), Path("/p"), ["Binaries"]))
 
     def test_glob_pattern(self):
         self.assertTrue(
@@ -125,6 +131,7 @@ class TestFindPrimitiveFilesExclude(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_finds_instruction_in_apm_dir(self):
@@ -232,25 +239,29 @@ class TestGlobMatchSegmentAware(unittest.TestCase):
 
     def test_star_does_not_cross_slash(self):
         from apm_cli.primitives.discovery import _glob_match
+
         # Pattern matches one segment under instructions/ only
         self.assertTrue(_glob_match(".apm/instructions/x.md", ".apm/instructions/*.md"))
         self.assertFalse(_glob_match(".apm/instructions/sub/x.md", ".apm/instructions/*.md"))
 
     def test_double_star_crosses_slash(self):
         from apm_cli.primitives.discovery import _glob_match
+
         self.assertTrue(_glob_match("a/b/c/x.md", "**/x.md"))
         self.assertTrue(_glob_match("x.md", "**/x.md"))  # zero segments
 
     def test_star_with_double_star_prefix(self):
         from apm_cli.primitives.discovery import _glob_match
+
         # ** then literal then * -- * should still respect /
-        self.assertTrue(_glob_match("a/b/.apm/instructions/foo.md",
-                                     "**/.apm/instructions/*.md"))
-        self.assertFalse(_glob_match("a/b/.apm/instructions/sub/foo.md",
-                                      "**/.apm/instructions/*.md"))
+        self.assertTrue(_glob_match("a/b/.apm/instructions/foo.md", "**/.apm/instructions/*.md"))
+        self.assertFalse(
+            _glob_match("a/b/.apm/instructions/sub/foo.md", "**/.apm/instructions/*.md")
+        )
 
     def test_question_mark_single_char_no_slash(self):
         from apm_cli.primitives.discovery import _glob_match
+
         self.assertTrue(_glob_match("ab", "a?"))
         self.assertFalse(_glob_match("a/b", "a?b"))
 
@@ -268,6 +279,7 @@ class TestFindPrimitiveFilesFileExclude(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_file_pattern_excludes_individual_files(self):

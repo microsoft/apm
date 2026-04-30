@@ -1,7 +1,7 @@
 """Unit tests for CursorClientAdapter and its MCP integrator wiring."""
 
 import json
-import os
+import os  # noqa: F401
 import tempfile
 import unittest
 from pathlib import Path

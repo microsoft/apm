@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
 
 
-def run(ctx: "InstallContext") -> None:
+def run(ctx: InstallContext) -> None:
     """Execute local content stale cleanup and lockfile persistence.
 
     Reads ``ctx.local_deployed_files``, ``ctx.old_local_deployed``,
@@ -62,8 +62,7 @@ def run(ctx: "InstallContext") -> None:
     # without errors to avoid deleting files that failed to re-deploy.
     # ------------------------------------------------------------------
     _local_had_errors = (
-        diagnostics is not None
-        and diagnostics.error_count > ctx.local_content_errors_before
+        diagnostics is not None and diagnostics.error_count > ctx.local_content_errors_before
     )
 
     if ctx.old_local_deployed and not _local_had_errors:
@@ -96,15 +95,14 @@ def run(ctx: "InstallContext") -> None:
                 if logger:
                     logger.cleanup_skipped_user_edit(_skipped, "<local .apm/>")
             if logger:
-                logger.stale_cleanup(
-                    "<local .apm/>", len(_cleanup_result.deleted)
-                )
+                logger.stale_cleanup("<local .apm/>", len(_cleanup_result.deleted))
 
     # ------------------------------------------------------------------
     # Lockfile persistence: read-modify-write the lockfile to add
     # local_deployed_files and per-file content hashes.
     # ------------------------------------------------------------------
-    from apm_cli.deps.lockfile import LockFile as _LF, get_lockfile_path as _get_lfp
+    from apm_cli.deps.lockfile import LockFile as _LF
+    from apm_cli.deps.lockfile import get_lockfile_path as _get_lfp
     from apm_cli.install.phases.lockfile import compute_deployed_hashes as _hash_deployed
 
     _lock_path = _get_lfp(ctx.apm_dir)
@@ -115,8 +113,5 @@ def run(ctx: "InstallContext") -> None:
     )
     # Only write if changed.
     _existing_for_cmp = _LF.read(_lock_path)
-    if (
-        not _existing_for_cmp
-        or not _persist_lock.is_semantically_equivalent(_existing_for_cmp)
-    ):
+    if not _existing_for_cmp or not _persist_lock.is_semantically_equivalent(_existing_for_cmp):
         _persist_lock.save(_lock_path)

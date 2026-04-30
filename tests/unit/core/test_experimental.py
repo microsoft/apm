@@ -14,11 +14,10 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict
+from typing import Any, Dict  # noqa: F401, UP035
 from unittest.mock import MagicMock
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -40,7 +39,7 @@ def inject_config(monkeypatch):
     """Directly inject a dict into the config cache -- no disk I/O."""
     import apm_cli.config as _conf
 
-    def _set(cfg: Dict[str, Any]) -> None:
+    def _set(cfg: dict[str, Any]) -> None:
         monkeypatch.setattr(_conf, "_config_cache", cfg)
 
     return _set
@@ -102,18 +101,14 @@ class TestIsEnabled:
 class TestMutators:
     """Tests for enable, disable, and reset writing through to config.json."""
 
-    def test_enable_roundtrip_is_enabled_returns_true(
-        self, isolated_config: Any
-    ) -> None:
+    def test_enable_roundtrip_is_enabled_returns_true(self, isolated_config: Any) -> None:
         """enable() followed by is_enabled() returns True (no manual reload)."""
         from apm_cli.core.experimental import enable, is_enabled
 
         enable("verbose_version")
         assert is_enabled("verbose_version") is True
 
-    def test_disable_after_enable_returns_false_and_persists(
-        self, isolated_config: Any
-    ) -> None:
+    def test_disable_after_enable_returns_false_and_persists(self, isolated_config: Any) -> None:
         """disable() after enable() sets the flag to False and persists the value."""
         from apm_cli.core.experimental import disable, enable, is_enabled
 
@@ -125,9 +120,7 @@ class TestMutators:
         data = json.loads(isolated_config.read_text(encoding="utf-8"))
         assert data.get("experimental", {}).get("verbose_version") is False
 
-    def test_reset_single_flag_removes_key_from_config(
-        self, isolated_config: Any
-    ) -> None:
+    def test_reset_single_flag_removes_key_from_config(self, isolated_config: Any) -> None:
         """reset(name) removes the key from config.json entirely (not just False)."""
         from apm_cli.core.experimental import enable, reset
 
@@ -137,9 +130,7 @@ class TestMutators:
         data = json.loads(isolated_config.read_text(encoding="utf-8"))
         assert "verbose_version" not in data.get("experimental", {})
 
-    def test_reset_all_clears_experimental_section(
-        self, isolated_config: Any
-    ) -> None:
+    def test_reset_all_clears_experimental_section(self, isolated_config: Any) -> None:
         """reset() with no args clears the entire experimental dict in config."""
         from apm_cli.core.experimental import enable, reset
 
@@ -193,7 +184,7 @@ class TestValidateFlagName:
         mock_update = MagicMock()
         monkeypatch.setattr("apm_cli.config.update_config", mock_update)
 
-        from apm_cli.core.experimental import validate_flag_name, enable
+        from apm_cli.core.experimental import enable, validate_flag_name
 
         # validate_flag_name itself should raise
         with pytest.raises(ValueError, match="Unknown experimental feature"):
@@ -247,7 +238,18 @@ class TestLoaderRejectsNonBool:
     @pytest.mark.parametrize(
         "bad_value",
         ["yes", "true", "false", 1, 0, 1.0, 0.0, [], {}, None],
-        ids=["yes", "true_str", "false_str", "int_1", "int_0", "float_1", "float_0", "list", "dict", "none"],
+        ids=[
+            "yes",
+            "true_str",
+            "false_str",
+            "int_1",
+            "int_0",
+            "float_1",
+            "float_0",
+            "list",
+            "dict",
+            "none",
+        ],
     )
     def test_non_bool_falls_back_to_registry_default(
         self, inject_config: Any, bad_value: Any
@@ -312,7 +314,7 @@ class TestGetStaleConfigKeys:
         inject_config(
             {
                 "experimental": {
-                    "verbose_version": True,      # known
+                    "verbose_version": True,  # known
                     "old_deprecated_flag_abc": True,  # stale
                 }
             }
@@ -421,15 +423,13 @@ class TestRegistryInvariants:
 
             # Invariant 3: description must be printable ASCII
             assert re.fullmatch(printable_ascii.pattern, flag.description), (
-                f"Flag {flag.name!r} description contains non-printable-ASCII: "
-                f"{flag.description!r}"
+                f"Flag {flag.name!r} description contains non-printable-ASCII: {flag.description!r}"
             )
 
             # Invariant 3 (continued): hint, when present, must also be printable ASCII
             if flag.hint is not None:
                 assert re.fullmatch(printable_ascii.pattern, flag.hint), (
-                    f"Flag {flag.name!r} hint contains non-printable-ASCII: "
-                    f"{flag.hint!r}"
+                    f"Flag {flag.name!r} hint contains non-printable-ASCII: {flag.hint!r}"
                 )
 
 
@@ -524,17 +524,13 @@ class TestCoworkFlagRegistration:
 
         assert FLAGS["copilot_cowork"].default is False
 
-    def test_cowork_flag_is_disabled_by_default(
-        self, inject_config: Any
-    ) -> None:
+    def test_cowork_flag_is_disabled_by_default(self, inject_config: Any) -> None:
         inject_config({})
         from apm_cli.core.experimental import is_enabled
 
         assert is_enabled("copilot_cowork") is False
 
-    def test_cowork_flag_can_be_enabled(
-        self, isolated_config: Any
-    ) -> None:
+    def test_cowork_flag_can_be_enabled(self, isolated_config: Any) -> None:
         from apm_cli.core.experimental import enable, is_enabled
 
         enable("copilot_cowork")
@@ -543,6 +539,7 @@ class TestCoworkFlagRegistration:
     def test_cowork_flag_hint_contains_docs_url(self) -> None:
         """Verify the hint URL is a valid https URL using urlparse."""
         from urllib.parse import urlparse
+
         from apm_cli.core.experimental import FLAGS
 
         hint = FLAGS["copilot_cowork"].hint
@@ -559,6 +556,7 @@ class TestCoworkFlagRegistration:
 
     def test_cowork_flag_description_is_printable_ascii(self) -> None:
         import string
+
         from apm_cli.core.experimental import FLAGS
 
         desc = FLAGS["copilot_cowork"].description

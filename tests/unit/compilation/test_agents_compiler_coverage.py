@@ -14,7 +14,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch  # noqa: F401
 
 import yaml
 
@@ -31,9 +31,7 @@ from apm_cli.primitives.models import Instruction, PrimitiveCollection
 # ---------------------------------------------------------------------------
 
 
-def _make_instruction(
-    name="test", apply_to="**/*.py", content="Use type hints.", file_path=None
-):
+def _make_instruction(name="test", apply_to="**/*.py", content="Use type hints.", file_path=None):
     if file_path is None:
         file_path = Path(f"/tmp/{name}.instructions.md")
     return Instruction(
@@ -104,9 +102,7 @@ class TestCompilationConfigFromApmYmlAdditional(unittest.TestCase):
 
     def test_from_apm_yml_min_instructions_per_file(self):
         """from_apm_yml reads placement.min_instructions_per_file."""
-        self._write_apm_yml(
-            {"compilation": {"placement": {"min_instructions_per_file": 3}}}
-        )
+        self._write_apm_yml({"compilation": {"placement": {"min_instructions_per_file": 3}}})
         config = CompilationConfig.from_apm_yml()
         self.assertEqual(config.min_instructions_per_file, 3)
 
@@ -151,7 +147,6 @@ class TestCompilationConfigFromApmYmlAdditional(unittest.TestCase):
 
 
 class TestCompilationConfigPostInit(unittest.TestCase):
-
     def test_single_agents_sets_strategy(self):
         config = CompilationConfig(single_agents=True)
         self.assertEqual(config.strategy, "single-file")
@@ -167,7 +162,6 @@ class TestCompilationConfigPostInit(unittest.TestCase):
 
 
 class TestAgentsCompilerCompileException(unittest.TestCase):
-
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
 
@@ -183,9 +177,7 @@ class TestAgentsCompilerCompileException(unittest.TestCase):
         primitives = _make_primitives()
 
         # Patch _compile_single_file to raise.
-        with patch.object(
-            compiler, "_compile_single_file", side_effect=RuntimeError("boom")
-        ):
+        with patch.object(compiler, "_compile_single_file", side_effect=RuntimeError("boom")):
             result = compiler.compile(config, primitives)
 
         self.assertFalse(result.success)
@@ -194,20 +186,16 @@ class TestAgentsCompilerCompileException(unittest.TestCase):
     def test_compile_local_only_calls_basic_discover(self):
         """compile() with local_only uses basic discover_primitives."""
         compiler = AgentsCompiler(self.tmp)
-        config = CompilationConfig(
-            strategy="single-file", local_only=True, dry_run=True
-        )
+        config = CompilationConfig(strategy="single-file", local_only=True, dry_run=True)
         primitives = _make_primitives()
 
         with patch(
             "apm_cli.compilation.agents_compiler.discover_primitives",
             return_value=primitives,
         ) as mock_disc:
-            result = compiler.compile(config)  # no primitives passed → discovers
+            result = compiler.compile(config)  # no primitives passed → discovers  # noqa: F841
 
-        mock_disc.assert_called_once_with(
-            str(compiler.base_dir), exclude_patterns=config.exclude
-        )
+        mock_disc.assert_called_once_with(str(compiler.base_dir), exclude_patterns=config.exclude)
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +204,6 @@ class TestAgentsCompilerCompileException(unittest.TestCase):
 
 
 class TestValidatePrimitivesErrors(unittest.TestCase):
-
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
 
@@ -229,13 +216,9 @@ class TestValidatePrimitivesErrors(unittest.TestCase):
         """validate_primitives converts primitive errors into warnings."""
         compiler = AgentsCompiler(self.tmp)
 
-        bad_instruction = _make_instruction(
-            file_path=Path(self.tmp) / "bad.instructions.md"
-        )
+        bad_instruction = _make_instruction(file_path=Path(self.tmp) / "bad.instructions.md")
         # Make validate() return errors.
-        bad_instruction.validate = MagicMock(
-            return_value=["Missing required field 'name'"]
-        )
+        bad_instruction.validate = MagicMock(return_value=["Missing required field 'name'"])
 
         primitives = _make_primitives(bad_instruction)
         errors = compiler.validate_primitives(primitives)
@@ -308,7 +291,6 @@ class TestValidatePrimitivesErrors(unittest.TestCase):
 
 
 class TestWriteOutputFile(unittest.TestCase):
-
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
 
@@ -343,7 +325,6 @@ class TestWriteOutputFile(unittest.TestCase):
 
 
 class TestWriteDistributedFile(unittest.TestCase):
-
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
 
@@ -379,15 +360,17 @@ class TestWriteDistributedFile(unittest.TestCase):
         config = CompilationConfig(with_constitution=True)
         target = Path(self.tmp) / "AGENTS.md"
 
-        with patch(
-            "apm_cli.compilation.agents_compiler.AgentsCompiler._write_distributed_file",
-            wraps=compiler._write_distributed_file,
-        ):
-            with patch(
+        with (
+            patch(
+                "apm_cli.compilation.agents_compiler.AgentsCompiler._write_distributed_file",
+                wraps=compiler._write_distributed_file,
+            ),
+            patch(
                 "apm_cli.compilation.injector.ConstitutionInjector.inject",
                 side_effect=RuntimeError("injection error"),
-            ):
-                compiler._write_distributed_file(target, "original content", config)
+            ),
+        ):
+            compiler._write_distributed_file(target, "original content", config)
 
         self.assertTrue(target.exists())
         self.assertEqual(target.read_text(), "original content")
@@ -409,7 +392,6 @@ class TestWriteDistributedFile(unittest.TestCase):
 
 
 class TestGenerateSummaries(unittest.TestCase):
-
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
 
@@ -488,9 +470,7 @@ class TestGenerateSummaries(unittest.TestCase):
             outside_path = str(Path(other_tmp) / "AGENTS.md")
             result = self._make_distributed_result([(outside_path, 1)])
 
-            summary = compiler._generate_distributed_summary(
-                result, CompilationConfig()
-            )
+            summary = compiler._generate_distributed_summary(result, CompilationConfig())
             # portable_relpath resolves and returns POSIX paths
             resolved_path = (Path(other_tmp) / "AGENTS.md").resolve().as_posix()
             self.assertIn(resolved_path, summary)
@@ -506,7 +486,6 @@ class TestGenerateSummaries(unittest.TestCase):
 
 
 class TestMergeResults(unittest.TestCase):
-
     def _make_result(
         self,
         success=True,
@@ -573,7 +552,6 @@ class TestMergeResults(unittest.TestCase):
 
 
 class TestCompileAgentsMdFunction(unittest.TestCase):
-
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.original_dir = os.getcwd()
@@ -597,12 +575,14 @@ class TestCompileAgentsMdFunction(unittest.TestCase):
             stats={},
         )
 
-        with patch(
-            "apm_cli.compilation.agents_compiler.AgentsCompiler.compile",
-            return_value=bad_result,
+        with (
+            patch(
+                "apm_cli.compilation.agents_compiler.AgentsCompiler.compile",
+                return_value=bad_result,
+            ),
+            self.assertRaises(RuntimeError) as ctx,
         ):
-            with self.assertRaises(RuntimeError) as ctx:
-                compile_agents_md(primitives=primitives)
+            compile_agents_md(primitives=primitives)
 
         self.assertIn("test failure", str(ctx.exception))
 
@@ -642,9 +622,7 @@ class TestCompileClaudeMdConstitutionInjectionFailure(unittest.TestCase):
         inst_dir = Path(self.tmp) / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
         inst_file = inst_dir / "test.instructions.md"
-        inst_file.write_text(
-            "---\ndescription: test\napplyTo: '**/*.py'\n---\nUse type hints.\n"
-        )
+        inst_file.write_text("---\ndescription: test\napplyTo: '**/*.py'\n---\nUse type hints.\n")
 
     def tearDown(self):
         import shutil
@@ -669,12 +647,13 @@ class TestCompileClaudeMdConstitutionInjectionFailure(unittest.TestCase):
             dry_run=False,
         )
 
-        with patch(
-            "apm_cli.compilation.injector.ConstitutionInjector.inject",
-            side_effect=RuntimeError("injector exploded"),
-        ), patch(
-            "apm_cli.compilation.agents_compiler._logger"
-        ) as mock_logger:
+        with (
+            patch(
+                "apm_cli.compilation.injector.ConstitutionInjector.inject",
+                side_effect=RuntimeError("injector exploded"),
+            ),
+            patch("apm_cli.compilation.agents_compiler._logger") as mock_logger,
+        ):
             result = compiler._compile_claude_md(config, primitives)
 
         # Compilation must still succeed (the exception is swallowed)
@@ -685,10 +664,7 @@ class TestCompileClaudeMdConstitutionInjectionFailure(unittest.TestCase):
 
         # Verify the debug log was emitted with the expected message fragment
         debug_calls = mock_logger.debug.call_args_list
-        matched = any(
-            "Constitution injection failed" in str(call)
-            for call in debug_calls
-        )
+        matched = any("Constitution injection failed" in str(call) for call in debug_calls)
         self.assertTrue(
             matched,
             f"Expected 'Constitution injection failed' in debug logs, got: {debug_calls}",

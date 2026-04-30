@@ -21,7 +21,7 @@ from apm_cli.policy.inheritance import (
     PolicyInheritanceError,
     detect_cycle,
     resolve_policy_chain,
-    validate_chain_depth,
+    validate_chain_depth,  # noqa: F401
 )
 from apm_cli.policy.parser import PolicyValidationError, load_policy
 
@@ -38,7 +38,7 @@ class TestValidPolicyFixturesParse(unittest.TestCase):
 
         for yml_file in yml_files:
             with self.subTest(fixture=yml_file.name):
-                policy, warnings = load_policy(yml_file)
+                policy, warnings = load_policy(yml_file)  # noqa: RUF059
                 self.assertIsNotNone(policy)
                 # All top-level fixtures have a name field
                 self.assertTrue(policy.name, f"{yml_file.name}: expected non-empty name")
@@ -46,11 +46,13 @@ class TestValidPolicyFixturesParse(unittest.TestCase):
     def test_chain_support_files_parse(self):
         """Every chains/*.yml must parse without error."""
         chain_files = sorted((FIXTURES_DIR / "chains").glob("*.yml"))
-        self.assertTrue(len(chain_files) >= 6, f"Expected >=6 chain files, found {len(chain_files)}")
+        self.assertTrue(
+            len(chain_files) >= 6, f"Expected >=6 chain files, found {len(chain_files)}"
+        )
 
         for yml_file in chain_files:
             with self.subTest(fixture=yml_file.name):
-                policy, warnings = load_policy(yml_file)
+                policy, warnings = load_policy(yml_file)  # noqa: RUF059
                 self.assertIsNotNone(policy)
 
 
@@ -136,7 +138,7 @@ class TestEmptyPolicy(unittest.TestCase):
     """Fixture 9: invalid/apm-policy-empty.yml -- literally {}."""
 
     def test_empty_loads_to_defaults(self):
-        policy, warnings = load_policy(FIXTURES_DIR / "invalid" / "apm-policy-empty.yml")
+        policy, warnings = load_policy(FIXTURES_DIR / "invalid" / "apm-policy-empty.yml")  # noqa: RUF059
         # Empty dict is valid YAML; parser fills all defaults
         self.assertIsNotNone(policy)
         self.assertEqual(policy.name, "")
@@ -173,7 +175,7 @@ class TestExtendsDepthFixtures(unittest.TestCase):
         leaf_file = FIXTURES_DIR / "apm-policy-extends-depth.yml"
 
         policies = []
-        for f in chain_files + [leaf_file]:
+        for f in chain_files + [leaf_file]:  # noqa: RUF005
             policy, _ = load_policy(f)
             policies.append(policy)
 
@@ -256,7 +258,7 @@ class TestTargetAllowPolicy(unittest.TestCase):
 class TestProjectFixturesExist(unittest.TestCase):
     """Verify all project fixture directories have apm.yml files."""
 
-    EXPECTED_PROJECTS = [
+    EXPECTED_PROJECTS = [  # noqa: RUF012
         "denied-direct",
         "denied-transitive",
         "required-missing",

@@ -1,26 +1,25 @@
 """Discovery functionality for primitive files."""
 
 import fnmatch
-import glob
+import glob  # noqa: F401
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
-from .models import PrimitiveCollection
-from .parser import parse_primitive_file, parse_skill_file
 from ..constants import DEFAULT_SKIP_DIRS
 from ..utils.exclude import should_exclude, validate_exclude_patterns
 from ..utils.paths import portable_relpath
+from .models import PrimitiveCollection
+from .parser import parse_primitive_file, parse_skill_file
 
 logger = logging.getLogger(__name__)
-from ..models.apm_package import APMPackage
-from ..deps.lockfile import LockFile
-
+from ..deps.lockfile import LockFile  # noqa: E402
+from ..models.apm_package import APMPackage  # noqa: E402
 
 # Common primitive patterns for local discovery (with recursive search)
-LOCAL_PRIMITIVE_PATTERNS: Dict[str, List[str]] = {
-    'chatmode': [
+LOCAL_PRIMITIVE_PATTERNS: dict[str, list[str]] = {
+    "chatmode": [
         # New standard (.agent.md)
         "**/.apm/agents/*.agent.md",
         "**/.github/agents/*.agent.md",
@@ -28,103 +27,100 @@ LOCAL_PRIMITIVE_PATTERNS: Dict[str, List[str]] = {
         # Legacy support (.chatmode.md)
         "**/.apm/chatmodes/*.chatmode.md",
         "**/.github/chatmodes/*.chatmode.md",
-        "**/*.chatmode.md"  # Generic .chatmode.md files
+        "**/*.chatmode.md",  # Generic .chatmode.md files
     ],
-    'instruction': [
+    "instruction": [
         "**/.apm/instructions/*.instructions.md",
         "**/.github/instructions/*.instructions.md",
-        "**/*.instructions.md"  # Generic .instructions.md files
+        "**/*.instructions.md",  # Generic .instructions.md files
     ],
-    'context': [
+    "context": [
         "**/.apm/context/*.context.md",
         "**/.apm/memory/*.memory.md",  # APM memory convention
         "**/.github/context/*.context.md",
         "**/.github/memory/*.memory.md",  # VSCode compatibility
         "**/*.context.md",  # Generic .context.md files
-        "**/*.memory.md"  # Generic .memory.md files
-    ]
+        "**/*.memory.md",  # Generic .memory.md files
+    ],
 }
 
 # Dependency primitive patterns (for .apm directory within dependencies)
-DEPENDENCY_PRIMITIVE_PATTERNS: Dict[str, List[str]] = {
-    'chatmode': [
+DEPENDENCY_PRIMITIVE_PATTERNS: dict[str, list[str]] = {
+    "chatmode": [
         "agents/*.agent.md",  # New standard
-        "chatmodes/*.chatmode.md"  # Legacy
+        "chatmodes/*.chatmode.md",  # Legacy
     ],
-    'instruction': ["instructions/*.instructions.md"],
-    'context': [
-        "context/*.context.md",
-        "memory/*.memory.md"
-    ]
+    "instruction": ["instructions/*.instructions.md"],
+    "context": ["context/*.context.md", "memory/*.memory.md"],
 }
 
 # Dependency primitive patterns for .github directory within dependencies.
 # Some packages store primitives in .github/ instead of (or in addition to) .apm/.
-DEPENDENCY_GITHUB_PRIMITIVE_PATTERNS: Dict[str, List[str]] = {
-    'chatmode': [
+DEPENDENCY_GITHUB_PRIMITIVE_PATTERNS: dict[str, list[str]] = {
+    "chatmode": [
         "agents/*.agent.md",
         "chatmodes/*.chatmode.md",
     ],
-    'instruction': ["instructions/*.instructions.md"],
-    'context': [
+    "instruction": ["instructions/*.instructions.md"],
+    "context": [
         "context/*.context.md",
         "memory/*.memory.md",
-    ]
+    ],
 }
 
 
 def discover_primitives(
     base_dir: str = ".",
-    exclude_patterns: Optional[List[str]] = None,
+    exclude_patterns: list[str] | None = None,
 ) -> PrimitiveCollection:
     """Find all APM primitive files in the project.
-    
+
     Searches for .chatmode.md, .instructions.md, .context.md, .memory.md files
     in both .apm/ and .github/ directory structures, plus SKILL.md at root.
-    
+
     Args:
         base_dir (str): Base directory to search in. Defaults to current directory.
         exclude_patterns (Optional[List[str]]): Glob patterns for paths to exclude.
-    
+
     Returns:
         PrimitiveCollection: Collection of discovered and parsed primitives.
     """
     collection = PrimitiveCollection()
-    base_path = Path(base_dir)
+    base_path = Path(base_dir)  # noqa: F841
     safe_patterns = validate_exclude_patterns(exclude_patterns)
-    
+
     # Find and parse files for each primitive type
-    for primitive_type, patterns in LOCAL_PRIMITIVE_PATTERNS.items():
+    for primitive_type, patterns in LOCAL_PRIMITIVE_PATTERNS.items():  # noqa: B007
         files = find_primitive_files(base_dir, patterns, exclude_patterns=safe_patterns)
-        
+
         for file_path in files:
             try:
                 primitive = parse_primitive_file(file_path, source="local")
                 collection.add_primitive(primitive)
             except Exception as e:
                 print(f"Warning: Failed to parse {file_path}: {e}")
-    
+
     # Discover SKILL.md at project root
     _discover_local_skill(base_dir, collection, exclude_patterns=safe_patterns)
-    
+
     return collection
 
 
 def discover_primitives_with_dependencies(
     base_dir: str = ".",
-    exclude_patterns: Optional[List[str]] = None,
+    exclude_patterns: list[str] | None = None,
 ) -> PrimitiveCollection:
     """Enhanced primitive discovery including dependency sources.
-    
+
     Priority Order:
     1. Local .apm/ (highest priority - always wins)
     2. Dependencies in declaration order (first declared wins)
     3. Plugins (lowest priority)
-    
+
     Args:
         base_dir (str): Base directory to search in. Defaults to current directory.
         exclude_patterns (Optional[List[str]]): Glob patterns for paths to exclude.
-    
+
     Returns:
         PrimitiveCollection: Collection of discovered and parsed primitives with source tracking.
     """
@@ -148,30 +144,30 @@ def discover_primitives_with_dependencies(
 def scan_local_primitives(
     base_dir: str,
     collection: PrimitiveCollection,
-    exclude_patterns: Optional[List[str]] = None,
+    exclude_patterns: list[str] | None = None,
 ) -> None:
     """Scan local .apm/ directory for primitives.
-    
+
     Args:
         base_dir (str): Base directory to search in.
         collection (PrimitiveCollection): Collection to add primitives to.
         exclude_patterns (Optional[List[str]]): Pre-validated exclude patterns.
     """
     # Find and parse files for each primitive type
-    for primitive_type, patterns in LOCAL_PRIMITIVE_PATTERNS.items():
+    for primitive_type, patterns in LOCAL_PRIMITIVE_PATTERNS.items():  # noqa: B007
         files = find_primitive_files(base_dir, patterns, exclude_patterns=exclude_patterns)
-        
+
         # Filter out files from apm_modules to avoid conflicts with dependency scanning
         local_files = []
         base_path = Path(base_dir)
         apm_modules_path = base_path / "apm_modules"
-        
+
         for file_path in files:
             # Only include files that are NOT in apm_modules directory
             if _is_under_directory(file_path, apm_modules_path):
                 continue
             local_files.append(file_path)
-        
+
         for file_path in local_files:
             try:
                 primitive = parse_primitive_file(file_path, source="local")
@@ -182,11 +178,11 @@ def scan_local_primitives(
 
 def _is_under_directory(file_path: Path, directory: Path) -> bool:
     """Check if a file path is under a specific directory.
-    
+
     Args:
         file_path (Path): Path to check.
         directory (Path): Directory to check against.
-    
+
     Returns:
         bool: True if file_path is under directory, False otherwise.
     """
@@ -197,10 +193,9 @@ def _is_under_directory(file_path: Path, directory: Path) -> bool:
         return False
 
 
-
 def scan_dependency_primitives(base_dir: str, collection: PrimitiveCollection) -> None:
     """Scan all dependencies in apm_modules/ with priority handling.
-    
+
     Args:
         base_dir (str): Base directory to search in.
         collection (PrimitiveCollection): Collection to add primitives to.
@@ -208,10 +203,10 @@ def scan_dependency_primitives(base_dir: str, collection: PrimitiveCollection) -
     apm_modules_path = Path(base_dir) / "apm_modules"
     if not apm_modules_path.exists():
         return
-    
+
     # Get dependency declaration order from apm.yml
     dependency_order = get_dependency_declaration_order(base_dir)
-    
+
     # Process dependencies in declaration order
     for dep_name in dependency_order:
         # Join all path parts to handle variable-length paths:
@@ -220,27 +215,27 @@ def scan_dependency_primitives(base_dir: str, collection: PrimitiveCollection) -
         # Virtual subdirectory: "owner/repo/subdir" or deeper (3+ parts)
         parts = dep_name.split("/")
         dep_path = apm_modules_path.joinpath(*parts)
-            
+
         if dep_path.exists() and dep_path.is_dir():
             scan_directory_with_source(dep_path, collection, source=f"dependency:{dep_name}")
 
 
-def get_dependency_declaration_order(base_dir: str) -> List[str]:
+def get_dependency_declaration_order(base_dir: str) -> list[str]:
     """Get APM dependency installed paths in their declaration order.
-    
+
     The returned list contains the actual installed path for each dependency,
     combining:
     1. Direct dependencies from apm.yml (highest priority, declaration order)
     2. Transitive dependencies from apm.lock (appended after direct deps)
-    
+
     This ensures transitive dependencies are included in primitive discovery
     and compilation, not just direct dependencies. The installed path differs for:
     - Regular packages: owner/repo (GitHub) or org/project/repo (ADO)
     - Virtual packages: owner/virtual-pkg-name (GitHub) or org/project/virtual-pkg-name (ADO)
-    
+
     Args:
         base_dir (str): Base directory containing apm.yml.
-    
+
     Returns:
         List[str]: List of dependency installed paths in declaration order.
     """
@@ -248,10 +243,10 @@ def get_dependency_declaration_order(base_dir: str) -> List[str]:
         apm_yml_path = Path(base_dir) / "apm.yml"
         if not apm_yml_path.exists():
             return []
-        
+
         package = APMPackage.from_apm_yml(apm_yml_path)
         apm_dependencies = package.get_apm_dependencies()
-        
+
         # Extract installed paths from dependency references
         # Virtual file/collection packages use get_virtual_package_name() (flattened),
         # while virtual subdirectory packages use natural repo/subdir paths.
@@ -291,7 +286,7 @@ def get_dependency_declaration_order(base_dir: str) -> List[str]:
                 # Regular packages: use full org/repo path
                 # This matches our org-namespaced directory structure
                 dependency_names.append(dep.repo_url)
-        
+
         # Include transitive dependencies from apm.lock
         # Direct deps from apm.yml have priority; transitive deps are appended
         lockfile_paths = LockFile.installed_paths_for_project(Path(base_dir))
@@ -299,9 +294,9 @@ def get_dependency_declaration_order(base_dir: str) -> List[str]:
         for path in lockfile_paths:
             if path not in direct_set:
                 dependency_names.append(path)
-        
+
         return dependency_names
-        
+
     except Exception as e:
         print(f"Warning: Failed to parse dependency order from apm.yml: {e}")
         return []
@@ -332,22 +327,24 @@ def _glob_match(rel_path: str, pattern: str) -> bool:
             idx = rel_path.find("/", idx)
             if idx == -1:
                 break
-            if fnmatch.fnmatch(rel_path[idx + 1:], sub_pattern):
+            if fnmatch.fnmatch(rel_path[idx + 1 :], sub_pattern):
                 return True
             idx += 1
         return False
     return fnmatch.fnmatch(rel_path, pattern)
 
 
-def _matches_any_pattern(rel_path: str, patterns: List[str]) -> bool:
+def _matches_any_pattern(rel_path: str, patterns: list[str]) -> bool:
     """Return ``True`` if *rel_path* matches at least one glob pattern."""
-    for pattern in patterns:
+    for pattern in patterns:  # noqa: SIM110
         if _glob_match(rel_path, pattern):
             return True
     return False
 
 
-def _scan_patterns(base_dir: Path, patterns: Dict[str, List[str]], collection: PrimitiveCollection, source: str) -> None:
+def _scan_patterns(
+    base_dir: Path, patterns: dict[str, list[str]], collection: PrimitiveCollection, source: str
+) -> None:
     """Walk *base_dir* once, match files against all patterns, parse and collect.
 
     Replaces the previous per-pattern ``glob.glob`` loop with a single
@@ -363,7 +360,7 @@ def _scan_patterns(base_dir: Path, patterns: Dict[str, List[str]], collection: P
         return
 
     # Flatten all patterns into a single list for matching
-    all_patterns: List[str] = []
+    all_patterns: list[str] = []
     for _primitive_type, type_patterns in patterns.items():
         all_patterns.extend(type_patterns)
 
@@ -383,7 +380,9 @@ def _scan_patterns(base_dir: Path, patterns: Dict[str, List[str]], collection: P
                     print(f"Warning: Failed to parse dependency primitive {file_path}: {e}")
 
 
-def scan_directory_with_source(directory: Path, collection: PrimitiveCollection, source: str) -> None:
+def scan_directory_with_source(
+    directory: Path, collection: PrimitiveCollection, source: str
+) -> None:
     """Scan a directory for primitives with a specific source tag.
 
     Args:
@@ -410,10 +409,10 @@ def scan_directory_with_source(directory: Path, collection: PrimitiveCollection,
 def _discover_local_skill(
     base_dir: str,
     collection: PrimitiveCollection,
-    exclude_patterns: Optional[List[str]] = None,
+    exclude_patterns: list[str] | None = None,
 ) -> None:
     """Discover SKILL.md at the project root.
-    
+
     Args:
         base_dir (str): Base directory to search in.
         collection (PrimitiveCollection): Collection to add skill to.
@@ -431,9 +430,11 @@ def _discover_local_skill(
             print(f"Warning: Failed to parse SKILL.md: {e}")
 
 
-def _discover_skill_in_directory(directory: Path, collection: PrimitiveCollection, source: str) -> None:
+def _discover_skill_in_directory(
+    directory: Path, collection: PrimitiveCollection, source: str
+) -> None:
     """Discover SKILL.md in a package directory.
-    
+
     Args:
         directory (Path): Package directory to check.
         collection (PrimitiveCollection): Collection to add skill to.
@@ -465,9 +466,9 @@ def _glob_match(rel_path: str, pattern: str) -> bool:
     Returns:
         True if the path matches the pattern.
     """
-    path_parts: List[str] = [p for p in rel_path.split('/') if p]
-    pattern_parts: List[str] = [p for p in pattern.split('/') if p]
-    memo: Dict[Tuple[int, int], bool] = {}
+    path_parts: list[str] = [p for p in rel_path.split("/") if p]
+    pattern_parts: list[str] = [p for p in pattern.split("/") if p]
+    memo: dict[tuple[int, int], bool] = {}
 
     def _match(pi: int, qi: int) -> bool:
         key = (pi, qi)
@@ -481,7 +482,7 @@ def _glob_match(rel_path: str, pattern: str) -> bool:
 
         current = pattern_parts[qi]
 
-        if current == '**':
+        if current == "**":
             # ** matches zero segments, OR consumes one segment and stays at **
             result = _match(pi, qi + 1)
             if not result and pi < len(path_parts):
@@ -495,10 +496,7 @@ def _glob_match(rel_path: str, pattern: str) -> bool:
 
         # Use platform-aware fnmatch semantics so Windows matching remains
         # case-insensitive, consistent with prior glob.glob() behavior.
-        result = (
-            fnmatch.fnmatch(path_parts[pi], current)
-            and _match(pi + 1, qi + 1)
-        )
+        result = fnmatch.fnmatch(path_parts[pi], current) and _match(pi + 1, qi + 1)
         memo[key] = result
         return result
 
@@ -507,9 +505,9 @@ def _glob_match(rel_path: str, pattern: str) -> bool:
 
 def find_primitive_files(
     base_dir: str,
-    patterns: List[str],
-    exclude_patterns: Optional[List[str]] = None,
-) -> List[Path]:
+    patterns: list[str],
+    exclude_patterns: list[str] | None = None,
+) -> list[Path]:
     """Find primitive files matching the given patterns.
 
     Uses os.walk with early directory pruning instead of glob.glob(recursive=True)
@@ -532,13 +530,14 @@ def find_primitive_files(
 
     base_path = Path(base_dir).resolve()
 
-    all_files: List[Path] = []
+    all_files: list[Path] = []
 
     for root, dirs, files in os.walk(str(base_path)):
         current = Path(root)
         # Prune excluded directories BEFORE descending
         dirs[:] = sorted(
-            d for d in dirs
+            d
+            for d in dirs
             if d not in DEFAULT_SKIP_DIRS
             and not _exclude_matches_dir(current / d, base_path, exclude_patterns)
         )
@@ -574,7 +573,7 @@ def find_primitive_files(
 def _exclude_matches_dir(
     dir_path: Path,
     base_path: Path,
-    exclude_patterns: Optional[List[str]],
+    exclude_patterns: list[str] | None,
 ) -> bool:
     """Check if a directory matches any exclude pattern (for early pruning)."""
     if not exclude_patterns:
@@ -584,15 +583,15 @@ def _exclude_matches_dir(
 
 def _is_readable(file_path: Path) -> bool:
     """Check if a file is readable.
-    
+
     Args:
         file_path (Path): Path to check.
-    
+
     Returns:
         bool: True if file is readable, False otherwise.
     """
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, encoding="utf-8") as f:
             # Try to read first few bytes to verify it's readable
             f.read(1)
         return True
@@ -602,10 +601,10 @@ def _is_readable(file_path: Path) -> bool:
 
 def _should_skip_directory(dir_path: str) -> bool:
     """Check if a directory should be skipped during scanning.
-    
+
     Args:
         dir_path (str): Directory path to check.
-    
+
     Returns:
         bool: True if directory should be skipped, False otherwise.
     """

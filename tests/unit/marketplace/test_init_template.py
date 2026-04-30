@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-import tempfile
+import tempfile  # noqa: F401
+from pathlib import Path  # noqa: F401
 
-import pytest
+import pytest  # noqa: F401
 import yaml
 
 from apm_cli.marketplace.init_template import render_marketplace_yml_template
 from apm_cli.marketplace.yml_schema import load_marketplace_yml
-
 
 # ---------------------------------------------------------------------------
 # Basic contract

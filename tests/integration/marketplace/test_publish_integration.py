@@ -23,12 +23,12 @@ Scenarios covered:
 
 from __future__ import annotations
 
-import json
+import json  # noqa: F401
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, call, patch  # noqa: F401
 
-import pytest
+import pytest  # noqa: F401
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import publish
@@ -39,7 +39,6 @@ from apm_cli.marketplace.publisher import (
     PublishPlan,
     TargetResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -139,9 +138,15 @@ def _setup_workspace(tmp_path: Path, with_targets=True, with_json=True):
         (tmp_path / "consumer-targets.yml").write_text(_TARGETS_SINGLE_YML, encoding="utf-8")
 
 
-def _run_publish(tmp_path: Path, extra_args=(), mock_plan=None, mock_results=None,
-                 mock_pr_available=True, mock_pr_results=None,
-                 env_overrides=None):
+def _run_publish(
+    tmp_path: Path,
+    extra_args=(),
+    mock_plan=None,
+    mock_results=None,
+    mock_pr_available=True,
+    mock_pr_results=None,
+    env_overrides=None,
+):
     """Run publish via CliRunner with publisher and PrIntegrator mocked."""
     runner = CliRunner()
 
@@ -161,6 +166,7 @@ def _run_publish(tmp_path: Path, extra_args=(), mock_plan=None, mock_results=Non
 
     with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
         import shutil
+
         for fname in ("marketplace.yml", "marketplace.json", "consumer-targets.yml"):
             src = tmp_path / fname
             if src.exists():
@@ -251,6 +257,7 @@ class TestPublishDryRun:
 
         with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
             import shutil
+
             for fname in ("marketplace.yml", "marketplace.json", "consumer-targets.yml"):
                 src = tmp_path / fname
                 if src.exists():
@@ -278,9 +285,7 @@ class TestPublishDryRun:
                     return_value=False,
                 ),
             ):
-                result = runner.invoke(
-                    publish, ["--yes", "--dry-run"], catch_exceptions=False
-                )
+                result = runner.invoke(publish, ["--yes", "--dry-run"], catch_exceptions=False)  # noqa: F841
 
         # execute must have been called with dry_run=True
         assert execute_mock.called
@@ -318,6 +323,7 @@ class TestPublishPreflightErrors:
         runner = CliRunner()
         with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
             import shutil
+
             shutil.copy(str(tmp_path / "marketplace.json"), f"{cwd}/marketplace.json")
             shutil.copy(str(tmp_path / "consumer-targets.yml"), f"{cwd}/consumer-targets.yml")
             result = runner.invoke(publish, ["--yes"], catch_exceptions=False)
@@ -330,6 +336,7 @@ class TestPublishPreflightErrors:
         runner = CliRunner()
         with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
             import shutil
+
             shutil.copy(str(tmp_path / "marketplace.yml"), f"{cwd}/marketplace.yml")
             shutil.copy(str(tmp_path / "consumer-targets.yml"), f"{cwd}/consumer-targets.yml")
             result = runner.invoke(publish, ["--yes"], catch_exceptions=False)
@@ -342,6 +349,7 @@ class TestPublishPreflightErrors:
         runner = CliRunner()
         with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
             import shutil
+
             shutil.copy(str(tmp_path / "marketplace.yml"), f"{cwd}/marketplace.yml")
             shutil.copy(str(tmp_path / "marketplace.json"), f"{cwd}/marketplace.json")
             result = runner.invoke(publish, ["--yes"], catch_exceptions=False)
@@ -357,6 +365,7 @@ class TestPublishPreflightErrors:
         runner = CliRunner()
         with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
             import shutil
+
             for fname in ("marketplace.yml", "marketplace.json", "consumer-targets.yml"):
                 src = tmp_path / fname
                 if src.exists():
@@ -377,6 +386,7 @@ class TestPublishNoPr:
 
         with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
             import shutil
+
             for fname in ("marketplace.yml", "marketplace.json", "consumer-targets.yml"):
                 src = tmp_path / fname
                 if src.exists():
@@ -402,9 +412,7 @@ class TestPublishNoPr:
                     return_value=False,
                 ),
             ):
-                result = runner.invoke(
-                    publish, ["--yes", "--no-pr"], catch_exceptions=False
-                )
+                result = runner.invoke(publish, ["--yes", "--no-pr"], catch_exceptions=False)
 
         # PrIntegrator.open_or_update must NOT have been called
         open_or_update_mock.assert_not_called()

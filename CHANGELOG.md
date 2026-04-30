@@ -8,8 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: `apm pack` now produces a Claude Code plugin directory by default — zero extra flags, schema-validated `plugin.json`, convention dirs auto-discovered.** The legacy APM bundle layout is preserved under `--format apm`. Migration: CI workflows and scripts that consume the legacy bundle must add `--format apm` (the [`microsoft/apm-action`](https://github.com/microsoft/apm-action) wrapper has been updated accordingly). (#1061)
+- **Plugin manifest schema conformance.** The synthesized/written `plugin.json` no longer emits `agents`/`skills`/`commands`/`instructions` keys pointing at the convention directories — these are auto-discovered by Claude Code, and per the [official schema](https://json.schemastore.org/claude-code-plugin.json) those array entries must be `./*.md` paths to *additional* files. The convention dirs themselves are still copied to disk. When stripping such keys from an authored `plugin.json`, `apm pack` now emits a warning so authors can clean up their source. (#1061)
+
 ### Added
 
+- **`apm pack` marketplace builder hardening.** Local source paths are now emitted relative to `metadata.pluginRoot` (fixes double-prefix bug). New pass-through fields: `author`, `license`, `repository`, `keywords` (alias for `tags`). Curator-wins override semantics for `description`/`version` on remote entries. Security guards reject path traversal and absolute paths post-subtraction. (#1061)
+- **Plugin manifest schema-conformance tests.** `tests/unit/test_plugin_exporter_schema.py` validates every shape of `plugin.json` produced by `apm pack` (synthesized, authored, and authored-with-stale-keys) against the vendored official schema. Companion marketplace conformance lives in `tests/unit/marketplace/test_schema_conformance.py`. (#1061)
 - Slash commands installed from APM packages now surface argument hints in Claude Code -- `apm install` automatically maps prompt `input:` to Claude's `arguments:` front-matter, rewrites `${input:name}` references to `$name`, and auto-generates `argument-hint`. Argument names are validated against an allowlist to prevent YAML injection from third-party packages, and the mapping is reported at install time. (#1039)
 
 ## [0.11.0] - 2026-04-29
@@ -59,6 +66,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - `apm audit --ci` and `apm install` now fail-closed when `apm.yml` is malformed YAML or not a mapping -- previously, policy and baseline checks were silently skipped (severity: medium -- policy bypass). **Migration:** repos with latently malformed `apm.yml` will go from CI-pass to CI-fail on upgrade. Validate before upgrading with `python -c "import yaml; yaml.safe_load(open('apm.yml'))"` or run `apm audit --ci` locally. Fix any YAML syntax errors in `apm.yml` (stray tabs, unquoted colons, non-mapping root). (#936)
+
+### Changed
+
+- Replace `black` + `isort` with Ruff for linting and formatting; add deterministic CI lint gate (~3s), configure 10 rule sets with strangler-fig complexity thresholds, and fix a Python 3.10 f-string compatibility bug in `audit_report.py` -- by @sergio-sisternes-epam (#999)
 
 ## [0.10.0] - 2026-04-27
 

@@ -10,6 +10,7 @@ import click
 from ...core.command_logger import CommandLogger
 from . import marketplace
 
+
 @marketplace.command(help="Validate a marketplace manifest")
 @click.argument("name", required=True)
 @click.option(
@@ -38,9 +39,7 @@ def validate(name, check_refs, verbose):
         if verbose:
             for p in manifest.plugins:
                 source_type = "dict" if isinstance(p.source, dict) else "string"
-                logger.verbose_detail(
-                    f"    {p.name}: source type: {source_type}"
-                )
+                logger.verbose_detail(f"    {p.name}: source type: {source_type}")
 
         # Run validation
         results = validate_marketplace(manifest)
@@ -48,8 +47,7 @@ def validate(name, check_refs, verbose):
         # Check-refs placeholder
         if check_refs:
             logger.warning(
-                "Ref checking not yet implemented -- skipping ref "
-                "reachability checks",
+                "Ref checking not yet implemented -- skipping ref reachability checks",
                 symbol="warning",
             )
 
@@ -61,9 +59,7 @@ def validate(name, check_refs, verbose):
         logger.progress("Validation Results:", symbol="info")
         for r in results:
             if r.passed and not r.warnings:
-                logger.success(
-                    f"  {r.check_name}: all plugins valid", symbol="check"
-                )
+                logger.success(f"  {r.check_name}: all plugins valid", symbol="check")
                 passed += 1
             elif r.warnings and not r.errors:
                 for w in r.warnings:
@@ -79,15 +75,14 @@ def validate(name, check_refs, verbose):
 
         logger.blank_line()
         logger.progress(
-            f"Summary: {passed} passed, {warning_count} warnings, "
-            f"{error_count} errors",
+            f"Summary: {passed} passed, {warning_count} warnings, {error_count} errors",
             symbol="info",
         )
 
         if error_count > 0:
             sys.exit(1)
 
-    except Exception as e:  # noqa: BLE001 -- top-level command catch-all
+    except Exception as e:
         logger.error(f"Failed to validate marketplace: {e}", symbol="error")
         logger.verbose_detail(traceback.format_exc())
         sys.exit(1)

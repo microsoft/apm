@@ -14,6 +14,7 @@ class TestAuthenticationErrorImportedInInstall:
 
     def test_import(self):
         from apm_cli.install.errors import AuthenticationError as AE
+
         assert AE is AuthenticationError
 
     def test_is_runtime_error_subclass(self):
@@ -37,6 +38,7 @@ class TestAuthenticationErrorImportedInInstall:
     def test_not_caught_by_policy_violation(self):
         """AuthenticationError is NOT a PolicyViolationError subclass."""
         from apm_cli.install.errors import PolicyViolationError
+
         assert not issubclass(AuthenticationError, PolicyViolationError)
 
 

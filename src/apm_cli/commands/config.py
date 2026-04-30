@@ -81,15 +81,9 @@ def config(ctx):
             # Show apm.yml if in project
             if Path(APM_YML_FILENAME).exists():
                 apm_config = _load_apm_config()
-                config_table.add_row(
-                    "Project", "Name", apm_config.get("name", "Unknown")
-                )
-                config_table.add_row(
-                    "", "Version", apm_config.get("version", "Unknown")
-                )
-                config_table.add_row(
-                    "", "Entrypoint", apm_config.get("entrypoint", "None")
-                )
+                config_table.add_row("Project", "Name", apm_config.get("name", "Unknown"))
+                config_table.add_row("", "Version", apm_config.get("version", "Unknown"))
+                config_table.add_row("", "Entrypoint", apm_config.get("entrypoint", "None"))
                 config_table.add_row(
                     "",
                     "MCP Dependencies",
@@ -115,13 +109,9 @@ def config(ctx):
                         str(compilation_config.get("resolve_links", True)),
                     )
                 else:
-                    config_table.add_row(
-                        "Compilation", "Status", "Using defaults (no config)"
-                    )
+                    config_table.add_row("Compilation", "Status", "Using defaults (no config)")
             else:
-                config_table.add_row(
-                    "Project", "Status", "Not in an APM project directory"
-                )
+                config_table.add_row("Project", "Status", "Not in an APM project directory")
 
             config_table.add_row("Global", "APM CLI Version", get_version())
 
@@ -185,7 +175,7 @@ def config(ctx):
 @config.command(help="Set a configuration value")
 @click.argument("key")
 @click.argument("value")
-def set(key, value):
+def set(key, value):  # noqa: F811
     """Set a configuration value.
 
     Examples:
@@ -208,9 +198,7 @@ def set(key, value):
 
         try:
             set_copilot_cowork_skills_dir(value)
-            logger.success(
-                f"Cowork skills directory set to: {get_copilot_cowork_skills_dir()}"
-            )
+            logger.success(f"Cowork skills directory set to: {get_copilot_cowork_skills_dir()}")
         except ValueError as exc:
             logger.error(str(exc))
             sys.exit(1)
@@ -268,9 +256,7 @@ def get(key):
 
             value = get_copilot_cowork_skills_dir()
             if value is None:
-                click.echo(
-                    "copilot-cowork-skills-dir: Not set (using auto-detection)"
-                )
+                click.echo("copilot-cowork-skills-dir: Not set (using auto-detection)")
             else:
                 click.echo(f"copilot-cowork-skills-dir: {value}")
             return
@@ -300,7 +286,9 @@ def get(key):
         logger.progress("APM Configuration:")
         click.echo(f"  auto-integrate: {get_auto_integrate()}")
         temp_dir = get_temp_dir()
-        click.echo(f"  temp-dir: {temp_dir if temp_dir is not None else 'Not set (using system default)'}")
+        click.echo(
+            f"  temp-dir: {temp_dir if temp_dir is not None else 'Not set (using system default)'}"
+        )
 
         from ..core.experimental import is_enabled as _is_enabled_get
 

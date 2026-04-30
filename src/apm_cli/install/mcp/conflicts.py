@@ -8,14 +8,14 @@ turns invalid ``apm install --mcp`` flag combinations into
 
 from __future__ import annotations
 
-from typing import Mapping, Optional, Sequence, Tuple
+from collections.abc import Mapping, Sequence
+from typing import Optional, Tuple  # noqa: F401, UP035
 
 import click
 
-
 # Mapping for E10: which flags require --mcp.  Keyed by attribute-style
 # name so we can read directly from the Click handler locals.
-MCP_REQUIRED_FLAGS: Tuple[Tuple[str, str], ...] = (
+MCP_REQUIRED_FLAGS: tuple[tuple[str, str], ...] = (
     ("transport", "--transport"),
     ("url", "--url"),
     ("env", "--env"),
@@ -26,22 +26,22 @@ MCP_REQUIRED_FLAGS: Tuple[Tuple[str, str], ...] = (
 
 def validate_mcp_conflicts(
     *,
-    mcp_name: Optional[str],
+    mcp_name: str | None,
     packages: Sequence[str],
     pre_dash_packages: Sequence[str],
-    transport: Optional[str],
-    url: Optional[str],
+    transport: str | None,
+    url: str | None,
     env: Mapping[str, str],
     headers: Mapping[str, str],
-    mcp_version: Optional[str],
-    command_argv: Optional[Sequence[str]],
+    mcp_version: str | None,
+    command_argv: Sequence[str] | None,
     global_: bool,
-    only: Optional[str],
+    only: str | None,
     update: bool,
     use_ssh: bool,
     use_https: bool,
     allow_protocol_fallback: bool,
-    registry_url: Optional[str] = None,
+    registry_url: str | None = None,
 ) -> None:
     """Apply conflict matrix E1-E15.  Raises ``click.UsageError`` on hit."""
     # E10: flags require --mcp -- run first so users get the right hint.
@@ -67,15 +67,11 @@ def validate_mcp_conflicts(
     if mcp_name == "":
         raise click.UsageError("MCP name cannot be empty")
     if mcp_name.startswith("-"):
-        raise click.UsageError(
-            f"MCP name cannot start with '-'; did you forget a value for --mcp?"
-        )
+        raise click.UsageError(f"MCP name cannot start with '-'; did you forget a value for --mcp?")  # noqa: F541
 
     # E1: positional packages mixed with --mcp.
     if pre_dash_packages:
-        raise click.UsageError(
-            "cannot mix --mcp with positional packages"
-        )
+        raise click.UsageError("cannot mix --mcp with positional packages")
 
     # E2: --global not supported for MCP entries.
     if global_:
@@ -116,9 +112,7 @@ def validate_mcp_conflicts(
 
     # E14: --env with --url and no command.
     if env and url and not command_argv:
-        raise click.UsageError(
-            "--env applies to stdio MCPs; use --header for remote"
-        )
+        raise click.UsageError("--env applies to stdio MCPs; use --header for remote")
 
     # E15: --registry only applies to registry-resolved entries.
     if registry_url and (url or command_argv):

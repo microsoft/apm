@@ -10,21 +10,20 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union  # noqa: F401, UP035
 
 import click
 
 from ...constants import APM_YML_FILENAME
 from ...core.null_logger import NullCommandLogger
 
-
-MCPEntry = Union[str, Dict[str, Any]]
+MCPEntry = Union[str, dict[str, Any]]  # noqa: UP007
 
 
 def _diff_entry(
-    old: Optional[MCPEntry],
-    new: Optional[MCPEntry],
-) -> List[str]:
+    old: MCPEntry | None,
+    new: MCPEntry | None,
+) -> list[str]:
     """Return a short list of ``key: old -> new`` strings for human display."""
     if isinstance(old, str) and isinstance(new, str):
         if old == new:
@@ -32,8 +31,8 @@ def _diff_entry(
         return [f"  {old} -> {new}"]
     old_d = {"name": old} if isinstance(old, str) else (old or {})
     new_d = {"name": new} if isinstance(new, str) else (new or {})
-    keys = list(old_d.keys()) + [k for k in new_d.keys() if k not in old_d]
-    diff: List[str] = []
+    keys = list(old_d.keys()) + [k for k in new_d.keys() if k not in old_d]  # noqa: SIM118
+    diff: list[str] = []
     for k in keys:
         ov = old_d.get(k, "<absent>")
         nv = new_d.get(k, "<absent>")
@@ -48,10 +47,10 @@ def add_mcp_to_apm_yml(
     *,
     dev: bool = False,
     force: bool = False,
-    project_root: Optional[Path] = None,
-    manifest_path: Optional[Path] = None,
+    project_root: Path | None = None,
+    manifest_path: Path | None = None,
     logger=None,
-) -> Tuple[str, Optional[List[str]]]:
+) -> tuple[str, list[str] | None]:
     """Persist ``entry`` to ``apm.yml`` under ``dependencies.mcp`` (or
     ``devDependencies.mcp`` when ``dev=True``).
 
@@ -69,9 +68,7 @@ def add_mcp_to_apm_yml(
     log = logger if logger is not None else NullCommandLogger()
     apm_yml_path = manifest_path or Path(APM_YML_FILENAME)
     if not apm_yml_path.exists():
-        raise click.UsageError(
-            f"{apm_yml_path}: no apm.yml found. Run 'apm init' first."
-        )
+        raise click.UsageError(f"{apm_yml_path}: no apm.yml found. Run 'apm init' first.")
     data = load_yaml(apm_yml_path) or {}
 
     section_name = "devDependencies" if dev else "dependencies"
@@ -81,15 +78,15 @@ def add_mcp_to_apm_yml(
         data[section_name]["mcp"] = []
     mcp_list = data[section_name]["mcp"]
     if not isinstance(mcp_list, list):
-        raise click.UsageError(
-            f"{apm_yml_path}: '{section_name}.mcp' must be a list"
-        )
+        raise click.UsageError(f"{apm_yml_path}: '{section_name}.mcp' must be a list")
 
     existing_idx = None
     existing_entry = None
     for i, item in enumerate(mcp_list):
-        item_name = item if isinstance(item, str) else (
-            item.get("name") if isinstance(item, dict) else None
+        item_name = (
+            item
+            if isinstance(item, str)
+            else (item.get("name") if isinstance(item, dict) else None)
         )
         if item_name == name:
             existing_idx = i
@@ -107,9 +104,7 @@ def add_mcp_to_apm_yml(
             mcp_list[existing_idx] = entry
             status = "replaced"
         elif is_tty:
-            log.warning(
-                f"MCP server '{name}' already exists. Replacement diff:"
-            )
+            log.warning(f"MCP server '{name}' already exists. Replacement diff:")
             # Diff lines drive the confirm prompt below: emit unconditionally
             # (tree_item is always-on, no --verbose gating) so users always
             # see what they are about to confirm.

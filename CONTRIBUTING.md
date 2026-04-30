@@ -118,7 +118,7 @@ check, not a redesign.
 2. Create a new branch for your feature/fix: `git checkout -b feature/your-feature-name` or `git checkout -b fix/issue-description`.
 3. Make your changes.
 4. Run tests: `uv run pytest tests/unit tests/test_console.py -x`
-5. Ensure your code follows our coding style (we use Black and isort).
+5. Ensure your code passes linting: `uv run ruff check src/ tests/`
 6. Commit your changes with a descriptive message.
 7. Push to your fork.
 8. Submit a pull request.
@@ -213,14 +213,25 @@ pytest tests/unit tests/test_console.py -x
 
 This project follows:
 - [PEP 8](https://pep8.org/) for Python style guidelines
-- We use Black for code formatting and isort for import sorting
+- We use [Ruff](https://docs.astral.sh/ruff/) for linting and formatting
 
-You can run these tools with:
+CI enforces all lint and formatting rules automatically. You can run them locally:
 
 ```bash
-uv run black .
-uv run isort .
+uv run ruff check src/ tests/        # lint
+uv run ruff check --fix src/ tests/   # lint with auto-fix
+uv run ruff format src/ tests/        # format
 ```
+
+### Optional: local pre-commit hooks
+
+For instant feedback before pushing, install the pre-commit hooks:
+
+```bash
+uv run pre-commit install
+```
+
+This is optional -- CI is the authoritative gate. The pre-commit hook rev may lag behind the CI version; check `.pre-commit-config.yaml` against `uv.lock` if you see discrepancies.
 
 ## Documentation
 

@@ -13,15 +13,15 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
+import pytest  # noqa: F401
 
 # The function under test lives in the commands module.
 from apm_cli.commands.install import _resolve_package_references
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_dep_ref(canonical, identity, *, is_insecure=False, is_local=False):
     """Return a mock DependencyReference with the minimal API surface."""
@@ -52,7 +52,7 @@ class TestResolvePackageReferencesPopulatesIdentities:
 
         existing = set()
 
-        valid, invalid, validated, _mkt, _entries = _resolve_package_references(
+        valid, invalid, validated, _mkt, _entries = _resolve_package_references(  # noqa: RUF059
             ["owner/repo-a", "owner/repo-b"],
             existing,
         )
@@ -91,7 +91,7 @@ class TestResolvePackageReferencesDuplicateDetection:
 
         existing = {"github.com/owner/repo-a"}
 
-        valid, invalid, validated, _mkt, _entries = _resolve_package_references(
+        valid, invalid, validated, _mkt, _entries = _resolve_package_references(  # noqa: RUF059
             ["owner/repo-a"],
             existing,
         )
@@ -100,7 +100,7 @@ class TestResolvePackageReferencesDuplicateDetection:
         assert validated == []
         # valid_outcomes still records it (with already_present=True)
         assert len(valid) == 1
-        canonical, already_present = valid[0]
+        canonical, already_present = valid[0]  # noqa: RUF059
         assert already_present is True
         # Set is unchanged
         assert existing == {"github.com/owner/repo-a"}
@@ -115,7 +115,7 @@ class TestResolvePackageReferencesDuplicateDetection:
 
         existing = set()
 
-        valid, invalid, validated, _mkt, _entries = _resolve_package_references(
+        valid, invalid, validated, _mkt, _entries = _resolve_package_references(  # noqa: RUF059
             ["owner/repo-x", "owner/repo-x"],
             existing,
         )
@@ -125,8 +125,8 @@ class TestResolvePackageReferencesDuplicateDetection:
         assert validated[0] == "owner/repo-x"
         # Both appear in valid_outcomes
         assert len(valid) == 2
-        assert valid[0][1] is False   # first is new
-        assert valid[1][1] is True    # second is already present
+        assert valid[0][1] is False  # first is new
+        assert valid[1][1] is True  # second is already present
         # Set has exactly one entry
         assert existing == {"github.com/owner/repo-x"}
 
@@ -141,7 +141,7 @@ class TestResolvePackageReferencesDuplicateDetection:
 
         existing = {"github.com/owner/old-pkg"}
 
-        valid, invalid, validated, _mkt, _entries = _resolve_package_references(
+        valid, invalid, validated, _mkt, _entries = _resolve_package_references(  # noqa: RUF059
             ["owner/old-pkg", "owner/new-pkg"],
             existing,
         )
@@ -163,7 +163,7 @@ class TestResolvePackageReferencesInvalidInput:
 
         existing = set()
 
-        valid, invalid, validated, _mkt, _entries = _resolve_package_references(
+        valid, invalid, validated, _mkt, _entries = _resolve_package_references(  # noqa: RUF059
             ["bad-input"],
             existing,
         )
@@ -183,7 +183,7 @@ class TestResolvePackageReferencesInvalidInput:
 
         existing = set()
 
-        valid, invalid, validated, _mkt, _entries = _resolve_package_references(
+        valid, invalid, validated, _mkt, _entries = _resolve_package_references(  # noqa: RUF059
             ["owner/repo-gone"],
             existing,
         )

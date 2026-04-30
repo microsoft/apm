@@ -2,34 +2,32 @@
 
 import builtins
 import sys
-from pathlib import Path
+from pathlib import Path  # noqa: F401
 
 import click
 
-from ...constants import APM_MODULES_DIR, APM_YML_FILENAME
+from ...constants import APM_MODULES_DIR, APM_YML_FILENAME  # noqa: F401
 from ...core.command_logger import CommandLogger
-
 from ...models.apm_package import APMPackage
-
 from .engine import (
-    _parse_dependency_entry,
-    _validate_uninstall_packages,
-    _dry_run_uninstall,
-    _remove_packages_from_disk,
-    _cleanup_transitive_orphans,
-    _sync_integrations_after_uninstall,
     _cleanup_stale_mcp,
+    _cleanup_transitive_orphans,
+    _dry_run_uninstall,
+    _parse_dependency_entry,
+    _remove_packages_from_disk,
+    _sync_integrations_after_uninstall,
+    _validate_uninstall_packages,
 )
 
 
 @click.command(help="Remove APM packages, their integrated files, and apm.yml entries")
 @click.argument("packages", nargs=-1, required=True)
-@click.option(
-    "--dry-run", is_flag=True, help="Show what would be removed without removing"
-)
+@click.option("--dry-run", is_flag=True, help="Show what would be removed without removing")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed removal information")
 @click.option(
-    "--global", "-g", "global_",
+    "--global",
+    "-g",
+    "global_",
     is_flag=True,
     default=False,
     help="Remove from user scope (~/.apm/) instead of the current project",
@@ -47,7 +45,14 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         apm uninstall acme/my-package --dry-run      # Show what would be removed
         apm uninstall -g acme/my-package             # Remove from user scope
     """
-    from ...core.scope import InstallScope, get_deploy_root, get_apm_dir, get_modules_dir, get_manifest_path
+    from ...core.scope import (
+        InstallScope,
+        get_apm_dir,
+        get_deploy_root,
+        get_manifest_path,
+        get_modules_dir,
+    )
+
     scope = InstallScope.USER if global_ else InstallScope.PROJECT
 
     manifest_path = get_manifest_path(scope)
@@ -78,7 +83,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         logger.start(f"Uninstalling {len(packages)} package(s)...")
 
         # Read current apm.yml
-        from ...utils.yaml_io import load_yaml, dump_yaml
+        from ...utils.yaml_io import dump_yaml, load_yaml
 
         apm_yml_path = manifest_path
         try:
@@ -95,7 +100,9 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         current_deps = data["dependencies"]["apm"] or []
 
         # Step 1: Validate packages
-        packages_to_remove, packages_not_found = _validate_uninstall_packages(packages, current_deps, logger)
+        packages_to_remove, packages_not_found = _validate_uninstall_packages(
+            packages, current_deps, logger
+        )
         if not packages_to_remove:
             logger.warning("No packages found in apm.yml to remove")
             return
@@ -120,9 +127,12 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
         # Step 4: Load lockfile and capture pre-uninstall MCP state
         from ...deps.lockfile import LockFile, get_lockfile_path
+
         lockfile_path = get_lockfile_path(apm_dir)
         lockfile = LockFile.read(lockfile_path)
-        _pre_uninstall_mcp_servers = builtins.set(lockfile.mcp_servers) if lockfile else builtins.set()
+        _pre_uninstall_mcp_servers = (
+            builtins.set(lockfile.mcp_servers) if lockfile else builtins.set()
+        )
 
         # Step 5: Remove packages from disk
         removed_from_modules = _remove_packages_from_disk(packages_to_remove, modules_dir, logger)
@@ -135,6 +145,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
         # Step 7: Collect deployed files for removed packages (before lockfile mutation)
         from ...integration.base_integrator import BaseIntegrator
+
         removed_keys = builtins.set()
         for pkg in packages_to_remove:
             try:
@@ -148,7 +159,9 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             for dep_key, dep in lockfile.dependencies.items():
                 if dep_key in removed_keys:
                     all_deployed_files.update(dep.deployed_files)
-        all_deployed_files = BaseIntegrator.normalize_managed_files(all_deployed_files) or builtins.set()
+        all_deployed_files = (
+            BaseIntegrator.normalize_managed_files(all_deployed_files) or builtins.set()
+        )
 
         # Step 8: Update lockfile
         if lockfile:
@@ -173,14 +186,26 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                     else:
                         lockfile_path.unlink(missing_ok=True)
                 except Exception:
-                    logger.warning("Failed to update lockfile -- it may be out of sync with uninstalled packages.")
+                    logger.warning(
+                        "Failed to update lockfile -- it may be out of sync with uninstalled packages."
+                    )
 
         # Step 9: Sync integrations
-        cleaned = {"prompts": 0, "agents": 0, "skills": 0, "commands": 0, "hooks": 0, "instructions": 0}
+        cleaned = {
+            "prompts": 0,
+            "agents": 0,
+            "skills": 0,
+            "commands": 0,
+            "hooks": 0,
+            "instructions": 0,
+        }
         try:
             apm_package = APMPackage.from_apm_yml(manifest_path)
             cleaned = _sync_integrations_after_uninstall(
-                apm_package, deploy_root, all_deployed_files, logger,
+                apm_package,
+                deploy_root,
+                all_deployed_files,
+                logger,
                 user_scope=scope is InstallScope.USER,
             )
         except Exception:

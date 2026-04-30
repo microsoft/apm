@@ -8,7 +8,7 @@ Tests that:
 5. PAT regression: auth_scheme="basic" still embeds token in URL.
 """
 
-import subprocess
+import subprocess  # noqa: F401
 import urllib.parse
 from unittest.mock import MagicMock, patch
 
@@ -16,10 +16,10 @@ import pytest
 
 from apm_cli.install.errors import AuthenticationError
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_dep_ref(host="dev.azure.com", repo_url="myorg/myproject/_git/myrepo"):
     """Build a minimal DependencyReference-like mock."""
@@ -38,7 +38,7 @@ def _make_dep_ref(host="dev.azure.com", repo_url="myorg/myproject/_git/myrepo"):
     return dep
 
 
-def _make_auth_ctx(token="test-pat", auth_scheme="basic", git_env=None):
+def _make_auth_ctx(token="test-pat", auth_scheme="basic", git_env=None):  # noqa: S107
     """Build an AuthContext-shaped mock."""
     ctx = MagicMock()
     ctx.token = token
@@ -60,6 +60,7 @@ def _make_resolver(auth_ctx=None):
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestBearerAuthSchemePassedToBuildRepoUrl:
     """auth_scheme='bearer' from resolve_for_dep reaches _build_repo_url."""

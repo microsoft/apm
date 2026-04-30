@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
+import pytest  # noqa: F401
 import requests
 
 from apm_cli.install import validation
@@ -237,8 +237,10 @@ class TestNoUrllibUrlopenInValidation:
             "does. Replace urllib.request.urlopen with requests.get."
         )
 
-        with patch("urllib.request.urlopen", side_effect=forbidden) as urlopen_mock, \
-             patch("apm_cli.install.validation.requests.get", return_value=fake_resp):
+        with (
+            patch("urllib.request.urlopen", side_effect=forbidden) as urlopen_mock,
+            patch("apm_cli.install.validation.requests.get", return_value=fake_resp),
+        ):
             result = validation._validate_package_exists(
                 "octocat/hello-world", verbose=False, auth_resolver=resolver
             )

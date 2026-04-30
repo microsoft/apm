@@ -8,6 +8,12 @@
     - **Full suite (only before final commit):** `uv run pytest`
     - When modifying a specific module, run only its corresponding test file(s) first. Run the full unit suite once as final validation before considering your work done.
 - **Test coverage principle**: When modifying existing code, add tests for the code paths you touch, on top of tests for the new functionality.
+- **Linting (run BEFORE pushing - CI gate fails otherwise)**: The `Lint` job runs `uv run --extra dev ruff check src/ tests/` AND `uv run --extra dev ruff format --check src/ tests/`. Mirror it locally:
+    - **Auto-fix style+imports:** `uv run --extra dev ruff check src/ tests/ --fix`
+    - **Apply formatter:** `uv run --extra dev ruff format src/ tests/`
+    - **Verify (must be silent):** `uv run --extra dev ruff check src/ tests/ && uv run --extra dev ruff format --check src/ tests/`
+    - Always run the verify pair before `git push` -- the CI Lint job fails on any remaining diagnostic. Common surprises: `RUF043` (use `match=r"..."` for regex with metacharacters), `UP006/UP045` (use `list`/`dict`/`X | None` instead of `List`/`Dict`/`Optional`), `RUF100` (drop stale `# noqa`), `F401`/`F841` (unused import / unused local).
+    - **Lifecycle binding**: this rule is the canonical lint contract for the repo. Any skill that produces an artifact claiming green CI -- notably `pr-description-skill` (whose "Validation evidence" row covers CI checks) -- inherits this gate transitively. Do NOT redefine ruff commands inside individual skills; honor this rule before invoking them.
 - **Development Workflow**: To run APM from source while working in other directories:
     - Install in development mode: `cd /path/to/awd-cli && uv run pip install -e .`
     - Use absolute path: `/Users/danielmeppiel/Repos/awd-cli/.venv/bin/apm compile --verbose --dry-run`

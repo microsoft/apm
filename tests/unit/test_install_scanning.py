@@ -5,7 +5,7 @@ critical findings and allows deployment on warnings/clean, and that
 install exits non-zero when packages are blocked.
 """
 
-from pathlib import Path
+from pathlib import Path  # noqa: F401
 
 import pytest
 
@@ -32,10 +32,10 @@ def mixed_files(tmp_path):
     clean.write_text("No issues here.\n", encoding="utf-8")
 
     warning = tmp_path / "warning.md"
-    warning.write_text("Has zero\u200Bwidth.\n", encoding="utf-8")
+    warning.write_text("Has zero\u200bwidth.\n", encoding="utf-8")
 
     critical = tmp_path / "critical.md"
-    critical.write_text("Has tag\U000E0041char.\n", encoding="utf-8")
+    critical.write_text("Has tag\U000e0041char.\n", encoding="utf-8")
 
     return [clean, warning, critical]
 
@@ -51,11 +51,13 @@ class TestDiagnosticsSecurityRendering:
         for f in mixed_files:
             findings = ContentScanner.scan_file(f)
             if findings:
-                has_crit, summary = ContentScanner.classify(findings)
+                has_crit, summary = ContentScanner.classify(findings)  # noqa: RUF059
                 sev = "critical" if has_crit else "warning"
                 diag.security(
-                    message=str(f), package="pkg",
-                    detail=f"{len(findings)} finding(s)", severity=sev,
+                    message=str(f),
+                    package="pkg",
+                    detail=f"{len(findings)} finding(s)",
+                    severity=sev,
                 )
         diag.render_summary()
         captured = capsys.readouterr()
@@ -63,23 +65,27 @@ class TestDiagnosticsSecurityRendering:
 
     def test_critical_security_flag(self, tmp_path):
         p = tmp_path / "evil.md"
-        p.write_text("x\U000E0001y\n", encoding="utf-8")
+        p.write_text("x\U000e0001y\n", encoding="utf-8")
         diag = DiagnosticCollector()
         findings = ContentScanner.scan_file(p)
         diag.security(
-            message=str(p), package="pkg",
-            detail=f"{len(findings)} finding(s)", severity="critical",
+            message=str(p),
+            package="pkg",
+            detail=f"{len(findings)} finding(s)",
+            severity="critical",
         )
         assert diag.has_critical_security is True
 
     def test_no_critical_when_only_warnings(self, tmp_path):
         p = tmp_path / "warn.md"
-        p.write_text("x\u200By\n", encoding="utf-8")
+        p.write_text("x\u200by\n", encoding="utf-8")
         diag = DiagnosticCollector()
         findings = ContentScanner.scan_file(p)
         diag.security(
-            message=str(p), package="pkg",
-            detail=f"{len(findings)} finding(s)", severity="warning",
+            message=str(p),
+            package="pkg",
+            detail=f"{len(findings)} finding(s)",
+            severity="warning",
         )
         assert diag.has_critical_security is False
 
@@ -97,34 +103,36 @@ class TestPreDeploySecurityScan:
         assert diag.security_count == 0
 
     def test_critical_chars_block_deploy(self, tmp_path):
-        (tmp_path / "evil.md").write_text(
-            "hidden\U000E0001tag\n", encoding="utf-8"
-        )
+        (tmp_path / "evil.md").write_text("hidden\U000e0001tag\n", encoding="utf-8")
         diag = DiagnosticCollector()
         result = _pre_deploy_security_scan(
-            tmp_path, diag, package_name="pkg", force=False,
+            tmp_path,
+            diag,
+            package_name="pkg",
+            force=False,
         )
         assert result is False
         assert diag.has_critical_security
 
     def test_critical_chars_with_force_allows_deploy(self, tmp_path):
-        (tmp_path / "evil.md").write_text(
-            "hidden\U000E0001tag\n", encoding="utf-8"
-        )
+        (tmp_path / "evil.md").write_text("hidden\U000e0001tag\n", encoding="utf-8")
         diag = DiagnosticCollector()
         result = _pre_deploy_security_scan(
-            tmp_path, diag, package_name="pkg", force=True,
+            tmp_path,
+            diag,
+            package_name="pkg",
+            force=True,
         )
         assert result is True
         assert diag.has_critical_security  # still records the finding
 
     def test_warnings_allow_deploy(self, tmp_path):
-        (tmp_path / "warn.md").write_text(
-            "zero\u200Bwidth\n", encoding="utf-8"
-        )
+        (tmp_path / "warn.md").write_text("zero\u200bwidth\n", encoding="utf-8")
         diag = DiagnosticCollector()
         result = _pre_deploy_security_scan(
-            tmp_path, diag, package_name="pkg",
+            tmp_path,
+            diag,
+            package_name="pkg",
         )
         assert result is True
         assert diag.security_count == 1
@@ -134,10 +142,13 @@ class TestPreDeploySecurityScan:
         """Source files in subdirectories are scanned."""
         sub = tmp_path / "subdir"
         sub.mkdir()
-        (sub / "deep.md").write_text("tag\U000E0041char\n", encoding="utf-8")
+        (sub / "deep.md").write_text("tag\U000e0041char\n", encoding="utf-8")
         diag = DiagnosticCollector()
         result = _pre_deploy_security_scan(
-            tmp_path, diag, package_name="pkg", force=False,
+            tmp_path,
+            diag,
+            package_name="pkg",
+            force=False,
         )
         assert result is False
 
@@ -147,7 +158,7 @@ class TestPreDeploySecurityScan:
         assert diag.security_count == 0
 
     def test_package_name_in_diagnostic(self, tmp_path):
-        (tmp_path / "x.md").write_text("z\u200Bw\n", encoding="utf-8")
+        (tmp_path / "x.md").write_text("z\u200bw\n", encoding="utf-8")
         diag = DiagnosticCollector()
         _pre_deploy_security_scan(tmp_path, diag, package_name="my-pkg")
         items = diag.by_category().get("security", [])
@@ -159,7 +170,7 @@ class TestPreDeploySecurityScan:
         # Create a directory outside the package with a critical file
         outside = tmp_path / "outside"
         outside.mkdir()
-        (outside / "evil.md").write_text("tag\U000E0001char\n", encoding="utf-8")
+        (outside / "evil.md").write_text("tag\U000e0001char\n", encoding="utf-8")
 
         # Package directory with a symlink pointing outside
         pkg = tmp_path / "pkg"
@@ -199,6 +210,7 @@ class TestInstallExitOnCriticalSecurity:
         with pytest.raises(SystemExit) as exc_info:
             if not force and diag.has_critical_security:
                 import sys
+
                 sys.exit(1)
         assert exc_info.value.code == 1
 
@@ -218,6 +230,7 @@ class TestInstallExitOnCriticalSecurity:
         # This should NOT raise SystemExit
         if not force and diag.has_critical_security:
             import sys
+
             sys.exit(1)
         # If we reach here, the force override worked
 
@@ -242,30 +255,49 @@ class TestCompileExitOnCriticalSecurity:
 
     def test_compilation_result_defaults_false(self):
         from apm_cli.compilation.agents_compiler import CompilationResult
+
         r = CompilationResult(
-            success=True, output_path="", content="",
-            warnings=[], errors=[], stats={},
+            success=True,
+            output_path="",
+            content="",
+            warnings=[],
+            errors=[],
+            stats={},
         )
         assert r.has_critical_security is False
 
     def test_compilation_result_propagates_critical(self):
         from apm_cli.compilation.agents_compiler import CompilationResult
+
         r = CompilationResult(
-            success=True, output_path="", content="",
-            warnings=[], errors=[], stats={},
+            success=True,
+            output_path="",
+            content="",
+            warnings=[],
+            errors=[],
+            stats={},
             has_critical_security=True,
         )
         assert r.has_critical_security is True
 
     def test_merge_results_propagates_critical(self):
         from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationResult
+
         clean = CompilationResult(
-            success=True, output_path="a.md", content="clean",
-            warnings=[], errors=[], stats={},
+            success=True,
+            output_path="a.md",
+            content="clean",
+            warnings=[],
+            errors=[],
+            stats={},
         )
         critical = CompilationResult(
-            success=True, output_path="b.md", content="bad",
-            warnings=[], errors=[], stats={},
+            success=True,
+            output_path="b.md",
+            content="bad",
+            warnings=[],
+            errors=[],
+            stats={},
             has_critical_security=True,
         )
         compiler = AgentsCompiler()
@@ -274,15 +306,23 @@ class TestCompileExitOnCriticalSecurity:
 
     def test_merge_results_clean_stays_clean(self):
         from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationResult
+
         r1 = CompilationResult(
-            success=True, output_path="a.md", content="ok",
-            warnings=[], errors=[], stats={},
+            success=True,
+            output_path="a.md",
+            content="ok",
+            warnings=[],
+            errors=[],
+            stats={},
         )
         r2 = CompilationResult(
-            success=True, output_path="b.md", content="ok",
-            warnings=[], errors=[], stats={},
+            success=True,
+            output_path="b.md",
+            content="ok",
+            warnings=[],
+            errors=[],
+            stats={},
         )
         compiler = AgentsCompiler()
         merged = compiler._merge_results([r1, r2])
         assert merged.has_critical_security is False
-

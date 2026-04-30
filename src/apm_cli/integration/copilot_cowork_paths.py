@@ -30,7 +30,6 @@ import os
 import sys
 from pathlib import Path
 
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -59,6 +58,7 @@ _COPILOT_COWORK_SKILLS_SUBDIR: str = "Documents/Cowork/skills"
 # Exceptions
 # ---------------------------------------------------------------------------
 
+
 class CoworkResolutionError(Exception):
     """Raised when OneDrive resolution fails with an actionable diagnostic.
 
@@ -70,6 +70,7 @@ class CoworkResolutionError(Exception):
 # ---------------------------------------------------------------------------
 # Resolution
 # ---------------------------------------------------------------------------
+
 
 def resolve_copilot_cowork_skills_dir() -> Path | None:
     """Locate the Cowork skills directory on the current machine.
@@ -98,6 +99,7 @@ def resolve_copilot_cowork_skills_dir() -> Path | None:
             PathTraversalError,
             validate_path_segments,
         )
+
         try:
             validate_path_segments(env_override, context="APM_COPILOT_COWORK_SKILLS_DIR")
         except PathTraversalError as exc:
@@ -115,6 +117,7 @@ def resolve_copilot_cowork_skills_dir() -> Path | None:
             PathTraversalError,
             validate_path_segments,
         )
+
         try:
             validate_path_segments(config_value, context="copilot_cowork_skills_dir config")
         except PathTraversalError as exc:
@@ -135,9 +138,7 @@ def resolve_copilot_cowork_skills_dir() -> Path | None:
             if _win_root:
                 _win_skills = Path(_win_root) / _COPILOT_COWORK_SKILLS_SUBDIR
                 try:
-                    validate_path_segments(
-                        str(_win_skills), context=f"{_env_name} env var"
-                    )
+                    validate_path_segments(str(_win_skills), context=f"{_env_name} env var")
                 except PathTraversalError as exc:
                     raise CoworkResolutionError(
                         f"{_env_name} contains a traversal sequence: {exc}"
@@ -169,6 +170,7 @@ def resolve_copilot_cowork_skills_dir() -> Path | None:
 # ---------------------------------------------------------------------------
 # Lockfile translation
 # ---------------------------------------------------------------------------
+
 
 def to_lockfile_path(absolute: Path, cowork_root: Path) -> str:
     """Encode an absolute cowork path as a ``cowork://`` lockfile entry.
@@ -214,12 +216,10 @@ def from_lockfile_path(lockfile_path: str, cowork_root: Path) -> Path:
     )
 
     if not lockfile_path.startswith(COWORK_URI_SCHEME):
-        raise ValueError(
-            f"Not a cowork lockfile path: {lockfile_path!r}"
-        )
+        raise ValueError(f"Not a cowork lockfile path: {lockfile_path!r}")
 
     # Strip scheme to get the relative portion (e.g. "skills/my-skill/SKILL.md").
-    rel_posix = lockfile_path[len(COWORK_URI_SCHEME):]
+    rel_posix = lockfile_path[len(COWORK_URI_SCHEME) :]
 
     # Pre-parse traversal rejection.
     validate_path_segments(rel_posix, context="cowork lockfile path")
@@ -229,7 +229,7 @@ def from_lockfile_path(lockfile_path: str, cowork_root: Path) -> Path:
     # "skills/" segment to avoid double-nesting.
     _skills_prefix = "skills/"
     if rel_posix.startswith(_skills_prefix):
-        rel_posix = rel_posix[len(_skills_prefix):]
+        rel_posix = rel_posix[len(_skills_prefix) :]
 
     candidate = cowork_root / rel_posix
     # Re-validate containment after path construction.

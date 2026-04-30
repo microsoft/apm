@@ -7,14 +7,14 @@ Tests cover:
 - Removal of all APM command files
 """
 
-import tempfile
 import shutil
+import tempfile
+from dataclasses import dataclass  # noqa: F401
 from pathlib import Path
 from unittest.mock import MagicMock
-from dataclasses import dataclass
 
-import pytest
 import frontmatter
+import pytest
 
 from apm_cli.integration.command_integrator import (
     CommandIntegrator,
@@ -30,91 +30,91 @@ class TestCommandIntegratorSyncIntegration:
         """Create a temporary project with .claude/commands directory."""
         temp_dir = tempfile.mkdtemp()
         temp_path = Path(temp_dir)
-        
+
         # Create commands directory
         commands_dir = temp_path / ".claude" / "commands"
         commands_dir.mkdir(parents=True)
-        
+
         yield temp_path
         shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_sync_removes_all_apm_commands(self, temp_project):
         """Test that sync_integration removes all *-apm.md files."""
         commands_dir = temp_project / ".claude" / "commands"
-        
+
         # Create command files for two packages
         pkg1_command = commands_dir / "audit-apm.md"
         pkg1_command.write_text("# Audit Command\n")
-        
+
         pkg2_command = commands_dir / "review-apm.md"
         pkg2_command.write_text("# Review Command\n")
-        
+
         integrator = CommandIntegrator()
         result = integrator.sync_integration(None, temp_project)
-        
-        assert result['files_removed'] == 2
+
+        assert result["files_removed"] == 2
         assert not pkg1_command.exists()
         assert not pkg2_command.exists()
 
     def test_sync_handles_empty_dependencies(self, temp_project):
         """Test sync removes all apm commands regardless of dependencies."""
         commands_dir = temp_project / ".claude" / "commands"
-        
+
         command1 = commands_dir / "cmd1-apm.md"
         command1.write_text("# Command 1\n")
-        
+
         command2 = commands_dir / "cmd2-apm.md"
         command2.write_text("# Command 2\n")
-        
+
         mock_package = MagicMock()
-        mock_package.dependencies = {'apm': []}
-        
+        mock_package.dependencies = {"apm": []}
+
         integrator = CommandIntegrator()
         result = integrator.sync_integration(mock_package, temp_project)
-        
-        assert result['files_removed'] == 2
+
+        assert result["files_removed"] == 2
         assert not command1.exists()
         assert not command2.exists()
 
     def test_sync_ignores_non_apm_command_files(self, temp_project):
         """Test that sync_integration ignores command files without -apm suffix."""
         commands_dir = temp_project / ".claude" / "commands"
-        
+
         # Create a non-APM command file (user-created)
         user_command = commands_dir / "my-custom-command.md"
         user_command.write_text("# My Custom Command\n")
-        
+
         integrator = CommandIntegrator()
         result = integrator.sync_integration(None, temp_project)
-        
-        assert result['files_removed'] == 0
+
+        assert result["files_removed"] == 0
         assert user_command.exists()
 
     def test_sync_handles_nonexistent_commands_dir(self):
         """Test sync handles missing .claude/commands directory."""
         temp_dir = tempfile.mkdtemp()
         temp_path = Path(temp_dir)
-        
+
         try:
             integrator = CommandIntegrator()
             result = integrator.sync_integration(None, temp_path)
-            assert result['files_removed'] == 0
-            assert result['errors'] == 0
+            assert result["files_removed"] == 0
+            assert result["errors"] == 0
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_sync_apm_package_param_is_unused(self, temp_project):
         """Test that sync works regardless of what apm_package is passed."""
         commands_dir = temp_project / ".claude" / "commands"
-        
+
         cmd = commands_dir / "test-apm.md"
         cmd.write_text("# Test\n")
-        
+
         integrator = CommandIntegrator()
-        
+
         # Works with None
         result = integrator.sync_integration(None, temp_project)
-        assert result['files_removed'] == 1
+        assert result["files_removed"] == 1
 
 
 class TestRemovePackageCommands:
@@ -125,29 +125,29 @@ class TestRemovePackageCommands:
         """Create a temporary project with .claude/commands directory."""
         temp_dir = tempfile.mkdtemp()
         temp_path = Path(temp_dir)
-        
+
         commands_dir = temp_path / ".claude" / "commands"
         commands_dir.mkdir(parents=True)
-        
+
         yield temp_path
         shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_removes_all_apm_commands(self, temp_project):
         """Test that remove_package_commands removes all *-apm.md files."""
         commands_dir = temp_project / ".claude" / "commands"
-        
+
         cmd1 = commands_dir / "audit-apm.md"
         cmd1.write_text("# Audit\n")
-        
+
         cmd2 = commands_dir / "review-apm.md"
         cmd2.write_text("# Review\n")
-        
+
         cmd3 = commands_dir / "design-apm.md"
         cmd3.write_text("# Design\n")
-        
+
         integrator = CommandIntegrator()
         removed = integrator.remove_package_commands("any/package", temp_project)
-        
+
         assert removed == 3
         assert not cmd1.exists()
         assert not cmd2.exists()
@@ -156,25 +156,25 @@ class TestRemovePackageCommands:
     def test_returns_zero_when_no_commands_dir(self, temp_project):
         """Test that remove_package_commands returns 0 when no commands directory exists."""
         shutil.rmtree(temp_project / ".claude" / "commands")
-        
+
         integrator = CommandIntegrator()
         removed = integrator.remove_package_commands("any/package", temp_project)
-        
+
         assert removed == 0
 
     def test_preserves_non_apm_files(self, temp_project):
         """Test that non-APM files are preserved."""
         commands_dir = temp_project / ".claude" / "commands"
-        
+
         user_cmd = commands_dir / "my-command.md"
         user_cmd.write_text("# User command\n")
-        
+
         apm_cmd = commands_dir / "test-apm.md"
         apm_cmd.write_text("# APM command\n")
-        
+
         integrator = CommandIntegrator()
         removed = integrator.remove_package_commands("any/package", temp_project)
-        
+
         assert removed == 1
         assert not apm_cmd.exists()
         assert user_cmd.exists()
@@ -188,10 +188,10 @@ class TestIntegrateCommandNoMetadata:
         """Create temporary project with source and target dirs."""
         temp_dir = tempfile.mkdtemp()
         temp_path = Path(temp_dir)
-        
+
         (temp_path / "source").mkdir()
         (temp_path / ".claude" / "commands").mkdir(parents=True)
-        
+
         yield temp_path
         shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -204,9 +204,9 @@ description: Run audit checks
 # Audit Command
 Run compliance audit.
 """)
-        
+
         target = temp_project / ".claude" / "commands" / "audit-apm.md"
-        
+
         mock_info = MagicMock()
         mock_info.package.name = "test/pkg"
         mock_info.package.version = "1.0.0"
@@ -215,31 +215,31 @@ Run compliance audit.
         mock_info.install_path = temp_project / "source"
         mock_info.installed_at = "2024-01-01"
         mock_info.get_canonical_dependency_string.return_value = "test/pkg"
-        
+
         integrator = CommandIntegrator()
         integrator.integrate_command(source, target, mock_info, source)
-        
+
         # Verify no APM metadata
         post = frontmatter.load(target)
-        assert 'apm' not in post.metadata
-        
+        assert "apm" not in post.metadata
+
         # Verify legitimate metadata IS preserved
-        assert post.metadata.get('description') == 'Run audit checks'
+        assert post.metadata.get("description") == "Run audit checks"
 
     def test_content_preserved_verbatim(self, temp_project):
         """Test that command content is preserved without modification."""
         content = "# My Command\nDo something useful.\n\n## Steps\n1. First\n2. Second"
         source = temp_project / "source" / "test.prompt.md"
         source.write_text(f"---\ndescription: Test\n---\n{content}\n")
-        
+
         target = temp_project / ".claude" / "commands" / "test-apm.md"
-        
+
         mock_info = MagicMock()
         mock_info.resolved_reference = None
-        
+
         integrator = CommandIntegrator()
         integrator.integrate_command(source, target, mock_info, source)
-        
+
         post = frontmatter.load(target)
         assert content in post.content
 
@@ -254,21 +254,21 @@ argument-hint: "file path"
 ---
 # Command
 """)
-        
+
         target = temp_project / ".claude" / "commands" / "cmd-apm.md"
-        
+
         mock_info = MagicMock()
         mock_info.resolved_reference = None
-        
+
         integrator = CommandIntegrator()
         integrator.integrate_command(source, target, mock_info, source)
-        
+
         post = frontmatter.load(target)
-        assert post.metadata['description'] == 'A command'
-        assert post.metadata['allowed-tools'] == ['bash', 'edit']
-        assert post.metadata['model'] == 'claude-sonnet'
-        assert post.metadata['argument-hint'] == 'file path'
-        assert 'apm' not in post.metadata
+        assert post.metadata["description"] == "A command"
+        assert post.metadata["allowed-tools"] == ["bash", "edit"]
+        assert post.metadata["model"] == "claude-sonnet"
+        assert post.metadata["argument-hint"] == "file path"
+        assert "apm" not in post.metadata
 
 
 class TestSecurityWarningsSurfaced:
@@ -289,7 +289,7 @@ class TestSecurityWarningsSurfaced:
 
         source = temp_project / "source" / "evil.prompt.md"
         source.write_text(
-            "---\ndescription: Evil\n---\nHidden tag\U000E0041char.\n",
+            "---\ndescription: Evil\n---\nHidden tag\U000e0041char.\n",
             encoding="utf-8",
         )
         target = temp_project / ".claude" / "commands" / "evil.md"
@@ -302,17 +302,18 @@ class TestSecurityWarningsSurfaced:
         diag = DiagnosticCollector()
         integrator = CommandIntegrator()
         integrator.integrate_command(
-            source, target, mock_info, source, diagnostics=diag,
+            source,
+            target,
+            mock_info,
+            source,
+            diagnostics=diag,
         )
 
         assert diag.security_count >= 1
         items = diag.by_category().get("security", [])
         # Critical findings must land in the critical bucket (severity), and
         # the short message must read as critical (not be downgraded).
-        assert any(
-            i.severity == "critical" and "critical" in i.message.lower()
-            for i in items
-        )
+        assert any(i.severity == "critical" and "critical" in i.message.lower() for i in items)
 
     def test_warning_only_findings_recorded_in_diagnostics(self, temp_project):
         """SecurityGate warning-only findings (e.g. soft hyphen) also surface."""
@@ -334,7 +335,11 @@ class TestSecurityWarningsSurfaced:
         diag = DiagnosticCollector()
         integrator = CommandIntegrator()
         integrator.integrate_command(
-            source, target, mock_info, source, diagnostics=diag,
+            source,
+            target,
+            mock_info,
+            source,
+            diagnostics=diag,
         )
 
         items = diag.by_category().get("security", [])
@@ -384,9 +389,7 @@ class TestOpenCodeCommandIntegration:
             {"test.prompt.md": "---\ndescription: Test\n---\n# Test"},
         )
         integrator = CommandIntegrator()
-        result = integrator.integrate_package_commands_opencode(
-            pkg_info, temp_project_no_opencode
-        )
+        result = integrator.integrate_package_commands_opencode(pkg_info, temp_project_no_opencode)
         assert result.files_integrated == 0
         assert not (temp_project_no_opencode / ".opencode" / "commands").exists()
 
@@ -397,9 +400,7 @@ class TestOpenCodeCommandIntegration:
             {"test.prompt.md": "---\ndescription: A test\n---\n# Test command"},
         )
         integrator = CommandIntegrator()
-        result = integrator.integrate_package_commands_opencode(
-            pkg_info, temp_project
-        )
+        result = integrator.integrate_package_commands_opencode(pkg_info, temp_project)
         assert result.files_integrated == 1
         target = temp_project / ".opencode" / "commands" / "test.md"
         assert target.exists()
@@ -414,9 +415,7 @@ class TestOpenCodeCommandIntegration:
             },
         )
         integrator = CommandIntegrator()
-        result = integrator.integrate_package_commands_opencode(
-            pkg_info, temp_project
-        )
+        result = integrator.integrate_package_commands_opencode(pkg_info, temp_project)
         assert result.files_integrated == 2
 
     def test_sync_removes_apm_commands(self, temp_project):
@@ -492,7 +491,9 @@ class TestIntegratePackagePrimitivesTargetGating:
         Copilot has no ``commands`` primitive, so the dispatch loop
         should never call ``integrate_commands_for_target``.
         """
-        import tempfile, shutil
+        import shutil
+        import tempfile
+
         from apm_cli.commands.install import _integrate_package_primitives
         from apm_cli.integration.targets import KNOWN_TARGETS
         from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -523,7 +524,9 @@ class TestIntegratePackagePrimitivesTargetGating:
 
     def test_claude_target_dispatches_commands(self):
         """When targets=[claude], commands must be dispatched."""
-        import tempfile, shutil
+        import shutil
+        import tempfile
+
         from apm_cli.commands.install import _integrate_package_primitives
         from apm_cli.integration.targets import KNOWN_TARGETS
         from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -565,18 +568,22 @@ class TestExtractInputNames:
         assert _extract_input_names(["a", "b", "c"]) == (["a", "b", "c"], [])
 
     def test_object_list(self):
-        valid, rejected = _extract_input_names([
-            {"feature_name": "Name"},
-            {"desc": "Description"},
-        ])
+        valid, rejected = _extract_input_names(
+            [
+                {"feature_name": "Name"},
+                {"desc": "Description"},
+            ]
+        )
         assert valid == ["feature_name", "desc"]
         assert rejected == []
 
     def test_mixed_list(self):
-        valid, rejected = _extract_input_names([
-            "simple_arg",
-            {"complex_arg": "A complex argument"},
-        ])
+        valid, rejected = _extract_input_names(
+            [
+                "simple_arg",
+                {"complex_arg": "A complex argument"},
+            ]
+        )
         assert valid == ["simple_arg", "complex_arg"]
         assert rejected == []
 
@@ -669,25 +676,28 @@ class TestInputToArgumentsEndToEnd:
     def test_full_dispatch_maps_input_to_arguments(self, temp_project):
         """input: [name, category] produces Claude arguments via full dispatch."""
         from apm_cli.install.services import integrate_package_primitives
-        from apm_cli.integration.targets import KNOWN_TARGETS
         from apm_cli.integration import (
-            PromptIntegrator,
             AgentIntegrator,
-            SkillIntegrator,
-            InstructionIntegrator,
             HookIntegrator,
+            InstructionIntegrator,
+            PromptIntegrator,
+            SkillIntegrator,
         )
+        from apm_cli.integration.targets import KNOWN_TARGETS
         from apm_cli.utils.diagnostics import DiagnosticCollector
 
-        pkg_info = self._make_package(temp_project, {
-            "gen.prompt.md": (
-                "---\n"
-                "description: Generate something\n"
-                "input: [name, category]\n"
-                "---\n"
-                "Create ${{input:name}} in ${{input:category}}.\n"
-            ),
-        })
+        pkg_info = self._make_package(
+            temp_project,
+            {
+                "gen.prompt.md": (
+                    "---\n"
+                    "description: Generate something\n"
+                    "input: [name, category]\n"
+                    "---\n"
+                    "Create ${{input:name}} in ${{input:category}}.\n"
+                ),
+            },
+        )
 
         result = integrate_package_primitives(
             pkg_info,
@@ -744,19 +754,25 @@ class TestInputToArgumentsIntegration:
 
     def test_input_list_becomes_arguments(self, temp_project):
         """input: [name, category] maps to arguments: [name, category]."""
-        pkg_info = self._make_package(temp_project, {
-            "gen.prompt.md": (
-                "---\n"
-                "description: Generate something\n"
-                "input: [name, category]\n"
-                "---\n"
-                "Create ${{input:name}} in ${{input:category}}.\n"
-            ),
-        })
+        pkg_info = self._make_package(
+            temp_project,
+            {
+                "gen.prompt.md": (
+                    "---\n"
+                    "description: Generate something\n"
+                    "input: [name, category]\n"
+                    "---\n"
+                    "Create ${{input:name}} in ${{input:category}}.\n"
+                ),
+            },
+        )
         integrator = CommandIntegrator()
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         integrator.integrate_commands_for_target(
-            KNOWN_TARGETS["claude"], pkg_info, temp_project,
+            KNOWN_TARGETS["claude"],
+            pkg_info,
+            temp_project,
         )
 
         target = temp_project / ".claude" / "commands" / "gen.md"
@@ -771,21 +787,27 @@ class TestInputToArgumentsIntegration:
 
     def test_input_object_list_becomes_arguments(self, temp_project):
         """input as object list extracts keys as argument names."""
-        pkg_info = self._make_package(temp_project, {
-            "feat.prompt.md": (
-                "---\n"
-                "description: Feature generator\n"
-                "input:\n"
-                "  - feature_name: Name of the feature\n"
-                "  - feature_desc: Description\n"
-                "---\n"
-                "Build ${{input:feature_name}}: ${{input:feature_desc}}\n"
-            ),
-        })
+        pkg_info = self._make_package(
+            temp_project,
+            {
+                "feat.prompt.md": (
+                    "---\n"
+                    "description: Feature generator\n"
+                    "input:\n"
+                    "  - feature_name: Name of the feature\n"
+                    "  - feature_desc: Description\n"
+                    "---\n"
+                    "Build ${{input:feature_name}}: ${{input:feature_desc}}\n"
+                ),
+            },
+        )
         integrator = CommandIntegrator()
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         integrator.integrate_commands_for_target(
-            KNOWN_TARGETS["claude"], pkg_info, temp_project,
+            KNOWN_TARGETS["claude"],
+            pkg_info,
+            temp_project,
         )
 
         target = temp_project / ".claude" / "commands" / "feat.md"
@@ -796,20 +818,26 @@ class TestInputToArgumentsIntegration:
 
     def test_explicit_argument_hint_not_overridden(self, temp_project):
         """When argument-hint is already set, input does not override it."""
-        pkg_info = self._make_package(temp_project, {
-            "cmd.prompt.md": (
-                "---\n"
-                "description: A command\n"
-                "argument-hint: <custom-hint>\n"
-                "input: [x]\n"
-                "---\n"
-                "Do ${{input:x}}.\n"
-            ),
-        })
+        pkg_info = self._make_package(
+            temp_project,
+            {
+                "cmd.prompt.md": (
+                    "---\n"
+                    "description: A command\n"
+                    "argument-hint: <custom-hint>\n"
+                    "input: [x]\n"
+                    "---\n"
+                    "Do ${{input:x}}.\n"
+                ),
+            },
+        )
         integrator = CommandIntegrator()
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         integrator.integrate_commands_for_target(
-            KNOWN_TARGETS["claude"], pkg_info, temp_project,
+            KNOWN_TARGETS["claude"],
+            pkg_info,
+            temp_project,
         )
 
         target = temp_project / ".claude" / "commands" / "cmd.md"
@@ -819,21 +847,27 @@ class TestInputToArgumentsIntegration:
 
     def test_bare_dict_input_becomes_arguments(self, temp_project):
         """input: {a: 'desc'} (bare dict) maps to arguments: [a]."""
-        pkg_info = self._make_package(temp_project, {
-            "d.prompt.md": (
-                "---\n"
-                "description: Dict input\n"
-                "input:\n"
-                "  feature-name: Name of the feature\n"
-                "  feature-desc: Description\n"
-                "---\n"
-                "Build ${{input:feature-name}}: ${{input:feature-desc}}\n"
-            ),
-        })
+        pkg_info = self._make_package(
+            temp_project,
+            {
+                "d.prompt.md": (
+                    "---\n"
+                    "description: Dict input\n"
+                    "input:\n"
+                    "  feature-name: Name of the feature\n"
+                    "  feature-desc: Description\n"
+                    "---\n"
+                    "Build ${{input:feature-name}}: ${{input:feature-desc}}\n"
+                ),
+            },
+        )
         integrator = CommandIntegrator()
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         integrator.integrate_commands_for_target(
-            KNOWN_TARGETS["claude"], pkg_info, temp_project,
+            KNOWN_TARGETS["claude"],
+            pkg_info,
+            temp_project,
         )
 
         target = temp_project / ".claude" / "commands" / "d.md"
@@ -845,19 +879,25 @@ class TestInputToArgumentsIntegration:
 
     def test_hyphenated_input_names_substituted(self, temp_project):
         """Hyphenated names like feature-name are replaced in content."""
-        pkg_info = self._make_package(temp_project, {
-            "h.prompt.md": (
-                "---\n"
-                "description: Hyphen test\n"
-                "input: [my-arg]\n"
-                "---\n"
-                "Use ${{input:my-arg}} here.\n"
-            ),
-        })
+        pkg_info = self._make_package(
+            temp_project,
+            {
+                "h.prompt.md": (
+                    "---\n"
+                    "description: Hyphen test\n"
+                    "input: [my-arg]\n"
+                    "---\n"
+                    "Use ${{input:my-arg}} here.\n"
+                ),
+            },
+        )
         integrator = CommandIntegrator()
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         integrator.integrate_commands_for_target(
-            KNOWN_TARGETS["claude"], pkg_info, temp_project,
+            KNOWN_TARGETS["claude"],
+            pkg_info,
+            temp_project,
         )
 
         target = temp_project / ".claude" / "commands" / "h.md"
@@ -867,19 +907,25 @@ class TestInputToArgumentsIntegration:
 
     def test_single_brace_input_references_substituted(self, temp_project):
         """${input:name} (single-brace, the canonical docs format) is rewritten."""
-        pkg_info = self._make_package(temp_project, {
-            "s.prompt.md": (
-                "---\n"
-                "description: Single-brace test\n"
-                "input: [name, category]\n"
-                "---\n"
-                "Create ${input:name} in ${input:category}.\n"
-            ),
-        })
+        pkg_info = self._make_package(
+            temp_project,
+            {
+                "s.prompt.md": (
+                    "---\n"
+                    "description: Single-brace test\n"
+                    "input: [name, category]\n"
+                    "---\n"
+                    "Create ${input:name} in ${input:category}.\n"
+                ),
+            },
+        )
         integrator = CommandIntegrator()
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         integrator.integrate_commands_for_target(
-            KNOWN_TARGETS["claude"], pkg_info, temp_project,
+            KNOWN_TARGETS["claude"],
+            pkg_info,
+            temp_project,
         )
 
         target = temp_project / ".claude" / "commands" / "s.md"
@@ -921,7 +967,11 @@ class TestInputMappingDiagnostics:
 
         diag = DiagnosticCollector()
         CommandIntegrator().integrate_command(
-            source, target, mock_info, source, diagnostics=diag,
+            source,
+            target,
+            mock_info,
+            source,
+            diagnostics=diag,
         )
 
         info_items = diag.by_category().get("info", [])
@@ -943,7 +993,7 @@ class TestInputMappingDiagnostics:
             "---\n"
             "description: Evil\n"
             "input:\n"
-            "  - \"foo>\\ninjected_key\": bad\n"
+            '  - "foo>\\ninjected_key": bad\n'
             "  - good_arg: ok\n"
             "---\n"
             "body\n",
@@ -958,7 +1008,11 @@ class TestInputMappingDiagnostics:
 
         diag = DiagnosticCollector()
         CommandIntegrator().integrate_command(
-            source, target, mock_info, source, diagnostics=diag,
+            source,
+            target,
+            mock_info,
+            source,
+            diagnostics=diag,
         )
 
         post = frontmatter.load(target)
@@ -990,7 +1044,8 @@ class TestSecurityScanFailClosed:
 
         source = temp_project / "source" / "x.prompt.md"
         source.write_text(
-            "---\ndescription: X\n---\nbody\n", encoding="utf-8",
+            "---\ndescription: X\n---\nbody\n",
+            encoding="utf-8",
         )
         target = temp_project / ".claude" / "commands" / "x.md"
 
@@ -1001,7 +1056,10 @@ class TestSecurityScanFailClosed:
 
         with pytest.raises(ImportError):
             CommandIntegrator().integrate_command(
-                source, target, mock_info, source,
+                source,
+                target,
+                mock_info,
+                source,
             )
         # Fail-closed: file must NOT have been written.
         assert not target.exists()
@@ -1054,6 +1112,7 @@ class TestGeminiCommandIntegration:
         )
         integrator = CommandIntegrator()
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         result = integrator.integrate_commands_for_target(
             KNOWN_TARGETS["gemini"], pkg_info, temp_project_no_gemini
         )
@@ -1067,6 +1126,7 @@ class TestGeminiCommandIntegration:
         )
         integrator = CommandIntegrator()
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         result = integrator.integrate_commands_for_target(
             KNOWN_TARGETS["gemini"], pkg_info, temp_project
         )
@@ -1080,15 +1140,15 @@ class TestGeminiCommandIntegration:
     def test_toml_is_valid(self, temp_project):
         """Verify generated file is valid TOML."""
         import toml
+
         pkg_info = self._make_package(
             temp_project,
             {"test.prompt.md": "---\ndescription: A test\n---\nDo the thing."},
         )
         integrator = CommandIntegrator()
         from apm_cli.integration.targets import KNOWN_TARGETS
-        integrator.integrate_commands_for_target(
-            KNOWN_TARGETS["gemini"], pkg_info, temp_project
-        )
+
+        integrator.integrate_commands_for_target(KNOWN_TARGETS["gemini"], pkg_info, temp_project)
         target = temp_project / ".gemini" / "commands" / "test.toml"
         parsed = toml.loads(target.read_text())
         assert parsed["description"] == "A test"
@@ -1102,9 +1162,8 @@ class TestGeminiCommandIntegration:
         )
         integrator = CommandIntegrator()
         from apm_cli.integration.targets import KNOWN_TARGETS
-        integrator.integrate_commands_for_target(
-            KNOWN_TARGETS["gemini"], pkg_info, temp_project
-        )
+
+        integrator.integrate_commands_for_target(KNOWN_TARGETS["gemini"], pkg_info, temp_project)
         target = temp_project / ".gemini" / "commands" / "cmd.toml"
         content = target.read_text()
         assert "{{args}}" in content
@@ -1118,11 +1177,11 @@ class TestGeminiCommandIntegration:
         )
         integrator = CommandIntegrator()
         from apm_cli.integration.targets import KNOWN_TARGETS
-        integrator.integrate_commands_for_target(
-            KNOWN_TARGETS["gemini"], pkg_info, temp_project
-        )
+
+        integrator.integrate_commands_for_target(KNOWN_TARGETS["gemini"], pkg_info, temp_project)
         target = temp_project / ".gemini" / "commands" / "cmd.toml"
         import toml
+
         parsed = toml.loads(target.read_text())
         assert parsed["prompt"].startswith("Arguments: {{args}}")
 
@@ -1134,11 +1193,11 @@ class TestGeminiCommandIntegration:
         )
         integrator = CommandIntegrator()
         from apm_cli.integration.targets import KNOWN_TARGETS
-        integrator.integrate_commands_for_target(
-            KNOWN_TARGETS["gemini"], pkg_info, temp_project
-        )
+
+        integrator.integrate_commands_for_target(KNOWN_TARGETS["gemini"], pkg_info, temp_project)
         target = temp_project / ".gemini" / "commands" / "cmd.toml"
         import toml
+
         parsed = toml.loads(target.read_text())
         assert "description" not in parsed
         assert "Just do the thing." in parsed["prompt"]
@@ -1149,6 +1208,7 @@ class TestWriteGeminiCommand:
 
     def setup_method(self):
         import tempfile
+
         self.temp_dir = tempfile.mkdtemp()
 
     def teardown_method(self):
@@ -1161,6 +1221,7 @@ class TestWriteGeminiCommand:
         CommandIntegrator._write_gemini_command(source, target)
 
         import toml
+
         parsed = toml.loads(target.read_text())
         assert parsed["description"] == "Test command"
         assert parsed["prompt"] == "Do something."
@@ -1172,6 +1233,7 @@ class TestWriteGeminiCommand:
         CommandIntegrator._write_gemini_command(source, target)
 
         import toml
+
         parsed = toml.loads(target.read_text())
         assert "{{args}}" in parsed["prompt"]
         assert "$ARGUMENTS" not in parsed["prompt"]

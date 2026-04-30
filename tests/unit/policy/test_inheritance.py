@@ -4,6 +4,14 @@ from __future__ import annotations
 
 import unittest
 
+from apm_cli.policy.inheritance import (
+    MAX_CHAIN_DEPTH,
+    PolicyInheritanceError,
+    detect_cycle,
+    merge_policies,
+    resolve_policy_chain,
+    validate_chain_depth,
+)
 from apm_cli.policy.schema import (
     ApmPolicy,
     CompilationPolicy,
@@ -15,14 +23,6 @@ from apm_cli.policy.schema import (
     McpTransportPolicy,
     PolicyCache,
     UnmanagedFilesPolicy,
-)
-from apm_cli.policy.inheritance import (
-    MAX_CHAIN_DEPTH,
-    PolicyInheritanceError,
-    detect_cycle,
-    merge_policies,
-    resolve_policy_chain,
-    validate_chain_depth,
 )
 
 
@@ -107,9 +107,7 @@ class TestDependencyAllowMerge(unittest.TestCase):
 
     def test_intersection(self):
         result = merge_policies(
-            ApmPolicy(
-                dependencies=DependencyPolicy(allow=["contoso/*", "microsoft/*"])
-            ),
+            ApmPolicy(dependencies=DependencyPolicy(allow=["contoso/*", "microsoft/*"])),
             ApmPolicy(dependencies=DependencyPolicy(allow=["contoso/*"])),
         )
         self.assertEqual(result.dependencies.allow, ("contoso/*",))
@@ -169,19 +167,13 @@ class TestRequireResolutionEscalation(unittest.TestCase):
         return result.dependencies.require_resolution
 
     def test_escalate_to_policy_wins(self):
-        self.assertEqual(
-            self._merge_resolution("project-wins", "policy-wins"), "policy-wins"
-        )
+        self.assertEqual(self._merge_resolution("project-wins", "policy-wins"), "policy-wins")
 
     def test_cannot_downgrade_from_block(self):
-        self.assertEqual(
-            self._merge_resolution("block", "project-wins"), "block"
-        )
+        self.assertEqual(self._merge_resolution("block", "project-wins"), "block")
 
     def test_same_level(self):
-        self.assertEqual(
-            self._merge_resolution("policy-wins", "policy-wins"), "policy-wins"
-        )
+        self.assertEqual(self._merge_resolution("policy-wins", "policy-wins"), "policy-wins")
 
 
 class TestMaxDepthMerge(unittest.TestCase):
@@ -221,12 +213,8 @@ class TestMcpMerge(unittest.TestCase):
 
     def test_transport_allow_intersection(self):
         result = merge_policies(
-            ApmPolicy(
-                mcp=McpPolicy(transport=McpTransportPolicy(allow=["stdio", "sse"]))
-            ),
-            ApmPolicy(
-                mcp=McpPolicy(transport=McpTransportPolicy(allow=["stdio"]))
-            ),
+            ApmPolicy(mcp=McpPolicy(transport=McpTransportPolicy(allow=["stdio", "sse"]))),
+            ApmPolicy(mcp=McpPolicy(transport=McpTransportPolicy(allow=["stdio"]))),
         )
         self.assertEqual(result.mcp.transport.allow, ("stdio",))
 
@@ -286,29 +274,19 @@ class TestCompilationMerge(unittest.TestCase):
     def test_target_enforce_parent_wins(self):
         result = merge_policies(
             ApmPolicy(
-                compilation=CompilationPolicy(
-                    target=CompilationTargetPolicy(enforce="vscode")
-                )
+                compilation=CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
             ),
             ApmPolicy(
-                compilation=CompilationPolicy(
-                    target=CompilationTargetPolicy(enforce="claude")
-                )
+                compilation=CompilationPolicy(target=CompilationTargetPolicy(enforce="claude"))
             ),
         )
         self.assertEqual(result.compilation.target.enforce, "vscode")
 
     def test_target_enforce_child_sets_if_parent_unset(self):
         result = merge_policies(
+            ApmPolicy(compilation=CompilationPolicy(target=CompilationTargetPolicy(enforce=None))),
             ApmPolicy(
-                compilation=CompilationPolicy(
-                    target=CompilationTargetPolicy(enforce=None)
-                )
-            ),
-            ApmPolicy(
-                compilation=CompilationPolicy(
-                    target=CompilationTargetPolicy(enforce="claude")
-                )
+                compilation=CompilationPolicy(target=CompilationTargetPolicy(enforce="claude"))
             ),
         )
         self.assertEqual(result.compilation.target.enforce, "claude")
@@ -321,9 +299,7 @@ class TestCompilationMerge(unittest.TestCase):
                 )
             ),
             ApmPolicy(
-                compilation=CompilationPolicy(
-                    target=CompilationTargetPolicy(allow=["vscode"])
-                )
+                compilation=CompilationPolicy(target=CompilationTargetPolicy(allow=["vscode"]))
             ),
         )
         self.assertEqual(result.compilation.target.allow, ("vscode",))
@@ -346,9 +322,7 @@ class TestCompilationMerge(unittest.TestCase):
     def test_strategy_enforce_child_sets_if_parent_unset(self):
         result = merge_policies(
             ApmPolicy(
-                compilation=CompilationPolicy(
-                    strategy=CompilationStrategyPolicy(enforce=None)
-                )
+                compilation=CompilationPolicy(strategy=CompilationStrategyPolicy(enforce=None))
             ),
             ApmPolicy(
                 compilation=CompilationPolicy(
@@ -367,9 +341,7 @@ class TestManifestMerge(unittest.TestCase):
             ApmPolicy(manifest=ManifestPolicy(required_fields=["name"])),
             ApmPolicy(manifest=ManifestPolicy(required_fields=["version"])),
         )
-        self.assertEqual(
-            sorted(result.manifest.required_fields), ["name", "version"]
-        )
+        self.assertEqual(sorted(result.manifest.required_fields), ["name", "version"])
 
     def test_required_fields_dedup(self):
         result = merge_policies(
@@ -394,14 +366,8 @@ class TestManifestMerge(unittest.TestCase):
 
     def test_content_types_allow_intersection(self):
         result = merge_policies(
-            ApmPolicy(
-                manifest=ManifestPolicy(
-                    content_types={"allow": ["prompts", "rules"]}
-                )
-            ),
-            ApmPolicy(
-                manifest=ManifestPolicy(content_types={"allow": ["prompts"]})
-            ),
+            ApmPolicy(manifest=ManifestPolicy(content_types={"allow": ["prompts", "rules"]})),
+            ApmPolicy(manifest=ManifestPolicy(content_types={"allow": ["prompts"]})),
         )
         self.assertEqual(result.manifest.content_types, {"allow": ["prompts"]})
 
@@ -415,9 +381,7 @@ class TestManifestMerge(unittest.TestCase):
     def test_content_types_parent_none_child_sets(self):
         result = merge_policies(
             ApmPolicy(manifest=ManifestPolicy(content_types=None)),
-            ApmPolicy(
-                manifest=ManifestPolicy(content_types={"allow": ["prompts"]})
-            ),
+            ApmPolicy(manifest=ManifestPolicy(content_types={"allow": ["prompts"]})),
         )
         self.assertEqual(result.manifest.content_types, {"allow": ["prompts"]})
 
@@ -448,25 +412,15 @@ class TestUnmanagedFilesMerge(unittest.TestCase):
 
     def test_directories_union(self):
         result = merge_policies(
-            ApmPolicy(
-                unmanaged_files=UnmanagedFilesPolicy(directories=[".prompts"])
-            ),
-            ApmPolicy(
-                unmanaged_files=UnmanagedFilesPolicy(directories=[".rules"])
-            ),
+            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(directories=[".prompts"])),
+            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(directories=[".rules"])),
         )
-        self.assertEqual(
-            sorted(result.unmanaged_files.directories), [".prompts", ".rules"]
-        )
+        self.assertEqual(sorted(result.unmanaged_files.directories), [".prompts", ".rules"])
 
     def test_directories_dedup(self):
         result = merge_policies(
-            ApmPolicy(
-                unmanaged_files=UnmanagedFilesPolicy(directories=[".prompts"])
-            ),
-            ApmPolicy(
-                unmanaged_files=UnmanagedFilesPolicy(directories=[".prompts"])
-            ),
+            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(directories=[".prompts"])),
+            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(directories=[".prompts"])),
         )
         self.assertEqual(result.unmanaged_files.directories, (".prompts",))
 
@@ -503,9 +457,7 @@ class TestResolvePolicyChain(unittest.TestCase):
         result = resolve_policy_chain([enterprise, org, repo])
 
         self.assertEqual(result.enforcement, "block")
-        self.assertEqual(
-            sorted(result.dependencies.deny), ["evil/*", "extra/*", "sketchy/*"]
-        )
+        self.assertEqual(sorted(result.dependencies.deny), ["evil/*", "extra/*", "sketchy/*"])
         self.assertEqual(result.dependencies.allow, ("contoso/*",))
         self.assertIsNone(result.extends)
 
@@ -593,9 +545,7 @@ class TestEdgeCases(unittest.TestCase):
         self.assertIsNone(result.extends)
 
     def test_name_from_child(self):
-        result = merge_policies(
-            ApmPolicy(name="parent"), ApmPolicy(name="child")
-        )
+        result = merge_policies(ApmPolicy(name="parent"), ApmPolicy(name="child"))
         self.assertEqual(result.name, "child")
 
     def test_name_fallback_to_parent(self):

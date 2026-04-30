@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import builtins
 import json
-import os
+import os  # noqa: F401
 import re
 import sys
 import traceback
@@ -47,7 +47,7 @@ from ...marketplace.publisher import (
 from ...marketplace.ref_resolver import RefResolver, RemoteRef
 from ...marketplace.semver import SemVer, parse_semver, satisfies_range
 from ...marketplace.yml_schema import load_marketplace_yml
-from ...utils.console import _rich_info, _rich_warning
+from ...utils.console import _rich_info, _rich_warning  # noqa: F401
 from ...utils.path_security import PathTraversalError, validate_path_segments
 from .._helpers import _get_console, _is_interactive
 
@@ -73,7 +73,7 @@ def _is_valid_alias(value: str) -> bool:
 class MarketplaceGroup(click.Group):
     """Custom group that organises commands by audience."""
 
-    _consumer_commands = [
+    _consumer_commands = [  # noqa: RUF012
         "add",
         "list",
         "browse",
@@ -81,7 +81,7 @@ class MarketplaceGroup(click.Group):
         "remove",
         "validate",
     ]
-    _authoring_commands = [
+    _authoring_commands = [  # noqa: RUF012
         "init",
         "check",
         "outdated",
@@ -121,6 +121,7 @@ class MarketplaceGroup(click.Group):
                 with formatter.section(section_name):
                     formatter.write_dl(commands)
 
+
 def _load_yml_or_exit(logger):
     """Load ``./marketplace.yml`` from CWD or exit with an appropriate code.
 
@@ -140,6 +141,7 @@ def _load_yml_or_exit(logger):
     except MarketplaceYmlError as exc:
         logger.error(f"marketplace.yml schema error: {exc}", symbol="error")
         sys.exit(2)
+
 
 def _load_config_or_exit(logger):
     """Load the marketplace config from CWD (apm.yml or marketplace.yml).
@@ -166,6 +168,7 @@ def _load_config_or_exit(logger):
         sys.exit(2)
     return project_root, config
 
+
 def _warn_duplicate_names(logger, yml):
     """Emit a warning for each duplicate package name in *yml*."""
     seen: dict[str, int] = {}
@@ -181,6 +184,7 @@ def _warn_duplicate_names(logger, yml):
         else:
             seen[lower] = idx
 
+
 def _find_duplicate_names(yml):
     """Return a diagnostic string if *yml* contains duplicate package names."""
     seen: dict[str, int] = {}
@@ -188,20 +192,18 @@ def _find_duplicate_names(yml):
     for idx, entry in enumerate(yml.packages):
         lower = entry.name.lower()
         if lower in seen:
-            duplicates.append(
-                f"'{entry.name}' (packages[{seen[lower]}] and packages[{idx}])"
-            )
+            duplicates.append(f"'{entry.name}' (packages[{seen[lower]}] and packages[{idx}])")
         else:
             seen[lower] = idx
     if duplicates:
         return f"Duplicate names: {', '.join(duplicates)}"
     return ""
 
+
 @click.group(cls=MarketplaceGroup, help="Manage marketplaces for discovery and governance")
 @click.pass_context
 def marketplace(ctx):
     """Register, browse, and search marketplaces."""
-
 
 
 from .plugin import package  # noqa: E402
@@ -235,6 +237,7 @@ def _check_gitignore_for_marketplace_json(logger):
             )
             return
 
+
 @marketplace.command(help="Register a marketplace")
 @click.argument("repo", required=True)
 @click.option("--name", "-n", default=None, help="Display name (defaults to repo name)")
@@ -252,8 +255,7 @@ def add(repo, name, branch, host, verbose):
         # Parse OWNER/REPO or HOST/OWNER/REPO
         if "/" not in repo:
             logger.error(
-                f"Invalid format: '{repo}'. Use 'OWNER/REPO' "
-                f"(e.g., 'acme-org/plugin-marketplace')"
+                f"Invalid format: '{repo}'. Use 'OWNER/REPO' (e.g., 'acme-org/plugin-marketplace')"
             )
             sys.exit(1)
 
@@ -263,14 +265,11 @@ def add(repo, name, branch, host, verbose):
         if len(parts) == 3 and parts[0] and parts[1] and parts[2]:
             if not is_valid_fqdn(parts[0]):
                 logger.error(
-                    f"Invalid host: '{parts[0]}'. "
-                    f"Use 'OWNER/REPO' or 'HOST/OWNER/REPO' format."
+                    f"Invalid host: '{parts[0]}'. Use 'OWNER/REPO' or 'HOST/OWNER/REPO' format."
                 )
                 sys.exit(1)
             if host and host != parts[0]:
-                logger.error(
-                    f"Conflicting host: --host '{host}' vs '{parts[0]}' in argument."
-                )
+                logger.error(f"Conflicting host: --host '{host}' vs '{parts[0]}' in argument.")
                 sys.exit(1)
             host = parts[0]
             owner, repo_name = parts[1], parts[2]
@@ -359,7 +358,7 @@ def add(repo, name, branch, host, verbose):
 
         # Defense-in-depth: repo names from GitHub already satisfy the alias
         # regex, so this invariant should always hold by the time we register.
-        assert _is_valid_alias(display_name), (
+        assert _is_valid_alias(display_name), (  # noqa: S101
             f"Resolved marketplace alias '{display_name}' failed validation"
         )
 
@@ -397,11 +396,12 @@ def add(repo, name, branch, host, verbose):
                 symbol="info",
             )
 
-    except Exception as e:  # noqa: BLE001 -- top-level command catch-all
+    except Exception as e:
         logger.error(f"Failed to register marketplace: {e}")
         if verbose:
             logger.progress(traceback.format_exc(), symbol="info")
         sys.exit(1)
+
 
 @marketplace.command(name="list", help="List registered marketplaces")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
@@ -415,8 +415,7 @@ def list_cmd(verbose):
 
         if not sources:
             logger.progress(
-                "No marketplaces registered. "
-                "Use 'apm marketplace add OWNER/REPO' to register one.",
+                "No marketplaces registered. Use 'apm marketplace add OWNER/REPO' to register one.",
                 symbol="info",
             )
             return
@@ -424,9 +423,7 @@ def list_cmd(verbose):
         console = _get_console()
         if not console:
             # Colorama fallback
-            logger.progress(
-                f"{len(sources)} marketplace(s) registered:", symbol="info"
-            )
+            logger.progress(f"{len(sources)} marketplace(s) registered:", symbol="info")
             for s in sources:
                 logger.tree_item(f"  {s.name}  ({s.owner}/{s.repo})")
             return
@@ -454,11 +451,12 @@ def list_cmd(verbose):
             symbol="info",
         )
 
-    except Exception as e:  # noqa: BLE001 -- top-level command catch-all
+    except Exception as e:
         logger.error(f"Failed to list marketplaces: {e}")
         if verbose:
             logger.progress(traceback.format_exc(), symbol="info")
         sys.exit(1)
+
 
 @marketplace.command(help="Browse plugins in a marketplace")
 @click.argument("name", required=True)
@@ -482,15 +480,11 @@ def browse(name, verbose):
         console = _get_console()
         if not console:
             # Colorama fallback
-            logger.success(
-                f"{len(manifest.plugins)} plugin(s) in '{name}':", symbol="check"
-            )
+            logger.success(f"{len(manifest.plugins)} plugin(s) in '{name}':", symbol="check")
             for p in manifest.plugins:
                 desc = f" -- {p.description}" if p.description else ""
                 logger.tree_item(f"  {p.name}{desc}")
-            logger.progress(
-                f"Install: apm install <plugin-name>@{name}", symbol="info"
-            )
+            logger.progress(f"Install: apm install <plugin-name>@{name}", symbol="info")
             return
 
         from rich.table import Table
@@ -518,11 +512,12 @@ def browse(name, verbose):
             symbol="info",
         )
 
-    except Exception as e:  # noqa: BLE001 -- top-level command catch-all
+    except Exception as e:
         logger.error(f"Failed to browse marketplace: {e}")
         if verbose:
             logger.progress(traceback.format_exc(), symbol="info")
         sys.exit(1)
+
 
 @marketplace.command(help="Refresh marketplace cache")
 @click.argument("name", required=False, default=None)
@@ -549,31 +544,26 @@ def update(name, verbose):
         else:
             sources = get_registered_marketplaces()
             if not sources:
-                logger.progress(
-                    "No marketplaces registered.", symbol="info"
-                )
+                logger.progress("No marketplaces registered.", symbol="info")
                 return
-            logger.start(
-                f"Refreshing {len(sources)} marketplace(s)...", symbol="gear"
-            )
+            logger.start(f"Refreshing {len(sources)} marketplace(s)...", symbol="gear")
             for s in sources:
                 try:
                     clear_marketplace_cache(s.name, host=s.host)
                     manifest = fetch_marketplace(s, force_refresh=True)
-                    logger.tree_item(
-                        f"  {s.name} ({len(manifest.plugins)} plugins)"
-                    )
-                except Exception as exc:  # noqa: BLE001 -- per-marketplace best-effort
+                    logger.tree_item(f"  {s.name} ({len(manifest.plugins)} plugins)")
+                except Exception as exc:
                     logger.warning(f"  {s.name}: {exc}")
                     if verbose:
                         logger.progress(traceback.format_exc(), symbol="info")
             logger.success("Marketplace cache refreshed", symbol="check")
 
-    except Exception as e:  # noqa: BLE001 -- top-level command catch-all
+    except Exception as e:
         logger.error(f"Failed to update marketplace: {e}")
         if verbose:
             logger.progress(traceback.format_exc(), symbol="info")
         sys.exit(1)
+
 
 @marketplace.command(help="Remove a registered marketplace")
 @click.argument("name", required=True)
@@ -608,11 +598,12 @@ def remove(name, yes, verbose):
         clear_marketplace_cache(name, host=source.host)
         logger.success(f"Marketplace '{name}' removed", symbol="check")
 
-    except Exception as e:  # noqa: BLE001 -- top-level command catch-all
+    except Exception as e:
         logger.error(f"Failed to remove marketplace: {e}")
         if verbose:
             logger.progress(traceback.format_exc(), symbol="info")
         sys.exit(1)
+
 
 def _render_build_error(logger, exc):
     """Render a BuildError with actionable hints."""
@@ -643,6 +634,7 @@ def _render_build_error(logger, exc):
     else:
         logger.error(f"Build failed: {exc}", symbol="error")
 
+
 def _render_build_table(logger, report):
     """Render the resolved-packages table (Rich with colorama fallback)."""
     console = _get_console()
@@ -651,9 +643,7 @@ def _render_build_table(logger, report):
         for pkg in report.resolved:
             sha_short = pkg.sha[:8] if pkg.sha else "--"
             ref_kind = "tag" if not pkg.ref.startswith("refs/heads/") else "branch"
-            logger.tree_item(
-                f"  [+] {pkg.name}  {pkg.ref}  {sha_short}  ({ref_kind})"
-            )
+            logger.tree_item(f"  [+] {pkg.name}  {pkg.ref}  {sha_short}  ({ref_kind})")
         return
 
     from rich.table import Table
@@ -682,16 +672,21 @@ def _render_build_table(logger, report):
     console.print()
     console.print(table)
 
+
 class _OutdatedRow:
     """Simple container for outdated table row data."""
 
     __slots__ = (
-        "name", "current", "range_spec", "latest_in_range",
-        "latest_overall", "status", "note",
+        "current",
+        "latest_in_range",
+        "latest_overall",
+        "name",
+        "note",
+        "range_spec",
+        "status",
     )
 
-    def __init__(self, name, current, range_spec, latest_in_range,
-                 latest_overall, status, note):
+    def __init__(self, name, current, range_spec, latest_in_range, latest_overall, status, note):
         self.name = name
         self.current = current
         self.range_spec = range_spec
@@ -699,6 +694,7 @@ class _OutdatedRow:
         self.latest_overall = latest_overall
         self.status = status
         self.note = note
+
 
 def _load_current_versions():
     """Load current ref versions from marketplace.json if present."""
@@ -717,6 +713,7 @@ def _load_current_versions():
     except (json.JSONDecodeError, OSError):
         return {}
 
+
 def _extract_tag_versions(refs, entry, yml, include_prerelease):
     """Extract (SemVer, tag_name) pairs from remote refs for a package entry."""
     from ...marketplace.tag_pattern import build_tag_regex
@@ -727,7 +724,7 @@ def _extract_tag_versions(refs, entry, yml, include_prerelease):
     for remote_ref in refs:
         if not remote_ref.name.startswith("refs/tags/"):
             continue
-        tag_name = remote_ref.name[len("refs/tags/"):]
+        tag_name = remote_ref.name[len("refs/tags/") :]
         m = tag_rx.match(tag_name)
         if not m:
             continue
@@ -739,6 +736,7 @@ def _extract_tag_versions(refs, entry, yml, include_prerelease):
             continue
         results.append((sv, tag_name))
     return results
+
 
 def _render_outdated_table(logger, rows):
     """Render the outdated-packages table."""
@@ -785,10 +783,11 @@ def _render_outdated_table(logger, rows):
     console.print()
     console.print(table)
 
+
 class _CheckResult:
     """Container for per-entry check results."""
 
-    __slots__ = ("name", "reachable", "version_found", "ref_ok", "error")
+    __slots__ = ("error", "name", "reachable", "ref_ok", "version_found")
 
     def __init__(self, name, reachable, version_found, ref_ok, error):
         self.name = name
@@ -796,6 +795,7 @@ class _CheckResult:
         self.version_found = version_found
         self.ref_ok = ref_ok
         self.error = error
+
 
 def _render_check_table(logger, results):
     """Render the check-results table."""
@@ -840,16 +840,18 @@ def _render_check_table(logger, results):
     console.print()
     console.print(table)
 
+
 class _DoctorCheck:
     """Container for a single doctor check result."""
 
-    __slots__ = ("name", "passed", "detail", "informational")
+    __slots__ = ("detail", "informational", "name", "passed")
 
     def __init__(self, name, passed, detail, informational=False):
         self.name = name
         self.passed = passed
         self.detail = detail
         self.informational = informational
+
 
 def _render_doctor_table(logger, checks):
     """Render the doctor results table."""
@@ -889,6 +891,7 @@ def _render_doctor_table(logger, checks):
 
     console.print()
     console.print(table)
+
 
 def _load_targets_file(path):
     """Load and validate a consumer-targets YAML file.
@@ -942,13 +945,16 @@ def _load_targets_file(path):
         except PathTraversalError as exc:
             return None, str(exc)
 
-        targets.append(ConsumerTarget(
-            repo=repo.strip(),
-            branch=branch.strip(),
-            path_in_repo=path_in_repo.strip(),
-        ))
+        targets.append(
+            ConsumerTarget(
+                repo=repo.strip(),
+                branch=branch.strip(),
+                path_in_repo=path_in_repo.strip(),
+            )
+        )
 
     return targets, None
+
 
 def _render_publish_plan(logger, plan):
     """Render the publish plan as a Rich panel + target table."""
@@ -968,9 +974,7 @@ def _render_publish_plan(logger, plan):
             logger.tree_item(f"  {line}")
         click.echo()
         for t in plan.targets:
-            logger.tree_item(
-                f"  [*] {t.repo}  branch={t.branch}  path={t.path_in_repo}"
-            )
+            logger.tree_item(f"  [*] {t.repo}  branch={t.branch}  path={t.path_in_repo}")
         return
 
     from rich.panel import Panel
@@ -978,11 +982,13 @@ def _render_publish_plan(logger, plan):
     from rich.text import Text
 
     console.print()
-    console.print(Panel(
-        plan_text,
-        title="Publish plan",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel(
+            plan_text,
+            title="Publish plan",
+            border_style="cyan",
+        )
+    )
 
     table = Table(
         show_header=True,
@@ -1000,6 +1006,7 @@ def _render_publish_plan(logger, plan):
     console.print(table)
     console.print()
 
+
 def _render_publish_summary(logger, results, pr_results, no_pr, dry_run):
     """Render the final publish summary table."""
     console = _get_console()
@@ -1009,12 +1016,8 @@ def _render_publish_summary(logger, results, pr_results, no_pr, dry_run):
     for pr_r in pr_results:
         pr_by_repo[pr_r.target.repo] = pr_r
 
-    updated_count = sum(
-        1 for r in results if r.outcome == PublishOutcome.UPDATED
-    )
-    failed_count = sum(
-        1 for r in results if r.outcome == PublishOutcome.FAILED
-    )
+    updated_count = sum(1 for r in results if r.outcome == PublishOutcome.UPDATED)
+    failed_count = sum(1 for r in results if r.outcome == PublishOutcome.FAILED)
     total = len(results)
 
     if not console:
@@ -1028,9 +1031,7 @@ def _render_publish_summary(logger, results, pr_results, no_pr, dry_run):
                     pr_info = f"  PR: {pr_r.state.value}"
                     if pr_r.pr_number:
                         pr_info += f" #{pr_r.pr_number}"
-            logger.tree_item(
-                f"  {icon} {r.target.repo}: {r.outcome.value}{pr_info} -- {r.message}"
-            )
+            logger.tree_item(f"  {icon} {r.target.repo}: {r.outcome.value}{pr_info} -- {r.message}")
         click.echo()
         _render_publish_footer(logger, updated_count, failed_count, total, dry_run)
         return
@@ -1077,6 +1078,7 @@ def _render_publish_summary(logger, results, pr_results, no_pr, dry_run):
 
     _render_publish_footer(logger, updated_count, failed_count, total, dry_run)
 
+
 def _outcome_symbol(outcome):
     """Map a ``PublishOutcome`` to a bracket symbol."""
     if outcome == PublishOutcome.UPDATED:
@@ -1092,6 +1094,7 @@ def _outcome_symbol(outcome):
         return "[*]"
     return "[*]"
 
+
 def _render_publish_footer(logger, updated, failed, total, dry_run):
     """Render the footer success/warning line."""
     suffix = " (dry-run)" if dry_run else ""
@@ -1102,10 +1105,10 @@ def _render_publish_footer(logger, updated, failed, total, dry_run):
         )
     else:
         logger.warning(
-            f"Published {updated}/{total} targets, "
-            f"{failed} failed{suffix}",
+            f"Published {updated}/{total} targets, {failed} failed{suffix}",
             symbol="warning",
         )
+
 
 @click.command(
     name="search",
@@ -1148,9 +1151,7 @@ def search(expression, limit, verbose):
             )
             sys.exit(1)
 
-        logger.start(
-            f"Searching '{marketplace_name}' for '{query}'...", symbol="search"
-        )
+        logger.start(f"Searching '{marketplace_name}' for '{query}'...", symbol="search")
         results = search_marketplace(query, source)[:limit]
 
         if not results:
@@ -1200,11 +1201,10 @@ def search(expression, limit, verbose):
 
     except SystemExit:
         raise
-    except Exception as e:  # noqa: BLE001 -- top-level command catch-all
+    except Exception as e:
         logger.error(f"Search failed: {e}")
         logger.verbose_detail(traceback.format_exc())
         sys.exit(1)
-
 
 
 from .check import check  # noqa: E402
@@ -1220,54 +1220,53 @@ from .validate import validate  # noqa: E402
 # and external consumers that patch via this package path. Submodules import
 # their domain types from the canonical sources directly, not from here.
 __all__ = [
-    "MarketplaceGroup",
-    "marketplace",
-    "package",
-    "init",
-    "add",
-    "list_cmd",
-    "browse",
-    "update",
-    "remove",
-    "validate",
-    "outdated",
-    "check",
-    "doctor",
-    "publish",
-    "migrate",
-    "search",
+    "BuildError",
     "BuildOptions",
     "BuildReport",
-    "MarketplaceBuilder",
-    "ResolvedPackage",
-    "BuildError",
+    "ConfigSource",
+    "ConsumerTarget",
     "GitLsRemoteError",
     "HeadNotAllowedError",
+    "MarketplaceBuilder",
+    "MarketplaceGroup",
     "MarketplaceNotFoundError",
+    "MarketplacePublisher",
     "MarketplaceYmlError",
     "NoMatchingVersionError",
     "OfflineMissError",
-    "RefNotFoundError",
-    "translate_git_stderr",
-    "ConfigSource",
-    "detect_config_source",
-    "load_marketplace_config",
-    "migrate_marketplace_yml",
+    "PathTraversalError",
     "PrIntegrator",
     "PrResult",
     "PrState",
-    "ConsumerTarget",
-    "MarketplacePublisher",
     "PublishOutcome",
     "PublishPlan",
-    "TargetResult",
+    "RefNotFoundError",
     "RefResolver",
     "RemoteRef",
+    "ResolvedPackage",
     "SemVer",
-    "parse_semver",
-    "satisfies_range",
+    "TargetResult",
+    "add",
+    "browse",
+    "check",
+    "detect_config_source",
+    "doctor",
+    "init",
+    "list_cmd",
+    "load_marketplace_config",
     "load_marketplace_yml",
-    "PathTraversalError",
+    "marketplace",
+    "migrate",
+    "migrate_marketplace_yml",
+    "outdated",
+    "package",
+    "parse_semver",
+    "publish",
+    "remove",
+    "satisfies_range",
+    "search",
+    "translate_git_stderr",
+    "update",
+    "validate",
     "validate_path_segments",
 ]
-
