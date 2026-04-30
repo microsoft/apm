@@ -17,7 +17,7 @@ class TestPluginUtf8RoundTrip:
             "id": "demo-plugin",
             "name": "Demo plugin -- cafe",
             "version": "1.0.0",
-            "description": "Plugin de demo with 中文 description",
+            "description": "Plugin de demo with \u4e2d\u6587 description",
             "author": "Cafe Author",
         }
         plugin_json = tmp_path / "plugin.json"
@@ -27,5 +27,5 @@ class TestPluginUtf8RoundTrip:
 
         assert plugin.metadata.id == "demo-plugin"
         assert plugin.metadata.name == "Demo plugin -- cafe"
-        assert plugin.metadata.description == "Plugin de demo with 中文 description"
+        assert plugin.metadata.description == "Plugin de demo with \u4e2d\u6587 description"
         assert plugin.metadata.author == "Cafe Author"

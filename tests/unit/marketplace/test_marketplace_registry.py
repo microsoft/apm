@@ -102,14 +102,14 @@ class TestRegistryUtf8RoundTrip:
         # but the registry file itself must still be UTF-8 to handle any
         # non-ASCII content that may flow through future fields. We use a
         # description-bearing source by writing a custom entry directly.
-        src = MarketplaceSource(name="cafe-mkt", owner="cafe-org", repo="plugins-開始")
+        src = MarketplaceSource(name="cafe-mkt", owner="cafe-org", repo="plugins-\u958b\u59cb")
         registry_mod.add_marketplace(src)
 
         # Force re-load from disk by clearing the cache.
         registry_mod._invalidate_cache()
         fetched = registry_mod.get_marketplace_by_name("cafe-mkt")
         assert fetched is not None
-        assert fetched.repo == "plugins-開始"
+        assert fetched.repo == "plugins-\u958b\u59cb"
 
     def test_registry_file_is_readable_with_utf8_external_writes(self, tmp_path):
         """A registry file written externally with raw UTF-8 (ensure_ascii=False)
@@ -122,7 +122,7 @@ class TestRegistryUtf8RoundTrip:
         registry_mod._ensure_file()
         payload = {
             "marketplaces": [
-                {"name": "cafe-mkt", "owner": "o", "repo": "repo-中文"},
+                {"name": "cafe-mkt", "owner": "o", "repo": "repo-\u4e2d\u6587"},
             ]
         }
         # Write raw UTF-8 (no \uXXXX escaping) to mimic what a non-Python
@@ -133,4 +133,4 @@ class TestRegistryUtf8RoundTrip:
         registry_mod._invalidate_cache()
         fetched = registry_mod.get_marketplace_by_name("cafe-mkt")
         assert fetched is not None
-        assert fetched.repo == "repo-中文"
+        assert fetched.repo == "repo-\u4e2d\u6587"

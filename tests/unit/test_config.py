@@ -27,7 +27,7 @@ class TestConfigUtf8RoundTrip:
     """Round-trip non-ASCII content through the config file."""
 
     def test_update_config_preserves_non_ascii(self, isolated_config):
-        non_ascii_value = "/Users/cafe/projets/開始"
+        non_ascii_value = "/Users/cafe/projets/\u958b\u59cb"
         config_mod.update_config({"copilot_cowork_skills_dir": non_ascii_value})
 
         # Force re-read from disk by invalidating the cache.
@@ -37,7 +37,7 @@ class TestConfigUtf8RoundTrip:
         assert loaded["copilot_cowork_skills_dir"] == non_ascii_value
 
     def test_config_file_is_utf8_on_disk(self, isolated_config):
-        non_ascii_value = "# 開始 -- cafe"
+        non_ascii_value = "# \u958b\u59cb -- cafe"
         config_mod.update_config({"note": non_ascii_value})
 
         # Read raw bytes and decode as UTF-8 to assert the on-disk encoding.

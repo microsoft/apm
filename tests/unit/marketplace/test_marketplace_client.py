@@ -437,21 +437,21 @@ class TestCacheUtf8RoundTrip:
     def test_write_and_read_non_ascii(self, tmp_path):
         data = {
             "name": "Marketplace -- cafe",
-            "description": "中文 description",
-            "plugins": [{"name": "skill-開始", "author": "cafe"}],
+            "description": "\u4e2d\u6587 description",
+            "plugins": [{"name": "skill-\u958b\u59cb", "author": "cafe"}],
         }
         client_mod._write_cache("utf8-mkt", data)
 
         cached = client_mod._read_cache("utf8-mkt")
         assert cached is not None
         assert cached["name"] == "Marketplace -- cafe"
-        assert cached["description"] == "中文 description"
-        assert cached["plugins"][0]["name"] == "skill-開始"
+        assert cached["description"] == "\u4e2d\u6587 description"
+        assert cached["plugins"][0]["name"] == "skill-\u958b\u59cb"
 
     def test_stale_cache_read_non_ascii(self, tmp_path):
         import os as _os
 
-        data = {"plugins": [{"name": "中文-skill"}]}
+        data = {"plugins": [{"name": "\u4e2d\u6587-skill"}]}
         client_mod._write_cache("stale-mkt", data)
 
         # Drop the meta file so _read_cache treats the entry as missing and
@@ -461,4 +461,4 @@ class TestCacheUtf8RoundTrip:
 
         stale = client_mod._read_stale_cache("stale-mkt")
         assert stale is not None
-        assert stale["plugins"][0]["name"] == "中文-skill"
+        assert stale["plugins"][0]["name"] == "\u4e2d\u6587-skill"

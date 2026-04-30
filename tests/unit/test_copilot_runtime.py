@@ -168,7 +168,7 @@ class TestMcpConfigUtf8RoundTrip:
                 "demo-cafe": {
                     "command": "node",
                     "args": ["server.js"],
-                    "description": "中文 description -- cafe",
+                    "description": "\u4e2d\u6587 description -- cafe",
                 }
             }
         }
@@ -180,4 +180,4 @@ class TestMcpConfigUtf8RoundTrip:
                 got = runtime.get_mcp_servers()
 
         assert "demo-cafe" in got
-        assert got["demo-cafe"]["description"] == "中文 description -- cafe"
+        assert got["demo-cafe"]["description"] == "\u4e2d\u6587 description -- cafe"
