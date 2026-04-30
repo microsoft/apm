@@ -92,3 +92,45 @@ class TestRegistryPersistence:
 
         registry_mod._invalidate_cache()
         assert registry_mod.get_registered_marketplaces() == []
+
+
+class TestRegistryUtf8RoundTrip:
+    """Registry persistence preserves non-ASCII content (Windows cp1252/cp950 guard)."""
+
+    def test_add_and_read_non_ascii_marketplace(self):
+        # Note: name/owner/repo are typically ASCII per the marketplace spec,
+        # but the registry file itself must still be UTF-8 to handle any
+        # non-ASCII content that may flow through future fields. We use a
+        # description-bearing source by writing a custom entry directly.
+        src = MarketplaceSource(name="cafe-mkt", owner="cafe-org", repo="plugins-開始")
+        registry_mod.add_marketplace(src)
+
+        # Force re-load from disk by clearing the cache.
+        registry_mod._invalidate_cache()
+        fetched = registry_mod.get_marketplace_by_name("cafe-mkt")
+        assert fetched is not None
+        assert fetched.repo == "plugins-開始"
+
+    def test_registry_file_is_readable_with_utf8_external_writes(self, tmp_path):
+        """A registry file written externally with raw UTF-8 (ensure_ascii=False)
+        must still load cleanly. This is the regression case for cp1252/cp950
+        Windows locales where the default open() would fail to decode."""
+        import json as _json
+
+        path = registry_mod._marketplaces_path()
+        # Ensure parent dir exists.
+        registry_mod._ensure_file()
+        payload = {
+            "marketplaces": [
+                {"name": "cafe-mkt", "owner": "o", "repo": "repo-中文"},
+            ]
+        }
+        # Write raw UTF-8 (no \uXXXX escaping) to mimic what a non-Python
+        # tool or a future writer with ensure_ascii=False would produce.
+        with open(path, "w", encoding="utf-8") as f:
+            _json.dump(payload, f, ensure_ascii=False)
+
+        registry_mod._invalidate_cache()
+        fetched = registry_mod.get_marketplace_by_name("cafe-mkt")
+        assert fetched is not None
+        assert fetched.repo == "repo-中文"

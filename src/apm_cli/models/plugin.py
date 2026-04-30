@@ -113,7 +113,7 @@ class Plugin:
                 f"Plugin metadata not found in any expected location: {plugin_path}"
             )
 
-        with open(metadata_file) as f:
+        with open(metadata_file, encoding="utf-8") as f:
             metadata_dict = json.load(f)
 
         metadata = PluginMetadata.from_dict(metadata_dict)

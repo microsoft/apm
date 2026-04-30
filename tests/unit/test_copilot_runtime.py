@@ -154,3 +154,30 @@ class TestCopilotRuntime:
             str_repr = str(runtime)
             assert "CopilotRuntime" in str_repr
             assert "test-model" in str_repr
+
+
+class TestMcpConfigUtf8RoundTrip:
+    """Reading MCP config preserves non-ASCII content (Windows cp1252/cp950 guard)."""
+
+    def test_get_mcp_servers_reads_non_ascii(self, tmp_path):
+        import json as _json
+
+        mcp_path = tmp_path / "mcp-config.json"
+        servers = {
+            "servers": {
+                "demo-cafe": {
+                    "command": "node",
+                    "args": ["server.js"],
+                    "description": "中文 description -- cafe",
+                }
+            }
+        }
+        mcp_path.write_bytes(_json.dumps(servers).encode("utf-8"))
+
+        with patch.object(CopilotRuntime, "is_available", return_value=True):
+            runtime = CopilotRuntime()
+            with patch.object(CopilotRuntime, "get_mcp_config_path", return_value=mcp_path):
+                got = runtime.get_mcp_servers()
+
+        assert "demo-cafe" in got
+        assert got["demo-cafe"]["description"] == "中文 description -- cafe"
