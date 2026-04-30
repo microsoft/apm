@@ -15,7 +15,7 @@ from ...core.token_manager import GitHubTokenManager
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.github_host import is_github_hostname
-from .base import MCPClientAdapter, _ENV_VAR_RE
+from .base import _ENV_VAR_RE, MCPClientAdapter
 
 # Combined env-var placeholder regex covering all three syntaxes Copilot accepts:
 #   <VARNAME>          legacy APM (group 1, uppercase only)
