@@ -429,3 +429,36 @@ class TestCacheKey:
         s1 = MarketplaceSource(name="mkt", owner="o", repo="r", host="a.com")
         s2 = MarketplaceSource(name="mkt", owner="o", repo="r", host="b.com")
         assert client_mod._cache_key(s1) != client_mod._cache_key(s2)
+
+
+class TestCacheUtf8RoundTrip:
+    """Cache I/O preserves non-ASCII content (Windows cp1252/cp950 guard)."""
+
+    def test_write_and_read_non_ascii(self, tmp_path):
+        data = {
+            "name": "Marketplace -- cafe",
+            "description": "\u4e2d\u6587 description",
+            "plugins": [{"name": "skill-\u958b\u59cb", "author": "cafe"}],
+        }
+        client_mod._write_cache("utf8-mkt", data)
+
+        cached = client_mod._read_cache("utf8-mkt")
+        assert cached is not None
+        assert cached["name"] == "Marketplace -- cafe"
+        assert cached["description"] == "\u4e2d\u6587 description"
+        assert cached["plugins"][0]["name"] == "skill-\u958b\u59cb"
+
+    def test_stale_cache_read_non_ascii(self, tmp_path):
+        import os as _os
+
+        data = {"plugins": [{"name": "\u4e2d\u6587-skill"}]}
+        client_mod._write_cache("stale-mkt", data)
+
+        # Drop the meta file so _read_cache treats the entry as missing and
+        # _read_stale_cache is the only path that returns content.
+        _os.remove(client_mod._cache_meta_path("stale-mkt"))
+        assert client_mod._read_cache("stale-mkt") is None
+
+        stale = client_mod._read_stale_cache("stale-mkt")
+        assert stale is not None
+        assert stale["plugins"][0]["name"] == "\u4e2d\u6587-skill"
