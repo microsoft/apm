@@ -371,26 +371,41 @@ def add(repo, name, branch, host, verbose):
         from ..marketplace.client import _auto_detect_path, fetch_marketplace
         from ..marketplace.models import MarketplaceSource
         from ..marketplace.registry import add_marketplace
+        from ..models.dependency.reference import DependencyReference
 
-        from ..utils.github_host import default_host, is_valid_fqdn
-        from ..models.apm_package import DependencyReference
-
+        # Parse the repo argument -- handles owner/repo, host/owner/repo, HTTPS URLs, SSH URLs.
         try:
-            dep_ref = DependencyReference.parse(repo)
-            resolved_host = dep_ref.host or default_host()
-            canonical = dep_ref.to_canonical()
-            repo_name = canonical.split("/")[-1]
-            owner = canonical[: -len("/" + repo_name)]
-            logger.verbose_detail(f"Parsed repository reference: host='{resolved_host}', owner='{owner}', repo='{repo_name}'")
-            if not is_valid_fqdn(resolved_host):
-                raise ValueError(f"Host '{resolved_host}' is not a valid FQDN")
-        except ValueError as exc:
-            logger.error(f"Invalid repository reference: {exc}", symbol="error")
+            dep = DependencyReference.parse(repo)
+        except ValueError:
+            logger.error(
+                "Invalid repository format. Use OWNER/REPO, HOST/OWNER/REPO, "
+                "or a full HTTPS URL (e.g. https://gitlab.com/org/repo).",
+                symbol="error",
+            )
             sys.exit(1)
 
+        # Extract owner and repo name from the parsed repo_url.
+        # For standard repos: "owner/repo" -> owner="owner", repo_name="repo".
+        # For GitLab subgroups: "group/sub/repo" -> owner="group/sub", repo_name="repo".
+        repo_parts = dep.repo_url.split("/")
+        owner = "/".join(repo_parts[:-1])
+        repo_name = repo_parts[-1]
 
-        # Validate name is identifier-compatible for NAME@MARKETPLACE syntax
-        import re
+        # Reject --host that contradicts an explicit host in the URL.
+        if host and dep.host and host != dep.host:
+            logger.error(
+                f"Conflicting host: URL specifies '{dep.host}' but --host flag "
+                f"specifies '{host}'. Remove --host or align it with the URL.",
+                symbol="error",
+            )
+            sys.exit(1)
+
+        # --host flag overrides the host detected from the URL.
+        resolved_host = host or dep.host
+        # --branch flag takes precedence; fall back to the ref in the URL, then "main".
+        resolved_branch = branch or dep.reference
+
+        logger.verbose_detail(f"Parsed repository: host='{resolved_host}', owner='{owner}', repo='{repo_name}', branch='{resolved_branch}'")
 
         # Hard-fail if the user-supplied --name flag is malformed; the
         # manifest's name is validated softly below (publisher mistakes
@@ -409,7 +424,7 @@ def add(repo, name, branch, host, verbose):
             name=name or repo_name,
             owner=owner,
             repo=repo_name,
-            branch=branch,
+            branch=resolved_branch,
             host=resolved_host,
         )
         detected_path = _auto_detect_path(probe_source)
@@ -428,7 +443,7 @@ def add(repo, name, branch, host, verbose):
             name=name or repo_name,
             owner=owner,
             repo=repo_name,
-            branch=branch,
+            branch=resolved_branch,
             host=resolved_host,
             path=detected_path,
         )
@@ -465,7 +480,7 @@ def add(repo, name, branch, host, verbose):
 
         logger.start(f"Registering marketplace '{display_name}'...", symbol="gear")
         logger.verbose_detail(f"    Repository: {owner}/{repo_name}")
-        logger.verbose_detail(f"    Branch: {branch}")
+        logger.verbose_detail(f"    Branch: {resolved_branch}")
         if resolved_host != "github.com":
             logger.verbose_detail(f"    Host: {resolved_host}")
         logger.verbose_detail(f"    Detected path: {detected_path}")
@@ -476,7 +491,7 @@ def add(repo, name, branch, host, verbose):
             name=display_name,
             owner=owner,
             repo=repo_name,
-            branch=branch,
+            branch=resolved_branch,
             host=resolved_host,
             path=detected_path,
         )
