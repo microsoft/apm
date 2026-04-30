@@ -5,6 +5,7 @@ correct paths at both project and user scope, across all targets.
 Uses real integrators against temp directories -- no mocks.
 """
 
+import os
 import shutil
 import tempfile
 from datetime import datetime
@@ -19,6 +20,24 @@ from apm_cli.integration.targets import KNOWN_TARGETS, resolve_targets
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
 from apm_cli.models.validation import PackageType
+
+
+def _set_home(monkeypatch, home: Path) -> None:
+    """Set the user's home directory portably across POSIX and Windows.
+
+    ``Path.home()`` consults ``HOME`` on POSIX but ``USERPROFILE`` (with
+    ``HOMEDRIVE`` + ``HOMEPATH`` fallback) on Windows. Setting only ``HOME``
+    is a no-op on Windows and causes ``relative_to(Path.home())`` checks in
+    code under test to compare against the real user's profile.
+    """
+    home_str = str(home)
+    monkeypatch.setenv("HOME", home_str)
+    if os.name == "nt":
+        monkeypatch.setenv("USERPROFILE", home_str)
+        drive, _, tail = home_str.partition(":")
+        if tail:
+            monkeypatch.setenv("HOMEDRIVE", f"{drive}:")
+            monkeypatch.setenv("HOMEPATH", tail)
 
 
 def _make_package_info(install_path, name="test-pkg"):
@@ -228,7 +247,7 @@ class TestClaudeScopeResolution:
         assert "agents" in resolved.primitives
 
     def test_user_scope_expands_tilde(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("HOME", str(tmp_path))
+        _set_home(monkeypatch, tmp_path)
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", "~/.config/claude")
         scoped = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
         assert scoped is not None
@@ -243,19 +262,19 @@ class TestClaudeScopeResolution:
     def test_user_scope_outside_home_keeps_absolute(self, tmp_path, monkeypatch):
         home = tmp_path / "home"
         outside = tmp_path / "elsewhere"
-        monkeypatch.setenv("HOME", str(home))
+        _set_home(monkeypatch, home)
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(outside))
         scoped = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
         assert scoped is not None
-        # Paths outside $HOME are not normalized; preserve the absolute string.
-        assert scoped.root_dir == str(outside)
+        # Paths outside $HOME remain absolute and are resolved/normalized.
+        assert scoped.root_dir == str(outside.resolve(strict=False))
 
     def test_user_scope_collapses_dotdot_segments(self, tmp_path, monkeypatch):
         # ``..`` must be resolved before relative_to(home) so traversal
         # cannot leak into root_dir and later escape project_root / root_dir.
         home = tmp_path / "home"
         home.mkdir()
-        monkeypatch.setenv("HOME", str(home))
+        _set_home(monkeypatch, home)
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home / ".." / "outside"))
         scoped = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
         assert scoped is not None

@@ -212,7 +212,7 @@ class ClaudeFormatter:
         dependencies = []
         apm_modules_dir = self.base_dir / "apm_modules"
 
-        if not apm_modules_dir.exists():
+        if not apm_modules_dir.is_dir():
             return dependencies
 
         # Scan for CLAUDE.md files in apm_modules
@@ -223,6 +223,10 @@ class ClaudeFormatter:
 
             for package_dir in owner_dir.iterdir():
                 if not package_dir.is_dir() or package_dir.name.startswith("."):
+                    continue
+
+                claude_md_path = package_dir / "CLAUDE.md"
+                if not claude_md_path.is_file():
                     continue
 
                 # Build the @import path
