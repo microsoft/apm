@@ -319,6 +319,55 @@ class TestMarketplaceAdd:
         assert result.exit_code != 0
         assert "Conflicting host" in result.output
 
+    def test_add_host_flag_url_rejected(self, runner):
+        """--host with a full URL (not a bare FQDN) is rejected with a clear error."""
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(
+            marketplace,
+            ["add", "acme/repo", "--host", "https://github.com"],
+        )
+        assert result.exit_code != 0
+        assert "Invalid --host" in result.output
+
+    def test_add_host_flag_invalid_fqdn_rejected(self, runner):
+        """--host with an invalid FQDN (no dot) is rejected."""
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(
+            marketplace,
+            ["add", "acme/repo", "--host", "notafqdn"],
+        )
+        assert result.exit_code != 0
+        assert "Invalid --host" in result.output
+
+    @patch("apm_cli.marketplace.registry.add_marketplace")
+    @patch("apm_cli.marketplace.client.fetch_marketplace")
+    @patch("apm_cli.marketplace.client._auto_detect_path")
+    def test_add_host_flag_overrides_default_for_plain_owner_repo(
+        self, mock_detect, mock_fetch, mock_add, runner
+    ):
+        """--host should override the default host when repo is plain OWNER/REPO."""
+        from apm_cli.commands.marketplace import marketplace
+
+        mock_detect.return_value = "marketplace.json"
+        mock_fetch.return_value = MarketplaceManifest(
+            name="Test",
+            plugins=(MarketplacePlugin(name="p1"),),
+        )
+
+        result = runner.invoke(
+            marketplace,
+            ["add", "acme/plugin-marketplace", "--host", "ghes.corp.example.com"],
+        )
+        assert result.exit_code == 0, result.output
+
+        probe_source = mock_detect.call_args[0][0]
+        assert probe_source.host == "ghes.corp.example.com"
+
+        final_source = mock_fetch.call_args[0][0]
+        assert final_source.host == "ghes.corp.example.com"
+
     def test_add_https_url_too_short_path(self, runner):
         """A URL with only one path segment (no OWNER/REPO) is rejected."""
         from apm_cli.commands.marketplace import marketplace

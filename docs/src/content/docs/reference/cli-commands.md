@@ -1157,7 +1157,9 @@ apm marketplace add https://HOST/OWNER/.../REPO [OPTIONS]
 **Arguments:**
 - `OWNER/REPO` - GitHub repository containing `marketplace.json`
 - `HOST/OWNER/.../REPO` - N-segment path with explicit host (GitHub Enterprise, GitLab, etc.)
-- `https://HOST/OWNER/.../REPO` - Full HTTPS URL pasted directly from the browser; `.git` suffix is stripped automatically. GitLab subgroup paths are supported.
+- `https://HOST/OWNER/.../REPO` - Full HTTPS URL pasted directly from the browser; `.git` suffix is stripped automatically. N-segment subgroup paths (e.g. GitLab) are parsed correctly.
+
+> **Note:** These input forms are accepted for parsing and registration. Marketplace fetching currently requires a GitHub or GHES-compatible Contents API host. GitLab and Bitbucket-style fetches are not yet supported.
 
 **Options:**
 - `-n, --name TEXT` - Custom display name for the marketplace

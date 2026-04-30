@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Added
 
-- `apm marketplace add` now accepts full HTTPS URLs (e.g. `https://gitlab.com/mycompany/platform/plugin-marketplace`) and N-segment GitLab subgroup paths -- paste directly from the browser. Works with any HTTPS-hosted Git marketplace. New `--allow-insecure` flag explicitly opts in to HTTP sources; HTTP is rejected by default. (#1034)
+- `apm marketplace add` now accepts full HTTPS URLs (e.g. `https://gitlab.com/mycompany/platform/plugin-marketplace`) and N-segment GitLab subgroup paths so you can paste directly from the browser. Marketplace fetching currently requires a GitHub or GHES-compatible Contents API host; GitLab and Bitbucket-style fetches are not yet supported. New `--allow-insecure` flag explicitly opts in to HTTP sources; HTTP is rejected by default. (#1034)
 - `apm pack` produces `.claude-plugin/marketplace.json` when `apm.yml` has a `marketplace:` block; new flags `--offline`, `--include-prerelease`, `--marketplace-output PATH`. (#722)
 - `marketplace:` block in `apm.yml` unifies catalog authoring with the manifest. (#1038)
 - `apm marketplace migrate` -- one-shot consolidation of legacy `marketplace.yml` into `apm.yml`. (#1038)

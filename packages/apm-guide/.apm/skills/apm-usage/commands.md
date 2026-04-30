@@ -52,7 +52,7 @@
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm marketplace add OWNER/REPO` | Register a marketplace | `-n NAME`, `-b BRANCH`, `--host HOST` |
+| `apm marketplace add REPO` | Register a marketplace (accepts OWNER/REPO, HOST/OWNER/.../REPO, or full HTTPS URL) | `-n NAME`, `-b BRANCH`, `--host HOST`, `--allow-insecure` |
 | `apm marketplace list` | List registered marketplaces | -- |
 | `apm marketplace browse NAME` | Browse marketplace plugins | -- |
 | `apm marketplace update [NAME]` | Update marketplace index | -- |

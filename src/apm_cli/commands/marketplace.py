@@ -361,8 +361,8 @@ def _check_gitignore_for_marketplace_json(logger):
 @marketplace.command(help="Register a marketplace")
 @click.argument("repo", required=True)
 @click.option("--name", "-n", default=None, help="Display name (defaults to repo name)")
-@click.option("--branch", "-b", default="main", show_default=True, help="Branch to use")
-@click.option("--host", default=None, help="Git host FQDN (default: github.com)")
+@click.option("--branch", "-b", default=None, help="Branch to use (default: main, or ref embedded in URL)")
+@click.option("--host", default=None, help="Git host FQDN (defaults to configured host, e.g. GITHUB_HOST or github.com)")
 @click.option(
     "--allow-insecure",
     is_flag=True,
@@ -379,6 +379,17 @@ def add(repo, name, branch, host, allow_insecure, verbose):
         from ..marketplace.registry import add_marketplace
         from ..models.dependency.reference import DependencyReference
         from ..utils.path_security import PathTraversalError
+        from ..utils.github_host import is_valid_fqdn
+
+        # Validate --host early: must be a bare FQDN (no scheme, no path).
+        if host is not None and not is_valid_fqdn(host):
+            logger.error(
+                f"Invalid --host value: '{host}'. "
+                f"Provide a bare FQDN such as 'ghes.corp.example.com', "
+                f"not a full URL.",
+                symbol="error",
+            )
+            sys.exit(1)
 
         # Parse the repo argument -- handles owner/repo, host/owner/repo, HTTPS URLs, SSH URLs.
         try:
@@ -393,6 +404,15 @@ def add(repo, name, branch, host, allow_insecure, verbose):
             logger.error(
                 "Invalid repository format. Use OWNER/REPO, HOST/OWNER/REPO, "
                 "or a full HTTPS URL (e.g. https://gitlab.com/org/repo).",
+                symbol="error",
+            )
+            sys.exit(1)
+
+        # Marketplace registration requires a remote Git repository.
+        if dep.is_local or dep.is_virtual:
+            logger.error(
+                "Only remote Git repositories are supported for marketplace registration. "
+                "Local paths and virtual packages are not valid marketplace sources.",
                 symbol="error",
             )
             sys.exit(1)
@@ -413,8 +433,12 @@ def add(repo, name, branch, host, allow_insecure, verbose):
         owner = "/".join(repo_parts[:-1])
         repo_name = repo_parts[-1]
 
-        # Reject --host that contradicts an explicit host in the URL.
-        if host and dep.host and host != dep.host:
+        # Reject --host only when the repo argument explicitly carried a host.
+        # For plain OWNER/REPO shorthands dep.host defaults to default_host(), so
+        # --host must be allowed to override it (documented behaviour).
+        first_segment = repo.split("/")[0] if "/" in repo else repo
+        repo_has_explicit_host = dep.explicit_scheme is not None or is_valid_fqdn(first_segment)
+        if host and repo_has_explicit_host and host != dep.host:
             logger.error(
                 f"Conflicting host: URL specifies '{dep.host}' but --host flag "
                 f"specifies '{host}'. Remove --host or align it with the URL.",
@@ -425,7 +449,7 @@ def add(repo, name, branch, host, allow_insecure, verbose):
         # --host flag overrides the host detected from the URL.
         resolved_host = host or dep.host
         # --branch flag takes precedence; fall back to the ref in the URL, then "main".
-        resolved_branch = branch or dep.reference
+        resolved_branch = branch or dep.reference or "main"
 
         logger.verbose_detail(f"Parsed repository: host='{resolved_host}', owner='{owner}', repo='{repo_name}', branch='{resolved_branch}'")
 
