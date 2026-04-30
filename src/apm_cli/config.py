@@ -2,12 +2,12 @@
 
 import json
 import os
-from typing import Optional
+from typing import Optional  # noqa: F401
 
 CONFIG_DIR = os.path.expanduser("~/.apm")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 
-_config_cache: Optional[dict] = None
+_config_cache: dict | None = None
 
 
 def ensure_config_exists():
@@ -32,7 +32,7 @@ def get_config():
     if _config_cache is not None:
         return _config_cache
     ensure_config_exists()
-    with open(CONFIG_FILE, "r") as f:
+    with open(CONFIG_FILE) as f:
         _config_cache = json.load(f)
     return _config_cache
 
@@ -94,7 +94,7 @@ def set_auto_integrate(enabled: bool) -> None:
     update_config({"auto_integrate": enabled})
 
 
-def get_temp_dir() -> Optional[str]:
+def get_temp_dir() -> str | None:
     """Get the configured temporary directory.
 
     Returns:
@@ -126,7 +126,71 @@ def set_temp_dir(path: str) -> None:
     update_config({"temp_dir": resolved})
 
 
-def get_apm_temp_dir() -> Optional[str]:
+def unset_temp_dir() -> None:
+    """Remove the ``temp_dir`` key from the config file.
+
+    No-op if the key is not present.
+    """
+    _invalidate_config_cache()
+    config = get_config()
+    if "temp_dir" in config:
+        del config["temp_dir"]
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(config, f, indent=2)
+    _invalidate_config_cache()
+
+
+# ---------------------------------------------------------------------------
+# Cowork skills directory
+# ---------------------------------------------------------------------------
+
+
+def get_copilot_cowork_skills_dir() -> str | None:
+    """Get the configured cowork skills directory.
+
+    Returns:
+        The stored ``copilot_cowork_skills_dir`` config value, or ``None`` if not set.
+    """
+    return get_config().get("copilot_cowork_skills_dir")
+
+
+def set_copilot_cowork_skills_dir(path: str) -> None:
+    """Set the cowork skills directory after validation.
+
+    The path is expanded (``~``) and verified to be absolute.  The
+    directory does **not** need to exist on disk (OneDrive may not yet
+    be synced).
+
+    Args:
+        path: Filesystem path to use as the cowork skills directory.
+
+    Raises:
+        ValueError: If *path* is empty, whitespace-only, or relative
+            after expansion.
+    """
+    if not path or not path.strip():
+        raise ValueError("Path cannot be empty")
+    expanded = os.path.normpath(os.path.expanduser(path))
+    if not os.path.isabs(expanded):
+        raise ValueError(f"Path must be absolute: {expanded}")
+    update_config({"copilot_cowork_skills_dir": expanded})
+
+
+def unset_copilot_cowork_skills_dir() -> None:
+    """Remove the ``copilot_cowork_skills_dir`` key from the config file.
+
+    No-op if the key is not present.
+    """
+    _invalidate_config_cache()
+    config = get_config()
+    if "copilot_cowork_skills_dir" in config:
+        del config["copilot_cowork_skills_dir"]
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(config, f, indent=2)
+    _invalidate_config_cache()
+
+
+def get_apm_temp_dir() -> str | None:
     """Return the effective temporary directory for APM operations.
 
     Resolution order:

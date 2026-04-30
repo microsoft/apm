@@ -25,12 +25,12 @@ import subprocess
 import threading
 import time
 from datetime import datetime, timezone
-from typing import Optional, Tuple
-
+from typing import Optional, Tuple  # noqa: F401, UP035
 
 # ---------------------------------------------------------------------------
 # Exceptions
 # ---------------------------------------------------------------------------
+
 
 class AzureCliBearerError(Exception):
     """Raised when az CLI bearer-token acquisition fails.
@@ -47,8 +47,8 @@ class AzureCliBearerError(Exception):
         message: str,
         *,
         kind: str,
-        stderr: Optional[str] = None,
-        tenant_id: Optional[str] = None,
+        stderr: str | None = None,
+        tenant_id: str | None = None,
     ) -> None:
         super().__init__(message)
         self.kind = kind
@@ -87,7 +87,7 @@ class AzureCliBearerProvider:
         # if the response did not include an expiresOn field (very old az
         # versions); in that case the token is treated as never-expiring
         # within this process, matching the prior behaviour.
-        self._cache: dict[str, Tuple[str, Optional[float]]] = {}
+        self._cache: dict[str, tuple[str, float | None]] = {}
         self._lock = threading.Lock()
 
     # -- public API ---------------------------------------------------------
@@ -140,7 +140,7 @@ class AzureCliBearerProvider:
             self._cache[self.ADO_RESOURCE_ID] = (token, expires_at)
             return token
 
-    def get_current_tenant_id(self) -> Optional[str]:
+    def get_current_tenant_id(self) -> str | None:
         """Return the active Entra tenant ID (best-effort).
 
         Uses ``az account show --query tenantId -o tsv``.  Returns ``None``
@@ -148,8 +148,7 @@ class AzureCliBearerProvider:
         """
         try:
             result = subprocess.run(
-                [self._az_command, "account", "show",
-                 "--query", "tenantId", "-o", "tsv"],
+                [self._az_command, "account", "show", "--query", "tenantId", "-o", "tsv"],
                 capture_output=True,
                 text=True,
                 timeout=_SUBPROCESS_TIMEOUT_SECONDS,
@@ -158,7 +157,7 @@ class AzureCliBearerProvider:
                 tenant = result.stdout.strip()
                 if tenant:
                     return tenant
-        except Exception:  # noqa: BLE001 -- intentionally broad
+        except Exception:
             pass
         return None
 
@@ -172,7 +171,7 @@ class AzureCliBearerProvider:
 
     # -- internals ----------------------------------------------------------
 
-    def _run_get_access_token(self) -> Tuple[str, Optional[float]]:
+    def _run_get_access_token(self) -> tuple[str, float | None]:
         """Shell out to ``az account get-access-token`` and return ``(jwt, expires_at)``.
 
         ``expires_at`` is the absolute epoch-second timestamp at which the
@@ -225,7 +224,7 @@ class AzureCliBearerProvider:
 
         raw = (result.stdout or "").strip()
         token: str = ""
-        expires_at: Optional[float] = None
+        expires_at: float | None = None
         # Try JSON first (modern az). Fall back to treating stdout as a bare
         # JWT for backwards compatibility (very old az or unusual configs).
         try:
@@ -261,11 +260,11 @@ class AzureCliBearerProvider:
 # design. Use get_bearer_provider() everywhere to share one cache across the
 # process. Tests can call .clear_cache() on the returned singleton.
 
-_provider_singleton: Optional["AzureCliBearerProvider"] = None
+_provider_singleton: AzureCliBearerProvider | None = None
 _provider_singleton_lock = threading.Lock()
 
 
-def get_bearer_provider() -> "AzureCliBearerProvider":
+def get_bearer_provider() -> AzureCliBearerProvider:
     """Return the process-wide AzureCliBearerProvider singleton."""
     global _provider_singleton
     if _provider_singleton is None:
@@ -285,7 +284,7 @@ def _looks_like_jwt(value: str) -> bool:
     return value.startswith("eyJ") and len(value) > 100
 
 
-def _parse_expires_on(value: str) -> Optional[float]:
+def _parse_expires_on(value: str) -> float | None:
     """Parse an ``expiresOn`` field from ``az account get-access-token`` JSON.
 
     Accepts both forms emitted by various az versions:

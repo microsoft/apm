@@ -24,12 +24,11 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
+import pytest  # noqa: F401
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.models.results import InstallResult
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -87,6 +86,7 @@ def _mock_apm_package():
 try:
     from apm_cli.install.phases.policy_gate import PolicyViolationError
 except ImportError:  # pragma: no cover
+
     class PolicyViolationError(RuntimeError):
         pass
 
@@ -94,6 +94,7 @@ except ImportError:  # pragma: no cover
 # ---------------------------------------------------------------------------
 # Help text validation
 # ---------------------------------------------------------------------------
+
 
 class TestHelpTextShowsNoPolicy:
     """--no-policy must appear with the correct help text in --help output."""
@@ -119,18 +120,15 @@ class TestHelpTextShowsNoPolicy:
     def test_help_text_is_plain_ascii(self):
         """Help text must be plain ASCII per cli.instructions.md."""
         result = self.runner.invoke(cli, ["install", "--help"])
-        assert result.output.isascii(), (
-            f"Non-ASCII characters in install --help output"
-        )
+        assert result.output.isascii(), f"Non-ASCII characters in install --help output"  # noqa: F541
         result = self.runner.invoke(cli, ["update", "--help"])
-        assert result.output.isascii(), (
-            f"Non-ASCII characters in update --help output"
-        )
+        assert result.output.isascii(), f"Non-ASCII characters in update --help output"  # noqa: F541
 
 
 # ---------------------------------------------------------------------------
 # apm install --no-policy (bare install -- denied dep in block mode)
 # ---------------------------------------------------------------------------
+
 
 class TestInstallNoPolicyFlag:
     """--no-policy causes policy_gate to skip, allowing denied deps."""
@@ -153,9 +151,7 @@ class TestInstallNoPolicyFlag:
     @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
     @patch("apm_cli.commands.install.APMPackage")
     @patch("apm_cli.commands.install._install_apm_dependencies")
-    def test_no_policy_flag_proceeds_on_denied_dep(
-        self, mock_install_apm, mock_apm_package
-    ):
+    def test_no_policy_flag_proceeds_on_denied_dep(self, mock_install_apm, mock_apm_package):
         """apm install --no-policy -> install proceeds (exit 0) even with denied dep."""
         with _chdir_tmp(self.original_dir) as tmp_dir:
             _write_seed_apm_yml(tmp_dir)
@@ -165,8 +161,7 @@ class TestInstallNoPolicyFlag:
             result = self.runner.invoke(cli, ["install", "--no-policy"])
 
             assert result.exit_code == 0, (
-                f"Expected exit 0 with --no-policy, got {result.exit_code}\n"
-                f"Output: {result.output}"
+                f"Expected exit 0 with --no-policy, got {result.exit_code}\nOutput: {result.output}"
             )
             # Verify no_policy=True was passed through to _install_apm_dependencies
             mock_install_apm.assert_called_once()
@@ -178,9 +173,7 @@ class TestInstallNoPolicyFlag:
     @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
     @patch("apm_cli.commands.install.APMPackage")
     @patch("apm_cli.commands.install._install_apm_dependencies")
-    def test_no_policy_passes_through_to_install_apm_deps(
-        self, mock_install_apm, mock_apm_package
-    ):
+    def test_no_policy_passes_through_to_install_apm_deps(self, mock_install_apm, mock_apm_package):
         """Verify no_policy=True kwarg reaches _install_apm_dependencies."""
         with _chdir_tmp(self.original_dir) as tmp_dir:
             _write_seed_apm_yml(tmp_dir)
@@ -195,9 +188,7 @@ class TestInstallNoPolicyFlag:
     @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
     @patch("apm_cli.commands.install.APMPackage")
     @patch("apm_cli.commands.install._install_apm_dependencies")
-    def test_without_no_policy_default_is_false(
-        self, mock_install_apm, mock_apm_package
-    ):
+    def test_without_no_policy_default_is_false(self, mock_install_apm, mock_apm_package):
         """Without --no-policy, no_policy=False is passed through."""
         with _chdir_tmp(self.original_dir) as tmp_dir:
             _write_seed_apm_yml(tmp_dir)
@@ -213,6 +204,7 @@ class TestInstallNoPolicyFlag:
 # ---------------------------------------------------------------------------
 # apm install <pkg> --no-policy -> apm.yml retains the new dep
 # ---------------------------------------------------------------------------
+
 
 class TestInstallPkgNoPolicy:
     """apm install <pkg> --no-policy -> new dep stays in apm.yml (no rollback)."""
@@ -241,19 +233,16 @@ class TestInstallPkgNoPolicy:
     ):
         """apm install <pkg> --no-policy succeeds; apm.yml has the new dep."""
         with _chdir_tmp(self.original_dir) as tmp_dir:
-            original_bytes = _write_seed_apm_yml(tmp_dir)
+            original_bytes = _write_seed_apm_yml(tmp_dir)  # noqa: F841
 
             mock_validate.return_value = True
             mock_apm_package.from_apm_yml.return_value = _mock_apm_package()
             mock_install_apm.return_value = _successful_install_result()
 
-            result = self.runner.invoke(
-                cli, ["install", "test-blocked/denied-pkg", "--no-policy"]
-            )
+            result = self.runner.invoke(cli, ["install", "test-blocked/denied-pkg", "--no-policy"])
 
             assert result.exit_code == 0, (
-                f"Expected exit 0 with --no-policy, got {result.exit_code}\n"
-                f"Output: {result.output}"
+                f"Expected exit 0 with --no-policy, got {result.exit_code}\nOutput: {result.output}"
             )
             # Verify no_policy was passed as True
             _, kwargs = mock_install_apm.call_args
@@ -263,6 +252,7 @@ class TestInstallPkgNoPolicy:
 # ---------------------------------------------------------------------------
 # apm install --mcp <denied> --no-policy -> proceeds
 # ---------------------------------------------------------------------------
+
 
 class TestInstallMcpNoPolicy:
     """install --mcp --no-policy skips MCP preflight policy check."""
@@ -284,9 +274,7 @@ class TestInstallMcpNoPolicy:
 
     @patch("apm_cli.policy.install_preflight.run_policy_preflight")
     @patch("apm_cli.commands.install._run_mcp_install")
-    def test_mcp_no_policy_passes_flag_to_preflight(
-        self, mock_run_mcp, mock_preflight
-    ):
+    def test_mcp_no_policy_passes_flag_to_preflight(self, mock_run_mcp, mock_preflight):
         """--no-policy is forwarded to run_policy_preflight as no_policy=True."""
         with _chdir_tmp(self.original_dir) as tmp_dir:
             _write_seed_apm_yml(tmp_dir)
@@ -294,7 +282,14 @@ class TestInstallMcpNoPolicy:
 
             self.runner.invoke(
                 cli,
-                ["install", "--mcp", "test-server", "--url", "https://example.com/mcp", "--no-policy"],
+                [
+                    "install",
+                    "--mcp",
+                    "test-server",
+                    "--url",
+                    "https://example.com/mcp",
+                    "--no-policy",
+                ],
             )
 
             mock_preflight.assert_called_once()
@@ -303,9 +298,7 @@ class TestInstallMcpNoPolicy:
 
     @patch("apm_cli.policy.install_preflight.run_policy_preflight")
     @patch("apm_cli.commands.install._run_mcp_install")
-    def test_mcp_without_no_policy_passes_false(
-        self, mock_run_mcp, mock_preflight
-    ):
+    def test_mcp_without_no_policy_passes_false(self, mock_run_mcp, mock_preflight):
         """Without --no-policy, no_policy=False is forwarded to preflight."""
         with _chdir_tmp(self.original_dir) as tmp_dir:
             _write_seed_apm_yml(tmp_dir)
@@ -325,6 +318,7 @@ class TestInstallMcpNoPolicy:
 # apm update --no-policy -> rejected (apm update is CLI self-update, not deps)
 # ---------------------------------------------------------------------------
 
+
 class TestUpdateNoPolicy:
     """apm update intentionally does NOT accept --no-policy."""
 
@@ -338,14 +332,13 @@ class TestUpdateNoPolicy:
         dependency refresh. A `--no-policy` flag would be misleading and dead.
         """
         result = self.runner.invoke(cli, ["update", "--no-policy"])
-        assert result.exit_code != 0, (
-            f"Expected non-zero exit, got 0\nOutput: {result.output}"
-        )
+        assert result.exit_code != 0, f"Expected non-zero exit, got 0\nOutput: {result.output}"
 
 
 # ---------------------------------------------------------------------------
 # APM_POLICY_DISABLE=1 env var (no --no-policy flag)
 # ---------------------------------------------------------------------------
+
 
 class TestEnvVarPolicyDisable:
     """APM_POLICY_DISABLE=1 env var alone triggers the same skip as --no-policy."""
@@ -368,9 +361,7 @@ class TestEnvVarPolicyDisable:
     @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
     @patch("apm_cli.commands.install.APMPackage")
     @patch("apm_cli.commands.install._install_apm_dependencies")
-    def test_env_var_disable_proceeds(
-        self, mock_install_apm, mock_apm_package
-    ):
+    def test_env_var_disable_proceeds(self, mock_install_apm, mock_apm_package):
         """APM_POLICY_DISABLE=1 (no flag) -> install proceeds normally."""
         with _chdir_tmp(self.original_dir) as tmp_dir:
             _write_seed_apm_yml(tmp_dir)
@@ -378,7 +369,8 @@ class TestEnvVarPolicyDisable:
             mock_install_apm.return_value = _successful_install_result()
 
             result = self.runner.invoke(
-                cli, ["install"],
+                cli,
+                ["install"],
                 env={"APM_POLICY_DISABLE": "1"},
             )
 
@@ -390,17 +382,16 @@ class TestEnvVarPolicyDisable:
     @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
     @patch("apm_cli.commands.install.APMPackage")
     @patch("apm_cli.commands.install._install_apm_dependencies")
-    def test_env_var_zero_does_not_disable(
-        self, mock_install_apm, mock_apm_package
-    ):
+    def test_env_var_zero_does_not_disable(self, mock_install_apm, mock_apm_package):
         """APM_POLICY_DISABLE=0 -> normal enforcement (no skip)."""
         with _chdir_tmp(self.original_dir) as tmp_dir:
             _write_seed_apm_yml(tmp_dir)
             mock_apm_package.from_apm_yml.return_value = _mock_apm_package()
             mock_install_apm.return_value = _successful_install_result()
 
-            result = self.runner.invoke(
-                cli, ["install"],
+            result = self.runner.invoke(  # noqa: F841
+                cli,
+                ["install"],
                 env={"APM_POLICY_DISABLE": "0"},
             )
 
@@ -412,6 +403,7 @@ class TestEnvVarPolicyDisable:
 # ---------------------------------------------------------------------------
 # Sanity: without --no-policy AND denied dep -> install fails
 # ---------------------------------------------------------------------------
+
 
 class TestWithoutNoPolicyDeniedDepFails:
     """Without --no-policy, a PolicyViolationError causes non-zero exit."""
@@ -448,9 +440,7 @@ class TestWithoutNoPolicyDeniedDepFails:
                 "Dependency test-blocked/denied-pkg denied by org policy"
             )
 
-            result = self.runner.invoke(
-                cli, ["install", "test-blocked/denied-pkg"]
-            )
+            result = self.runner.invoke(cli, ["install", "test-blocked/denied-pkg"])
 
             assert result.exit_code != 0, (
                 f"Expected non-zero exit without --no-policy, got {result.exit_code}"
@@ -460,6 +450,7 @@ class TestWithoutNoPolicyDeniedDepFails:
 # ---------------------------------------------------------------------------
 # Loud warnings visible even without --verbose
 # ---------------------------------------------------------------------------
+
 
 class TestLoudWarningsWithoutVerbose:
     """policy_disabled warning is always visible (not gated by --verbose)."""
@@ -509,6 +500,7 @@ class TestLoudWarningsWithoutVerbose:
 # ---------------------------------------------------------------------------
 # Policy gate unit test: ctx.no_policy + env var skip enforcement
 # ---------------------------------------------------------------------------
+
 
 class TestPolicyGateEscapeHatch:
     """The policy_gate phase respects no_policy flag and APM_POLICY_DISABLE env."""
@@ -576,6 +568,7 @@ class TestPolicyGateEscapeHatch:
 # Install preflight (--mcp) escape hatch
 # ---------------------------------------------------------------------------
 
+
 class TestPreflightEscapeHatch:
     """run_policy_preflight respects no_policy and APM_POLICY_DISABLE."""
 
@@ -617,6 +610,7 @@ class TestPreflightEscapeHatch:
 # ---------------------------------------------------------------------------
 # InstallRequest and pipeline wiring
 # ---------------------------------------------------------------------------
+
 
 class TestInstallRequestNoPolicy:
     """InstallRequest carries no_policy through to the pipeline."""

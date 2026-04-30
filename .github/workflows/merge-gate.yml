@@ -120,7 +120,7 @@ jobs:
           # Keep this in sync with the underlying workflows.
           # NOTE: 'gate' (this job) MUST NOT appear here -- it would
           # deadlock waiting for itself.
-          EXPECTED_CHECKS: ${{ github.event_name == 'merge_group' && 'Build & Test (Linux),APM Self-Check,Build (Linux),Smoke Test (Linux),Integration Tests (Linux),Release Validation (Linux)' || 'Build & Test (Linux),APM Self-Check' }}
+          EXPECTED_CHECKS: ${{ github.event_name == 'merge_group' && 'Build & Test (Linux),APM Self-Check,NOTICE Drift Check,Build (Linux),Smoke Test (Linux),Integration Tests (Linux),Release Validation (Linux)' || 'Build & Test (Linux),APM Self-Check,NOTICE Drift Check' }}
           # Poll budget: ci-integration.yml chains Build -> Smoke ->
           # Integration (timeout 20m) -> Release Validation (timeout 20m).
           # Theoretical worst case ~50m; observed today ~5m end-to-end.

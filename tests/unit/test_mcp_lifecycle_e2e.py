@@ -7,21 +7,21 @@ package names only (no private/project-specific identifiers).
 
 import json
 import os
-import tempfile
+import tempfile  # noqa: F401
 from pathlib import Path
 
-import pytest
+import pytest  # noqa: F401
 import yaml
 
-from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.deps.lockfile import LockedDependency, LockFile
-
+from apm_cli.integration.mcp_integrator import MCPIntegrator
 
 # ---------------------------------------------------------------------------
 # Helpers — mirror the per-file convention used across the test suite.
 # ---------------------------------------------------------------------------
 
-def _write_apm_yml(path: Path, deps: list = None, mcp: list = None, name: str = "test-project"):
+
+def _write_apm_yml(path: Path, deps: list = None, mcp: list = None, name: str = "test-project"):  # noqa: RUF013
     """Write a minimal apm.yml at *path* with optional APM and MCP deps."""
     data = {"name": name, "version": "1.0.0", "dependencies": {}}
     if deps:
@@ -32,8 +32,14 @@ def _write_apm_yml(path: Path, deps: list = None, mcp: list = None, name: str = 
     path.write_text(yaml.dump(data, default_flow_style=False), encoding="utf-8")
 
 
-def _make_pkg_dir(apm_modules: Path, repo_url: str, mcp: list = None,
-                  apm_deps: list = None, name: str = None, virtual_path: str = None):
+def _make_pkg_dir(
+    apm_modules: Path,
+    repo_url: str,
+    mcp: list = None,  # noqa: RUF013
+    apm_deps: list = None,  # noqa: RUF013
+    name: str = None,  # noqa: RUF013
+    virtual_path: str = None,  # noqa: RUF013
+):
     """Create a package directory under apm_modules with an apm.yml."""
     base = apm_modules / repo_url
     if virtual_path:
@@ -48,7 +54,7 @@ def _make_pkg_dir(apm_modules: Path, repo_url: str, mcp: list = None,
     (base / "apm.yml").write_text(yaml.dump(data, default_flow_style=False), encoding="utf-8")
 
 
-def _write_lockfile(path: Path, locked_deps: list, mcp_servers: list = None):
+def _write_lockfile(path: Path, locked_deps: list, mcp_servers: list = None):  # noqa: RUF013
     """Write a lockfile from LockedDependency list and optional MCP server names."""
     lf = LockFile()
     for dep in locked_deps:
@@ -86,17 +92,26 @@ class TestSelectiveInstallTransitiveMCP:
         _make_pkg_dir(apm_modules, "acme/squad-alpha", apm_deps=["acme/infra-cloud"])
 
         # infra-cloud declares two MCP servers
-        _make_pkg_dir(apm_modules, "acme/infra-cloud", mcp=[
-            "ghcr.io/acme/mcp-server-alpha",
-            "ghcr.io/acme/mcp-server-beta",
-        ])
+        _make_pkg_dir(
+            apm_modules,
+            "acme/infra-cloud",
+            mcp=[
+                "ghcr.io/acme/mcp-server-alpha",
+                "ghcr.io/acme/mcp-server-beta",
+            ],
+        )
 
         # Lockfile records both packages
         lock_path = tmp_path / "apm.lock.yaml"
-        _write_lockfile(lock_path, [
-            LockedDependency(repo_url="acme/squad-alpha", depth=1, resolved_by="root"),
-            LockedDependency(repo_url="acme/infra-cloud", depth=2, resolved_by="acme/squad-alpha"),
-        ])
+        _write_lockfile(
+            lock_path,
+            [
+                LockedDependency(repo_url="acme/squad-alpha", depth=1, resolved_by="root"),
+                LockedDependency(
+                    repo_url="acme/infra-cloud", depth=2, resolved_by="acme/squad-alpha"
+                ),
+            ],
+        )
 
         result = MCPIntegrator.collect_transitive(apm_modules, lock_path)
         names = [d.name for d in result]
@@ -113,9 +128,12 @@ class TestSelectiveInstallTransitiveMCP:
 
         # Only squad-alpha is locked
         lock_path = tmp_path / "apm.lock.yaml"
-        _write_lockfile(lock_path, [
-            LockedDependency(repo_url="acme/squad-alpha", depth=1, resolved_by="root"),
-        ])
+        _write_lockfile(
+            lock_path,
+            [
+                LockedDependency(repo_url="acme/squad-alpha", depth=1, resolved_by="root"),
+            ],
+        )
 
         result = MCPIntegrator.collect_transitive(apm_modules, lock_path)
         names = [d.name for d in result]
@@ -143,17 +161,24 @@ class TestDeepTransitiveChainMCP:
         _make_pkg_dir(apm_modules, "acme/pkg-a", apm_deps=["acme/pkg-b"])
         _make_pkg_dir(apm_modules, "acme/pkg-b", apm_deps=["acme/pkg-c"])
         _make_pkg_dir(apm_modules, "acme/pkg-c", apm_deps=["acme/pkg-d"])
-        _make_pkg_dir(apm_modules, "acme/pkg-d", mcp=[
-            "ghcr.io/acme/mcp-deep-server",
-        ])
+        _make_pkg_dir(
+            apm_modules,
+            "acme/pkg-d",
+            mcp=[
+                "ghcr.io/acme/mcp-deep-server",
+            ],
+        )
 
         lock_path = tmp_path / "apm.lock.yaml"
-        _write_lockfile(lock_path, [
-            LockedDependency(repo_url="acme/pkg-a", depth=1, resolved_by="root"),
-            LockedDependency(repo_url="acme/pkg-b", depth=2, resolved_by="acme/pkg-a"),
-            LockedDependency(repo_url="acme/pkg-c", depth=3, resolved_by="acme/pkg-b"),
-            LockedDependency(repo_url="acme/pkg-d", depth=4, resolved_by="acme/pkg-c"),
-        ])
+        _write_lockfile(
+            lock_path,
+            [
+                LockedDependency(repo_url="acme/pkg-a", depth=1, resolved_by="root"),
+                LockedDependency(repo_url="acme/pkg-b", depth=2, resolved_by="acme/pkg-a"),
+                LockedDependency(repo_url="acme/pkg-c", depth=3, resolved_by="acme/pkg-b"),
+                LockedDependency(repo_url="acme/pkg-d", depth=4, resolved_by="acme/pkg-c"),
+            ],
+        )
 
         result = MCPIntegrator.collect_transitive(apm_modules, lock_path)
         names = [d.name for d in result]
@@ -164,19 +189,23 @@ class TestDeepTransitiveChainMCP:
         os.chdir(tmp_path)
         apm_modules = tmp_path / "apm_modules"
 
-        _make_pkg_dir(apm_modules, "acme/pkg-a", apm_deps=["acme/pkg-b"],
-                      mcp=["ghcr.io/acme/mcp-level-1"])
-        _make_pkg_dir(apm_modules, "acme/pkg-b", apm_deps=["acme/pkg-c"],
-                      mcp=["ghcr.io/acme/mcp-level-2"])
-        _make_pkg_dir(apm_modules, "acme/pkg-c",
-                      mcp=["ghcr.io/acme/mcp-level-3"])
+        _make_pkg_dir(
+            apm_modules, "acme/pkg-a", apm_deps=["acme/pkg-b"], mcp=["ghcr.io/acme/mcp-level-1"]
+        )
+        _make_pkg_dir(
+            apm_modules, "acme/pkg-b", apm_deps=["acme/pkg-c"], mcp=["ghcr.io/acme/mcp-level-2"]
+        )
+        _make_pkg_dir(apm_modules, "acme/pkg-c", mcp=["ghcr.io/acme/mcp-level-3"])
 
         lock_path = tmp_path / "apm.lock.yaml"
-        _write_lockfile(lock_path, [
-            LockedDependency(repo_url="acme/pkg-a", depth=1, resolved_by="root"),
-            LockedDependency(repo_url="acme/pkg-b", depth=2, resolved_by="acme/pkg-a"),
-            LockedDependency(repo_url="acme/pkg-c", depth=3, resolved_by="acme/pkg-b"),
-        ])
+        _write_lockfile(
+            lock_path,
+            [
+                LockedDependency(repo_url="acme/pkg-a", depth=1, resolved_by="root"),
+                LockedDependency(repo_url="acme/pkg-b", depth=2, resolved_by="acme/pkg-a"),
+                LockedDependency(repo_url="acme/pkg-c", depth=3, resolved_by="acme/pkg-b"),
+            ],
+        )
 
         result = MCPIntegrator.collect_transitive(apm_modules, lock_path)
         names = [d.name for d in result]
@@ -206,17 +235,24 @@ class TestDiamondDependencyMCP:
         _make_pkg_dir(apm_modules, "acme/pkg-a", apm_deps=["acme/pkg-b", "acme/pkg-c"])
         _make_pkg_dir(apm_modules, "acme/pkg-b", apm_deps=["acme/pkg-d"])
         _make_pkg_dir(apm_modules, "acme/pkg-c", apm_deps=["acme/pkg-d"])
-        _make_pkg_dir(apm_modules, "acme/pkg-d", mcp=[
-            "ghcr.io/acme/mcp-shared-server",
-        ])
+        _make_pkg_dir(
+            apm_modules,
+            "acme/pkg-d",
+            mcp=[
+                "ghcr.io/acme/mcp-shared-server",
+            ],
+        )
 
         lock_path = tmp_path / "apm.lock.yaml"
-        _write_lockfile(lock_path, [
-            LockedDependency(repo_url="acme/pkg-a", depth=1, resolved_by="root"),
-            LockedDependency(repo_url="acme/pkg-b", depth=2, resolved_by="acme/pkg-a"),
-            LockedDependency(repo_url="acme/pkg-c", depth=2, resolved_by="acme/pkg-a"),
-            LockedDependency(repo_url="acme/pkg-d", depth=3, resolved_by="acme/pkg-b"),
-        ])
+        _write_lockfile(
+            lock_path,
+            [
+                LockedDependency(repo_url="acme/pkg-a", depth=1, resolved_by="root"),
+                LockedDependency(repo_url="acme/pkg-b", depth=2, resolved_by="acme/pkg-a"),
+                LockedDependency(repo_url="acme/pkg-c", depth=2, resolved_by="acme/pkg-a"),
+                LockedDependency(repo_url="acme/pkg-d", depth=3, resolved_by="acme/pkg-b"),
+            ],
+        )
 
         result = MCPIntegrator.collect_transitive(apm_modules, lock_path)
         names = [d.name for d in result]
@@ -233,19 +269,24 @@ class TestDiamondDependencyMCP:
         apm_modules = tmp_path / "apm_modules"
 
         _make_pkg_dir(apm_modules, "acme/pkg-a", apm_deps=["acme/pkg-b", "acme/pkg-c"])
-        _make_pkg_dir(apm_modules, "acme/pkg-b", apm_deps=["acme/pkg-d"],
-                      mcp=["ghcr.io/acme/mcp-branch-b"])
-        _make_pkg_dir(apm_modules, "acme/pkg-c", apm_deps=["acme/pkg-d"],
-                      mcp=["ghcr.io/acme/mcp-branch-c"])
+        _make_pkg_dir(
+            apm_modules, "acme/pkg-b", apm_deps=["acme/pkg-d"], mcp=["ghcr.io/acme/mcp-branch-b"]
+        )
+        _make_pkg_dir(
+            apm_modules, "acme/pkg-c", apm_deps=["acme/pkg-d"], mcp=["ghcr.io/acme/mcp-branch-c"]
+        )
         _make_pkg_dir(apm_modules, "acme/pkg-d", mcp=["ghcr.io/acme/mcp-leaf"])
 
         lock_path = tmp_path / "apm.lock.yaml"
-        _write_lockfile(lock_path, [
-            LockedDependency(repo_url="acme/pkg-a", depth=1, resolved_by="root"),
-            LockedDependency(repo_url="acme/pkg-b", depth=2, resolved_by="acme/pkg-a"),
-            LockedDependency(repo_url="acme/pkg-c", depth=2, resolved_by="acme/pkg-a"),
-            LockedDependency(repo_url="acme/pkg-d", depth=3, resolved_by="acme/pkg-b"),
-        ])
+        _write_lockfile(
+            lock_path,
+            [
+                LockedDependency(repo_url="acme/pkg-a", depth=1, resolved_by="root"),
+                LockedDependency(repo_url="acme/pkg-b", depth=2, resolved_by="acme/pkg-a"),
+                LockedDependency(repo_url="acme/pkg-c", depth=2, resolved_by="acme/pkg-a"),
+                LockedDependency(repo_url="acme/pkg-d", depth=3, resolved_by="acme/pkg-b"),
+            ],
+        )
 
         result = MCPIntegrator.collect_transitive(apm_modules, lock_path)
         merged = MCPIntegrator.deduplicate(result)
@@ -274,14 +315,21 @@ class TestUninstallRemovesTransitiveMCP:
 
         # Pre-existing .vscode/mcp.json with servers from two packages
         mcp_json = tmp_path / ".vscode" / "mcp.json"
-        _write_mcp_json(mcp_json, {
-            "ghcr.io/acme/mcp-server-alpha": {"command": "npx", "args": ["alpha"]},
-            "ghcr.io/acme/mcp-server-beta": {"command": "npx", "args": ["beta"]},
-            "ghcr.io/acme/mcp-server-gamma": {"command": "npx", "args": ["gamma"]},
-        })
+        _write_mcp_json(
+            mcp_json,
+            {
+                "ghcr.io/acme/mcp-server-alpha": {"command": "npx", "args": ["alpha"]},
+                "ghcr.io/acme/mcp-server-beta": {"command": "npx", "args": ["beta"]},
+                "ghcr.io/acme/mcp-server-gamma": {"command": "npx", "args": ["gamma"]},
+            },
+        )
 
         # Suppose infra-cloud (alpha + beta) was uninstalled, gamma remains.
-        old_servers = {"ghcr.io/acme/mcp-server-alpha", "ghcr.io/acme/mcp-server-beta", "ghcr.io/acme/mcp-server-gamma"}
+        old_servers = {
+            "ghcr.io/acme/mcp-server-alpha",
+            "ghcr.io/acme/mcp-server-beta",
+            "ghcr.io/acme/mcp-server-gamma",
+        }
         new_servers = {"ghcr.io/acme/mcp-server-gamma"}
         stale = old_servers - new_servers
 
@@ -296,9 +344,13 @@ class TestUninstallRemovesTransitiveMCP:
         os.chdir(tmp_path)
 
         lock_path = tmp_path / "apm.lock.yaml"
-        _write_lockfile(lock_path, [
-            LockedDependency(repo_url="acme/base-lib", depth=1, resolved_by="root"),
-        ], mcp_servers=["ghcr.io/acme/mcp-server-alpha", "ghcr.io/acme/mcp-server-beta"])
+        _write_lockfile(
+            lock_path,
+            [
+                LockedDependency(repo_url="acme/base-lib", depth=1, resolved_by="root"),
+            ],
+            mcp_servers=["ghcr.io/acme/mcp-server-alpha", "ghcr.io/acme/mcp-server-beta"],
+        )
 
         # After uninstall, only beta remains
         MCPIntegrator.update_lockfile({"ghcr.io/acme/mcp-server-beta"})
@@ -310,9 +362,13 @@ class TestUninstallRemovesTransitiveMCP:
         os.chdir(tmp_path)
 
         lock_path = tmp_path / "apm.lock.yaml"
-        _write_lockfile(lock_path, [
-            LockedDependency(repo_url="acme/base-lib", depth=1, resolved_by="root"),
-        ], mcp_servers=["ghcr.io/acme/mcp-server-alpha"])
+        _write_lockfile(
+            lock_path,
+            [
+                LockedDependency(repo_url="acme/base-lib", depth=1, resolved_by="root"),
+            ],
+            mcp_servers=["ghcr.io/acme/mcp-server-alpha"],
+        )
 
         MCPIntegrator.update_lockfile(set())
 
@@ -341,15 +397,23 @@ class TestUpdateMCPRename:
 
         # After update: the package now declares a renamed server
         apm_modules = tmp_path / "apm_modules"
-        _make_pkg_dir(apm_modules, "acme/infra-cloud", mcp=[
-            "ghcr.io/acme/mcp-server-new",  # renamed from mcp-server-old
-            "ghcr.io/acme/mcp-server-gamma",
-        ])
+        _make_pkg_dir(
+            apm_modules,
+            "acme/infra-cloud",
+            mcp=[
+                "ghcr.io/acme/mcp-server-new",  # renamed from mcp-server-old
+                "ghcr.io/acme/mcp-server-gamma",
+            ],
+        )
 
         lock_path = tmp_path / "apm.lock.yaml"
-        _write_lockfile(lock_path, [
-            LockedDependency(repo_url="acme/infra-cloud", depth=1, resolved_by="root"),
-        ], mcp_servers=sorted(old_mcp))
+        _write_lockfile(
+            lock_path,
+            [
+                LockedDependency(repo_url="acme/infra-cloud", depth=1, resolved_by="root"),
+            ],
+            mcp_servers=sorted(old_mcp),
+        )
 
         transitive = MCPIntegrator.collect_transitive(apm_modules, lock_path)
         new_mcp = MCPIntegrator.get_server_names(transitive)
@@ -364,10 +428,13 @@ class TestUpdateMCPRename:
         os.chdir(tmp_path)
 
         mcp_json = tmp_path / ".vscode" / "mcp.json"
-        _write_mcp_json(mcp_json, {
-            "ghcr.io/acme/mcp-server-old": {"command": "npx", "args": ["old"]},
-            "ghcr.io/acme/mcp-server-gamma": {"command": "npx", "args": ["gamma"]},
-        })
+        _write_mcp_json(
+            mcp_json,
+            {
+                "ghcr.io/acme/mcp-server-old": {"command": "npx", "args": ["old"]},
+                "ghcr.io/acme/mcp-server-gamma": {"command": "npx", "args": ["gamma"]},
+            },
+        )
 
         MCPIntegrator.remove_stale({"ghcr.io/acme/mcp-server-old"}, runtime="vscode")
 
@@ -399,9 +466,13 @@ class TestUpdateMCPRemoval:
         _make_pkg_dir(apm_modules, "acme/infra-cloud")  # no mcp arg
 
         lock_path = tmp_path / "apm.lock.yaml"
-        _write_lockfile(lock_path, [
-            LockedDependency(repo_url="acme/infra-cloud", depth=1, resolved_by="root"),
-        ], mcp_servers=sorted(old_mcp))
+        _write_lockfile(
+            lock_path,
+            [
+                LockedDependency(repo_url="acme/infra-cloud", depth=1, resolved_by="root"),
+            ],
+            mcp_servers=sorted(old_mcp),
+        )
 
         transitive = MCPIntegrator.collect_transitive(apm_modules, lock_path)
         new_mcp = MCPIntegrator.get_server_names(transitive)
@@ -413,14 +484,21 @@ class TestUpdateMCPRemoval:
         os.chdir(tmp_path)
 
         mcp_json = tmp_path / ".vscode" / "mcp.json"
-        _write_mcp_json(mcp_json, {
-            "ghcr.io/acme/mcp-server-alpha": {"command": "npx", "args": ["alpha"]},
-        })
+        _write_mcp_json(
+            mcp_json,
+            {
+                "ghcr.io/acme/mcp-server-alpha": {"command": "npx", "args": ["alpha"]},
+            },
+        )
 
         lock_path = tmp_path / "apm.lock.yaml"
-        _write_lockfile(lock_path, [
-            LockedDependency(repo_url="acme/infra-cloud", depth=1, resolved_by="root"),
-        ], mcp_servers=["ghcr.io/acme/mcp-server-alpha"])
+        _write_lockfile(
+            lock_path,
+            [
+                LockedDependency(repo_url="acme/infra-cloud", depth=1, resolved_by="root"),
+            ],
+            mcp_servers=["ghcr.io/acme/mcp-server-alpha"],
+        )
 
         MCPIntegrator.remove_stale({"ghcr.io/acme/mcp-server-alpha"}, runtime="vscode")
         MCPIntegrator.update_lockfile(set())
@@ -441,17 +519,30 @@ class TestDeduplicationRootAndTransitive:
 
     def test_root_overrides_transitive_duplicate(self, tmp_path):
         apm_modules = tmp_path / "apm_modules"
-        _make_pkg_dir(apm_modules, "acme/infra-cloud", mcp=[
-            "ghcr.io/acme/mcp-server-alpha",
-        ])
+        _make_pkg_dir(
+            apm_modules,
+            "acme/infra-cloud",
+            mcp=[
+                "ghcr.io/acme/mcp-server-alpha",
+            ],
+        )
 
         lock_path = tmp_path / "apm.lock.yaml"
-        _write_lockfile(lock_path, [
-            LockedDependency(repo_url="acme/infra-cloud", depth=1, resolved_by="root"),
-        ])
+        _write_lockfile(
+            lock_path,
+            [
+                LockedDependency(repo_url="acme/infra-cloud", depth=1, resolved_by="root"),
+            ],
+        )
 
         # Root declares alpha with extra config (dict form)
-        root_mcp = [{"name": "ghcr.io/acme/mcp-server-alpha", "type": "http", "url": "https://custom.example.com"}]
+        root_mcp = [
+            {
+                "name": "ghcr.io/acme/mcp-server-alpha",
+                "type": "http",
+                "url": "https://custom.example.com",
+            }
+        ]
         transitive_mcp = MCPIntegrator.collect_transitive(apm_modules, lock_path)
 
         merged = MCPIntegrator.deduplicate(root_mcp + transitive_mcp)
@@ -466,10 +557,13 @@ class TestDeduplicationRootAndTransitive:
         _make_pkg_dir(apm_modules, "acme/base-lib", mcp=["ghcr.io/acme/mcp-server-beta"])
 
         lock_path = tmp_path / "apm.lock.yaml"
-        _write_lockfile(lock_path, [
-            LockedDependency(repo_url="acme/infra-cloud", depth=1, resolved_by="root"),
-            LockedDependency(repo_url="acme/base-lib", depth=2, resolved_by="acme/infra-cloud"),
-        ])
+        _write_lockfile(
+            lock_path,
+            [
+                LockedDependency(repo_url="acme/infra-cloud", depth=1, resolved_by="root"),
+                LockedDependency(repo_url="acme/base-lib", depth=2, resolved_by="acme/infra-cloud"),
+            ],
+        )
 
         transitive_mcp = MCPIntegrator.collect_transitive(apm_modules, lock_path)
         merged = MCPIntegrator.deduplicate(transitive_mcp)
@@ -491,22 +585,26 @@ class TestVirtualPathMCPCollection:
 
         # Virtual package: acme/monorepo with virtual_path=packages/web-api
         _make_pkg_dir(
-            apm_modules, "acme/monorepo",
+            apm_modules,
+            "acme/monorepo",
             virtual_path="packages/web-api",
             name="web-api",
             mcp=["ghcr.io/acme/mcp-server-web"],
         )
 
         lock_path = tmp_path / "apm.lock.yaml"
-        _write_lockfile(lock_path, [
-            LockedDependency(
-                repo_url="acme/monorepo",
-                virtual_path="packages/web-api",
-                is_virtual=True,
-                depth=1,
-                resolved_by="root",
-            ),
-        ])
+        _write_lockfile(
+            lock_path,
+            [
+                LockedDependency(
+                    repo_url="acme/monorepo",
+                    virtual_path="packages/web-api",
+                    is_virtual=True,
+                    depth=1,
+                    resolved_by="root",
+                ),
+            ],
+        )
 
         result = MCPIntegrator.collect_transitive(apm_modules, lock_path)
         names = [d.name for d in result]
@@ -517,23 +615,27 @@ class TestVirtualPathMCPCollection:
 
         _make_pkg_dir(apm_modules, "acme/base-lib", mcp=["ghcr.io/acme/mcp-base"])
         _make_pkg_dir(
-            apm_modules, "acme/monorepo",
+            apm_modules,
+            "acme/monorepo",
             virtual_path="packages/api",
             name="api",
             mcp=["ghcr.io/acme/mcp-api"],
         )
 
         lock_path = tmp_path / "apm.lock.yaml"
-        _write_lockfile(lock_path, [
-            LockedDependency(repo_url="acme/base-lib", depth=1, resolved_by="root"),
-            LockedDependency(
-                repo_url="acme/monorepo",
-                virtual_path="packages/api",
-                is_virtual=True,
-                depth=1,
-                resolved_by="root",
-            ),
-        ])
+        _write_lockfile(
+            lock_path,
+            [
+                LockedDependency(repo_url="acme/base-lib", depth=1, resolved_by="root"),
+                LockedDependency(
+                    repo_url="acme/monorepo",
+                    virtual_path="packages/api",
+                    is_virtual=True,
+                    depth=1,
+                    resolved_by="root",
+                ),
+            ],
+        )
 
         result = MCPIntegrator.collect_transitive(apm_modules, lock_path)
         names = [d.name for d in result]
@@ -551,15 +653,27 @@ class TestSelfDefinedMCPTrustGating:
 
     def test_self_defined_skipped_for_transitive(self, tmp_path):
         apm_modules = tmp_path / "apm_modules"
-        _make_pkg_dir(apm_modules, "acme/infra-cloud", mcp=[
-            "ghcr.io/acme/mcp-registry-server",
-            {"name": "private-srv", "registry": False, "transport": "http", "url": "https://private.example.com"},
-        ])
+        _make_pkg_dir(
+            apm_modules,
+            "acme/infra-cloud",
+            mcp=[
+                "ghcr.io/acme/mcp-registry-server",
+                {
+                    "name": "private-srv",
+                    "registry": False,
+                    "transport": "http",
+                    "url": "https://private.example.com",
+                },
+            ],
+        )
 
         lock_path = tmp_path / "apm.lock.yaml"
-        _write_lockfile(lock_path, [
-            LockedDependency(repo_url="acme/infra-cloud", depth=2, resolved_by="some-dep"),
-        ])
+        _write_lockfile(
+            lock_path,
+            [
+                LockedDependency(repo_url="acme/infra-cloud", depth=2, resolved_by="some-dep"),
+            ],
+        )
 
         result = MCPIntegrator.collect_transitive(apm_modules, lock_path, trust_private=False)
         names = [d.name for d in result]
@@ -569,15 +683,27 @@ class TestSelfDefinedMCPTrustGating:
     def test_direct_dep_self_defined_auto_trusted(self, tmp_path):
         """Depth=1 packages have their self-defined MCPs auto-trusted."""
         apm_modules = tmp_path / "apm_modules"
-        _make_pkg_dir(apm_modules, "acme/infra-cloud", mcp=[
-            "ghcr.io/acme/mcp-registry-server",
-            {"name": "private-srv", "registry": False, "transport": "http", "url": "https://private.example.com"},
-        ])
+        _make_pkg_dir(
+            apm_modules,
+            "acme/infra-cloud",
+            mcp=[
+                "ghcr.io/acme/mcp-registry-server",
+                {
+                    "name": "private-srv",
+                    "registry": False,
+                    "transport": "http",
+                    "url": "https://private.example.com",
+                },
+            ],
+        )
 
         lock_path = tmp_path / "apm.lock.yaml"
-        _write_lockfile(lock_path, [
-            LockedDependency(repo_url="acme/infra-cloud", depth=1, resolved_by="root"),
-        ])
+        _write_lockfile(
+            lock_path,
+            [
+                LockedDependency(repo_url="acme/infra-cloud", depth=1, resolved_by="root"),
+            ],
+        )
 
         result = MCPIntegrator.collect_transitive(apm_modules, lock_path, trust_private=False)
         names = [d.name for d in result]
@@ -586,15 +712,27 @@ class TestSelfDefinedMCPTrustGating:
 
     def test_self_defined_included_when_trusted(self, tmp_path):
         apm_modules = tmp_path / "apm_modules"
-        _make_pkg_dir(apm_modules, "acme/infra-cloud", mcp=[
-            "ghcr.io/acme/mcp-registry-server",
-            {"name": "private-srv", "registry": False, "transport": "http", "url": "https://private.example.com"},
-        ])
+        _make_pkg_dir(
+            apm_modules,
+            "acme/infra-cloud",
+            mcp=[
+                "ghcr.io/acme/mcp-registry-server",
+                {
+                    "name": "private-srv",
+                    "registry": False,
+                    "transport": "http",
+                    "url": "https://private.example.com",
+                },
+            ],
+        )
 
         lock_path = tmp_path / "apm.lock.yaml"
-        _write_lockfile(lock_path, [
-            LockedDependency(repo_url="acme/infra-cloud", depth=1, resolved_by="root"),
-        ])
+        _write_lockfile(
+            lock_path,
+            [
+                LockedDependency(repo_url="acme/infra-cloud", depth=1, resolved_by="root"),
+            ],
+        )
 
         result = MCPIntegrator.collect_transitive(apm_modules, lock_path, trust_private=True)
         names = [d.name for d in result]
@@ -616,9 +754,11 @@ class TestStaleCleanupKeyNormalization:
         copilot_dir = tmp_path / ".copilot"
         copilot_dir.mkdir()
         copilot_config = copilot_dir / "mcp-config.json"
-        copilot_config.write_text(json.dumps({
-            "mcpServers": {"github-mcp-server": {"command": "npx", "args": ["mcp-server"]}}
-        }))
+        copilot_config.write_text(
+            json.dumps(
+                {"mcpServers": {"github-mcp-server": {"command": "npx", "args": ["mcp-server"]}}}
+            )
+        )
 
         stale = {"io.github.github/github-mcp-server"}
         MCPIntegrator.remove_stale(stale, runtime="copilot")
@@ -633,9 +773,9 @@ class TestStaleCleanupKeyNormalization:
         vscode_dir = tmp_path / ".vscode"
         vscode_dir.mkdir()
         mcp_json = vscode_dir / "mcp.json"
-        mcp_json.write_text(json.dumps({
-            "servers": {"io.github.github/github-mcp-server": {"type": "stdio"}}
-        }))
+        mcp_json.write_text(
+            json.dumps({"servers": {"io.github.github/github-mcp-server": {"type": "stdio"}}})
+        )
 
         stale = {"io.github.github/github-mcp-server"}
         MCPIntegrator.remove_stale(stale, runtime="vscode")
@@ -651,9 +791,9 @@ class TestStaleCleanupKeyNormalization:
         copilot_dir = tmp_path / ".copilot"
         copilot_dir.mkdir()
         copilot_config = copilot_dir / "mcp-config.json"
-        copilot_config.write_text(json.dumps({
-            "mcpServers": {"acme-kb": {"command": "npx", "args": ["acme-kb"]}}
-        }))
+        copilot_config.write_text(
+            json.dumps({"mcpServers": {"acme-kb": {"command": "npx", "args": ["acme-kb"]}}})
+        )
 
         stale = {"acme-kb"}
         MCPIntegrator.remove_stale(stale, runtime="copilot")

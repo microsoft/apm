@@ -23,7 +23,6 @@ from apm_cli.policy.schema import (
     UnmanagedFilesPolicy,
 )
 
-
 # -- Fixtures -------------------------------------------------------
 
 
@@ -122,9 +121,7 @@ class TestAutoDiscoveryRuns:
         assert result.exit_code == 1, result.output
 
     @patch("apm_cli.policy.discovery.discover_policy_with_chain")
-    def test_auto_discovery_no_policy_baseline_only_passes(
-        self, mock_discover, runner, tmp_path
-    ):
+    def test_auto_discovery_no_policy_baseline_only_passes(self, mock_discover, runner, tmp_path):
         _setup_project_with_unmanaged_file(tmp_path)
         mock_discover.return_value = _make_no_policy_fetch()
 
@@ -140,9 +137,7 @@ class TestAutoDiscoveryOptOut:
     """--no-policy disables auto-discovery."""
 
     @patch("apm_cli.policy.discovery.discover_policy_with_chain")
-    def test_no_policy_skips_auto_discovery(
-        self, mock_discover, runner, tmp_path
-    ):
+    def test_no_policy_skips_auto_discovery(self, mock_discover, runner, tmp_path):
         _setup_project_with_unmanaged_file(tmp_path)
         # Even though discovery would find a deny policy, --no-policy
         # means it must not be called.
@@ -159,9 +154,7 @@ class TestAutoDiscoveryFetchFailure:
     """fetch failure during auto-discovery honors fetch_failure_default."""
 
     @patch("apm_cli.policy.discovery.discover_policy_with_chain")
-    def test_fetch_failure_warn_proceeds(
-        self, mock_discover, runner, tmp_path
-    ):
+    def test_fetch_failure_warn_proceeds(self, mock_discover, runner, tmp_path):
         _setup_project_with_unmanaged_file(tmp_path)
         mock_discover.return_value = PolicyFetchResult(
             policy=None,
@@ -177,14 +170,10 @@ class TestAutoDiscoveryFetchFailure:
         assert result.exit_code == 0, result.output
 
     @patch("apm_cli.policy.discovery.discover_policy_with_chain")
-    def test_fetch_failure_block_exits_one(
-        self, mock_discover, runner, tmp_path
-    ):
+    def test_fetch_failure_block_exits_one(self, mock_discover, runner, tmp_path):
         _setup_project_with_unmanaged_file(tmp_path)
         # Add project-side opt-in to fail closed.
-        apm_yml = (tmp_path / "apm.yml").read_text() + (
-            "policy:\n  fetch_failure_default: block\n"
-        )
+        apm_yml = (tmp_path / "apm.yml").read_text() + ("policy:\n  fetch_failure_default: block\n")
         (tmp_path / "apm.yml").write_text(apm_yml, encoding="utf-8")
         mock_discover.return_value = PolicyFetchResult(
             policy=None,

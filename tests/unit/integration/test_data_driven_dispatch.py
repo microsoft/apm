@@ -12,14 +12,14 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from apm_cli.commands.install import _integrate_package_primitives
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS, PrimitiveMapping, TargetProfile
-from apm_cli.commands.install import _integrate_package_primitives
-
 
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
 
 def _make_integration_result(n=0):
     """Return an IntegrationResult with *n* files integrated."""
@@ -61,7 +61,9 @@ def _make_mock_integrators():
     command.integrate_commands_for_target = MagicMock(return_value=_make_integration_result())
 
     instruction = MagicMock()
-    instruction.integrate_instructions_for_target = MagicMock(return_value=_make_integration_result())
+    instruction.integrate_instructions_for_target = MagicMock(
+        return_value=_make_integration_result()
+    )
 
     hook = MagicMock()
     hook.integrate_hooks_for_target = MagicMock(return_value=_make_hook_result())
@@ -102,6 +104,7 @@ def _dispatch(targets, integrators=None, package_info=None, project_root=None):
 # 1. TestTargetGatingRegression
 # ===================================================================
 
+
 class TestTargetGatingRegression:
     """Verify that the dispatch loop only invokes integrators for the
     primitives declared by each target, preventing cross-target writes."""
@@ -116,7 +119,9 @@ class TestTargetGatingRegression:
             target = call_args[0][0]
             assert target.root_dir != ".github"
 
-        for call_args in mocks["instruction_integrator"].integrate_instructions_for_target.call_args_list:
+        for call_args in mocks[
+            "instruction_integrator"
+        ].integrate_instructions_for_target.call_args_list:
             target = call_args[0][0]
             assert target.root_dir != ".github"
 
@@ -131,10 +136,14 @@ class TestTargetGatingRegression:
         _result, mocks = _dispatch(targets)
 
         all_calls = []
-        for name in ("prompt_integrator", "agent_integrator",
-                      "command_integrator", "instruction_integrator",
-                      "hook_integrator"):
-            for method_name, method in vars(mocks[name]).items():
+        for name in (
+            "prompt_integrator",
+            "agent_integrator",
+            "command_integrator",
+            "instruction_integrator",
+            "hook_integrator",
+        ):
+            for method_name, method in vars(mocks[name]).items():  # noqa: B007
                 if hasattr(method, "call_args_list"):
                     for call_args in method.call_args_list:
                         if call_args[0]:
@@ -151,9 +160,13 @@ class TestTargetGatingRegression:
         _result, mocks = _dispatch(targets)
 
         dispatched_roots = set()
-        for name in ("prompt_integrator", "agent_integrator",
-                      "command_integrator", "instruction_integrator",
-                      "hook_integrator"):
+        for name in (
+            "prompt_integrator",
+            "agent_integrator",
+            "command_integrator",
+            "instruction_integrator",
+            "hook_integrator",
+        ):
             for attr_name in dir(mocks[name]):
                 method = getattr(mocks[name], attr_name)
                 if hasattr(method, "call_args_list"):
@@ -169,9 +182,13 @@ class TestTargetGatingRegression:
         targets = [KNOWN_TARGETS["codex"]]
         _result, mocks = _dispatch(targets)
         dispatched_roots = set()
-        for name in ("prompt_integrator", "agent_integrator",
-                      "command_integrator", "instruction_integrator",
-                      "hook_integrator"):
+        for name in (
+            "prompt_integrator",
+            "agent_integrator",
+            "command_integrator",
+            "instruction_integrator",
+            "hook_integrator",
+        ):
             for attr_name in dir(mocks[name]):
                 method = getattr(mocks[name], attr_name)
                 if hasattr(method, "call_args_list"):
@@ -247,6 +264,7 @@ class TestTargetGatingRegression:
 # 2. TestExhaustivenessChecks
 # ===================================================================
 
+
 class TestExhaustivenessChecks:
     """Structural checks ensuring no target x primitive pair is orphaned."""
 
@@ -254,6 +272,7 @@ class TestExhaustivenessChecks:
         """For each (target, primitive) in KNOWN_TARGETS, verify the dispatch
         table has a corresponding entry."""
         from apm_cli.integration.dispatch import get_dispatch_table
+
         dispatch = get_dispatch_table()
 
         for target_name, profile in KNOWN_TARGETS.items():
@@ -271,20 +290,20 @@ class TestExhaustivenessChecks:
 
         # Expected keys from the old hardcoded version:
         expected_keys = {
-            "prompts",             # was prompts_copilot, aliased
-            "agents_github",       # was agents_copilot, aliased
+            "prompts",  # was prompts_copilot, aliased
+            "agents_github",  # was agents_copilot, aliased
             "agents_claude",
             "agents_cursor",
             "agents_opencode",
             "agents_codex",
-            "commands",            # was commands_claude, aliased
+            "commands",  # was commands_claude, aliased
             "commands_gemini",
             "commands_opencode",
-            "instructions",        # was instructions_copilot, aliased
-            "rules_cursor",        # was instructions_cursor, aliased
-            "rules_claude",        # was instructions_claude, aliased
-            "skills",              # cross-target bucket
-            "hooks",               # cross-target bucket
+            "instructions",  # was instructions_copilot, aliased
+            "rules_cursor",  # was instructions_cursor, aliased
+            "rules_claude",  # was instructions_claude, aliased
+            "skills",  # cross-target bucket
+            "hooks",  # cross-target bucket
         }
 
         assert expected_keys == set(buckets.keys()), (
@@ -297,6 +316,7 @@ class TestExhaustivenessChecks:
 # ===================================================================
 # 3. TestSyntheticTargetProfile
 # ===================================================================
+
 
 class TestSyntheticTargetProfile:
     """Verify that a hand-built TargetProfile works end-to-end without
@@ -329,9 +349,7 @@ class TestSyntheticTargetProfile:
         pkg_dir = self.root / "packages" / "test-pkg"
         prompts_dir = pkg_dir / ".apm" / "prompts"
         prompts_dir.mkdir(parents=True)
-        (prompts_dir / "hello.prompt.md").write_text(
-            "---\nname: hello\n---\nHello world"
-        )
+        (prompts_dir / "hello.prompt.md").write_text("---\nname: hello\n---\nHello world")
 
         # Create the target root so integration proceeds
         (self.root / ".newcode").mkdir(parents=True)
@@ -344,8 +362,11 @@ class TestSyntheticTargetProfile:
 
         integrator = CommandIntegrator()
         result = integrator.integrate_commands_for_target(
-            synthetic, package_info, self.root,
-            force=False, managed_files=set(),
+            synthetic,
+            package_info,
+            self.root,
+            force=False,
+            managed_files=set(),
         )
 
         assert result.files_integrated == 1
@@ -397,7 +418,9 @@ class TestSyntheticTargetProfile:
         # validate_deploy_path, so .newcode/ prefix is accepted
         # without patching.
         result = integrator.sync_for_target(
-            synthetic, apm_package, self.root,
+            synthetic,
+            apm_package,
+            self.root,
             managed_files=managed,
         )
 
@@ -413,6 +436,7 @@ class TestSyntheticTargetProfile:
 # 4. TestSkillTargetGating  (Issue #482 regression)
 # ===================================================================
 
+
 class TestSkillTargetGating:
     """Verify that the skill integrator respects the targets parameter
     passed from the dispatch loop, preventing cross-target skill writes."""
@@ -426,9 +450,7 @@ class TestSkillTargetGating:
         # Verify skill integrator was called with targets= kwarg
         call_kwargs = mocks["skill_integrator"].integrate_package_skill.call_args
         assert call_kwargs is not None, "skill integrator was not called"
-        assert "targets" in call_kwargs.kwargs, (
-            "targets= not passed to skill integrator"
-        )
+        assert "targets" in call_kwargs.kwargs, "targets= not passed to skill integrator"
         passed_targets = call_kwargs.kwargs["targets"]
         assert len(passed_targets) == 1
         assert passed_targets[0].name == "cursor"
@@ -451,6 +473,7 @@ class TestSkillTargetGating:
 # ===================================================================
 # 5. TestPartitionBucketKey
 # ===================================================================
+
 
 class TestPartitionBucketKey:
     """Verify that partition_bucket_key produces the correct aliased keys."""
@@ -477,6 +500,7 @@ class TestPartitionBucketKey:
 # ===================================================================
 # 6. TestCodexPartitionRouting
 # ===================================================================
+
 
 class TestCodexPartitionRouting:
     """Verify that Codex deployed_files are routed to correct buckets."""
@@ -515,12 +539,14 @@ class TestClaudeRulesPartitionRouting:
 # 7. TestIntegrationPrefixSecurity
 # ===================================================================
 
+
 class TestIntegrationPrefixSecurity:
     """Verify integration prefixes include deploy_root paths."""
 
     def test_integration_prefixes_include_agents_dir(self):
         """get_integration_prefixes() includes .agents/ from deploy_root."""
         from apm_cli.integration.targets import get_integration_prefixes
+
         prefixes = get_integration_prefixes()
         assert ".agents/" in prefixes
         assert ".codex/" in prefixes
@@ -543,6 +569,7 @@ class TestGetIntegrationPrefixesTargetsParam:
     def test_prefixes_from_resolved_copilot(self):
         """Resolved copilot target yields .copilot/ prefix."""
         from dataclasses import replace
+
         from apm_cli.integration.targets import get_integration_prefixes
 
         resolved = replace(KNOWN_TARGETS["copilot"], root_dir=".copilot")
@@ -595,15 +622,9 @@ class TestScopeResolvedPartition:
             ".config/opencode/skills/my-skill/SKILL.md",
         }
         buckets = BaseIntegrator.partition_managed_files(managed, targets=[resolved])
-        assert ".config/opencode/agents/reviewer.md" in buckets.get(
-            "agents_opencode", set()
-        )
-        assert ".config/opencode/commands/test.md" in buckets.get(
-            "commands_opencode", set()
-        )
-        assert ".config/opencode/skills/my-skill/SKILL.md" in buckets.get(
-            "skills", set()
-        )
+        assert ".config/opencode/agents/reviewer.md" in buckets.get("agents_opencode", set())
+        assert ".config/opencode/commands/test.md" in buckets.get("commands_opencode", set())
+        assert ".config/opencode/skills/my-skill/SKILL.md" in buckets.get("skills", set())
 
     def test_partition_backward_compat_no_targets(self):
         """Without targets param, uses KNOWN_TARGETS (existing behavior)."""
@@ -667,28 +688,36 @@ class TestForScope:
     def test_project_scope_returns_self(self):
         """for_scope(user_scope=False) returns the same object."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         copilot = KNOWN_TARGETS["copilot"]
         assert copilot.for_scope(user_scope=False) is copilot
 
-    def test_unsupported_target_returns_none(self):
-        """for_scope returns None for targets that don't support user scope."""
+    def test_codex_is_supported_at_user_scope(self):
+        """Codex resolves cleanly at user scope."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         codex = KNOWN_TARGETS["codex"]
-        assert codex.user_supported is False
-        assert codex.for_scope(user_scope=True) is None
+        assert codex.user_supported == "partial"
+        resolved = codex.for_scope(user_scope=True)
+        assert resolved is not None
+        assert resolved.root_dir == ".codex"
 
     def test_resolves_root_dir_to_user_root(self):
         """for_scope replaces root_dir with user_root_dir."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         copilot = KNOWN_TARGETS["copilot"]
         resolved = copilot.for_scope(user_scope=True)
         assert resolved is not None
         assert resolved.root_dir == ".copilot"
         assert resolved.name == "copilot"
 
-    def test_user_root_dir_none_keeps_root_dir(self):
-        """When user_root_dir is None, root_dir stays unchanged."""
+    def test_user_root_dir_none_keeps_root_dir(self, monkeypatch):
+        """When user_root_dir is None and CLAUDE_CONFIG_DIR is unset,
+        the user-scope root_dir falls back to the project-scope value."""
+        monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         claude = KNOWN_TARGETS["claude"]
         assert claude.user_root_dir is None
         resolved = claude.for_scope(user_scope=True)
@@ -698,6 +727,7 @@ class TestForScope:
     def test_filters_unsupported_primitives(self):
         """for_scope removes unsupported primitives from the dict."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         copilot = KNOWN_TARGETS["copilot"]
         assert "prompts" in copilot.primitives
         assert "instructions" in copilot.primitives
@@ -712,6 +742,7 @@ class TestForScope:
     def test_no_unsupported_primitives_keeps_all(self):
         """Targets with empty unsupported_user_primitives keep all primitives."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         claude = KNOWN_TARGETS["claude"]
         assert claude.unsupported_user_primitives == ()
         resolved = claude.for_scope(user_scope=True)
@@ -720,6 +751,7 @@ class TestForScope:
     def test_prefix_property_reflects_resolved_root(self):
         """The prefix property uses the resolved root_dir."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         copilot = KNOWN_TARGETS["copilot"]
         resolved = copilot.for_scope(user_scope=True)
         assert resolved.prefix == ".copilot/"
@@ -728,6 +760,7 @@ class TestForScope:
     def test_opencode_resolves_to_config_dir(self):
         """OpenCode resolves to .config/opencode at user scope."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         opencode = KNOWN_TARGETS["opencode"]
         resolved = opencode.for_scope(user_scope=True)
         assert resolved is not None
@@ -735,9 +768,11 @@ class TestForScope:
 
     def test_resolve_targets_project_scope(self):
         """resolve_targets at project scope returns unmodified profiles."""
-        from apm_cli.integration.targets import resolve_targets
         import tempfile
         from pathlib import Path
+
+        from apm_cli.integration.targets import resolve_targets
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             # No target dirs exist, so fallback to copilot
@@ -747,13 +782,14 @@ class TestForScope:
             assert targets[0].root_dir == ".github"
 
     def test_resolve_targets_filters_unsupported(self):
-        """resolve_targets at user scope excludes unsupported targets."""
-        from apm_cli.integration.targets import resolve_targets, KNOWN_TARGETS
+        """resolve_targets at user scope includes all user-capable targets."""
         from pathlib import Path
+
+        from apm_cli.integration.targets import KNOWN_TARGETS, resolve_targets  # noqa: F401
+
         targets = resolve_targets(Path.home(), user_scope=True, explicit_target="all")
         target_names = {t.name for t in targets}
-        # Codex doesn't support user scope
-        assert "codex" not in target_names
+        assert "codex" in target_names
 
 
 # ===================================================================
@@ -775,12 +811,15 @@ class TestPrimitiveCoverage:
 
     def test_missing_primitive_raises(self):
         """A primitive without a handler triggers RuntimeError."""
-        from apm_cli.integration.coverage import check_primitive_coverage
         import pytest
+
+        from apm_cli.integration.coverage import check_primitive_coverage
 
         # Deliberately omit "instructions"
         incomplete_dispatch = {
-            "prompts": None, "agents": None, "commands": None,
+            "prompts": None,
+            "agents": None,
+            "commands": None,
         }
         with pytest.raises(RuntimeError, match="instructions"):
             check_primitive_coverage(
@@ -793,7 +832,10 @@ class TestPrimitiveCoverage:
         from apm_cli.integration.coverage import check_primitive_coverage
 
         dispatch_keys = {
-            "prompts", "agents", "commands", "instructions",
+            "prompts",
+            "agents",
+            "commands",
+            "instructions",
         }
         # skills and hooks are special-cased
         check_primitive_coverage(
@@ -812,6 +854,7 @@ class TestDispatchTable:
 
     def test_dispatch_table_has_all_primitives(self):
         from apm_cli.integration.dispatch import get_dispatch_table
+
         dispatch = get_dispatch_table()
         assert "prompts" in dispatch
         assert "agents" in dispatch
@@ -822,6 +865,7 @@ class TestDispatchTable:
 
     def test_skills_is_multi_target(self):
         from apm_cli.integration.dispatch import get_dispatch_table
+
         dispatch = get_dispatch_table()
         assert dispatch["skills"].multi_target is True
         for name in ("prompts", "agents", "commands", "instructions", "hooks"):
@@ -829,8 +873,9 @@ class TestDispatchTable:
 
     def test_dispatch_entries_have_valid_methods(self):
         from apm_cli.integration.dispatch import get_dispatch_table
+
         dispatch = get_dispatch_table()
-        for name, entry in dispatch.items():
+        for name, entry in dispatch.items():  # noqa: B007
             integrator = entry.integrator_class()
             assert hasattr(integrator, entry.integrate_method), (
                 f"{entry.integrator_class.__name__} missing {entry.integrate_method}"
@@ -842,6 +887,7 @@ class TestDispatchTable:
     def test_dispatch_counter_keys_match_result_dict(self):
         """Counter keys in dispatch match the keys used in install result."""
         from apm_cli.integration.dispatch import get_dispatch_table
+
         dispatch = get_dispatch_table()
         expected_counters = {"prompts", "agents", "commands", "instructions", "hooks", "skills"}
         actual_counters = {entry.counter_key for entry in dispatch.values()}
@@ -850,6 +896,7 @@ class TestDispatchTable:
     def test_lazy_initialization(self):
         """get_dispatch_table returns the same object on repeated calls."""
         from apm_cli.integration.dispatch import get_dispatch_table
+
         table1 = get_dispatch_table()
         table2 = get_dispatch_table()
         assert table1 is table2
@@ -865,13 +912,18 @@ class TestCoverageReverse:
 
     def test_dead_dispatch_entry_raises(self):
         """An entry in the dispatch table with no matching target raises."""
-        from apm_cli.integration.coverage import check_primitive_coverage
         import pytest
+
+        from apm_cli.integration.coverage import check_primitive_coverage
 
         # Add a fake primitive not in any target
         dispatch = {
-            "prompts": None, "agents": None, "commands": None,
-            "instructions": None, "hooks": None, "skills": None,
+            "prompts": None,
+            "agents": None,
+            "commands": None,
+            "instructions": None,
+            "hooks": None,
+            "skills": None,
             "phantoms": None,  # not in any KNOWN_TARGETS
         }
         with pytest.raises(RuntimeError, match="phantoms"):
@@ -881,6 +933,7 @@ class TestCoverageReverse:
         """The real dispatch table passes both forward and reverse checks."""
         from apm_cli.integration.coverage import check_primitive_coverage
         from apm_cli.integration.dispatch import get_dispatch_table
+
         # Should not raise (checks both directions + method existence)
         check_primitive_coverage(get_dispatch_table())
 
@@ -891,6 +944,7 @@ class TestHookResultShim:
     def test_old_style_construction(self):
         """Old-style HookIntegrationResult(hooks_integrated=N) works."""
         from apm_cli.integration.hook_integrator import HookIntegrationResult
+
         r = HookIntegrationResult(hooks_integrated=5, scripts_copied=3, target_paths=[])
         assert r.hooks_integrated == 5
         assert r.files_integrated == 5
@@ -899,6 +953,7 @@ class TestHookResultShim:
     def test_old_style_no_target_paths(self):
         """Old-style construction without target_paths defaults to []."""
         from apm_cli.integration.hook_integrator import HookIntegrationResult
+
         r = HookIntegrationResult(hooks_integrated=0, scripts_copied=0)
         assert r.hooks_integrated == 0
         assert r.target_paths == []
@@ -906,9 +961,13 @@ class TestHookResultShim:
     def test_new_style_construction(self):
         """New-style IntegrationResult fields work on HookIntegrationResult."""
         from apm_cli.integration.hook_integrator import HookIntegrationResult
+
         r = HookIntegrationResult(
-            files_integrated=3, files_updated=0, files_skipped=0,
-            target_paths=[], scripts_copied=1,
+            files_integrated=3,
+            files_updated=0,
+            files_skipped=0,
+            target_paths=[],
+            scripts_copied=1,
         )
         assert r.files_integrated == 3
         assert r.hooks_integrated == 3  # property alias

@@ -158,9 +158,7 @@ class TestPruneCommand:
             result = self.runner.invoke(cli, ["prune", "--dry-run"])
             assert result.exit_code == 0
             assert "orphan-org/orphan-repo" in result.output
-            assert (
-                orphan_dir.exists()
-            ), "Package dir must NOT be removed in dry-run mode"
+            assert orphan_dir.exists(), "Package dir must NOT be removed in dry-run mode"
 
     def test_dry_run_says_no_changes_made(self):
         """--dry-run output should indicate no changes were made."""
@@ -214,9 +212,7 @@ class TestPruneCommand:
             result = self.runner.invoke(cli, ["prune"])
             assert result.exit_code == 0
             # Output should mention the removal (count or package name)
-            assert (
-                "Pruned" in result.output or "orphan-org/orphan-repo" in result.output
-            )
+            assert "Pruned" in result.output or "orphan-org/orphan-repo" in result.output
 
     def test_prune_removes_multiple_orphans(self):
         """prune removes all orphaned packages in one pass."""
@@ -353,9 +349,9 @@ dependencies:
             _write_lockfile(tmp, lockfile_content)
             result = self.runner.invoke(cli, ["prune"])
             assert result.exit_code == 0
-            assert not (
-                tmp / "apm.lock.yaml"
-            ).exists(), "apm.lock.yaml should be deleted when empty"
+            assert not (tmp / "apm.lock.yaml").exists(), (
+                "apm.lock.yaml should be deleted when empty"
+            )
 
     def test_prune_preserves_lockfile_for_remaining_packages(self):
         """prune keeps lockfile entries for packages that are NOT pruned."""

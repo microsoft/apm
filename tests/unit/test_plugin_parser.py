@@ -1,7 +1,7 @@
 """Unit tests for plugin_parser.py and find_plugin_json helper."""
 
 import json
-import os
+import os  # noqa: F401
 from pathlib import Path
 
 import pytest
@@ -211,7 +211,9 @@ class TestMapPluginArtifacts:
         assert (apm_dir / "agents" / "real.md").exists()
         # _ignore_symlinks callback causes copytree to skip symlinks entirely
         copied_linked = apm_dir / "agents" / "linked"
-        assert not copied_linked.exists(), "Symlinked directory should be skipped entirely by _ignore_symlinks"
+        assert not copied_linked.exists(), (
+            "Symlinked directory should be skipped entirely by _ignore_symlinks"
+        )
 
     # ---- Custom component paths from plugin.json ----
 
@@ -243,7 +245,8 @@ class TestMapPluginArtifacts:
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
         _map_plugin_artifacts(
-            plugin_dir, apm_dir,
+            plugin_dir,
+            apm_dir,
             manifest={"skills": ["skills/", "extra-skills/"]},
         )
 
@@ -269,7 +272,13 @@ class TestMapPluginArtifacts:
         """Manifest hooks as a file path copies it to .apm/hooks/hooks.json."""
         plugin_dir = tmp_path / "plugin"
         plugin_dir.mkdir()
-        hooks_data = {"hooks": {"PreToolUse": [{"matcher": "bash", "hooks": [{"type": "command", "command": "echo ok"}]}]}}
+        hooks_data = {
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "bash", "hooks": [{"type": "command", "command": "echo ok"}]}
+                ]
+            }
+        }
         (plugin_dir / "my-hooks.json").write_text(json.dumps(hooks_data))
 
         apm_dir = plugin_dir / ".apm"
@@ -284,7 +293,11 @@ class TestMapPluginArtifacts:
         """Manifest hooks as an inline object writes .apm/hooks/hooks.json."""
         plugin_dir = tmp_path / "plugin"
         plugin_dir.mkdir()
-        hooks_obj = {"hooks": {"Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "echo done"}]}]}}
+        hooks_obj = {
+            "hooks": {
+                "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "echo done"}]}]
+            }
+        }
 
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
@@ -320,7 +333,8 @@ class TestMapPluginArtifacts:
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
         _map_plugin_artifacts(
-            plugin_dir, apm_dir,
+            plugin_dir,
+            apm_dir,
             manifest={"agents": "does-not-exist/", "skills": ["also-missing/"]},
         )
 
@@ -341,7 +355,8 @@ class TestMapPluginArtifacts:
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
         _map_plugin_artifacts(
-            plugin_dir, apm_dir,
+            plugin_dir,
+            apm_dir,
             manifest={"agents": ["./agents/planner.md", "./agents/coder.md"]},
         )
 
@@ -358,7 +373,8 @@ class TestMapPluginArtifacts:
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
         _map_plugin_artifacts(
-            plugin_dir, apm_dir,
+            plugin_dir,
+            apm_dir,
             manifest={"skills": ["my-skill.md"]},
         )
 
@@ -373,7 +389,8 @@ class TestMapPluginArtifacts:
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
         _map_plugin_artifacts(
-            plugin_dir, apm_dir,
+            plugin_dir,
+            apm_dir,
             manifest={"commands": ["deploy.md"]},
         )
 
@@ -391,7 +408,8 @@ class TestMapPluginArtifacts:
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
         _map_plugin_artifacts(
-            plugin_dir, apm_dir,
+            plugin_dir,
+            apm_dir,
             manifest={"agents": ["./agents", "extra-agent.md"]},
         )
 
@@ -416,15 +434,17 @@ class TestMapPluginArtifacts:
         apm_dir = plugin_dir / ".apm"
         apm_dir.mkdir()
         _map_plugin_artifacts(
-            plugin_dir, apm_dir,
+            plugin_dir,
+            apm_dir,
             manifest={"agents": ["./agents"]},
         )
 
         # Files should be directly in .apm/agents/, NOT .apm/agents/agents/
         assert (apm_dir / "agents" / "context-architect.md").read_text() == "# Context Architect"
         assert (apm_dir / "agents" / "planner.md").read_text() == "# Planner"
-        assert not (apm_dir / "agents" / "agents").exists(), \
+        assert not (apm_dir / "agents" / "agents").exists(), (
             "Should not create nested agents/agents/ directory"
+        )
 
 
 class TestGenerateApmYml:

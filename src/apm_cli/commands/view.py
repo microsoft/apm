@@ -8,7 +8,7 @@ reused by the backward-compatible ``apm deps info`` alias.
 
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional  # noqa: F401, UP035
 
 import click
 
@@ -17,10 +17,9 @@ from ..core.auth import AuthResolver
 from ..core.command_logger import CommandLogger
 from ..deps.github_downloader import GitHubPackageDownloader
 from ..models.dependency.reference import DependencyReference
-from ..models.dependency.types import GitReferenceType, RemoteRef
+from ..models.dependency.types import GitReferenceType, RemoteRef  # noqa: F401
 from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
 from .deps._utils import _get_detailed_package_info
-
 
 # ------------------------------------------------------------------
 # Valid field names (extensible in follow-up tasks)
@@ -37,7 +36,7 @@ def resolve_package_path(
     package: str,
     apm_modules_path: Path,
     logger: CommandLogger,
-) -> Optional[Path]:
+) -> Path | None:
     """Locate the package directory inside *apm_modules_path*.
 
     Resolution order:
@@ -65,8 +64,7 @@ def resolve_package_path(
         logger.error(str(exc))
         return None
     if direct_match.is_dir() and (
-        (direct_match / APM_YML_FILENAME).exists()
-        or (direct_match / SKILL_MD_FILENAME).exists()
+        (direct_match / APM_YML_FILENAME).exists() or (direct_match / SKILL_MD_FILENAME).exists()
     ):
         return direct_match
 
@@ -76,7 +74,7 @@ def resolve_package_path(
             for package_dir in org_dir.iterdir():
                 if package_dir.is_dir() and not package_dir.name.startswith("."):
                     if (
-                        package_dir.name == package
+                        package_dir.name == package  # noqa: PLR1714
                         or f"{org_dir.name}/{package_dir.name}" == package
                     ):
                         return package_dir
@@ -122,7 +120,7 @@ def display_package_info(
     package: str,
     package_path: Path,
     logger: CommandLogger,
-    project_root: Optional[Path] = None,
+    project_root: Path | None = None,
 ) -> None:
     """Load and render package metadata to the terminal.
 
@@ -137,33 +135,25 @@ def display_package_info(
         locked_ref = ""
         locked_commit = ""
         if project_root is not None:
-            locked_ref, locked_commit = _lookup_lockfile_ref(
-                package, project_root
-            )
+            locked_ref, locked_commit = _lookup_lockfile_ref(package, project_root)
 
         try:
-            from rich.panel import Panel
             from rich.console import Console
+            from rich.panel import Panel
 
             console = Console()
 
             content_lines = []
             content_lines.append(f"[bold]Name:[/bold] {package_info['name']}")
             content_lines.append(f"[bold]Version:[/bold] {package_info['version']}")
-            content_lines.append(
-                f"[bold]Description:[/bold] {package_info['description']}"
-            )
+            content_lines.append(f"[bold]Description:[/bold] {package_info['description']}")
             content_lines.append(f"[bold]Author:[/bold] {package_info['author']}")
             content_lines.append(f"[bold]Source:[/bold] {package_info['source']}")
             if locked_ref:
                 content_lines.append(f"[bold]Ref:[/bold] {locked_ref}")
             if locked_commit:
-                content_lines.append(
-                    f"[bold]Commit:[/bold] {locked_commit[:12]}"
-                )
-            content_lines.append(
-                f"[bold]Install Path:[/bold] {package_info['install_path']}"
-            )
+                content_lines.append(f"[bold]Commit:[/bold] {locked_commit[:12]}")
+            content_lines.append(f"[bold]Install Path:[/bold] {package_info['install_path']}")
             content_lines.append("")
             content_lines.append("[bold]Context Files:[/bold]")
 
@@ -171,17 +161,13 @@ def display_package_info(
                 if count > 0:
                     content_lines.append(f"  * {count} {context_type}")
 
-            if not any(
-                count > 0 for count in package_info["context_files"].values()
-            ):
+            if not any(count > 0 for count in package_info["context_files"].values()):
                 content_lines.append("  * No context files found")
 
             content_lines.append("")
             content_lines.append("[bold]Agent Workflows:[/bold]")
             if package_info["workflows"] > 0:
-                content_lines.append(
-                    f"  * {package_info['workflows']} executable workflows"
-                )
+                content_lines.append(f"  * {package_info['workflows']} executable workflows")
             else:
                 content_lines.append("  * No agent workflows found")
 
@@ -219,17 +205,13 @@ def display_package_info(
                 if count > 0:
                     click.echo(f"  * {count} {context_type}")
 
-            if not any(
-                count > 0 for count in package_info["context_files"].values()
-            ):
+            if not any(count > 0 for count in package_info["context_files"].values()):
                 click.echo("  * No context files found")
 
             click.echo("")
             click.echo("Agent Workflows:")
             if package_info["workflows"] > 0:
-                click.echo(
-                    f"  * {package_info['workflows']} executable workflows"
-                )
+                click.echo(f"  * {package_info['workflows']} executable workflows")
             else:
                 click.echo("  * No agent workflows found")
 
@@ -253,10 +235,10 @@ def _display_marketplace_plugin(
     Fetches the marketplace manifest, finds the plugin, and renders
     its entry information (name, version, description, source).
     """
+    from ..marketplace.client import fetch_or_cache
     from ..marketplace.errors import MarketplaceFetchError
     from ..marketplace.models import MarketplaceSource
     from ..marketplace.registry import get_marketplace_by_name
-    from ..marketplace.client import fetch_or_cache
 
     # -- Fetch marketplace & plugin --
     try:
@@ -288,7 +270,9 @@ def _display_marketplace_plugin(
         from ..marketplace.resolver import resolve_marketplace_plugin
 
         canonical_str, _resolved = resolve_marketplace_plugin(
-            plugin_name, marketplace_name, plugin,
+            plugin_name,
+            marketplace_name,
+            plugin,
         )
         resolved_display = canonical_str
     except Exception:
@@ -324,11 +308,13 @@ def _display_marketplace_plugin(
         if plugin.tags:
             lines.append(f"[bold]Tags:[/bold]        {', '.join(plugin.tags)}")
 
-        console.print(Panel(
-            "\n".join(lines),
-            title=title,
-            border_style="cyan",
-        ))
+        console.print(
+            Panel(
+                "\n".join(lines),
+                title=title,
+                border_style="cyan",
+            )
+        )
         click.echo("")
         click.echo(f"  Install: apm install {plugin.name}@{marketplace_name}")
 
@@ -381,7 +367,7 @@ def display_versions(package: str, logger: CommandLogger) -> None:
 
     try:
         downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
-        refs: List[RemoteRef] = downloader.list_remote_refs(dep_ref)
+        refs: list[RemoteRef] = downloader.list_remote_refs(dep_ref)
     except RuntimeError as exc:
         logger.error(f"Failed to list versions for '{package}': {exc}")
         sys.exit(1)
@@ -421,10 +407,7 @@ def display_versions(package: str, logger: CommandLogger) -> None:
         click.echo(f"{'Name':<30} {'Type':<10} {'Commit':<10}")
         click.echo("-" * 50)
         for ref in refs:
-            click.echo(
-                f"{ref.name:<30} {ref.ref_type.value:<10} "
-                f"{ref.commit_sha[:8]:<10}"
-            )
+            click.echo(f"{ref.name:<30} {ref.ref_type.value:<10} {ref.commit_sha[:8]:<10}")
 
 
 # ------------------------------------------------------------------
@@ -435,9 +418,15 @@ def display_versions(package: str, logger: CommandLogger) -> None:
 @click.command(name="view")
 @click.argument("package", required=True)
 @click.argument("field", required=False, default=None)
-@click.option("--global", "-g", "global_", is_flag=True, default=False,
-              help="Inspect package from user scope (~/.apm/)")
-def view(package: str, field: Optional[str], global_: bool):
+@click.option(
+    "--global",
+    "-g",
+    "global_",
+    is_flag=True,
+    default=False,
+    help="Inspect package from user scope (~/.apm/)",
+)
+def view(package: str, field: str | None, global_: bool):
     """View package metadata or list remote versions.
 
     Without FIELD, displays local metadata for an installed package.
@@ -461,9 +450,7 @@ def view(package: str, field: Optional[str], global_: bool):
     if field is not None:
         if field not in VALID_FIELDS:
             valid_list = ", ".join(VALID_FIELDS)
-            logger.error(
-                f"Unknown field '{field}'. Valid fields: {valid_list}"
-            )
+            logger.error(f"Unknown field '{field}'. Valid fields: {valid_list}")
             sys.exit(1)
 
         if field == "versions":

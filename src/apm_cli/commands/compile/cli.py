@@ -1,12 +1,12 @@
 """APM compile command CLI."""
 
 import sys
-from pathlib import Path
+from pathlib import Path  # noqa: F401
 
 import click
 
-from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME
 from ...compilation import AgentsCompiler, CompilationConfig
+from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
 from ...core.target_detection import TargetParamType
 from ...primitives.discovery import discover_primitives
@@ -16,7 +16,6 @@ from ...utils.console import (
     _rich_panel,
 )
 from .._helpers import (
-    _atomic_write,
     _check_orphaned_packages,
     _get_console,
     _rich_blank_line,
@@ -36,6 +35,7 @@ def _display_single_file_summary(stats, c_status, c_hash, output_path, dry_run):
             return
 
         import os
+
         from rich.table import Table
 
         table = Table(
@@ -68,7 +68,7 @@ def _display_single_file_summary(stats, c_status, c_hash, output_path, dry_run):
 
         try:
             file_size = os.path.getsize(output_path) if not dry_run else 0
-            size_str = f"{file_size/1024:.1f}KB" if file_size > 0 else "Preview"
+            size_str = f"{file_size / 1024:.1f}KB" if file_size > 0 else "Preview"
             output_details = f"{output_path.name} ({size_str})"
         except Exception:
             output_details = f"{output_path.name}"
@@ -95,9 +95,7 @@ def _display_next_steps(output):
             from rich.panel import Panel
 
             steps_content = "\n".join(f"* {step}" for step in next_steps)
-            console.print(
-                Panel(steps_content, title=" Next Steps", border_style="blue")
-            )
+            console.print(Panel(steps_content, title=" Next Steps", border_style="blue"))
         else:
             _rich_info("Next steps:")
             for step in next_steps:
@@ -164,31 +162,42 @@ def _get_validation_suggestion(error_msg):
 
 
 def _resolve_compile_target(target):
-    """Map CLI target input to compiler-understood target string.
+    """Map CLI target input to a compiler-understood target.
 
-    The compiler understands ``"vscode"``, ``"claude"``, ``"gemini"``,
-    and ``"all"``.  Multi-target lists are mapped to the narrowest
-    equivalent; any combination of two or more distinct compiler
-    families collapses to ``"all"``.
+    The compiler understands single-string targets (``"vscode"``,
+    ``"claude"``, ``"gemini"``, ``"all"``) and ``frozenset`` targets
+    containing compiler-family names (``"agents"``, ``"claude"``,
+    ``"gemini"``).
+
+    Multi-target lists are mapped to the narrowest representation:
+    a single string when only one compiler family is needed, or a
+    ``frozenset`` of families when multiple are needed.  This avoids
+    collapsing to ``"all"`` (which would incorrectly generate files
+    for every family).
 
     Args:
         target: A single target string, a list of target strings, or ``None``.
 
     Returns:
-        A single string (or ``None``) suitable for :func:`detect_target`.
+        A single string, a ``frozenset`` of compiler families, or ``None``.
     """
     if target is None:
         return None  # will trigger detect_target() auto-detection
     if isinstance(target, list):
         target_set = set(target)
-        has_agents_family = bool(
-            target_set & {"copilot", "vscode", "agents", "cursor", "opencode", "codex"}
-        )
+        agents_family = {"copilot", "vscode", "agents", "cursor", "opencode", "codex"}
+        has_agents_family = bool(target_set & agents_family)
         has_claude = "claude" in target_set
         has_gemini = "gemini" in target_set
-        distinct = sum([has_agents_family, has_claude, has_gemini])
-        if distinct >= 2:
-            return "all"
+        families = set()
+        if has_agents_family:
+            families.add("agents")
+        if has_claude:
+            families.add("claude")
+        if has_gemini:
+            families.add("gemini")
+        if len(families) >= 2:
+            return frozenset(families)
         elif has_claude:
             return "claude"
         elif has_gemini:
@@ -304,16 +313,11 @@ def compile(
         # Check if .apm directory has actual content
         apm_dir = Path(APM_DIR)
         local_apm_has_content = apm_dir.exists() and (
-            any(apm_dir.rglob("*.instructions.md"))
-            or any(apm_dir.rglob("*.chatmode.md"))
+            any(apm_dir.rglob("*.instructions.md")) or any(apm_dir.rglob("*.chatmode.md"))
         )
 
         # If no primitive sources exist, check deeper to provide better feedback
-        if (
-            not apm_modules_exists
-            and not local_apm_has_content
-            and not constitution_exists
-        ):
+        if not apm_modules_exists and not local_apm_has_content and not constitution_exists:
             # Check if .apm directories exist but are empty
             has_empty_apm = (
                 apm_dir.exists()
@@ -330,9 +334,7 @@ def compile(
                 logger.error("No APM content found to compile")
                 logger.progress(" To get started:")
                 logger.progress("   1. Install APM dependencies: apm install <owner>/<repo>")
-                logger.progress(
-                    "   2. Or create local instructions: mkdir -p .apm/instructions"
-                )
+                logger.progress("   2. Or create local instructions: mkdir -p .apm/instructions")
                 logger.progress("   3. Then create .instructions.md or .chatmode.md files")
 
             if not dry_run:  # Don't exit on dry-run to allow testing
@@ -361,6 +363,7 @@ def compile(
             # Show MCP dependency validation count
             try:
                 from ...models.apm_package import APMPackage
+
                 apm_pkg = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
                 mcp_count = len(apm_pkg.get_mcp_dependencies())
                 if mcp_count > 0:
@@ -377,31 +380,52 @@ def compile(
         logger.start("Starting context compilation...", symbol="cogs")
 
         # Auto-detect target if not explicitly provided
-        from ...core.target_detection import detect_target, get_target_description
+        from ...core.target_detection import (
+            REASON_NO_TARGET_FOLDER,
+            detect_target,
+            get_target_description,
+        )
 
-        # Get config target from apm.yml if available
+        # Get config target from apm.yml if available.  When the file is
+        # absent we proceed with auto-detection; when it is present but
+        # malformed we let the parse error surface so users see exactly
+        # what is wrong (e.g. ``target: opencode,bogus`` -> a ValueError
+        # naming the bad token), rather than silently falling through to
+        # auto-detect.  See #820.
+        from ...models.apm_package import APMPackage
+
         config_target = None
-        try:
-            from ...models.apm_package import APMPackage
-
-            apm_pkg = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
+        apm_yml_path = Path(APM_YML_FILENAME)
+        if apm_yml_path.exists():
+            apm_pkg = APMPackage.from_apm_yml(apm_yml_path)
             config_target = apm_pkg.target
-        except Exception:
-            # No apm.yml or parsing error - proceed with auto-detection
-            pass
 
-        # Resolve list targets to compiler-understood string
+        # Resolve list targets to compiler-understood value
         compile_target = _resolve_compile_target(target)
         # Also handle config_target being a list (from apm.yml target: [claude, copilot])
         compile_config_target = _resolve_compile_target(config_target)
-        detected_target, detection_reason = detect_target(
-            project_root=Path("."),
-            explicit_target=compile_target,
-            config_target=compile_config_target,
-        )
 
-        # Map 'minimal' to 'vscode' for the compiler (AGENTS.md only, no folder integration)
-        effective_target = detected_target if detected_target != "minimal" else "vscode"
+        # A frozenset means multiple compiler families were explicitly
+        # requested -- bypass detect_target() since it only handles strings.
+        if isinstance(compile_target, frozenset):
+            effective_target = compile_target
+            detection_reason = "explicit --target flag"
+        elif isinstance(compile_config_target, frozenset) and compile_target is None:
+            effective_target = compile_config_target
+            detection_reason = "apm.yml target"
+        else:
+            # Pass config_target only when it's a string -- detect_target() is
+            # typed for Optional[str], and a frozenset config_target is already
+            # handled by the branch above.
+            detected_target, detection_reason = detect_target(
+                project_root=Path("."),
+                explicit_target=compile_target,
+                config_target=compile_config_target
+                if isinstance(compile_config_target, str)
+                else None,
+            )
+            # Map 'minimal' to 'vscode' for the compiler (AGENTS.md only, no folder integration)
+            effective_target = detected_target if detected_target != "minimal" else "vscode"
 
         # Build config with distributed compilation flags (Task 7)
         config = CompilationConfig.from_apm_yml(
@@ -423,37 +447,45 @@ def compile(
             # Show target-aware message with detection reason. Use
             # get_target_description() so any future target added to
             # target_detection shows up here automatically.
-            if isinstance(target, list):
-                # Multi-target list: show what the compiler will produce
-                _target_label = ",".join(target)
-                if effective_target == "all":
-                    logger.progress(
-                        f"Compiling for AGENTS.md + CLAUDE.md (--target {_target_label})"
-                    )
-                elif effective_target == "claude":
-                    logger.progress(
-                        f"Compiling for CLAUDE.md (--target {_target_label})"
-                    )
+            if isinstance(effective_target, frozenset):
+                # Multi-target compile (from CLI `--target a,b` OR apm.yml
+                # `target: [a, b]`): show what the compiler will produce.
+                if isinstance(target, list):
+                    _target_label = f"--target {','.join(target)}"
+                elif isinstance(config_target, list):
+                    _target_label = f"apm.yml target: [{', '.join(config_target)}]"
                 else:
-                    logger.progress(
-                        f"Compiling for AGENTS.md (--target {_target_label})"
-                    )
-            elif detected_target == "minimal":
+                    _target_label = "multi-target"
+                from ...core.target_detection import (
+                    should_compile_agents_md,
+                    should_compile_claude_md,
+                    should_compile_gemini_md,
+                )
+
+                _parts = []
+                if should_compile_agents_md(effective_target):
+                    _parts.append("AGENTS.md")
+                if should_compile_claude_md(effective_target):
+                    _parts.append("CLAUDE.md")
+                if should_compile_gemini_md(effective_target):
+                    _parts.append("GEMINI.md")
+                logger.progress(f"Compiling for {' + '.join(_parts)} ({_target_label})")
+            elif (
+                isinstance(effective_target, str)
+                and effective_target == "vscode"
+                and detection_reason == REASON_NO_TARGET_FOLDER
+            ):
                 logger.progress(f"Compiling for AGENTS.md only ({detection_reason})")
                 logger.progress(
                     " Create .github/, .claude/, .codex/, .opencode/ or .cursor/ folder for full integration",
                     symbol="light_bulb",
                 )
             else:
-                description = get_target_description(detected_target)
-                logger.progress(
-                    f"Compiling for {description} - {detection_reason}"
-                )
+                description = get_target_description(effective_target)
+                logger.progress(f"Compiling for {description} - {detection_reason}")
 
             if dry_run:
-                logger.dry_run_notice(
-                    "showing placement without writing files"
-                )
+                logger.dry_run_notice("showing placement without writing files")
             if verbose:
                 logger.verbose_detail(
                     "Verbose mode: showing source attribution and optimizer analysis"
@@ -475,8 +507,39 @@ def compile(
                     # Success message for dry run already included in formatter output
                     pass
                 else:
-                    # Success message for actual compilation
-                    logger.success("Compilation completed successfully!", symbol="check")
+                    # Defense-in-depth (#820): don't claim "completed
+                    # successfully" when zero files were emitted.  With
+                    # parse_target_field as the upstream gatekeeper this is
+                    # unreachable in normal flow, but silent zero-effect
+                    # success is the worst-case package-manager DX.
+                    #
+                    # Pattern-based stat scan (instead of a hardcoded key
+                    # list) so new compile-time targets pick up the guard
+                    # automatically: any stat ending in ``_files_written``
+                    # or ``_files_generated`` contributes to the total.
+                    _files_written = sum(
+                        int(v or 0)
+                        for k, v in result.stats.items()
+                        if k.endswith(("_files_written", "_files_generated"))
+                    )
+                    if _files_written > 0:
+                        logger.success(
+                            "Compilation completed successfully!",
+                            symbol="check",
+                        )
+                    else:
+                        # Zero-output compile is the silent-success failure
+                        # mode #820 guards against.  Don't claim success;
+                        # surface what the user can act on.  The cause is
+                        # usually one of: target dirs not present (auto-
+                        # detect found nothing), explicit target rejected
+                        # by policy, or no primitives in the project.
+                        logger.warning(
+                            "Compilation completed but produced no output "
+                            "files. Check that target directories exist "
+                            "(e.g. .github/, .claude/) or set 'target:' "
+                            "in apm.yml / pass --target explicitly."
+                        )
 
             else:
                 # Traditional single-file compilation - keep existing logic
@@ -503,26 +566,6 @@ def compile(
                         output_path=output_path,
                     )
 
-                    # Compute deterministic Build ID (12-char SHA256) over content with placeholder removed
-                    import hashlib
-
-                    from ...compilation.constants import BUILD_ID_PLACEHOLDER
-
-                    lines = final_content.splitlines()
-                    # Identify placeholder line index
-                    try:
-                        idx = lines.index(BUILD_ID_PLACEHOLDER)
-                    except ValueError:
-                        idx = None
-                    hash_input_lines = [l for i, l in enumerate(lines) if i != idx]
-                    hash_bytes = "\n".join(hash_input_lines).encode("utf-8")
-                    build_id = hashlib.sha256(hash_bytes).hexdigest()[:12]
-                    if idx is not None:
-                        lines[idx] = f"<!-- Build ID: {build_id} -->"
-                        final_content = "\n".join(lines) + (
-                            "\n" if final_content.endswith("\n") else ""
-                        )
-
                     if not dry_run:
                         # Only rewrite when content materially changes (creation, update, missing constitution case)
                         if c_status in ("CREATED", "UPDATED", "MISSING"):
@@ -542,7 +585,9 @@ def compile(
                                         f"-- run 'apm audit --file {output_path}' to inspect"
                                     )
                             try:
-                                _atomic_write(output_path, final_content)
+                                from ...compilation.output_writer import CompiledOutputWriter
+
+                                CompiledOutputWriter().write(output_path, final_content)
                             except OSError as e:
                                 logger.error(f"Failed to write final AGENTS.md: {e}")
                                 sys.exit(1)
@@ -572,20 +617,14 @@ def compile(
                     _display_single_file_summary(stats, c_status, c_hash, output_path, dry_run)
 
                     if dry_run:
-                        preview = final_content[:500] + (
-                            "..." if len(final_content) > 500 else ""
-                        )
-                        _rich_panel(
-                            preview, title=" Generated Content Preview", style="cyan"
-                        )
+                        preview = final_content[:500] + ("..." if len(final_content) > 500 else "")
+                        _rich_panel(preview, title=" Generated Content Preview", style="cyan")
                     else:
                         _display_next_steps(output)
 
         # Display warnings for all compilation modes
         if result.warnings:
-            logger.warning(
-                f"Compilation completed with {len(result.warnings)} warning(s):"
-            )
+            logger.warning(f"Compilation completed with {len(result.warnings)} warning(s):")
             for warning in result.warnings:
                 logger.warning(f"  {warning}")
 

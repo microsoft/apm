@@ -1,10 +1,10 @@
 """Tests for active_targets() resolution in targets.py."""
 
-import tempfile
 import shutil
+import tempfile
 from pathlib import Path
 
-from apm_cli.integration.targets import active_targets, KNOWN_TARGETS
+from apm_cli.integration.targets import KNOWN_TARGETS, active_targets
 
 
 class TestActiveTargets:
@@ -94,9 +94,19 @@ class TestActiveTargets:
         targets = active_targets(self.root, explicit_target="claude")
         assert [t.name for t in targets] == ["claude"]
 
-    def test_explicit_unknown_returns_empty(self):
-        targets = active_targets(self.root, explicit_target="nonexistent")
-        assert targets == []
+    def test_unknown_target_raises_at_parse_time(self):
+        """Unknown tokens in apm.yml or --target must fail at the parser.
+
+        Replaces the previous ``test_explicit_unknown_returns_empty`` --
+        the silent-empty contract was the root cause of #820 (apm install
+        and apm compile exited 0 while deploying nothing).
+        """
+        import pytest
+
+        from apm_cli.core.target_detection import parse_target_field
+
+        with pytest.raises(ValueError, match="not a valid target"):
+            parse_target_field("nonexistent")
 
     # -- codex detection --
 
@@ -171,12 +181,22 @@ class TestActiveTargets:
         targets = active_targets(self.root, explicit_target=["claude", "all"])
         assert len(targets) == len(KNOWN_TARGETS)
 
-    def test_explicit_list_unknown_targets_falls_back_to_copilot(self):
+    def test_explicit_list_all_unknown_returns_empty(self):
+        """When the parser is bypassed and all tokens are unknown, the
+        result is an empty list -- the old asymmetric ``[copilot]`` fallback
+        was removed in #820 because the parser
+        (:func:`apm_cli.core.target_detection.parse_target_field`) now
+        rejects unknown tokens at the entry point."""
         targets = active_targets(self.root, explicit_target=["nonexistent", "bogus"])
-        assert [t.name for t in targets] == ["copilot"]
+        assert targets == []
 
     def test_explicit_list_mixed_known_unknown(self):
-        """Known targets are included, unknown ones are silently skipped."""
+        """Known targets are included, unknown ones are skipped (no fallback).
+
+        In normal use the parser rejects this input upstream; this test
+        exercises the post-parser invariant that the loop only adds known
+        profiles.
+        """
         targets = active_targets(self.root, explicit_target=["claude", "nonexistent"])
         assert [t.name for t in targets] == ["claude"]
 
@@ -198,9 +218,7 @@ class TestActiveTargets:
 
     def test_explicit_list_preserves_order(self):
         """Result order matches input order."""
-        targets = active_targets(
-            self.root, explicit_target=["cursor", "claude", "copilot"]
-        )
+        targets = active_targets(self.root, explicit_target=["cursor", "claude", "copilot"])
         assert [t.name for t in targets] == ["cursor", "claude", "copilot"]
 
     def test_explicit_list_codex_at_project_scope(self):

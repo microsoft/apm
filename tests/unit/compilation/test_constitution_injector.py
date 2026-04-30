@@ -1,12 +1,18 @@
 """Tests for constitution_block helpers and ConstitutionInjector."""
+
 from __future__ import annotations
 
-import tempfile
+import tempfile  # noqa: F401
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch  # noqa: F401
 
-import pytest
+import pytest  # noqa: F401
 
+from apm_cli.compilation.constants import (
+    CONSTITUTION_MARKER_BEGIN,
+    CONSTITUTION_MARKER_END,
+    CONSTITUTION_RELATIVE_PATH,
+)
 from apm_cli.compilation.constitution import clear_constitution_cache
 from apm_cli.compilation.constitution_block import (
     ExistingBlock,
@@ -14,11 +20,6 @@ from apm_cli.compilation.constitution_block import (
     find_existing_block,
     inject_or_update,
     render_block,
-)
-from apm_cli.compilation.constants import (
-    CONSTITUTION_MARKER_BEGIN,
-    CONSTITUTION_MARKER_END,
-    CONSTITUTION_RELATIVE_PATH,
 )
 from apm_cli.compilation.injector import ConstitutionInjector
 
@@ -29,6 +30,7 @@ _END = CONSTITUTION_MARKER_END
 # ---------------------------------------------------------------------------
 # render_block
 # ---------------------------------------------------------------------------
+
 
 class TestRenderBlock:
     def test_contains_begin_and_end_markers(self):
@@ -44,7 +46,7 @@ class TestRenderBlock:
     def test_hash_line_present(self):
         block = render_block("content")
         lines = block.splitlines()
-        assert any(l.startswith("hash:") for l in lines)
+        assert any(l.startswith("hash:") for l in lines)  # noqa: E741
 
     def test_hash_matches_compute(self):
         content = "My constitution text"
@@ -69,6 +71,7 @@ class TestRenderBlock:
 # ---------------------------------------------------------------------------
 # find_existing_block
 # ---------------------------------------------------------------------------
+
 
 class TestFindExistingBlock:
     def _make_block_content(self, inner="Rule 1\n") -> str:
@@ -103,7 +106,7 @@ class TestFindExistingBlock:
         assert result is not None
         assert result.start_index == len(prefix)
         # end_index points to end of closing marker (regex excludes trailing newline)
-        assert content[result.start_index:result.end_index] == block_text.rstrip()
+        assert content[result.start_index : result.end_index] == block_text.rstrip()
 
     def test_raw_contains_markers(self):
         content = self._make_block_content()
@@ -115,6 +118,7 @@ class TestFindExistingBlock:
 # ---------------------------------------------------------------------------
 # inject_or_update
 # ---------------------------------------------------------------------------
+
 
 class TestInjectOrUpdate:
     def _rendered_block(self, content: str) -> str:
@@ -131,7 +135,7 @@ class TestInjectOrUpdate:
     def test_created_block_at_top_by_default(self):
         agents_text = "# Existing content\n"
         new_block = self._rendered_block("My rule")
-        updated, status = inject_or_update(agents_text, new_block)
+        updated, status = inject_or_update(agents_text, new_block)  # noqa: RUF059
         assert updated.startswith(_BEGIN)
 
     def test_updates_changed_block(self):
@@ -170,6 +174,7 @@ class TestInjectOrUpdate:
 # ConstitutionInjector
 # ---------------------------------------------------------------------------
 
+
 class TestConstitutionInjector:
     def setup_method(self):
         clear_constitution_cache()
@@ -198,14 +203,14 @@ class TestConstitutionInjector:
         output_path = tmp_path / "AGENTS.md"
         output_path.write_text(existing)
 
-        final, status, hash_val = injector.inject("# Title\n\nBody.\n", False, output_path)
+        final, status, hash_val = injector.inject("# Title\n\nBody.\n", False, output_path)  # noqa: RUF059
         assert status == "SKIPPED"
         assert _BEGIN in final
 
     def test_missing_when_no_constitution_file(self, tmp_path):
         injector = self._make_injector(tmp_path)
         output_path = tmp_path / "AGENTS.md"
-        final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)
+        final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)  # noqa: RUF059
         assert status == "MISSING"
         assert hash_val is None
 
@@ -216,7 +221,7 @@ class TestConstitutionInjector:
         output_path.write_text(f"# Title\n\n{existing_block}\nBody.\n")
 
         injector = self._make_injector(tmp_path)
-        final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)
+        final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)  # noqa: RUF059
         assert status == "MISSING"
         assert _BEGIN in final
 
@@ -246,7 +251,7 @@ class TestConstitutionInjector:
         output_path = tmp_path / "AGENTS.md"
         output_path.write_text(existing)
 
-        final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)
+        final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)  # noqa: RUF059
         assert status == "UNCHANGED"
 
     def test_updated_when_constitution_changes(self, tmp_path):
@@ -262,7 +267,7 @@ class TestConstitutionInjector:
         output_path = tmp_path / "AGENTS.md"
         output_path.write_text(existing)
 
-        final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)
+        final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)  # noqa: RUF059
         assert status == "UPDATED"
         assert "New rule." in final
         assert "Old rule." not in final
@@ -274,7 +279,7 @@ class TestConstitutionInjector:
 
         injector = self._make_injector(tmp_path)
         output_path = tmp_path / "nonexistent.md"
-        final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)
+        final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)  # noqa: RUF059
         assert status == "CREATED"
 
     def test_trailing_newline_in_output(self, tmp_path):
@@ -284,7 +289,7 @@ class TestConstitutionInjector:
 
         injector = self._make_injector(tmp_path)
         output_path = tmp_path / "AGENTS.md"
-        final, status, hash_val = injector.inject("# Title\n\nBody.", True, output_path)
+        final, status, hash_val = injector.inject("# Title\n\nBody.", True, output_path)  # noqa: RUF059
         assert final.endswith("\n")
 
     def test_hash_value_extracted_correctly(self, tmp_path):

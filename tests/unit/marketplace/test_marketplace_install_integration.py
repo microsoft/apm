@@ -1,9 +1,9 @@
 """Tests for the install flow with mocked marketplace resolution."""
 
-import sys
+import sys  # noqa: F401
 from unittest.mock import MagicMock, patch
 
-import pytest
+import pytest  # noqa: F401
 
 from apm_cli.marketplace.resolver import parse_marketplace_ref
 
@@ -86,20 +86,26 @@ class TestInstallExitCodeOnAllFailed:
 
         # Create minimal apm.yml so pre-flight check passes
         import yaml
+
         apm_yml = tmp_path / "apm.yml"
-        apm_yml.write_text(yaml.dump({
-            "name": "test", "version": "0.1.0",
-            "dependencies": {"apm": []},
-        }))
+        apm_yml.write_text(
+            yaml.dump(
+                {
+                    "name": "test",
+                    "version": "0.1.0",
+                    "dependencies": {"apm": []},
+                }
+            )
+        )
         monkeypatch.chdir(tmp_path)
 
         from click.testing import CliRunner
+
         from apm_cli.commands.install import install
 
         runner = CliRunner()
-        result = runner.invoke(install, ["bad-pkg"], catch_exceptions=False)
+        result = runner.invoke(install, ["bad-pkg"], catch_exceptions=False)  # noqa: F841
         # The install command returns early (exit 0) when all packages fail
         # validation -- the failures are reported via logger but do not cause
         # a non-zero exit.  Verify the mock was called with the expected args.
         mock_validate.assert_called_once()
-

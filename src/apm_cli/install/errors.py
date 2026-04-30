@@ -4,6 +4,17 @@ Centralises typed errors raised by the install machinery so call sites
 in ``commands/install.py``, ``install/pipeline.py``, ``install/phases/``,
 and ``policy/install_preflight.py`` can ``except`` a single class.
 
+Exception hierarchy
+-------------------
+* :class:`DirectDependencyError` -- one or more deps failed validation.
+* :class:`PolicyViolationError` -- org-policy enforcement halted install.
+* :class:`AuthenticationError`  -- remote-host auth failure (PAT rejected,
+  bearer rejected, no credentials available).  Carries a pre-rendered
+  ``diagnostic_context`` produced by
+  :meth:`~apm_cli.core.auth.AuthResolver.build_error_context` so the
+  renderer in ``commands/install.py`` can display actionable guidance on
+  the **default** output path (not ``--verbose``-gated).  Added in #1015.
+
 Historical note
 ---------------
 Two classes carried the same semantic until #832: ``PolicyViolationError``
@@ -16,10 +27,39 @@ external callers keep working.
 
 from __future__ import annotations
 
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional  # noqa: F401
 
 if TYPE_CHECKING:  # pragma: no cover - import for type hints only
     from apm_cli.policy.models import CIAuditResult
+
+
+class DirectDependencyError(RuntimeError):
+    """Raised when one or more direct dependencies fail validation or integration.
+
+    Bypasses the broad ``except Exception`` wrapper in ``pipeline.py`` so the
+    original message reaches ``commands/install.py`` without being double-wrapped
+    as ``"Failed to resolve APM dependencies: ..."`` (same pattern as
+    :class:`PolicyViolationError`).
+    """
+
+
+class AuthenticationError(RuntimeError):
+    """Raised when a remote host rejects credentials or none are available.
+
+    Parameters
+    ----------
+    message:
+        Short summary suitable for the ``_rich_error`` header line
+        (e.g. ``"Authentication failed for dev.azure.com"``).
+    diagnostic_context:
+        Pre-rendered multi-line guidance produced by
+        :meth:`~apm_cli.core.auth.AuthResolver.build_error_context`.
+        Embedded at raise time so the renderer never re-resolves.
+    """
+
+    def __init__(self, message: str, *, diagnostic_context: str = ""):
+        super().__init__(message)
+        self.diagnostic_context = diagnostic_context
 
 
 class PolicyViolationError(RuntimeError):
@@ -42,7 +82,7 @@ class PolicyViolationError(RuntimeError):
         self,
         message: str,
         *,
-        audit_result: "Optional[CIAuditResult]" = None,
+        audit_result: CIAuditResult | None = None,
         policy_source: str = "",
     ):
         super().__init__(message)

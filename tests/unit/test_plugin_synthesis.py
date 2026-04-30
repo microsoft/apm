@@ -23,13 +23,16 @@ class TestPluginJsonSynthesis:
 
     def test_basic_synthesis(self, tmp_path):
         """Synthesizes plugin.json with mapped fields."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "my-plugin",
-            "version": "1.0.0",
-            "description": "A cool plugin",
-            "author": "Jane Doe",
-            "license": "MIT",
-        })
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "my-plugin",
+                "version": "1.0.0",
+                "description": "A cool plugin",
+                "author": "Jane Doe",
+                "license": "MIT",
+            },
+        )
 
         result = synthesize_plugin_json_from_apm_yml(yml)
 
@@ -41,11 +44,14 @@ class TestPluginJsonSynthesis:
 
     def test_author_string_to_object(self, tmp_path):
         """Author string maps to {name: string} object."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test",
-            "version": "1.0.0",
-            "author": "John Smith",
-        })
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test",
+                "version": "1.0.0",
+                "author": "John Smith",
+            },
+        )
 
         result = synthesize_plugin_json_from_apm_yml(yml)
 
@@ -54,11 +60,14 @@ class TestPluginJsonSynthesis:
 
     def test_author_numeric_coerced_to_string(self, tmp_path):
         """Numeric author values are coerced to strings."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test",
-            "version": "1.0.0",
-            "author": 42,
-        })
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test",
+                "version": "1.0.0",
+                "author": 42,
+            },
+        )
 
         result = synthesize_plugin_json_from_apm_yml(yml)
 
@@ -80,10 +89,13 @@ class TestPluginJsonSynthesis:
 
     def test_optional_fields_omitted_if_missing(self, tmp_path):
         """Optional fields (description, license, author) not in output if missing from apm.yml."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "minimal-pkg",
-            "version": "1.0.0",
-        })
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "minimal-pkg",
+                "version": "1.0.0",
+            },
+        )
 
         result = synthesize_plugin_json_from_apm_yml(yml)
 
@@ -125,11 +137,14 @@ class TestPluginJsonSynthesis:
 
     def test_license_without_author(self, tmp_path):
         """License can be present without author."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test",
-            "version": "1.0.0",
-            "license": "Apache-2.0",
-        })
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test",
+                "version": "1.0.0",
+                "license": "Apache-2.0",
+            },
+        )
 
         result = synthesize_plugin_json_from_apm_yml(yml)
 
@@ -138,13 +153,16 @@ class TestPluginJsonSynthesis:
 
     def test_all_fields_present(self, tmp_path):
         """All supported fields are mapped correctly."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "full-pkg",
-            "version": "2.1.0",
-            "description": "Full package",
-            "author": "Acme Corp",
-            "license": "ISC",
-        })
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "full-pkg",
+                "version": "2.1.0",
+                "description": "Full package",
+                "author": "Acme Corp",
+                "license": "ISC",
+            },
+        )
 
         result = synthesize_plugin_json_from_apm_yml(yml)
 
@@ -152,13 +170,16 @@ class TestPluginJsonSynthesis:
 
     def test_extra_apm_fields_ignored(self, tmp_path):
         """Fields not part of plugin spec (dependencies, scripts) are not in output."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test",
-            "version": "1.0.0",
-            "dependencies": {"apm": ["owner/repo"]},
-            "scripts": {"build": "echo hi"},
-            "target": "vscode",
-        })
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test",
+                "version": "1.0.0",
+                "dependencies": {"apm": ["owner/repo"]},
+                "scripts": {"build": "echo hi"},
+                "target": "vscode",
+            },
+        )
 
         result = synthesize_plugin_json_from_apm_yml(yml)
 

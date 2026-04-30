@@ -39,9 +39,7 @@ def _collect_insecure_dependency_infos(
                 url=_get_insecure_dependency_url(dep),
                 is_transitive=parent is not None,
                 introduced_by=(
-                    parent.dependency_ref.get_display_name()
-                    if parent is not None
-                    else None
+                    parent.dependency_ref.get_display_name() if parent is not None else None
                 ),
             )
         )
@@ -93,9 +91,7 @@ def _format_insecure_dependency_warning(info: _InsecureDependencyInfo) -> str:
     """Render the install-time warning text for an insecure dependency."""
     message = f"Insecure HTTP fetch (unencrypted): {info.url}"
     if info.is_transitive and info.introduced_by:
-        message = (
-            f"{message} (transitive, introduced by {info.introduced_by})"
-        )
+        message = f"{message} (transitive, introduced by {info.introduced_by})"
     return message
 
 
@@ -124,7 +120,7 @@ def _allow_insecure_host_callback(ctx, param, value):
         try:
             normalized = _normalize_allow_insecure_host(raw_host)
         except ValueError as exc:
-            raise click.BadParameter(str(exc))
+            raise click.BadParameter(str(exc))  # noqa: B904
         if normalized not in seen_hosts:
             seen_hosts.add(normalized)
             normalized_hosts.append(normalized)
@@ -178,18 +174,14 @@ def _guard_transitive_insecure_dependencies(
     blocked_hosts = sorted(
         {
             host
-            for host in (
-                _get_insecure_dependency_host(info) for info in transitive_infos
-            )
+            for host in (_get_insecure_dependency_host(info) for info in transitive_infos)
             if host and host not in allowed_hosts
         }
     )
     if not blocked_hosts:
         return
 
-    suggested_flags = " ".join(
-        f"--allow-insecure-host {host}" for host in blocked_hosts
-    )
+    suggested_flags = " ".join(f"--allow-insecure-host {host}" for host in blocked_hosts)
     message = (
         f"Re-run with {suggested_flags} to allow transitive HTTP dependencies "
         f"from unapproved host(s): {', '.join(blocked_hosts)}."
@@ -198,9 +190,7 @@ def _guard_transitive_insecure_dependencies(
     raise InsecureDependencyPolicyError(message)
 
 
-def _check_insecure_dependencies(
-    deps, allow_insecure_flag: bool, logger, /
-) -> None:
+def _check_insecure_dependencies(deps, allow_insecure_flag: bool, logger, /) -> None:
     """Check direct APM dependencies for HTTP (insecure) URLs and enforce policy.
 
     Two conditions must BOTH be true for an HTTP dep to be allowed:

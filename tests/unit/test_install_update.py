@@ -11,7 +11,7 @@ Also tests the drift detection helpers in ``apm_cli/drift.py``:
 
 from unittest.mock import Mock
 
-from apm_cli.deps.lockfile import LockFile, LockedDependency
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.drift import build_download_ref, detect_config_drift, detect_orphans, detect_ref_change
 from apm_cli.models.apm_package import DependencyReference
 
@@ -23,8 +23,9 @@ class TestSkipDownloadWithUpdateFlag:
     even if the package was already resolved by the BFS callback.
     """
 
-    def _build_skip_download(self, *, install_path_exists, is_cacheable, update_refs,
-                              already_resolved, lockfile_match):
+    def _build_skip_download(
+        self, *, install_path_exists, is_cacheable, update_refs, already_resolved, lockfile_match
+    ):
         """Reproduce the skip_download condition from cli.py.
 
         Note: ``already_resolved`` is intentionally NOT gated by ``update_refs``.
@@ -38,65 +39,83 @@ class TestSkipDownloadWithUpdateFlag:
 
     def test_already_resolved_skips_without_update(self):
         """Without --update, already_resolved packages should be skipped."""
-        assert self._build_skip_download(
-            install_path_exists=True,
-            is_cacheable=False,
-            update_refs=False,
-            already_resolved=True,
-            lockfile_match=False,
-        ) is True
+        assert (
+            self._build_skip_download(
+                install_path_exists=True,
+                is_cacheable=False,
+                update_refs=False,
+                already_resolved=True,
+                lockfile_match=False,
+            )
+            is True
+        )
 
     def test_already_resolved_still_skips_with_update(self):
         """With --update, already_resolved packages are still skipped because
         the BFS callback already fetched them fresh in this run."""
-        assert self._build_skip_download(
-            install_path_exists=True,
-            is_cacheable=False,
-            update_refs=True,
-            already_resolved=True,
-            lockfile_match=False,
-        ) is True
+        assert (
+            self._build_skip_download(
+                install_path_exists=True,
+                is_cacheable=False,
+                update_refs=True,
+                already_resolved=True,
+                lockfile_match=False,
+            )
+            is True
+        )
 
     def test_cacheable_skips_without_update(self):
         """Without --update, cacheable (tag/commit) packages should be skipped."""
-        assert self._build_skip_download(
-            install_path_exists=True,
-            is_cacheable=True,
-            update_refs=False,
-            already_resolved=False,
-            lockfile_match=False,
-        ) is True
+        assert (
+            self._build_skip_download(
+                install_path_exists=True,
+                is_cacheable=True,
+                update_refs=False,
+                already_resolved=False,
+                lockfile_match=False,
+            )
+            is True
+        )
 
     def test_cacheable_does_not_skip_with_update(self):
         """With --update, cacheable packages must NOT be skipped."""
-        assert self._build_skip_download(
-            install_path_exists=True,
-            is_cacheable=True,
-            update_refs=True,
-            already_resolved=False,
-            lockfile_match=False,
-        ) is False
+        assert (
+            self._build_skip_download(
+                install_path_exists=True,
+                is_cacheable=True,
+                update_refs=True,
+                already_resolved=False,
+                lockfile_match=False,
+            )
+            is False
+        )
 
     def test_lockfile_match_always_skips(self):
         """lockfile_match should always skip (including under update_refs) because
         the lockfile_match check now handles both normal and update_refs modes."""
-        assert self._build_skip_download(
-            install_path_exists=True,
-            is_cacheable=False,
-            update_refs=True,
-            already_resolved=False,
-            lockfile_match=True,
-        ) is True
+        assert (
+            self._build_skip_download(
+                install_path_exists=True,
+                is_cacheable=False,
+                update_refs=True,
+                already_resolved=False,
+                lockfile_match=True,
+            )
+            is True
+        )
 
     def test_no_install_path_never_skips(self):
         """If install path doesn't exist, never skip regardless of other flags."""
-        assert self._build_skip_download(
-            install_path_exists=False,
-            is_cacheable=True,
-            update_refs=False,
-            already_resolved=True,
-            lockfile_match=True,
-        ) is False
+        assert (
+            self._build_skip_download(
+                install_path_exists=False,
+                is_cacheable=True,
+                update_refs=False,
+                already_resolved=True,
+                lockfile_match=True,
+            )
+            is False
+        )
 
 
 class TestDetectRefChange:
@@ -478,9 +497,7 @@ class TestRefChangedDetection:
         lockfile.get_dependency = Mock(return_value=locked_dep)
         ref_changed = detect_ref_change(dep, locked_dep)
         assert ref_changed is True
-        download_ref = build_download_ref(
-            dep, lockfile, update_refs=False, ref_changed=ref_changed
-        )
+        download_ref = build_download_ref(dep, lockfile, update_refs=False, ref_changed=ref_changed)
         assert download_ref.reference != "abc123"
 
     def test_build_download_ref_uses_locked_sha_when_no_change(self):
@@ -491,9 +508,7 @@ class TestRefChangedDetection:
         lockfile.get_dependency = Mock(return_value=locked_dep)
         ref_changed = detect_ref_change(dep, locked_dep)
         assert ref_changed is False
-        download_ref = build_download_ref(
-            dep, lockfile, update_refs=False, ref_changed=ref_changed
-        )
+        download_ref = build_download_ref(dep, lockfile, update_refs=False, ref_changed=ref_changed)
         assert download_ref.reference == "abc123"
 
 
@@ -505,7 +520,9 @@ class TestOrphanDeployedFilesDetection:
     """
 
     @staticmethod
-    def _should_merge_lockfile_entry(dep_key, lockfile_dependencies, only_packages, intended_dep_keys):
+    def _should_merge_lockfile_entry(
+        dep_key, lockfile_dependencies, only_packages, intended_dep_keys
+    ):
         """Reproduce the lockfile merge condition from install.py.
 
         Returns True if the dep_key should be merged into the new lockfile.
@@ -529,23 +546,27 @@ class TestOrphanDeployedFilesDetection:
 
     def test_no_orphans_when_all_packages_still_in_manifest(self):
         """No orphaned files when all lockfile packages are still in manifest."""
-        lockfile = self._mock_lockfile_with_deps({
-            "owner/pkg-a": [".github/prompts/a.prompt.md"],
-            "owner/pkg-b": [".github/prompts/b.prompt.md"],
-        })
+        lockfile = self._mock_lockfile_with_deps(
+            {
+                "owner/pkg-a": [".github/prompts/a.prompt.md"],
+                "owner/pkg-b": [".github/prompts/b.prompt.md"],
+            }
+        )
         intended = {"owner/pkg-a", "owner/pkg-b"}
         orphans = detect_orphans(lockfile, intended, only_packages=None)
         assert orphans == set()
 
     def test_orphaned_files_when_package_removed(self):
         """Deployed files for removed package should be detected as orphans."""
-        lockfile = self._mock_lockfile_with_deps({
-            "owner/pkg-a": [".github/prompts/a.prompt.md"],
-            "owner/pkg-removed": [
-                ".github/prompts/removed.prompt.md",
-                ".github/instructions/removed.instructions.md",
-            ],
-        })
+        lockfile = self._mock_lockfile_with_deps(
+            {
+                "owner/pkg-a": [".github/prompts/a.prompt.md"],
+                "owner/pkg-removed": [
+                    ".github/prompts/removed.prompt.md",
+                    ".github/instructions/removed.instructions.md",
+                ],
+            }
+        )
         intended = {"owner/pkg-a"}  # pkg-removed not in new manifest
         orphans = detect_orphans(lockfile, intended, only_packages=None)
         assert orphans == {
@@ -555,10 +576,12 @@ class TestOrphanDeployedFilesDetection:
 
     def test_no_orphans_for_partial_install(self):
         """Orphan detection is skipped for partial installs (only_packages)."""
-        lockfile = self._mock_lockfile_with_deps({
-            "owner/pkg-a": [".github/prompts/a.prompt.md"],
-            "owner/pkg-removed": [".github/prompts/removed.prompt.md"],
-        })
+        lockfile = self._mock_lockfile_with_deps(
+            {
+                "owner/pkg-a": [".github/prompts/a.prompt.md"],
+                "owner/pkg-removed": [".github/prompts/removed.prompt.md"],
+            }
+        )
         intended = {"owner/pkg-a"}
         orphans = detect_orphans(lockfile, intended, only_packages=["owner/pkg-a"])
         assert orphans == set()
@@ -596,7 +619,10 @@ class TestOrphanDeployedFilesDetection:
 
         # pkg-removed should STILL be preserved in a partial install
         assert self._should_merge_lockfile_entry(
-            "owner/pkg-removed", new_lockfile_deps, only_packages=["owner/pkg-a"], intended_dep_keys=intended
+            "owner/pkg-removed",
+            new_lockfile_deps,
+            only_packages=["owner/pkg-a"],
+            intended_dep_keys=intended,
         )
 
 
@@ -657,8 +683,9 @@ class TestUpdateRefsShaComparison:
     """
 
     @staticmethod
-    def _build_lockfile_match_update(*, resolved_sha, lockfile_sha, install_exists,
-                                      local_head_sha=None):
+    def _build_lockfile_match_update(
+        *, resolved_sha, lockfile_sha, install_exists, local_head_sha=None
+    ):
         """Reproduce the update_refs lockfile_match check from install.py.
 
         In update mode, lockfile_match is True when the resolved remote SHA
@@ -689,61 +716,82 @@ class TestUpdateRefsShaComparison:
 
     def test_matching_sha_skips_download(self):
         """When resolved SHA matches lockfile SHA, lockfile_match is True."""
-        assert self._build_lockfile_match_update(
-            resolved_sha="abc123def456",
-            lockfile_sha="abc123def456",
-            install_exists=True,
-        ) is True
+        assert (
+            self._build_lockfile_match_update(
+                resolved_sha="abc123def456",
+                lockfile_sha="abc123def456",
+                install_exists=True,
+            )
+            is True
+        )
 
     def test_different_sha_does_not_skip(self):
         """When resolved SHA differs, lockfile_match is False (download needed)."""
-        assert self._build_lockfile_match_update(
-            resolved_sha="new_sha_789",
-            lockfile_sha="abc123def456",
-            install_exists=True,
-        ) is False
+        assert (
+            self._build_lockfile_match_update(
+                resolved_sha="new_sha_789",
+                lockfile_sha="abc123def456",
+                install_exists=True,
+            )
+            is False
+        )
 
     def test_no_resolved_ref_does_not_skip(self):
         """When resolution failed (None), lockfile_match is False."""
-        assert self._build_lockfile_match_update(
-            resolved_sha=None,
-            lockfile_sha="abc123def456",
-            install_exists=True,
-        ) is False
+        assert (
+            self._build_lockfile_match_update(
+                resolved_sha=None,
+                lockfile_sha="abc123def456",
+                install_exists=True,
+            )
+            is False
+        )
 
     def test_no_lockfile_entry_does_not_skip(self):
         """When no lockfile entry exists (new package), lockfile_match is False."""
-        assert self._build_lockfile_match_update(
-            resolved_sha="abc123def456",
-            lockfile_sha=None,
-            install_exists=True,
-        ) is False
+        assert (
+            self._build_lockfile_match_update(
+                resolved_sha="abc123def456",
+                lockfile_sha=None,
+                install_exists=True,
+            )
+            is False
+        )
 
     def test_cached_lockfile_entry_does_not_skip(self):
         """When lockfile has 'cached' placeholder, lockfile_match is False."""
-        assert self._build_lockfile_match_update(
-            resolved_sha="abc123def456",
-            lockfile_sha="cached",
-            install_exists=True,
-        ) is False
+        assert (
+            self._build_lockfile_match_update(
+                resolved_sha="abc123def456",
+                lockfile_sha="cached",
+                install_exists=True,
+            )
+            is False
+        )
 
     def test_no_install_path_does_not_skip(self):
         """When install path doesn't exist, lockfile_match is False."""
-        assert self._build_lockfile_match_update(
-            resolved_sha="abc123def456",
-            lockfile_sha="abc123def456",
-            install_exists=False,
-        ) is False
+        assert (
+            self._build_lockfile_match_update(
+                resolved_sha="abc123def456",
+                lockfile_sha="abc123def456",
+                install_exists=False,
+            )
+            is False
+        )
 
     def test_corrupted_local_checkout_does_not_skip(self):
         """When local HEAD differs from lockfile SHA, lockfile_match is False
         even if resolved remote matches lockfile (guards against corrupt installs)."""
-        assert self._build_lockfile_match_update(
-            resolved_sha="abc123def456",
-            lockfile_sha="abc123def456",
-            install_exists=True,
-            local_head_sha="corrupted_different_sha",
-        ) is False
+        assert (
+            self._build_lockfile_match_update(
+                resolved_sha="abc123def456",
+                lockfile_sha="abc123def456",
+                install_exists=True,
+                local_head_sha="corrupted_different_sha",
+            )
+            is False
+        )
 
     def test_skip_download_with_update_lockfile_match(self):
         """End-to-end: skip_download is True when update_refs lockfile_match is True."""
@@ -781,8 +829,7 @@ class TestPreDownloadUpdateRefsSkip:
     """
 
     @staticmethod
-    def _should_skip_pre_download(*, update_refs, path_exists, lockfile_sha,
-                                   local_head_sha):
+    def _should_skip_pre_download(*, update_refs, path_exists, lockfile_sha, local_head_sha):
         """Reproduce the pre-download skip condition for update_refs."""
         locked_dep = Mock() if lockfile_sha else None
         if locked_dep:
@@ -796,54 +843,72 @@ class TestPreDownloadUpdateRefsSkip:
 
     def test_skip_when_head_matches_lockfile(self):
         """Skip pre-download when local HEAD matches lockfile SHA."""
-        assert self._should_skip_pre_download(
-            update_refs=True,
-            path_exists=True,
-            lockfile_sha="abc123",
-            local_head_sha="abc123",
-        ) is True
+        assert (
+            self._should_skip_pre_download(
+                update_refs=True,
+                path_exists=True,
+                lockfile_sha="abc123",
+                local_head_sha="abc123",
+            )
+            is True
+        )
 
     def test_no_skip_when_head_differs(self):
         """Don't skip pre-download when local HEAD differs (corrupted install)."""
-        assert self._should_skip_pre_download(
-            update_refs=True,
-            path_exists=True,
-            lockfile_sha="abc123",
-            local_head_sha="different",
-        ) is False
+        assert (
+            self._should_skip_pre_download(
+                update_refs=True,
+                path_exists=True,
+                lockfile_sha="abc123",
+                local_head_sha="different",
+            )
+            is False
+        )
 
     def test_no_skip_when_not_update_mode(self):
         """Don't use this optimization in normal install mode."""
-        assert self._should_skip_pre_download(
-            update_refs=False,
-            path_exists=True,
-            lockfile_sha="abc123",
-            local_head_sha="abc123",
-        ) is False
+        assert (
+            self._should_skip_pre_download(
+                update_refs=False,
+                path_exists=True,
+                lockfile_sha="abc123",
+                local_head_sha="abc123",
+            )
+            is False
+        )
 
     def test_no_skip_when_path_missing(self):
         """Don't skip when install path doesn't exist."""
-        assert self._should_skip_pre_download(
-            update_refs=True,
-            path_exists=False,
-            lockfile_sha="abc123",
-            local_head_sha="abc123",
-        ) is False
+        assert (
+            self._should_skip_pre_download(
+                update_refs=True,
+                path_exists=False,
+                lockfile_sha="abc123",
+                local_head_sha="abc123",
+            )
+            is False
+        )
 
     def test_no_skip_when_no_lockfile_entry(self):
         """Don't skip when there's no lockfile entry (new package)."""
-        assert self._should_skip_pre_download(
-            update_refs=True,
-            path_exists=True,
-            lockfile_sha=None,
-            local_head_sha="abc123",
-        ) is False
+        assert (
+            self._should_skip_pre_download(
+                update_refs=True,
+                path_exists=True,
+                lockfile_sha=None,
+                local_head_sha="abc123",
+            )
+            is False
+        )
 
     def test_no_skip_when_lockfile_sha_is_cached(self):
         """Don't skip when lockfile has 'cached' placeholder."""
-        assert self._should_skip_pre_download(
-            update_refs=True,
-            path_exists=True,
-            lockfile_sha="cached",
-            local_head_sha="cached",
-        ) is False
+        assert (
+            self._should_skip_pre_download(
+                update_refs=True,
+                path_exists=True,
+                lockfile_sha="cached",
+                local_head_sha="cached",
+            )
+            is False
+        )

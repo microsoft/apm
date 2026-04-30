@@ -354,6 +354,12 @@ Discovery outcomes APM can emit (see `PolicyFetchResult.outcome`):
 are fail-open by default and become fail-closed when the project opts in
 via `policy.fetch_failure_default: block`.
 
+A malformed project manifest (`apm.yml`) is a separate concern from a
+malformed policy file. When `apm.yml` cannot be parsed (invalid YAML or
+non-mapping content), both `run_policy_checks()` and
+`run_baseline_checks()` produce a failing `manifest-parse` check. This
+is unconditionally fail-closed and cannot be relaxed.
+
 Violation classes:
 
 | Class | Triggers | Remediation |

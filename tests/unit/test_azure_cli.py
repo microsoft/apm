@@ -1,7 +1,7 @@
 """Unit tests for AzureCliBearerProvider and AzureCliBearerError."""
 
 import subprocess
-import threading
+import threading  # noqa: F401
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from unittest.mock import MagicMock, patch
 
@@ -20,6 +20,7 @@ FAKE_JWT = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9." + "a" * 200
 # is_available
 # ---------------------------------------------------------------------------
 
+
 class TestIsAvailable:
     def test_is_available_when_az_on_path(self):
         with patch("apm_cli.core.azure_cli.shutil.which", return_value="/usr/bin/az"):
@@ -35,6 +36,7 @@ class TestIsAvailable:
 # ---------------------------------------------------------------------------
 # get_bearer_token
 # ---------------------------------------------------------------------------
+
 
 class TestGetBearerToken:
     def test_get_bearer_raises_when_az_missing(self):
@@ -132,6 +134,7 @@ class TestGetBearerToken:
 # get_current_tenant_id
 # ---------------------------------------------------------------------------
 
+
 class TestGetCurrentTenantId:
     def test_get_current_tenant_id_success(self):
         mock_result = MagicMock()
@@ -156,6 +159,7 @@ class TestGetCurrentTenantId:
 # ---------------------------------------------------------------------------
 # clear_cache
 # ---------------------------------------------------------------------------
+
 
 class TestClearCache:
     def test_clear_cache_drops_token(self):
@@ -185,6 +189,7 @@ class TestClearCache:
 # Thread safety
 # ---------------------------------------------------------------------------
 
+
 class TestThreadSafety:
     def test_thread_safety_concurrent_calls(self):
         mock_result = MagicMock()
@@ -203,10 +208,7 @@ class TestThreadSafety:
             num_threads = 20
 
             with ThreadPoolExecutor(max_workers=num_threads) as pool:
-                futures = [
-                    pool.submit(provider.get_bearer_token)
-                    for _ in range(num_threads)
-                ]
+                futures = [pool.submit(provider.get_bearer_token) for _ in range(num_threads)]
                 results = [f.result() for f in as_completed(futures)]
 
             # All threads got the same token

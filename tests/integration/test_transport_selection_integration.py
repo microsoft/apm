@@ -23,7 +23,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple  # noqa: F401, UP035
 from unittest.mock import patch
 
 import pytest
@@ -35,7 +35,6 @@ from apm_cli.deps.transport_selection import (
     ProtocolPreference,
 )
 from apm_cli.models.apm_package import DependencyReference
-
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("APM_RUN_INTEGRATION_TESTS") != "1",
@@ -50,8 +49,15 @@ _REPO = "awesome-copilot"
 def _ssh_available() -> bool:
     try:
         result = subprocess.run(
-            ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
-             "-T", "git@github.com"],
+            [
+                "ssh",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-T",
+                "git@github.com",
+            ],
             capture_output=True,
             timeout=10,
         )
@@ -88,10 +94,10 @@ def _attempt_clone(
     target_dir: Path,
     protocol_pref: ProtocolPreference = ProtocolPreference.NONE,
     allow_fallback: bool = False,
-) -> Tuple[bool, List[str]]:
+) -> tuple[bool, list[str]]:
     """Drive the production clone path and capture the URLs attempted."""
     dep = DependencyReference.parse(spec)
-    captured: List[str] = []
+    captured: list[str] = []
 
     from git import Repo as _Repo
 
@@ -128,9 +134,9 @@ class TestPublicShorthandPath:
         ok, urls = _attempt_clone(f"{_OWNER}/{_REPO}", target_dir=tmp_clone_dir / "c")
         assert ok, f"clone failed; URLs tried: {urls}"
         assert any(u.startswith("https://") for u in urls)
-        assert not any(
-            u.startswith("git@") or u.startswith("ssh://") for u in urls
-        ), "shorthand-default must not silently try SSH; URLs tried: %s" % urls
+        assert not any(u.startswith("git@") or u.startswith("ssh://") for u in urls), (
+            "shorthand-default must not silently try SSH; URLs tried: %s" % urls  # noqa: UP031
+        )
 
 
 class TestExplicitHttpsStrict:
@@ -156,9 +162,7 @@ class TestExplicitSshStrict:
             target_dir=tmp_clone_dir / "c",
         )
         assert ok
-        assert all(
-            (u.startswith("git@") or u.startswith("ssh://")) for u in urls
-        ), urls
+        assert all((u.startswith("git@") or u.startswith("ssh://")) for u in urls), urls
 
     def test_explicit_ssh_bad_host_does_not_fall_back(self, tmp_clone_dir, isolated_env):
         ok, urls = _attempt_clone(
@@ -181,22 +185,16 @@ class TestInsteadOfHonored:
                 fixture_home / ".gitconfig",
             )
             monkeypatch.setenv("HOME", str(fixture_home))
-            ok, urls = _attempt_clone(
-                f"{_OWNER}/{_REPO}", target_dir=tmp_clone_dir / "c"
-            )
+            ok, urls = _attempt_clone(f"{_OWNER}/{_REPO}", target_dir=tmp_clone_dir / "c")
             assert ok
-            assert urls and (
-                urls[0].startswith("git@") or urls[0].startswith("ssh://")
-            ), urls
+            assert urls and (urls[0].startswith("git@") or urls[0].startswith("ssh://")), urls
         finally:
             shutil.rmtree(fixture_home, ignore_errors=True)
 
 
 @_REQUIRES_SSH
 class TestEnvProtocolOverride:
-    def test_env_apm_git_protocol_ssh_picks_ssh_for_shorthand(
-        self, tmp_clone_dir, isolated_env
-    ):
+    def test_env_apm_git_protocol_ssh_picks_ssh_for_shorthand(self, tmp_clone_dir, isolated_env):
         isolated_env.setenv(ENV_PROTOCOL, "ssh")
         ok, urls = _attempt_clone(
             f"{_OWNER}/{_REPO}",
@@ -204,21 +202,17 @@ class TestEnvProtocolOverride:
             protocol_pref=ProtocolPreference.SSH,
         )
         assert ok
-        assert urls and (
-            urls[0].startswith("git@") or urls[0].startswith("ssh://")
-        ), urls
+        assert urls and (urls[0].startswith("git@") or urls[0].startswith("ssh://")), urls
 
 
 @_REQUIRES_SSH
 class TestAllowFallbackEscapeHatch:
-    def test_explicit_ssh_with_allow_fallback_can_reach_https(
-        self, tmp_clone_dir, isolated_env
-    ):
-        ok, urls = _attempt_clone(
+    def test_explicit_ssh_with_allow_fallback_can_reach_https(self, tmp_clone_dir, isolated_env):
+        ok, urls = _attempt_clone(  # noqa: RUF059
             "ssh://git@nonexistent-host-apm-test.invalid/foo/bar.git",
             target_dir=tmp_clone_dir / "c",
             allow_fallback=True,
         )
         assert any(u.startswith("https://") for u in urls), (
-            "allow_fallback must permit cross-protocol retry; URLs tried: %s" % urls
+            "allow_fallback must permit cross-protocol retry; URLs tried: %s" % urls  # noqa: UP031
         )

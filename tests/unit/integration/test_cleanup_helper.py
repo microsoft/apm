@@ -14,13 +14,13 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.core.command_logger import CommandLogger
 from apm_cli.integration.cleanup import (
     CleanupResult,
     remove_stale_deployed_files,
 )
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.diagnostics import DiagnosticCollector
-from apm_cli.core.command_logger import CommandLogger
 
 
 @pytest.fixture
@@ -48,8 +48,10 @@ def _make_managed_file(project_root: Path, rel: str, content: str = "hi\n") -> P
 def test_happy_path_deletes_under_known_prefix(project_root, diagnostics, logger):
     target = _make_managed_file(project_root, ".github/prompts/old.prompt.md")
     result = remove_stale_deployed_files(
-        [".github/prompts/old.prompt.md"], project_root,
-        dep_key="pkg", targets=None,
+        [".github/prompts/old.prompt.md"],
+        project_root,
+        dep_key="pkg",
+        targets=None,
         diagnostics=diagnostics,
     )
     assert result.deleted == [".github/prompts/old.prompt.md"]
@@ -61,8 +63,10 @@ def test_happy_path_deletes_under_known_prefix(project_root, diagnostics, logger
 def test_path_traversal_rejected(project_root, diagnostics, logger):
     """validate_deploy_path rejects '..' segments."""
     result = remove_stale_deployed_files(
-        ["../escape.md"], project_root,
-        dep_key="pkg", targets=None,
+        ["../escape.md"],
+        project_root,
+        dep_key="pkg",
+        targets=None,
         diagnostics=diagnostics,
     )
     assert result.deleted == []
@@ -74,8 +78,10 @@ def test_unmanaged_prefix_rejected(project_root, diagnostics, logger):
     rel = "src/main.py"
     _make_managed_file(project_root, rel)
     result = remove_stale_deployed_files(
-        [rel], project_root,
-        dep_key="pkg", targets=None,
+        [rel],
+        project_root,
+        dep_key="pkg",
+        targets=None,
         diagnostics=diagnostics,
     )
     assert result.deleted == []
@@ -94,11 +100,14 @@ def test_directory_entry_refused(project_root, diagnostics, logger):
     """
     (project_root / ".github" / "instructions").mkdir(parents=True)
     (project_root / ".github" / "instructions" / "user.md").write_text(
-        "user-authored", encoding="utf-8",
+        "user-authored",
+        encoding="utf-8",
     )
     result = remove_stale_deployed_files(
-        [".github/instructions"], project_root,
-        dep_key="pkg", targets=None,
+        [".github/instructions"],
+        project_root,
+        dep_key="pkg",
+        targets=None,
         diagnostics=diagnostics,
     )
     assert result.deleted == []
@@ -112,8 +121,10 @@ def test_directory_entry_refused(project_root, diagnostics, logger):
 
 def test_missing_file_treated_as_already_clean(project_root, diagnostics, logger):
     result = remove_stale_deployed_files(
-        [".github/prompts/gone.prompt.md"], project_root,
-        dep_key="pkg", targets=None,
+        [".github/prompts/gone.prompt.md"],
+        project_root,
+        dep_key="pkg",
+        targets=None,
         diagnostics=diagnostics,
     )
     assert result.deleted == []
@@ -128,8 +139,10 @@ def test_hash_mismatch_skips_user_edited_file(project_root, diagnostics, logger)
     # has since edited the file).
     fake_recorded = {rel: "sha256:" + "0" * 64}
     result = remove_stale_deployed_files(
-        [rel], project_root,
-        dep_key="pkg", targets=None,
+        [rel],
+        project_root,
+        dep_key="pkg",
+        targets=None,
         diagnostics=diagnostics,
         recorded_hashes=fake_recorded,
     )
@@ -145,8 +158,10 @@ def test_hash_match_deletes_file(project_root, diagnostics, logger):
     target = _make_managed_file(project_root, rel, "untouched\n")
     recorded = {rel: compute_file_hash(target)}
     result = remove_stale_deployed_files(
-        [rel], project_root,
-        dep_key="pkg", targets=None,
+        [rel],
+        project_root,
+        dep_key="pkg",
+        targets=None,
         diagnostics=diagnostics,
         recorded_hashes=recorded,
     )
@@ -159,8 +174,10 @@ def test_no_recorded_hashes_falls_through_to_delete(project_root, diagnostics, l
     rel = ".github/prompts/legacy.prompt.md"
     target = _make_managed_file(project_root, rel)
     result = remove_stale_deployed_files(
-        [rel], project_root,
-        dep_key="pkg", targets=None,
+        [rel],
+        project_root,
+        dep_key="pkg",
+        targets=None,
         diagnostics=diagnostics,
         recorded_hashes=None,
     )
@@ -187,12 +204,12 @@ def test_hash_read_failure_fails_closed(project_root, diagnostics, logger, monke
 
     # The helper imports compute_file_hash lazily inside the gate, so
     # patch the source module.
-    monkeypatch.setattr(
-        "apm_cli.utils.content_hash.compute_file_hash", _boom
-    )
+    monkeypatch.setattr("apm_cli.utils.content_hash.compute_file_hash", _boom)
     result = remove_stale_deployed_files(
-        [rel], project_root,
-        dep_key="pkg", targets=None,
+        [rel],
+        project_root,
+        dep_key="pkg",
+        targets=None,
         diagnostics=diagnostics,
         recorded_hashes=recorded,
     )
@@ -214,8 +231,10 @@ def test_unlink_failure_is_retained_for_retry(project_root, diagnostics, logger,
 
     monkeypatch.setattr(Path, "unlink", _raise)
     result = remove_stale_deployed_files(
-        [rel], project_root,
-        dep_key="pkg", targets=None,
+        [rel],
+        project_root,
+        dep_key="pkg",
+        targets=None,
         diagnostics=diagnostics,
     )
     assert result.deleted == []
@@ -237,10 +256,14 @@ def test_orphan_failure_message_does_not_promise_retry(
     """
     rel = ".github/prompts/orphan-cant-delete.prompt.md"
     _make_managed_file(project_root, rel)
-    monkeypatch.setattr(Path, "unlink", lambda *_a, **_kw: (_ for _ in ()).throw(PermissionError("nope")))
+    monkeypatch.setattr(
+        Path, "unlink", lambda *_a, **_kw: (_ for _ in ()).throw(PermissionError("nope"))
+    )
     result = remove_stale_deployed_files(
-        [rel], project_root,
-        dep_key="some/orphan-pkg", targets=None,
+        [rel],
+        project_root,
+        dep_key="some/orphan-pkg",
+        targets=None,
         diagnostics=diagnostics,
         failed_path_retained=False,
     )
@@ -261,8 +284,10 @@ def test_orphan_path_honours_hash_gate(project_root, diagnostics, logger):
     target = _make_managed_file(project_root, rel, "user has edited this\n")
     fake_recorded = {rel: "sha256:" + "0" * 64}
     result = remove_stale_deployed_files(
-        [rel], project_root,
-        dep_key="orphan-pkg", targets=None,
+        [rel],
+        project_root,
+        dep_key="orphan-pkg",
+        targets=None,
         diagnostics=diagnostics,
         recorded_hashes=fake_recorded,
         failed_path_retained=False,
@@ -277,6 +302,7 @@ def test_helper_signature_does_not_accept_logger():
     plus caller-side InstallLogger methods (cleanup_skipped_user_edit /
     stale_cleanup / orphan_cleanup). Pin the SoC."""
     import inspect
+
     sig = inspect.signature(remove_stale_deployed_files)
     assert "logger" not in sig.parameters
 
@@ -293,7 +319,9 @@ def test_orphan_loop_uses_manifest_intent_not_integration_outcome():
     still in apm.yml. Detected by the security re-review on commit 4b64c27.
     """
     import inspect
+
     from apm_cli.install.phases import cleanup as cleanup_mod
+
     src = inspect.getsource(cleanup_mod)
     orphan_marker = "# Orphan cleanup: remove deployed files for packages that were"
     assert orphan_marker in src, "Orphan cleanup block not found -- update marker."
@@ -302,10 +330,7 @@ def test_orphan_loop_uses_manifest_intent_not_integration_outcome():
     orphan_block = src[block_start:block_end]
     # Strip comments so the banned-phrase check doesn't trip on the
     # cautionary comment that explains the bug we're guarding against.
-    code_only_lines = [
-        ln for ln in orphan_block.splitlines()
-        if not ln.lstrip().startswith("#")
-    ]
+    code_only_lines = [ln for ln in orphan_block.splitlines() if not ln.lstrip().startswith("#")]
     code_only = "\n".join(code_only_lines)
     # Must consult manifest intent.
     assert "intended_dep_keys" in code_only, (
@@ -355,3 +380,141 @@ def test_result_dataclass_defaults():
     assert r.skipped_user_edit == []
     assert r.skipped_unmanaged == []
     assert r.deleted_targets == []
+
+
+# ---------------------------------------------------------------------------
+# Cowork cleanup tests (PR #926 -- remove_stale_deployed_files)
+# ---------------------------------------------------------------------------
+
+
+def test_cowork_stale_entry_deletes_real_file(tmp_path, diagnostics):
+    """Happy path: cowork:// stale entry with a real file in a temp cowork
+    root -> file deleted, lockfile entry removed (in result.deleted)."""
+    from unittest.mock import patch
+
+    cowork_root = tmp_path / "cowork-skills"
+    cowork_root.mkdir()
+    skill_md = cowork_root / "my-skill" / "SKILL.md"
+    skill_md.parent.mkdir(parents=True)
+    skill_md.write_text("# My Skill\n", encoding="ascii")
+    assert skill_md.exists()
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    with patch(
+        "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+        return_value=cowork_root,
+    ):
+        result = remove_stale_deployed_files(
+            ["cowork://skills/my-skill/SKILL.md"],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+        )
+
+    assert not skill_md.exists(), "File should have been deleted"
+    assert "cowork://skills/my-skill/SKILL.md" in result.deleted
+    assert not result.failed
+    assert not result.skipped_unmanaged
+
+
+def test_cowork_stale_entry_resolver_returns_none(tmp_path, diagnostics):
+    """Resolver returns None -> file NOT deleted, lockfile entry retained
+    in result.failed, one-time warning emitted."""
+    from unittest.mock import patch
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    with patch(
+        "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+        return_value=None,
+    ):
+        result = remove_stale_deployed_files(
+            ["cowork://skills/my-skill/SKILL.md"],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+        )
+
+    assert result.deleted == []
+    assert "cowork://skills/my-skill/SKILL.md" in result.failed
+    # One-time warning about missing OneDrive path.
+    msgs = [d.message for d in diagnostics._diagnostics]
+    assert any("OneDrive path not detected" in m for m in msgs)
+    assert any("APM_COPILOT_COWORK_SKILLS_DIR" in m for m in msgs)
+
+
+def test_cowork_stale_entry_file_already_gone(tmp_path, diagnostics):
+    """Cowork root resolves but file is already missing -> lockfile entry
+    is removed (not in failed), no error. Idempotent cleanup."""
+    from unittest.mock import patch
+
+    cowork_root = tmp_path / "cowork-skills"
+    cowork_root.mkdir()
+    # Do NOT create the skill file -- it is already gone.
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    with patch(
+        "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+        return_value=cowork_root,
+    ):
+        result = remove_stale_deployed_files(
+            ["cowork://skills/my-skill/SKILL.md"],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+        )
+
+    # Not in deleted (nothing was on disk), not in failed (no error),
+    # not in skipped_unmanaged (path was valid).
+    assert result.deleted == []
+    assert result.failed == []
+    assert result.skipped_unmanaged == []
+
+
+def test_cowork_stale_entry_from_lockfile_error_retains_in_failed(tmp_path, diagnostics):
+    """from_lockfile_path raises after validation passes -> entry
+    retained in result.failed, warning emitted."""
+    from unittest.mock import patch
+
+    cowork_root = tmp_path / "cowork-skills"
+    cowork_root.mkdir()
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    # Use a valid-looking cowork path so it passes validate_deploy_path.
+    stale = "cowork://skills/bad-skill/SKILL.md"
+
+    def _boom(_path, _root):
+        raise ValueError("simulated resolution failure")
+
+    with (
+        patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=cowork_root,
+        ),
+        patch(
+            "apm_cli.integration.copilot_cowork_paths.from_lockfile_path",
+            side_effect=_boom,
+        ),
+    ):
+        result = remove_stale_deployed_files(
+            [stale],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+        )
+
+    assert result.deleted == []
+    assert stale in result.failed
+    msgs = [d.message for d in diagnostics._diagnostics]
+    assert any("failed path resolution" in m for m in msgs)
