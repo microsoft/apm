@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Generate / verify the project NOTICE.md.
+"""Generate / verify the project NOTICE.
 
 WHY this script exists
 ----------------------
 Microsoft CELA's third-party-notices process requires a per-component
-attribution document (`NOTICE.md`) covering every open-source dependency
+attribution document (`NOTICE`) covering every open-source dependency
 distributed with the project (the runtime deps of `apm-cli`). Maintaining
 that file by hand drifts the moment anyone bumps a version: the version
 string, the copyright snippet, and even the *license text* can change
@@ -43,8 +43,8 @@ generator here would duplicate that surface without adding value.
 
 Modes
 -----
-  default  : regenerate NOTICE.md (overwrite on disk).
-  --check  : regenerate to memory, compare to NOTICE.md on disk, exit 1
+  default  : regenerate NOTICE (overwrite on disk).
+  --check  : regenerate to memory, compare to NOTICE on disk, exit 1
              with a unified diff to stderr if they differ. Used by
              .github/workflows/notice-drift.yml.
 
@@ -104,7 +104,7 @@ class DepSpec:
 
     `raw_specifier` preserves everything after the package name -- including
     PEP 508 environment markers (e.g. `; python_version<'3.11'`). We keep
-    it verbatim because the NOTICE.md "Version requirement" line is meant
+    it verbatim because the NOTICE "Version requirement" line is meant
     to communicate *intent* (what the project asks for), not the resolved
     version (which lives in `uv.lock` / GitHub's dependency graph).
     """
@@ -117,7 +117,7 @@ class DepSpec:
 class ComponentMeta:
     """Curated per-component data loaded from notice-metadata.yaml."""
 
-    name: str  # canonical/display name as it appears in NOTICE.md
+    name: str  # canonical/display name as it appears in NOTICE
     pyproject_name: str  # exact name used in pyproject.toml deps
     upstream: str
     spdx: str
@@ -311,9 +311,11 @@ def _normalize(name: str) -> str:
 
 
 def render_third_party_submissions(tps: ThirdPartySubmissions) -> str:
+    # Each component already ends with `---\n\n` (see render_component +
+    # the trailing blank line in render_notice), so we do NOT emit a
+    # leading separator here -- doing so would produce two consecutive
+    # `---` lines in the file.
     lines = [
-        "---\n",
-        "\n",
         "Submitted on behalf of a third-party\n",
         "\n",
         tps.preamble,
