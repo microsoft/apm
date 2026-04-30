@@ -12,18 +12,28 @@ Exit-code contract (consumed by the ``apm audit --ci`` command):
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from .models import CIAuditResult, CheckResult
 from ..deps.lockfile import _SELF_KEY
+
+_logger = logging.getLogger(__name__)
 
 
 # -- Individual checks ---------------------------------------------
 
 
-def _check_lockfile_exists(project_root: Path) -> CheckResult:
+def _check_lockfile_exists(
+    project_root: Path,
+    manifest: Optional["APMPackage"],
+) -> CheckResult:
     """Check that ``apm.lock.yaml`` is present when relevant.
+
+    Receives the already-parsed manifest from :func:`run_baseline_checks`
+    (``None`` when no ``apm.yml`` exists on disk).  This function never
+    parses ``apm.yml`` itself and always returns ``name="lockfile-exists"``.
 
     Relevance is determined by either:
       * the manifest declaring APM/MCP dependencies, or
@@ -32,23 +42,11 @@ def _check_lockfile_exists(project_root: Path) -> CheckResult:
     """
     from ..deps.lockfile import LockFile, get_lockfile_path
 
-    apm_yml_path = project_root / "apm.yml"
-    if not apm_yml_path.exists():
+    if manifest is None:
         return CheckResult(
             name="lockfile-exists",
             passed=True,
             message="No apm.yml found -- nothing to check",
-        )
-
-    from ..models.apm_package import APMPackage
-
-    try:
-        manifest = APMPackage.from_apm_yml(apm_yml_path)
-    except (ValueError, FileNotFoundError):
-        return CheckResult(
-            name="lockfile-exists",
-            passed=True,
-            message="Could not parse apm.yml -- skipping lockfile check",
         )
 
     has_deps = manifest.has_apm_dependencies() or bool(manifest.get_mcp_dependencies())
@@ -63,8 +61,8 @@ def _check_lockfile_exists(project_root: Path) -> CheckResult:
             lock_for_gating = LockFile.read(lockfile_path)
             if lock_for_gating is not None and lock_for_gating.local_deployed_files:
                 has_deps = True
-        except Exception:
-            pass  # fall through; if unreadable the missing-lockfile branch warns
+        except Exception as exc:
+            _logger.debug("Could not read lockfile for gating: %s", exc)
 
     if not has_deps:
         return CheckResult(
@@ -431,26 +429,38 @@ def run_baseline_checks(
     from ..models.apm_package import APMPackage, clear_apm_yml_cache
 
     result = CIAuditResult()
+    apm_yml_path = project_root / "apm.yml"
 
-    # Check 1: Lockfile exists
-    result.checks.append(_check_lockfile_exists(project_root))
+    # Parse manifest ONCE -- this function owns parse-error handling.
+    manifest = None
+    if apm_yml_path.exists():
+        import yaml
+
+        try:
+            clear_apm_yml_cache()
+            manifest = APMPackage.from_apm_yml(apm_yml_path)
+        except (ValueError, yaml.YAMLError, OSError) as exc:
+            result.checks.append(
+                CheckResult(
+                    name="manifest-parse",
+                    passed=False,
+                    message="Cannot parse apm.yml: %s -- fix the YAML syntax error in apm.yml and re-run." % exc,
+                )
+            )
+            return result
+
+    # Check 1: Lockfile exists (manifest already parsed, pass it in)
+    result.checks.append(_check_lockfile_exists(project_root, manifest))
 
     # If lockfile doesn't exist or isn't needed, remaining checks can't run
     if not result.checks[0].passed:
         return result
 
-    apm_yml_path = project_root / "apm.yml"
     lockfile_path = get_lockfile_path(project_root)
 
     # If there's no apm.yml or no lockfile, the first check already passed
     # (no deps needed).  Skip remaining checks.
     if not apm_yml_path.exists() or not lockfile_path.exists():
-        return result
-
-    try:
-        clear_apm_yml_cache()
-        manifest = APMPackage.from_apm_yml(apm_yml_path)
-    except (ValueError, FileNotFoundError):
         return result
 
     lock = LockFile.read(lockfile_path)
