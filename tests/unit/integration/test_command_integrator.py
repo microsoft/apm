@@ -617,15 +617,18 @@ class TestCursorCommandEndToEnd:
         from apm_cli.integration.targets import KNOWN_TARGETS
         from apm_cli.utils.diagnostics import DiagnosticCollector
 
-        pkg_info = self._make_package(temp_project, {
-            "review.prompt.md": (
-                "---\n"
-                "description: Review code quality\n"
-                "allowed-tools: [\"bash\", \"edit\"]\n"
-                "---\n"
-                "Review the code for quality issues.\n"
-            ),
-        })
+        pkg_info = self._make_package(
+            temp_project,
+            {
+                "review.prompt.md": (
+                    "---\n"
+                    "description: Review code quality\n"
+                    'allowed-tools: ["bash", "edit"]\n'
+                    "---\n"
+                    "Review the code for quality issues.\n"
+                ),
+            },
+        )
 
         result = integrate_package_primitives(
             pkg_info,
@@ -1382,6 +1385,7 @@ class TestCursorCommandIntegration:
         )
         integrator = CommandIntegrator()
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         result = integrator.integrate_commands_for_target(
             KNOWN_TARGETS["cursor"], pkg_info, temp_project_no_cursor
         )
@@ -1396,6 +1400,7 @@ class TestCursorCommandIntegration:
         )
         integrator = CommandIntegrator()
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         result = integrator.integrate_commands_for_target(
             KNOWN_TARGETS["cursor"], pkg_info, temp_project
         )
@@ -1414,6 +1419,7 @@ class TestCursorCommandIntegration:
         )
         integrator = CommandIntegrator()
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         result = integrator.integrate_commands_for_target(
             KNOWN_TARGETS["cursor"], pkg_info, temp_project
         )
@@ -1445,9 +1451,8 @@ class TestCursorCommandIntegration:
         )
         integrator = CommandIntegrator()
         from apm_cli.integration.targets import KNOWN_TARGETS
-        integrator.integrate_commands_for_target(
-            KNOWN_TARGETS["cursor"], pkg_info, temp_project
-        )
+
+        integrator.integrate_commands_for_target(KNOWN_TARGETS["cursor"], pkg_info, temp_project)
 
         target = temp_project / ".cursor" / "commands" / "cmd.md"
         assert target.exists()
@@ -1470,8 +1475,11 @@ class TestCursorCommandIntegration:
 
         integrator = CommandIntegrator()
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         result = integrator.sync_for_target(
-            KNOWN_TARGETS["cursor"], None, temp_project,
+            KNOWN_TARGETS["cursor"],
+            None,
+            temp_project,
             managed_files=managed,
         )
 
@@ -1483,7 +1491,6 @@ class TestCursorCommandIntegration:
         """Sync handles missing .cursor/commands/ gracefully."""
         integrator = CommandIntegrator()
         from apm_cli.integration.targets import KNOWN_TARGETS
-        result = integrator.sync_for_target(
-            KNOWN_TARGETS["cursor"], None, temp_project_no_cursor
-        )
+
+        result = integrator.sync_for_target(KNOWN_TARGETS["cursor"], None, temp_project_no_cursor)
         assert result["files_removed"] == 0
