@@ -226,7 +226,7 @@ class ClaudeFormatter:
                     continue
 
                 claude_md_path = package_dir / "CLAUDE.md"
-                if not claude_md_path.exists():
+                if not claude_md_path.is_file():
                     continue
 
                 # Build the @import path

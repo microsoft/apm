@@ -477,7 +477,6 @@ class TestErrorHandling:
 
         primitives = PrimitiveCollection()
 
-
         instruction = Instruction(
             name="test",
             file_path=temp_project / "test.md",
