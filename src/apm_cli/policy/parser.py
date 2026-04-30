@@ -275,11 +275,8 @@ def load_policy(source: Union[str, Path]) -> Tuple[ApmPolicy, List[str]]:
         path = Path(source)
         try:
             is_file = path.is_file()
-        except OSError as exc:
-            if exc.errno == errno.ENAMETOOLONG:
-                is_file = False
-            else:
-                raise
+        except (OSError, ValueError):
+            is_file = False
 
         if is_file:
             raw = path.read_text(encoding="utf-8")

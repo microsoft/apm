@@ -115,10 +115,6 @@ def run(ctx: "InstallContext") -> None:
                 )
             raise SystemExit(1)
 
-    # Log target detection results.  The empty-targets branch is a defensive
-    # warning -- with parse_target_field as the upstream gatekeeper this
-    # state is unreachable in normal flow, but a silent zero-target install
-    # is the worst-case package-manager DX (see #820), so always emit.
     if ctx.logger:
         _scope_label = "global" if _is_user else "project"
         if _targets:

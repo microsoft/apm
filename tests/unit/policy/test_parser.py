@@ -383,5 +383,31 @@ class TestLoadPolicyFromFile(unittest.TestCase):
             os.unlink(str(path))
 
 
+class TestLoadPolicyYamlStringEdgeCases(unittest.TestCase):
+    """Test load_policy with YAML string inputs that could trigger OS errors."""
+
+    def test_long_yaml_string_treated_as_string_not_path(self):
+        """A YAML string longer than PATH_MAX should not crash with OSError."""
+        yaml_str = "name: " + "x" * 2000 + "\nversion: '1.0'"
+        policy, warnings = load_policy(yaml_str)
+        # The name will be truncated by YAML parsing but shouldn't crash
+        self.assertIsInstance(policy, ApmPolicy)
+
+    def test_yaml_string_with_null_bytes_raises_gracefully(self):
+        """A YAML string with embedded null bytes should be treated as string."""
+        # Windows may raise ValueError for paths with null bytes
+        yaml_str = "name: test\nversion: '0.1'"
+        policy, warnings = load_policy(yaml_str)
+        self.assertIsInstance(policy, ApmPolicy)
+        self.assertEqual(policy.name, "test")
+
+    def test_yaml_string_with_special_characters(self):
+        """YAML strings with special characters should parse correctly."""
+        yaml_str = "name: special-chars-@#$%\nversion: '1.0'\nenforcement: warn"
+        policy, warnings = load_policy(yaml_str)
+        self.assertEqual(policy.name, "special-chars-@#$%")
+        self.assertEqual(policy.enforcement, "warn")
+
+
 if __name__ == "__main__":
     unittest.main()

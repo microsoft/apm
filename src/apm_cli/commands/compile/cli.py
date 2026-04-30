@@ -405,8 +405,15 @@ def compile(
         config_target = None
         apm_yml_path = Path(APM_YML_FILENAME)
         if apm_yml_path.exists():
-            apm_pkg = APMPackage.from_apm_yml(apm_yml_path)
-            config_target = apm_pkg.target
+            try:
+                apm_pkg = APMPackage.from_apm_yml(apm_yml_path)
+                config_target = apm_pkg.target
+            except FileNotFoundError:
+                pass
+            except Exception as exc:
+                logger.warning(
+                    f"Could not load apm.yml: {exc}. Proceeding with auto-detection."
+                )
 
         # Resolve list targets to compiler-understood value
         compile_target = _resolve_compile_target(target)
@@ -512,22 +519,9 @@ def compile(
         if result.success:
             # Handle different compilation modes
             if config.strategy == "distributed" and not single_agents:
-                # Distributed compilation results - output already shown by professional formatter
-                # Just show final success message
                 if dry_run:
-                    # Success message for dry run already included in formatter output
                     pass
                 else:
-                    # Defense-in-depth (#820): don't claim "completed
-                    # successfully" when zero files were emitted.  With
-                    # parse_target_field as the upstream gatekeeper this is
-                    # unreachable in normal flow, but silent zero-effect
-                    # success is the worst-case package-manager DX.
-                    #
-                    # Pattern-based stat scan (instead of a hardcoded key
-                    # list) so new compile-time targets pick up the guard
-                    # automatically: any stat ending in ``_files_written``
-                    # or ``_files_generated`` contributes to the total.
                     _files_written = sum(
                         int(v or 0)
                         for k, v in result.stats.items()
@@ -539,12 +533,6 @@ def compile(
                             symbol="check",
                         )
                     else:
-                        # Zero-output compile is the silent-success failure
-                        # mode #820 guards against.  Don't claim success;
-                        # surface what the user can act on.  The cause is
-                        # usually one of: target dirs not present (auto-
-                        # detect found nothing), explicit target rejected
-                        # by policy, or no primitives in the project.
                         logger.warning(
                             "Compilation completed but produced no output "
                             "files. Check that target directories exist "

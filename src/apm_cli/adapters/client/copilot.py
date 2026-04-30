@@ -24,6 +24,7 @@ class CopilotClientAdapter(MCPClientAdapter):
     MCP server configuration.
     """
     supports_user_scope: bool = True
+    _runtime_label: str = "Copilot CLI"
 
     def __init__(
         self,
@@ -185,7 +186,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             config["args"] = raw["args"]
             if raw.get("env"):
                 config["env"] = raw["env"]
-                self._warn_input_variables(raw["env"], server_info.get("name", ""), "Copilot CLI")
+                self._warn_input_variables(raw["env"], server_info.get("name", ""), self._runtime_label)
             # Apply tools override if present
             tools_override = server_info.get("_apm_tools_override")
             if tools_override:
@@ -254,7 +255,7 @@ class CopilotClientAdapter(MCPClientAdapter):
 
             # Warn about unresolvable ${input:...} references in headers
             if config.get("headers"):
-                self._warn_input_variables(config["headers"], server_info.get("name", ""), "Copilot CLI")
+                self._warn_input_variables(config["headers"], server_info.get("name", ""), self._runtime_label)
 
             # Apply tools override from MCP dependency overlay if present
             tools_override = server_info.get("_apm_tools_override")

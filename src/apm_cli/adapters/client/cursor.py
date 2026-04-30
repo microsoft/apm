@@ -1,17 +1,22 @@
 """Cursor IDE implementation of MCP client adapter.
 
 Cursor uses the standard ``mcpServers`` JSON format at ``.cursor/mcp.json``
-(repo-local).  The config schema is identical to GitHub Copilot CLI, so this
-adapter subclasses :class:`CopilotClientAdapter` and only overrides the
-config-path logic and the user-facing labels.
+(repo-local).  Cursor's schema differs from Copilot CLI in key ways:
+
+- ``type`` must be ``"stdio"`` or ``"http"`` (not ``"local"``).
+- ``tools`` and ``id`` fields are not supported.
+
+This adapter delegates config formatting to :class:`CopilotClientAdapter`
+and then transforms the result for Cursor compatibility.
 
 APM only writes to ``.cursor/mcp.json`` when the ``.cursor/`` directory
-already exists — Cursor support is opt-in.
+already exists -- Cursor support is opt-in.
 """
 
 import json
 import os
 from pathlib import Path
+from typing import Optional
 
 from .copilot import CopilotClientAdapter
 
@@ -19,13 +24,21 @@ from .copilot import CopilotClientAdapter
 class CursorClientAdapter(CopilotClientAdapter):
     """Cursor IDE MCP client adapter.
 
-    Inherits all config formatting from :class:`CopilotClientAdapter`
-    (``mcpServers`` JSON with ``command``/``args``/``env``).  Only the
-    config-file location differs: repo-local ``.cursor/mcp.json`` instead
-    of global ``~/.copilot/mcp-config.json``.
+    Inherits config path and read/write logic from :class:`CopilotClientAdapter`
+    and uses the delegate-then-transform pattern for ``_format_server_config``:
+
+    - Calls ``super()._format_server_config()`` to get the fully-resolved config
+      (GitHub auth, header env-var resolution, ``_warn_input_variables``, etc.)
+    - Translates Cursor-incompatible fields:
+      - ``type: "local"`` becomes ``"stdio"`` (Cursor schema)
+      - Copilot-specific ``tools`` and ``id`` fields stripped
+    - Security: resolved Bearer tokens and env-var secrets are replaced with
+      ``${env:...}`` references so credentials never touch the repo-local
+      ``.cursor/mcp.json`` file.
     """
 
     supports_user_scope: bool = False
+    _runtime_label: str = "Cursor"
 
     # ------------------------------------------------------------------ #
     # Config path
@@ -35,14 +48,14 @@ class CursorClientAdapter(CopilotClientAdapter):
         """Return the path to ``.cursor/mcp.json`` in the repository root.
 
         Unlike the Copilot adapter this is a **repo-local** path.  The
-        ``.cursor/`` directory is *not* created automatically — APM only
+        ``.cursor/`` directory is *not* created automatically -- APM only
         writes here when the directory already exists.
         """
         cursor_dir = self.project_root / ".cursor"
         return str(cursor_dir / "mcp.json")
 
     # ------------------------------------------------------------------ #
-    # Config read / write — override to avoid auto-creating the directory
+    # Config read / write -- override to avoid auto-creating the directory
     # ------------------------------------------------------------------ #
 
     def update_config(self, config_updates):
@@ -80,7 +93,7 @@ class CursorClientAdapter(CopilotClientAdapter):
             return {}
 
     # ------------------------------------------------------------------ #
-    # configure_mcp_server — thin override for the print label
+    # configure_mcp_server -- thin override for the print label
     # ------------------------------------------------------------------ #
 
     def configure_mcp_server(
@@ -130,11 +143,71 @@ class CursorClientAdapter(CopilotClientAdapter):
             )
             self.update_config({config_key: server_config})
 
-            print(
-                f"Successfully configured MCP server '{config_key}' for Cursor"
-            )
+            print(f"Successfully configured MCP server '{config_key}' for Cursor")
             return True
 
         except Exception as e:
             print(f"Error configuring MCP server: {e}")
             return False
+
+    # ------------------------------------------------------------------ #
+    # _format_server_config -- delegate to parent, then transform for Cursor
+    # ------------------------------------------------------------------ #
+
+    def _format_server_config(
+        self,
+        server_info: dict,
+        env_overrides: Optional[dict] = None,
+        runtime_vars: Optional[dict] = None,
+    ) -> dict:
+        """Format server config via parent, then adapt for Cursor schema.
+
+        Cursor requires ``type: "stdio"`` (not ``"local"``) and does not
+        support the Copilot-specific ``tools`` and ``id`` fields.
+
+        Security: ``.cursor/mcp.json`` is repo-local and may be committed to
+        version control.  For GitHub MCP servers the parent injects a literal
+        ``Bearer <token>`` header; this override replaces it with a
+        ``${env:GITHUB_TOKEN}`` reference so the secret never touches disk.
+        Cursor resolves ``${env:...}`` from the process environment at runtime.
+        """
+        config = super()._format_server_config(server_info, env_overrides, runtime_vars)
+        config.pop("tools", None)
+        config.pop("id", None)
+        if config.get("type") == "local":
+            config["type"] = "stdio"
+
+        # Security: .cursor/mcp.json is repo-local and may be committed to
+        # version control.  Any header value that the parent resolved from
+        # an environment variable placeholder (<VAR>) must NOT be written
+        # as plaintext.  Replace resolved Bearer tokens with env-var
+        # references and strip other resolved secrets entirely.
+        _headers = config.get("headers", {})
+        if _headers:
+            remote = (server_info.get("remotes") or [{}])[0]
+            _is_gh = self._is_github_server(
+                server_info.get("name", ""), remote.get("url", "")
+            )
+            _keys_to_strip = []
+            for _hname, _hval in _headers.items():
+                if _is_gh and _hname == "Authorization":
+                    _auth = str(_hval)
+                    if _auth.startswith("Bearer ") and not _auth.startswith(
+                        "Bearer ${"
+                    ):
+                        _headers[_hname] = "Bearer ${env:GITHUB_TOKEN}"
+                elif isinstance(_hval, str) and not _hval.startswith("${"):
+                    _raw_headers = remote.get("headers", []) if remote else []
+                    _was_placeholder = any(
+                        h.get("name") == _hname
+                        and ("<" in h.get("value", "") or "${" in h.get("value", ""))
+                        for h in _raw_headers
+                    )
+                    if _was_placeholder:
+                        _keys_to_strip.append(_hname)
+            for _k in _keys_to_strip:
+                del _headers[_k]
+            if not _headers:
+                config.pop("headers", None)
+
+        return config
