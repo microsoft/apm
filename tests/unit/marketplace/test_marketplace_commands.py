@@ -339,6 +339,20 @@ class TestMarketplaceAdd:
         assert result.exit_code != 0
         assert "traversal" in result.output.lower() or "invalid" in result.output.lower()
 
+    def test_add_rejects_double_percent_encoded_traversal(self, runner):
+        """Round 4 panel (supply-chain required): doubly percent-encoded '..'
+        ('%252E%252E') must not bypass the traversal guard. The guard inside
+        validate_path_segments now iteratively unquotes each segment so
+        multi-encoded markers are caught."""
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(
+            marketplace,
+            ["add", "https://github.com/acme/%252E%252E/evil/plugin-marketplace"],
+        )
+        assert result.exit_code != 0
+        assert "traversal" in result.output.lower() or "invalid" in result.output.lower()
+
     def test_add_rejects_conflicting_host_flag_with_url(self, runner):
         from apm_cli.commands.marketplace import marketplace
 
@@ -388,6 +402,22 @@ class TestMarketplaceAdd:
         assert "gitlab.com" in first_line
         assert "credential" not in result.output.lower()
         assert "leak" not in result.output.lower()
+
+    def test_untrusted_host_error_includes_copyable_export_and_rerun(self, runner):
+        """Round 4 panel (devx-ux required): GHES users must get a one-copy-paste
+        recovery -- the resolved host appears in an `export GITHUB_HOST=...` line
+        and the original repo string appears in the `apm marketplace add ...`
+        re-run line."""
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(
+            marketplace,
+            ["add", "myghes.corp/org/repo"],
+        )
+        assert result.exit_code != 0
+        normalized = " ".join(result.output.split())
+        assert "export GITHUB_HOST=myghes.corp" in normalized
+        assert "apm marketplace add myghes.corp/org/repo" in normalized
 
     def test_path_traversal_error_message_no_double_exception_text(self, runner):
         """Round 3 panel: PathTraversalError message must not embed the raw

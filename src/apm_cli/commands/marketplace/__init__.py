@@ -327,10 +327,14 @@ def _parse_marketplace_repo(repo: str, host_flag: str | None) -> tuple[str, str,
     # Reject conflicting --host BEFORE security validation so the user gets the
     # clearest possible error.
     if embedded_host and host_flag and host_flag.strip().lower() != embedded_host:
+        # shlex.quote prevents shell-metacharacter injection in the
+        # copy-paste suggestion (round-4 supply-chain nit).
+        import shlex as _shlex
+
         raise ValueError(
             f"Conflicting host: --host '{host_flag}' does not match "
             f"'{embedded_host}' in '{raw}'.\n"
-            f"To fix: drop --host and run: apm marketplace add {raw}"
+            f"To fix: drop --host and run: apm marketplace add {_shlex.quote(raw)}"
         )
 
     # validate_path_segments rejects '.', '..', '~' and cross-platform backslash
@@ -401,11 +405,21 @@ def add(repo, name, branch, host, verbose):
         from ...core.auth import AuthResolver
 
         if AuthResolver.classify_host(resolved_host).kind not in _TRUSTED_MARKETPLACE_HOST_KINDS:
+            # Build a one-copy-paste recovery: tell the GHES user the exact
+            # export and the exact re-run command, with the resolved host
+            # and original repo string interpolated and shell-quoted.
+            import shlex as _shlex
+
+            quoted_repo = _shlex.quote(repo)
+            quoted_host = _shlex.quote(resolved_host)
             logger.error(
                 f"Host '{resolved_host}' is not supported.\n"
                 f"Supported hosts: github.com, *.ghe.com, "
                 f"or the host set via GITHUB_HOST.\n"
-                f"Set GITHUB_HOST or use a supported host, then re-run the command."
+                f"To use this host:\n"
+                f"  export GITHUB_HOST={quoted_host}\n"
+                f"Then re-run:\n"
+                f"  apm marketplace add {quoted_repo}"
             )
             sys.exit(1)
 

@@ -31,6 +31,14 @@ class TestMarketplaceErrors:
         assert idx_url < idx_short, "URL form must precede shorthand form in the recovery hint"
         assert err.name == "acme"
 
+    def test_not_found_message_uses_provided_host(self):
+        # Round 4 panel (devx-ux required): GHES users copying the URL must
+        # land on a host that works for them, not the public-cloud default.
+        err = MarketplaceNotFoundError("acme", host="github.example.corp")
+        assert "https://github.example.corp/OWNER/REPO" in str(err)
+        assert "https://github.com/" not in str(err)
+        assert err.host == "github.example.corp"
+
     def test_plugin_not_found_message(self):
         err = PluginNotFoundError("my-plugin", "acme")
         assert "my-plugin" in str(err)
