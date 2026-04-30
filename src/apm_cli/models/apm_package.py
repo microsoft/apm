@@ -7,6 +7,7 @@ compatibility.
 """
 
 import yaml
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, List, Dict, Union
@@ -77,6 +78,7 @@ class APMPackage:
     target: Optional[Union[str, List[str]]] = None  # Target agent(s): single string or list (applies to compile and install)
     type: Optional[PackageContentType] = None  # Package content type: instructions, skill, hybrid, or prompts
     includes: Optional[Union[str, List[str]]] = None  # Include-only manifest: 'auto' or list of repo paths
+    namespace: Optional[str] = None  # Optional skill namespace for deployed package skills
 
     @classmethod
     def _parse_dependency_dict(cls, raw_deps: dict, label: str = "") -> dict:
@@ -197,6 +199,34 @@ class APMPackage:
             else:
                 raise ValueError("'includes' must be 'auto' or a list of strings")
 
+        namespace = None
+        if 'namespace' in data and data['namespace'] is not None:
+            namespace_value = data['namespace']
+            if not isinstance(namespace_value, str):
+                raise ValueError(
+                    f"Invalid 'namespace' field: expected string, got {type(namespace_value).__name__}"
+                )
+            namespace = namespace_value.strip()
+            if not namespace:
+                raise ValueError("'namespace' must not be empty")
+            from ..utils.path_security import validate_path_segments
+            validate_path_segments(
+                namespace,
+                context="namespace",
+                reject_empty=True,
+            )
+            if "/" in namespace or "\\" in namespace:
+                raise ValueError("'namespace' must be a single path segment")
+            if len(namespace) > 64:
+                raise ValueError("'namespace' must be 1-64 characters")
+            if not re.match(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", namespace):
+                raise ValueError(
+                    "'namespace' must contain only lowercase letters, digits, "
+                    "and hyphens, and must not start or end with a hyphen"
+                )
+            if "--" in namespace:
+                raise ValueError("'namespace' must not contain consecutive hyphens")
+
         # Parse target field through the same validator as --target so a CSV
         # string like ``target: "claude,copilot"`` resolves identically to
         # ``--target claude,copilot`` and unknown tokens fail at parse time
@@ -219,6 +249,7 @@ class APMPackage:
             target=target_value,
             type=pkg_type,
             includes=includes,
+            namespace=namespace,
         )
         _apm_yml_cache[resolved] = result
         return result

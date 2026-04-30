@@ -103,6 +103,7 @@ class InstallContext:
     intended_dep_keys: Set[str] = field(default_factory=set)
     package_deployed_files: Dict[str, List[str]] = field(default_factory=dict)
     package_types: Dict[str, str] = field(default_factory=dict)
+    package_namespaces: Dict[str, str] = field(default_factory=dict)
     package_hashes: Dict[str, str] = field(default_factory=dict)
     installed_count: int = 0  # integrate
     unpinned_count: int = 0  # integrate

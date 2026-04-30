@@ -77,6 +77,7 @@ class LockfileBuilder:
             # Attach deployed_files and package_type to each LockedDependency
             self._attach_deployed_files(lockfile)
             self._attach_package_types(lockfile)
+            self._attach_package_namespaces(lockfile)
             # Apply CLI --skill override to lockfile entries (skill_bundle only)
             self._attach_skill_subset_override(lockfile)
             # Attach content hashes captured at download/verify time
@@ -125,6 +126,11 @@ class LockfileBuilder:
         for dep_key, pkg_type in self.ctx.package_types.items():
             if dep_key in lockfile.dependencies:
                 lockfile.dependencies[dep_key].package_type = pkg_type
+
+    def _attach_package_namespaces(self, lockfile: LockFile) -> None:
+        for dep_key, namespace in self.ctx.package_namespaces.items():
+            if dep_key in lockfile.dependencies:
+                lockfile.dependencies[dep_key].namespace = namespace
 
     def _attach_skill_subset_override(self, lockfile: LockFile) -> None:
         """Apply CLI --skill override to lockfile skill_bundle entries.
