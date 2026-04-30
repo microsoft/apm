@@ -7,11 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [Unreleased]
+
 ### Added
 
 - Slash commands installed from APM packages now surface argument hints in Claude Code -- `apm install` automatically maps prompt `input:` to Claude's `arguments:` front-matter, rewrites `${input:name}` references to `$name`, and auto-generates `argument-hint`. Argument names are validated against an allowlist to prevent YAML injection from third-party packages, and the mapping is reported at install time. (#1039)
 
 ## [0.11.0] - 2026-04-29
+
 ### Added
 
 - **`apm pack` is now the single command for marketplace builds** -- with an `apm.yml` `marketplace:` block it emits `.claude-plugin/marketplace.json` directly. New flags: `--offline`, `--include-prerelease`, `--marketplace-output PATH`. (#722)
