@@ -257,7 +257,7 @@ APM auto-detects targets based on project structure -- deploying to every recogn
 
 For tools that read a single instructions file, `apm compile` merges your primitives into a portable document the tool can consume. This gives you instruction-level support rather than full primitive integration.
 
-- **Cursor** - native integration to `.cursor/rules/`, `.cursor/agents/`, `.cursor/skills/`, `.cursor/hooks.json`, `.cursor/mcp.json`
+- **Cursor** - native integration to `.cursor/rules/`, `.cursor/agents/`, `.cursor/commands/`, `.cursor/skills/`, `.cursor/hooks.json`, `.cursor/mcp.json`
 - **OpenCode** - native integration to `.opencode/agents/`, `.opencode/commands/`, `.opencode/skills/`, `opencode.json` (MCP)
 - **Gemini** - native integration to `.gemini/commands/`, `.gemini/skills/`, `.gemini/settings.json` (MCP, hooks); instructions compiled to `GEMINI.md`
 - **Codex CLI** - compiled to `AGENTS.md`

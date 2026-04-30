@@ -554,6 +554,110 @@ class TestIntegratePackagePrimitivesTargetGating:
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_cursor_target_dispatches_commands(self):
+        """When targets=[cursor], commands must be dispatched."""
+        import tempfile, shutil
+        from apm_cli.commands.install import _integrate_package_primitives
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        temp_dir = tempfile.mkdtemp()
+        try:
+            project_root = Path(temp_dir)
+            (project_root / ".cursor").mkdir()
+
+            package_info = MagicMock()
+            integrators = self._make_mock_integrators()
+            diagnostics = DiagnosticCollector(verbose=False)
+
+            _integrate_package_primitives(
+                package_info,
+                project_root,
+                targets=[KNOWN_TARGETS["cursor"]],
+                managed_files=set(),
+                force=False,
+                diagnostics=diagnostics,
+                **integrators,
+            )
+
+            integrators["command_integrator"].integrate_commands_for_target.assert_called_once()
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+class TestCursorCommandEndToEnd:
+    """Full dispatch-layer test: .prompt.md -> .cursor/commands/ via real integrators."""
+
+    @pytest.fixture
+    def temp_project(self):
+        temp_dir = tempfile.mkdtemp()
+        temp_path = Path(temp_dir)
+        (temp_path / ".cursor").mkdir()
+        yield temp_path
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def _make_package(self, project_root, prompts):
+        pkg_dir = project_root / "apm_modules" / "test-pkg"
+        pkg_dir.mkdir(parents=True)
+        prompts_dir = pkg_dir / ".apm" / "prompts"
+        prompts_dir.mkdir(parents=True)
+        for name, content in prompts.items():
+            (prompts_dir / name).write_text(content)
+
+        mock_info = MagicMock()
+        mock_info.install_path = pkg_dir
+        mock_info.resolved_reference = None
+        mock_info.package = MagicMock()
+        mock_info.package.name = "test-pkg"
+        return mock_info
+
+    def test_full_dispatch_deploys_to_cursor(self, temp_project):
+        """Prompt files deploy to .cursor/commands/ via full dispatch pipeline."""
+        from apm_cli.install.services import integrate_package_primitives
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.integration import (
+            PromptIntegrator,
+            AgentIntegrator,
+            SkillIntegrator,
+            InstructionIntegrator,
+            HookIntegrator,
+        )
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        pkg_info = self._make_package(temp_project, {
+            "review.prompt.md": (
+                "---\n"
+                "description: Review code quality\n"
+                "allowed-tools: [\"bash\", \"edit\"]\n"
+                "---\n"
+                "Review the code for quality issues.\n"
+            ),
+        })
+
+        result = integrate_package_primitives(
+            pkg_info,
+            temp_project,
+            targets=[KNOWN_TARGETS["cursor"]],
+            prompt_integrator=PromptIntegrator(),
+            agent_integrator=AgentIntegrator(),
+            skill_integrator=SkillIntegrator(),
+            instruction_integrator=InstructionIntegrator(),
+            command_integrator=CommandIntegrator(),
+            hook_integrator=HookIntegrator(),
+            force=False,
+            managed_files=set(),
+            diagnostics=DiagnosticCollector(),
+        )
+
+        assert result["commands"] == 1
+
+        target = temp_project / ".cursor" / "commands" / "review.md"
+        assert target.exists()
+        post = frontmatter.load(target)
+        assert post.metadata["description"] == "Review code quality"
+        assert post.metadata["allowed-tools"] == ["bash", "edit"]
+        assert "Review the code for quality issues." in post.content
+
 
 class TestExtractInputNames:
     """Tests for _extract_input_names helper."""
@@ -1244,3 +1348,151 @@ class TestWriteGeminiCommand:
         source.write_text("# Test")
         CommandIntegrator._write_gemini_command(source, target)
         assert target.exists()
+
+
+class TestCursorCommandIntegration:
+    """Tests for Cursor command integration (.prompt.md -> .md with frontmatter)."""
+
+    @pytest.fixture
+    def temp_project(self):
+        temp_dir = tempfile.mkdtemp()
+        temp_path = Path(temp_dir)
+        (temp_path / ".cursor").mkdir()
+        yield temp_path
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    @pytest.fixture
+    def temp_project_no_cursor(self):
+        temp_dir = tempfile.mkdtemp()
+        temp_path = Path(temp_dir)
+        yield temp_path
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def _make_package(self, project_root, prompts):
+        pkg_dir = project_root / "apm_modules" / "test-pkg"
+        pkg_dir.mkdir(parents=True)
+        prompts_dir = pkg_dir / ".apm" / "prompts"
+        prompts_dir.mkdir(parents=True)
+        for name, content in prompts.items():
+            (prompts_dir / name).write_text(content)
+
+        mock_info = MagicMock()
+        mock_info.install_path = pkg_dir
+        mock_info.resolved_reference = None
+        mock_info.package = MagicMock()
+        mock_info.package.name = "test-pkg"
+        return mock_info
+
+    def test_skips_when_cursor_dir_missing(self, temp_project_no_cursor):
+        """Opt-in: skip if .cursor/ does not exist."""
+        pkg_info = self._make_package(
+            temp_project_no_cursor,
+            {"test.prompt.md": "---\ndescription: Test\n---\n# Test"},
+        )
+        integrator = CommandIntegrator()
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        result = integrator.integrate_commands_for_target(
+            KNOWN_TARGETS["cursor"], pkg_info, temp_project_no_cursor
+        )
+        assert result.files_integrated == 0
+        assert not (temp_project_no_cursor / ".cursor" / "commands").exists()
+
+    def test_deploys_prompts_to_cursor_commands(self, temp_project):
+        """Deploy .prompt.md to .cursor/commands/<name>.md."""
+        pkg_info = self._make_package(
+            temp_project,
+            {"test.prompt.md": "---\ndescription: A test\n---\n# Test command"},
+        )
+        integrator = CommandIntegrator()
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        result = integrator.integrate_commands_for_target(
+            KNOWN_TARGETS["cursor"], pkg_info, temp_project
+        )
+        assert result.files_integrated == 1
+        target = temp_project / ".cursor" / "commands" / "test.md"
+        assert target.exists()
+
+    def test_deploys_multiple_prompts(self, temp_project):
+        """Deploy multiple prompts to .cursor/commands/."""
+        pkg_info = self._make_package(
+            temp_project,
+            {
+                "review.prompt.md": "---\ndescription: Review\n---\n# Review",
+                "fix.prompt.md": "---\ndescription: Fix\n---\n# Fix",
+            },
+        )
+        integrator = CommandIntegrator()
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        result = integrator.integrate_commands_for_target(
+            KNOWN_TARGETS["cursor"], pkg_info, temp_project
+        )
+        assert result.files_integrated == 2
+
+    def test_frontmatter_normalized_to_supported_subset(self, temp_project):
+        """Frontmatter is normalized to the supported command subset.
+
+        The shared command transformer keeps description, allowed-tools,
+        model, and argument-hint but drops unknown keys (e.g. author,
+        parameters).  This is intentional -- only the command-relevant
+        subset is emitted.
+        """
+        pkg_info = self._make_package(
+            temp_project,
+            {
+                "cmd.prompt.md": (
+                    "---\n"
+                    "description: A command\n"
+                    'allowed-tools: ["bash", "edit"]\n'
+                    "model: claude-sonnet\n"
+                    "argument-hint: file path\n"
+                    "author: someone\n"
+                    "custom-field: should-be-dropped\n"
+                    "---\n"
+                    "# Review Command\n"
+                ),
+            },
+        )
+        integrator = CommandIntegrator()
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        integrator.integrate_commands_for_target(
+            KNOWN_TARGETS["cursor"], pkg_info, temp_project
+        )
+
+        target = temp_project / ".cursor" / "commands" / "cmd.md"
+        assert target.exists()
+        post = frontmatter.load(target)
+        assert post.metadata["description"] == "A command"
+        assert post.metadata["allowed-tools"] == ["bash", "edit"]
+        assert post.metadata["model"] == "claude-sonnet"
+        assert post.metadata["argument-hint"] == "file path"
+        assert "author" not in post.metadata
+        assert "custom-field" not in post.metadata
+
+    def test_sync_removes_managed_commands(self, temp_project):
+        """Sync removes manifest-tracked commands from .cursor/commands/."""
+        cmds = temp_project / ".cursor" / "commands"
+        cmds.mkdir(parents=True)
+        (cmds / "review.md").write_text("# APM managed")
+        (cmds / "custom.md").write_text("# User created")
+
+        managed = {".cursor/commands/review.md"}
+
+        integrator = CommandIntegrator()
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        result = integrator.sync_for_target(
+            KNOWN_TARGETS["cursor"], None, temp_project,
+            managed_files=managed,
+        )
+
+        assert result["files_removed"] == 1
+        assert not (cmds / "review.md").exists()
+        assert (cmds / "custom.md").exists()
+
+    def test_sync_handles_missing_dir(self, temp_project_no_cursor):
+        """Sync handles missing .cursor/commands/ gracefully."""
+        integrator = CommandIntegrator()
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        result = integrator.sync_for_target(
+            KNOWN_TARGETS["cursor"], None, temp_project_no_cursor
+        )
+        assert result["files_removed"] == 0

@@ -317,6 +317,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         primitives={
             "instructions": PrimitiveMapping("rules", ".mdc", "cursor_rules"),
             "agents": PrimitiveMapping("agents", ".md", "cursor_agent"),
+            "commands": PrimitiveMapping("commands", ".md", "cursor_command"),
             "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
             "hooks": PrimitiveMapping("hooks", ".json", "cursor_hooks"),
         },
