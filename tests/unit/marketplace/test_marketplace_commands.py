@@ -219,6 +219,244 @@ class TestMarketplaceAdd:
         assert result.exit_code != 0
         assert "marketplace.json" in result.output
 
+    # ------------------------------------------------------------------
+    # Issue #1027: full HTTPS URLs and nested HOST/group/sub/.../REPO
+    # shorthand. The new parser also enforces a trusted-host gate so
+    # GitHub credentials are not forwarded to non-GitHub hosts.
+    # ------------------------------------------------------------------
+
+    @patch("apm_cli.marketplace.client.fetch_marketplace")
+    @patch("apm_cli.marketplace.client._auto_detect_path")
+    def test_add_accepts_full_https_url(self, mock_detect, mock_fetch, runner):
+        """`apm marketplace add https://github.com/org/repo` parses as github.com/org/repo."""
+        from apm_cli.commands.marketplace import marketplace
+
+        mock_detect.return_value = "marketplace.json"
+        mock_fetch.return_value = MarketplaceManifest(
+            name="m", plugins=(MarketplacePlugin(name="p1"),)
+        )
+
+        result = runner.invoke(
+            marketplace, ["add", "https://github.com/acme-org/plugin-marketplace"]
+        )
+        assert result.exit_code == 0, result.output
+        probe_source = mock_detect.call_args[0][0]
+        assert probe_source.host == "github.com"
+        assert probe_source.owner == "acme-org"
+        assert probe_source.repo == "plugin-marketplace"
+
+    @patch("apm_cli.marketplace.client.fetch_marketplace")
+    @patch("apm_cli.marketplace.client._auto_detect_path")
+    def test_add_strips_dot_git_suffix(self, mock_detect, mock_fetch, runner):
+        from apm_cli.commands.marketplace import marketplace
+
+        mock_detect.return_value = "marketplace.json"
+        mock_fetch.return_value = MarketplaceManifest(
+            name="m", plugins=(MarketplacePlugin(name="p1"),)
+        )
+
+        result = runner.invoke(
+            marketplace, ["add", "https://github.com/acme-org/plugin-marketplace.git"]
+        )
+        assert result.exit_code == 0, result.output
+        probe_source = mock_detect.call_args[0][0]
+        assert probe_source.repo == "plugin-marketplace"
+
+    @patch("apm_cli.marketplace.client.fetch_marketplace")
+    @patch("apm_cli.marketplace.client._auto_detect_path")
+    def test_add_accepts_nested_subpath_on_github_host(
+        self, mock_detect, mock_fetch, runner, monkeypatch
+    ):
+        """N>=4 segments with FQDN first parse as host + multi-segment owner + repo."""
+        from apm_cli.commands.marketplace import marketplace
+
+        # Pretend ghes.corp.example.com is the configured GHES host so the
+        # trusted-host gate accepts it. This is the realistic shape on which
+        # nested sub-paths actually appear.
+        monkeypatch.setenv("GITHUB_HOST", "ghes.corp.example.com")
+        mock_detect.return_value = "marketplace.json"
+        mock_fetch.return_value = MarketplaceManifest(
+            name="m", plugins=(MarketplacePlugin(name="p1"),)
+        )
+
+        result = runner.invoke(
+            marketplace,
+            ["add", "ghes.corp.example.com/acme/team/sub/plugin-marketplace"],
+        )
+        assert result.exit_code == 0, result.output
+        probe_source = mock_detect.call_args[0][0]
+        assert probe_source.host == "ghes.corp.example.com"
+        assert probe_source.owner == "acme/team/sub"
+        assert probe_source.repo == "plugin-marketplace"
+
+    def test_add_rejects_non_github_host_with_actionable_error(self, runner):
+        """gitlab.com URLs are rejected at registration to avoid leaking creds."""
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(
+            marketplace, ["add", "https://gitlab.com/acme/team/plugin-marketplace"]
+        )
+        assert result.exit_code != 0
+        assert "gitlab.com" in result.output
+        assert "not supported" in result.output.lower()
+
+    def test_add_rejects_non_github_host_shorthand(self, runner):
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(marketplace, ["add", "gitlab.com/acme/team/plugin-marketplace"])
+        assert result.exit_code != 0
+        assert "gitlab.com" in result.output
+        assert "not supported" in result.output.lower()
+
+    def test_add_rejects_http_url(self, runner):
+        """Plain HTTP URLs are rejected -- no --allow-insecure escape hatch."""
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(marketplace, ["add", "http://github.com/acme/plugin-marketplace"])
+        assert result.exit_code != 0
+        assert "http" in result.output.lower()
+
+    def test_add_rejects_path_traversal_in_url(self, runner):
+        """validate_path_segments rejects '..' in any segment."""
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(
+            marketplace, ["add", "https://github.com/acme/../evil/plugin-marketplace"]
+        )
+        assert result.exit_code != 0
+        # Either the parse-time guard or the segment validator may surface;
+        # both produce a clear actionable message.
+        assert "traversal" in result.output.lower() or "invalid" in result.output.lower()
+
+    def test_add_rejects_percent_encoded_traversal(self, runner):
+        """Percent-encoded '..' must be unescaped before validation."""
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(
+            marketplace,
+            ["add", "https://github.com/acme/%2E%2E/evil/plugin-marketplace"],
+        )
+        assert result.exit_code != 0
+        assert "traversal" in result.output.lower() or "invalid" in result.output.lower()
+
+    def test_add_rejects_double_percent_encoded_traversal(self, runner):
+        """Round 4 panel (supply-chain required): doubly percent-encoded '..'
+        ('%252E%252E') must not bypass the traversal guard. The guard inside
+        validate_path_segments now iteratively unquotes each segment so
+        multi-encoded markers are caught."""
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(
+            marketplace,
+            ["add", "https://github.com/acme/%252E%252E/evil/plugin-marketplace"],
+        )
+        assert result.exit_code != 0
+        assert "traversal" in result.output.lower() or "invalid" in result.output.lower()
+
+    def test_add_rejects_conflicting_host_flag_with_url(self, runner):
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(
+            marketplace,
+            [
+                "add",
+                "https://github.com/acme/plugin-marketplace",
+                "--host",
+                "ghes.corp.example.com",
+            ],
+        )
+        assert result.exit_code != 0
+        assert "conflicting host" in result.output.lower()
+
+    def test_add_rejects_url_without_owner(self, runner):
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(marketplace, ["add", "https://github.com/onlyone"])
+        assert result.exit_code != 0
+        assert "OWNER/REPO" in result.output or "Expected" in result.output
+
+    def test_marketplace_host_classification_via_auth_resolver(self):
+        """Round 3: _is_trusted_marketplace_host must not exist; classification
+        routes through AuthResolver.classify_host (single source of truth)."""
+        from apm_cli.commands import marketplace as marketplace_cmd_pkg
+
+        assert not hasattr(marketplace_cmd_pkg, "_is_trusted_marketplace_host"), (
+            "Round 3 panel: _is_trusted_marketplace_host must be removed; "
+            "classification is owned by AuthResolver.classify_host"
+        )
+
+    def test_untrusted_host_error_has_action_in_first_sentence(self, runner):
+        """Round 3 panel: untrusted-host error leads with the outcome and the fix,
+        not internal security rationale."""
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(
+            marketplace, ["add", "https://gitlab.com/acme/team/plugin-marketplace"]
+        )
+        assert result.exit_code != 0
+        # First non-empty line must state the outcome ("not supported") and name
+        # the host. Security rationale ("forward GitHub credentials", "credential
+        # leak", etc.) must NOT appear in the default error path.
+        first_line = next((line for line in result.output.splitlines() if line.strip()), "").lower()
+        assert "not supported" in first_line
+        assert "gitlab.com" in first_line
+        assert "credential" not in result.output.lower()
+        assert "leak" not in result.output.lower()
+
+    def test_untrusted_host_error_includes_copyable_export_and_rerun(self, runner):
+        """Round 4 panel (devx-ux required): GHES users must get a one-copy-paste
+        recovery -- the resolved host appears in an `export GITHUB_HOST=...` line
+        and the original repo string appears in the `apm marketplace add ...`
+        re-run line."""
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(
+            marketplace,
+            ["add", "myghes.corp/org/repo"],
+        )
+        assert result.exit_code != 0
+        normalized = " ".join(result.output.split())
+        assert "export GITHUB_HOST=myghes.corp" in normalized
+        assert "apm marketplace add myghes.corp/org/repo" in normalized
+
+    def test_path_traversal_error_message_no_double_exception_text(self, runner):
+        """Round 3 panel: PathTraversalError message must not embed the raw
+        exception text mid-sentence (no double 'rejected: ... rejected' noise)."""
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(
+            marketplace, ["add", "https://github.com/acme/../evil/plugin-marketplace"]
+        )
+        assert result.exit_code != 0
+        out = result.output.lower()
+        # The phrase "path-traversal sequence" must appear at most once.
+        assert out.count("path-traversal sequence") <= 1
+        # Must not duplicate the "rejected" keyword (old form: "rejected: ...
+        # rejected").
+        assert out.count("rejected") <= 1
+
+    def test_conflicting_host_error_includes_runnable_command(self, runner):
+        """Round 3 panel: conflicting-host error must give a copy-pasteable next
+        command (apm marketplace add <raw>) rather than abstract advice."""
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(
+            marketplace,
+            [
+                "add",
+                "https://github.com/acme/plugin-marketplace",
+                "--host",
+                "ghes.corp.example.com",
+            ],
+        )
+        assert result.exit_code != 0
+        # Rich console may soft-wrap long lines; collapse whitespace before
+        # asserting the runnable command appears intact.
+        normalized = " ".join(result.output.split())
+        assert (
+            "apm marketplace add https://github.com/acme/plugin-marketplace" in normalized
+        )
+
 
 class TestMarketplaceList:
     """marketplace list."""

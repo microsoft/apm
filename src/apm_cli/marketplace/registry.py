@@ -97,7 +97,9 @@ def get_marketplace_by_name(name: str) -> MarketplaceSource:
     for src in _load():
         if src.name.lower() == lower:
             return src
-    raise MarketplaceNotFoundError(name)
+    from ..utils.github_host import default_host
+
+    raise MarketplaceNotFoundError(name, host=default_host())
 
 
 def add_marketplace(source: MarketplaceSource) -> None:
@@ -117,7 +119,9 @@ def remove_marketplace(name: str) -> None:
     before = _load()
     after = [s for s in before if s.name.lower() != name.lower()]
     if len(after) == len(before):
-        raise MarketplaceNotFoundError(name)
+        from ..utils.github_host import default_host
+
+        raise MarketplaceNotFoundError(name, host=default_host())
     _save(after)
     logger.debug("Removed marketplace '%s'", name)
 
