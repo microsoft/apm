@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-APM is additive. It never deletes, overwrites, or modifies your existing configuration files. Your current `.github/copilot-instructions.md`, `AGENTS.md`, `.claude/` config, `.cursor-rules` — all stay exactly where they are, untouched.
+APM is additive. It never deletes, overwrites, or modifies your existing configuration files. Your current `.github/copilot-instructions.md`, `AGENTS.md`, `.claude/` config, `.cursor-rules` -- all stay exactly where they are, untouched. (Note: as of the [Unreleased] release, `apm compile --target vscode/all` no longer writes `.github/copilot-instructions.md` either; if you previously relied on the generated file, copy it into your repo or manage it via a dedicated APM package.)
 
 ## Add APM in three steps
 

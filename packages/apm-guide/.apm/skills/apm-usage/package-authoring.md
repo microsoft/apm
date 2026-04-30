@@ -99,6 +99,22 @@ the same way at every entry point. Invalid values fail at parse time with a
 message naming the apm.yml path and the offending token -- they do **not**
 silently fall through to auto-detect.
 
+## Manifest fields: `namespace:` (optional)
+
+Declare `namespace: <segment>` at the top level of `apm.yml` to install the
+package's skills under `skills/<namespace>/<skill-name>/` instead of the legacy
+flat `skills/<skill-name>/` layout. This lets one org publish multiple
+packages (e.g. `acme-security`, `acme-brand`) without skill-name collisions.
+
+- The segment must be kebab-case: lowercase letters, digits, and hyphens, max
+  64 characters, no leading/trailing hyphen, no consecutive `--`.
+- Omitting `namespace:` keeps the legacy flat layout.
+- The namespace flows from `apm.yml` into `apm.lock.yaml` (per-dependency
+  `namespace:` field) and surfaces in `apm install` tree output as
+  `skill <namespace>/<name> integrated -> .github/skills/<namespace>/`.
+- `--verbose` adds a per-skill line: `Skill deployed under namespace
+  "<namespace>": skills/<namespace>/<skill-name>/`.
+
 | Form | Behaviour |
 |------|-----------|
 | `target: copilot` | Single token; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `all` |

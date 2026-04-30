@@ -551,3 +551,104 @@ class TestAmendment6Warning:
         msg = str(warning_calls[0])
         assert "prompts" in msg
         assert "commands" not in msg
+
+
+class TestNamespaceTreeOutput:
+    """Regression tests for PR #1028 panel findings 2 and 4: install summary
+    must surface the namespace segment when a package declares one."""
+
+    def _make_pkg_info(self, tmp_path: Path, namespace: str | None) -> MagicMock:
+        pkg_dir = tmp_path / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+        (pkg_dir / ".apm").mkdir(exist_ok=True)
+        pkg = MagicMock()
+        pkg.install_path = pkg_dir
+        pkg.name = "ns-pkg"
+        pkg.package = MagicMock()
+        pkg.package.namespace = namespace
+        return pkg
+
+    def _run(
+        self,
+        tmp_path: Path,
+        pkg_info: Any,
+        target_paths: list[Path],
+        skill_created: bool = True,
+        sub_skills_promoted: int = 0,
+        primary_skill_path: Path | None = None,
+    ) -> MagicMock:
+        from apm_cli.install.services import integrate_package_primitives
+
+        copilot = KNOWN_TARGETS["copilot"]
+        targets = [copilot]
+
+        logger = MagicMock()
+
+        integrators = {
+            k: MagicMock()
+            for k in [
+                "prompt_integrator",
+                "agent_integrator",
+                "skill_integrator",
+                "instruction_integrator",
+                "command_integrator",
+                "hook_integrator",
+            ]
+        }
+        skill_result = MagicMock()
+        skill_result.target_paths = target_paths
+        skill_result.skill_created = skill_created
+        skill_result.sub_skills_promoted = sub_skills_promoted
+        # services.py reads .skill_path.parent.name for the per-skill label
+        if primary_skill_path is None and target_paths:
+            primary_skill_path = target_paths[0] / "SKILL.md"
+        skill_result.skill_path = primary_skill_path
+        integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
+
+        with patch(
+            "apm_cli.integration.dispatch.get_dispatch_table",
+            return_value={},
+        ):
+            integrate_package_primitives(
+                pkg_info,
+                tmp_path,
+                targets=targets,
+                diagnostics=MagicMock(),
+                package_name="ns-pkg",
+                logger=logger,
+                ctx=None,
+                **integrators,
+                force=False,
+                managed_files=None,
+            )
+        return logger
+
+    def test_namespaced_skill_install_label_includes_namespace(self, tmp_path: Path) -> None:
+        """When namespace is set, the per-skill confirmation line must show
+        ``skill <namespace>/<name> integrated -> .github/skills/<namespace>/``."""
+        pkg_info = self._make_pkg_info(tmp_path, namespace="acme")
+        deployed = tmp_path / ".github" / "skills" / "acme" / "brand-guidelines"
+        deployed.mkdir(parents=True, exist_ok=True)
+
+        logger = self._run(tmp_path, pkg_info, [deployed])
+
+        tree_msgs = [str(c) for c in logger.tree_item.call_args_list]
+        joined = "\n".join(tree_msgs)
+        assert "acme/brand-guidelines" in joined, joined
+        assert ".github/skills/acme/" in joined, joined
+
+    def test_unnamespaced_skill_install_label_unchanged(self, tmp_path: Path) -> None:
+        """Packages without a namespace keep the legacy ``Skill integrated``
+        label so existing assertions and CI snapshots stay green."""
+        pkg_info = self._make_pkg_info(tmp_path, namespace=None)
+        deployed = tmp_path / ".github" / "skills" / "plain-skill"
+        deployed.mkdir(parents=True, exist_ok=True)
+
+        logger = self._run(tmp_path, pkg_info, [deployed])
+
+        tree_msgs = [str(c) for c in logger.tree_item.call_args_list]
+        joined = "\n".join(tree_msgs)
+        assert "Skill integrated" in joined, joined
+        assert ".github/skills/" in joined, joined
+        # Must NOT contain a namespace-style label segment
+        assert "skill /" not in joined, joined

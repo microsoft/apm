@@ -454,6 +454,100 @@ class TestSkillIntegrator:
         assert (target / "SKILL.md").exists()
         assert not (self.project_root / ".github" / "skills" / "my-skill").exists()
 
+    def test_integrate_package_skill_namespace_emits_verbose_log(self):
+        """Verbose mode surfaces the namespaced deploy path so users can see why
+        the skill landed under skills/<namespace>/<name>/ instead of the legacy
+        flat layout. Regression test for PR #1028 panel finding 1.
+        """
+        package_dir = self.project_root / "brand-guidelines"
+        package_dir.mkdir()
+        (package_dir / "SKILL.md").write_text("# Brand Guidelines")
+
+        package_info = self._create_package_info(
+            name="brand-guidelines",
+            install_path=package_dir,
+            package_type=PackageType.CLAUDE_SKILL,
+            namespace="acme",
+        )
+
+        captured: list[str] = []
+
+        class _StubLogger:
+            def verbose_detail(self, msg):
+                captured.append(msg)
+
+            def warning(self, *_args, **_kwargs):
+                pass
+
+            def info(self, *_args, **_kwargs):
+                pass
+
+        self.integrator.integrate_package_skill(
+            package_info, self.project_root, logger=_StubLogger()
+        )
+
+        assert any(
+            'namespace "acme"' in m and "skills/acme/brand-guidelines/" in m for m in captured
+        ), captured
+
+    def test_integrate_package_skill_namespace_no_log_when_absent(self):
+        """When no namespace is set, no namespace-specific verbose line fires."""
+        package_dir = self.project_root / "plain-skill"
+        package_dir.mkdir()
+        (package_dir / "SKILL.md").write_text("# Plain")
+
+        package_info = self._create_package_info(
+            name="plain-skill",
+            install_path=package_dir,
+            package_type=PackageType.CLAUDE_SKILL,
+            namespace=None,
+        )
+
+        captured: list[str] = []
+
+        class _StubLogger:
+            def verbose_detail(self, msg):
+                captured.append(msg)
+
+            def warning(self, *_args, **_kwargs):
+                pass
+
+            def info(self, *_args, **_kwargs):
+                pass
+
+        self.integrator.integrate_package_skill(
+            package_info, self.project_root, logger=_StubLogger()
+        )
+
+        assert not any("namespace" in m for m in captured), captured
+
+    def test_integrate_package_skill_namespace_preserved_in_target_paths(self):
+        """IntegrationResult.target_paths must include the namespace segment so
+        downstream consumers (install summary, lockfile) can reconstruct the
+        full <namespace>/<skill-name> identity. Regression for PR #1028 finding 2.
+        """
+        package_dir = self.project_root / "my-skill"
+        package_dir.mkdir()
+        (package_dir / "SKILL.md").write_text("# My Skill")
+
+        package_info = self._create_package_info(
+            name="my-skill",
+            install_path=package_dir,
+            package_type=PackageType.CLAUDE_SKILL,
+            namespace="acme",
+        )
+
+        result = self.integrator.integrate_package_skill(package_info, self.project_root)
+
+        assert result.target_paths, "expected at least one deployed path"
+        for tp in result.target_paths:
+            rel_parts = tp.relative_to(self.project_root).parts
+            assert "acme" in rel_parts, f"namespace segment missing from deployed path: {tp}"
+            # parent of the leaf skill dir must end with the namespace segment
+            assert tp.parent.name == "acme", (
+                f"expected parent dir to be the namespace, got {tp.parent}"
+            )
+
     def test_integrate_sub_skills_uses_manifest_namespace(self):
         """Sub-skills inherit the package namespace."""
         package_dir = self.project_root / "bundle"

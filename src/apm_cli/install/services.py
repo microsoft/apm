@@ -232,24 +232,46 @@ def integrate_package_primitives(
         targets=targets,
         skill_subset=skill_subset,
     )
+    # Resolve the package namespace once so install-summary labels can
+    # surface the namespace segment that the skill_integrator used to
+    # decide deploy paths. Without this, namespaced installs are
+    # invisible in the tree output (panel finding 2/4, PR #1028).
+    from apm_cli.integration.skill_integrator import _package_namespace
+
+    _pkg_namespace = _package_namespace(package_info)
+    # Group target_paths by their parent directory (the skills root,
+    # including the namespace segment when present) so the displayed
+    # tree label preserves the full ``.../skills[/namespace]/`` prefix.
     _skill_target_dirs: set = builtins.set()
     for tp in skill_result.target_paths:
         try:
-            rel = tp.relative_to(project_root)
-            if rel.parts:
-                _skill_target_dirs.add(rel.parts[0])
+            parent_rel = tp.parent.relative_to(project_root).as_posix()
+            _skill_target_dirs.add(parent_rel)
         except ValueError:
             # Dynamic-root target (copilot-cowork) -- path is outside project tree.
-            _skill_target_dirs.add("copilot-cowork")
+            label = "copilot-cowork/skills"
+            if _pkg_namespace:
+                label = f"{label}/{_pkg_namespace}"
+            _skill_target_dirs.add(label)
     _skill_targets = sorted(_skill_target_dirs)
-    _skill_target_str = ", ".join(f"{d}/skills/" for d in _skill_targets) or "skills/"
+    _skill_target_str = ", ".join(f"{d}/" for d in _skill_targets) or "skills/"
     if skill_result.skill_created:
         result["skills"] += 1
-        _log_integration(f"  |-- Skill integrated -> {_skill_target_str}")
+        if _pkg_namespace:
+            # Per-skill confirmation surfaces the namespace/name identity
+            # so users can tell why the skill landed at the namespaced
+            # path instead of the legacy flat layout.
+            _skill_name = skill_result.skill_path.parent.name
+            _log_integration(
+                f"  |-- skill {_pkg_namespace}/{_skill_name} integrated -> {_skill_target_str}"
+            )
+        else:
+            _log_integration(f"  |-- Skill integrated -> {_skill_target_str}")
     if skill_result.sub_skills_promoted > 0:
         result["sub_skills"] += skill_result.sub_skills_promoted
+        _ns_suffix = f" (namespace: {_pkg_namespace})" if _pkg_namespace else ""
         _log_integration(
-            f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_target_str}"
+            f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_target_str}{_ns_suffix}"
         )
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))

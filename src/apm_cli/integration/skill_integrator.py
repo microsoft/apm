@@ -943,6 +943,12 @@ class SkillIntegrator(BaseIntegrator):
             shutil.copytree(package_path, target_skill_dir, ignore=_ignore_symlinks_and_apm)
             all_target_paths.append(target_skill_dir)
 
+            if is_primary and namespace and logger is not None:
+                logger.verbose_detail(
+                    f'Skill deployed under namespace "{namespace}": '
+                    f"skills/{namespace}/{skill_name}/"
+                )
+
             if is_primary:
                 files_copied = sum(1 for _ in target_skill_dir.rglob("*") if _.is_file())
 
