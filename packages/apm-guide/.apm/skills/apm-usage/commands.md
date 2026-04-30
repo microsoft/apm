@@ -23,14 +23,7 @@
 
 ### Install validation chain (virtual subdirectory packages)
 
-When installing a virtual subdirectory package (`owner/repo/path#ref`), `apm install` validates accessibility before writing to `apm.yml`. The chain mirrors the actual clone auth path so API/git scope mismatches do not produce false negatives:
-
-1. Marker-file probes via raw content (`apm.yml`, `SKILL.md`, `plugin.json`, `README.md`).
-2. Contents API directory probe (`GET /repos/{o}/{r}/contents/{path}?ref={ref}`).
-3. `git ls-remote` against the repo with the install auth chain (PAT, plain HTTPS w/ credential helper, SSH if `--ssh` or `--allow-protocol-fallback`).
-4. Shallow `git fetch --depth=1 --filter=tree:0` + `git ls-tree` to confirm the subdirectory exists at the resolved ref. This step is required (since #941 round-2): a successful `ls-remote` only proves the *ref* exists; the path probe closes the fail-open hole.
-
-Azure DevOps tokens (PAT or AAD bearer) are injected via `http.extraheader` (`Authorization: Bearer ...`) and never embedded in the clone URL. Run `apm install --verbose` to see the full probe chain when a package fails validation.
+`apm install` validates subdirectory packages (`owner/repo/path#ref`) before writing to `apm.yml` using the same credential chain as the actual install. See [Authentication > Install validation chain](../authentication/) for the full probe sequence and troubleshooting.
 
 ## Compilation
 

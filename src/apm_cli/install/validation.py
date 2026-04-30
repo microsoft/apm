@@ -27,7 +27,7 @@ from pathlib import Path
 
 import requests
 
-from ..utils.console import _rich_echo, _rich_info
+from ..utils.console import _rich_echo, _rich_info, _rich_warning
 from ..utils.github_host import default_host
 from .errors import AuthenticationError
 
@@ -191,19 +191,30 @@ def _validate_package_exists(package, verbose=False, auth_resolver=None, logger=
             virtual_downloader = GitHubPackageDownloader(auth_resolver=auth_resolver)
 
             def _warn(msg: str) -> None:
-                # DevX (round-3): suppress on the happy path. The deferred
-                # validation message is only useful for debugging an
-                # unexpected fallback; in default-verbosity CI runs it
-                # adds stderr noise without actionable signal.
-                if not verbose:
-                    return
+                # Round-4 panel fix (cli-logging + devx-ux converge):
+                #   * Yellow warnings MUST reach the user in BOTH
+                #     verbose and non-verbose modes -- the git-fallback
+                #     signal is security-relevant (a scoped PAT may
+                #     have correctly rejected the package on the API
+                #     surface and the broader git-credential chain
+                #     accepted it). Operators must see this in default
+                #     CI logs.
+                #   * Strip the "Run with --verbose for details."
+                #     suffix only when --verbose is already set; the
+                #     suffix is meaningful only when it tells the user
+                #     a follow-up is available.
+                #   * Fall back to ``_rich_warning`` when ``logger`` is
+                #     None so production callers without a
+                #     CommandLogger still emit the yellow signal --
+                #     comments are not enforcement.
+                display = msg
+                verbose_suffix = " Run with --verbose for details."
+                if verbose and msg.endswith(verbose_suffix):
+                    display = msg[: -len(verbose_suffix)]
                 if logger:
-                    logger.warning(msg)
-                # No _rich_echo fallback: in the install code path the
-                # CommandLogger is always present (cli.py constructs it
-                # before calling validate). A None logger here means the
-                # caller is a unit test, which inspects warn_callback
-                # directly via its own callable.
+                    logger.warning(display)
+                else:
+                    _rich_warning(display)
 
             result = virtual_downloader.validate_virtual_package_exists(
                 dep_ref,

@@ -506,77 +506,183 @@ class TestRound3WarnMessage:
         assert "Contents-API scope" not in msg
 
 
-class TestRound3WarnSuppressedOnHappyPath:
-    """Round-3: _warn in install/validation.py suppresses on the happy path."""
+class TestRound4WarnSurfacedOnHappyPath:
+    """Round-4 (cli-logging + devx-ux): the git-fallback warning is yellow.
 
-    def test_warn_suppressed_on_happy_path_unless_verbose(self) -> None:
-        """Default-verbosity install must not surface the deferred-probe warning."""
-        from unittest.mock import MagicMock
+    The remote panel rejected round-3's suppression-on-happy-path: a
+    scoped PAT may have correctly rejected a package on the API surface
+    while the git credential chain accepted it; operators MUST see that
+    in default CI logs. Round-4 surfaces the warning in both verbose
+    and non-verbose modes, and strips the "Run with --verbose for
+    details." suffix only when --verbose is already set.
+    """
 
-        from apm_cli.install import validation as install_validation
+    def _patch_validate(self, msg: str):
+        """Patch the downloader to invoke warn_callback once with ``msg``."""
 
-        # Build a fake logger that records .warning() calls.
-        logger = MagicMock()
-        # Stub auth_resolver.resolve_for_dep so we don't hit real env.
+        def fake_validate(self, dep_ref, verbose_callback=None, warn_callback=None):
+            if warn_callback is not None:
+                warn_callback(msg)
+            return True
+
+        return patch(
+            "apm_cli.deps.github_downloader.GitHubPackageDownloader."
+            "validate_virtual_package_exists",
+            new=fake_validate,
+        )
+
+    def _stub_resolver(self) -> MagicMock:
         auth_resolver = MagicMock()
         ctx = MagicMock()
         ctx.source = "env"
         ctx.token_type = "pat"
         auth_resolver.resolve_for_dep.return_value = ctx
+        return auth_resolver
 
-        # Capture the _warn callable by patching the downloader's
-        # validate_virtual_package_exists so we can invoke it ourselves.
-        captured = {}
+    def test_warn_emits_in_non_verbose_mode_with_suffix_kept(self) -> None:
+        from apm_cli.install import validation as install_validation
 
-        def fake_validate(self, dep_ref, verbose_callback=None, warn_callback=None):
-            captured["warn"] = warn_callback
-            # Simulate the fallback path firing.
-            if warn_callback is not None:
-                warn_callback("Validated owner/repo/sub#v1 via git fallback")
-            return True
+        logger = MagicMock()
+        msg = (
+            "API validation skipped for owner/repo/sub#v1; "
+            "resolved via git credential fallback. "
+            "Run with --verbose for details."
+        )
+        with self._patch_validate(msg):
+            ok = install_validation._validate_package_exists(
+                "owner/repo/sub#v1",
+                verbose=False,
+                auth_resolver=self._stub_resolver(),
+                logger=logger,
+            )
+        assert ok is True
+        # Yellow signal must reach the user even in default-verbosity.
+        logger.warning.assert_called_once()
+        # Suffix is kept in non-verbose so the user knows --verbose digs deeper.
+        assert "Run with --verbose for details." in logger.warning.call_args[0][0]
 
-        with patch(
-            "apm_cli.deps.github_downloader.GitHubPackageDownloader.validate_virtual_package_exists",
-            new=fake_validate,
+    def test_warn_emits_in_verbose_mode_with_suffix_stripped(self) -> None:
+        from apm_cli.install import validation as install_validation
+
+        logger = MagicMock()
+        msg = (
+            "API validation skipped for owner/repo/sub#v1; "
+            "resolved via git credential fallback. "
+            "Run with --verbose for details."
+        )
+        with self._patch_validate(msg):
+            ok = install_validation._validate_package_exists(
+                "owner/repo/sub#v1",
+                verbose=True,
+                auth_resolver=self._stub_resolver(),
+                logger=logger,
+            )
+        assert ok is True
+        logger.warning.assert_called_once()
+        # In verbose mode, the suffix becomes a no-op: strip it so output
+        # is not self-referential.
+        emitted = logger.warning.call_args[0][0]
+        assert "Run with --verbose for details." not in emitted
+        assert "API validation skipped for owner/repo/sub#v1" in emitted
+
+    def test_warn_falls_back_to_rich_warning_when_logger_is_none(self) -> None:
+        """No-logger production callers must still emit the yellow signal.
+
+        Round-3 left a comment claiming "logger is always present in the
+        install code path"; round-4 enforces it via a ``_rich_warning``
+        fallback so silent-drop is impossible regardless of caller wiring.
+        """
+        from apm_cli.install import validation as install_validation
+
+        msg = (
+            "API validation skipped for owner/repo/sub#v1; "
+            "resolved via git credential fallback. "
+            "Run with --verbose for details."
+        )
+        with (
+            self._patch_validate(msg),
+            patch("apm_cli.install.validation._rich_warning") as rich,
         ):
             ok = install_validation._validate_package_exists(
                 "owner/repo/sub#v1",
                 verbose=False,
-                auth_resolver=auth_resolver,
-                logger=logger,
+                auth_resolver=self._stub_resolver(),
+                logger=None,
             )
-
         assert ok is True
-        # Happy path with verbose=False: logger.warning MUST NOT have fired.
-        logger.warning.assert_not_called()
+        rich.assert_called_once()
+        assert "API validation skipped" in rich.call_args[0][0]
 
-    def test_warn_emits_when_verbose(self) -> None:
-        from unittest.mock import MagicMock
 
-        from apm_cli.install import validation as install_validation
+class TestRound4EmptyRefAndEmptyVpathGates:
+    """Round-4 supply-chain: bare `#` and empty vpath must NOT bypass gates."""
 
-        logger = MagicMock()
-        auth_resolver = MagicMock()
-        ctx = MagicMock()
-        ctx.source = "env"
-        ctx.token_type = "pat"
-        auth_resolver.resolve_for_dep.return_value = ctx
+    def test_empty_string_ref_does_not_activate_git_fallback(self) -> None:
+        """A bare ``#`` fragment yields ``reference=""``; the git fallback
+        must remain unreachable. Round-3 used ``is not None`` and let
+        empty string through, contradicting the documented invariant
+        that the fallback is only reachable for explicitly-pinned refs.
+        """
+        downloader = GitHubPackageDownloader()
+        dep_ref = _make_subdir_dep(vpath="skills/x", ref="")
 
-        def fake_validate(self, dep_ref, verbose_callback=None, warn_callback=None):
-            if warn_callback is not None:
-                warn_callback("Validated owner/repo/sub#v1 via git fallback")
-            return True
-
-        with patch(
-            "apm_cli.deps.github_downloader.GitHubPackageDownloader.validate_virtual_package_exists",
-            new=fake_validate,
+        with (
+            patch.object(downloader, "download_raw_file", side_effect=RuntimeError("404")),
+            patch.object(gdv, "_directory_exists_at_ref", return_value=False),
+            patch.object(gdv, "_ref_exists_via_ls_remote") as ls_remote,
+            patch.object(gdv, "_path_exists_in_tree_at_ref") as ls_tree,
         ):
-            ok = install_validation._validate_package_exists(
-                "owner/repo/sub#v1",
-                verbose=True,
-                auth_resolver=auth_resolver,
-                logger=logger,
-            )
+            ok = gdv.validate_virtual_package_exists(downloader, dep_ref)
+
+        assert ok is False
+        ls_remote.assert_not_called()
+        ls_tree.assert_not_called()
+
+    def test_empty_vpath_rejected_before_any_network(self) -> None:
+        """Empty ``virtual_path`` must be rejected at the entry point.
+
+        ``git ls-tree FETCH_HEAD ""`` is implementation-defined: some
+        git versions root-list the tree, which would falsely validate
+        any successfully-fetched repo. ``reject_empty=True`` on the
+        ``validate_path_segments`` call closes that hole before any
+        network or git operation runs.
+        """
+        downloader = GitHubPackageDownloader()
+        dep_ref = _make_subdir_dep(vpath="", ref="v1.0.0")
+
+        with (
+            patch.object(downloader, "download_raw_file") as raw_mock,
+            patch.object(gdv, "_directory_exists_at_ref") as dir_mock,
+            patch.object(gdv, "_ref_exists_via_ls_remote") as ls_remote,
+            patch.object(gdv, "_path_exists_in_tree_at_ref") as ls_tree,
+        ):
+            ok = gdv.validate_virtual_package_exists(downloader, dep_ref)
+
+        assert ok is False
+        raw_mock.assert_not_called()
+        dir_mock.assert_not_called()
+        ls_remote.assert_not_called()
+        ls_tree.assert_not_called()
+
+    def test_explicit_ref_still_activates_git_fallback(self) -> None:
+        """Sanity: a real ref pin (``v1.0.0``) MUST still reach the
+        git fallback. Guards against an over-eager fix that would also
+        block legitimate explicit-ref flows.
+        """
+        downloader = GitHubPackageDownloader()
+        dep_ref = _make_subdir_dep(vpath="skills/x", ref="v1.0.0")
+        winning = gdv.AttemptSpec("authenticated HTTPS (header)", "https://x", {})
+
+        with (
+            patch.object(downloader, "download_raw_file", side_effect=RuntimeError("404")),
+            patch.object(gdv, "_directory_exists_at_ref", return_value=False),
+            patch.object(
+                gdv, "_ref_exists_via_ls_remote", return_value=(True, winning)
+            ) as ls_remote,
+            patch.object(gdv, "_path_exists_in_tree_at_ref", return_value=True) as ls_tree,
+        ):
+            ok = gdv.validate_virtual_package_exists(downloader, dep_ref)
 
         assert ok is True
-        logger.warning.assert_called_once()
+        ls_remote.assert_called_once()
+        ls_tree.assert_called_once()

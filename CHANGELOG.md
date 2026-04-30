@@ -47,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`apm install` no longer rejects packages you can actually access** -- validation now uses the same credential chain as the actual install (token, git credential helper, SSH), so packages your `git clone` succeeds on are no longer false-rejected by the installer's API probe. Most visible to enterprise users on EMU/SSO. (#941)
+- **`apm install` works with your existing credential chain (SSO, EMU, GHES tokens).** Validation now uses the same credentials as the actual clone (PAT header-injected, then git credential helper, then SSH for explicit `#ref` pins) -- enterprise users whose env-var PAT has narrower SSO/EMU access than their `gh auth setup-git` / OS keychain are no longer false-rejected by the installer's API probe. Validation logic is now a separate module (`github_downloader_validation.py`), laying groundwork for future credential-provider extensibility. (#941)
 - **`shared/apm.md` single-credential-group runs no longer fail validation** with a spurious `missing APM bundles: apm-default` -- a normalisation step recreates the per-group subdir layout that `actions/download-artifact@v5+` flattens away. (#1051)
 - **`apm pack` works against GitHub Enterprise and other Git hosts** -- honors `GITHUB_HOST` for GHES auth and accepts GitHub / GHES / GitLab / Bitbucket / ADO / SSH URL forms. (#1008)
 - **ADO Entra ID auth no longer silently fails.** Bearer tokens from `az account get-access-token` are plumbed through, errors are typed + actionable (4-case diagnostic), and `apm install --update` pre-flights auth before touching files. (#1015)

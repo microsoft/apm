@@ -109,10 +109,12 @@ def validate_virtual_package_exists(
             transport, auth, and helper methods.
         dep_ref: Parsed dependency reference for the virtual package.
         verbose_callback: Optional per-probe log callback (verbose mode).
-        warn_callback: Optional non-verbose warning callback.  Emitted
+        warn_callback: Optional non-verbose warning callback. Fired
             when the ls-remote + shallow-fetch fallback resolves both
-            the ref and the path, so users in default-verbosity mode
-            still see that strict API validation was bypassed.
+            the ref and the path. Yellow-traffic-light signal: the
+            git-credential chain validated a package the API check
+            could not, which may indicate a credential-scope mismatch
+            an operator must see in default-verbosity CI runs.
 
     Returns:
         True if the package exists / is accessible, False otherwise.
@@ -123,11 +125,14 @@ def validate_virtual_package_exists(
     ref: str = dep_ref.reference or "main"
     vpath: str = dep_ref.virtual_path
 
-    # SECURITY (round-2 finding 7): reject traversal segments before any
-    # URL interpolation. Empty / single-dot segments are tolerated only
-    # because some legitimate vpaths normalise to them; '..' is hard-rejected.
+    # SECURITY (round-2 finding 7 + round-3 finding 2): reject traversal
+    # segments before any URL interpolation, and reject empty vpath
+    # outright. Empty vpath is not a traversal but `git ls-tree
+    # FETCH_HEAD ""` is implementation-defined; some git versions emit a
+    # root listing and falsely validate any successfully-fetched repo.
+    # `reject_empty=True` closes that hole at the entry point.
     try:
-        validate_path_segments(vpath, context="virtual path")
+        validate_path_segments(vpath, context="virtual path", reject_empty=True)
     except PathTraversalError as exc:
         if verbose_callback:
             verbose_callback(f"  [x] virtual path rejected: {exc}")
@@ -177,9 +182,13 @@ def validate_virtual_package_exists(
         # Fallback 2: explicit ref + git ls-remote + shallow-fetch path
         # probe.  Mirrors install's auth chain so we accept packages
         # whose API auth is stricter than their git auth.  Only kicks in
-        # with an explicit ref -- without one, strict validation keeps
-        # path typos failing fast on the default branch.
-        if dep_ref.reference is not None:
+        # with an explicit, NON-EMPTY ref -- without one, strict
+        # validation keeps path typos failing fast on the default
+        # branch. Round-3 finding 1: a bare `#` fragment produces
+        # `reference == ""`, which `is not None` would let through; the
+        # truthy check below rejects it so the fallback is reachable
+        # only for explicitly-pinned refs.
+        if dep_ref.reference:
             ref_ok, winning_attempt = _ref_exists_via_ls_remote(downloader, dep_ref, ref, _log)
             if ref_ok and winning_attempt is not None:
                 # SECURITY (round-2 finding 6): close the fail-open.  ls-remote
@@ -193,9 +202,15 @@ def validate_virtual_package_exists(
                 ):
                     _log(f'  [+] "{vpath}@{ref}" confirmed via shallow-fetch + ls-tree')
                     if warn_callback is not None:
+                        # devx-ux + cli-logging (round-3): name the
+                        # security-relevant outcome explicitly. A scoped
+                        # PAT may have *correctly* rejected this package
+                        # on the API surface; the operator must be able
+                        # to distinguish that from a legitimate API hit.
                         warn_callback(
-                            f"Validated {dep_ref.to_canonical()} via git fallback "
-                            "(API check skipped). Run with --verbose for details."
+                            f"API validation skipped for {dep_ref.to_canonical()}; "
+                            "resolved via git credential fallback. "
+                            "Run with --verbose for details."
                         )
                     return True
                 _log(
