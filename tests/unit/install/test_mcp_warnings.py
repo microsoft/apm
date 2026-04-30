@@ -1,4 +1,4 @@
-"""Unit tests for ``apm_cli.install.mcp_warnings``.
+"""Unit tests for ``apm_cli.install.mcp.warnings``.
 
 Covers F5 (SSRF) and F7 (shell metacharacter) non-blocking safety warnings
 that fire during ``apm install --mcp``.
@@ -6,17 +6,13 @@ that fire during ``apm install --mcp``.
 
 from __future__ import annotations
 
-import socket
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-from apm_cli.install.mcp_warnings import (
+from apm_cli.install.mcp.warnings import (
     _is_internal_or_metadata_host,
     warn_shell_metachars,
     warn_ssrf_url,
 )
-
 
 # ================================================================
 # _is_internal_or_metadata_host
@@ -130,7 +126,15 @@ class TestWarnSsrfUrl:
         warn_ssrf_url("http://127.0.0.1:8080/api", logger)
         logger.warning.assert_called_once()
         msg = logger.warning.call_args[0][0]
-        assert "127.0.0.1" in msg
+        # Extract the URL embedded in the warning ("URL '<url>' points...")
+        # and assert via urlparse rather than substring matching, per repo
+        # test convention (CodeQL py/incomplete-url-substring-sanitization).
+        import re
+        from urllib.parse import urlparse
+
+        match = re.search(r"URL '([^']+)'", msg)
+        assert match is not None, f"warning message has no quoted URL: {msg!r}"
+        assert urlparse(match.group(1)).hostname == "127.0.0.1"
 
     def test_metadata_url_warns(self):
         logger = self._make_logger()
