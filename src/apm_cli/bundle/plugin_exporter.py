@@ -364,29 +364,26 @@ def _find_or_synthesize_plugin_json(
 
 
 def _update_plugin_json_paths(plugin_json: dict, output_files: list[str]) -> dict:
-    """Update component paths in ``plugin.json`` to reflect the output layout."""
+    r"""Strip component-path keys from ``plugin.json``.
+
+    Per the official Claude Code plugin manifest schema, the
+    ``agents``/``skills``/``commands``/``instructions`` keys point to
+    *additional* files OUTSIDE the convention directories
+    (``agents/``, ``skills/``, ``commands/``, ``instructions/``) and
+    each entry must match ``^\./.*`` (relative path) and the per-key
+    file-extension pattern. The convention directories themselves are
+    auto-discovered by Claude Code -- listing them here is invalid.
+
+    APM emits everything into the convention directories, so we drop
+    these keys entirely to keep the manifest schema-conformant.
+
+    The ``output_files`` argument is retained for signature stability
+    (and as a hook for future "additional files" extensions); it is
+    currently unused.
+    """
     result = dict(plugin_json)
-
-    # Detect which top-level directories actually exist in the output
-    top_dirs: set[str] = set()
-    for f in output_files:
-        parts = Path(f).parts
-        if parts:
-            top_dirs.add(parts[0])
-
-    # Map component keys to their output directories
-    component_dirs = {
-        "agents": "agents",
-        "skills": "skills",
-        "commands": "commands",
-        "instructions": "instructions",
-    }
-    for key, dirname in component_dirs.items():
-        if dirname in top_dirs:
-            result[key] = [f"{dirname}/"]
-        else:
-            result.pop(key, None)
-
+    for key in ("agents", "skills", "commands", "instructions"):
+        result.pop(key, None)
     return result
 
 

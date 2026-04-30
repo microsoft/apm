@@ -531,19 +531,23 @@ class TestSynthesizePluginJson:
 
 
 class TestUpdatePluginJsonPaths:
-    def test_adds_present_directories(self):
+    def test_strips_convention_dir_keys(self):
+        """Convention dirs are auto-discovered; keys must be absent for schema validity."""
         pj = {"name": "test"}
         files = ["agents/a.md", "commands/b.md"]
         result = _update_plugin_json_paths(pj, files)
-        assert result["agents"] == ["agents/"]
-        assert result["commands"] == ["commands/"]
+        assert "agents" not in result
+        assert "commands" not in result
         assert "skills" not in result
 
-    def test_removes_absent_directories(self):
-        pj = {"name": "test", "skills": ["skills/"]}
+    def test_strips_existing_invalid_keys(self):
+        """Pre-existing invalid convention-dir entries are stripped."""
+        pj = {"name": "test", "skills": ["skills/"], "agents": ["agents/"]}
         files = ["agents/a.md"]
         result = _update_plugin_json_paths(pj, files)
         assert "skills" not in result
+        assert "agents" not in result
+        assert result["name"] == "test"
 
 
 # ---------------------------------------------------------------------------
@@ -843,7 +847,9 @@ class TestExportPluginBundle:
         assert result.bundle_path.exists()
         assert any("hidden character" in str(c) for c in mock_warn.call_args_list)
 
-    def test_plugin_json_updated_with_component_dirs(self, tmp_path):
+    def test_plugin_json_omits_convention_dir_keys(self, tmp_path):
+        """plugin.json must NOT include convention-dir keys (schema requires
+        ``./*.md`` paths for these arrays; convention dirs are auto-discovered)."""
         project = _setup_plugin_project(
             tmp_path,
             agents=["a.agent.md"],
@@ -854,8 +860,13 @@ class TestExportPluginBundle:
         result = export_plugin_bundle(project, out)
 
         pj = json.loads((result.bundle_path / "plugin.json").read_text())
-        assert pj["agents"] == ["agents/"]
-        assert pj["skills"] == ["skills/"]
+        assert "agents" not in pj
+        assert "skills" not in pj
+        assert "commands" not in pj
+        assert "instructions" not in pj
+        # Files still land in convention dirs
+        assert (result.bundle_path / "agents" / "a.agent.md").exists()
+        assert (result.bundle_path / "skills" / "s1" / "SKILL.md").exists()
 
     def test_root_level_plugin_dirs_collected(self, tmp_path):
         """Root-level agents/ commands/ etc. are picked up for plugin-native repos."""

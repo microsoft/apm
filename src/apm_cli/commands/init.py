@@ -164,14 +164,14 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, verbose):
         if plugin:
             next_steps = [
                 "Add dev dependencies:    apm install --dev <owner>/<repo>",
-                "Pack as plugin:          apm pack --format plugin",
+                "Pack as plugin:          apm pack",
             ]
         else:
             next_steps = [
                 "Install a skill:                apm install github/awesome-copilot/skills/documentation-writer",
                 "Install a marketplace plugin:   apm install frontend-web-dev@awesome-copilot",
                 "Install a versioned package:    apm install microsoft/apm-sample-package#v1.0.0",
-                "Author your own plugin:         apm pack --format plugin",
+                "Author your own plugin:         apm pack",
             ]
 
         try:
