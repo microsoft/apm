@@ -1315,9 +1315,7 @@ class GitHubPackageDownloader:
             # scope mismatches). Only kicks in when the user gave an
             # explicit ref -- without one we keep strict validation so
             # path typos still fail fast on the default branch.
-            if dep_ref.reference is not None and self._ref_exists_via_ls_remote(
-                dep_ref, ref, _log
-            ):
+            if dep_ref.reference is not None and self._ref_exists_via_ls_remote(dep_ref, ref, _log):
                 _log(
                     f"  [+] ref '{ref}' resolves via ls-remote; "
                     "deferring path validation to install"
@@ -1354,7 +1352,7 @@ class GitHubPackageDownloader:
             log(f"  [i] directory-exists probe skipped (host {host} not supported)")
             return False
 
-        owner, repo = dep_ref.repo_url.split('/', 1)
+        owner, repo = dep_ref.repo_url.split("/", 1)
         token = self.auth_resolver.resolve(host, owner, port=dep_ref.port).token
 
         # Encode path (preserve '/' as segment separator) and ref (full
@@ -1368,7 +1366,9 @@ class GitHubPackageDownloader:
         if host_lc == "github.com":
             api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{encoded_path}?ref={encoded_ref}"
         elif host_lc.endswith(".ghe.com"):
-            api_url = f"https://api.{host}/repos/{owner}/{repo}/contents/{encoded_path}?ref={encoded_ref}"
+            api_url = (
+                f"https://api.{host}/repos/{owner}/{repo}/contents/{encoded_path}?ref={encoded_ref}"
+            )
         else:
             api_url = f"https://{host}/api/v3/repos/{owner}/{repo}/contents/{encoded_path}?ref={encoded_ref}"
 
@@ -1435,8 +1435,11 @@ class GitHubPackageDownloader:
                 else self.git_env
             )
             token_url = self._build_repo_url(
-                dep_ref.repo_url, use_ssh=False, dep_ref=dep_ref,
-                token=dep_token, auth_scheme=dep_auth_scheme,
+                dep_ref.repo_url,
+                use_ssh=False,
+                dep_ref=dep_ref,
+                token=dep_token,
+                auth_scheme=dep_auth_scheme,
             )
             attempts.append(("authenticated HTTPS", token_url, token_env))
 
@@ -1446,7 +1449,10 @@ class GitHubPackageDownloader:
             suppress_credential_helpers=is_insecure,
         )
         plain_url = self._build_repo_url(
-            dep_ref.repo_url, use_ssh=False, dep_ref=dep_ref, token="",
+            dep_ref.repo_url,
+            use_ssh=False,
+            dep_ref=dep_ref,
+            token="",
         )
         attempts.append(("plain HTTPS w/ credential helper", plain_url, plain_env))
 
@@ -1455,12 +1461,12 @@ class GitHubPackageDownloader:
         if not is_insecure and self._ssh_attempt_allowed():
             try:
                 ssh_url = self._build_repo_url(
-                    dep_ref.repo_url, use_ssh=True, dep_ref=dep_ref,
+                    dep_ref.repo_url,
+                    use_ssh=True,
+                    dep_ref=dep_ref,
                 )
                 ssh_env = dict(plain_env)
-                ssh_env["GIT_SSH_COMMAND"] = (
-                    "ssh -o BatchMode=yes -o ConnectTimeout=10"
-                )
+                ssh_env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes -o ConnectTimeout=10"
                 attempts.append(("SSH", ssh_url, ssh_env))
             except Exception as exc:
                 log(f"  [i] SSH URL build skipped: {exc}")

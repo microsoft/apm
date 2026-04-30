@@ -1920,7 +1920,9 @@ class TestRefExistsViaLsRemote:
                 MockGit.return_value.ls_remote = ls_remote_mock
 
                 ok = downloader._ref_exists_via_ls_remote(
-                    dep_ref, "main", log=lambda _msg: None,
+                    dep_ref,
+                    "main",
+                    log=lambda _msg: None,
                 )
 
             assert ok is True
@@ -1938,11 +1940,15 @@ class TestRefExistsViaLsRemote:
         self._enter(ctxs)
         try:
             calls = []
+
             def _ls_remote(*args, **kwargs):
                 calls.append(args)
                 if len(calls) == 1:
                     raise GitCommandError(
-                        ["git", "ls-remote"], 128, b"403", b"Write access not granted",
+                        ["git", "ls-remote"],
+                        128,
+                        b"403",
+                        b"Write access not granted",
                     )
                 return "deadbeef\trefs/heads/main\n"
 
@@ -1950,7 +1956,9 @@ class TestRefExistsViaLsRemote:
                 MockGit.return_value.ls_remote = _ls_remote
 
                 ok = downloader._ref_exists_via_ls_remote(
-                    dep_ref, "main", log=lambda _msg: None,
+                    dep_ref,
+                    "main",
+                    log=lambda _msg: None,
                 )
 
             assert ok is True
@@ -1970,7 +1978,9 @@ class TestRefExistsViaLsRemote:
                 MockGit.return_value.ls_remote = ls_remote_mock
 
                 ok = downloader._ref_exists_via_ls_remote(
-                    dep_ref, "main", log=lambda _msg: None,
+                    dep_ref,
+                    "main",
+                    log=lambda _msg: None,
                 )
 
             assert ok is True
@@ -1987,6 +1997,7 @@ class TestRefExistsViaLsRemote:
         ctxs = self._patch_auth(downloader, has_token=True)
         self._enter(ctxs)
         try:
+
             def _always_fail(*args, **kwargs):
                 raise GitCommandError(["git", "ls-remote"], 128, b"403", b"forbidden")
 
@@ -1994,7 +2005,9 @@ class TestRefExistsViaLsRemote:
                 MockGit.return_value.ls_remote = _always_fail
 
                 ok = downloader._ref_exists_via_ls_remote(
-                    dep_ref, "loo", log=lambda _msg: None,
+                    dep_ref,
+                    "loo",
+                    log=lambda _msg: None,
                 )
 
             assert ok is False
@@ -2012,7 +2025,9 @@ class TestRefExistsViaLsRemote:
                 MockGit.return_value.ls_remote = MagicMock(return_value="   \n  ")
 
                 ok = downloader._ref_exists_via_ls_remote(
-                    dep_ref, "missing", log=lambda _msg: None,
+                    dep_ref,
+                    "missing",
+                    log=lambda _msg: None,
                 )
 
             assert ok is False
@@ -2030,7 +2045,9 @@ class TestRefExistsViaLsRemote:
 
         with patch("git.cmd.Git") as MockGit:
             ok = downloader._ref_exists_via_ls_remote(
-                dep_ref, "main", log=lambda _msg: None,
+                dep_ref,
+                "main",
+                log=lambda _msg: None,
             )
 
         assert ok is False
@@ -2048,7 +2065,9 @@ class TestRefExistsViaLsRemote:
                 MockGit.return_value.ls_remote = ls_remote_mock
 
                 downloader._ref_exists_via_ls_remote(
-                    dep_ref, "main", log=lambda _msg: None,
+                    dep_ref,
+                    "main",
+                    log=lambda _msg: None,
                 )
 
             assert ls_remote_mock.call_count == 2
@@ -2070,7 +2089,9 @@ class TestRefExistsViaLsRemote:
                 MockGit.return_value.ls_remote = ls_remote_mock
 
                 downloader._ref_exists_via_ls_remote(
-                    dep_ref, "main", log=lambda _msg: None,
+                    dep_ref,
+                    "main",
+                    log=lambda _msg: None,
                 )
 
             assert ls_remote_mock.call_count == 3
@@ -2095,9 +2116,15 @@ class TestRefExistsViaLsRemote:
         ]
         self._enter(ctxs)
         try:
+
             def _always_fail(*args, **kwargs):
                 raise GitCommandError(
-                    ["git", "ls-remote", "https://ghp_supersecret@github.com/owner/repo.git", "main"],
+                    [
+                        "git",
+                        "ls-remote",
+                        "https://ghp_supersecret@github.com/owner/repo.git",
+                        "main",
+                    ],
                     128,
                     b"fatal: Authentication failed for 'https://ghp_supersecret@github.com/owner/repo.git/'",
                     b"",
@@ -2108,13 +2135,13 @@ class TestRefExistsViaLsRemote:
                 MockGit.return_value.ls_remote = _always_fail
 
                 downloader._ref_exists_via_ls_remote(
-                    dep_ref, "main", log=captured.append,
+                    dep_ref,
+                    "main",
+                    log=captured.append,
                 )
 
             joined = "\n".join(captured)
-            assert "ghp_supersecret" not in joined, (
-                f"Token leaked into verbose log: {joined!r}"
-            )
+            assert "ghp_supersecret" not in joined, f"Token leaked into verbose log: {joined!r}"
         finally:
             self._exit(ctxs)
 
