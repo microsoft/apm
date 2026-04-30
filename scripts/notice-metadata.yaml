@@ -10,6 +10,22 @@ _header:
     repository.
 
     The `apm` source code itself is licensed under the MIT License; see `LICENSE`.
+_third_party_submissions:
+  preamble: |
+    The contributions below are identified as submitted on behalf of a
+    third party. If you are listed here and have since signed the Microsoft
+    CLA (or wish to), please open an issue so we can update this file.
+  contributors:
+    - github: pofallon
+      prs: [4]
+    - github: richgo
+      prs: [8, 25, 26, 33, 34]
+    - github: ryanfk
+      prs: [92]
+    - github: foutoucour
+      prs: [108]
+    - github: Jah-yee
+      prs: [184]
 components:
   - name: click
     pyproject_name: click
