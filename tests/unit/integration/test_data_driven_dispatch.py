@@ -343,6 +343,7 @@ class TestSyntheticTargetProfile:
             },
             auto_create=True,
             detect_by_dir=False,
+            requires_executable_consent=False,
         )
 
         # CommandIntegrator.find_prompt_files() discovers .prompt.md files
@@ -391,6 +392,7 @@ class TestSyntheticTargetProfile:
             },
             auto_create=True,
             detect_by_dir=False,
+            requires_executable_consent=False,
         )
 
         apm_package = MagicMock()

@@ -129,7 +129,7 @@ class InstallContext:
     direct_mcp_deps: list[Any] | None = None  # Direct MCP deps from apm.yml for policy gate
     # Threat #8: explicit user opt-in to deploy slash commands for targets
     # marked requires_executable_consent (currently Cursor).  Wired from
-    # ``apm install --allow-executable-commands``; default False so missing
+    # ``apm install --allow-cursor-commands``; default False so missing
     # consent skips deployment with a diagnostic explaining how to enable it.
     allow_executable_commands: bool = False
 

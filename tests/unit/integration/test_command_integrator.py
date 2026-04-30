@@ -1557,7 +1557,7 @@ class TestCursorCommandPanelFindings:
         assert any("Mapped input -> command arguments" in i.message for i in info_items)
 
     def test_cursor_consent_warning_emitted(self, temp_project):
-        """Without --allow-executable-commands, cursor deployment is gated.
+        """Without --allow-cursor-commands, cursor deployment is gated.
 
         Threat #8: warn() is notification, not consent. The gate skips
         deployment entirely and surfaces a warning telling the user the
@@ -1582,7 +1582,7 @@ class TestCursorCommandPanelFindings:
         assert not (temp_project / ".cursor" / "commands").exists()
         warnings = diag.by_category().get("warning", [])
         assert any(
-            "allow-executable-commands" in w.message and "cursor" in w.message.lower()
+            "allow-cursor-commands" in w.message and "cursor" in w.message.lower()
             for w in warnings
         ), f"expected gated-skip warning naming the CLI flag, got: {[w.message for w in warnings]}"
 
@@ -1611,7 +1611,7 @@ class TestCursorCommandPanelFindings:
 
 class TestExecutableConsentGate:
     """Threat #8 regression: deployment to ``requires_executable_consent``
-    targets is gated on ``--allow-executable-commands`` and warn() alone
+    targets is gated on ``--allow-cursor-commands`` and warn() alone
     is no longer sufficient.
 
     Covers panel findings 1, 3, 4 (hardcoded cursor branch removed,
@@ -1679,7 +1679,7 @@ class TestExecutableConsentGate:
         assert result.files_skipped == 2
         assert not (temp_project / ".cursor" / "commands").exists()
         warnings = diag.by_category().get("warning", [])
-        assert any("allow-executable-commands" in w.message for w in warnings), (
+        assert any("allow-cursor-commands" in w.message for w in warnings), (
             f"expected re-run hint in warning, got: {[w.message for w in warnings]}"
         )
 

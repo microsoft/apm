@@ -201,7 +201,7 @@ class InstallContext:
     manifest_snapshot: bytes | None = None
     snapshot_manifest_path: Optional["Path"] = None
     # Threat #8 consent: deploy slash commands for cursor-style targets
-    # only when the user passed ``apm install --allow-executable-commands``.
+    # only when the user passed ``apm install --allow-cursor-commands``.
     allow_executable_commands: bool = False
 
 
@@ -928,16 +928,20 @@ def _handle_mcp_install(
     help="Skip org policy enforcement for this invocation. Does NOT bypass apm audit --ci.",
 )
 @click.option(
-    "--allow-executable-commands",
-    "allow_executable_commands",
+    "--allow-cursor-commands",
+    "allow_cursor_commands",
     is_flag=True,
     default=False,
     help=(
-        "Opt in to deploying slash-command files for targets that treat the commands "
-        "directory as executable code (currently Cursor: .cursor/commands/*.md). Without "
-        "this flag, command deployment is skipped for those targets and a diagnostic "
-        "explains how to enable it. Mirrors `npm --ignore-scripts` semantics for "
-        "post-install code execution (Threat #8)."
+        "Opt in to deploying slash-command files to Cursor "
+        "(.cursor/commands/*.md). Cursor reads this directory as "
+        "IDE-invokable slash commands, so deployment is treated as "
+        "post-install code execution and gated on this explicit consent "
+        "flag. Without it, command deployment is skipped for Cursor and a "
+        "diagnostic explains how to enable it. Mirrors `npm "
+        "--ignore-scripts` semantics for Threat #8 (post-install code "
+        "execution). Other targets (claude, opencode, gemini) do not "
+        "auto-invoke command files at IDE startup and are unaffected."
     ),
 )
 @click.pass_context
@@ -970,7 +974,7 @@ def install(  # noqa: PLR0913
     registry_url,
     skill_names,
     no_policy,
-    allow_executable_commands,
+    allow_cursor_commands,
 ):
     """Install APM and MCP dependencies from apm.yml (like npm install).
 
@@ -1218,7 +1222,7 @@ def install(  # noqa: PLR0913
             only_packages=builtins.list(validated_packages) if packages else None,
             manifest_snapshot=_manifest_snapshot,
             snapshot_manifest_path=_snapshot_manifest_path,
-            allow_executable_commands=allow_executable_commands,
+            allow_executable_commands=allow_cursor_commands,
         )
 
         apm_count, mcp_count, apm_diagnostics = _install_apm_packages(
@@ -1232,6 +1236,7 @@ def install(  # noqa: PLR0913
             mcp_count=mcp_count,
             apm_diagnostics=apm_diagnostics,
             force=force,
+            allow_cursor_commands=allow_cursor_commands,
         )
 
     except InsecureDependencyPolicyError:
@@ -1567,18 +1572,39 @@ def _install_apm_packages(ctx, outcome):
     return apm_count, mcp_count, apm_diagnostics
 
 
-def _post_install_summary(*, logger, apm_count, mcp_count, apm_diagnostics, force):
+def _post_install_summary(
+    *,
+    logger,
+    apm_count,
+    mcp_count,
+    apm_diagnostics,
+    force,
+    allow_cursor_commands: bool = False,
+):
     """Render diagnostics and final install summary.
 
     Shows diagnostic details (if any), the install summary line, and
     exits with code 1 when critical security findings are present
     (unless *force* is set).
+
+    *allow_cursor_commands* is echoed in the verbose block so the
+    Threat #8 consent flag state is auditable in CI logs and verbose
+    shells -- a security-consent flag that controls which files are
+    deployed must be observable post-install.
     """
     # Show diagnostics and final install summary
     if apm_diagnostics and apm_diagnostics.has_diagnostics:
         apm_diagnostics.render_summary()
     else:
         _rich_blank_line()
+
+    # Surface the Threat #8 consent flag state in --verbose so users
+    # and CI can confirm which security posture was applied.  Rendered
+    # only in verbose mode to keep the default summary terse.
+    if logger.verbose:
+        logger.verbose_detail(
+            f"  allow-cursor-commands: {'true' if allow_cursor_commands else 'false'}"
+        )
 
     error_count = 0
     if apm_diagnostics:

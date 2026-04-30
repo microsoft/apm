@@ -46,5 +46,5 @@ class InstallRequest:
     skill_subset_from_cli: bool = False  # True when user passed --skill (even --skill '*')
     # Threat #8: explicit consent for deploying slash commands to targets
     # marked requires_executable_consent (currently Cursor).  Wired from
-    # ``apm install --allow-executable-commands``.
+    # ``apm install --allow-cursor-commands``.
     allow_executable_commands: bool = False

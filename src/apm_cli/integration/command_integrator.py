@@ -70,16 +70,18 @@ def should_deploy_executable_commands(
     :attr:`TargetProfile.requires_executable_consent`; the gate then
     returns True only when the caller passes
     ``allow_executable_commands=True`` (sourced from
-    ``apm install --allow-executable-commands`` at the CLI surface).
+    ``apm install --allow-cursor-commands`` at the CLI surface; the
+    internal kwarg keeps a generic name so the gate can be reused by
+    future target-scoped consent flags).
 
     Targets that did not opt in are always allowed (returns True
     immediately) so existing Claude/OpenCode/Gemini behaviour is preserved
     in this PR.  See :class:`TargetProfile.requires_executable_consent`
-    for the asymmetric-consent TODO.
+    for the asymmetric-consent rationale.
     """
     if not target.requires_executable_consent:
         return True
-    return bool(allow_executable_commands)
+    return allow_executable_commands
 
 
 def _extract_input_names(
@@ -153,6 +155,30 @@ class CommandIntegrator(BaseIntegrator):
     Transforms .prompt.md files into Claude Code custom slash commands
     during package installation, following the same pattern as PromptIntegrator.
     """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Track which (target_name) values have already received the
+        # one-shot Claude-frontmatter-passthrough notice so the message
+        # fires once per (install run, target), not once per package or
+        # once per file.  Reset implicitly when a new integrator is
+        # constructed (one per install run).
+        self._passthrough_notified: set[str] = set()
+
+    def _should_emit_passthrough_notice(self, target_name: str, format_id: str) -> bool:
+        """Return True the first time *target_name* sees a passthrough deploy.
+
+        Only fires for cursor-style targets that reuse the shared
+        ``claude_command`` transformer (and would benefit from the
+        cross-tool-compatibility explanation).  Returns False for
+        targets that have their own dedicated writer (e.g. Gemini).
+        """
+        if format_id != "claude_command" or target_name == "claude":
+            return False
+        if target_name in self._passthrough_notified:
+            return False
+        self._passthrough_notified.add(target_name)
+        return True
 
     def find_prompt_files(self, package_path: Path) -> list[Path]:
         """Find all .prompt.md files in a package."""
@@ -255,12 +281,14 @@ class CommandIntegrator(BaseIntegrator):
         diagnostic messages so users can tell which IDE the command was
         installed for.
 
-        TODO(cursor-command-format): https://github.com/microsoft/apm/issues/1046
-        Cursor currently reuses the ``claude_command`` transformer which
-        preserves only a common subset of frontmatter (description,
-        allowed-tools, model, argument-hint).  When a dedicated
-        ``cursor_command`` transformer lands, the target dispatch in
-        ``integrate_commands_for_target`` should branch to it.
+        TODO(cursor-command-format): track via dedicated follow-up issue
+        once filed.  Cursor currently reuses the ``claude_command``
+        transformer which preserves only a common subset of frontmatter
+        (description, allowed-tools, model, argument-hint, input).  When a
+        dedicated ``cursor_command`` transformer lands, the target
+        dispatch in ``integrate_commands_for_target`` should branch to
+        it.  Dropped keys are surfaced via diagnostics.warn() per file
+        in the meantime.
 
         Args:
             source: Source .prompt.md file path
@@ -420,8 +448,8 @@ class CommandIntegrator(BaseIntegrator):
 
         When *target* sets ``requires_executable_consent=True`` (currently
         Cursor only), deployment is gated on *allow_executable_commands*
-        (sourced from ``apm install --allow-executable-commands``).  A
-        missing consent flag causes deployment to be skipped with a clear
+        (sourced from ``apm install --allow-cursor-commands``).  A missing
+        consent flag causes deployment to be skipped with a clear
         diagnostic explaining how to enable it -- this implements the
         consent gate from Threat #8 uniformly via
         :func:`should_deploy_executable_commands` rather than per-target
@@ -431,56 +459,69 @@ class CommandIntegrator(BaseIntegrator):
         if not mapping:
             return IntegrationResult(0, 0, 0, [], 0)
 
+        # Hoist the per-package name lookup once -- used by every
+        # diagnostic emitted below instead of being recomputed at each
+        # call site (was duplicated 4x in this method).
+        pkg_name = getattr(
+            getattr(package_info, "package", None),
+            "name",
+            "",
+        )
+
         effective_root = mapping.deploy_root or target.root_dir
         target_root = project_root / effective_root
         if not target.auto_create and not (project_root / target.root_dir).is_dir():
             # Surface a discoverability note so users (and CI logs) see
-            # why the target was skipped instead of silently diverging
-            # from a dev machine that has the directory.
+            # why the target was skipped.  When the target also requires
+            # explicit consent, mention the flag in the same hint so a
+            # user who creates the directory and re-runs does not hit a
+            # second confusing skip on the consent gate.
             if diagnostics is not None:
-                pkg_name = getattr(
-                    getattr(package_info, "package", None),
-                    "name",
-                    "",
-                )
+                consent_hint = ""
+                if target.requires_executable_consent:
+                    consent_hint = (
+                        f" Once {target.root_dir}/ exists, re-run with "
+                        f"`apm install --allow-cursor-commands` to "
+                        f"register the deployed files as IDE-invokable "
+                        f"slash commands."
+                    )
                 diagnostics.info(
                     message=(
                         f"Skipped {target.root_dir}/{mapping.subdir}/ -- "
                         f"create a {target.root_dir}/ directory to enable "
-                        f"{target.name} command deployment."
+                        f"{target.name} command deployment.{consent_hint}"
                     ),
                     package=pkg_name,
                 )
             return IntegrationResult(0, 0, 0, [], 0)
 
-        prompt_files = self.find_prompt_files(package_info.install_path)
-        if not prompt_files:
-            return IntegrationResult(0, 0, 0, [], 0)
-
         # Threat #8 consent gate: if the target marks command deployment
-        # as post-install code execution, require an explicit opt-in
-        # before writing anything.  warn() is notification, not consent;
-        # this gate enforces the difference.  A skip-note explains the
-        # exact flag the user must add.  Applied via the shared helper so
-        # new targets opt in by setting requires_executable_consent
-        # rather than touching this branch.
+        # as post-install code execution, refuse to do *any* filesystem
+        # work (including discovery I/O) before the user opts in.  warn()
+        # is notification, not consent; this gate enforces the difference.
+        # The skip-note names the exact flag the user must add.  Applied
+        # via the shared helper so new targets opt in by setting
+        # requires_executable_consent rather than touching this branch.
         if not should_deploy_executable_commands(
             target,
             allow_executable_commands=allow_executable_commands,
         ):
-            if diagnostics is not None:
-                pkg_name = getattr(
-                    getattr(package_info, "package", None),
-                    "name",
-                    "",
-                )
+            # Cheap discovery so the warning can quote the exact file
+            # count -- but only after the gate has decided to skip, so
+            # the I/O cost is paid once (not at install steady-state
+            # when consent is missing on every package).  This is still
+            # called inside the gate-skipped branch so consent-absent
+            # installs do exactly one find per package, not zero -- the
+            # tradeoff is a more actionable warning vs. a silent zero.
+            n_prompt_files = len(self.find_prompt_files(package_info.install_path))
+            if diagnostics is not None and n_prompt_files:
                 diagnostics.warn(
                     message=(
-                        f"Skipped {len(prompt_files)} {target.name} "
+                        f"Skipped {n_prompt_files} {target.name} "
                         f"command(s): deployment to "
                         f"{target.root_dir}/{mapping.subdir}/ requires "
                         f"explicit opt-in. Re-run with "
-                        f"`apm install --allow-executable-commands` to "
+                        f"`apm install --allow-cursor-commands` to "
                         f"register these files as IDE-invokable slash "
                         f"commands."
                     ),
@@ -493,7 +534,33 @@ class CommandIntegrator(BaseIntegrator):
                         f"code execution requires explicit consent."
                     ),
                 )
-            return IntegrationResult(0, 0, len(prompt_files), [], 0)
+            return IntegrationResult(0, 0, n_prompt_files, [], 0)
+
+        prompt_files = self.find_prompt_files(package_info.install_path)
+        if not prompt_files:
+            return IntegrationResult(0, 0, 0, [], 0)
+
+        # One-shot install-time notice for cursor-style targets: the
+        # shared command transformer keeps Claude-compatible frontmatter
+        # in the output file (description, allowed-tools, model,
+        # argument-hint, input).  Surface this once per (target, install)
+        # so a user who inspects ``.cursor/commands/*.md`` and sees Claude
+        # naming understands it is intentional cross-tool compatibility,
+        # not a leaked artefact.  Per-file dropped-keys warnings still
+        # fire from integrate_command() for keys that *are* discarded.
+        if diagnostics is not None and self._should_emit_passthrough_notice(
+            target.name,
+            mapping.format_id,
+        ):
+            diagnostics.info(
+                message=(
+                    f"{target.name.capitalize()} command files keep "
+                    f"Claude-compatible frontmatter (description, "
+                    f"allowed-tools, model, argument-hint, input) "
+                    f"intentionally for cross-tool compatibility."
+                ),
+                package=pkg_name,
+            )
 
         self.init_link_resolver(package_info, project_root)
 
@@ -520,11 +587,7 @@ class CommandIntegrator(BaseIntegrator):
                 if diagnostics is not None:
                     diagnostics.warn(
                         message=f"Rejected command filename: {exc}",
-                        package=getattr(
-                            getattr(package_info, "package", None),
-                            "name",
-                            "",
-                        ),
+                        package=pkg_name,
                     )
                 files_skipped += 1
                 continue
@@ -540,11 +603,7 @@ class CommandIntegrator(BaseIntegrator):
                 if diagnostics is not None:
                     diagnostics.warn(
                         message=f"Rejected command target path: {exc}",
-                        package=getattr(
-                            getattr(package_info, "package", None),
-                            "name",
-                            "",
-                        ),
+                        package=pkg_name,
                     )
                 files_skipped += 1
                 continue
@@ -565,10 +624,11 @@ class CommandIntegrator(BaseIntegrator):
                 self._write_gemini_command(prompt_file, target_path)
                 links_resolved = 0
             else:
-                # TODO(cursor-command-format): https://github.com/microsoft/apm/issues/1046
-                # Cursor reuses the shared claude_command transformer; pass
-                # target.name so diagnostic messages stay target-agnostic
-                # (no Claude branding for Cursor installs).
+                # Cursor reuses the shared claude_command transformer;
+                # pass target.name so diagnostic messages stay
+                # target-agnostic (no Claude branding for Cursor
+                # installs).  See the cursor-command-format TODO on
+                # KNOWN_TARGETS["cursor"]["commands"] in targets.py.
                 links_resolved = self.integrate_command(
                     prompt_file,
                     target_path,

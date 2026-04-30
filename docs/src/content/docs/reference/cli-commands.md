@@ -115,7 +115,7 @@ apm install [PACKAGES...] [OPTIONS]
 - `--allow-protocol-fallback` - Restore the legacy permissive cross-protocol fallback chain (HTTPS-then-SSH or vice-versa). Strict-by-default otherwise. Each retry emits a `[!]` warning naming both protocols. When the dependency URL carries a custom port, APM also emits a one-shot `[!]` warning before the first clone attempt noting that the same port will be reused across schemes (wrong on servers like Bitbucket Datacenter that serve SSH and HTTPS on different ports) -- to avoid the mismatch, omit this flag and pin the dependency with an explicit `ssh://` or `https://` URL.
 - `--no-policy` -- Skip org policy enforcement for this invocation. Loudly logged. Does NOT bypass `apm audit --ci`. Available on `apm install`, `apm install <pkg>`, and `apm install --mcp <name>`.
   - Equivalent env var: `APM_POLICY_DISABLE=1` (applies to the entire shell session). Note: `apm deps update` runs the install pipeline and is gated by policy but does not currently expose a `--no-policy` flag -- use `APM_POLICY_DISABLE=1` as the only escape hatch there.
-- `--allow-executable-commands` -- Opt in to deploying slash-command files for targets that treat the commands directory as executable code (currently `cursor`: `.cursor/commands/*.md`). Without this flag, command deployment is skipped for those targets and a warning explains how to enable it. Mirrors `npm --ignore-scripts` semantics for post-install code execution. Other targets (`claude`, `opencode`, `gemini`) are unaffected and continue to deploy slash commands by default.
+- `--allow-cursor-commands` -- Opt in to deploying slash-command files to Cursor (`.cursor/commands/*.md`). Cursor reads this directory as IDE-invokable slash commands, so deployment is treated as post-install code execution and gated on this explicit consent flag. Without it, command deployment is skipped for Cursor and a warning explains how to enable it. Mirrors `npm --ignore-scripts` semantics for Threat #8 (post-install code execution). Other targets (`claude`, `opencode`, `gemini`) do not auto-invoke command files at IDE startup and are unaffected -- they continue to deploy slash commands by default. **Lifecycle note:** Cursor 1.6+ only; Cursor is de-emphasizing commands in favor of rules/skills -- watch upstream changes.
 - `--skill NAME` - Install only named skill(s) from a `SKILL_BUNDLE` package. Repeatable. The selection is **persisted** in `apm.yml` (as a `skills:` list in dict-form entries) and in `apm.lock.yaml` (as `skill_subset`), so subsequent bare `apm install` commands are deterministic. Use `--skill '*'` to reset and install all skills from the bundle.
 
 **Transport env vars:**
@@ -386,7 +386,7 @@ apm uninstall -g microsoft/apm-sample-package
 | Claude hook settings | `.claude/settings.json` (hooks key cleaned) |
 | Cursor rules | `.cursor/rules/*.mdc` |
 | Cursor agents | `.cursor/agents/*.md` |
-| Cursor commands | `.cursor/commands/*.md` (opt-in via `--allow-executable-commands`) |
+| Cursor commands | `.cursor/commands/*.md` (opt-in via `--allow-cursor-commands`; Cursor 1.6+) |
 | Cursor skills | `.cursor/skills/{folder-name}/` |
 | Cursor hooks | `.cursor/hooks.json` (hooks key cleaned) |
 | OpenCode agents | `.opencode/agents/*.md` |

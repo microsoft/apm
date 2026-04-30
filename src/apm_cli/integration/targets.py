@@ -131,26 +131,36 @@ class TargetProfile:
     ``copilot-instructions.md`` file.
     """
 
-    requires_executable_consent: bool = False
+    requires_executable_consent: bool = True
     """When True, deploying the ``commands`` primitive for this target is
     treated as post-install code execution (Threat #8) and requires explicit
-    user opt-in via ``apm install --allow-executable-commands``.
+    user opt-in via ``apm install --allow-cursor-commands`` (or any future
+    target-scoped consent flag wired to the same gate).
+
+    The default is ``True`` so the security posture is fail-closed: any
+    target added in the future that omits this field will refuse command
+    deployment until a maintainer either (a) implements an explicit consent
+    flag and wires it through the install pipeline, or (b) sets this field
+    to ``False`` with a documented rationale.
 
     Rationale: some targets (currently Cursor) read deployed ``.md`` files
     from a commands directory as IDE-invokable slash commands.  A passive
     ``warn()`` diagnostic is notification, not consent, and is invisible in
-    CI / non-verbose shells.  Targets that opt in to this flag are gated by
+    CI / non-verbose shells.  Targets opted in to this gate are checked by
     :func:`should_deploy_executable_commands` in the command integrator;
     when consent is missing the deployment is skipped and a clear
     ``commands_skipped`` diagnostic explains how to enable it.
 
-    TODO(asymmetric-consent): https://github.com/microsoft/apm/pull/1046
-    Claude Code, OpenCode, and Gemini CLI also deploy ``.md``/``.toml``
-    files that become IDE-invokable, so the same gate logically applies
-    to them.  They are intentionally left at ``False`` in this PR to
-    avoid breaking existing installs in a single change; the flag will
-    flip in a follow-up after migration guidance ships.  The bypass risk
-    is documented so future maintainers do not silently accept the gap.
+    Per-target posture (see ``docs/.../enterprise/security.md`` Threat #8):
+
+    * ``cursor`` -- gated (this field defaults True); requires
+      ``--allow-cursor-commands``.
+    * ``claude``, ``opencode``, ``gemini`` -- explicitly opt out
+      (``requires_executable_consent=False``) because their command files
+      are not auto-invoked at IDE startup and the existing one-flag-per-
+      target ergonomics would regress for users on those tools.  The
+      asymmetry is intentional and documented; see the security doc for
+      the rationale and follow-up tracking.
     """
 
     @property
@@ -337,6 +347,11 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         auto_create=False,
         detect_by_dir=True,
         user_supported=True,
+        # Threat #8 posture: Claude Code does not auto-invoke
+        # .claude/commands/*.md at IDE startup; deployment is opt-out
+        # rather than opt-in so existing one-flag-per-target ergonomics
+        # are preserved.  See docs/.../enterprise/security.md (Threat #8).
+        requires_executable_consent=False,
     ),
     # Cursor -- at user scope, ~/.cursor/ supports skills, agents, hooks,
     # and MCP.  Rules/instructions are managed via Cursor Settings UI only
@@ -348,15 +363,17 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         primitives={
             "instructions": PrimitiveMapping("rules", ".mdc", "cursor_rules"),
             "agents": PrimitiveMapping("agents", ".md", "cursor_agent"),
-            # TODO(cursor-command-format): https://github.com/microsoft/apm/issues/1046
-            # Cursor command deployment reuses the shared command transformer
-            # (claude_command), which preserves only the supported common
-            # frontmatter subset (description, allowed-tools, model,
-            # argument-hint).  Switch to a dedicated "cursor_command" format
-            # when the integrator implements a Cursor-specific writer that
-            # preserves Cursor-specific prompt metadata (author, input, mcp,
-            # parameters, etc.) verbatim.  Dropped keys are surfaced via
-            # diagnostics.warn() at install time -- see command_integrator.
+            # TODO(cursor-command-format): track via dedicated issue once
+            # filed.  Cursor command deployment reuses the shared command
+            # transformer (claude_command), which preserves only the
+            # supported common frontmatter subset (description,
+            # allowed-tools, model, argument-hint, input).  Switch to a
+            # dedicated "cursor_command" format when the integrator
+            # implements a Cursor-specific writer that preserves
+            # Cursor-specific prompt metadata (author, mcp, parameters,
+            # ...) verbatim.  Dropped keys are surfaced via
+            # diagnostics.warn() at install time -- see
+            # command_integrator.
             "commands": PrimitiveMapping("commands", ".md", "claude_command"),
             "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
             "hooks": PrimitiveMapping("hooks", ".json", "cursor_hooks"),
@@ -366,9 +383,10 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported="partial",
         user_root_dir=".cursor",
         unsupported_user_primitives=("instructions",),
-        # Cursor reads .cursor/commands/*.md as IDE-invokable slash commands;
-        # treat deployment as post-install code execution and require explicit
-        # opt-in (see TargetProfile.requires_executable_consent).
+        # Cursor reads .cursor/commands/*.md as IDE-invokable slash
+        # commands; treat deployment as post-install code execution and
+        # require explicit opt-in via --allow-cursor-commands (Threat #8).
+        # See TargetProfile.requires_executable_consent docstring.
         requires_executable_consent=True,
     ),
     # OpenCode -- at user scope, ~/.config/opencode/ supports skills, agents,
@@ -386,6 +404,11 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported="partial",
         user_root_dir=".config/opencode",
         unsupported_user_primitives=("hooks",),
+        # Threat #8 posture: OpenCode commands deploy to
+        # .opencode/commands/*.md but are not auto-invoked at startup;
+        # opt out of the consent gate to preserve existing ergonomics.
+        # See docs/.../enterprise/security.md (Threat #8).
+        requires_executable_consent=False,
     ),
     # Gemini CLI -- ~/.gemini/ is the documented user-level config directory.
     # Instructions are compile-only (GEMINI.md) -- Gemini CLI does not read
@@ -406,6 +429,10 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         user_supported=True,
         user_root_dir=".gemini",
+        # Threat #8 posture: Gemini commands are TOML under
+        # .gemini/commands/; not auto-invoked at startup.  Opt out of the
+        # consent gate; see docs/.../enterprise/security.md (Threat #8).
+        requires_executable_consent=False,
     ),
     # Codex CLI: skills use the cross-tool .agents/ dir (agent skills standard),
     # agents are TOML under .codex/agents/, hooks merge into .codex/hooks.json.
