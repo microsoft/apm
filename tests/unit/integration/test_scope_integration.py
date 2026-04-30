@@ -266,8 +266,8 @@ class TestClaudeScopeResolution:
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(outside))
         scoped = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
         assert scoped is not None
-        # Paths outside $HOME are not normalized; preserve the absolute string.
-        assert scoped.root_dir == str(outside.resolve())
+        # Paths outside $HOME remain absolute and are resolved/normalized.
+        assert scoped.root_dir == str(outside.resolve(strict=False))
 
     def test_user_scope_collapses_dotdot_segments(self, tmp_path, monkeypatch):
         # ``..`` must be resolved before relative_to(home) so traversal
