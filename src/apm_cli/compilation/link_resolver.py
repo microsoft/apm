@@ -433,6 +433,13 @@ def _resolve_path(path: str, base_path: Path) -> Path | None:
     """
     if not path or not path.strip():
         return None
+    # NUL bytes survive ``Path()`` construction on POSIX but every downstream
+    # filesystem call (``.exists()``, ``.is_file()``, ``.read_text()``) raises
+    # ``ValueError``. Callers in this module do not catch ``ValueError`` so an
+    # unguarded NUL would abort markdown link resolution / validation. Reject
+    # at the resolver boundary instead.
+    if "\x00" in path:
+        return None
     try:
         if Path(path).is_absolute():
             return Path(path)
