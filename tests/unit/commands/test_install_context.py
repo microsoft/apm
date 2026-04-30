@@ -65,6 +65,7 @@ class TestInstallContextFields:
         "only_packages",
         "manifest_snapshot",
         "snapshot_manifest_path",
+        "allow_executable_commands",
     )
 
     def test_all_required_fields_present(self):

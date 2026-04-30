@@ -93,6 +93,7 @@ def integrate_package_primitives(
     scope: InstallScope | None = None,
     skill_subset: tuple | None = None,
     ctx: InstallContext | None = None,
+    allow_executable_commands: bool = False,
 ) -> dict:
     """Run the full integration pipeline for a single package.
 
@@ -182,13 +183,21 @@ def integrate_package_primitives(
                 continue  # skills handled below
 
             _integrator = _INTEGRATOR_KWARGS[_prim_name]
+            _integrate_kwargs = {
+                "force": force,
+                "managed_files": managed_files,
+                "diagnostics": diagnostics,
+            }
+            if _prim_name == "commands":
+                # Threat #8 consent gate -- only the command integrator
+                # accepts this kwarg; gating is enforced inside via
+                # should_deploy_executable_commands(target, ...).
+                _integrate_kwargs["allow_executable_commands"] = allow_executable_commands
             _int_result = getattr(_integrator, _entry.integrate_method)(
                 _target,
                 package_info,
                 project_root,
-                force=force,
-                managed_files=managed_files,
-                diagnostics=diagnostics,
+                **_integrate_kwargs,
             )
 
             if _int_result.files_integrated > 0:
@@ -273,6 +282,7 @@ def integrate_local_content(
     logger: InstallLogger | None = None,
     scope: InstallScope | None = None,
     ctx: InstallContext | None = None,
+    allow_executable_commands: bool = False,
 ) -> dict:
     """Integrate primitives from the project's own .apm/ directory.
 
@@ -318,6 +328,7 @@ def integrate_local_content(
         logger=logger,
         scope=scope,
         ctx=ctx,
+        allow_executable_commands=allow_executable_commands,
     )
 
 

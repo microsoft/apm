@@ -634,6 +634,7 @@ class TestCursorCommandEndToEnd:
             force=False,
             managed_files=set(),
             diagnostics=DiagnosticCollector(),
+            allow_executable_commands=True,
         )
 
         assert result["commands"] == 1
@@ -1333,7 +1334,10 @@ class TestCursorCommandIntegration:
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         result = integrator.integrate_commands_for_target(
-            KNOWN_TARGETS["cursor"], pkg_info, temp_project
+            KNOWN_TARGETS["cursor"],
+            pkg_info,
+            temp_project,
+            allow_executable_commands=True,
         )
         assert result.files_integrated == 1
         target = temp_project / ".cursor" / "commands" / "test.md"
@@ -1352,7 +1356,10 @@ class TestCursorCommandIntegration:
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         result = integrator.integrate_commands_for_target(
-            KNOWN_TARGETS["cursor"], pkg_info, temp_project
+            KNOWN_TARGETS["cursor"],
+            pkg_info,
+            temp_project,
+            allow_executable_commands=True,
         )
         assert result.files_integrated == 2
 
@@ -1383,7 +1390,12 @@ class TestCursorCommandIntegration:
         integrator = CommandIntegrator()
         from apm_cli.integration.targets import KNOWN_TARGETS
 
-        integrator.integrate_commands_for_target(KNOWN_TARGETS["cursor"], pkg_info, temp_project)
+        integrator.integrate_commands_for_target(
+            KNOWN_TARGETS["cursor"],
+            pkg_info,
+            temp_project,
+            allow_executable_commands=True,
+        )
 
         target = temp_project / ".cursor" / "commands" / "cmd.md"
         assert target.exists()
@@ -1476,6 +1488,7 @@ class TestCursorCommandPanelFindings:
             pkg_info,
             temp_project,
             diagnostics=diag,
+            allow_executable_commands=True,
         )
 
         warnings = diag.by_category().get("warning", [])
@@ -1504,6 +1517,7 @@ class TestCursorCommandPanelFindings:
             pkg_info,
             temp_project,
             diagnostics=diag,
+            allow_executable_commands=True,
         )
 
         warnings = diag.by_category().get("warning", [])
@@ -1534,6 +1548,7 @@ class TestCursorCommandPanelFindings:
             pkg_info,
             temp_project,
             diagnostics=diag,
+            allow_executable_commands=True,
         )
         info_items = diag.by_category().get("info", [])
         assert all("Claude arguments" not in i.message for i in info_items), (
@@ -1542,7 +1557,12 @@ class TestCursorCommandPanelFindings:
         assert any("Mapped input -> command arguments" in i.message for i in info_items)
 
     def test_cursor_consent_warning_emitted(self, temp_project):
-        """Cursor commands deployment surfaces an IDE-consent warning per package."""
+        """Without --allow-executable-commands, cursor deployment is gated.
+
+        Threat #8: warn() is notification, not consent. The gate skips
+        deployment entirely and surfaces a warning telling the user the
+        exact CLI flag to add. This test verifies the gated-skip path.
+        """
         from apm_cli.integration.targets import KNOWN_TARGETS
         from apm_cli.utils.diagnostics import DiagnosticCollector
 
@@ -1551,16 +1571,20 @@ class TestCursorCommandPanelFindings:
             {"hello.prompt.md": "---\ndescription: Hi\n---\nbody"},
         )
         diag = DiagnosticCollector()
-        CommandIntegrator().integrate_commands_for_target(
+        result = CommandIntegrator().integrate_commands_for_target(
             KNOWN_TARGETS["cursor"],
             pkg_info,
             temp_project,
             diagnostics=diag,
         )
+        # Nothing was written.
+        assert result.files_integrated == 0
+        assert not (temp_project / ".cursor" / "commands").exists()
         warnings = diag.by_category().get("warning", [])
         assert any(
-            "Cursor command deployment" in w.message and "IDE" in w.message for w in warnings
-        ), f"expected consent warning, got: {[w.message for w in warnings]}"
+            "allow-executable-commands" in w.message and "cursor" in w.message.lower()
+            for w in warnings
+        ), f"expected gated-skip warning naming the CLI flag, got: {[w.message for w in warnings]}"
 
     def test_skip_note_when_cursor_dir_missing(self, temp_project_no_cursor):
         """No .cursor/ -> info note explaining the skip (no silent skip)."""
@@ -1583,3 +1607,116 @@ class TestCursorCommandPanelFindings:
             "Skipped .cursor/commands/" in i.message and "create a .cursor/" in i.message
             for i in info_items
         ), f"expected skip note, got: {[i.message for i in info_items]}"
+
+
+class TestExecutableConsentGate:
+    """Threat #8 regression: deployment to ``requires_executable_consent``
+    targets is gated on ``--allow-executable-commands`` and warn() alone
+    is no longer sufficient.
+
+    Covers panel findings 1, 3, 4 (hardcoded cursor branch removed,
+    consent unified via shared helper, warn() upgraded to a real gate).
+    """
+
+    @pytest.fixture
+    def temp_project(self):
+        temp_dir = tempfile.mkdtemp()
+        temp_path = Path(temp_dir)
+        (temp_path / ".cursor").mkdir()
+        (temp_path / ".claude" / "commands").mkdir(parents=True)
+        (temp_path / ".opencode" / "command").mkdir(parents=True)
+        (temp_path / ".gemini" / "commands").mkdir(parents=True)
+        yield temp_path
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_helper_returns_true_for_non_consent_targets(self):
+        """Helper short-circuits for targets without the consent flag."""
+        from apm_cli.integration.command_integrator import (
+            should_deploy_executable_commands,
+        )
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        for name in ("claude", "opencode", "gemini"):
+            target = KNOWN_TARGETS[name]
+            assert target.requires_executable_consent is False
+            assert (
+                should_deploy_executable_commands(target, allow_executable_commands=False) is True
+            )
+
+    def test_helper_blocks_consent_target_without_flag(self):
+        """Cursor-style targets are blocked unless the user opts in."""
+        from apm_cli.integration.command_integrator import (
+            should_deploy_executable_commands,
+        )
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        cursor = KNOWN_TARGETS["cursor"]
+        assert cursor.requires_executable_consent is True
+        assert should_deploy_executable_commands(cursor, allow_executable_commands=False) is False
+        assert should_deploy_executable_commands(cursor, allow_executable_commands=True) is True
+
+    def test_cursor_skipped_without_consent_flag(self, temp_project):
+        """Without the flag, cursor deployment writes no files and emits a warn."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        pkg_info = _make_package(
+            temp_project,
+            {
+                "a.prompt.md": "---\ndescription: a\n---\nbody",
+                "b.prompt.md": "---\ndescription: b\n---\nbody",
+            },
+        )
+        diag = DiagnosticCollector()
+        result = CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["cursor"],
+            pkg_info,
+            temp_project,
+            diagnostics=diag,
+        )
+
+        assert result.files_integrated == 0
+        assert result.files_skipped == 2
+        assert not (temp_project / ".cursor" / "commands").exists()
+        warnings = diag.by_category().get("warning", [])
+        assert any("allow-executable-commands" in w.message for w in warnings), (
+            f"expected re-run hint in warning, got: {[w.message for w in warnings]}"
+        )
+
+    def test_cursor_deployed_with_consent_flag(self, temp_project):
+        """With the flag, cursor deployment writes files normally."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        pkg_info = _make_package(
+            temp_project,
+            {"a.prompt.md": "---\ndescription: a\n---\nbody"},
+        )
+        result = CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["cursor"],
+            pkg_info,
+            temp_project,
+            allow_executable_commands=True,
+        )
+        assert result.files_integrated == 1
+        assert (temp_project / ".cursor" / "commands" / "a.md").exists()
+
+    @pytest.mark.parametrize("target_name", ["claude", "opencode", "gemini"])
+    def test_non_consent_targets_unaffected_by_flag(self, temp_project, target_name):
+        """Existing slash-command targets keep deploying without the flag.
+
+        Documented asymmetry (PR #1046): only Cursor sets
+        requires_executable_consent today; flipping it on for the other
+        targets would break existing user installs and is deferred.
+        """
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        pkg_info = _make_package(
+            temp_project,
+            {"x.prompt.md": "---\ndescription: x\n---\nbody"},
+        )
+        result = CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS[target_name],
+            pkg_info,
+            temp_project,
+        )
+        assert result.files_integrated == 1

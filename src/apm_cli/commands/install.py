@@ -200,6 +200,9 @@ class InstallContext:
     only_packages: builtins.list | None = None
     manifest_snapshot: bytes | None = None
     snapshot_manifest_path: Optional["Path"] = None
+    # Threat #8 consent: deploy slash commands for cursor-style targets
+    # only when the user passed ``apm install --allow-executable-commands``.
+    allow_executable_commands: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -924,6 +927,19 @@ def _handle_mcp_install(
     default=False,
     help="Skip org policy enforcement for this invocation. Does NOT bypass apm audit --ci.",
 )
+@click.option(
+    "--allow-executable-commands",
+    "allow_executable_commands",
+    is_flag=True,
+    default=False,
+    help=(
+        "Opt in to deploying slash-command files for targets that treat the commands "
+        "directory as executable code (currently Cursor: .cursor/commands/*.md). Without "
+        "this flag, command deployment is skipped for those targets and a diagnostic "
+        "explains how to enable it. Mirrors `npm --ignore-scripts` semantics for "
+        "post-install code execution (Threat #8)."
+    ),
+)
 @click.pass_context
 def install(  # noqa: PLR0913
     ctx,
@@ -954,6 +970,7 @@ def install(  # noqa: PLR0913
     registry_url,
     skill_names,
     no_policy,
+    allow_executable_commands,
 ):
     """Install APM and MCP dependencies from apm.yml (like npm install).
 
@@ -1201,6 +1218,7 @@ def install(  # noqa: PLR0913
             only_packages=builtins.list(validated_packages) if packages else None,
             manifest_snapshot=_manifest_snapshot,
             snapshot_manifest_path=_snapshot_manifest_path,
+            allow_executable_commands=allow_executable_commands,
         )
 
         apm_count, mcp_count, apm_diagnostics = _install_apm_packages(
@@ -1396,6 +1414,7 @@ def _install_apm_packages(ctx, outcome):
                 protocol_pref=ctx.protocol_pref,
                 allow_protocol_fallback=ctx.allow_protocol_fallback,
                 no_policy=ctx.no_policy,
+                allow_executable_commands=ctx.allow_executable_commands,
             )
             apm_count = install_result.installed_count
             prompt_count = install_result.prompts_integrated  # noqa: F841
@@ -1607,7 +1626,7 @@ from apm_cli.install.services import (  # noqa: E402
 #
 # The real implementation lives in ``apm_cli.install.pipeline`` (F2).
 # ---------------------------------------------------------------------------
-def _install_apm_dependencies(
+def _install_apm_dependencies(  # noqa: PLR0913
     apm_package: "APMPackage",
     update_refs: bool = False,
     verbose: bool = False,
@@ -1626,6 +1645,7 @@ def _install_apm_dependencies(
     no_policy: bool = False,
     skill_subset: "builtins.tuple | None" = None,
     skill_subset_from_cli: bool = False,
+    allow_executable_commands: bool = False,
 ):
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.
@@ -1660,5 +1680,6 @@ def _install_apm_dependencies(
         no_policy=no_policy,
         skill_subset=skill_subset,
         skill_subset_from_cli=skill_subset_from_cli,
+        allow_executable_commands=allow_executable_commands,
     )
     return InstallService().run(request)

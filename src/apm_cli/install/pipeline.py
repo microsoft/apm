@@ -145,6 +145,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     no_policy: bool = False,
     skill_subset: tuple | None = None,
     skill_subset_from_cli: bool = False,
+    allow_executable_commands: bool = False,
 ):
     """Install APM package dependencies.
 
@@ -240,6 +241,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         skill_subset=skill_subset,
         skill_subset_from_cli=skill_subset_from_cli,
         early_lockfile=_early_lockfile,
+        allow_executable_commands=allow_executable_commands,
     )
 
     # ------------------------------------------------------------------

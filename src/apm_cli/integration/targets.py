@@ -131,6 +131,28 @@ class TargetProfile:
     ``copilot-instructions.md`` file.
     """
 
+    requires_executable_consent: bool = False
+    """When True, deploying the ``commands`` primitive for this target is
+    treated as post-install code execution (Threat #8) and requires explicit
+    user opt-in via ``apm install --allow-executable-commands``.
+
+    Rationale: some targets (currently Cursor) read deployed ``.md`` files
+    from a commands directory as IDE-invokable slash commands.  A passive
+    ``warn()`` diagnostic is notification, not consent, and is invisible in
+    CI / non-verbose shells.  Targets that opt in to this flag are gated by
+    :func:`should_deploy_executable_commands` in the command integrator;
+    when consent is missing the deployment is skipped and a clear
+    ``commands_skipped`` diagnostic explains how to enable it.
+
+    TODO(asymmetric-consent): https://github.com/microsoft/apm/pull/1046
+    Claude Code, OpenCode, and Gemini CLI also deploy ``.md``/``.toml``
+    files that become IDE-invokable, so the same gate logically applies
+    to them.  They are intentionally left at ``False`` in this PR to
+    avoid breaking existing installs in a single change; the flag will
+    flip in a follow-up after migration guidance ships.  The bypass risk
+    is documented so future maintainers do not silently accept the gap.
+    """
+
     @property
     def prefix(self) -> str:
         """Return the path prefix for this target (e.g. ``".github/"``).
@@ -344,6 +366,10 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported="partial",
         user_root_dir=".cursor",
         unsupported_user_primitives=("instructions",),
+        # Cursor reads .cursor/commands/*.md as IDE-invokable slash commands;
+        # treat deployment as post-install code execution and require explicit
+        # opt-in (see TargetProfile.requires_executable_consent).
+        requires_executable_consent=True,
     ),
     # OpenCode -- at user scope, ~/.config/opencode/ supports skills, agents,
     # and commands.  OpenCode has no hooks concept, so "hooks" is excluded.

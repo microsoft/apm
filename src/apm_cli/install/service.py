@@ -77,4 +77,5 @@ class InstallService:
             no_policy=request.no_policy,
             skill_subset=request.skill_subset,
             skill_subset_from_cli=request.skill_subset_from_cli,
+            allow_executable_commands=request.allow_executable_commands,
         )
