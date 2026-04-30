@@ -10,10 +10,9 @@ import pytest
 
 from apm_cli.marketplace.git_stderr import (
     GitErrorKind,
-    TranslatedGitError,
+    TranslatedGitError,  # noqa: F401
     translate_git_stderr,
 )
-
 
 # ---------------------------------------------------------------------------
 # AUTH classification
@@ -53,8 +52,7 @@ _AUTH_STDERR_SAMPLES = [
         id="remote-write-access",
     ),
     pytest.param(
-        "Please make sure you have the correct access rights\n"
-        "and the repository exists.",
+        "Please make sure you have the correct access rights\nand the repository exists.",
         id="correct-access-rights",
     ),
     pytest.param(
@@ -77,15 +75,11 @@ class TestAuthClassification:
         assert result.kind == GitErrorKind.AUTH
 
     def test_auth_summary(self) -> None:
-        result = translate_git_stderr(
-            "fatal: Authentication failed", operation="ls-remote"
-        )
+        result = translate_git_stderr("fatal: Authentication failed", operation="ls-remote")
         assert result.summary == "Git authentication failed during ls-remote."
 
     def test_auth_hint(self) -> None:
-        result = translate_git_stderr(
-            "fatal: Authentication failed", operation="push"
-        )
+        result = translate_git_stderr("fatal: Authentication failed", operation="push")
         assert "GITHUB_TOKEN" in result.hint
         assert "apm marketplace doctor" in result.hint
 
@@ -143,15 +137,11 @@ class TestNotFoundClassification:
         assert result.kind == GitErrorKind.NOT_FOUND
 
     def test_not_found_summary(self) -> None:
-        result = translate_git_stderr(
-            "Repository not found", operation="clone"
-        )
+        result = translate_git_stderr("Repository not found", operation="clone")
         assert result.summary == "Git ref or repository not found during clone."
 
     def test_hint_with_remote(self) -> None:
-        result = translate_git_stderr(
-            "Repository not found", remote="acme/code-reviewer"
-        )
+        result = translate_git_stderr("Repository not found", remote="acme/code-reviewer")
         assert "'acme/code-reviewer'" in result.hint
         assert "ref is spelled correctly" in result.hint
 
@@ -214,9 +204,7 @@ class TestTimeoutClassification:
         assert result.kind == GitErrorKind.TIMEOUT
 
     def test_timeout_summary(self) -> None:
-        result = translate_git_stderr(
-            "Connection timed out", operation="push"
-        )
+        result = translate_git_stderr("Connection timed out", operation="push")
         assert result.summary == "Git network timeout during push."
 
     def test_timeout_hint(self) -> None:
@@ -233,15 +221,11 @@ class TestUnknownFallback:
     """Unrecognized stderr maps to UNKNOWN."""
 
     def test_unknown_kind(self) -> None:
-        result = translate_git_stderr(
-            "error: something completely unexpected happened"
-        )
+        result = translate_git_stderr("error: something completely unexpected happened")
         assert result.kind == GitErrorKind.UNKNOWN
 
     def test_unknown_summary_with_exit_code(self) -> None:
-        result = translate_git_stderr(
-            "kaboom", exit_code=1, operation="rebase"
-        )
+        result = translate_git_stderr("kaboom", exit_code=1, operation="rebase")
         assert result.summary == "Git failed during rebase (exit 1)."
 
     def test_unknown_summary_without_exit_code(self) -> None:
@@ -267,26 +251,17 @@ class TestPriorityOrder:
     """When stderr matches multiple categories, priority order wins."""
 
     def test_auth_beats_not_found(self) -> None:
-        stderr = (
-            "fatal: Authentication failed\n"
-            "ERROR: Repository not found."
-        )
+        stderr = "fatal: Authentication failed\nERROR: Repository not found."
         result = translate_git_stderr(stderr)
         assert result.kind == GitErrorKind.AUTH
 
     def test_auth_beats_timeout(self) -> None:
-        stderr = (
-            "fatal: Authentication failed\n"
-            "error: RPC failed; curl 56"
-        )
+        stderr = "fatal: Authentication failed\nerror: RPC failed; curl 56"
         result = translate_git_stderr(stderr)
         assert result.kind == GitErrorKind.AUTH
 
     def test_not_found_beats_timeout(self) -> None:
-        stderr = (
-            "Repository not found\n"
-            "Connection timed out"
-        )
+        stderr = "Repository not found\nConnection timed out"
         result = translate_git_stderr(stderr)
         assert result.kind == GitErrorKind.NOT_FOUND
 
@@ -351,9 +326,7 @@ class TestSummaryLengthCap:
             ("Connection timed out", GitErrorKind.TIMEOUT),
             ("kaboom", GitErrorKind.UNKNOWN),
         ]:
-            result = translate_git_stderr(
-                stderr, operation=long_op, exit_code=128
-            )
+            result = translate_git_stderr(stderr, operation=long_op, exit_code=128)
             assert result.kind == expected_kind
             assert len(result.summary) <= 80, (
                 f"{expected_kind}: summary is {len(result.summary)} chars"
@@ -406,9 +379,7 @@ class TestAsciiOnly:
         ids=["auth", "not-found", "timeout", "unknown", "empty"],
     )
     def test_all_fields_are_ascii(self, stderr: str) -> None:
-        result = translate_git_stderr(
-            stderr, operation="push", remote="acme/tools", exit_code=1
-        )
+        result = translate_git_stderr(stderr, operation="push", remote="acme/tools", exit_code=1)
         for field_name in ("summary", "hint", "raw"):
             value = getattr(result, field_name)
             value.encode("ascii")  # raises UnicodeEncodeError if non-ASCII

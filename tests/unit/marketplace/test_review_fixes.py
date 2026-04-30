@@ -22,7 +22,6 @@ from apm_cli.marketplace.migration import (
 )
 from apm_cli.marketplace.yml_editor import _is_apm_yml_with_marketplace
 
-
 # ---------------------------------------------------------------------------
 # r3: malformed apm.yml surfaces a clear error
 # ---------------------------------------------------------------------------
@@ -35,9 +34,7 @@ class TestMalformedApmYmlSurfaced:
         with pytest.raises(MarketplaceYmlError, match="Invalid YAML"):
             _has_marketplace_block(bad)
 
-    def test_unreadable_apm_yml_raises_marketplace_error(
-        self, tmp_path: Path, monkeypatch
-    ):
+    def test_unreadable_apm_yml_raises_marketplace_error(self, tmp_path: Path, monkeypatch):
         bad = tmp_path / "apm.yml"
         bad.write_text("name: app\n", encoding="utf-8")
 
@@ -61,13 +58,7 @@ class TestMalformedApmYmlSurfaced:
 
 
 def _legacy_yml() -> str:
-    return (
-        "name: mp\n"
-        "version: 0.1.0\n"
-        "description: legacy mp\n"
-        "owner:\n  name: acme\n"
-        "packages: []\n"
-    )
+    return "name: mp\nversion: 0.1.0\ndescription: legacy mp\nowner:\n  name: acme\npackages: []\n"
 
 
 class TestMigrateNonMappingApmYml:
@@ -147,17 +138,11 @@ class TestMarketplaceInitNonMappingApmYml:
 
 
 class TestMigrateMalformedApmYmlTyped:
-    def test_migrate_with_malformed_apm_yml_raises_typed_error(
-        self, tmp_path: Path
-    ):
+    def test_migrate_with_malformed_apm_yml_raises_typed_error(self, tmp_path: Path):
         # apm.yml passes the up-front existence check but is unparseable.
-        (tmp_path / "apm.yml").write_text(
-            "name: app\nversion: : :\n", encoding="utf-8"
-        )
-        (tmp_path / "marketplace.yml").write_text(
-            _legacy_yml(), encoding="utf-8"
-        )
-        with pytest.raises(MarketplaceYmlError, match="apm.yml is malformed"):
+        (tmp_path / "apm.yml").write_text("name: app\nversion: : :\n", encoding="utf-8")
+        (tmp_path / "marketplace.yml").write_text(_legacy_yml(), encoding="utf-8")
+        with pytest.raises(MarketplaceYmlError, match="apm.yml is malformed"):  # noqa: RUF043
             migrate_marketplace_yml(tmp_path)
 
 
@@ -168,4 +153,3 @@ class TestMigrateMalformedApmYmlTyped:
 # Removed: the ``marketplace_authoring`` experimental flag was deleted when
 # marketplace authoring went GA. ``apm init --marketplace`` now appends the
 # block unconditionally, so the disabled-flag warning case no longer exists.
-

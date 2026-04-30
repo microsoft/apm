@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import textwrap
-from pathlib import Path
+from pathlib import Path  # noqa: F401
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,13 +12,12 @@ from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import marketplace
 from apm_cli.marketplace.errors import (
-    BuildError,
+    BuildError,  # noqa: F401
     GitLsRemoteError,
-    MarketplaceYmlError,
+    MarketplaceYmlError,  # noqa: F401
     OfflineMissError,
 )
 from apm_cli.marketplace.ref_resolver import RemoteRef
-
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -156,9 +155,7 @@ class TestOutdatedHappyPath:
                 {"name": "pkg-beta", "source": {"ref": "v2.0.0", "commit": _SHA_A}},
             ]
         }
-        (yml_cwd / "marketplace.json").write_text(
-            json.dumps(mkt), encoding="utf-8"
-        )
+        (yml_cwd / "marketplace.json").write_text(json.dumps(mkt), encoding="utf-8")
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = [_REFS_ALPHA, _REFS_BETA]
         mock_inst.close = MagicMock()
@@ -294,9 +291,7 @@ class TestOutdatedStatusSymbols:
                 {"name": "pkg-beta", "source": {"ref": "v2.0.1", "commit": _SHA_B}},
             ]
         }
-        (yml_cwd / "marketplace.json").write_text(
-            json.dumps(mkt), encoding="utf-8"
-        )
+        (yml_cwd / "marketplace.json").write_text(json.dumps(mkt), encoding="utf-8")
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = [_REFS_ALPHA, _REFS_BETA]
         mock_inst.close = MagicMock()
@@ -361,9 +356,7 @@ class TestOutdatedSummaryLine:
                 {"name": "pkg-beta", "source": {"ref": "v2.0.1", "commit": _SHA_B}},
             ]
         }
-        (yml_cwd / "marketplace.json").write_text(
-            json.dumps(mkt), encoding="utf-8"
-        )
+        (yml_cwd / "marketplace.json").write_text(json.dumps(mkt), encoding="utf-8")
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = [_REFS_ALPHA, _REFS_BETA]
         mock_inst.close = MagicMock()
@@ -391,9 +384,7 @@ class TestOutdatedSummaryLine:
                 {"name": "pkg-beta", "source": {"ref": "v2.0.1", "commit": _SHA_B}},
             ]
         }
-        (yml_cwd / "marketplace.json").write_text(
-            json.dumps(mkt), encoding="utf-8"
-        )
+        (yml_cwd / "marketplace.json").write_text(json.dumps(mkt), encoding="utf-8")
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = [_REFS_ALPHA, _REFS_BETA]
         mock_inst.close = MagicMock()

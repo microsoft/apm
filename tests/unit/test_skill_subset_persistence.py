@@ -13,9 +13,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.deps.lockfile import LockedDependency
-
+from apm_cli.models.dependency.reference import DependencyReference
 
 # ============================================================================
 # DependencyReference — parse_from_dict with skills: field
@@ -274,9 +273,7 @@ class TestApmYmlWriter:
                     - old-skill
             """,
         )
-        result = set_skill_subset_for_entry(
-            manifest, "owner/repo", ["new-a", "new-b"]
-        )
+        result = set_skill_subset_for_entry(manifest, "owner/repo", ["new-a", "new-b"])
         assert result is True
         data = load_yaml(manifest)
         entry = data["dependencies"]["apm"][0]
@@ -295,9 +292,7 @@ class TestApmYmlWriter:
                 - owner/repo#main
             """,
         )
-        set_skill_subset_for_entry(
-            manifest, "owner/repo", ["gamma", "alpha", "gamma"]
-        )
+        set_skill_subset_for_entry(manifest, "owner/repo", ["gamma", "alpha", "gamma"])
         data = load_yaml(manifest)
         entry = data["dependencies"]["apm"][0]
         assert entry["skills"] == ["alpha", "gamma"]
@@ -377,9 +372,7 @@ class TestSkillSubsetConsistencyCheck:
         from apm_cli.policy.ci_checks import _check_skill_subset_consistency
 
         dep_ref = self._make_dep_ref("owner/repo", skill_subset=["alpha"])
-        locked = self._make_locked_dep(
-            package_type="marketplace_plugin", skill_subset=[]
-        )
+        locked = self._make_locked_dep(package_type="marketplace_plugin", skill_subset=[])
         manifest = self._make_manifest_mock([dep_ref])
         lock = self._make_lock_mock({"owner/repo": locked})
 

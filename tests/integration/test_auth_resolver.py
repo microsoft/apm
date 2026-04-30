@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
-from apm_cli.core.auth import AuthResolver, HostInfo
+from apm_cli.core.auth import AuthResolver, HostInfo  # noqa: F401
 from apm_cli.core.token_manager import GitHubTokenManager
 
 # ---------------------------------------------------------------------------
@@ -29,14 +29,13 @@ pytestmark = [
 ]
 
 # Shared helper: suppress git-credential-fill so env vars are the only source.
-_NO_GIT_CRED = patch.object(
-    GitHubTokenManager, "resolve_credential_from_git", return_value=None
-)
+_NO_GIT_CRED = patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None)
 
 
 # ---------------------------------------------------------------------------
 # 1. Clean env → no token
 # ---------------------------------------------------------------------------
+
 
 class TestAuthResolverNoEnv:
     def test_auth_resolver_no_env_resolves_none(self):
@@ -55,6 +54,7 @@ class TestAuthResolverNoEnv:
 # 2. GITHUB_APM_PAT is picked up
 # ---------------------------------------------------------------------------
 
+
 class TestGlobalPat:
     def test_auth_resolver_respects_github_apm_pat(self):
         """GITHUB_APM_PAT is the primary env var for module access."""
@@ -70,6 +70,7 @@ class TestGlobalPat:
 # ---------------------------------------------------------------------------
 # 3. Per-org override takes precedence
 # ---------------------------------------------------------------------------
+
 
 class TestPerOrgOverride:
     def test_auth_resolver_per_org_override(self):
@@ -100,6 +101,7 @@ class TestPerOrgOverride:
 # ---------------------------------------------------------------------------
 # 4. GHE Cloud uses global env vars
 # ---------------------------------------------------------------------------
+
 
 class TestGheCloudGlobalVars:
     def test_auth_resolver_ghe_cloud_uses_global(self):
@@ -133,12 +135,14 @@ class TestGheCloudGlobalVars:
         """When a global env-var token fails on GHE Cloud, try_with_fallback
         retries via git credential fill before giving up."""
         env = {"GITHUB_APM_PAT": "wrong-global-token"}
-        with patch.dict(os.environ, env, clear=True), \
-             patch.object(
-                 GitHubTokenManager,
-                 "resolve_credential_from_git",
-                 return_value="correct-ghe-cred",
-             ):
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_git",
+                return_value="correct-ghe-cred",
+            ),
+        ):
             resolver = AuthResolver()
             calls: list = []
 
@@ -148,9 +152,7 @@ class TestGheCloudGlobalVars:
                     raise RuntimeError("auth failed")
                 return "ok"
 
-            result = resolver.try_with_fallback(
-                "contoso.ghe.com", op, org="contoso"
-            )
+            result = resolver.try_with_fallback("contoso.ghe.com", op, org="contoso")
 
             assert result == "ok"
             assert calls == ["wrong-global-token", "correct-ghe-cred"], (
@@ -161,6 +163,7 @@ class TestGheCloudGlobalVars:
 # ---------------------------------------------------------------------------
 # 5. Cache consistency
 # ---------------------------------------------------------------------------
+
 
 class TestCacheConsistency:
     def test_auth_resolver_cache_consistency(self):
@@ -192,6 +195,7 @@ class TestCacheConsistency:
 # ---------------------------------------------------------------------------
 # 6. try_with_fallback: unauth-first for public repos
 # ---------------------------------------------------------------------------
+
 
 class TestTryWithFallbackUnauthFirst:
     def test_try_with_fallback_unauth_first_public(self):
@@ -244,19 +248,16 @@ class TestTryWithFallbackUnauthFirst:
                 calls.append(token)
                 return "ok"
 
-            result = resolver.try_with_fallback(
-                "corp.ghe.com", op, org="corp", unauth_first=True
-            )
+            result = resolver.try_with_fallback("corp.ghe.com", op, org="corp", unauth_first=True)
 
             assert result == "ok"
-            assert calls == ["ghp_corp"], (
-                "GHE Cloud must use auth-only path"
-            )
+            assert calls == ["ghp_corp"], "GHE Cloud must use auth-only path"
 
 
 # ---------------------------------------------------------------------------
 # 7. classify_host variants
 # ---------------------------------------------------------------------------
+
 
 class TestClassifyHostVariants:
     """End-to-end classification of various host strings."""
@@ -295,13 +296,16 @@ class TestClassifyHostVariants:
         """Verify API base URLs for each host kind."""
         with patch.dict(os.environ, {}, clear=True):
             assert AuthResolver.classify_host("github.com").api_base == "https://api.github.com"
-            assert AuthResolver.classify_host("acme.ghe.com").api_base == "https://acme.ghe.com/api/v3"
+            assert (
+                AuthResolver.classify_host("acme.ghe.com").api_base == "https://acme.ghe.com/api/v3"
+            )
             assert AuthResolver.classify_host("dev.azure.com").api_base == "https://dev.azure.com"
 
 
 # ---------------------------------------------------------------------------
 # 8. build_error_context integration
 # ---------------------------------------------------------------------------
+
 
 class TestBuildErrorContextIntegration:
     """Verify error messages are actionable under realistic conditions."""

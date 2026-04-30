@@ -12,11 +12,10 @@ GITHUB_APM_PAT or GITHUB_TOKEN for API access.
 import os
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 import yaml
-from pathlib import Path
-
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("GITHUB_APM_PAT") and not os.environ.get("GITHUB_TOKEN"),
@@ -47,7 +46,7 @@ def temp_project(tmp_path):
 
 def _run_apm(apm_command, args, cwd, timeout=180):
     return subprocess.run(
-        [apm_command] + args,
+        [apm_command] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -71,19 +70,11 @@ def _write_apm_yml(project_dir, apm_packages, mcp_packages=None):
 
 def _assert_no_install_artifacts(project_dir):
     """Dry-run must not create lockfile or deploy any files."""
-    assert not (project_dir / "apm.lock.yaml").exists(), (
-        "Dry-run created apm.lock.yaml"
-    )
-    assert not (project_dir / "apm.lock").exists(), (
-        "Dry-run created legacy apm.lock"
-    )
-    assert not (project_dir / "apm_modules").exists(), (
-        "Dry-run populated apm_modules/"
-    )
+    assert not (project_dir / "apm.lock.yaml").exists(), "Dry-run created apm.lock.yaml"
+    assert not (project_dir / "apm.lock").exists(), "Dry-run created legacy apm.lock"
+    assert not (project_dir / "apm_modules").exists(), "Dry-run populated apm_modules/"
     copilot_instructions = project_dir / ".github" / "copilot-instructions.md"
-    assert not copilot_instructions.exists(), (
-        "Dry-run wrote .github/copilot-instructions.md"
-    )
+    assert not copilot_instructions.exists(), "Dry-run wrote .github/copilot-instructions.md"
 
 
 class TestInstallDryRunE2E:
@@ -110,9 +101,7 @@ class TestInstallDryRunE2E:
 
         _assert_no_install_artifacts(temp_project)
 
-    def test_install_dry_run_with_only_packages_filter(
-        self, temp_project, apm_command
-    ):
+    def test_install_dry_run_with_only_packages_filter(self, temp_project, apm_command):
         """`--only=apm` suppresses MCP-dependency listing in the dry-run preview."""
         _write_apm_yml(
             temp_project,
@@ -120,9 +109,7 @@ class TestInstallDryRunE2E:
             mcp_packages=["io.github.github/github-mcp-server"],
         )
 
-        result = _run_apm(
-            apm_command, ["install", "--dry-run", "--only=apm"], temp_project
-        )
+        result = _run_apm(apm_command, ["install", "--dry-run", "--only=apm"], temp_project)
         assert result.returncode == 0, (
             f"Filtered dry-run failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
         )
@@ -134,15 +121,11 @@ class TestInstallDryRunE2E:
         assert "MCP dependencies" not in out, (
             f"MCP section should be hidden under --only=apm:\n{out}"
         )
-        assert "github-mcp-server" not in out, (
-            f"MCP dep leaked into --only=apm dry-run:\n{out}"
-        )
+        assert "github-mcp-server" not in out, f"MCP dep leaked into --only=apm dry-run:\n{out}"
 
         _assert_no_install_artifacts(temp_project)
 
-    def test_install_dry_run_previews_orphan_removals(
-        self, temp_project, apm_command
-    ):
+    def test_install_dry_run_previews_orphan_removals(self, temp_project, apm_command):
         """After a real install, removing the dep + dry-run reports orphan files
         and keeps them on disk (the orphan-preview NameError regression test)."""
         _write_apm_yml(temp_project, ["microsoft/apm-sample-package"])
@@ -157,11 +140,10 @@ class TestInstallDryRunE2E:
             lockfile = yaml.safe_load(f)
 
         deployed_files = []
-        for entry in (lockfile.get("dependencies") or []):
+        for entry in lockfile.get("dependencies") or []:
             if entry.get("repo_url") == "microsoft/apm-sample-package":
                 deployed_files = [
-                    f for f in (entry.get("deployed_files") or [])
-                    if (temp_project / f).exists()
+                    f for f in (entry.get("deployed_files") or []) if (temp_project / f).exists()
                 ]
                 break
         if not deployed_files:
@@ -177,12 +159,8 @@ class TestInstallDryRunE2E:
         out = result.stdout
         assert "Dry run mode" in out
         assert "Dry run complete" in out
-        assert "Files that would be removed" in out, (
-            f"Orphan-removal preview missing:\n{out}"
-        )
+        assert "Files that would be removed" in out, f"Orphan-removal preview missing:\n{out}"
 
         for rel_path in deployed_files:
             full = temp_project / rel_path
-            assert full.exists(), (
-                f"Dry-run unexpectedly deleted orphan file: {rel_path}"
-            )
+            assert full.exists(), f"Dry-run unexpectedly deleted orphan file: {rel_path}"

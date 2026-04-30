@@ -34,7 +34,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 import yaml
 
@@ -42,17 +42,17 @@ from ..utils.path_security import PathTraversalError, validate_path_segments
 from .errors import MarketplaceYmlError
 
 __all__ = [
-    "MarketplaceConfig",
-    "MarketplaceYml",  # backwards-compat alias
-    "MarketplaceOwner",
-    "MarketplaceBuild",
-    "PackageEntry",
-    "MarketplaceYmlError",
-    "SOURCE_RE",
     "LOCAL_SOURCE_RE",
-    "load_marketplace_yml",
+    "SOURCE_RE",
+    "MarketplaceBuild",
+    "MarketplaceConfig",
+    "MarketplaceOwner",
+    "MarketplaceYml",  # backwards-compat alias
+    "MarketplaceYmlError",
+    "PackageEntry",
     "load_marketplace_from_apm_yml",
     "load_marketplace_from_legacy_yml",
+    "load_marketplace_yml",
 ]
 
 # ---------------------------------------------------------------------------
@@ -78,37 +78,43 @@ _TAG_PLACEHOLDERS = ("{version}", "{name}")
 # Permitted key sets (strict mode)
 # ---------------------------------------------------------------------------
 
-_BUILD_KEYS = frozenset({
-    "tagPattern",
-})
+_BUILD_KEYS = frozenset(
+    {
+        "tagPattern",
+    }
+)
 
-_PACKAGE_ENTRY_KEYS = frozenset({
-    "name",
-    "source",
-    "subdir",
-    "version",
-    "ref",
-    "tag_pattern",
-    "include_prerelease",
-    "description",
-    "homepage",
-    "tags",
-})
+_PACKAGE_ENTRY_KEYS = frozenset(
+    {
+        "name",
+        "source",
+        "subdir",
+        "version",
+        "ref",
+        "tag_pattern",
+        "include_prerelease",
+        "description",
+        "homepage",
+        "tags",
+    }
+)
 
 # Keys permitted inside the ``marketplace:`` block of apm.yml.  This is
 # distinct from the legacy top-level keys (which include ``name``,
 # ``description``, ``version`` -- those are inherited from apm.yml's
 # top-level scalars in the new world).
-_APM_MARKETPLACE_KEYS = frozenset({
-    "name",          # optional override of top-level apm.yml name
-    "description",   # optional override of top-level apm.yml description
-    "version",       # optional override of top-level apm.yml version
-    "owner",
-    "output",
-    "metadata",
-    "build",
-    "packages",
-})
+_APM_MARKETPLACE_KEYS = frozenset(
+    {
+        "name",  # optional override of top-level apm.yml name
+        "description",  # optional override of top-level apm.yml description
+        "version",  # optional override of top-level apm.yml version
+        "owner",
+        "output",
+        "metadata",
+        "build",
+        "packages",
+    }
+)
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
@@ -119,8 +125,8 @@ class MarketplaceOwner:
     """Owner block of ``marketplace.yml``."""
 
     name: str
-    email: Optional[str] = None
-    url: Optional[str] = None
+    email: str | None = None
+    url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -148,15 +154,15 @@ class PackageEntry:
     name: str
     source: str
     # APM-only fields
-    subdir: Optional[str] = None
-    version: Optional[str] = None
-    ref: Optional[str] = None
-    tag_pattern: Optional[str] = None
+    subdir: str | None = None
+    version: str | None = None
+    ref: str | None = None
+    tag_pattern: str | None = None
     include_prerelease: bool = False
     # Anthropic pass-through fields
-    description: Optional[str] = None
-    homepage: Optional[str] = None
-    tags: Tuple[str, ...] = ()
+    description: str | None = None
+    homepage: str | None = None
+    tags: tuple[str, ...] = ()
     # Derived (set by loader, not by user)
     is_local: bool = False
 
@@ -184,11 +190,11 @@ class MarketplaceConfig:
     version: str
     owner: MarketplaceOwner
     output: str = ".claude-plugin/marketplace.json"
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     build: MarketplaceBuild = field(default_factory=MarketplaceBuild)
-    packages: Tuple[PackageEntry, ...] = ()
+    packages: tuple[PackageEntry, ...] = ()
     # Origin tracking + override-detection metadata
-    source_path: Optional[Path] = None
+    source_path: Path | None = None
     is_legacy: bool = False
     name_overridden: bool = False
     description_overridden: bool = False
@@ -206,7 +212,7 @@ MarketplaceYml = MarketplaceConfig
 
 
 def _require_str(
-    data: Dict[str, Any],
+    data: dict[str, Any],
     key: str,
     *,
     context: str = "",
@@ -217,9 +223,7 @@ def _require_str(
     if value is None:
         raise MarketplaceYmlError(f"'{path}' is required")
     if not isinstance(value, str) or not value.strip():
-        raise MarketplaceYmlError(
-            f"'{path}' must be a non-empty string"
-        )
+        raise MarketplaceYmlError(f"'{path}' must be a non-empty string")
     return value.strip()
 
 
@@ -239,16 +243,13 @@ def _validate_source(source: str, *, index: int) -> None:
     ctx = f"packages[{index}].source"
     if not SOURCE_RE.match(source):
         raise MarketplaceYmlError(
-            f"'{ctx}' must match '<owner>/<repo>' or './<path>' shape, "
-            f"got '{source}'"
+            f"'{ctx}' must match '<owner>/<repo>' or './<path>' shape, got '{source}'"
         )
     is_local = bool(LOCAL_SOURCE_RE.match(source))
     try:
         # Local paths legitimately start with ``.`` (current dir) and
         # may have trailing-slash forms like ``./``.  Allow ``.`` here.
-        validate_path_segments(
-            source, context=ctx, allow_current_dir=is_local
-        )
+        validate_path_segments(source, context=ctx, allow_current_dir=is_local)
     except PathTraversalError as exc:
         raise MarketplaceYmlError(str(exc)) from exc
 
@@ -263,7 +264,7 @@ def _validate_tag_pattern(pattern: str, *, context: str) -> None:
 
 
 def _check_unknown_keys(
-    data: Dict[str, Any],
+    data: dict[str, Any],
     permitted: frozenset,
     *,
     context: str,
@@ -287,9 +288,7 @@ def _check_unknown_keys(
 def _parse_owner(raw: Any) -> MarketplaceOwner:
     """Parse and validate the ``owner`` block."""
     if not isinstance(raw, dict):
-        raise MarketplaceYmlError(
-            "'owner' must be a mapping with at least a 'name' key"
-        )
+        raise MarketplaceYmlError("'owner' must be a mapping with at least a 'name' key")
     name = _require_str(raw, "name", context="owner")
     email = raw.get("email")
     if email is not None:
@@ -309,9 +308,7 @@ def _parse_build(raw: Any) -> MarketplaceBuild:
     _check_unknown_keys(raw, _BUILD_KEYS, context="build")
     tag_pattern = raw.get("tagPattern", "v{version}")
     if not isinstance(tag_pattern, str) or not tag_pattern.strip():
-        raise MarketplaceYmlError(
-            "'build.tagPattern' must be a non-empty string"
-        )
+        raise MarketplaceYmlError("'build.tagPattern' must be a non-empty string")
     tag_pattern = tag_pattern.strip()
     _validate_tag_pattern(tag_pattern, context="build.tagPattern")
     return MarketplaceBuild(tag_pattern=tag_pattern)
@@ -320,9 +317,7 @@ def _parse_build(raw: Any) -> MarketplaceBuild:
 def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
     """Parse and validate a single ``packages`` entry."""
     if not isinstance(raw, dict):
-        raise MarketplaceYmlError(
-            f"packages[{index}] must be a mapping"
-        )
+        raise MarketplaceYmlError(f"packages[{index}] must be a mapping")
 
     # -- strict key check --
     _check_unknown_keys(raw, _PACKAGE_ENTRY_KEYS, context=f"packages[{index}]")
@@ -333,12 +328,10 @@ def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
     is_local = bool(LOCAL_SOURCE_RE.match(source))
 
     # APM-only: subdir (irrelevant for local packages but harmless)
-    subdir: Optional[str] = raw.get("subdir")
+    subdir: str | None = raw.get("subdir")
     if subdir is not None:
         if not isinstance(subdir, str) or not subdir.strip():
-            raise MarketplaceYmlError(
-                f"'packages[{index}].subdir' must be a non-empty string"
-            )
+            raise MarketplaceYmlError(f"'packages[{index}].subdir' must be a non-empty string")
         subdir = subdir.strip()
         try:
             validate_path_segments(subdir, context=f"packages[{index}].subdir")
@@ -346,22 +339,18 @@ def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
             raise MarketplaceYmlError(str(exc)) from exc
 
     # APM-only: version (semver range -- stored as string, not parsed here)
-    version: Optional[str] = raw.get("version")
+    version: str | None = raw.get("version")
     if version is not None:
         version = str(version).strip()
         if not version:
-            raise MarketplaceYmlError(
-                f"'packages[{index}].version' must be a non-empty string"
-            )
+            raise MarketplaceYmlError(f"'packages[{index}].version' must be a non-empty string")
 
     # APM-only: ref
-    ref: Optional[str] = raw.get("ref")
+    ref: str | None = raw.get("ref")
     if ref is not None:
         ref = str(ref).strip()
         if not ref:
-            raise MarketplaceYmlError(
-                f"'packages[{index}].ref' must be a non-empty string"
-            )
+            raise MarketplaceYmlError(f"'packages[{index}].ref' must be a non-empty string")
 
     # At least one of version or ref must be present for REMOTE packages.
     # Local-path packages skip git resolution so the requirement does not
@@ -373,50 +362,38 @@ def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
         )
 
     # APM-only: tag_pattern
-    tag_pattern: Optional[str] = raw.get("tag_pattern")
+    tag_pattern: str | None = raw.get("tag_pattern")
     if tag_pattern is not None:
         if not isinstance(tag_pattern, str) or not tag_pattern.strip():
-            raise MarketplaceYmlError(
-                f"'packages[{index}].tag_pattern' must be a non-empty string"
-            )
+            raise MarketplaceYmlError(f"'packages[{index}].tag_pattern' must be a non-empty string")
         tag_pattern = tag_pattern.strip()
-        _validate_tag_pattern(
-            tag_pattern, context=f"packages[{index}].tag_pattern"
-        )
+        _validate_tag_pattern(tag_pattern, context=f"packages[{index}].tag_pattern")
 
     # APM-only: include_prerelease
     include_prerelease = raw.get("include_prerelease", False)
     if not isinstance(include_prerelease, bool):
-        raise MarketplaceYmlError(
-            f"'packages[{index}].include_prerelease' must be a boolean"
-        )
+        raise MarketplaceYmlError(f"'packages[{index}].include_prerelease' must be a boolean")
 
     # Anthropic pass-through: description
-    description: Optional[str] = raw.get("description")
+    description: str | None = raw.get("description")
     if description is not None:
         if not isinstance(description, str) or not description.strip():
-            raise MarketplaceYmlError(
-                f"'packages[{index}].description' must be a non-empty string"
-            )
+            raise MarketplaceYmlError(f"'packages[{index}].description' must be a non-empty string")
         description = description.strip()
 
     # Anthropic pass-through: homepage
-    homepage: Optional[str] = raw.get("homepage")
+    homepage: str | None = raw.get("homepage")
     if homepage is not None:
         if not isinstance(homepage, str) or not homepage.strip():
-            raise MarketplaceYmlError(
-                f"'packages[{index}].homepage' must be a non-empty string"
-            )
+            raise MarketplaceYmlError(f"'packages[{index}].homepage' must be a non-empty string")
         homepage = homepage.strip()
 
     # Anthropic pass-through: tags
     raw_tags = raw.get("tags")
-    tags: Tuple[str, ...] = ()
+    tags: tuple[str, ...] = ()
     if raw_tags is not None:
         if not isinstance(raw_tags, list):
-            raise MarketplaceYmlError(
-                f"'packages[{index}].tags' must be a list of strings"
-            )
+            raise MarketplaceYmlError(f"'packages[{index}].tags' must be a list of strings")
         tags = tuple(str(t) for t in raw_tags)
 
     return PackageEntry(
@@ -530,14 +507,10 @@ def load_marketplace_from_apm_yml(apm_yml_path: Path) -> MarketplaceConfig:
             "Add one or run 'apm marketplace init' to scaffold it."
         )
     if not isinstance(raw_block, dict):
-        raise MarketplaceYmlError(
-            "'marketplace' in apm.yml must be a mapping"
-        )
+        raise MarketplaceYmlError("'marketplace' in apm.yml must be a mapping")
 
     # -- strict marketplace-block key check --
-    _check_unknown_keys(
-        raw_block, _APM_MARKETPLACE_KEYS, context="marketplace"
-    )
+    _check_unknown_keys(raw_block, _APM_MARKETPLACE_KEYS, context="marketplace")
 
     # -- inheritance with optional overrides --
     top_name = data.get("name")
@@ -545,39 +518,30 @@ def load_marketplace_from_apm_yml(apm_yml_path: Path) -> MarketplaceConfig:
     top_ver = data.get("version")
 
     name_overridden = "name" in raw_block and raw_block["name"] is not None
-    desc_overridden = (
-        "description" in raw_block and raw_block["description"] is not None
-    )
-    ver_overridden = (
-        "version" in raw_block and raw_block["version"] is not None
-    )
+    desc_overridden = "description" in raw_block and raw_block["description"] is not None
+    ver_overridden = "version" in raw_block and raw_block["version"] is not None
 
     if name_overridden:
         name = _require_str(raw_block, "name", context="marketplace")
     else:
         if not isinstance(top_name, str) or not top_name.strip():
             raise MarketplaceYmlError(
-                "'name' is required (set it at apm.yml top level or "
-                "override via marketplace.name)"
+                "'name' is required (set it at apm.yml top level or override via marketplace.name)"
             )
         name = top_name.strip()
 
     if desc_overridden:
-        description = _require_str(
-            raw_block, "description", context="marketplace"
-        )
-    else:
+        description = _require_str(raw_block, "description", context="marketplace")
+    else:  # noqa: PLR5501
         if not isinstance(top_desc, str) or not top_desc.strip():
             description = ""
         else:
             description = top_desc.strip()
 
     if ver_overridden:
-        version_str = _require_str(
-            raw_block, "version", context="marketplace"
-        )
-    else:
-        if top_ver is None:
+        version_str = _require_str(raw_block, "version", context="marketplace")
+    else:  # noqa: PLR5501
+        if top_ver is None:  # noqa: SIM108
             version_str = ""
         else:
             version_str = str(top_ver).strip()
@@ -603,14 +567,12 @@ def load_marketplace_from_apm_yml(apm_yml_path: Path) -> MarketplaceConfig:
 # ---------------------------------------------------------------------------
 
 
-def _read_yaml_mapping(path: Path) -> Dict[str, Any]:
+def _read_yaml_mapping(path: Path) -> dict[str, Any]:
     """Read *path* and return its top-level mapping or raise."""
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise MarketplaceYmlError(
-            f"Cannot read '{path}': {exc}"
-        ) from exc
+        raise MarketplaceYmlError(f"Cannot read '{path}': {exc}") from exc
 
     try:
         data = yaml.safe_load(text)
@@ -619,22 +581,18 @@ def _read_yaml_mapping(path: Path) -> Dict[str, Any]:
         if hasattr(exc, "problem_mark") and exc.problem_mark is not None:
             mark = exc.problem_mark
             detail = f" (line {mark.line + 1}, column {mark.column + 1})"
-        raise MarketplaceYmlError(
-            f"YAML parse error in '{path}'{detail}: {exc}"
-        ) from exc
+        raise MarketplaceYmlError(f"YAML parse error in '{path}'{detail}: {exc}") from exc
 
     if data is None:
         return {}
     if not isinstance(data, dict):
-        raise MarketplaceYmlError(
-            f"'{path}' must contain a YAML mapping at the top level"
-        )
+        raise MarketplaceYmlError(f"'{path}' must contain a YAML mapping at the top level")
     return data
 
 
 def _build_config(
     *,
-    marketplace_dict: Dict[str, Any],
+    marketplace_dict: dict[str, Any],
     name: str,
     description: str,
     version: str,
@@ -659,9 +617,7 @@ def _build_config(
     if output is None:
         output = default_output
     if not isinstance(output, str) or not output.strip():
-        raise MarketplaceYmlError(
-            "'output' must be a non-empty string"
-        )
+        raise MarketplaceYmlError("'output' must be a non-empty string")
     output = output.strip()
 
     # Path-traversal guard -- reject output paths containing ".." segments.
@@ -671,7 +627,7 @@ def _build_config(
         raise MarketplaceYmlError(str(exc)) from exc
 
     # -- metadata (Anthropic pass-through, preserve verbatim) --
-    metadata: Dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
     raw_metadata = marketplace_dict.get("metadata")
     if raw_metadata is not None:
         if not isinstance(raw_metadata, dict):
@@ -688,8 +644,8 @@ def _build_config(
     if not isinstance(raw_packages, list):
         raise MarketplaceYmlError("'packages' must be a list")
 
-    entries: List[PackageEntry] = []
-    seen_names: Dict[str, int] = {}
+    entries: list[PackageEntry] = []
+    seen_names: dict[str, int] = {}
     for idx, raw_entry in enumerate(raw_packages):
         entry = _parse_package_entry(raw_entry, idx)
         lower_name = entry.name.lower()

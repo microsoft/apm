@@ -20,5 +20,6 @@ def _validate_primitive_coverage():
     """Fail fast if KNOWN_TARGETS has primitives without dispatch handlers."""
     from apm_cli.integration.coverage import check_primitive_coverage
     from apm_cli.integration.dispatch import get_dispatch_table
+
     dispatch = get_dispatch_table()
     check_primitive_coverage(dispatch)

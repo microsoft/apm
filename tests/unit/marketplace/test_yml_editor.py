@@ -15,7 +15,6 @@ from apm_cli.marketplace.yml_editor import (
     update_plugin_entry,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -50,9 +49,7 @@ packages:
 class TestAddPluginHappy:
     def test_add_with_version(self, tmp_path):
         yml = _write_yml(tmp_path, _BASIC_YML)
-        name = add_plugin_entry(
-            yml, source="acme/new-tool", version=">=2.0.0"
-        )
+        name = add_plugin_entry(yml, source="acme/new-tool", version=">=2.0.0")
         assert name == "new-tool"
         data = yaml.safe_load(yml.read_text(encoding="utf-8"))
         names = [p["name"] for p in data["packages"]]
@@ -63,14 +60,10 @@ class TestAddPluginHappy:
 
     def test_add_with_ref(self, tmp_path):
         yml = _write_yml(tmp_path, _BASIC_YML)
-        name = add_plugin_entry(
-            yml, source="acme/pinned-tool", ref="abc123"
-        )
+        name = add_plugin_entry(yml, source="acme/pinned-tool", ref="abc123")
         assert name == "pinned-tool"
         data = yaml.safe_load(yml.read_text(encoding="utf-8"))
-        added = next(
-            p for p in data["packages"] if p["name"] == "pinned-tool"
-        )
+        added = next(p for p in data["packages"] if p["name"] == "pinned-tool")
         assert added["ref"] == "abc123"
         assert "version" not in added
 
@@ -87,9 +80,7 @@ class TestAddPluginHappy:
         )
         assert name == "full-tool"
         data = yaml.safe_load(yml.read_text(encoding="utf-8"))
-        added = next(
-            p for p in data["packages"] if p["name"] == "full-tool"
-        )
+        added = next(p for p in data["packages"] if p["name"] == "full-tool")
         assert added["subdir"] == "src/plugin"
         assert added["tag_pattern"] == "v{version}"
         assert added["tags"] == ["utilities", "testing"]
@@ -97,9 +88,7 @@ class TestAddPluginHappy:
 
     def test_name_defaults_to_repo_from_source(self, tmp_path):
         yml = _write_yml(tmp_path, _BASIC_YML)
-        name = add_plugin_entry(
-            yml, source="some-org/my-awesome-tool", version=">=1.0.0"
-        )
+        name = add_plugin_entry(yml, source="some-org/my-awesome-tool", version=">=1.0.0")
         assert name == "my-awesome-tool"
 
     def test_explicit_name_overrides_source(self, tmp_path):
@@ -112,9 +101,7 @@ class TestAddPluginHappy:
         )
         assert name == "custom-name"
         data = yaml.safe_load(yml.read_text(encoding="utf-8"))
-        added = next(
-            p for p in data["packages"] if p["name"] == "custom-name"
-        )
+        added = next(p for p in data["packages"] if p["name"] == "custom-name")
         assert added["source"] == "acme/repo-name"
 
     def test_reparses_correctly(self, tmp_path):
@@ -137,9 +124,7 @@ class TestAddPluginErrors:
     def test_duplicate_name_raises(self, tmp_path):
         yml = _write_yml(tmp_path, _BASIC_YML)
         with pytest.raises(MarketplaceYmlError, match="already exists"):
-            add_plugin_entry(
-                yml, source="acme/existing-package", version=">=1.0.0"
-            )
+            add_plugin_entry(yml, source="acme/existing-package", version=">=1.0.0")
 
     def test_duplicate_name_case_insensitive(self, tmp_path):
         yml = _write_yml(tmp_path, _BASIC_YML)
@@ -225,9 +210,7 @@ class TestUpdatePluginHappy:
 
     def test_update_subdir(self, tmp_path):
         yml = _write_yml(tmp_path, _BASIC_YML)
-        update_plugin_entry(
-            yml, "existing-package", subdir="src/plugin"
-        )
+        update_plugin_entry(yml, "existing-package", subdir="src/plugin")
         data = yaml.safe_load(yml.read_text(encoding="utf-8"))
         entry = data["packages"][0]
         assert entry["subdir"] == "src/plugin"
@@ -262,9 +245,7 @@ class TestUpdatePluginHappy:
 
     def test_unmodified_fields_preserved(self, tmp_path):
         yml = _write_yml(tmp_path, _BASIC_YML)
-        update_plugin_entry(
-            yml, "existing-package", subdir="sub/dir"
-        )
+        update_plugin_entry(yml, "existing-package", subdir="sub/dir")
         data = yaml.safe_load(yml.read_text(encoding="utf-8"))
         entry = data["packages"][0]
         # Original fields are untouched.
@@ -274,9 +255,7 @@ class TestUpdatePluginHappy:
 
     def test_case_insensitive_match(self, tmp_path):
         yml = _write_yml(tmp_path, _BASIC_YML)
-        update_plugin_entry(
-            yml, "Existing-Package", subdir="sub/dir"
-        )
+        update_plugin_entry(yml, "Existing-Package", subdir="sub/dir")
         data = yaml.safe_load(yml.read_text(encoding="utf-8"))
         entry = data["packages"][0]
         assert entry["subdir"] == "sub/dir"

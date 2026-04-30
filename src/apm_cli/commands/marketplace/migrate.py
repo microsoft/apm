@@ -35,13 +35,11 @@ def migrate(force, dry_run, verbose):
     project_root = Path.cwd()
 
     try:
-        diff = migrate_marketplace_yml(
-            project_root, force=force, dry_run=dry_run
-        )
+        diff = migrate_marketplace_yml(project_root, force=force, dry_run=dry_run)
     except MarketplaceYmlError as exc:
         logger.error(str(exc), symbol="error")
         sys.exit(1)
-    except Exception as exc:  # noqa: BLE001 -- top-level command catch-all
+    except Exception as exc:
         logger.error(f"Migration failed: {exc}", symbol="error")
         logger.verbose_detail(traceback.format_exc())
         sys.exit(1)

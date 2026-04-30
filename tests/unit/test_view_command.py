@@ -14,10 +14,10 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 
-
 # ------------------------------------------------------------------
 # Rich-fallback helper (same approach as test_deps_list_tree_info.py)
 # ------------------------------------------------------------------
+
 
 def _force_rich_fallback():
     """Context-manager that forces the text-only code path."""
@@ -96,8 +96,7 @@ class _InfoCmdBase:
         description = kwargs.get("description", "A test package")
         author = kwargs.get("author", "TestAuthor")
         content = (
-            f"name: {repo}\nversion: {version}\n"
-            f"description: {description}\nauthor: {author}\n"
+            f"name: {repo}\nversion: {version}\ndescription: {description}\nauthor: {author}\n"
         )
         (pkg_dir / "apm.yml").write_text(content)
         return pkg_dir
@@ -145,23 +144,17 @@ class TestViewCommand(_InfoCmdBase):
     def test_view_versions_lists_refs(self):
         """``apm view org/repo versions`` shows tags and branches."""
         mock_refs = [
-            RemoteRef(name="v2.0.0", ref_type=GitReferenceType.TAG,
-                      commit_sha="aabbccdd11223344"),
-            RemoteRef(name="v1.0.0", ref_type=GitReferenceType.TAG,
-                      commit_sha="11223344aabbccdd"),
-            RemoteRef(name="main", ref_type=GitReferenceType.BRANCH,
-                      commit_sha="deadbeef12345678"),
+            RemoteRef(name="v2.0.0", ref_type=GitReferenceType.TAG, commit_sha="aabbccdd11223344"),
+            RemoteRef(name="v1.0.0", ref_type=GitReferenceType.TAG, commit_sha="11223344aabbccdd"),
+            RemoteRef(name="main", ref_type=GitReferenceType.BRANCH, commit_sha="deadbeef12345678"),
         ]
-        with patch(
-            "apm_cli.commands.view.GitHubPackageDownloader"
-        ) as mock_cls, patch(
-            "apm_cli.commands.view.AuthResolver"
+        with (
+            patch("apm_cli.commands.view.GitHubPackageDownloader") as mock_cls,
+            patch("apm_cli.commands.view.AuthResolver"),
         ):
             mock_cls.return_value.list_remote_refs.return_value = mock_refs
             with _force_rich_fallback():
-                result = self.runner.invoke(
-                    cli, ["view", "myorg/myrepo", "versions"]
-                )
+                result = self.runner.invoke(cli, ["view", "myorg/myrepo", "versions"])
         assert result.exit_code == 0
         assert "v2.0.0" in result.output
         assert "v1.0.0" in result.output
@@ -173,71 +166,55 @@ class TestViewCommand(_InfoCmdBase):
 
     def test_view_versions_empty_refs(self):
         """``apm view org/repo versions`` with no refs shows info message."""
-        with patch(
-            "apm_cli.commands.view.GitHubPackageDownloader"
-        ) as mock_cls, patch(
-            "apm_cli.commands.view.AuthResolver"
+        with (
+            patch("apm_cli.commands.view.GitHubPackageDownloader") as mock_cls,
+            patch("apm_cli.commands.view.AuthResolver"),
         ):
             mock_cls.return_value.list_remote_refs.return_value = []
-            result = self.runner.invoke(
-                cli, ["view", "myorg/myrepo", "versions"]
-            )
+            result = self.runner.invoke(cli, ["view", "myorg/myrepo", "versions"])
         assert result.exit_code == 0
         assert "no versions found" in result.output.lower()
 
     def test_view_versions_runtime_error(self):
         """``apm view org/repo versions`` exits 1 on RuntimeError."""
-        with patch(
-            "apm_cli.commands.view.GitHubPackageDownloader"
-        ) as mock_cls, patch(
-            "apm_cli.commands.view.AuthResolver"
+        with (
+            patch("apm_cli.commands.view.GitHubPackageDownloader") as mock_cls,
+            patch("apm_cli.commands.view.AuthResolver"),
         ):
-            mock_cls.return_value.list_remote_refs.side_effect = RuntimeError(
-                "auth failed"
-            )
-            result = self.runner.invoke(
-                cli, ["view", "myorg/myrepo", "versions"]
-            )
+            mock_cls.return_value.list_remote_refs.side_effect = RuntimeError("auth failed")
+            result = self.runner.invoke(cli, ["view", "myorg/myrepo", "versions"])
         assert result.exit_code == 1
         assert "failed to list versions" in result.output.lower()
 
     def test_view_versions_with_ref_shorthand(self):
         """``apm view owner/repo#v1.0 versions`` parses ref correctly."""
         mock_refs = [
-            RemoteRef(name="v1.0.0", ref_type=GitReferenceType.TAG,
-                      commit_sha="abcdef1234567890"),
+            RemoteRef(name="v1.0.0", ref_type=GitReferenceType.TAG, commit_sha="abcdef1234567890"),
         ]
-        with patch(
-            "apm_cli.commands.view.GitHubPackageDownloader"
-        ) as mock_cls, patch(
-            "apm_cli.commands.view.AuthResolver"
+        with (
+            patch("apm_cli.commands.view.GitHubPackageDownloader") as mock_cls,
+            patch("apm_cli.commands.view.AuthResolver"),
         ):
             mock_cls.return_value.list_remote_refs.return_value = mock_refs
             with _force_rich_fallback():
-                result = self.runner.invoke(
-                    cli, ["view", "myorg/myrepo#v1.0", "versions"]
-                )
+                result = self.runner.invoke(cli, ["view", "myorg/myrepo#v1.0", "versions"])
         assert result.exit_code == 0
         assert "v1.0.0" in result.output
 
     def test_view_versions_does_not_require_apm_modules(self):
         """``apm view org/repo versions`` works without apm_modules/."""
         mock_refs = [
-            RemoteRef(name="main", ref_type=GitReferenceType.BRANCH,
-                      commit_sha="1234567890abcdef"),
+            RemoteRef(name="main", ref_type=GitReferenceType.BRANCH, commit_sha="1234567890abcdef"),
         ]
         with self._chdir_tmp():
             # No apm_modules/ created -- should still succeed
-            with patch(
-                "apm_cli.commands.view.GitHubPackageDownloader"
-            ) as mock_cls, patch(
-                "apm_cli.commands.view.AuthResolver"
+            with (
+                patch("apm_cli.commands.view.GitHubPackageDownloader") as mock_cls,
+                patch("apm_cli.commands.view.AuthResolver"),
             ):
                 mock_cls.return_value.list_remote_refs.return_value = mock_refs
                 with _force_rich_fallback():
-                    result = self.runner.invoke(
-                        cli, ["view", "myorg/myrepo", "versions"]
-                    )
+                    result = self.runner.invoke(cli, ["view", "myorg/myrepo", "versions"])
         assert result.exit_code == 0
         assert "main" in result.output
 
@@ -321,19 +298,19 @@ class TestViewCommand(_InfoCmdBase):
         # Click exits 2 for missing required arguments
         assert result.exit_code == 2
         # Should mention the missing argument or show usage
-        assert "PACKAGE" in result.output or "Missing argument" in result.output or "Usage" in result.output
+        assert (
+            "PACKAGE" in result.output
+            or "Missing argument" in result.output
+            or "Usage" in result.output
+        )
 
     # -- DependencyReference.parse failure for versions field -------------
 
     def test_view_versions_invalid_parse(self):
         """``apm view <pkg> versions`` exits 1 when DependencyReference.parse raises ValueError."""
-        with patch(
-            "apm_cli.commands.view.DependencyReference"
-        ) as mock_dep_ref_cls:
+        with patch("apm_cli.commands.view.DependencyReference") as mock_dep_ref_cls:
             mock_dep_ref_cls.parse.side_effect = ValueError("unsupported host: ftp")
-            result = self.runner.invoke(
-                cli, ["view", "ftp://bad-host/invalid", "versions"]
-            )
+            result = self.runner.invoke(cli, ["view", "ftp://bad-host/invalid", "versions"])
         assert result.exit_code == 1
         assert "invalid" in result.output.lower() or "ftp" in result.output.lower()
 
@@ -368,12 +345,14 @@ class TestViewCommand(_InfoCmdBase):
             (pkg_dir / "apm.yml").write_text(
                 "name: grepo\nversion: 1.0.0\ndescription: global pkg\nauthor: X\n"
             )
-            with patch(
-                "apm_cli.core.scope.get_apm_dir", return_value=fake_home,
-            ), _force_rich_fallback():
-                result = self.runner.invoke(
-                    cli, ["view", "gorg/grepo", "-g"]
-                )
+            with (
+                patch(
+                    "apm_cli.core.scope.get_apm_dir",
+                    return_value=fake_home,
+                ),
+                _force_rich_fallback(),
+            ):
+                result = self.runner.invoke(cli, ["view", "gorg/grepo", "-g"])
             assert result.exit_code == 0
             assert "grepo" in result.output
 
@@ -429,10 +408,13 @@ class TestViewCommand(_InfoCmdBase):
         with self._chdir_tmp() as tmp:
             self._make_package(tmp, "lorg", "lrepo")
             os.chdir(tmp)
-            with patch(
-                "apm_cli.commands.view._lookup_lockfile_ref",
-                return_value=("v2.0.0", "abcdef1234567890deadbeef"),
-            ), _force_rich_fallback():
+            with (
+                patch(
+                    "apm_cli.commands.view._lookup_lockfile_ref",
+                    return_value=("v2.0.0", "abcdef1234567890deadbeef"),
+                ),
+                _force_rich_fallback(),
+            ):
                 result = self.runner.invoke(cli, ["view", "lorg/lrepo"])
         assert result.exit_code == 0
         assert "v2.0.0" in result.output
@@ -466,9 +448,11 @@ class TestLookupLockfileRef(_InfoCmdBase):
         mock_lockfile = MagicMock()
         mock_lockfile.dependencies = {"org/repo": mock_dep}
 
-        with patch("apm_cli.deps.lockfile.LockFile") as mock_lf, \
-             patch("apm_cli.deps.lockfile.get_lockfile_path"), \
-             patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"):  # noqa: patched to prevent real I/O
+        with (
+            patch("apm_cli.deps.lockfile.LockFile") as mock_lf,
+            patch("apm_cli.deps.lockfile.get_lockfile_path"),
+            patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"),
+        ):  # patched to prevent real I/O
             mock_lf.read.return_value = mock_lockfile
             ref, commit = _lookup_lockfile_ref("org/repo", Path("/fake"))
         assert ref == "v1.0.0"
@@ -487,9 +471,11 @@ class TestLookupLockfileRef(_InfoCmdBase):
             "github.com/org/repo": mock_dep,
         }
 
-        with patch("apm_cli.deps.lockfile.LockFile") as mock_lf, \
-             patch("apm_cli.deps.lockfile.get_lockfile_path"), \
-             patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"):  # noqa: patched to prevent real I/O
+        with (
+            patch("apm_cli.deps.lockfile.LockFile") as mock_lf,
+            patch("apm_cli.deps.lockfile.get_lockfile_path"),
+            patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"),
+        ):  # patched to prevent real I/O
             mock_lf.read.return_value = mock_lockfile
             ref, commit = _lookup_lockfile_ref("org/repo", Path("/fake"))
         assert ref == "main"
@@ -502,9 +488,11 @@ class TestLookupLockfileRef(_InfoCmdBase):
         mock_lockfile = MagicMock()
         mock_lockfile.dependencies = {"other/pkg": MagicMock()}
 
-        with patch("apm_cli.deps.lockfile.LockFile") as mock_lf, \
-             patch("apm_cli.deps.lockfile.get_lockfile_path"), \
-             patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"):  # noqa: patched to prevent real I/O
+        with (
+            patch("apm_cli.deps.lockfile.LockFile") as mock_lf,
+            patch("apm_cli.deps.lockfile.get_lockfile_path"),
+            patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"),
+        ):  # patched to prevent real I/O
             mock_lf.read.return_value = mock_lockfile
             ref, commit = _lookup_lockfile_ref("nomatch", Path("/fake"))
         assert ref == ""
@@ -526,9 +514,11 @@ class TestLookupLockfileRef(_InfoCmdBase):
         """Returns ('', '') when LockFile.read returns None."""
         from apm_cli.commands.view import _lookup_lockfile_ref
 
-        with patch("apm_cli.deps.lockfile.LockFile") as mock_lf, \
-             patch("apm_cli.deps.lockfile.get_lockfile_path"), \
-             patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"):  # noqa: patched to prevent real I/O
+        with (
+            patch("apm_cli.deps.lockfile.LockFile") as mock_lf,
+            patch("apm_cli.deps.lockfile.get_lockfile_path"),
+            patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"),
+        ):  # patched to prevent real I/O
             mock_lf.read.return_value = None
             ref, commit = _lookup_lockfile_ref("org/repo", Path("/fake"))
         assert ref == ""
@@ -542,8 +532,12 @@ class TestInfoAlias(_InfoCmdBase):
         """``apm info org/repo`` produces the same output as ``apm view``."""
         with self._chdir_tmp() as tmp:
             self._make_package(
-                tmp, "myorg", "myrepo",
-                version="2.5.0", description="Alias test", author="Bob",
+                tmp,
+                "myorg",
+                "myrepo",
+                version="2.5.0",
+                description="Alias test",
+                author="Bob",
             )
             os.chdir(tmp)
             with _force_rich_fallback():
@@ -561,8 +555,9 @@ class TestInfoAlias(_InfoCmdBase):
         # Check that "info" doesn't appear as a listed command
         # (it may appear in other text, so check the commands section)
         lines = result.output.splitlines()
-        command_lines = [
-            l.strip() for l in lines
+        command_lines = [  # noqa: F841
+            l.strip()
+            for l in lines  # noqa: E741
             if l.strip().startswith("info") and not l.strip().startswith("info")  # skip false match
         ]
         # More robust: "info" should not be in the commands listing
@@ -598,17 +593,18 @@ class TestViewMarketplaceNoField(_InfoCmdBase):
         manifest = MarketplaceManifest(name="acme-tools", plugins=(plugin,))
         source = MarketplaceSource(name="acme-tools", owner="acme", repo="marketplace")
 
-        with patch(
-            "apm_cli.marketplace.registry.get_marketplace_by_name",
-            return_value=source,
-        ), patch(
-            "apm_cli.marketplace.client.fetch_or_cache",
-            return_value=manifest,
+        with (
+            patch(
+                "apm_cli.marketplace.registry.get_marketplace_by_name",
+                return_value=source,
+            ),
+            patch(
+                "apm_cli.marketplace.client.fetch_or_cache",
+                return_value=manifest,
+            ),
+            _force_rich_fallback(),
         ):
-            with _force_rich_fallback():
-                result = self.runner.invoke(
-                    cli, ["view", "my-plugin@acme-tools"]
-                )
+            result = self.runner.invoke(cli, ["view", "my-plugin@acme-tools"])
 
         assert result.exit_code == 0
         assert "my-plugin" in result.output
@@ -632,17 +628,18 @@ class TestViewMarketplaceNoField(_InfoCmdBase):
 
         with self._chdir_tmp():
             # No apm_modules/ -- should still succeed
-            with patch(
-                "apm_cli.marketplace.registry.get_marketplace_by_name",
-                return_value=source,
-            ), patch(
-                "apm_cli.marketplace.client.fetch_or_cache",
-                return_value=manifest,
+            with (
+                patch(
+                    "apm_cli.marketplace.registry.get_marketplace_by_name",
+                    return_value=source,
+                ),
+                patch(
+                    "apm_cli.marketplace.client.fetch_or_cache",
+                    return_value=manifest,
+                ),
             ):
                 with _force_rich_fallback():
-                    result = self.runner.invoke(
-                        cli, ["view", "my-plugin@acme-tools"]
-                    )
+                    result = self.runner.invoke(cli, ["view", "my-plugin@acme-tools"])
 
         assert result.exit_code == 0
 
@@ -650,7 +647,10 @@ class TestViewMarketplaceNoField(_InfoCmdBase):
         """``apm view org/repo`` still falls through to local metadata lookup."""
         with self._chdir_tmp() as tmp:
             self._make_package(
-                tmp, "myorg", "myrepo", version="3.0.0",
+                tmp,
+                "myorg",
+                "myrepo",
+                version="3.0.0",
             )
             os.chdir(tmp)
             with _force_rich_fallback():
@@ -675,17 +675,18 @@ class TestViewMarketplaceNoField(_InfoCmdBase):
         manifest = MarketplaceManifest(name="acme-tools", plugins=(plugin,))
         source = MarketplaceSource(name="acme-tools", owner="acme", repo="marketplace")
 
-        with patch(
-            "apm_cli.marketplace.registry.get_marketplace_by_name",
-            return_value=source,
-        ), patch(
-            "apm_cli.marketplace.client.fetch_or_cache",
-            return_value=manifest,
+        with (
+            patch(
+                "apm_cli.marketplace.registry.get_marketplace_by_name",
+                return_value=source,
+            ),
+            patch(
+                "apm_cli.marketplace.client.fetch_or_cache",
+                return_value=manifest,
+            ),
+            _force_rich_fallback(),
         ):
-            with _force_rich_fallback():
-                result = self.runner.invoke(
-                    cli, ["view", "my-plugin@acme-tools"]
-                )
+            result = self.runner.invoke(cli, ["view", "my-plugin@acme-tools"])
 
         assert result.exit_code == 0
         assert "1.0.0" in result.output

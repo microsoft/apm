@@ -12,13 +12,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
+import pytest  # noqa: F401
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import init
 from apm_cli.marketplace.init_template import render_marketplace_yml_template
 from apm_cli.marketplace.yml_schema import load_marketplace_yml
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -76,7 +75,7 @@ class TestInitScaffold:
     def test_verbose_shows_path(self, tmp_path: Path):
         """--verbose must show the output path."""
         runner = CliRunner()
-        with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:
+        with runner.isolated_filesystem(temp_dir=str(tmp_path)) as cwd:  # noqa: F841
             result = runner.invoke(init, ["--verbose"], catch_exceptions=False)
         assert "marketplace.yml" in result.output or "Path" in result.output
 

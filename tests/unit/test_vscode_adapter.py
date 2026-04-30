@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
+import pytest  # noqa: F401
 
 from apm_cli.adapters.client.base import MCPClientAdapter
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
@@ -27,16 +27,12 @@ class TestVSCodeClientAdapter(unittest.TestCase):
             json.dump({"servers": {}}, f)
 
         # Create mock clients
-        self.mock_registry_patcher = patch(
-            "apm_cli.adapters.client.vscode.SimpleRegistryClient"
-        )
+        self.mock_registry_patcher = patch("apm_cli.adapters.client.vscode.SimpleRegistryClient")
         self.mock_registry_class = self.mock_registry_patcher.start()
         self.mock_registry = MagicMock()
         self.mock_registry_class.return_value = self.mock_registry
 
-        self.mock_integration_patcher = patch(
-            "apm_cli.adapters.client.vscode.RegistryIntegration"
-        )
+        self.mock_integration_patcher = patch("apm_cli.adapters.client.vscode.RegistryIntegration")
         self.mock_integration_class = self.mock_integration_patcher.start()
         self.mock_integration = MagicMock()
         self.mock_integration_class.return_value = self.mock_integration
@@ -94,7 +90,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
 
         result = adapter.update_config(new_config)
 
-        with open(self.temp_path, "r") as f:
+        with open(self.temp_path) as f:
             updated_config = json.load(f)
 
         self.assertEqual(updated_config, new_config)
@@ -119,7 +115,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
 
         result = adapter.update_config(new_config)
 
-        with open(nonexistent_path, "r") as f:
+        with open(nonexistent_path) as f:
             updated_config = json.load(f)
 
         self.assertEqual(updated_config, new_config)
@@ -133,7 +129,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
 
         result = adapter.configure_mcp_server(server_url="fetch", server_name="fetch")
 
-        with open(self.temp_path, "r") as f:
+        with open(self.temp_path) as f:
             updated_config = json.load(f)
 
         self.assertTrue(result)
@@ -146,9 +142,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
         # Verify the server configuration
         self.assertEqual(updated_config["servers"]["fetch"]["type"], "stdio")
         self.assertEqual(updated_config["servers"]["fetch"]["command"], "npx")
-        self.assertEqual(
-            updated_config["servers"]["fetch"]["args"], ["-y", "@mcp/fetch"]
-        )
+        self.assertEqual(updated_config["servers"]["fetch"]["args"], ["-y", "@mcp/fetch"])
 
     @patch("apm_cli.adapters.client.vscode.VSCodeClientAdapter.get_config_path")
     def test_configure_mcp_server_update_existing(self, mock_get_path):
@@ -172,7 +166,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
 
         result = adapter.configure_mcp_server(server_url="fetch", server_name="fetch")
 
-        with open(self.temp_path, "r") as f:
+        with open(self.temp_path) as f:
             updated_config = json.load(f)
 
         self.assertTrue(result)
@@ -184,9 +178,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
         # Verify the server configuration
         self.assertEqual(updated_config["servers"]["fetch"]["type"], "stdio")
         self.assertEqual(updated_config["servers"]["fetch"]["command"], "npx")
-        self.assertEqual(
-            updated_config["servers"]["fetch"]["args"], ["-y", "@mcp/fetch"]
-        )
+        self.assertEqual(updated_config["servers"]["fetch"]["args"], ["-y", "@mcp/fetch"])
 
     @patch("apm_cli.adapters.client.vscode.VSCodeClientAdapter.get_config_path")
     def test_configure_mcp_server_empty_url(self, mock_get_path):
@@ -194,9 +186,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
         mock_get_path.return_value = self.temp_path
         adapter = VSCodeClientAdapter()
 
-        result = adapter.configure_mcp_server(
-            server_url="", server_name="Example Server"
-        )
+        result = adapter.configure_mcp_server(server_url="", server_name="Example Server")
 
         self.assertFalse(result)
 
@@ -211,9 +201,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
 
         # Test that ValueError is raised when server details can't be retrieved
         with self.assertRaises(ValueError) as context:
-            adapter.configure_mcp_server(
-                server_url="unknown-server", server_name="unknown-server"
-            )
+            adapter.configure_mcp_server(server_url="unknown-server", server_name="unknown-server")
 
         self.assertIn(
             "Failed to retrieve server details for 'unknown-server'. Server not found in registry.",
@@ -268,7 +256,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
                 }
             ],
         }
-        config, inputs = adapter._format_server_config(server_info)
+        config, inputs = adapter._format_server_config(server_info)  # noqa: RUF059
 
         self.assertEqual(config["type"], "streamable-http")
         self.assertEqual(config["url"], "https://stream.example.com")
@@ -292,7 +280,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
                 }
             ],
         }
-        config, inputs = adapter._format_server_config(server_info)
+        config, inputs = adapter._format_server_config(server_info)  # noqa: RUF059
 
         self.assertEqual(config["type"], "http")
         self.assertEqual(
@@ -313,9 +301,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
         cache = {
             "my-private-srv": {
                 "name": "my-private-srv",
-                "remotes": [
-                    {"transport_type": "http", "url": "http://localhost:8787/"}
-                ],
+                "remotes": [{"transport_type": "http", "url": "http://localhost:8787/"}],
             }
         }
 
@@ -326,14 +312,12 @@ class TestVSCodeClientAdapter(unittest.TestCase):
         )
 
         self.assertTrue(result)
-        with open(self.temp_path, "r") as f:
+        with open(self.temp_path) as f:
             config = json.load(f)
 
         self.assertIn("my-private-srv", config["servers"])
         self.assertEqual(config["servers"]["my-private-srv"]["type"], "http")
-        self.assertEqual(
-            config["servers"]["my-private-srv"]["url"], "http://localhost:8787/"
-        )
+        self.assertEqual(config["servers"]["my-private-srv"]["url"], "http://localhost:8787/")
 
     @patch("apm_cli.adapters.client.vscode.VSCodeClientAdapter.get_config_path")
     def test_format_server_config_remote_missing_transport_type(self, mock_get_path):
@@ -345,7 +329,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
             "name": "atlassian-mcp-server",
             "remotes": [{"url": "https://mcp.atlassian.com/v1/mcp"}],
         }
-        config, inputs = adapter._format_server_config(server_info)
+        config, inputs = adapter._format_server_config(server_info)  # noqa: RUF059
 
         self.assertEqual(config["type"], "http")
         self.assertEqual(config["url"], "https://mcp.atlassian.com/v1/mcp")
@@ -361,7 +345,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
             "name": "remote-srv",
             "remotes": [{"transport_type": "", "url": "https://example.com/mcp"}],
         }
-        config, inputs = adapter._format_server_config(server_info)
+        config, inputs = adapter._format_server_config(server_info)  # noqa: RUF059
 
         self.assertEqual(config["type"], "http")
         self.assertEqual(config["url"], "https://example.com/mcp")
@@ -376,7 +360,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
             "name": "remote-srv",
             "remotes": [{"transport_type": None, "url": "https://example.com/mcp"}],
         }
-        config, inputs = adapter._format_server_config(server_info)
+        config, inputs = adapter._format_server_config(server_info)  # noqa: RUF059
 
         self.assertEqual(config["type"], "http")
 
@@ -390,7 +374,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
             "name": "remote-srv",
             "remotes": [{"transport_type": "  ", "url": "https://example.com/mcp"}],
         }
-        config, inputs = adapter._format_server_config(server_info)
+        config, inputs = adapter._format_server_config(server_info)  # noqa: RUF059
 
         self.assertEqual(config["type"], "http")
 
@@ -423,7 +407,7 @@ class TestVSCodeClientAdapter(unittest.TestCase):
                 {"transport_type": "sse", "url": "https://good.example.com/sse"},
             ],
         }
-        config, inputs = adapter._format_server_config(server_info)
+        config, inputs = adapter._format_server_config(server_info)  # noqa: RUF059
 
         self.assertEqual(config["type"], "sse")
         self.assertEqual(config["url"], "https://good.example.com/sse")
@@ -458,13 +442,9 @@ class TestVSCodeSelectBestPackage(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
-        self.mock_registry_patcher = patch(
-            "apm_cli.adapters.client.vscode.SimpleRegistryClient"
-        )
+        self.mock_registry_patcher = patch("apm_cli.adapters.client.vscode.SimpleRegistryClient")
         self.mock_registry_patcher.start()
-        self.mock_integration_patcher = patch(
-            "apm_cli.adapters.client.vscode.RegistryIntegration"
-        )
+        self.mock_integration_patcher = patch("apm_cli.adapters.client.vscode.RegistryIntegration")
         self.mock_integration_patcher.start()
         self.adapter = VSCodeClientAdapter()
 
@@ -527,16 +507,12 @@ class TestVSCodeStdioRegistryPackages(unittest.TestCase):
         with open(self.temp_path, "w") as f:
             json.dump({"servers": {}}, f)
 
-        self.mock_registry_patcher = patch(
-            "apm_cli.adapters.client.vscode.SimpleRegistryClient"
-        )
+        self.mock_registry_patcher = patch("apm_cli.adapters.client.vscode.SimpleRegistryClient")
         self.mock_registry_class = self.mock_registry_patcher.start()
         self.mock_registry = MagicMock()
         self.mock_registry_class.return_value = self.mock_registry
 
-        self.mock_integration_patcher = patch(
-            "apm_cli.adapters.client.vscode.RegistryIntegration"
-        )
+        self.mock_integration_patcher = patch("apm_cli.adapters.client.vscode.RegistryIntegration")
         self.mock_integration_patcher.start()
 
     def tearDown(self):
@@ -605,7 +581,7 @@ class TestVSCodeStdioRegistryPackages(unittest.TestCase):
         )
 
         self.assertTrue(result)
-        with open(self.temp_path, "r") as f:
+        with open(self.temp_path) as f:
             config = json.load(f)
 
         server = config["servers"]["azure"]
@@ -643,7 +619,7 @@ class TestVSCodeStdioRegistryPackages(unittest.TestCase):
         )
 
         self.assertTrue(result)
-        with open(self.temp_path, "r") as f:
+        with open(self.temp_path) as f:
             config = json.load(f)
 
         server = config["servers"]["nuget-server"]
@@ -689,13 +665,9 @@ class TestVSCodeInferRegistryName(unittest.TestCase):
     """Test _infer_registry_name with various package metadata patterns."""
 
     def setUp(self):
-        self.mock_registry_patcher = patch(
-            "apm_cli.adapters.client.vscode.SimpleRegistryClient"
-        )
+        self.mock_registry_patcher = patch("apm_cli.adapters.client.vscode.SimpleRegistryClient")
         self.mock_registry_patcher.start()
-        self.mock_integration_patcher = patch(
-            "apm_cli.adapters.client.vscode.RegistryIntegration"
-        )
+        self.mock_integration_patcher = patch("apm_cli.adapters.client.vscode.RegistryIntegration")
         self.mock_integration_patcher.start()
 
     def tearDown(self):
@@ -704,17 +676,13 @@ class TestVSCodeInferRegistryName(unittest.TestCase):
 
     def test_explicit_registry_name(self):
         self.assertEqual(
-            VSCodeClientAdapter._infer_registry_name(
-                {"name": "pkg", "registry_name": "npm"}
-            ),
+            VSCodeClientAdapter._infer_registry_name({"name": "pkg", "registry_name": "npm"}),
             "npm",
         )
 
     def test_empty_registry_name_scoped_npm(self):
         self.assertEqual(
-            VSCodeClientAdapter._infer_registry_name(
-                {"name": "@azure/mcp", "registry_name": ""}
-            ),
+            VSCodeClientAdapter._infer_registry_name({"name": "@azure/mcp", "registry_name": ""}),
             "npm",
         )
 
@@ -744,9 +712,7 @@ class TestVSCodeInferRegistryName(unittest.TestCase):
 
     def test_empty_registry_name_nuget_pascal_case(self):
         self.assertEqual(
-            VSCodeClientAdapter._infer_registry_name(
-                {"name": "Azure.Mcp", "registry_name": ""}
-            ),
+            VSCodeClientAdapter._infer_registry_name({"name": "Azure.Mcp", "registry_name": ""}),
             "nuget",
         )
 
@@ -760,9 +726,7 @@ class TestVSCodeInferRegistryName(unittest.TestCase):
 
     def test_unknown_returns_empty(self):
         self.assertEqual(
-            VSCodeClientAdapter._infer_registry_name(
-                {"name": "unknown-pkg", "registry_name": ""}
-            ),
+            VSCodeClientAdapter._infer_registry_name({"name": "unknown-pkg", "registry_name": ""}),
             "",
         )
 
@@ -774,13 +738,9 @@ class TestVSCodeExtractPackageArgs(unittest.TestCase):
     """Test _extract_package_args with both API formats."""
 
     def setUp(self):
-        self.mock_registry_patcher = patch(
-            "apm_cli.adapters.client.vscode.SimpleRegistryClient"
-        )
+        self.mock_registry_patcher = patch("apm_cli.adapters.client.vscode.SimpleRegistryClient")
         self.mock_registry_patcher.start()
-        self.mock_integration_patcher = patch(
-            "apm_cli.adapters.client.vscode.RegistryIntegration"
-        )
+        self.mock_integration_patcher = patch("apm_cli.adapters.client.vscode.RegistryIntegration")
         self.mock_integration_patcher.start()
 
     def tearDown(self):
@@ -795,9 +755,7 @@ class TestVSCodeExtractPackageArgs(unittest.TestCase):
                 {"type": "positional", "value": "start"},
             ],
         }
-        self.assertEqual(
-            VSCodeClientAdapter._extract_package_args(pkg), ["server", "start"]
-        )
+        self.assertEqual(VSCodeClientAdapter._extract_package_args(pkg), ["server", "start"])
 
     def test_runtime_arguments_legacy_format(self):
         pkg = {
@@ -807,9 +765,7 @@ class TestVSCodeExtractPackageArgs(unittest.TestCase):
                 {"is_required": True, "value_hint": "start"},
             ],
         }
-        self.assertEqual(
-            VSCodeClientAdapter._extract_package_args(pkg), ["server", "start"]
-        )
+        self.assertEqual(VSCodeClientAdapter._extract_package_args(pkg), ["server", "start"])
 
     def test_prefers_package_arguments_over_runtime(self):
         pkg = {
@@ -835,16 +791,12 @@ class TestVSCodeRealApiFormat(unittest.TestCase):
         with open(self.temp_path, "w") as f:
             json.dump({"servers": {}}, f)
 
-        self.mock_registry_patcher = patch(
-            "apm_cli.adapters.client.vscode.SimpleRegistryClient"
-        )
+        self.mock_registry_patcher = patch("apm_cli.adapters.client.vscode.SimpleRegistryClient")
         self.mock_registry_class = self.mock_registry_patcher.start()
         self.mock_registry = MagicMock()
         self.mock_registry_class.return_value = self.mock_registry
 
-        self.mock_integration_patcher = patch(
-            "apm_cli.adapters.client.vscode.RegistryIntegration"
-        )
+        self.mock_integration_patcher = patch("apm_cli.adapters.client.vscode.RegistryIntegration")
         self.mock_integration_patcher.start()
 
     def tearDown(self):
@@ -899,7 +851,7 @@ class TestVSCodeRealApiFormat(unittest.TestCase):
         )
 
         self.assertTrue(result)
-        with open(self.temp_path, "r") as f:
+        with open(self.temp_path) as f:
             config = json.load(f)
 
         server = config["servers"]["azure"]
@@ -936,7 +888,7 @@ class TestVSCodeRealApiFormat(unittest.TestCase):
         )
 
         self.assertTrue(result)
-        with open(self.temp_path, "r") as f:
+        with open(self.temp_path) as f:
             config = json.load(f)
 
         server = config["servers"]["my-pypi-server"]
@@ -956,16 +908,12 @@ class TestExtractInputVariables(unittest.TestCase):
         with open(self.temp_path, "w") as f:
             json.dump({"servers": {}, "inputs": []}, f)
 
-        self.mock_registry_patcher = patch(
-            "apm_cli.adapters.client.vscode.SimpleRegistryClient"
-        )
+        self.mock_registry_patcher = patch("apm_cli.adapters.client.vscode.SimpleRegistryClient")
         self.mock_registry_class = self.mock_registry_patcher.start()
         self.mock_registry = MagicMock()
         self.mock_registry_class.return_value = self.mock_registry
 
-        self.mock_integration_patcher = patch(
-            "apm_cli.adapters.client.vscode.RegistryIntegration"
-        )
+        self.mock_integration_patcher = patch("apm_cli.adapters.client.vscode.RegistryIntegration")
         self.mock_integration_class = self.mock_integration_patcher.start()
         self.mock_integration = MagicMock()
         self.mock_integration_class.return_value = self.mock_integration
@@ -1012,9 +960,7 @@ class TestExtractInputVariables(unittest.TestCase):
 
     def test_no_input_variables(self):
         adapter = VSCodeClientAdapter()
-        result = adapter._extract_input_variables(
-            {"Content-Type": "application/json"}, "my-server"
-        )
+        result = adapter._extract_input_variables({"Content-Type": "application/json"}, "my-server")
         assert result == []
 
     def test_empty_mapping(self):
@@ -1046,12 +992,10 @@ class TestExtractInputVariables(unittest.TestCase):
         self.mock_registry.find_server_by_reference.return_value = server_info
 
         adapter = VSCodeClientAdapter()
-        result = adapter.configure_mcp_server(
-            server_url="my-server", server_name="my-server"
-        )
+        result = adapter.configure_mcp_server(server_url="my-server", server_name="my-server")
 
         assert result is True
-        with open(self.temp_path, "r") as f:
+        with open(self.temp_path) as f:
             config = json.load(f)
 
         inputs = config["inputs"]
@@ -1081,7 +1025,7 @@ class TestExtractInputVariables(unittest.TestCase):
         result = adapter.configure_mcp_server(server_url="my-cli", server_name="my-cli")
 
         assert result is True
-        with open(self.temp_path, "r") as f:
+        with open(self.temp_path) as f:
             config = json.load(f)
 
         inputs = config["inputs"]
@@ -1130,7 +1074,7 @@ class TestExtractInputVariables(unittest.TestCase):
         adapter = VSCodeClientAdapter()
         adapter.configure_mcp_server(server_url="my-server", server_name="my-server")
 
-        with open(self.temp_path, "r") as f:
+        with open(self.temp_path) as f:
             config = json.load(f)
 
         token_entries = [i for i in config["inputs"] if i["id"] == "my-server-token"]

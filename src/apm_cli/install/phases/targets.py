@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
 
 
-def run(ctx: "InstallContext") -> None:
+def run(ctx: InstallContext) -> None:
     """Execute the targets phase.
 
     On return ``ctx.targets`` and ``ctx.integrators`` are populated.
@@ -27,10 +27,10 @@ def run(ctx: "InstallContext") -> None:
     )
     from apm_cli.integration import AgentIntegrator, PromptIntegrator
     from apm_cli.integration.command_integrator import CommandIntegrator
+    from apm_cli.integration.copilot_cowork_paths import CoworkResolutionError
     from apm_cli.integration.hook_integrator import HookIntegrator
     from apm_cli.integration.instruction_integrator import InstructionIntegrator
     from apm_cli.integration.skill_integrator import SkillIntegrator
-    from apm_cli.integration.copilot_cowork_paths import CoworkResolutionError
     from apm_cli.integration.targets import resolve_targets as _resolve_targets
 
     # Get config target from apm.yml if available
@@ -84,6 +84,7 @@ def run(ctx: "InstallContext") -> None:
             else:
                 # Fix 3: flag is ON but resolver returned None
                 import sys as _sys
+
                 if _sys.platform.startswith("linux"):
                     _cowork_msg = (
                         "Cowork has no auto-detection on Linux.\n"
@@ -123,18 +124,13 @@ def run(ctx: "InstallContext") -> None:
         _scope_label = "global" if _is_user else "project"
         if _targets:
             _target_names = ", ".join(
-                f"{t.name} (~/{t.root_dir}/)" if _is_user else t.name
-                for t in _targets
+                f"{t.name} (~/{t.root_dir}/)" if _is_user else t.name for t in _targets
             )
-            ctx.logger.verbose_detail(
-                f"Active {_scope_label} targets: {_target_names}"
-            )
+            ctx.logger.verbose_detail(f"Active {_scope_label} targets: {_target_names}")
             if _is_user:
                 from apm_cli.deps.lockfile import get_lockfile_path
 
-                ctx.logger.verbose_detail(
-                    f"Lockfile: {get_lockfile_path(ctx.apm_dir)}"
-                )
+                ctx.logger.verbose_detail(f"Lockfile: {get_lockfile_path(ctx.apm_dir)}")
         else:
             ctx.logger.warning(
                 f"No {_scope_label} targets resolved -- nothing will be "
@@ -158,9 +154,7 @@ def run(ctx: "InstallContext") -> None:
         if not _target_dir.exists():
             _target_dir.mkdir(parents=True, exist_ok=True)
             if ctx.logger:
-                ctx.logger.verbose_detail(
-                    f"Created {_root}/ ({_t.name} target)"
-                )
+                ctx.logger.verbose_detail(f"Created {_root}/ ({_t.name} target)")
 
     # Legacy detect_target call -- return values are not consumed by any
     # downstream code but the call is preserved for behaviour parity with

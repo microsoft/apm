@@ -1,55 +1,55 @@
 """APM package integration utilities."""
 
-from .base_integrator import BaseIntegrator, IntegrationResult
-from .prompt_integrator import PromptIntegrator
 from .agent_integrator import AgentIntegrator
-from .hook_integrator import HookIntegrator
-from .instruction_integrator import InstructionIntegrator
-from .skill_integrator import (
-    SkillIntegrator,
-    validate_skill_name,
-    normalize_skill_name,
-    to_hyphen_case,
-    copy_skill_to_target,
-    should_install_skill,
-    should_compile_instructions,
-    get_effective_type,
-)
-from .skill_transformer import SkillTransformer
-from .mcp_integrator import MCPIntegrator
+from .base_integrator import BaseIntegrator, IntegrationResult
 from .coverage import check_primitive_coverage
 from .dispatch import PrimitiveDispatch, get_dispatch_table
+from .hook_integrator import HookIntegrator
+from .instruction_integrator import InstructionIntegrator
+from .mcp_integrator import MCPIntegrator
+from .prompt_integrator import PromptIntegrator
+from .skill_integrator import (
+    SkillIntegrator,
+    copy_skill_to_target,
+    get_effective_type,
+    normalize_skill_name,
+    should_compile_instructions,
+    should_install_skill,
+    to_hyphen_case,
+    validate_skill_name,
+)
+from .skill_transformer import SkillTransformer
 from .targets import (
-    TargetProfile,
-    PrimitiveMapping,
     KNOWN_TARGETS,
-    get_integration_prefixes,
+    PrimitiveMapping,
+    TargetProfile,
     active_targets,
+    get_integration_prefixes,
 )
 
 __all__ = [
-    'BaseIntegrator',
-    'IntegrationResult',
-    'check_primitive_coverage',
-    'PrimitiveDispatch',
-    'get_dispatch_table',
-    'PromptIntegrator',
-    'AgentIntegrator',
-    'HookIntegrator',
-    'InstructionIntegrator',
-    'SkillIntegrator',
-    'SkillTransformer',
-    'MCPIntegrator',
-    'TargetProfile',
-    'PrimitiveMapping',
-    'KNOWN_TARGETS',
-    'get_integration_prefixes',
-    'active_targets',
-    'validate_skill_name',
-    'normalize_skill_name',
-    'to_hyphen_case',
-    'copy_skill_to_target',
-    'should_install_skill',
-    'should_compile_instructions',
-    'get_effective_type',
+    "KNOWN_TARGETS",
+    "AgentIntegrator",
+    "BaseIntegrator",
+    "HookIntegrator",
+    "InstructionIntegrator",
+    "IntegrationResult",
+    "MCPIntegrator",
+    "PrimitiveDispatch",
+    "PrimitiveMapping",
+    "PromptIntegrator",
+    "SkillIntegrator",
+    "SkillTransformer",
+    "TargetProfile",
+    "active_targets",
+    "check_primitive_coverage",
+    "copy_skill_to_target",
+    "get_dispatch_table",
+    "get_effective_type",
+    "get_integration_prefixes",
+    "normalize_skill_name",
+    "should_compile_instructions",
+    "should_install_skill",
+    "to_hyphen_case",
+    "validate_skill_name",
 ]

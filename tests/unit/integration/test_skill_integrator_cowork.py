@@ -9,20 +9,21 @@ cowork:// URI scheme.
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-import pytest
+import pytest  # noqa: F401
 
 from apm_cli.integration.skill_integrator import SkillIntegrator
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_cowork_target_profile():
     """Return a minimal TargetProfile that mimics the copilot-cowork target."""
-    from apm_cli.integration.targets import TargetProfile, PrimitiveMapping
+    from apm_cli.integration.targets import PrimitiveMapping, TargetProfile
+
     return TargetProfile(
         name="copilot-cowork",
         root_dir="copilot-cowork",
@@ -38,7 +39,8 @@ def _make_cowork_target_profile():
 
 def _make_copilot_target_profile(project_root: Path):
     """Return a minimal copilot TargetProfile (local, non-cowork)."""
-    from apm_cli.integration.targets import TargetProfile, PrimitiveMapping
+    from apm_cli.integration.targets import PrimitiveMapping, TargetProfile
+
     return TargetProfile(
         name="copilot",
         root_dir=".github",
@@ -88,9 +90,7 @@ class TestSyncIntegrationCoworkDeletion:
                 targets=targets,
             )
 
-        assert not skill_dir.exists(), (
-            "Cowork skill directory still exists after sync_integration."
-        )
+        assert not skill_dir.exists(), "Cowork skill directory still exists after sync_integration."
         assert result["files_removed"] == 1
         assert result["errors"] == 0
 
@@ -119,9 +119,7 @@ class TestSyncIntegrationCoworkDeletion:
                 targets=targets,
             )
 
-        assert not skill_md.exists(), (
-            "Cowork SKILL.md still exists after sync_integration."
-        )
+        assert not skill_md.exists(), "Cowork SKILL.md still exists after sync_integration."
         assert result["files_removed"] == 1
         assert result["errors"] == 0
 

@@ -115,9 +115,7 @@ class TestSarifReport:
             ],
         }
         report = findings_to_sarif(findings, files_scanned=1)
-        loc = report["runs"][0]["results"][0]["locations"][0][
-            "physicalLocation"
-        ]
+        loc = report["runs"][0]["results"][0]["locations"][0]["physicalLocation"]
         assert loc["artifactLocation"]["uri"] == "some/path/file.md"
         assert loc["region"]["startLine"] == 5
         assert loc["region"]["startColumn"] == 10
@@ -140,9 +138,7 @@ class TestFormatDetection:
         assert detect_format_from_extension(Path("report.sarif")) == "sarif"
 
     def test_sarif_json_extension(self):
-        assert (
-            detect_format_from_extension(Path("report.sarif.json")) == "sarif"
-        )
+        assert detect_format_from_extension(Path("report.sarif.json")) == "sarif"
 
     def test_json_extension(self):
         assert detect_format_from_extension(Path("report.json")) == "json"
@@ -199,7 +195,7 @@ class TestMarkdownReport:
         }
         md = findings_to_markdown(findings, files_scanned=2)
         lines = md.split("\n")
-        table_rows = [l for l in lines if l.startswith("| CRITICAL") or l.startswith("| WARNING")]
+        table_rows = [l for l in lines if l.startswith("| CRITICAL") or l.startswith("| WARNING")]  # noqa: E741
         assert table_rows[0].startswith("| CRITICAL")
         assert table_rows[1].startswith("| WARNING")
 

@@ -9,8 +9,8 @@ import pytest
 
 from apm_cli.marketplace.errors import MarketplaceYmlError
 from apm_cli.marketplace.migration import (
-    ConfigSource,
     DEPRECATION_MESSAGE,
+    ConfigSource,
     detect_config_source,
     load_marketplace_config,
 )
@@ -76,20 +76,16 @@ class TestDetectConfigSource:
     def test_both_is_hard_error(self, tmp_path: Path) -> None:
         _write(tmp_path / "apm.yml", _APM_WITH_BLOCK)
         _write(tmp_path / "marketplace.yml", _LEGACY_BODY)
-        with pytest.raises(MarketplaceYmlError, match="Both apm.yml"):
+        with pytest.raises(MarketplaceYmlError, match="Both apm.yml"):  # noqa: RUF043
             detect_config_source(tmp_path)
 
-    def test_apm_yml_without_marketplace_block_is_legacy(
-        self, tmp_path: Path
-    ) -> None:
+    def test_apm_yml_without_marketplace_block_is_legacy(self, tmp_path: Path) -> None:
         _write(tmp_path / "apm.yml", _APM_WITHOUT_BLOCK)
         _write(tmp_path / "marketplace.yml", _LEGACY_BODY)
         # apm.yml has no marketplace: block, so legacy is the active source
         assert detect_config_source(tmp_path) == ConfigSource.LEGACY_YML
 
-    def test_apm_yml_without_marketplace_block_alone_is_none(
-        self, tmp_path: Path
-    ) -> None:
+    def test_apm_yml_without_marketplace_block_alone_is_none(self, tmp_path: Path) -> None:
         _write(tmp_path / "apm.yml", _APM_WITHOUT_BLOCK)
         assert detect_config_source(tmp_path) == ConfigSource.NONE
 
@@ -104,9 +100,7 @@ class TestLoadMarketplaceConfig:
     def test_legacy_load_emits_deprecation(self, tmp_path: Path) -> None:
         _write(tmp_path / "marketplace.yml", _LEGACY_BODY)
         warnings: list = []
-        config = load_marketplace_config(
-            tmp_path, warn_callback=warnings.append
-        )
+        config = load_marketplace_config(tmp_path, warn_callback=warnings.append)
         assert config.is_legacy is True
         assert warnings == [DEPRECATION_MESSAGE]
 
@@ -117,5 +111,5 @@ class TestLoadMarketplaceConfig:
     def test_both_files_raises(self, tmp_path: Path) -> None:
         _write(tmp_path / "apm.yml", _APM_WITH_BLOCK)
         _write(tmp_path / "marketplace.yml", _LEGACY_BODY)
-        with pytest.raises(MarketplaceYmlError, match="Both apm.yml"):
+        with pytest.raises(MarketplaceYmlError, match="Both apm.yml"):  # noqa: RUF043
             load_marketplace_config(tmp_path)

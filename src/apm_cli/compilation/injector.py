@@ -1,12 +1,13 @@
 """High-level constitution injection workflow used by compile command."""
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Literal
+from typing import Literal, Optional  # noqa: F401
 
+from .constants import CONSTITUTION_MARKER_BEGIN, CONSTITUTION_MARKER_END  # noqa: F401
 from .constitution import read_constitution
-from .constitution_block import render_block, find_existing_block
-from .constants import CONSTITUTION_MARKER_BEGIN, CONSTITUTION_MARKER_END
+from .constitution_block import find_existing_block, render_block
 
 InjectionStatus = Literal["CREATED", "UPDATED", "UNCHANGED", "SKIPPED", "MISSING"]
 
@@ -17,7 +18,9 @@ class ConstitutionInjector:
     def __init__(self, base_dir: str):
         self.base_dir = Path(base_dir)
 
-    def inject(self, compiled_content: str, with_constitution: bool, output_path: Path) -> tuple[str, InjectionStatus, Optional[str]]:
+    def inject(
+        self, compiled_content: str, with_constitution: bool, output_path: Path
+    ) -> tuple[str, InjectionStatus, str | None]:
         """Return final AGENTS.md content after optional injection.
 
         Args:

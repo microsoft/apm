@@ -13,12 +13,17 @@ import json
 import logging
 import os
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional  # noqa: F401, UP035
 
 import requests
 
 from .errors import MarketplaceFetchError
-from .models import MarketplaceManifest, MarketplacePlugin, MarketplaceSource, parse_marketplace_json
+from .models import (
+    MarketplaceManifest,
+    MarketplacePlugin,
+    MarketplaceSource,
+    parse_marketplace_json,
+)
 from .registry import get_registered_marketplaces
 
 logger = logging.getLogger(__name__)
@@ -76,39 +81,39 @@ def _cache_meta_path(name: str) -> str:
     return os.path.join(_cache_dir(), f"{_sanitize_cache_name(name)}.meta.json")
 
 
-def _read_cache(name: str) -> Optional[Dict]:
+def _read_cache(name: str) -> dict | None:
     """Read cached marketplace data if valid (not expired)."""
     data_path = _cache_data_path(name)
     meta_path = _cache_meta_path(name)
     if not os.path.exists(data_path) or not os.path.exists(meta_path):
         return None
     try:
-        with open(meta_path, "r") as f:
+        with open(meta_path) as f:
             meta = json.load(f)
         fetched_at = meta.get("fetched_at", 0)
         ttl = meta.get("ttl_seconds", _CACHE_TTL_SECONDS)
         if time.time() - fetched_at > ttl:
             return None  # Expired
-        with open(data_path, "r") as f:
+        with open(data_path) as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError, KeyError) as exc:
         logger.debug("Cache read failed for '%s': %s", name, exc)
         return None
 
 
-def _read_stale_cache(name: str) -> Optional[Dict]:
+def _read_stale_cache(name: str) -> dict | None:
     """Read cached data even if expired (stale-while-revalidate)."""
     data_path = _cache_data_path(name)
     if not os.path.exists(data_path):
         return None
     try:
-        with open(data_path, "r") as f:
+        with open(data_path) as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return None
 
 
-def _write_cache(name: str, data: Dict) -> None:
+def _write_cache(name: str, data: dict) -> None:
     """Write marketplace data and metadata to cache."""
     data_path = _cache_data_path(name)
     meta_path = _cache_meta_path(name)
@@ -127,7 +132,7 @@ def _write_cache(name: str, data: Dict) -> None:
 def _clear_cache(name: str) -> None:
     """Remove cached data for a marketplace."""
     for path in (_cache_data_path(name), _cache_meta_path(name)):
-        try:
+        try:  # noqa: SIM105
             os.remove(path)
         except OSError:
             pass
@@ -141,7 +146,7 @@ def _clear_cache(name: str) -> None:
 def _try_proxy_fetch(
     source: MarketplaceSource,
     file_path: str,
-) -> Optional[Dict]:
+) -> dict | None:
     """Try to fetch marketplace JSON via the registry proxy.
 
     Returns parsed JSON dict on success, ``None`` when no proxy is
@@ -173,7 +178,9 @@ def _try_proxy_fetch(
     except (json.JSONDecodeError, ValueError):
         logger.debug(
             "Proxy returned non-JSON for %s/%s %s",
-            source.owner, source.repo, file_path,
+            source.owner,
+            source.repo,
+            file_path,
         )
         return None
 
@@ -190,8 +197,8 @@ def _github_contents_url(source: MarketplaceSource, file_path: str) -> str:
 def _fetch_file(
     source: MarketplaceSource,
     file_path: str,
-    auth_resolver: Optional[object] = None,
-) -> Optional[Dict]:
+    auth_resolver: object | None = None,
+) -> dict | None:
     """Fetch a JSON file from a GitHub repo.
 
     When ``PROXY_REGISTRY_URL`` is set, tries the registry proxy first via
@@ -213,7 +220,9 @@ def _fetch_file(
     if cfg is not None and cfg.enforce_only:
         logger.debug(
             "PROXY_REGISTRY_ONLY blocks direct GitHub fetch for %s/%s %s",
-            source.owner, source.repo, file_path,
+            source.owner,
+            source.repo,
+            file_path,
         )
         return None
 
@@ -250,15 +259,15 @@ def _fetch_file(
             # retrying with a token.
             unauth_first=False,
         )
-    except Exception as exc:  # noqa: BLE001 -- wraps unknown auth/network errors into MarketplaceFetchError
+    except Exception as exc:
         logger.debug("Fetch failed for '%s'", source.name, exc_info=True)
         raise MarketplaceFetchError(source.name, str(exc)) from exc
 
 
 def _auto_detect_path(
     source: MarketplaceSource,
-    auth_resolver: Optional[object] = None,
-) -> Optional[str]:
+    auth_resolver: object | None = None,
+) -> str | None:
     """Probe candidate locations and return the first that exists.
 
     Returns ``None`` if no location contains a marketplace.json.
@@ -280,7 +289,7 @@ def fetch_marketplace(
     source: MarketplaceSource,
     *,
     force_refresh: bool = False,
-    auth_resolver: Optional[object] = None,
+    auth_resolver: object | None = None,
 ) -> MarketplaceManifest:
     """Fetch and parse a marketplace manifest.
 
@@ -313,8 +322,7 @@ def fetch_marketplace(
         if data is None:
             raise MarketplaceFetchError(
                 source.name,
-                f"marketplace.json not found at '{source.path}' "
-                f"in {source.owner}/{source.repo}",
+                f"marketplace.json not found at '{source.path}' in {source.owner}/{source.repo}",
             )
         _write_cache(cache_name, data)
         return parse_marketplace_json(data, source.name)
@@ -322,9 +330,7 @@ def fetch_marketplace(
         # Stale-while-revalidate: serve expired cache on network error
         stale = _read_stale_cache(cache_name)
         if stale is not None:
-            logger.warning(
-                "Network error fetching '%s'; using stale cache", source.name
-            )
+            logger.warning("Network error fetching '%s'; using stale cache", source.name)
             return parse_marketplace_json(stale, source.name)
         raise
 
@@ -332,7 +338,7 @@ def fetch_marketplace(
 def fetch_or_cache(
     source: MarketplaceSource,
     *,
-    auth_resolver: Optional[object] = None,
+    auth_resolver: object | None = None,
 ) -> MarketplaceManifest:
     """Convenience wrapper -- same as ``fetch_marketplace`` with defaults."""
     return fetch_marketplace(source, auth_resolver=auth_resolver)
@@ -342,8 +348,8 @@ def search_marketplace(
     query: str,
     source: MarketplaceSource,
     *,
-    auth_resolver: Optional[object] = None,
-) -> List[MarketplacePlugin]:
+    auth_resolver: object | None = None,
+) -> list[MarketplacePlugin]:
     """Search a single marketplace for plugins matching *query*."""
     manifest = fetch_marketplace(source, auth_resolver=auth_resolver)
     return manifest.search(query)
@@ -352,13 +358,13 @@ def search_marketplace(
 def search_all_marketplaces(
     query: str,
     *,
-    auth_resolver: Optional[object] = None,
-) -> List[MarketplacePlugin]:
+    auth_resolver: object | None = None,
+) -> list[MarketplacePlugin]:
     """Search across all registered marketplaces.
 
     Returns plugins matching the query, annotated with their source marketplace.
     """
-    results: List[MarketplacePlugin] = []
+    results: list[MarketplacePlugin] = []
     for source in get_registered_marketplaces():
         try:
             manifest = fetch_marketplace(source, auth_resolver=auth_resolver)
@@ -369,7 +375,7 @@ def search_all_marketplaces(
 
 
 def clear_marketplace_cache(
-    name: Optional[str] = None,
+    name: str | None = None,
     host: str = "github.com",
 ) -> int:
     """Clear cached data for one or all marketplaces.

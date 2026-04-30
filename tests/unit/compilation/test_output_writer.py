@@ -13,17 +13,12 @@ import pytest
 from apm_cli.compilation.constants import BUILD_ID_PLACEHOLDER
 from apm_cli.compilation.output_writer import CompiledOutputWriter
 
-
 _HASH_LINE_RE = re.compile(r"<!-- Build ID: [a-f0-9]{12} -->")
 
 
 def test_stabilizes_build_id_before_writing(tmp_path: Path):
     target = tmp_path / "AGENTS.md"
-    content = (
-        "# AGENTS.md\n"
-        f"{BUILD_ID_PLACEHOLDER}\n"
-        "<!-- APM Version: 1.0.0 -->\n"
-    )
+    content = f"# AGENTS.md\n{BUILD_ID_PLACEHOLDER}\n<!-- APM Version: 1.0.0 -->\n"
 
     CompiledOutputWriter().write(target, content)
 
@@ -82,7 +77,7 @@ def test_atomic_write_no_partial_file_on_failure(tmp_path: Path, monkeypatch):
     target = tmp_path / "AGENTS.md"
     target.write_text("PRE-EXISTING\n", encoding="utf-8")
 
-    import apm_cli.utils.atomic_io as atomic_io
+    import apm_cli.utils.atomic_io as atomic_io  # noqa: PLR0402
 
     def boom(*args, **kwargs):
         raise OSError("disk full")

@@ -13,10 +13,10 @@ Covers:
 
 from __future__ import annotations
 
-import os
+import os  # noqa: F401
 from pathlib import Path
-from typing import Optional
-from unittest.mock import MagicMock, call, patch
+from typing import Optional  # noqa: F401
+from unittest.mock import MagicMock, call, patch  # noqa: F401
 
 import pytest
 
@@ -27,15 +27,14 @@ from apm_cli.policy.install_preflight import (
     PolicyBlockError,
     run_policy_preflight,
 )
-from apm_cli.policy.models import CIAuditResult, CheckResult
+from apm_cli.policy.models import CheckResult, CIAuditResult  # noqa: F401
 from apm_cli.policy.parser import load_policy
 from apm_cli.policy.schema import (
     ApmPolicy,
-    DependencyPolicy,
+    DependencyPolicy,  # noqa: F401
     McpPolicy,
-    McpTransportPolicy,
+    McpTransportPolicy,  # noqa: F401
 )
-
 
 # -- Fixtures / helpers -----------------------------------------------
 
@@ -51,7 +50,7 @@ def _load_mcp_policy() -> ApmPolicy:
 
 
 def _make_fetch_result(
-    policy: Optional[ApmPolicy] = None,
+    policy: ApmPolicy | None = None,
     outcome: str = "found",
     source: str = "org:test-org/.github",
 ) -> PolicyFetchResult:
@@ -66,9 +65,9 @@ def _make_fetch_result(
 
 def _make_mcp_dep(
     name: str,
-    transport: Optional[str] = None,
+    transport: str | None = None,
     registry=None,
-    url: Optional[str] = None,
+    url: str | None = None,
 ) -> MCPDependency:
     """Build a minimal MCPDependency for policy checks."""
     return MCPDependency(
@@ -177,13 +176,11 @@ class TestAllowedMCPProceeds:
             dependencies=policy.dependencies,
         )
         fetch = _make_fetch_result(policy=policy)
-        dep = _make_mcp_dep(
-            "io.github.modelcontextprotocol/test-server", transport="stdio"
-        )
+        dep = _make_mcp_dep("io.github.modelcontextprotocol/test-server", transport="stdio")
 
         logger = _make_logger()
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(
+            result, active = run_policy_preflight(  # noqa: RUF059
                 project_root=Path("/tmp/fake"),
                 mcp_deps=[dep],
                 logger=logger,
@@ -203,13 +200,12 @@ class TestDeniedMCPBlock:
         dep = _make_mcp_dep("io.github.untrusted/evil-mcp-server", transport="stdio")
 
         logger = _make_logger()
-        with _patch_discover(fetch):
-            with pytest.raises(PolicyBlockError) as exc_info:
-                run_policy_preflight(
-                    project_root=Path("/tmp/fake"),
-                    mcp_deps=[dep],
-                    logger=logger,
-                )
+        with _patch_discover(fetch), pytest.raises(PolicyBlockError) as exc_info:
+            run_policy_preflight(
+                project_root=Path("/tmp/fake"),
+                mcp_deps=[dep],
+                logger=logger,
+            )
 
         assert exc_info.value.audit_result is not None
         assert not exc_info.value.audit_result.passed
@@ -222,8 +218,10 @@ class TestDeniedMCPBlock:
         dep = _make_mcp_dep("io.github.untrusted/evil-mcp-server", transport="stdio")
 
         logger = _make_logger()
-        with _patch_discover(fetch), \
-             patch("apm_cli.integration.mcp_integrator.MCPIntegrator.install") as mock_install:
+        with (
+            _patch_discover(fetch),
+            patch("apm_cli.integration.mcp_integrator.MCPIntegrator.install") as mock_install,
+        ):
             with pytest.raises(PolicyBlockError):
                 run_policy_preflight(
                     project_root=Path("/tmp/fake"),
@@ -240,8 +238,7 @@ class TestDeniedMCPBlock:
         dep = _make_mcp_dep("io.github.untrusted/evil-mcp-server", transport="stdio")
 
         logger = _make_logger()
-        with _patch_discover(fetch), \
-             patch.object(logger, "policy_violation") as mock_violation:
+        with _patch_discover(fetch), patch.object(logger, "policy_violation") as mock_violation:
             with pytest.raises(PolicyBlockError):
                 run_policy_preflight(
                     project_root=Path("/tmp/fake"),
@@ -253,8 +250,11 @@ class TestDeniedMCPBlock:
             assert mock_violation.call_count >= 1
             # All calls used severity="block"
             for c in mock_violation.call_args_list:
-                assert c.kwargs.get("severity") == "block" or c[1].get("severity") == "block" or \
-                    (len(c.args) >= 3 and c.args[2] == "block")
+                assert (
+                    c.kwargs.get("severity") == "block"
+                    or c[1].get("severity") == "block"
+                    or (len(c.args) >= 3 and c.args[2] == "block")
+                )
 
 
 # -- Test: denied MCP under warn -> proceeds with diagnostic ----------
@@ -274,7 +274,7 @@ class TestDeniedMCPWarn:
 
         logger = _make_logger()
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(
+            result, active = run_policy_preflight(  # noqa: RUF059
                 project_root=Path("/tmp/fake"),
                 mcp_deps=[dep],
                 logger=logger,
@@ -294,8 +294,7 @@ class TestDeniedMCPWarn:
         dep = _make_mcp_dep("io.github.untrusted/evil-mcp-server", transport="stdio")
 
         logger = _make_logger()
-        with _patch_discover(fetch), \
-             patch.object(logger, "policy_violation") as mock_violation:
+        with _patch_discover(fetch), patch.object(logger, "policy_violation") as mock_violation:
             run_policy_preflight(
                 project_root=Path("/tmp/fake"),
                 mcp_deps=[dep],
@@ -318,18 +317,15 @@ class TestTransportAllow:
         policy = _load_mcp_policy()
         fetch = _make_fetch_result(policy=policy)
         # Use 'sse' transport which is NOT in [stdio, http]
-        dep = _make_mcp_dep(
-            "io.github.github/github-mcp-server", transport="sse"
-        )
+        dep = _make_mcp_dep("io.github.github/github-mcp-server", transport="sse")
 
         logger = _make_logger()
-        with _patch_discover(fetch):
-            with pytest.raises(PolicyBlockError) as exc_info:
-                run_policy_preflight(
-                    project_root=Path("/tmp/fake"),
-                    mcp_deps=[dep],
-                    logger=logger,
-                )
+        with _patch_discover(fetch), pytest.raises(PolicyBlockError) as exc_info:
+            run_policy_preflight(
+                project_root=Path("/tmp/fake"),
+                mcp_deps=[dep],
+                logger=logger,
+            )
 
         # Verify the transport check failed
         failed = exc_info.value.audit_result.failed_checks
@@ -340,13 +336,11 @@ class TestTransportAllow:
         """MCP using an allowed transport proceeds."""
         policy = _load_mcp_policy()
         fetch = _make_fetch_result(policy=policy)
-        dep = _make_mcp_dep(
-            "io.github.github/github-mcp-server", transport="stdio"
-        )
+        dep = _make_mcp_dep("io.github.github/github-mcp-server", transport="stdio")
 
         logger = _make_logger()
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(
+            result, active = run_policy_preflight(  # noqa: RUF059
                 project_root=Path("/tmp/fake"),
                 mcp_deps=[dep],
                 logger=logger,
@@ -385,13 +379,12 @@ class TestSelfDefined:
         )
 
         logger = _make_logger()
-        with _patch_discover(fetch):
-            with pytest.raises(PolicyBlockError) as exc_info:
-                run_policy_preflight(
-                    project_root=Path("/tmp/fake"),
-                    mcp_deps=[dep],
-                    logger=logger,
-                )
+        with _patch_discover(fetch), pytest.raises(PolicyBlockError) as exc_info:
+            run_policy_preflight(
+                project_root=Path("/tmp/fake"),
+                mcp_deps=[dep],
+                logger=logger,
+            )
 
         failed = exc_info.value.audit_result.failed_checks
         self_defined_fails = [c for c in failed if c.name == "mcp-self-defined"]
@@ -415,7 +408,7 @@ class TestSelfDefined:
             # Under block enforcement, self_defined='warn' means the
             # self_defined check itself passes (it returns passed=True
             # with details). No exception.
-            result, active = run_policy_preflight(
+            result, active = run_policy_preflight(  # noqa: RUF059
                 project_root=Path("/tmp/fake"),
                 mcp_deps=[dep],
                 logger=logger,
@@ -447,7 +440,7 @@ class TestSelfDefined:
 
         logger = _make_logger()
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(
+            result, active = run_policy_preflight(  # noqa: RUF059
                 project_root=Path("/tmp/fake"),
                 mcp_deps=[dep],
                 logger=logger,
@@ -488,18 +481,15 @@ class TestTrustTransitive:
 
         # This MCP is NOT in the allow list -- simulates a transitive
         # dep that was pulled in by an allowed package.
-        transitive_dep = _make_mcp_dep(
-            "io.github.random-org/sneaky-server", transport="stdio"
-        )
+        transitive_dep = _make_mcp_dep("io.github.random-org/sneaky-server", transport="stdio")
 
         logger = _make_logger()
-        with _patch_discover(fetch):
-            with pytest.raises(PolicyBlockError) as exc_info:
-                run_policy_preflight(
-                    project_root=Path("/tmp/fake"),
-                    mcp_deps=[transitive_dep],
-                    logger=logger,
-                )
+        with _patch_discover(fetch), pytest.raises(PolicyBlockError) as exc_info:
+            run_policy_preflight(
+                project_root=Path("/tmp/fake"),
+                mcp_deps=[transitive_dep],
+                logger=logger,
+            )
 
         # The allowlist check should catch this
         failed = exc_info.value.audit_result.failed_checks
@@ -511,13 +501,11 @@ class TestTrustTransitive:
         fetch = _make_fetch_result(policy=policy)
 
         # This IS in the allow list
-        transitive_dep = _make_mcp_dep(
-            "io.github.github/github-mcp-server", transport="stdio"
-        )
+        transitive_dep = _make_mcp_dep("io.github.github/github-mcp-server", transport="stdio")
 
         logger = _make_logger()
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(
+            result, active = run_policy_preflight(  # noqa: RUF059
                 project_root=Path("/tmp/fake"),
                 mcp_deps=[transitive_dep],
                 logger=logger,
@@ -556,7 +544,7 @@ class TestDiscoveryOutcomes:
 
         logger = _make_logger()
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(
+            result, active = run_policy_preflight(  # noqa: RUF059
                 project_root=Path("/tmp/fake"),
                 mcp_deps=[_make_mcp_dep("io.github.untrusted/evil")],
                 logger=logger,
@@ -580,9 +568,11 @@ class TestDiscoveryOutcomes:
 
         # Non-verbose: no info / warning emitted at all.
         logger = _make_logger(verbose=False)
-        with _patch_discover(fetch), \
-             patch("apm_cli.core.command_logger._rich_info") as mock_info, \
-             patch("apm_cli.core.command_logger._rich_warning") as mock_warning:
+        with (
+            _patch_discover(fetch),
+            patch("apm_cli.core.command_logger._rich_info") as mock_info,
+            patch("apm_cli.core.command_logger._rich_warning") as mock_warning,
+        ):
             result, active = run_policy_preflight(
                 project_root=Path("/tmp/fake"),
                 mcp_deps=[_make_mcp_dep("anything/server")],
@@ -595,9 +585,8 @@ class TestDiscoveryOutcomes:
 
         # Verbose: the info line surfaces with the explanatory text.
         logger = _make_logger(verbose=True)
-        with _patch_discover(fetch), \
-             patch("apm_cli.core.command_logger._rich_info") as mock_info:
-            result, active = run_policy_preflight(
+        with _patch_discover(fetch), patch("apm_cli.core.command_logger._rich_info") as mock_info:
+            result, active = run_policy_preflight(  # noqa: RUF059
                 project_root=Path("/tmp/fake"),
                 mcp_deps=[_make_mcp_dep("anything/server")],
                 logger=logger,
@@ -640,7 +629,7 @@ class TestHelperReturnShape:
 
         logger = _make_logger()
         with _patch_discover(fetch):
-            result, active = run_policy_preflight(
+            result, active = run_policy_preflight(  # noqa: RUF059
                 project_root=Path("/tmp/fake"),
                 mcp_deps=None,
                 logger=logger,

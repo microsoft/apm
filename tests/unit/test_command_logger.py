@@ -157,9 +157,7 @@ class TestCommandLogger:
     def test_dry_run_notice(self, mock_info):
         logger = CommandLogger("test", dry_run=True)
         logger.dry_run_notice("Would compile 3 files")
-        mock_info.assert_called_once_with(
-            "[dry-run] Would compile 3 files", symbol="info"
-        )
+        mock_info.assert_called_once_with("[dry-run] Would compile 3 files", symbol="info")
 
     @patch("apm_cli.core.command_logger._rich_echo")
     def test_auth_step_failure(self, mock_echo):
@@ -377,9 +375,7 @@ class TestInstallLogger:
     def test_tree_item_calls_rich_echo_green_no_symbol(self, mock_echo):
         logger = CommandLogger("test")
         logger.tree_item("  └─ .github/copilot-instructions.md")
-        mock_echo.assert_called_once_with(
-            "  └─ .github/copilot-instructions.md", color="green"
-        )
+        mock_echo.assert_called_once_with("  └─ .github/copilot-instructions.md", color="green")
 
     @patch("apm_cli.core.command_logger._rich_echo")
     def test_tree_item_renders_regardless_of_verbose(self, mock_echo):
@@ -398,9 +394,7 @@ class TestInstallLogger:
     def test_package_inline_warning_verbose(self, mock_echo):
         logger = CommandLogger("test", verbose=True)
         logger.package_inline_warning("  ⚠ path collision on file.md")
-        mock_echo.assert_called_once_with(
-            "  ⚠ path collision on file.md", color="yellow"
-        )
+        mock_echo.assert_called_once_with("  ⚠ path collision on file.md", color="yellow")
 
     @patch("apm_cli.core.command_logger._rich_echo")
     def test_package_inline_warning_not_verbose(self, mock_echo):
@@ -519,6 +513,7 @@ class TestVerboseFlagAcceptance:
 
     def test_uninstall_accepts_verbose_flag(self):
         from click.testing import CliRunner
+
         from apm_cli.commands.uninstall.cli import uninstall
 
         runner = CliRunner()

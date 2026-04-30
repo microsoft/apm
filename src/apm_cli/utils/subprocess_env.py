@@ -28,11 +28,12 @@ Typical use::
 
     subprocess.run(cmd, env=external_process_env(), check=False)
 """
+
 from __future__ import annotations
 
 import os
 import sys
-from typing import Mapping
+from collections.abc import Mapping
 
 # Runtime-library search-path variables that PyInstaller's bootloader
 # rewrites at launch.  Each has a sibling ``<NAME>_ORIG`` holding the
@@ -40,8 +41,8 @@ from typing import Mapping
 # process.  The tuple is intentionally narrow: we do not touch ``PATH``
 # or other inherited variables, only the ones PyInstaller itself manages.
 _PYINSTALLER_MANAGED_LIBRARY_VARS: tuple[str, ...] = (
-    "LD_LIBRARY_PATH",      # Linux and most Unixes
-    "DYLD_LIBRARY_PATH",    # macOS dynamic library search path
+    "LD_LIBRARY_PATH",  # Linux and most Unixes
+    "DYLD_LIBRARY_PATH",  # macOS dynamic library search path
     "DYLD_FRAMEWORK_PATH",  # macOS framework search path
 )
 

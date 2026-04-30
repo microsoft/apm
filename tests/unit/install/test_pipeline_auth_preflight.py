@@ -1,6 +1,6 @@
 """Unit tests for --update auth pre-flight probe in pipeline.py (#1015)."""
 
-import subprocess
+import subprocess  # noqa: F401
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -29,7 +29,7 @@ def _make_ctx(update_refs=True, deps=None):
     return ctx
 
 
-def _make_resolver(auth_scheme="basic", token="pat", git_env=None):
+def _make_resolver(auth_scheme="basic", token="pat", git_env=None):  # noqa: S107
     resolver = MagicMock()
     dep_ctx = MagicMock()
     dep_ctx.token = token
@@ -86,7 +86,9 @@ class TestUpdatePreflightPassesGoodAuth:
     @patch("subprocess.run")
     def test_good_auth_no_exception(self, mock_run):
         mock_run.return_value = MagicMock(
-            returncode=0, stderr="", stdout="abc123\trefs/heads/main\n",
+            returncode=0,
+            stderr="",
+            stdout="abc123\trefs/heads/main\n",
         )
         from apm_cli.install.pipeline import _preflight_auth_check
 

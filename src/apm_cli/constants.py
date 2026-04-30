@@ -2,7 +2,6 @@
 
 from enum import Enum
 
-
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
@@ -10,6 +9,7 @@ from enum import Enum
 
 class InstallMode(Enum):
     """Controls which dependency types are installed."""
+
     ALL = "all"
     APM = "apm"
     MCP = "mcp"
@@ -38,16 +38,18 @@ APM_MODULES_GITIGNORE_PATTERN = "apm_modules/"
 # in primitives/discovery.py to prune traversal.
 # NOTE: .apm is intentionally absent -- it is where primitives live.
 # ---------------------------------------------------------------------------
-DEFAULT_SKIP_DIRS: frozenset[str] = frozenset({
-    ".git",
-    "node_modules",
-    "__pycache__",
-    ".pytest_cache",
-    ".venv",
-    "venv",
-    ".tox",
-    "build",
-    "dist",
-    ".mypy_cache",
-    "apm_modules",
-})
+DEFAULT_SKIP_DIRS: frozenset[str] = frozenset(
+    {
+        ".git",
+        "node_modules",
+        "__pycache__",
+        ".pytest_cache",
+        ".venv",
+        "venv",
+        ".tox",
+        "build",
+        "dist",
+        ".mypy_cache",
+        "apm_modules",
+    }
+)

@@ -11,12 +11,11 @@ from apm_cli.marketplace.models import (
     MarketplaceSource,
 )
 from apm_cli.marketplace.validator import (
-    ValidationResult,
+    ValidationResult,  # noqa: F401
     validate_marketplace,
     validate_no_duplicate_names,
     validate_plugin_schema,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -33,13 +32,9 @@ def _isolate_config(tmp_path, monkeypatch):
     """Isolate filesystem writes (mirrors test_marketplace_commands.py)."""
     config_dir = str(tmp_path / ".apm")
     monkeypatch.setattr("apm_cli.config.CONFIG_DIR", config_dir)
-    monkeypatch.setattr(
-        "apm_cli.config.CONFIG_FILE", str(tmp_path / ".apm" / "config.json")
-    )
+    monkeypatch.setattr("apm_cli.config.CONFIG_FILE", str(tmp_path / ".apm" / "config.json"))
     monkeypatch.setattr("apm_cli.config._config_cache", None)
-    monkeypatch.setattr(
-        "apm_cli.marketplace.registry._registry_cache", None
-    )
+    monkeypatch.setattr("apm_cli.marketplace.registry._registry_cache", None)
 
 
 # ---------------------------------------------------------------------------
@@ -151,9 +146,7 @@ class TestValidateCommand:
     def test_output_format(self, mock_get, mock_fetch, runner):
         from apm_cli.commands.marketplace import marketplace
 
-        mock_get.return_value = MarketplaceSource(
-            name="acme", owner="acme-org", repo="plugins"
-        )
+        mock_get.return_value = MarketplaceSource(name="acme", owner="acme-org", repo="plugins")
         mock_fetch.return_value = _manifest(
             _plugin("a", "owner/a"),
             _plugin("b", "owner/b"),
@@ -167,28 +160,22 @@ class TestValidateCommand:
 
     @patch("apm_cli.marketplace.client.fetch_marketplace")
     @patch("apm_cli.marketplace.registry.get_marketplace_by_name")
-    def test_verbose_shows_per_plugin_details(
-        self, mock_get, mock_fetch, runner
-    ):
+    def test_verbose_shows_per_plugin_details(self, mock_get, mock_fetch, runner):
         from apm_cli.commands.marketplace import marketplace
 
-        mock_get.return_value = MarketplaceSource(
-            name="acme", owner="acme-org", repo="plugins"
-        )
+        mock_get.return_value = MarketplaceSource(name="acme", owner="acme-org", repo="plugins")
         mock_fetch.return_value = _manifest(
             _plugin("alpha", "owner/alpha"),
         )
-        result = runner.invoke(
-            marketplace, ["validate", "acme", "--verbose"]
-        )
+        result = runner.invoke(marketplace, ["validate", "acme", "--verbose"])
         assert result.exit_code == 0
         assert "alpha" in result.output
         assert "source type" in result.output
 
     @patch("apm_cli.marketplace.registry.get_marketplace_by_name")
     def test_unregistered_marketplace_errors(self, mock_get, runner):
-        from apm_cli.marketplace.errors import MarketplaceNotFoundError
         from apm_cli.commands.marketplace import marketplace
+        from apm_cli.marketplace.errors import MarketplaceNotFoundError
 
         mock_get.side_effect = MarketplaceNotFoundError("nope")
         result = runner.invoke(marketplace, ["validate", "nope"])
@@ -199,15 +186,11 @@ class TestValidateCommand:
     def test_check_refs_shows_warning(self, mock_get, mock_fetch, runner):
         from apm_cli.commands.marketplace import marketplace
 
-        mock_get.return_value = MarketplaceSource(
-            name="acme", owner="acme-org", repo="plugins"
-        )
+        mock_get.return_value = MarketplaceSource(name="acme", owner="acme-org", repo="plugins")
         mock_fetch.return_value = _manifest(
             _plugin("a", "owner/a"),
         )
-        result = runner.invoke(
-            marketplace, ["validate", "acme", "--check-refs"]
-        )
+        result = runner.invoke(marketplace, ["validate", "acme", "--check-refs"])
         assert result.exit_code == 0
         assert "not yet implemented" in result.output.lower()
 
@@ -216,9 +199,7 @@ class TestValidateCommand:
     def test_plugin_count_in_output(self, mock_get, mock_fetch, runner):
         from apm_cli.commands.marketplace import marketplace
 
-        mock_get.return_value = MarketplaceSource(
-            name="acme", owner="acme-org", repo="plugins"
-        )
+        mock_get.return_value = MarketplaceSource(name="acme", owner="acme-org", repo="plugins")
         mock_fetch.return_value = _manifest(
             _plugin("a", "o/a"),
             _plugin("b", "o/b"),

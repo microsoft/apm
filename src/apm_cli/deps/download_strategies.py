@@ -12,7 +12,7 @@ import random
 import sys
 import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional  # noqa: F401, UP035
 
 import requests
 
@@ -30,21 +30,22 @@ from ..utils.github_host import (
     is_github_hostname,
 )
 
-
 # ---------------------------------------------------------------------------
 # Module-level debug helper (mirrors the one in github_downloader so that
 # this module has no import dependency on the orchestrator).
 # ---------------------------------------------------------------------------
 
+
 def _debug(message: str) -> None:
     """Print debug message if APM_DEBUG environment variable is set."""
-    if os.environ.get('APM_DEBUG'):
+    if os.environ.get("APM_DEBUG"):
         print(f"[DEBUG] {message}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
 # DownloadDelegate
 # ---------------------------------------------------------------------------
+
 
 class DownloadDelegate:
     """Facade/Delegate that encapsulates backend-specific download logic.
@@ -76,7 +77,7 @@ class DownloadDelegate:
     def resilient_get(
         self,
         url: str,
-        headers: Dict[str, str],
+        headers: dict[str, str],
         timeout: int = 30,
         max_retries: int = 3,
     ) -> requests.Response:
@@ -120,14 +121,14 @@ class DownloadDelegate:
                             wait = min(float(retry_after), 60)
                         except (TypeError, ValueError):
                             # Retry-After may be an HTTP-date; fall back to exponential backoff
-                            wait = min(2 ** attempt, 30) * (0.5 + random.random())
+                            wait = min(2**attempt, 30) * (0.5 + random.random())  # noqa: S311
                     elif reset_at:
                         try:
                             wait = max(0, min(int(reset_at) - time.time(), 60))
                         except (TypeError, ValueError):
-                            wait = min(2 ** attempt, 30) * (0.5 + random.random())
+                            wait = min(2**attempt, 30) * (0.5 + random.random())  # noqa: S311
                     else:
-                        wait = min(2 ** attempt, 30) * (0.5 + random.random())
+                        wait = min(2**attempt, 30) * (0.5 + random.random())  # noqa: S311
                     _debug(
                         f"Rate limited ({response.status_code}), retry in "
                         f"{wait:.1f}s (attempt {attempt + 1}/{max_retries})"
@@ -147,7 +148,7 @@ class DownloadDelegate:
             except requests.exceptions.ConnectionError as e:
                 last_exc = e
                 if attempt < max_retries - 1:
-                    wait = min(2 ** attempt, 30) * (0.5 + random.random())
+                    wait = min(2**attempt, 30) * (0.5 + random.random())  # noqa: S311
                     _debug(
                         f"Connection error, retry in {wait:.1f}s "
                         f"(attempt {attempt + 1}/{max_retries})"
@@ -166,9 +167,7 @@ class DownloadDelegate:
 
         if last_exc:
             raise last_exc
-        raise requests.exceptions.RequestException(
-            f"All {max_retries} attempts failed for {url}"
-        )
+        raise requests.exceptions.RequestException(f"All {max_retries} attempts failed for {url}")
 
     # ------------------------------------------------------------------
     # Repository URL building
@@ -179,7 +178,7 @@ class DownloadDelegate:
         repo_ref: str,
         use_ssh: bool = False,
         dep_ref: DependencyReference = None,
-        token: Optional[str] = None,
+        token: str | None = None,
         auth_scheme: str = "basic",
     ) -> str:
         """Build the appropriate repository URL for cloning.
@@ -205,18 +204,11 @@ class DownloadDelegate:
         if dep_ref and dep_ref.host:
             host = dep_ref.host
         else:
-            host = getattr(self._host, 'github_host', None) or default_host()
+            host = getattr(self._host, "github_host", None) or default_host()
 
         # Check if this is Azure DevOps (either via dep_ref or host detection)
-        is_ado = (
-            (dep_ref and dep_ref.is_azure_devops())
-            or is_azure_devops_hostname(host)
-        )
-        is_insecure = (
-            bool(getattr(dep_ref, "is_insecure", False))
-            if dep_ref is not None
-            else False
-        )
+        is_ado = (dep_ref and dep_ref.is_azure_devops()) or is_azure_devops_hostname(host)
+        is_insecure = bool(getattr(dep_ref, "is_insecure", False)) if dep_ref is not None else False
 
         # Use provided token or fall back to instance default.  Pass an empty
         # string ("") explicitly to suppress the per-instance token (used by
@@ -227,9 +219,7 @@ class DownloadDelegate:
             ado_token = ""
         else:
             github_token = token if token is not None else self._host.github_token
-            ado_token = (
-                token if (token is not None and is_ado) else self._host.ado_token
-            )
+            ado_token = token if (token is not None and is_ado) else self._host.ado_token
 
         _debug(
             f"build_repo_url: host={host}, is_ado={is_ado}, "
@@ -282,9 +272,7 @@ class DownloadDelegate:
                 return f"http://{netloc}/{repo_ref}.git"
             elif is_github and github_token:
                 # Only send GitHub tokens to GitHub hosts
-                return build_https_clone_url(
-                    host, repo_ref, token=github_token, port=port
-                )
+                return build_https_clone_url(host, repo_ref, token=github_token, port=port)
             else:
                 # Generic hosts: plain HTTPS, let git credential helpers
                 # handle auth
@@ -294,15 +282,15 @@ class DownloadDelegate:
     # Artifactory helpers
     # ------------------------------------------------------------------
 
-    def get_artifactory_headers(self) -> Dict[str, str]:
+    def get_artifactory_headers(self) -> dict[str, str]:
         """Build HTTP headers for registry/Artifactory requests."""
         cfg = self._host.registry_config
         if cfg is not None:
             return cfg.get_headers()
         # Fallback: direct artifactory_token attribute (legacy path)
-        headers: Dict[str, str] = {}
+        headers: dict[str, str] = {}
         if self._host.artifactory_token:
-            headers['Authorization'] = f'Bearer {self._host.artifactory_token}'
+            headers["Authorization"] = f"Bearer {self._host.artifactory_token}"
         return headers
 
     def download_artifactory_archive(
@@ -327,15 +315,11 @@ class DownloadDelegate:
         import io
         import zipfile
 
-        archive_urls = build_artifactory_archive_url(
-            host, prefix, owner, repo, ref, scheme=scheme
-        )
+        archive_urls = build_artifactory_archive_url(host, prefix, owner, repo, ref, scheme=scheme)
         headers = self.get_artifactory_headers()
 
         # Guard: reject unreasonably large archives (default 500 MB)
-        max_archive_bytes = int(
-            os.environ.get('ARTIFACTORY_MAX_ARCHIVE_MB', '500')
-        ) * 1024 * 1024
+        max_archive_bytes = int(os.environ.get("ARTIFACTORY_MAX_ARCHIVE_MB", "500")) * 1024 * 1024
 
         last_error = None
         for url in archive_urls:
@@ -344,9 +328,7 @@ class DownloadDelegate:
                 resp = self._host._resilient_get(url, headers=headers, timeout=60)
                 if resp.status_code == 200:
                     if len(resp.content) > max_archive_bytes:
-                        last_error = (
-                            f"Archive too large ({len(resp.content)} bytes) from {url}"
-                        )
+                        last_error = f"Archive too large ({len(resp.content)} bytes) from {url}"
                         _debug(last_error)
                         continue
                     # Extract zip, stripping the top-level directory
@@ -357,7 +339,7 @@ class DownloadDelegate:
                         if not names:
                             raise RuntimeError(f"Empty archive from {url}")
                         root_prefix = names[0]
-                        if not root_prefix.endswith('/'):
+                        if not root_prefix.endswith("/"):
                             # Single file archive; extract as-is
                             zf.extractall(target_path)
                             return
@@ -365,24 +347,19 @@ class DownloadDelegate:
                             # Strip root prefix
                             if member.filename == root_prefix:
                                 continue
-                            rel = member.filename[len(root_prefix):]
+                            rel = member.filename[len(root_prefix) :]
                             if not rel:
                                 continue
                             # Guard: prevent zip path traversal (CWE-22)
                             dest = target_path / rel
-                            if not dest.resolve().is_relative_to(
-                                target_path.resolve()
-                            ):
-                                _debug(
-                                    "Skipping zip entry escaping target: "
-                                    f"{member.filename}"
-                                )
+                            if not dest.resolve().is_relative_to(target_path.resolve()):
+                                _debug(f"Skipping zip entry escaping target: {member.filename}")
                                 continue
                             if member.is_dir():
                                 dest.mkdir(parents=True, exist_ok=True)
                             else:
                                 dest.parent.mkdir(parents=True, exist_ok=True)
-                                with zf.open(member) as src, open(dest, 'wb') as dst:
+                                with zf.open(member) as src, open(dest, "wb") as dst:
                                     dst.write(src.read())
                     _debug(f"Extracted Artifactory archive to {target_path}")
                     return
@@ -423,7 +400,10 @@ class DownloadDelegate:
         if cfg is not None and cfg.host == host:
             client = cfg.get_client()
             content = client.fetch_file(
-                owner, repo, file_path, ref,
+                owner,
+                repo,
+                file_path,
+                ref,
                 resilient_get=self._host._resilient_get,
             )
         else:
@@ -432,7 +412,12 @@ class DownloadDelegate:
             from .artifactory_entry import fetch_entry_from_archive
 
             content = fetch_entry_from_archive(
-                host, prefix, owner, repo, file_path, ref,
+                host,
+                prefix,
+                owner,
+                repo,
+                file_path,
+                ref,
                 scheme=scheme,
                 headers=self.get_artifactory_headers(),
                 resilient_get=self._host._resilient_get,
@@ -444,9 +429,7 @@ class DownloadDelegate:
         import io
         import zipfile
 
-        archive_urls = build_artifactory_archive_url(
-            host, prefix, owner, repo, ref, scheme=scheme
-        )
+        archive_urls = build_artifactory_archive_url(host, prefix, owner, repo, ref, scheme=scheme)
         headers = self.get_artifactory_headers()
 
         for url in archive_urls:
@@ -474,9 +457,7 @@ class DownloadDelegate:
     # Raw / CDN download helper
     # ------------------------------------------------------------------
 
-    def try_raw_download(
-        self, owner: str, repo: str, ref: str, file_path: str
-    ) -> Optional[bytes]:
+    def try_raw_download(self, owner: str, repo: str, ref: str, file_path: str) -> bytes | None:
         """Attempt to fetch a file via raw.githubusercontent.com (CDN).
 
         Returns the raw bytes on success, or ``None`` if the file was not found
@@ -516,9 +497,7 @@ class DownloadDelegate:
         import base64
 
         # Validate required ADO fields before proceeding
-        if not all(
-            [dep_ref.ado_organization, dep_ref.ado_project, dep_ref.ado_repo]
-        ):
+        if not all([dep_ref.ado_organization, dep_ref.ado_project, dep_ref.ado_repo]):
             raise ValueError(
                 "Invalid Azure DevOps dependency reference: missing "
                 "organization, project, or repo. "
@@ -537,13 +516,11 @@ class DownloadDelegate:
         )
 
         # Set up authentication headers - ADO uses Basic auth with PAT
-        headers: Dict[str, str] = {}
+        headers: dict[str, str] = {}
         if self._host.ado_token:
             # ADO uses Basic auth: username can be empty, password is the PAT
-            auth = base64.b64encode(
-                f":{self._host.ado_token}".encode()
-            ).decode()
-            headers['Authorization'] = f'Basic {auth}'
+            auth = base64.b64encode(f":{self._host.ado_token}".encode()).decode()
+            headers["Authorization"] = f"Basic {auth}"
 
         try:
             response = self._host._resilient_get(api_url, headers=headers, timeout=30)
@@ -553,9 +530,8 @@ class DownloadDelegate:
             if e.response.status_code == 404:
                 # Try fallback branches
                 if ref not in ["main", "master"]:
-                    raise RuntimeError(
-                        f"File not found: {file_path} at ref '{ref}' "
-                        f"in {dep_ref.repo_url}"
+                    raise RuntimeError(  # noqa: B904
+                        f"File not found: {file_path} at ref '{ref}' in {dep_ref.repo_url}"
                     )
 
                 fallback_ref = "master" if ref == "main" else "main"
@@ -569,21 +545,16 @@ class DownloadDelegate:
                 )
 
                 try:
-                    response = self._host._resilient_get(
-                        fallback_url, headers=headers, timeout=30
-                    )
+                    response = self._host._resilient_get(fallback_url, headers=headers, timeout=30)
                     response.raise_for_status()
                     return response.content
                 except requests.exceptions.HTTPError:
-                    raise RuntimeError(
+                    raise RuntimeError(  # noqa: B904
                         f"File not found: {file_path} in {dep_ref.repo_url} "
                         f"(tried refs: {ref}, {fallback_ref})"
                     )
             elif e.response.status_code in (401, 403):
-                error_msg = (
-                    "Authentication failed for Azure DevOps "
-                    f"{dep_ref.repo_url}. "
-                )
+                error_msg = f"Authentication failed for Azure DevOps {dep_ref.repo_url}. "
                 if not self._host.ado_token:
                     error_msg += self._host.auth_resolver.build_error_context(
                         host,
@@ -593,17 +564,12 @@ class DownloadDelegate:
                         dep_url=dep_ref.repo_url if dep_ref else None,
                     )
                 else:
-                    error_msg += (
-                        "Please check your Azure DevOps PAT permissions."
-                    )
-                raise RuntimeError(error_msg)
+                    error_msg += "Please check your Azure DevOps PAT permissions."
+                raise RuntimeError(error_msg)  # noqa: B904
             else:
-                raise RuntimeError(
-                    f"Failed to download {file_path}: "
-                    f"HTTP {e.response.status_code}"
-                )
+                raise RuntimeError(f"Failed to download {file_path}: HTTP {e.response.status_code}")  # noqa: B904
         except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"Network error downloading {file_path}: {e}")
+            raise RuntimeError(f"Network error downloading {file_path}: {e}")  # noqa: B904
 
     # ------------------------------------------------------------------
     # GitHub file download
@@ -635,17 +601,15 @@ class DownloadDelegate:
         host = dep_ref.host or default_host()
 
         # Parse owner/repo from repo_url
-        owner, repo = dep_ref.repo_url.split('/', 1)
+        owner, repo = dep_ref.repo_url.split("/", 1)
 
         # Resolve token via AuthResolver for CDN fast-path decision
         org = None
         if dep_ref and dep_ref.repo_url:
-            parts = dep_ref.repo_url.split('/')
+            parts = dep_ref.repo_url.split("/")
             if parts:
                 org = parts[0]
-        file_ctx = self._host.auth_resolver.resolve(
-            host, org, port=dep_ref.port
-        )
+        file_ctx = self._host.auth_resolver.resolve(host, org, port=dep_ref.port)
         token = file_ctx.token
 
         # --- CDN fast-path for github.com without a token ---
@@ -656,23 +620,16 @@ class DownloadDelegate:
             content = self.try_raw_download(owner, repo, ref, file_path)
             if content is not None:
                 if verbose_callback:
-                    verbose_callback(
-                        f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}"
-                    )
+                    verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
                 return content
             # raw download returned 404 -- could be wrong default branch.
             # Try the other default branch before falling through to the API.
             if ref in ("main", "master"):
                 fallback_ref = "master" if ref == "main" else "main"
-                content = self.try_raw_download(
-                    owner, repo, fallback_ref, file_path
-                )
+                content = self.try_raw_download(owner, repo, fallback_ref, file_path)
                 if content is not None:
                     if verbose_callback:
-                        verbose_callback(
-                            f"Downloaded file: "
-                            f"{host}/{dep_ref.repo_url}/{file_path}"
-                        )
+                        verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
                     return content
             # All raw attempts failed -- fall through to API path which
             # handles private repos, rate-limit messaging, and SAML errors.
@@ -680,46 +637,32 @@ class DownloadDelegate:
         # --- Contents API path (authenticated, enterprise, or raw fallback) ---
         # Build GitHub API URL - format differs by host type
         if host == "github.com":
-            api_url = (
-                f"https://api.github.com/repos/{owner}/{repo}"
-                f"/contents/{file_path}?ref={ref}"
-            )
+            api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}?ref={ref}"
         elif host.lower().endswith(".ghe.com"):
-            api_url = (
-                f"https://api.{host}/repos/{owner}/{repo}"
-                f"/contents/{file_path}?ref={ref}"
-            )
+            api_url = f"https://api.{host}/repos/{owner}/{repo}/contents/{file_path}?ref={ref}"
         else:
-            api_url = (
-                f"https://{host}/api/v3/repos/{owner}/{repo}"
-                f"/contents/{file_path}?ref={ref}"
-            )
+            api_url = f"https://{host}/api/v3/repos/{owner}/{repo}/contents/{file_path}?ref={ref}"
 
         # Set up authentication headers
-        headers: Dict[str, str] = {
-            'Accept': 'application/vnd.github.v3.raw'  # Returns raw content
+        headers: dict[str, str] = {
+            "Accept": "application/vnd.github.v3.raw"  # Returns raw content
         }
         if token:
-            headers['Authorization'] = f'token {token}'
+            headers["Authorization"] = f"token {token}"
 
         # Try to download with the specified ref
         try:
-            response = self._host._resilient_get(
-                api_url, headers=headers, timeout=30
-            )
+            response = self._host._resilient_get(api_url, headers=headers, timeout=30)
             response.raise_for_status()
             if verbose_callback:
-                verbose_callback(
-                    f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}"
-                )
+                verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
             return response.content
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 404:
                 # Try fallback branches if the specified ref fails
                 if ref not in ["main", "master"]:
-                    raise RuntimeError(
-                        f"File not found: {file_path} at ref '{ref}' "
-                        f"in {dep_ref.repo_url}"
+                    raise RuntimeError(  # noqa: B904
+                        f"File not found: {file_path} at ref '{ref}' in {dep_ref.repo_url}"
                     )
 
                 # Try the other default branch
@@ -743,18 +686,13 @@ class DownloadDelegate:
                     )
 
                 try:
-                    response = self._host._resilient_get(
-                        fallback_url, headers=headers, timeout=30
-                    )
+                    response = self._host._resilient_get(fallback_url, headers=headers, timeout=30)
                     response.raise_for_status()
                     if verbose_callback:
-                        verbose_callback(
-                            f"Downloaded file: "
-                            f"{host}/{dep_ref.repo_url}/{file_path}"
-                        )
+                        verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
                     return response.content
                 except requests.exceptions.HTTPError:
-                    raise RuntimeError(
+                    raise RuntimeError(  # noqa: B904
                         f"File not found: {file_path} in {dep_ref.repo_url} "
                         f"(tried refs: {ref}, {fallback_ref})"
                     )
@@ -762,19 +700,14 @@ class DownloadDelegate:
                 # Distinguish rate limiting from auth failure.
                 is_rate_limit = False
                 try:
-                    rl_remaining = e.response.headers.get(
-                        "X-RateLimit-Remaining"
-                    )
+                    rl_remaining = e.response.headers.get("X-RateLimit-Remaining")
                     if rl_remaining is not None and int(rl_remaining) == 0:
                         is_rate_limit = True
                 except (TypeError, ValueError):
                     pass
 
                 if is_rate_limit:
-                    error_msg = (
-                        "GitHub API rate limit exceeded for "
-                        f"{dep_ref.repo_url}. "
-                    )
+                    error_msg = f"GitHub API rate limit exceeded for {dep_ref.repo_url}. "
                     if not token:
                         error_msg += (
                             "Unauthenticated requests are limited to "
@@ -783,12 +716,8 @@ class DownloadDelegate:
                                 host,
                                 "API request (rate limited)",
                                 org=owner,
-                                port=(
-                                    dep_ref.port if dep_ref else None
-                                ),
-                                dep_url=(
-                                    dep_ref.repo_url if dep_ref else None
-                                ),
+                                port=(dep_ref.port if dep_ref else None),
+                                dep_url=(dep_ref.repo_url if dep_ref else None),
                             )
                         )
                     else:
@@ -797,23 +726,20 @@ class DownloadDelegate:
                             "Wait a few minutes or check your token's "
                             "rate-limit quota."
                         )
-                    raise RuntimeError(error_msg)
+                    raise RuntimeError(error_msg)  # noqa: B904
 
                 # Token may lack SSO/SAML authorization for this org.
                 # Retry without auth -- the repo might be public.
                 if token and not host.lower().endswith(".ghe.com"):
                     try:
-                        unauth_headers: Dict[str, str] = {
-                            'Accept': 'application/vnd.github.v3.raw'
-                        }
+                        unauth_headers: dict[str, str] = {"Accept": "application/vnd.github.v3.raw"}
                         response = self._host._resilient_get(
                             api_url, headers=unauth_headers, timeout=30
                         )
                         response.raise_for_status()
                         if verbose_callback:
                             verbose_callback(
-                                f"Downloaded file: "
-                                f"{host}/{dep_ref.repo_url}/{file_path}"
+                                f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}"
                             )
                         return response.content
                     except requests.exceptions.HTTPError:
@@ -839,14 +765,9 @@ class DownloadDelegate:
                         "for this organization."
                     )
                 else:
-                    error_msg += (
-                        "Please check your GitHub token permissions."
-                    )
-                raise RuntimeError(error_msg)
+                    error_msg += "Please check your GitHub token permissions."
+                raise RuntimeError(error_msg)  # noqa: B904
             else:
-                raise RuntimeError(
-                    f"Failed to download {file_path}: "
-                    f"HTTP {e.response.status_code}"
-                )
+                raise RuntimeError(f"Failed to download {file_path}: HTTP {e.response.status_code}")  # noqa: B904
         except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"Network error downloading {file_path}: {e}")
+            raise RuntimeError(f"Network error downloading {file_path}: {e}")  # noqa: B904

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
+import pytest  # noqa: F401
 
 ENGINE_ROOT = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "install"
 
@@ -33,9 +33,7 @@ def test_install_context_importable():
     """InstallContext is the contract carrying state between phases."""
     from apm_cli.install.context import InstallContext
 
-    assert hasattr(InstallContext, "__dataclass_fields__"), (
-        "InstallContext must be a dataclass"
-    )
+    assert hasattr(InstallContext, "__dataclass_fields__"), "InstallContext must be a dataclass"
 
 
 MAX_MODULE_LOC = 1000
@@ -66,10 +64,7 @@ def test_no_install_module_exceeds_loc_budget():
         n = _line_count(path)
         if n > budget:
             offenders.append((rel, n, budget))
-    assert not offenders, (
-        "Modules exceeding LOC budget (file, actual, budget): "
-        f"{offenders}"
-    )
+    assert not offenders, f"Modules exceeding LOC budget (file, actual, budget): {offenders}"
 
 
 def test_install_py_under_legacy_budget():
@@ -151,12 +146,21 @@ def test_install_py_under_legacy_budget():
     ``_install_apm_packages()`` helper after upstream rebases. This is
     still helper overhead inside the same pending file-split work, not
     new install surface area.
+    PR #999 (Ruff guardrails) raised 1980 -> 2100 for noqa directives
+    added during mass linting rollout. These are suppression comments on
+    pre-existing patterns (F401, RUF013, B904, etc.) that make violations
+    visible and searchable. The line count increase is mechanical, not
+    new logic -- each noqa is a cleanup target for future PRs.
+
+    Post-rebase (main merged into #999) install.py shrank from 2100 to
+    ~1700 as upstream refactors extracted helpers. Budget tightened to
+    1800 to track the improvement.
     """
     install_py = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "commands" / "install.py"
     assert install_py.is_file()
     n = _line_count(install_py)
-    assert n <= 1980, (
-        f"commands/install.py grew to {n} LOC (budget 1980). "
+    assert n <= 1800, (
+        f"commands/install.py grew to {n} LOC (budget 1800). "
         "Do NOT trim cosmetically -- engage the python-architecture skill "
         "(.github/skills/python-architecture/SKILL.md) and propose an "
         "extraction into apm_cli/install/."

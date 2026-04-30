@@ -3,22 +3,19 @@
 import os
 import tempfile
 import unittest
-import yaml
 from pathlib import Path
 from unittest.mock import patch
 
-from apm_cli.compilation.template_builder import (
-    build_conditional_sections,
-)
+import yaml
+
+from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig, compile_agents_md
 from apm_cli.compilation.link_resolver import (
     validate_link_targets,
 )
-from apm_cli.compilation.agents_compiler import (
-    AgentsCompiler,
-    CompilationConfig,
-    compile_agents_md
+from apm_cli.compilation.template_builder import (
+    build_conditional_sections,
 )
-from apm_cli.primitives.models import Instruction, Chatmode, PrimitiveCollection
+from apm_cli.primitives.models import Chatmode, Instruction, PrimitiveCollection
 
 
 class TestTemplateBuilder(unittest.TestCase):
@@ -35,7 +32,7 @@ class TestTemplateBuilder(unittest.TestCase):
                 apply_to="**/*.py",
                 content="Use type hints and follow PEP 8.",
                 author="test",
-                version="1.0"
+                version="1.0",
             ),
             Instruction(
                 name="js_test",
@@ -44,7 +41,7 @@ class TestTemplateBuilder(unittest.TestCase):
                 apply_to="**/*.js",
                 content="Use ES6+ features and proper formatting.",
                 author="test",
-                version="1.0"
+                version="1.0",
             ),
             Instruction(
                 name="python_test2",
@@ -53,12 +50,12 @@ class TestTemplateBuilder(unittest.TestCase):
                 apply_to="**/*.py",
                 content="Write comprehensive docstrings.",
                 author="test",
-                version="1.0"
-            )
+                version="1.0",
+            ),
         ]
-        
+
         result = build_conditional_sections(instructions)
-        
+
         # Should group by pattern
         self.assertIn("## Files matching `**/*.py`", result)
         self.assertIn("## Files matching `**/*.js`", result)
@@ -83,6 +80,7 @@ class TestLinkResolver(unittest.TestCase):
     def tearDown(self):
         """Clean up test fixtures."""
         import shutil
+
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_validate_link_targets_with_valid_links(self):
@@ -90,11 +88,11 @@ class TestLinkResolver(unittest.TestCase):
         # Create test files
         (self.temp_path / "README.md").write_text("# Test README")
         (self.temp_path / "CONTRIBUTING.md").write_text("# Contributing")
-        
+
         content = """
         See [README](README.md) and [Contributing](CONTRIBUTING.md).
         """
-        
+
         errors = validate_link_targets(content, self.temp_path)
         self.assertEqual(len(errors), 0)
 
@@ -103,7 +101,7 @@ class TestLinkResolver(unittest.TestCase):
         content = """
         See [Missing](missing.md) file.
         """
-        
+
         errors = validate_link_targets(content, self.temp_path)
         self.assertEqual(len(errors), 1)
         self.assertIn("missing.md", errors[0])
@@ -120,16 +118,13 @@ class TestAgentsCompiler(unittest.TestCase):
     def tearDown(self):
         """Clean up test fixtures."""
         import shutil
+
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_compilation_config(self):
         """Test compilation configuration."""
-        config = CompilationConfig(
-            output_path="test.md",
-            dry_run=True,
-            resolve_links=False
-        )
-        
+        config = CompilationConfig(output_path="test.md", dry_run=True, resolve_links=False)
+
         self.assertEqual(config.output_path, "test.md")
         self.assertTrue(config.dry_run)
         self.assertFalse(config.resolve_links)
@@ -137,10 +132,10 @@ class TestAgentsCompiler(unittest.TestCase):
     def test_validate_primitives(self):
         """Test primitive validation."""
         compiler = AgentsCompiler(str(self.temp_path))
-        
+
         # Create test primitives
         primitives = PrimitiveCollection()
-        
+
         # Valid instruction
         valid_instruction = Instruction(
             name="test",
@@ -148,10 +143,10 @@ class TestAgentsCompiler(unittest.TestCase):
             description="Test instruction",
             apply_to="**/*.py",
             content="Test content",
-            author="test"
+            author="test",
         )
         primitives.add_primitive(valid_instruction)
-        
+
         # Test validation (should return empty error list since we use warnings)
         errors = compiler.validate_primitives(primitives)
         self.assertEqual(len(errors), 0)
@@ -179,30 +174,30 @@ class TestAgentsCompiler(unittest.TestCase):
             f"Expected a warning mentioning 'applyTo', got: {compiler.warnings}",
         )
 
-    @patch('apm_cli.primitives.discovery.discover_primitives')
+    @patch("apm_cli.primitives.discovery.discover_primitives")
     def test_compile_with_mock_primitives(self, mock_discover):
         """Test compilation with mocked primitives."""
         # Create mock primitives
         primitives = PrimitiveCollection()
-        
+
         instruction = Instruction(
             name="test",
             file_path=Path("test.md"),
             description="Test instruction",
             apply_to="**/*.py",
             content="Use type hints.",
-            author="test"
+            author="test",
         )
         primitives.add_primitive(instruction)
-        
+
         mock_discover.return_value = primitives
-        
+
         compiler = AgentsCompiler(str(self.temp_path))
         config = CompilationConfig(dry_run=True, resolve_links=False, strategy="single-file")
-        
+
         # Pass primitives directly to avoid discovery
         result = compiler.compile(config, primitives)
-        
+
         self.assertTrue(result.success)
         self.assertIn("# AGENTS.md", result.content)
         self.assertIn("Files matching `**/*.py`", result.content)
@@ -258,9 +253,7 @@ class TestAgentsCompiler(unittest.TestCase):
         primitives.add_primitive(bad_instruction)
 
         compiler = AgentsCompiler(str(self.temp_path))
-        config = CompilationConfig(
-            dry_run=True, resolve_links=False, target="claude"
-        )
+        config = CompilationConfig(dry_run=True, resolve_links=False, target="claude")
 
         result = compiler.compile(config, primitives)
 
@@ -273,24 +266,22 @@ class TestAgentsCompiler(unittest.TestCase):
         """Test the standalone compile function."""
         # Create test primitives
         primitives = PrimitiveCollection()
-        
+
         instruction = Instruction(
             name="test",
             file_path=Path("test.md"),
             description="Test instruction",
             apply_to="**/*.py",
             content="Test content.",
-            author="test"
+            author="test",
         )
         primitives.add_primitive(instruction)
-        
+
         # Test the standalone function
         content = compile_agents_md(
-            primitives=primitives,
-            dry_run=True,
-            base_dir=str(self.temp_path)
+            primitives=primitives, dry_run=True, base_dir=str(self.temp_path)
         )
-        
+
         self.assertIn("# AGENTS.md", content)
         self.assertIn("Files matching `**/*.py`", content)
         self.assertIn("Test content.", content)
@@ -299,29 +290,31 @@ class TestAgentsCompiler(unittest.TestCase):
         """Test compilation with chatmode."""
         # Create test primitives with chatmode
         primitives = PrimitiveCollection()
-        
+
         chatmode = Chatmode(
             name="test-chatmode",
             file_path=Path("test.chatmode.md"),
             description="Test chatmode",
             apply_to=None,
             content="You are a test assistant.",
-            author="test"
+            author="test",
         )
         primitives.add_primitive(chatmode)
-        
+
         instruction = Instruction(
             name="test",
             file_path=Path("test.md"),
             description="Test instruction",
             apply_to="**/*.py",
             content="Use type hints.",
-            author="test"
+            author="test",
         )
         primitives.add_primitive(instruction)
 
         compiler = AgentsCompiler(str(self.temp_path))
-        config = CompilationConfig(chatmode="test-chatmode", dry_run=True, resolve_links=False, strategy="single-file")
+        config = CompilationConfig(
+            chatmode="test-chatmode", dry_run=True, resolve_links=False, strategy="single-file"
+        )
 
         result = compiler.compile(config, primitives)
 
@@ -336,19 +329,21 @@ class TestAgentsCompiler(unittest.TestCase):
     def test_compile_with_nonexistent_chatmode(self):
         """Test compilation with non-existent chatmode."""
         primitives = PrimitiveCollection()
-        
+
         instruction = Instruction(
             name="test",
             file_path=Path("test.md"),
             description="Test instruction",
             apply_to="**/*.py",
             content="Use type hints.",
-            author="test"
+            author="test",
         )
         primitives.add_primitive(instruction)
 
         compiler = AgentsCompiler(str(self.temp_path))
-        config = CompilationConfig(chatmode="nonexistent", dry_run=True, resolve_links=False, strategy="single-file")
+        config = CompilationConfig(
+            chatmode="nonexistent", dry_run=True, resolve_links=False, strategy="single-file"
+        )
 
         result = compiler.compile(config, primitives)
 
@@ -360,11 +355,11 @@ class TestAgentsCompiler(unittest.TestCase):
 
 class TestCLIIntegration(unittest.TestCase):
     """Test CLI-specific functionality for the compile command."""
-    
+
     def setUp(self):
         """Set up test fixtures."""
         self.temp_dir = tempfile.mkdtemp()
-        
+
         # Safely get the original working directory, fallback if it doesn't exist
         try:
             self.original_cwd = Path.cwd()
@@ -373,9 +368,9 @@ class TestCLIIntegration(unittest.TestCase):
             repo_root = Path(__file__).parent.parent.parent
             self.original_cwd = repo_root
             os.chdir(str(repo_root))
-        
+
         os.chdir(self.temp_dir)
-    
+
     def tearDown(self):
         """Clean up test fixtures."""
         # Safely change back to original directory
@@ -389,173 +384,163 @@ class TestCLIIntegration(unittest.TestCase):
         except (FileNotFoundError, OSError):
             # Last resort: go to home directory
             os.chdir(str(Path.home()))
-        
+
         # Clean up temp directory
         import shutil
+
         if Path(self.temp_dir).exists():
             shutil.rmtree(self.temp_dir)
-    
+
     def test_validate_mode_with_valid_primitives(self):
         """Test validation mode with valid primitives."""
-        from apm_cli.commands.compile import _display_validation_errors, _get_validation_suggestion
-        
+        from apm_cli.commands.compile import (
+            _display_validation_errors,  # noqa: F401
+            _get_validation_suggestion,
+        )
+
         # Test validation suggestion function
         suggestion = _get_validation_suggestion("Missing 'description' in frontmatter")
         self.assertIn("Add 'description:", suggestion)
-        
-        suggestion = _get_validation_suggestion("No 'applyTo' pattern specified -- instruction will apply globally")
+
+        suggestion = _get_validation_suggestion(
+            "No 'applyTo' pattern specified -- instruction will apply globally"
+        )
         self.assertIn("applyTo", suggestion)
-        
+
         suggestion = _get_validation_suggestion("Empty content")
         self.assertIn("Add markdown content", suggestion)
-    
+
     def test_validation_error_display(self):
         """Test validation error display functionality."""
-        from apm_cli.commands.compile import _display_validation_errors, _get_validation_suggestion
-        
+        from apm_cli.commands.compile import (
+            _display_validation_errors,
+            _get_validation_suggestion,  # noqa: F401
+        )
+
         # Test with mock errors
-        errors = [
-            "test.md: Missing 'description' in frontmatter",
-            "other.md: Empty content"
-        ]
-        
+        errors = ["test.md: Missing 'description' in frontmatter", "other.md: Empty content"]
+
         # This should not raise an exception
         try:
             _display_validation_errors(errors)
         except Exception as e:
             self.fail(f"_display_validation_errors raised an exception: {e}")
-    
+
     def test_compilation_config_from_apm_yml(self):
         """Test CompilationConfig loading from apm.yml."""
-        from apm_cli.compilation.agents_compiler import CompilationConfig
         import yaml
-        
+
+        from apm_cli.compilation.agents_compiler import CompilationConfig
+
         # Create test apm.yml
         test_config = {
-            'compilation': {
-                'output': 'CUSTOM.md',
-                'chatmode': 'test-mode',
-                'resolve_links': False
-            }
+            "compilation": {"output": "CUSTOM.md", "chatmode": "test-mode", "resolve_links": False}
         }
-        
-        with open('apm.yml', 'w') as f:
+
+        with open("apm.yml", "w") as f:
             yaml.dump(test_config, f)
-        
+
         # Test config loading
         config = CompilationConfig.from_apm_yml()
-        self.assertEqual(config.output_path, 'CUSTOM.md')
-        self.assertEqual(config.chatmode, 'test-mode')
+        self.assertEqual(config.output_path, "CUSTOM.md")
+        self.assertEqual(config.chatmode, "test-mode")
         self.assertEqual(config.resolve_links, False)
-        
+
         # Test with overrides
         config_with_overrides = CompilationConfig.from_apm_yml(
-            output_path='OVERRIDE.md',
-            chatmode='override-mode'
+            output_path="OVERRIDE.md", chatmode="override-mode"
         )
-        self.assertEqual(config_with_overrides.output_path, 'OVERRIDE.md')
-        self.assertEqual(config_with_overrides.chatmode, 'override-mode')
+        self.assertEqual(config_with_overrides.output_path, "OVERRIDE.md")
+        self.assertEqual(config_with_overrides.chatmode, "override-mode")
         self.assertEqual(config_with_overrides.resolve_links, False)  # Should keep from config
-        
+
         # Clean up
-        Path('apm.yml').unlink()
-    
+        Path("apm.yml").unlink()
+
     def test_compilation_config_exclude_patterns_from_yml(self):
         """Test loading exclude patterns from apm.yml."""
         # Create test apm.yml with exclude patterns
         test_config = {
-            'name': 'test-project',
-            'version': '1.0.0',
-            'compilation': {
-                'exclude': [
-                    'apm_modules/**',
-                    'tmp/**',
-                    'projects/packages/apm/**'
-                ]
-            }
+            "name": "test-project",
+            "version": "1.0.0",
+            "compilation": {"exclude": ["apm_modules/**", "tmp/**", "projects/packages/apm/**"]},
         }
-        
-        with open('apm.yml', 'w') as f:
+
+        with open("apm.yml", "w") as f:
             yaml.dump(test_config, f)
-        
+
         # Test config loading
         config = CompilationConfig.from_apm_yml()
         self.assertIsNotNone(config.exclude)
         self.assertEqual(len(config.exclude), 3)
-        self.assertIn('apm_modules/**', config.exclude)
-        self.assertIn('tmp/**', config.exclude)
-        self.assertIn('projects/packages/apm/**', config.exclude)
-        
+        self.assertIn("apm_modules/**", config.exclude)
+        self.assertIn("tmp/**", config.exclude)
+        self.assertIn("projects/packages/apm/**", config.exclude)
+
         # Clean up
-        Path('apm.yml').unlink()
-    
+        Path("apm.yml").unlink()
+
     def test_compilation_config_exclude_patterns_single_string(self):
         """Test loading a single exclude pattern as string from apm.yml."""
         # Create test apm.yml with single exclude pattern as string
         test_config = {
-            'name': 'test-project',
-            'version': '1.0.0',
-            'compilation': {
-                'exclude': 'tmp/**'
-            }
+            "name": "test-project",
+            "version": "1.0.0",
+            "compilation": {"exclude": "tmp/**"},
         }
-        
-        with open('apm.yml', 'w') as f:
+
+        with open("apm.yml", "w") as f:
             yaml.dump(test_config, f)
-        
+
         # Test config loading
         config = CompilationConfig.from_apm_yml()
         self.assertIsNotNone(config.exclude)
         self.assertEqual(len(config.exclude), 1)
-        self.assertEqual(config.exclude[0], 'tmp/**')
-        
+        self.assertEqual(config.exclude[0], "tmp/**")
+
         # Clean up
-        Path('apm.yml').unlink()
-    
+        Path("apm.yml").unlink()
+
     def test_compilation_config_no_exclude_patterns(self):
         """Test that config initializes with empty list when no exclude patterns."""
         # Create test apm.yml without exclude patterns
         test_config = {
-            'name': 'test-project',
-            'version': '1.0.0',
-            'compilation': {
-                'output': 'AGENTS.md'
-            }
+            "name": "test-project",
+            "version": "1.0.0",
+            "compilation": {"output": "AGENTS.md"},
         }
-        
-        with open('apm.yml', 'w') as f:
+
+        with open("apm.yml", "w") as f:
             yaml.dump(test_config, f)
-        
+
         # Test config loading
         config = CompilationConfig.from_apm_yml()
         self.assertIsNotNone(config.exclude)
         self.assertEqual(len(config.exclude), 0)
-        
+
         # Clean up
-        Path('apm.yml').unlink()
-    
+        Path("apm.yml").unlink()
+
     def test_compilation_config_exclude_patterns_override(self):
         """Test that command-line overrides work for exclude patterns."""
         # Create test apm.yml with exclude patterns
         test_config = {
-            'name': 'test-project',
-            'version': '1.0.0',
-            'compilation': {
-                'exclude': ['apm_modules/**']
-            }
+            "name": "test-project",
+            "version": "1.0.0",
+            "compilation": {"exclude": ["apm_modules/**"]},
         }
-        
-        with open('apm.yml', 'w') as f:
+
+        with open("apm.yml", "w") as f:
             yaml.dump(test_config, f)
-        
+
         # Test config with override
-        override_patterns = ['tmp/**', 'coverage/**']
+        override_patterns = ["tmp/**", "coverage/**"]
         config = CompilationConfig.from_apm_yml(exclude=override_patterns)
         self.assertEqual(config.exclude, override_patterns)
-        
+
         # Clean up
-        Path('apm.yml').unlink()
+        Path("apm.yml").unlink()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

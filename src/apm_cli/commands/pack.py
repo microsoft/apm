@@ -15,7 +15,6 @@ from ..core.build_orchestrator import (
 from ..core.command_logger import CommandLogger
 from ..core.target_detection import TargetParamType
 
-
 _PACK_HELP = """\
 Pack distributable artifacts from your APM project.
 
@@ -68,7 +67,12 @@ Exit codes:
     default=None,
     help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Auto-detects if not specified.",
 )
-@click.option("--archive", is_flag=True, default=False, help="Produce a .tar.gz archive instead of a directory.")
+@click.option(
+    "--archive",
+    is_flag=True,
+    default=False,
+    help="Produce a .tar.gz archive instead of a directory.",
+)
 @click.option(
     "-o",
     "--output",
@@ -76,8 +80,12 @@ Exit codes:
     default="./build",
     help="Bundle output directory (default: ./build).",
 )
-@click.option("--dry-run", is_flag=True, default=False, help="Show what would be packed without writing")
-@click.option("--force", is_flag=True, default=False, help="On collision (plugin format), last writer wins.")
+@click.option(
+    "--dry-run", is_flag=True, default=False, help="Show what would be packed without writing"
+)
+@click.option(
+    "--force", is_flag=True, default=False, help="On collision (plugin format), last writer wins."
+)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed packing information.")
 @click.option(
     "--offline",
@@ -133,7 +141,7 @@ def pack_cmd(
     try:
         result = BuildOrchestrator().run(options, logger=logger)
     except BuildError as exc:
-        raise click.ClickException(str(exc))
+        raise click.ClickException(str(exc))  # noqa: B904
 
     for sub in result.producer_results:
         if sub.kind is OutputKind.BUNDLE:
@@ -167,18 +175,14 @@ def _render_bundle_result(logger, pack_result, fmt, target, dry_run):
         return
 
     if pack_result.mapped_count:
-        logger.progress(
-            f"Mapped {pack_result.mapped_count} file(s){mapping_summary}"
-        )
+        logger.progress(f"Mapped {pack_result.mapped_count} file(s){mapping_summary}")
         for mapped, original in pack_result.path_mappings.items():
             logger.verbose_detail(f"    {original} -> {mapped}")
 
     if not pack_result.files:
         _warn_empty(logger, target, pack_result)
     else:
-        logger.success(
-            f"Packed {len(pack_result.files)} file(s) -> {pack_result.bundle_path}"
-        )
+        logger.success(f"Packed {len(pack_result.files)} file(s) -> {pack_result.bundle_path}")
         for f in pack_result.files:
             logger.verbose_detail(f"    {f}")
         if fmt == "plugin":
@@ -193,7 +197,7 @@ def _render_marketplace_result(logger, report, dry_run, extra_warnings=None):
     """Render the marketplace producer's report (one-liner summary)."""
     if report is None:
         return
-    for warn_msg in (extra_warnings or []):
+    for warn_msg in extra_warnings or []:
         logger.warning(warn_msg)
     for warn_msg in report.warnings:
         logger.warning(warn_msg)
@@ -204,8 +208,7 @@ def _render_marketplace_result(logger, report, dry_run, extra_warnings=None):
         )
         return
     logger.success(
-        f"Built marketplace.json ({len(report.resolved)} package(s)) "
-        f"-> {report.output_path}"
+        f"Built marketplace.json ({len(report.resolved)} package(s)) -> {report.output_path}"
     )
 
 
@@ -219,8 +222,15 @@ def _render_marketplace_result(logger, report, dry_run, extra_warnings=None):
     help="Target directory (default: current directory).",
 )
 @click.option("--skip-verify", is_flag=True, default=False, help="Skip bundle completeness check.")
-@click.option("--dry-run", is_flag=True, default=False, help="Show what would be unpacked without writing")
-@click.option("--force", is_flag=True, default=False, help="Deploy despite critical hidden-character findings.")
+@click.option(
+    "--dry-run", is_flag=True, default=False, help="Show what would be unpacked without writing"
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Deploy despite critical hidden-character findings.",
+)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed unpacking information")
 @click.pass_context
 def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
@@ -254,9 +264,7 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
         else:
             _log_unpack_file_list(result, logger)
             if result.skipped_count > 0:
-                logger.warning(
-                    f"  {result.skipped_count} file(s) skipped (missing from bundle)"
-                )
+                logger.warning(f"  {result.skipped_count} file(s) skipped (missing from bundle)")
             if result.security_critical > 0:
                 logger.warning(
                     f"  Deployed with --force despite {result.security_critical} "
@@ -309,9 +317,7 @@ def _warn_empty(logger, target, result):
             logger.warning(f"No files to pack for target '{target}'")
         else:
             logger.warning(f"No files to pack for target '{target}'")
-            logger.verbose_detail(
-                f"    Hint: use '--target all' to include all platforms"
-            )
+            logger.verbose_detail(f"    Hint: use '--target all' to include all platforms")  # noqa: F541
     else:
         logger.warning("No deployed files found -- empty bundle created")
 
@@ -330,14 +336,12 @@ def _log_bundle_meta(result, output_dir, logger):
     _DISPLAY = {"vscode": "copilot", "agents": "copilot"}
     display_bundle = _DISPLAY.get(bundle_target, bundle_target)
 
-    logger.progress(
-        f"Bundle target: {display_bundle} "
-        f"({dep_count} dep(s), {file_count} file(s))"
-    )
+    logger.progress(f"Bundle target: {display_bundle} ({dep_count} dep(s), {file_count} file(s))")
 
     # Detect project target from output directory
     try:
         from ..core.target_detection import detect_target
+
         project_target, _reason = detect_target(output_dir.resolve())
     except Exception:
         return  # can't detect -- skip mismatch check
@@ -354,11 +358,9 @@ def _log_bundle_meta(result, output_dir, logger):
 
     if norm_bundle != norm_project:
         logger.warning(
-            f"Bundle target '{display_bundle}' differs from project "
-            f"target '{display_project}'"
+            f"Bundle target '{display_bundle}' differs from project target '{display_project}'"
         )
         logger.verbose_detail(
             f"    To get a {display_project}-targeted bundle, "
             f"ask the publisher to run: apm pack --target {display_project}"
         )
-

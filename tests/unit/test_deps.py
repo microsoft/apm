@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import mock_open, patch
 
-import frontmatter
+import frontmatter  # noqa: F401
 import yaml
 
 from apm_cli.deps.aggregator import (
@@ -26,9 +26,7 @@ class TestDependenciesAggregator(unittest.TestCase):
     @patch("glob.glob")
     @patch("builtins.open", new_callable=mock_open)
     @patch("frontmatter.load")
-    def test_scan_workflows_for_dependencies(
-        self, mock_frontmatter_load, mock_file, mock_glob
-    ):
+    def test_scan_workflows_for_dependencies(self, mock_frontmatter_load, mock_file, mock_glob):
         """Test scanning workflows for dependencies."""
         # Mock glob to return workflow files
         # First call returns GitHub prompts, second call returns generic prompts
@@ -137,9 +135,7 @@ class TestDependenciesVerifier(unittest.TestCase):
     @patch("apm_cli.factory.ClientFactory.create_client")
     @patch("apm_cli.factory.PackageManagerFactory.create_package_manager")
     @patch("apm_cli.deps.verifier.verify_dependencies")
-    def test_install_missing_dependencies(
-        self, mock_verify, mock_factory, mock_client_factory
-    ):
+    def test_install_missing_dependencies(self, mock_verify, mock_factory, mock_client_factory):
         """Test installing missing dependencies."""
         # Mock verify_dependencies to return missing packages
         mock_verify.return_value = (False, ["server1"], ["server2", "server3"])
@@ -165,12 +161,8 @@ class TestDependenciesVerifier(unittest.TestCase):
         self.assertEqual(mock_client.configure_mcp_server.call_count, 2)
 
         # Verify client was configured properly
-        mock_client.configure_mcp_server.assert_any_call(
-            "server2", server_name="server2"
-        )
-        mock_client.configure_mcp_server.assert_any_call(
-            "server3", server_name="server3"
-        )
+        mock_client.configure_mcp_server.assert_any_call("server2", server_name="server2")
+        mock_client.configure_mcp_server.assert_any_call("server3", server_name="server3")
 
 
 if __name__ == "__main__":

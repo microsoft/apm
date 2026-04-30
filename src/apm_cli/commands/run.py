@@ -30,9 +30,7 @@ def run(ctx, script_name, param, verbose):
         if not script_name:
             script_name = _get_default_script()
             if not script_name:
-                logger.error(
-                    "No script specified and no 'start' script defined in apm.yml"
-                )
+                logger.error("No script specified and no 'start' script defined in apm.yml")
                 logger.progress("Available scripts:")
                 scripts = _list_available_scripts()
 
@@ -107,9 +105,7 @@ def preview(ctx, script_name, param, verbose):
         if not script_name:
             script_name = _get_default_script()
             if not script_name:
-                logger.error(
-                    "No script specified and no 'start' script defined in apm.yml"
-                )
+                logger.error("No script specified and no 'start' script defined in apm.yml")
                 sys.exit(1)
 
         logger.start(f"Previewing script: {script_name}")
@@ -141,14 +137,12 @@ def preview(ctx, script_name, param, verbose):
                 _rich_panel(command, title=" Original command", style="blue")
 
                 # Auto-compile prompts to show what would be executed
-                compiled_command, compiled_prompt_files = (
-                    script_runner._auto_compile_prompts(command, params)
+                compiled_command, compiled_prompt_files = script_runner._auto_compile_prompts(
+                    command, params
                 )
 
                 if compiled_prompt_files:
-                    _rich_panel(
-                        compiled_command, title="> Compiled command", style="green"
-                    )
+                    _rich_panel(compiled_command, title="> Compiled command", style="green")
                 else:
                     _rich_panel(
                         compiled_command,
@@ -163,16 +157,12 @@ def preview(ctx, script_name, param, verbose):
                 if compiled_prompt_files:
                     file_list = []
                     for prompt_file in compiled_prompt_files:
-                        output_name = (
-                            Path(prompt_file).stem.replace(".prompt", "") + ".txt"
-                        )
+                        output_name = Path(prompt_file).stem.replace(".prompt", "") + ".txt"
                         compiled_path = Path(".apm/compiled") / output_name
                         file_list.append(str(compiled_path))
 
                     files_content = "\n".join([f" {file}" for file in file_list])
-                    _rich_panel(
-                        files_content, title=" Compiled prompt files", style="cyan"
-                    )
+                    _rich_panel(files_content, title=" Compiled prompt files", style="cyan")
                 else:
                     _rich_panel(
                         "No .prompt.md files were compiled.\n\n"
@@ -187,8 +177,8 @@ def preview(ctx, script_name, param, verbose):
                 logger.progress("Original command:")
                 click.echo(f"  {command}")
 
-                compiled_command, compiled_prompt_files = (
-                    script_runner._auto_compile_prompts(command, params)
+                compiled_command, compiled_prompt_files = script_runner._auto_compile_prompts(
+                    command, params
                 )
 
                 if compiled_prompt_files:
@@ -197,17 +187,13 @@ def preview(ctx, script_name, param, verbose):
 
                     logger.progress("Compiled prompt files:")
                     for prompt_file in compiled_prompt_files:
-                        output_name = (
-                            Path(prompt_file).stem.replace(".prompt", "") + ".txt"
-                        )
+                        output_name = Path(prompt_file).stem.replace(".prompt", "") + ".txt"
                         compiled_path = Path(".apm/compiled") / output_name
                         click.echo(f"  - {compiled_path}")
                 else:
                     logger.warning("Command (no prompt compilation):")
                     click.echo(f"  {compiled_command}")
-                    logger.progress(
-                        "APM only compiles files ending with '.prompt.md' extension."
-                    )
+                    logger.progress("APM only compiles files ending with '.prompt.md' extension.")
 
             _rich_blank_line()
             logger.success(

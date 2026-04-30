@@ -3,7 +3,7 @@
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import mock_open, patch
+from unittest.mock import mock_open, patch  # noqa: F401
 
 import pytest
 import yaml
@@ -17,7 +17,7 @@ from src.apm_cli.models.apm_package import (
     PackageInfo,
     PackageType,
     ResolvedReference,
-    ValidationError,
+    ValidationError,  # noqa: F401
     ValidationResult,
     parse_git_reference,
     validate_apm_package,
@@ -196,7 +196,7 @@ class TestDependencyReference:
         assert dep.ado_organization == "dmeppiel-org"
         assert dep.ado_project == "market-js-app"
         assert dep.ado_repo == "compliance-rules"
-        assert dep.is_azure_devops() == True
+        assert dep.is_azure_devops() == True  # noqa: E712
         assert dep.repo_url == "dmeppiel-org/market-js-app/compliance-rules"
 
         # Simplified ADO format (without _git)
@@ -205,14 +205,12 @@ class TestDependencyReference:
         assert dep.ado_organization == "myorg"
         assert dep.ado_project == "myproject"
         assert dep.ado_repo == "myrepo"
-        assert dep.is_azure_devops() == True
+        assert dep.is_azure_devops() == True  # noqa: E712
 
         # Legacy visualstudio.com format
-        dep = DependencyReference.parse(
-            "mycompany.visualstudio.com/myorg/myproject/myrepo"
-        )
+        dep = DependencyReference.parse("mycompany.visualstudio.com/myorg/myproject/myrepo")
         assert dep.host == "mycompany.visualstudio.com"
-        assert dep.is_azure_devops() == True
+        assert dep.is_azure_devops() == True  # noqa: E712
         assert dep.ado_organization == "myorg"
         assert dep.ado_project == "myproject"
         assert dep.ado_repo == "myrepo"
@@ -223,8 +221,8 @@ class TestDependencyReference:
         dep = DependencyReference.parse(
             "dev.azure.com/myorg/myproject/myrepo/prompts/code-review.prompt.md"
         )
-        assert dep.is_azure_devops() == True
-        assert dep.is_virtual == True
+        assert dep.is_azure_devops() == True  # noqa: E712
+        assert dep.is_virtual == True  # noqa: E712
         assert dep.repo_url == "myorg/myproject/myrepo"
         assert dep.virtual_path == "prompts/code-review.prompt.md"
         assert dep.ado_organization == "myorg"
@@ -235,8 +233,8 @@ class TestDependencyReference:
         dep = DependencyReference.parse(
             "dev.azure.com/myorg/myproject/_git/myrepo/prompts/test.prompt.md"
         )
-        assert dep.is_azure_devops() == True
-        assert dep.is_virtual == True
+        assert dep.is_azure_devops() == True  # noqa: E712
+        assert dep.is_virtual == True  # noqa: E712
         assert dep.virtual_path == "prompts/test.prompt.md"
 
     def test_parse_azure_devops_invalid_virtual_package(self):
@@ -251,12 +249,12 @@ class TestDependencyReference:
 
         # Valid 4-segment ADO virtual package should work
         dep = DependencyReference.parse("dev.azure.com/org/proj/repo/file.prompt.md")
-        assert dep.is_virtual == True
+        assert dep.is_virtual == True  # noqa: E712
         assert dep.repo_url == "org/proj/repo"
 
         # 3 segments after host (org/proj/repo) without a path - this is a regular package, not virtual
         dep = DependencyReference.parse("dev.azure.com/myorg/myproject/myrepo")
-        assert dep.is_virtual == False
+        assert dep.is_virtual == False  # noqa: E712
         assert dep.repo_url == "myorg/myproject/myrepo"
 
     def test_parse_azure_devops_project_with_spaces(self):
@@ -271,7 +269,7 @@ class TestDependencyReference:
         assert dep.ado_organization == "myorg"
         assert dep.ado_project == "My Project"
         assert dep.ado_repo == "myrepo"
-        assert dep.is_azure_devops() == True
+        assert dep.is_azure_devops() == True  # noqa: E712
         assert dep.repo_url == "myorg/My Project/myrepo"
 
         # Literal space in project name (simplified format without _git)
@@ -280,7 +278,7 @@ class TestDependencyReference:
         assert dep.ado_organization == "myorg"
         assert dep.ado_project == "My Project"
         assert dep.ado_repo == "myrepo"
-        assert dep.is_azure_devops() == True
+        assert dep.is_azure_devops() == True  # noqa: E712
 
         # Percent-encoded space in simplified format
         dep = DependencyReference.parse("dev.azure.com/org/America%20Oh%20Yeah/repo")
@@ -300,7 +298,7 @@ class TestDependencyReference:
         assert dep.ado_organization == "Zifo"
         assert dep.ado_project == "AIdeate and AIterate"
         assert dep.ado_repo == "AiDeate SDLC Guidelines"
-        assert dep.is_azure_devops() == True
+        assert dep.is_azure_devops() == True  # noqa: E712
         assert dep.repo_url == "Zifo/AIdeate and AIterate/AiDeate SDLC Guidelines"
 
         # Spaces in both project and repo names (literal)
@@ -310,9 +308,7 @@ class TestDependencyReference:
         assert dep.ado_repo == "My Repo Name"
 
         # Spaces in repo name only (percent-encoded, no _git)
-        dep = DependencyReference.parse(
-            "dev.azure.com/myorg/myproject/My%20Repo%20Name"
-        )
+        dep = DependencyReference.parse("dev.azure.com/myorg/myproject/My%20Repo%20Name")
         assert dep.ado_organization == "myorg"
         assert dep.ado_project == "myproject"
         assert dep.ado_repo == "My Repo Name"
@@ -336,21 +332,15 @@ class TestDependencyReference:
         """
         # Path injection: still rejected (creates invalid repo format)
         with pytest.raises(ValueError):
-            DependencyReference.parse(
-                "evil.com/github.com/user/repo/prompts/file.prompt.md"
-            )
+            DependencyReference.parse("evil.com/github.com/user/repo/prompts/file.prompt.md")
 
         # Valid generic hosts: now accepted with generic git URL support
-        dep1 = DependencyReference.parse(
-            "github.com.evil.com/user/repo/prompts/file.prompt.md"
-        )
+        dep1 = DependencyReference.parse("github.com.evil.com/user/repo/prompts/file.prompt.md")
         assert dep1.host == "github.com.evil.com"
         assert dep1.repo_url == "user/repo"
         assert dep1.is_virtual is True
 
-        dep2 = DependencyReference.parse(
-            "attacker.net/user/repo/prompts/file.prompt.md"
-        )
+        dep2 = DependencyReference.parse("attacker.net/user/repo/prompts/file.prompt.md")
         assert dep2.host == "attacker.net"
         assert dep2.repo_url == "user/repo"
         assert dep2.is_virtual is True
@@ -367,9 +357,7 @@ class TestDependencyReference:
 
     def test_parse_virtual_file_with_reference(self):
         """Test parsing virtual file package with git reference."""
-        dep = DependencyReference.parse(
-            "owner/test-repo/prompts/code-review.prompt.md#v1.0.0"
-        )
+        dep = DependencyReference.parse("owner/test-repo/prompts/code-review.prompt.md#v1.0.0")
         assert dep.repo_url == "owner/test-repo"
         assert dep.is_virtual is True
         assert dep.virtual_path == "prompts/code-review.prompt.md"
@@ -415,9 +403,7 @@ class TestDependencyReference:
         ]
 
         for path in invalid_paths:
-            with pytest.raises(
-                ValueError, match="Individual files must end with one of"
-            ):
+            with pytest.raises(ValueError, match="Individual files must end with one of"):
                 DependencyReference.parse(path)
 
     def test_virtual_package_str_representation(self):
@@ -425,17 +411,13 @@ class TestDependencyReference:
 
         Note: After PR #33, host is explicit in string representation.
         """
-        dep = DependencyReference.parse(
-            "owner/test-repo/prompts/code-review.prompt.md#v1.0.0"
-        )
+        dep = DependencyReference.parse("owner/test-repo/prompts/code-review.prompt.md#v1.0.0")
         # Check that key components are present (host may be explicit now)
         assert "owner/test-repo" in str(dep)
         assert "prompts/code-review.prompt.md" in str(dep)
         assert "#v1.0.0" in str(dep)
 
-        dep_with_ref = DependencyReference.parse(
-            "owner/test-repo/prompts/test.prompt.md#v2.0"
-        )
+        dep_with_ref = DependencyReference.parse("owner/test-repo/prompts/test.prompt.md#v2.0")
         assert "owner/test-repo" in str(dep_with_ref)
         assert "prompts/test.prompt.md" in str(dep_with_ref)
         assert "#v2.0" in str(dep_with_ref)
@@ -458,7 +440,7 @@ class TestDependencyReference:
         for invalid_format in invalid_formats:
             with pytest.raises(
                 ValueError,
-                match="Invalid Git host|Empty dependency string|Invalid repository|Use 'user/repo'|path component",
+                match="Invalid Git host|Empty dependency string|Invalid repository|Use 'user/repo'|path component",  # noqa: RUF043
             ):
                 DependencyReference.parse(invalid_format)
 
@@ -633,9 +615,7 @@ class TestAPMPackage:
         assert not pkg1.has_apm_dependencies()
 
         # Package with MCP dependencies only
-        pkg2 = APMPackage(
-            name="test", version="1.0.0", dependencies={"mcp": ["server"]}
-        )
+        pkg2 = APMPackage(name="test", version="1.0.0", dependencies={"mcp": ["server"]})
         assert not pkg2.has_apm_dependencies()
 
         # Package with APM dependencies
@@ -662,9 +642,7 @@ class TestAPMPackage:
             "version": "0.1.0",
             "target": "opencode,claude,copilot,agents",
         }
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yml", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
             yaml.dump(apm_content, f)
             f.flush()
 
@@ -683,9 +661,7 @@ class TestAPMPackage:
             "version": "0.1.0",
             "target": "claude,bogus,copilot",
         }
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yml", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
             yaml.dump(apm_content, f)
             f.flush()
             yml_path = f.name
@@ -708,9 +684,7 @@ class TestAPMPackage:
             "version": "0.1.0",
             "target": ["claude", "copilot"],
         }
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yml", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
             yaml.dump(apm_content, f)
             f.flush()
 
@@ -723,9 +697,7 @@ class TestAPMPackage:
         """Omitting ``target:`` yields ``None`` -- auto-detection takes
         over at consumption time (active_targets / detect_target)."""
         apm_content = {"name": "x", "version": "0.1.0"}
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yml", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
             yaml.dump(apm_content, f)
             f.flush()
 
@@ -738,9 +710,7 @@ class TestAPMPackage:
         """``target: ""`` is user error and now raises (was: silently
         auto-detected before #820).  See CHANGELOG migration note."""
         apm_content = {"name": "x", "version": "0.1.0", "target": ""}
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yml", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
             yaml.dump(apm_content, f)
             f.flush()
             yml_path = f.name
@@ -756,9 +726,7 @@ class TestAPMPackage:
         which is not the same as "unset" -- to opt into auto-detection
         the field must be omitted entirely."""
         apm_content = {"name": "x", "version": "0.1.0", "target": []}
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yml", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
             yaml.dump(apm_content, f)
             f.flush()
             yml_path = f.name
@@ -777,9 +745,7 @@ class TestAPMPackage:
             "version": "0.1.0",
             "target": ["all", "claude"],
         }
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yml", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
             yaml.dump(apm_content, f)
             f.flush()
             yml_path = f.name
@@ -880,9 +846,7 @@ class TestPackageValidation:
 
             result = validate_apm_package(Path(tmpdir))
             assert not result.is_valid
-            assert any(
-                "missing the required .apm/ directory" in error for error in result.errors
-            )
+            assert any("missing the required .apm/ directory" in error for error in result.errors)
 
     def test_validate_apm_file_instead_of_directory(self):
         """Test validating package with .apm as file instead of directory."""
@@ -908,9 +872,7 @@ class TestPackageValidation:
 
             result = validate_apm_package(Path(tmpdir))
             assert result.is_valid  # Should be valid but with warning
-            assert any(
-                "No primitive files found" in warning for warning in result.warnings
-            )
+            assert any("No primitive files found" in warning for warning in result.warnings)
 
     def test_validate_valid_package(self):
         """Test validating completely valid package."""
@@ -952,8 +914,7 @@ class TestPackageValidation:
             result = validate_apm_package(Path(tmpdir))
             assert result.is_valid
             assert any(
-                "doesn't follow semantic versioning" in warning
-                for warning in result.warnings
+                "doesn't follow semantic versioning" in warning for warning in result.warnings
             )
 
     def test_validate_numeric_version_types(self):
@@ -1093,11 +1054,7 @@ class TestHookPackageValidation:
                     {
                         "hooks": {
                             "PreToolUse": [
-                                {
-                                    "hooks": [
-                                        {"type": "command", "command": "echo hello"}
-                                    ]
-                                }
+                                {"hooks": [{"type": "command", "command": "echo hello"}]}
                             ]
                         }
                     }
@@ -1118,13 +1075,7 @@ class TestHookPackageValidation:
             hooks_json = hooks_dir / "my-hooks.json"
             hooks_json.write_text(
                 json.dumps(
-                    {
-                        "hooks": {
-                            "Stop": [
-                                {"hooks": [{"type": "command", "command": "echo bye"}]}
-                            ]
-                        }
-                    }
+                    {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo bye"}]}]}}
                 )
             )
 
@@ -1158,7 +1109,7 @@ class TestHookPackageValidation:
             assert result.package_type == PackageType.INVALID
 
 
-from src.apm_cli.models.validation import detect_package_type
+from src.apm_cli.models.validation import detect_package_type  # noqa: E402
 
 
 class TestDetectPackageType:
@@ -1320,9 +1271,7 @@ class TestDetectPackageType:
         (tmp_path / "hooks" / "hooks.json").write_text("{}")
         # Plugin shape.
         (tmp_path / ".claude-plugin").mkdir()
-        (tmp_path / ".claude-plugin" / "plugin.json").write_text(
-            '{"name": "superpowers"}'
-        )
+        (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"name": "superpowers"}')
         (tmp_path / "agents").mkdir()
         (tmp_path / "agents" / "code-reviewer.md").write_text("# agent")
         (tmp_path / "skills").mkdir()
@@ -1347,9 +1296,7 @@ class TestHybridPackageValidation:
     def test_hybrid_no_apm_dir_validates_as_skill_bundle(self, tmp_path):
         """Core reproducer: HYBRID layout without .apm/ is valid."""
         (tmp_path / "apm.yml").write_text(
-            "name: genesis\n"
-            "version: 1.0.0\n"
-            "description: Genesis architect\n"
+            "name: genesis\nversion: 1.0.0\ndescription: Genesis architect\n"
         )
         (tmp_path / "SKILL.md").write_text(
             "---\nname: genesis\ndescription: skill desc\n---\n# Genesis Skill\n"
@@ -1367,9 +1314,7 @@ class TestHybridPackageValidation:
 
     def test_hybrid_with_apm_dir_falls_through_to_standard(self, tmp_path):
         """HYBRID with .apm/ present uses standard APM package validation."""
-        (tmp_path / "apm.yml").write_text(
-            "name: hybrid-classic\nversion: 2.0.0\n"
-        )
+        (tmp_path / "apm.yml").write_text("name: hybrid-classic\nversion: 2.0.0\n")
         (tmp_path / "SKILL.md").write_text("# Skill")
         apm_dir = tmp_path / ".apm"
         apm_dir.mkdir()
@@ -1400,12 +1345,8 @@ class TestHybridPackageValidation:
         ``APMPackage.description`` stays ``None`` -- the SKILL.md value
         does NOT silently leak into the human-facing tagline slot.
         """
-        (tmp_path / "apm.yml").write_text(
-            "name: genesis\nversion: 1.0.0\n"
-        )
-        (tmp_path / "SKILL.md").write_text(
-            "---\ndescription: from-skill-md\n---\n# Skill\n"
-        )
+        (tmp_path / "apm.yml").write_text("name: genesis\nversion: 1.0.0\n")
+        (tmp_path / "SKILL.md").write_text("---\ndescription: from-skill-md\n---\n# Skill\n")
 
         result = validate_apm_package(tmp_path)
         assert result.is_valid
@@ -1420,9 +1361,7 @@ class TestHybridPackageValidation:
         (tmp_path / "apm.yml").write_text(
             "name: genesis\nversion: 1.0.0\ndescription: from-apm-yml\n"
         )
-        (tmp_path / "SKILL.md").write_text(
-            "---\ndescription: from-skill-md\n---\n# Skill\n"
-        )
+        (tmp_path / "SKILL.md").write_text("---\ndescription: from-skill-md\n---\n# Skill\n")
 
         result = validate_apm_package(tmp_path)
         assert result.is_valid
@@ -1468,8 +1407,7 @@ class TestClaudeSkillPackageValidation:
     def test_claude_skill_with_agents_and_assets_validates(self, tmp_path):
         """CLAUDE_SKILL with agents/ and assets/ sub-dirs passes validation."""
         (tmp_path / "SKILL.md").write_text(
-            "---\nname: my-skill\ndescription: A skill with agents\n---\n"
-            "# My Skill\n"
+            "---\nname: my-skill\ndescription: A skill with agents\n---\n# My Skill\n"
         )
         agents_dir = tmp_path / "agents"
         agents_dir.mkdir()
@@ -1491,9 +1429,7 @@ class TestClaudeSkillPackageValidation:
         classify as MARKETPLACE_PLUGIN.  With SKILL.md present the cascade
         must short-circuit to CLAUDE_SKILL (step 3 precedes step 4).
         """
-        (tmp_path / "SKILL.md").write_text(
-            "---\nname: agents-skill\n---\n# Has Agents\n"
-        )
+        (tmp_path / "SKILL.md").write_text("---\nname: agents-skill\n---\n# Has Agents\n")
         (tmp_path / "agents").mkdir()
         (tmp_path / "agents" / "bar.agent.md").write_text("# Bar Agent")
 
@@ -1544,9 +1480,7 @@ class TestGatherDetectionEvidence:
         (tmp_path / "hooks").mkdir()
         (tmp_path / "hooks" / "hooks.json").write_text("{}")
         (tmp_path / ".claude-plugin").mkdir()
-        (tmp_path / ".claude-plugin" / "plugin.json").write_text(
-            '{"name": "superpowers"}'
-        )
+        (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"name": "superpowers"}')
         (tmp_path / "agents").mkdir()
         (tmp_path / "skills").mkdir()
         (tmp_path / "commands").mkdir()
@@ -1711,30 +1645,21 @@ class TestPackageContentType:
 
     def test_from_string_valid_values(self):
         """Test parsing all valid type values."""
-        assert (
-            PackageContentType.from_string("instructions")
-            == PackageContentType.INSTRUCTIONS
-        )
+        assert PackageContentType.from_string("instructions") == PackageContentType.INSTRUCTIONS
         assert PackageContentType.from_string("skill") == PackageContentType.SKILL
         assert PackageContentType.from_string("hybrid") == PackageContentType.HYBRID
         assert PackageContentType.from_string("prompts") == PackageContentType.PROMPTS
 
     def test_from_string_case_insensitive(self):
         """Test that parsing is case-insensitive."""
-        assert (
-            PackageContentType.from_string("INSTRUCTIONS")
-            == PackageContentType.INSTRUCTIONS
-        )
+        assert PackageContentType.from_string("INSTRUCTIONS") == PackageContentType.INSTRUCTIONS
         assert PackageContentType.from_string("Skill") == PackageContentType.SKILL
         assert PackageContentType.from_string("HYBRID") == PackageContentType.HYBRID
         assert PackageContentType.from_string("Prompts") == PackageContentType.PROMPTS
 
     def test_from_string_with_whitespace(self):
         """Test that parsing handles leading/trailing whitespace."""
-        assert (
-            PackageContentType.from_string("  instructions  ")
-            == PackageContentType.INSTRUCTIONS
-        )
+        assert PackageContentType.from_string("  instructions  ") == PackageContentType.INSTRUCTIONS
         assert PackageContentType.from_string("\tskill\n") == PackageContentType.SKILL
 
     def test_from_string_invalid_value(self):
@@ -1914,9 +1839,7 @@ type: null
 
     def test_package_dataclass_with_type(self):
         """Test that APMPackage dataclass accepts type parameter."""
-        package = APMPackage(
-            name="test", version="1.0.0", type=PackageContentType.SKILL
-        )
+        package = APMPackage(name="test", version="1.0.0", type=PackageContentType.SKILL)
         assert package.type == PackageContentType.SKILL
 
     def test_package_dataclass_type_defaults_to_none(self):

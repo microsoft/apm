@@ -1,6 +1,6 @@
 """Tests for CLI entry point encoding configuration."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from apm_cli.cli import _configure_encoding
 
@@ -47,6 +47,7 @@ class TestConfigureEncoding:
     def test_sets_pythonioencoding(self, mock_sys, mock_ctypes):
         """Should set PYTHONIOENCODING=utf-8 if not already set."""
         import os as real_os
+
         mock_sys.platform = "win32"
         mock_sys.stdout = MagicMock()
         mock_sys.stderr = MagicMock()
@@ -101,9 +102,7 @@ class TestConfigureEncoding:
 
         assert mock_stdout.reconfigure.call_count == 2
         mock_stdout.reconfigure.assert_any_call(encoding="utf-8")
-        mock_stdout.reconfigure.assert_any_call(
-            encoding="utf-8", errors="backslashreplace"
-        )
+        mock_stdout.reconfigure.assert_any_call(encoding="utf-8", errors="backslashreplace")
 
     @patch("apm_cli.cli.ctypes")
     @patch("apm_cli.cli.os")

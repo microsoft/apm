@@ -1,13 +1,14 @@
 """Utilities for reading Spec Kit style constitution file."""
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional  # noqa: F401, UP035
 
 from .constants import CONSTITUTION_RELATIVE_PATH
 
 # Module-level cache: resolved base_dir -> constitution content (#171)
-_constitution_cache: Dict[Path, Optional[str]] = {}
+_constitution_cache: dict[Path, str | None] = {}
 
 
 def clear_constitution_cache() -> None:
@@ -24,7 +25,7 @@ def find_constitution(base_dir: Path) -> Path:
     return base_dir / CONSTITUTION_RELATIVE_PATH
 
 
-def read_constitution(base_dir: Path) -> Optional[str]:
+def read_constitution(base_dir: Path) -> str | None:
     """Read full constitution content if file exists.
 
     Results are cached by resolved base_dir for the lifetime of the process.

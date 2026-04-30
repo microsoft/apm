@@ -32,7 +32,7 @@ def atomic_write_text(path: Path, data: str) -> None:
             fh.write(data)
         os.replace(tmp_name, path)
     except Exception:
-        try:
+        try:  # noqa: SIM105
             os.unlink(tmp_name)
         except OSError:
             pass

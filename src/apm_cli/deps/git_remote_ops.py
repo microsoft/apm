@@ -6,12 +6,12 @@ no side effects.
 """
 
 import re
-from typing import Dict, List
+from typing import Dict, List  # noqa: F401, UP035
 
 from ..models.apm_package import GitReferenceType, RemoteRef
 
 
-def parse_ls_remote_output(output: str) -> List[RemoteRef]:
+def parse_ls_remote_output(output: str) -> list[RemoteRef]:
     """Parse ``git ls-remote --tags --heads`` output into RemoteRef objects.
 
     Format per line: ``<sha>\\t<refname>``
@@ -30,8 +30,8 @@ def parse_ls_remote_output(output: str) -> List[RemoteRef]:
     Returns:
         Unsorted list of RemoteRef.
     """
-    tags: Dict[str, str] = {}       # tag name -> commit sha
-    branches: List[RemoteRef] = []
+    tags: dict[str, str] = {}  # tag name -> commit sha
+    branches: list[RemoteRef] = []
 
     for line in output.splitlines():
         line = line.strip()
@@ -43,7 +43,7 @@ def parse_ls_remote_output(output: str) -> List[RemoteRef]:
         sha, refname = parts[0].strip(), parts[1].strip()
 
         if refname.startswith("refs/tags/"):
-            tag_name = refname[len("refs/tags/"):]
+            tag_name = refname[len("refs/tags/") :]
             if tag_name.endswith("^{}"):
                 # Dereferenced commit -- overwrite with the real commit SHA
                 tag_name = tag_name[:-3]
@@ -53,12 +53,14 @@ def parse_ls_remote_output(output: str) -> List[RemoteRef]:
                 tags.setdefault(tag_name, sha)
 
         elif refname.startswith("refs/heads/"):
-            branch_name = refname[len("refs/heads/"):]
-            branches.append(RemoteRef(
-                name=branch_name,
-                ref_type=GitReferenceType.BRANCH,
-                commit_sha=sha,
-            ))
+            branch_name = refname[len("refs/heads/") :]
+            branches.append(
+                RemoteRef(
+                    name=branch_name,
+                    ref_type=GitReferenceType.BRANCH,
+                    commit_sha=sha,
+                )
+            )
 
     tag_refs = [
         RemoteRef(name=name, ref_type=GitReferenceType.TAG, commit_sha=sha)
@@ -80,7 +82,7 @@ def semver_sort_key(name: str):
     return (1, name)
 
 
-def sort_remote_refs(refs: List[RemoteRef]) -> List[RemoteRef]:
+def sort_remote_refs(refs: list[RemoteRef]) -> list[RemoteRef]:
     """Sort refs: tags first (semver descending), then branches alphabetically."""
     tags = [r for r in refs if r.ref_type == GitReferenceType.TAG]
     branches = [r for r in refs if r.ref_type == GitReferenceType.BRANCH]

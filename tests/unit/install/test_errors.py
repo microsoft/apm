@@ -1,6 +1,10 @@
 """Unit tests for install/errors.py exception types."""
 
-from apm_cli.install.errors import AuthenticationError, DirectDependencyError, PolicyViolationError
+from apm_cli.install.errors import (
+    AuthenticationError,
+    DirectDependencyError,  # noqa: F401
+    PolicyViolationError,  # noqa: F401
+)
 
 
 class TestAuthenticationError:

@@ -1,12 +1,12 @@
 """Tests for marketplace registry CRUD with tmp_path isolation."""
 
-import json
+import json  # noqa: F401
 
 import pytest
 
+from apm_cli.marketplace import registry as registry_mod
 from apm_cli.marketplace.errors import MarketplaceNotFoundError
 from apm_cli.marketplace.models import MarketplaceSource
-from apm_cli.marketplace import registry as registry_mod
 
 
 @pytest.fixture(autouse=True)
@@ -66,12 +66,8 @@ class TestRegistryBasicOps:
             registry_mod.get_marketplace_by_name("nonexistent")
 
     def test_marketplace_names(self):
-        registry_mod.add_marketplace(
-            MarketplaceSource(name="beta", owner="o", repo="r")
-        )
-        registry_mod.add_marketplace(
-            MarketplaceSource(name="alpha", owner="o", repo="r")
-        )
+        registry_mod.add_marketplace(MarketplaceSource(name="beta", owner="o", repo="r"))
+        registry_mod.add_marketplace(MarketplaceSource(name="alpha", owner="o", repo="r"))
         assert registry_mod.marketplace_names() == ["alpha", "beta"]
 
 

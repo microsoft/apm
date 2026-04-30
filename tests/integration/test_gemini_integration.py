@@ -10,6 +10,7 @@ import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from typing import Optional  # noqa: F401
 
 import pytest
 import toml
@@ -22,8 +23,6 @@ from apm_cli.integration import (
     SkillIntegrator,
 )
 from apm_cli.integration.command_integrator import CommandIntegrator
-from typing import Optional
-
 from apm_cli.models.apm_package import (
     APMPackage,
     GitReferenceType,
@@ -36,7 +35,7 @@ from apm_cli.models.apm_package import (
 def _make_package_info(
     package_dir: Path,
     name: str = "test-pkg",
-    package_type: Optional[PackageType] = None,
+    package_type: PackageType | None = None,
 ) -> PackageInfo:
     """Build a minimal ``PackageInfo`` for offline tests."""
     package = APMPackage(name=name, version="1.0.0", package_path=package_dir)
@@ -80,9 +79,7 @@ class TestGeminiCommandIntegration:
         info = _make_package_info(pkg)
         target = KNOWN_TARGETS["gemini"]
 
-        result = CommandIntegrator().integrate_commands_for_target(
-            target, info, self.root
-        )
+        result = CommandIntegrator().integrate_commands_for_target(target, info, self.root)
 
         assert result.files_integrated == 1
         toml_path = self.root / ".gemini" / "commands" / "greet.toml"
@@ -102,9 +99,7 @@ class TestGeminiCommandIntegration:
 
         CommandIntegrator().integrate_commands_for_target(target, info, self.root)
 
-        doc = toml.loads(
-            (self.root / ".gemini" / "commands" / "run.toml").read_text()
-        )
+        doc = toml.loads((self.root / ".gemini" / "commands" / "run.toml").read_text())
         assert doc["prompt"].startswith("Arguments: {{args}}")
 
     def test_no_description_omits_key(self):
@@ -118,9 +113,7 @@ class TestGeminiCommandIntegration:
 
         CommandIntegrator().integrate_commands_for_target(target, info, self.root)
 
-        doc = toml.loads(
-            (self.root / ".gemini" / "commands" / "bare.toml").read_text()
-        )
+        doc = toml.loads((self.root / ".gemini" / "commands" / "bare.toml").read_text())
         assert "prompt" in doc
         assert "description" not in doc
 
@@ -141,17 +134,13 @@ class TestGeminiSkillIntegration:
         skill_content = "# My Skill\n\nDo something useful."
         pkg = self.root / "apm_modules" / "my-skill"
         pkg.mkdir(parents=True, exist_ok=True)
-        (pkg / "apm.yml").write_text(
-            "name: my-skill\nversion: 1.0.0\ntype: skill\n"
-        )
+        (pkg / "apm.yml").write_text("name: my-skill\nversion: 1.0.0\ntype: skill\n")
         (pkg / "SKILL.md").write_text(skill_content)
 
         info = _make_package_info(pkg, name="my-skill", package_type=PackageType.HYBRID)
         target = KNOWN_TARGETS["gemini"]
 
-        result = SkillIntegrator().integrate_package_skill(
-            info, self.root, targets=[target]
-        )
+        result = SkillIntegrator().integrate_package_skill(info, self.root, targets=[target])
 
         assert result.skill_created
         skill_md = self.root / ".gemini" / "skills" / "my-skill" / "SKILL.md"
@@ -176,20 +165,26 @@ class TestGeminiMCPIntegration:
         monkeypatch.chdir(self.root)
 
         settings = self.gemini_dir / "settings.json"
-        settings.write_text(json.dumps({
-            "mcpServers": {},
-            "theme": "dark",
-            "tools": {"enabled": True},
-        }))
+        settings.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {},
+                    "theme": "dark",
+                    "tools": {"enabled": True},
+                }
+            )
+        )
 
         adapter = GeminiClientAdapter.__new__(GeminiClientAdapter)
-        adapter.update_config({
-            "my-server": {
-                "command": "npx",
-                "args": ["-y", "@mcp/test-server"],
-                "env": {"KEY": "val"},
+        adapter.update_config(
+            {
+                "my-server": {
+                    "command": "npx",
+                    "args": ["-y", "@mcp/test-server"],
+                    "env": {"KEY": "val"},
+                }
             }
-        })
+        )
 
         result = json.loads(settings.read_text())
         assert "my-server" in result["mcpServers"]
@@ -230,9 +225,7 @@ class TestGeminiOptInBehavior:
         (pkg / "hello.prompt.md").write_text("---\ndescription: hi\n---\nHello\n")
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True, exist_ok=True)
-        (inst_dir / "rule.instructions.md").write_text(
-            "---\napplyTo: '**/*.py'\n---\nBe nice.\n"
-        )
+        (inst_dir / "rule.instructions.md").write_text("---\napplyTo: '**/*.py'\n---\nBe nice.\n")
         return pkg
 
     def test_commands_not_deployed_without_gemini_dir(self):
@@ -240,9 +233,7 @@ class TestGeminiOptInBehavior:
         info = _make_package_info(pkg)
         target = KNOWN_TARGETS["gemini"]
 
-        result = CommandIntegrator().integrate_commands_for_target(
-            target, info, self.root
-        )
+        result = CommandIntegrator().integrate_commands_for_target(target, info, self.root)
 
         assert result.files_integrated == 0
         assert not (self.root / ".gemini").exists()
@@ -252,9 +243,7 @@ class TestGeminiOptInBehavior:
         info = _make_package_info(pkg)
         target = KNOWN_TARGETS["gemini"]
 
-        result = InstructionIntegrator().integrate_instructions_for_target(
-            target, info, self.root
-        )
+        result = InstructionIntegrator().integrate_instructions_for_target(target, info, self.root)
 
         assert result.files_integrated == 0
         assert not (self.root / ".gemini").exists()
@@ -301,12 +290,8 @@ class TestGeminiMultiTargetCoexistence:
         copilot = KNOWN_TARGETS["copilot"]
         gemini = KNOWN_TARGETS["gemini"]
 
-        r_copilot = PromptIntegrator().integrate_prompts_for_target(
-            copilot, info, self.root
-        )
-        r_gemini = CommandIntegrator().integrate_commands_for_target(
-            gemini, info, self.root
-        )
+        r_copilot = PromptIntegrator().integrate_prompts_for_target(copilot, info, self.root)
+        r_gemini = CommandIntegrator().integrate_commands_for_target(gemini, info, self.root)
 
         assert r_copilot.files_integrated == 1
         assert r_gemini.files_integrated == 1
@@ -331,18 +316,15 @@ class TestGeminiHookIntegration:
         pkg = self.root / "apm_modules" / name
         hooks_dir = pkg / ".apm" / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
-        (hooks_dir / "hooks.json").write_text(json.dumps({
-            "hooks": {
-                "preCommit": [
-                    {"type": "command", "command": "echo lint"}
-                ]
-            }
-        }))
+        (hooks_dir / "hooks.json").write_text(
+            json.dumps({"hooks": {"preCommit": [{"type": "command", "command": "echo lint"}]}})
+        )
         return _make_package_info(pkg, name)
 
     def test_hooks_merge_into_settings_json(self):
         """Hooks are merged into .gemini/settings.json with _apm_source."""
         from apm_cli.integration.hook_integrator import HookIntegrator
+
         info = self._setup_hook_package()
         target = KNOWN_TARGETS["gemini"]
 
@@ -350,9 +332,7 @@ class TestGeminiHookIntegration:
         result = integrator.integrate_hooks_for_target(target, info, self.root)
 
         assert result.files_integrated == 1
-        settings = json.loads(
-            (self.root / ".gemini" / "settings.json").read_text()
-        )
+        settings = json.loads((self.root / ".gemini" / "settings.json").read_text())
         assert "hooks" in settings
         assert "preCommit" in settings["hooks"]
         assert settings["hooks"]["preCommit"][0]["_apm_source"] == "test-hooks"
@@ -360,12 +340,17 @@ class TestGeminiHookIntegration:
     def test_hooks_preserve_existing_mcp_servers(self):
         """Hook merge must not clobber existing mcpServers in settings.json."""
         settings_path = self.root / ".gemini" / "settings.json"
-        settings_path.write_text(json.dumps({
-            "mcpServers": {"my-server": {"command": "npx", "args": ["-y", "foo"]}},
-            "theme": "dark",
-        }))
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {"my-server": {"command": "npx", "args": ["-y", "foo"]}},
+                    "theme": "dark",
+                }
+            )
+        )
 
         from apm_cli.integration.hook_integrator import HookIntegrator
+
         info = self._setup_hook_package()
         target = KNOWN_TARGETS["gemini"]
 
@@ -381,17 +366,23 @@ class TestGeminiHookIntegration:
     def test_sync_removes_hook_entries_preserves_mcp(self):
         """Sync removes APM-managed hook entries but preserves mcpServers."""
         from apm_cli.integration.hook_integrator import HookIntegrator
+
         settings_path = self.root / ".gemini" / "settings.json"
-        settings_path.write_text(json.dumps({
-            "mcpServers": {"srv": {"command": "echo"}},
-            "hooks": {
-                "preCommit": [
-                    {"_apm_source": "test-hooks", "hooks": [
-                        {"type": "command", "command": "echo lint"}
-                    ]},
-                ]
-            }
-        }))
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {"srv": {"command": "echo"}},
+                    "hooks": {
+                        "preCommit": [
+                            {
+                                "_apm_source": "test-hooks",
+                                "hooks": [{"type": "command", "command": "echo lint"}],
+                            },
+                        ]
+                    },
+                }
+            )
+        )
 
         integrator = HookIntegrator()
         target = KNOWN_TARGETS["gemini"]
@@ -406,6 +397,7 @@ class TestGeminiHookIntegration:
         shutil.rmtree(self.root / ".gemini")
 
         from apm_cli.integration.hook_integrator import HookIntegrator
+
         info = self._setup_hook_package()
         target = KNOWN_TARGETS["gemini"]
 
@@ -440,9 +432,7 @@ class TestGeminiUninstallCleanup:
 
         target = KNOWN_TARGETS["gemini"]
         integrator = CommandIntegrator()
-        stats = integrator.sync_for_target(
-            target, None, self.root, managed_files=managed_files
-        )
+        stats = integrator.sync_for_target(target, None, self.root, managed_files=managed_files)
 
         assert stats["files_removed"] == 1
         assert not (commands_dir / "review.toml").exists()
@@ -458,9 +448,7 @@ class TestGeminiUninstallCleanup:
         }
 
         integrator = SkillIntegrator()
-        stats = integrator.sync_integration(
-            None, self.root, managed_files=managed_files
-        )
+        stats = integrator.sync_integration(None, self.root, managed_files=managed_files)
 
         assert stats["files_removed"] == 1
         assert not skills_dir.exists()
@@ -476,10 +464,7 @@ class TestGeminiUninstallCleanup:
         }
 
         integrator = SkillIntegrator()
-        stats = integrator.sync_integration(
-            None, self.root, managed_files=managed_files
-        )
+        stats = integrator.sync_integration(None, self.root, managed_files=managed_files)
 
         assert stats["files_removed"] == 1
         assert not skill_dir.exists()
-

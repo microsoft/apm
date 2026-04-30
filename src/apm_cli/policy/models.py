@@ -7,11 +7,10 @@ baseline checks (``ci_checks``) and policy checks (``policy_checks``).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List
-
+from typing import Dict, List  # noqa: F401, UP035
 
 # Check name -> most relevant artifact for SARIF locations.
-_CHECK_ARTIFACT_MAP: Dict[str, str] = {
+_CHECK_ARTIFACT_MAP: dict[str, str] = {
     "lockfile-exists": "apm.lock.yaml",
     "ref-consistency": "apm.lock.yaml",
     "deployed-files-present": "apm.lock.yaml",
@@ -48,21 +47,21 @@ class CheckResult:
     name: str  # e.g., "lockfile-exists"
     passed: bool
     message: str  # human-readable description
-    details: List[str] = field(default_factory=list)  # individual violations
+    details: list[str] = field(default_factory=list)  # individual violations
 
 
 @dataclass
 class CIAuditResult:
     """Aggregate result of all CI checks."""
 
-    checks: List[CheckResult] = field(default_factory=list)
+    checks: list[CheckResult] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
         return all(c.passed for c in self.checks)
 
     @property
-    def failed_checks(self) -> List[CheckResult]:
+    def failed_checks(self) -> list[CheckResult]:
         return [c for c in self.checks if not c.passed]
 
     def to_json(self) -> dict:

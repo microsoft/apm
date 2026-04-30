@@ -11,8 +11,8 @@ from pathlib import Path
 import yaml
 
 from apm_cli.deps.lockfile import (
-    LockFile,
     LockedDependency,
+    LockFile,
 )
 from apm_cli.primitives.discovery import get_dependency_declaration_order
 
@@ -55,12 +55,14 @@ class TestGetLockfileInstalledPaths:
     def test_virtual_file_package_path(self, tmp_path):
         """Virtual file packages should use the flattened virtual package name."""
         lockfile = LockFile()
-        lockfile.add_dependency(LockedDependency(
-            repo_url="owner/repo",
-            is_virtual=True,
-            virtual_path="prompts/code-review.prompt.md",
-            depth=1,
-        ))
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="owner/repo",
+                is_virtual=True,
+                virtual_path="prompts/code-review.prompt.md",
+                depth=1,
+            )
+        )
         lockfile.write(tmp_path / "apm.lock.yaml")
 
         paths = LockFile.installed_paths_for_project(tmp_path)
@@ -90,9 +92,13 @@ class TestTransitiveDependencyDiscovery:
 
         lockfile = LockFile()
         lockfile.add_dependency(LockedDependency(repo_url="owner/direct", depth=1))
-        lockfile.add_dependency(LockedDependency(
-            repo_url="owner/transitive", depth=2, resolved_by="owner/direct",
-        ))
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="owner/transitive",
+                depth=2,
+                resolved_by="owner/direct",
+            )
+        )
         lockfile.write(tmp_path / "apm.lock.yaml")
 
         order = get_dependency_declaration_order(str(tmp_path))
@@ -114,17 +120,26 @@ class TestTransitiveDependencyDiscovery:
         self._write_apm_yml(tmp_path, ["rieraj/team-cot-agent-instructions"])
 
         lockfile = LockFile()
-        lockfile.add_dependency(LockedDependency(
-            repo_url="rieraj/team-cot-agent-instructions", depth=1,
-        ))
-        lockfile.add_dependency(LockedDependency(
-            repo_url="rieraj/division-ime-agent-instructions", depth=2,
-            resolved_by="rieraj/team-cot-agent-instructions",
-        ))
-        lockfile.add_dependency(LockedDependency(
-            repo_url="rieraj/autodesk-agent-instructions", depth=3,
-            resolved_by="rieraj/division-ime-agent-instructions",
-        ))
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="rieraj/team-cot-agent-instructions",
+                depth=1,
+            )
+        )
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="rieraj/division-ime-agent-instructions",
+                depth=2,
+                resolved_by="rieraj/team-cot-agent-instructions",
+            )
+        )
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="rieraj/autodesk-agent-instructions",
+                depth=3,
+                resolved_by="rieraj/division-ime-agent-instructions",
+            )
+        )
         lockfile.write(tmp_path / "apm.lock.yaml")
 
         order = get_dependency_declaration_order(str(tmp_path))
@@ -175,8 +190,12 @@ class TestOrphanDetectionWithTransitiveDeps:
             direct_deps=["rieraj/team-cot"],
             lockfile_deps=[
                 LockedDependency(repo_url="rieraj/team-cot", depth=1),
-                LockedDependency(repo_url="rieraj/division-ime", depth=2, resolved_by="rieraj/team-cot"),
-                LockedDependency(repo_url="rieraj/autodesk", depth=3, resolved_by="rieraj/division-ime"),
+                LockedDependency(
+                    repo_url="rieraj/division-ime", depth=2, resolved_by="rieraj/team-cot"
+                ),
+                LockedDependency(
+                    repo_url="rieraj/autodesk", depth=3, resolved_by="rieraj/division-ime"
+                ),
             ],
             installed_pkgs=["rieraj/team-cot", "rieraj/division-ime", "rieraj/autodesk"],
         )
@@ -184,6 +203,7 @@ class TestOrphanDetectionWithTransitiveDeps:
         monkeypatch.chdir(tmp_path)
 
         from apm_cli.commands._helpers import _check_orphaned_packages
+
         orphans = _check_orphaned_packages()
         assert orphans == [], f"Transitive deps should not be orphaned, got: {orphans}"
 
@@ -201,6 +221,7 @@ class TestOrphanDetectionWithTransitiveDeps:
         monkeypatch.chdir(tmp_path)
 
         from apm_cli.commands._helpers import _check_orphaned_packages
+
         orphans = _check_orphaned_packages()
         assert "owner/stale" in orphans
 
@@ -216,5 +237,6 @@ class TestOrphanDetectionWithTransitiveDeps:
         monkeypatch.chdir(tmp_path)
 
         from apm_cli.commands._helpers import _check_orphaned_packages
+
         orphans = _check_orphaned_packages()
         assert "owner/stale" in orphans

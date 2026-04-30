@@ -1,10 +1,9 @@
 """Lockfile enrichment for pack-time metadata."""
 
 from datetime import datetime, timezone
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Tuple, Union  # noqa: F401, UP035
 
 from ..deps.lockfile import LockFile
-
 
 # Authoritative mapping of target names to deployed-file path prefixes.
 _TARGET_PREFIXES = {
@@ -26,7 +25,7 @@ _TARGET_PREFIXES = {
 # maps FROM .claude/ for the common case of Claude-first projects packing
 # for Copilot.  Cursor/opencode sources are niche; if someone publishes
 # skills exclusively under .cursor/, they must pack with --target cursor.
-_CROSS_TARGET_MAPS: Dict[str, Dict[str, str]] = {
+_CROSS_TARGET_MAPS: dict[str, dict[str, str]] = {
     "claude": {
         ".github/skills/": ".claude/skills/",
         ".github/agents/": ".claude/agents/",
@@ -55,8 +54,8 @@ _CROSS_TARGET_MAPS: Dict[str, Dict[str, str]] = {
 
 
 def _filter_files_by_target(
-    deployed_files: List[str], target: Union[str, List[str]]
-) -> Tuple[List[str], Dict[str, str]]:
+    deployed_files: list[str], target: str | list[str]
+) -> tuple[list[str], dict[str, str]]:
     """Filter deployed file paths by target prefix, with cross-target mapping.
 
     When files are deployed under one target prefix (e.g. ``.github/skills/``)
@@ -74,7 +73,7 @@ def _filter_files_by_target(
     """
     if isinstance(target, list):
         # Union all prefixes for the targets in the list
-        prefixes: List[str] = []
+        prefixes: list[str] = []
         seen_prefixes: set = set()
         for t in target:
             for p in _TARGET_PREFIXES.get(t, []):
@@ -86,7 +85,7 @@ def _filter_files_by_target(
         # multiple targets map the same source prefix. In practice this
         # is benign -- common multi-target combos (e.g. claude+copilot)
         # match prefixes directly without needing cross-maps.
-        cross_map: Dict[str, str] = {}
+        cross_map: dict[str, str] = {}
         for t in target:
             cross_map.update(_CROSS_TARGET_MAPS.get(t, {}))
     else:
@@ -95,7 +94,7 @@ def _filter_files_by_target(
 
     direct = [f for f in deployed_files if any(f.startswith(p) for p in prefixes)]
 
-    path_mappings: Dict[str, str] = {}
+    path_mappings: dict[str, str] = {}
     if cross_map:
         direct_set = set(direct)
         for f in deployed_files:
@@ -103,7 +102,7 @@ def _filter_files_by_target(
                 continue
             for src_prefix, dst_prefix in cross_map.items():
                 if f.startswith(src_prefix):
-                    mapped = dst_prefix + f[len(src_prefix):]
+                    mapped = dst_prefix + f[len(src_prefix) :]
                     if mapped not in direct_set:
                         direct.append(mapped)
                         direct_set.add(mapped)
@@ -116,7 +115,7 @@ def _filter_files_by_target(
 def enrich_lockfile_for_pack(
     lockfile: LockFile,
     fmt: str,
-    target: Union[str, List[str]],
+    target: str | list[str],
 ) -> str:
     """Create an enriched copy of the lockfile YAML with a ``pack:`` section.
 
@@ -142,14 +141,12 @@ def enrich_lockfile_for_pack(
 
     # Build a filtered lockfile YAML: each dep's deployed_files is narrowed
     # to only the paths matching the pack target (with cross-target mapping).
-    all_mappings: Dict[str, str] = {}
+    all_mappings: dict[str, str] = {}
     data = yaml.safe_load(lockfile.to_yaml())
     if data and "dependencies" in data:
         for dep in data["dependencies"]:
             if "deployed_files" in dep:
-                filtered, mappings = _filter_files_by_target(
-                    dep["deployed_files"], target
-                )
+                filtered, mappings = _filter_files_by_target(dep["deployed_files"], target)
                 dep["deployed_files"] = filtered
                 all_mappings.update(mappings)
 
@@ -169,7 +166,7 @@ def enrich_lockfile_for_pack(
     # Serialize target as a comma-joined string for backward compatibility
     # with consumers that expect a plain string in pack.target.
     target_str = ",".join(target) if isinstance(target, list) else target
-    pack_meta: Dict = {
+    pack_meta: dict = {
         "format": fmt,
         "target": target_str,
         "packed_at": datetime.now(timezone.utc).isoformat(),
@@ -180,7 +177,7 @@ def enrich_lockfile_for_pack(
         # prefix keys from _CROSS_TARGET_MAPS rather than reverse-engineering
         # them from file paths.
         if isinstance(target, list):
-            cross_map: Dict[str, str] = {}
+            cross_map: dict[str, str] = {}
             for t in target:
                 cross_map.update(_CROSS_TARGET_MAPS.get(t, {}))
         else:

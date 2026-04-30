@@ -8,7 +8,7 @@ import urllib.parse
 from collections import OrderedDict
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional  # noqa: F401, UP035
 from unittest.mock import patch
 
 import pytest
@@ -19,19 +19,18 @@ from apm_cli.marketplace.builder import (
     MarketplaceBuilder,
     ResolvedPackage,
 )
-from apm_cli.marketplace.semver import (
-    SemVer,
-    parse_semver,
-    satisfies_range,
-)
 from apm_cli.marketplace.errors import (
-    BuildError,
+    BuildError,  # noqa: F401
     HeadNotAllowedError,
     NoMatchingVersionError,
     RefNotFoundError,
 )
 from apm_cli.marketplace.ref_resolver import RemoteRef
-
+from apm_cli.marketplace.semver import (
+    SemVer,  # noqa: F401
+    parse_semver,
+    satisfies_range,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -43,10 +42,7 @@ _SHA_C = "c" * 40
 _SHA_D = "d" * 40
 
 _GOLDEN_PATH = (
-    Path(__file__).resolve().parent.parent.parent
-    / "fixtures"
-    / "marketplace"
-    / "golden.json"
+    Path(__file__).resolve().parent.parent.parent / "fixtures" / "marketplace" / "golden.json"
 )
 
 # Standard marketplace.yml for many tests
@@ -82,13 +78,13 @@ def _write_yml(tmp_path: Path, content: str) -> Path:
     return p
 
 
-def _make_refs(*tags: str, branches: Optional[List[str]] = None) -> List[RemoteRef]:
+def _make_refs(*tags: str, branches: list[str] | None = None) -> list[RemoteRef]:
     """Build a list of RemoteRef for testing.
 
     Tags are assigned SHAs starting from 'a' * 40, 'b' * 40, etc.
     """
     sha_chars = "abcdef0123456789"
-    refs: List[RemoteRef] = []
+    refs: list[RemoteRef] = []
     for i, tag in enumerate(tags):
         ch = sha_chars[i % len(sha_chars)]
         refs.append(RemoteRef(name=f"refs/tags/{tag}", sha=ch * 40))
@@ -102,10 +98,10 @@ def _make_refs(*tags: str, branches: Optional[List[str]] = None) -> List[RemoteR
 class _MockRefResolver:
     """In-process mock for RefResolver -- no subprocess calls."""
 
-    def __init__(self, refs_by_remote: Optional[Dict[str, List[RemoteRef]]] = None):
+    def __init__(self, refs_by_remote: dict[str, list[RemoteRef]] | None = None):
         self._refs = refs_by_remote or {}
 
-    def list_remote_refs(self, owner_repo: str) -> List[RemoteRef]:
+    def list_remote_refs(self, owner_repo: str) -> list[RemoteRef]:
         if owner_repo not in self._refs:
             from apm_cli.marketplace.errors import GitLsRemoteError
 
@@ -123,8 +119,8 @@ class _MockRefResolver:
 def _build_with_mock(
     tmp_path: Path,
     yml_content: str,
-    refs_by_remote: Dict[str, List[RemoteRef]],
-    options: Optional[BuildOptions] = None,
+    refs_by_remote: dict[str, list[RemoteRef]],
+    options: BuildOptions | None = None,
 ) -> BuildReport:
     """Build using a mock ref resolver.
 
@@ -381,7 +377,7 @@ class TestBuilderHappyPath:
 class TestFieldStripping:
     """Verify APM-only fields are stripped from output."""
 
-    _APM_ONLY_KEYS = {"version", "ref", "subdir", "tag_pattern", "include_prerelease", "build"}
+    _APM_ONLY_KEYS = {"version", "ref", "subdir", "tag_pattern", "include_prerelease", "build"}  # noqa: RUF012
 
     def test_no_apm_keys_in_top_level(self, tmp_path: Path) -> None:
         refs = {
@@ -638,7 +634,7 @@ class TestNoMatch:
             version: "^5.0.0"
         """
         refs = {"acme/pkg": _make_refs("v1.0.0", "v2.0.0")}
-        with pytest.raises(NoMatchingVersionError, match="5.0.0"):
+        with pytest.raises(NoMatchingVersionError, match="5.0.0"):  # noqa: RUF043
             _build_with_mock(tmp_path, yml, refs)
 
 
@@ -1172,7 +1168,9 @@ class TestDuplicateNameWarnings:
 
     def test_duplicate_names_produce_warning(self, tmp_path: Path) -> None:
         """Bypass yml_schema by feeding resolved packages directly."""
-        yml_path = _write_yml(tmp_path, """\
+        yml_path = _write_yml(
+            tmp_path,
+            """\
         name: test-mkt
         description: Test
         version: 1.0.0
@@ -1182,7 +1180,8 @@ class TestDuplicateNameWarnings:
           - name: alpha
             source: acme/alpha
             version: "^1.0.0"
-        """)
+        """,
+        )
         refs = {"acme/alpha": _make_refs("v1.0.0")}
         builder = MarketplaceBuilder(yml_path, BuildOptions(offline=True))
         builder._resolver = _MockRefResolver(refs)  # type: ignore[assignment]
@@ -1218,10 +1217,13 @@ class TestDuplicateNameWarnings:
         assert "special/learning" in warnings[0]
 
     def test_duplicate_names_without_subdir_uses_repository(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """When subdir is absent, the warning should reference the repository."""
-        yml_path = _write_yml(tmp_path, """\
+        yml_path = _write_yml(
+            tmp_path,
+            """\
         name: test-mkt
         description: Test
         version: 1.0.0
@@ -1231,11 +1233,14 @@ class TestDuplicateNameWarnings:
           - name: alpha
             source: acme/alpha
             version: "^1.0.0"
-        """)
+        """,
+        )
         builder = MarketplaceBuilder(yml_path, BuildOptions(offline=True))
-        builder._resolver = _MockRefResolver({  # type: ignore[assignment]
-            "acme/alpha": _make_refs("v1.0.0"),
-        })
+        builder._resolver = _MockRefResolver(
+            {  # type: ignore[assignment]
+                "acme/alpha": _make_refs("v1.0.0"),
+            }
+        )
 
         dupes = [
             ResolvedPackage(
@@ -1297,7 +1302,7 @@ class TestFetchRemoteMetadata:
         *,
         name: str = "my-tool",
         source_repo: str = "acme/my-tool",
-        subdir: Optional[str] = None,
+        subdir: str | None = None,
         sha: str = _SHA_A,
     ) -> ResolvedPackage:
         return ResolvedPackage(
@@ -1391,7 +1396,11 @@ class TestFetchRemoteMetadata:
         with patch(
             "apm_cli.marketplace.builder.urllib.request.urlopen",
             side_effect=urllib.error.HTTPError(
-                url="", code=404, msg="Not Found", hdrs=None, fp=None  # type: ignore[arg-type]
+                url="",
+                code=404,
+                msg="Not Found",
+                hdrs=None,
+                fp=None,  # type: ignore[arg-type]
             ),
         ):
             result = builder._fetch_remote_metadata(pkg)
@@ -1537,7 +1546,8 @@ class TestMetadataEnrichment:
         assert result["plugins"][0]["version"] == "1.2.3"
 
     def test_remote_fetch_failure_leaves_no_description_or_version(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """When remote fetch returns None, plugin has no description or version."""
         yml_path = _write_yml(tmp_path, _BASIC_YML)
@@ -1707,7 +1717,8 @@ class TestResolveGitHubToken:
         assert builder._auth_resolver is not None
 
     def test_prefetch_metadata_resolves_token_before_fetching(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """_prefetch_metadata resolves the token once, then workers use it."""
         from unittest.mock import MagicMock
@@ -1802,7 +1813,7 @@ class TestFetchRemoteMetadataGHEHost:
         *,
         name: str = "test-pkg",
         source_repo: str = "acme/tools",
-        subdir: Optional[str] = None,
+        subdir: str | None = None,
         sha: str = _SHA_A,
     ) -> ResolvedPackage:
         return ResolvedPackage(

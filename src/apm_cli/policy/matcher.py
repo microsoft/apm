@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from functools import lru_cache
-from typing import Optional, Tuple
+from typing import Optional, Tuple  # noqa: F401, UP035
 
 from .schema import DependencyPolicy, McpPolicy
 
@@ -43,9 +43,9 @@ def matches_pattern(canonical_ref: str, pattern: str) -> bool:
 
 def _check_allow_deny(
     ref: str,
-    allow: Optional[Tuple[str, ...]],
-    deny: Tuple[str, ...],
-) -> Tuple[bool, str]:
+    allow: tuple[str, ...] | None,
+    deny: tuple[str, ...],
+) -> tuple[bool, str]:
     """Shared allow/deny logic.
 
     1. If ref matches any deny pattern -> denied.
@@ -71,7 +71,7 @@ def _check_allow_deny(
 def check_dependency_allowed(
     canonical_ref: str,
     policy: DependencyPolicy,
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """Check if a dependency is allowed by policy."""
     return _check_allow_deny(canonical_ref, policy.allow, policy.deny)
 
@@ -79,6 +79,6 @@ def check_dependency_allowed(
 def check_mcp_allowed(
     server_name: str,
     policy: McpPolicy,
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """Check if an MCP server is allowed by policy."""
     return _check_allow_deny(server_name, policy.allow, policy.deny)

@@ -1,16 +1,16 @@
 """Bundle packer  -- creates self-contained APM bundles from the resolved dependency tree."""
 
-import os
+import os  # noqa: F401
 import shutil
 import tarfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union  # noqa: F401, UP035
 
+from ..core.target_detection import detect_target
 from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
 from ..models.apm_package import APMPackage
-from ..core.target_detection import detect_target
-from .lockfile_enrichment import enrich_lockfile_for_pack, _filter_files_by_target
+from .lockfile_enrichment import _filter_files_by_target, enrich_lockfile_for_pack
 
 
 @dataclass
@@ -18,17 +18,17 @@ class PackResult:
     """Result of a pack operation."""
 
     bundle_path: Path
-    files: List[str] = field(default_factory=list)
+    files: list[str] = field(default_factory=list)
     lockfile_enriched: bool = False
     mapped_count: int = 0
-    path_mappings: Dict[str, str] = field(default_factory=dict)
+    path_mappings: dict[str, str] = field(default_factory=dict)
 
 
 def pack_bundle(
     project_root: Path,
     output_dir: Path,
     fmt: str = "apm",
-    target: Optional[Union[str, List[str]]] = None,
+    target: str | list[str] | None = None,
     archive: bool = False,
     dry_run: bool = False,
     force: bool = False,
@@ -99,7 +99,8 @@ def pack_bundle(
         if is_hybrid_root and not package.description and logger:
             try:
                 import frontmatter as _frontmatter
-                with open(skill_md_path, "r", encoding="utf-8") as _f:
+
+                with open(skill_md_path, encoding="utf-8") as _f:
                     _skill_post = _frontmatter.load(_f)
                 _skill_desc = _skill_post.metadata.get("description")
             except Exception:
@@ -109,7 +110,7 @@ def pack_bundle(
                     "apm.yml is missing 'description'. SKILL.md has its own "
                     "description, but that is for agent invocation -- not "
                     "for 'apm view' or search. Add a short tagline to "
-                    "apm.yml:  description: \"One-line human summary\""
+                    'apm.yml:  description: "One-line human summary"'
                 )
 
         # Guard: reject local-path dependencies (non-portable)
@@ -150,7 +151,7 @@ def pack_bundle(
     #    (local_path == ".") and any local-path manifest deps. Local content is
     #    not portable and is bundled separately via the project's own files
     #    (or rejected outright at L89-97 for manifest-declared local deps).
-    all_deployed: List[str] = []
+    all_deployed: list[str] = []
     for dep in lockfile.get_all_dependencies():
         if dep.source == "local":
             continue
@@ -159,7 +160,7 @@ def pack_bundle(
     filtered_files, path_mappings = _filter_files_by_target(all_deployed, effective_target)
     # Deduplicate while preserving order
     seen = set()
-    unique_files: List[str] = []
+    unique_files: list[str] = []
     for f in filtered_files:
         if f not in seen:
             seen.add(f)
@@ -167,29 +168,24 @@ def pack_bundle(
 
     # 5. Verify each path is safe (no traversal) and exists on disk
     project_root_resolved = project_root.resolve()
-    missing: List[str] = []
+    missing: list[str] = []
     for rel_path in unique_files:
         # Guard against absolute paths or path-traversal entries in deployed_files
         p = Path(rel_path)
         if p.is_absolute() or ".." in p.parts:
-            raise ValueError(
-                f"Refusing to pack unsafe path from lockfile: {rel_path!r}"
-            )
+            raise ValueError(f"Refusing to pack unsafe path from lockfile: {rel_path!r}")
         # For cross-target mapped files, verify the original (on-disk) path
         disk_path = path_mappings.get(rel_path, rel_path)
         abs_path = project_root / disk_path
         if not abs_path.resolve().is_relative_to(project_root_resolved):
-            raise ValueError(
-                f"Refusing to pack path that escapes project root: {disk_path!r}"
-            )
+            raise ValueError(f"Refusing to pack path that escapes project root: {disk_path!r}")
         # deployed_files may reference directories (ending with /)
         if not abs_path.exists():
             missing.append(disk_path)
     if missing:
         raise ValueError(
-            f"The following deployed files are missing on disk  -- "
-            f"run 'apm install' to restore them:\n"
-            + "\n".join(f"  - {m}" for m in missing)
+            f"The following deployed files are missing on disk  -- "  # noqa: F541
+            f"run 'apm install' to restore them:\n" + "\n".join(f"  - {m}" for m in missing)  # noqa: F541
         )
 
     # Dry-run: return file list without writing anything
@@ -224,7 +220,8 @@ def pack_bundle(
         elif src.is_file():
             verdict = SecurityGate.scan_text(
                 src.read_text(encoding="utf-8", errors="replace"),
-                str(src), policy=WARN_POLICY,
+                str(src),
+                policy=WARN_POLICY,
             )
             _scan_findings_total += len(verdict.all_findings)
     if _scan_findings_total:
@@ -252,11 +249,10 @@ def pack_bundle(
         dest = bundle_dir / rel_path
         # Defense-in-depth: verify mapped destination stays inside the bundle
         if not dest.resolve().is_relative_to(bundle_dir_resolved):
-            raise ValueError(
-                f"Refusing to write outside bundle directory: {rel_path!r}"
-            )
+            raise ValueError(f"Refusing to write outside bundle directory: {rel_path!r}")
         if src.is_dir():
             from ..security.gate import ignore_symlinks
+
             shutil.copytree(src, dest, dirs_exist_ok=True, ignore=ignore_symlinks)
         else:
             dest.parent.mkdir(parents=True, exist_ok=True)

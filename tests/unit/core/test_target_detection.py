@@ -1,20 +1,20 @@
 """Tests for target detection module."""
 
+import click
+import pytest
+
 from apm_cli.core.target_detection import (
     ALL_CANONICAL_TARGETS,
     EXPERIMENTAL_TARGETS,
+    VALID_TARGET_VALUES,
+    TargetParamType,
     detect_target,
+    get_target_description,
     normalize_target_list,
     should_compile_agents_md,
     should_compile_claude_md,
     should_compile_gemini_md,
-    get_target_description,
-    TargetParamType,
-    VALID_TARGET_VALUES,
 )
-
-import click
-import pytest
 
 
 class TestDetectTarget:
@@ -25,13 +25,13 @@ class TestDetectTarget:
         # Create both folders - should still use explicit
         (tmp_path / ".github").mkdir()
         (tmp_path / ".claude").mkdir()
-        
+
         target, reason = detect_target(
             project_root=tmp_path,
             explicit_target="vscode",
             config_target="claude",
         )
-        
+
         assert target == "vscode"
         assert reason == "explicit --target flag"
 
@@ -41,7 +41,7 @@ class TestDetectTarget:
             project_root=tmp_path,
             explicit_target="copilot",
         )
-        
+
         assert target == "vscode"
         assert reason == "explicit --target flag"
 
@@ -51,19 +51,19 @@ class TestDetectTarget:
             project_root=tmp_path,
             explicit_target="agents",
         )
-        
+
         assert target == "vscode"
         assert reason == "explicit --target flag"
 
     def test_explicit_target_claude_wins(self, tmp_path):
         """Explicit --target claude always wins."""
         (tmp_path / ".github").mkdir()
-        
+
         target, reason = detect_target(
             project_root=tmp_path,
             explicit_target="claude",
         )
-        
+
         assert target == "claude"
         assert reason == "explicit --target flag"
 
@@ -73,7 +73,7 @@ class TestDetectTarget:
             project_root=tmp_path,
             explicit_target="all",
         )
-        
+
         assert target == "all"
         assert reason == "explicit --target flag"
 
@@ -84,7 +84,7 @@ class TestDetectTarget:
             explicit_target=None,
             config_target="copilot",
         )
-        
+
         assert target == "vscode"
         assert reason == "apm.yml target"
 
@@ -95,7 +95,7 @@ class TestDetectTarget:
             explicit_target=None,
             config_target="vscode",
         )
-        
+
         assert target == "vscode"
         assert reason == "apm.yml target"
 
@@ -106,7 +106,7 @@ class TestDetectTarget:
             explicit_target=None,
             config_target="claude",
         )
-        
+
         assert target == "claude"
         assert reason == "apm.yml target"
 
@@ -117,33 +117,33 @@ class TestDetectTarget:
             explicit_target=None,
             config_target="all",
         )
-        
+
         assert target == "all"
         assert reason == "apm.yml target"
 
     def test_auto_detect_github_only(self, tmp_path):
         """Auto-detect vscode when only .github/ exists."""
         (tmp_path / ".github").mkdir()
-        
+
         target, reason = detect_target(
             project_root=tmp_path,
             explicit_target=None,
             config_target=None,
         )
-        
+
         assert target == "vscode"
         assert "detected .github/ folder" in reason
 
     def test_auto_detect_claude_only(self, tmp_path):
         """Auto-detect claude when only .claude/ exists."""
         (tmp_path / ".claude").mkdir()
-        
+
         target, reason = detect_target(
             project_root=tmp_path,
             explicit_target=None,
             config_target=None,
         )
-        
+
         assert target == "claude"
         assert "detected .claude/ folder" in reason
 
@@ -151,13 +151,13 @@ class TestDetectTarget:
         """Auto-detect all when both folders exist."""
         (tmp_path / ".github").mkdir()
         (tmp_path / ".claude").mkdir()
-        
+
         target, reason = detect_target(
             project_root=tmp_path,
             explicit_target=None,
             config_target=None,
         )
-        
+
         assert target == "all"
         assert ".github/" in reason and ".claude/" in reason
 
@@ -168,7 +168,7 @@ class TestDetectTarget:
             explicit_target=None,
             config_target=None,
         )
-        
+
         assert target == "minimal"
         assert "no target folder found" in reason
 
@@ -379,6 +379,7 @@ class TestDetectTargetOpencode:
 # ---------------------------------------------------------------------------
 # TargetParamType tests
 # ---------------------------------------------------------------------------
+
 
 class TestTargetParamType:
     """Tests for TargetParamType Click parameter type."""
@@ -635,7 +636,7 @@ class TestCoworkParserLayer:
         This locks the constant so that adding a new experimental target
         requires an intentional test update.
         """
-        assert EXPERIMENTAL_TARGETS == frozenset({"copilot-cowork"})
+        assert frozenset({"copilot-cowork"}) == EXPERIMENTAL_TARGETS
 
     # -- Case 7: "all" expansion does NOT include "copilot-cowork" ---------------
 

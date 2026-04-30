@@ -15,14 +15,14 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional  # noqa: F401, UP035
 
 import click
 
 from ..core.command_logger import CommandLogger
 from ..policy._help_text import POLICY_SOURCE_FORMS_HELP
 from ..policy.discovery import (
-    DEFAULT_CACHE_TTL,
+    DEFAULT_CACHE_TTL,  # noqa: F401
     MAX_STALE_TTL,
     PolicyFetchResult,
     _read_cache_entry,
@@ -33,7 +33,7 @@ from ..policy.schema import ApmPolicy
 from ..utils.console import (
     RICH_AVAILABLE,
     _get_console,
-    _rich_echo,
+    _rich_echo,  # noqa: F401
     _rich_error,
     _rich_panel,
 )
@@ -51,11 +51,11 @@ def _strip_source_prefix(source: str) -> str:
     """Strip ``org:`` / ``url:`` / ``file:`` prefix from a source label."""
     for prefix in ("org:", "url:", "file:"):
         if source.startswith(prefix):
-            return source[len(prefix):]
+            return source[len(prefix) :]
     return source
 
 
-def _format_age(seconds: Optional[int]) -> str:
+def _format_age(seconds: int | None) -> str:
     """Render a cache age in a compact, human-friendly way."""
     if seconds is None or seconds < 0:
         return "n/a"
@@ -71,7 +71,7 @@ def _format_age(seconds: Optional[int]) -> str:
     return f"{days}d ago"
 
 
-def _count_rules(policy: Optional[ApmPolicy]) -> Dict[str, int]:
+def _count_rules(policy: ApmPolicy | None) -> dict[str, int]:
     """Count actionable rules across every top-level policy section.
 
     Returns a flat dict keyed by ``<section>_<axis>`` with integer values.
@@ -82,7 +82,7 @@ def _count_rules(policy: Optional[ApmPolicy]) -> Dict[str, int]:
     if policy is None:
         return {}
 
-    def _allow_count(value: Optional[tuple]) -> int:
+    def _allow_count(value: tuple | None) -> int:
         return -1 if value is None else len(value)
 
     return {
@@ -92,15 +92,13 @@ def _count_rules(policy: Optional[ApmPolicy]) -> Dict[str, int]:
         "mcp_deny": len(policy.mcp.deny),
         "mcp_allow": _allow_count(policy.mcp.allow),
         "mcp_transports_allowed": _allow_count(policy.mcp.transport.allow),
-        "compilation_targets_allowed": _allow_count(
-            policy.compilation.target.allow
-        ),
+        "compilation_targets_allowed": _allow_count(policy.compilation.target.allow),
         "manifest_required_fields": len(policy.manifest.required_fields),
         "unmanaged_files_directories": len(policy.unmanaged_files.directories),
     }
 
 
-def _summarize_rules(counts: Dict[str, int]) -> List[str]:
+def _summarize_rules(counts: dict[str, int]) -> list[str]:
     """Render rule counts as a list of one-line human summaries.
 
     Skips axes that report ``-1`` (no opinion) or ``0``.  An axis with
@@ -119,7 +117,7 @@ def _summarize_rules(counts: Dict[str, int]) -> List[str]:
         ("manifest_required_fields", "required manifest fields"),
         ("unmanaged_files_directories", "unmanaged-file directories"),
     ]
-    summary: List[str] = []
+    summary: list[str] = []
     for key, label in labels:
         value = counts.get(key, -1)
         if value > 0:
@@ -127,7 +125,7 @@ def _summarize_rules(counts: Dict[str, int]) -> List[str]:
     return summary
 
 
-def _resolve_chain_refs(result: PolicyFetchResult, project_root: Path) -> List[str]:
+def _resolve_chain_refs(result: PolicyFetchResult, project_root: Path) -> list[str]:
     """Best-effort lookup of the resolved ``extends`` chain for ``result``.
 
     For org / URL fetches the chain is persisted in cache meta.json by
@@ -142,9 +140,7 @@ def _resolve_chain_refs(result: PolicyFetchResult, project_root: Path) -> List[s
     repo_ref = _strip_source_prefix(result.source)
     if repo_ref and not result.source.startswith("file:"):
         try:
-            entry = _read_cache_entry(
-                repo_ref, project_root, ttl=MAX_STALE_TTL
-            )
+            entry = _read_cache_entry(repo_ref, project_root, ttl=MAX_STALE_TTL)
             if entry is not None and entry.chain_refs:
                 # Drop the leaf itself from the visible chain.
                 tail = [r for r in entry.chain_refs if r != repo_ref]
@@ -173,7 +169,7 @@ def _enforcement_label(result: PolicyFetchResult) -> str:
 
 def _cache_age_label(result: PolicyFetchResult) -> str:
     """Render the cache-age column with stale / refresh-failure context."""
-    if result.outcome == "disabled" or result.policy is None and not result.cached:
+    if result.outcome == "disabled" or (result.policy is None and not result.cached):
         return "n/a"
     age = _format_age(result.cache_age_seconds)
     if result.cache_stale and result.fetch_error:
@@ -187,9 +183,9 @@ def _cache_age_label(result: PolicyFetchResult) -> str:
 
 def _build_report(
     result: PolicyFetchResult,
-    chain: List[str],
-    counts: Dict[str, int],
-) -> Dict[str, Any]:
+    chain: list[str],
+    counts: dict[str, int],
+) -> dict[str, Any]:
     """Assemble the structured report consumed by both renderers."""
     source_label = result.source if result.source else "n/a"
     if result.outcome in ("absent", "no_git_remote", "disabled"):
@@ -214,12 +210,12 @@ def _build_report(
 # -- Renderers ------------------------------------------------------
 
 
-def _render_json(report: Dict[str, Any]) -> None:
+def _render_json(report: dict[str, Any]) -> None:
     """Emit the report as a single JSON object on stdout."""
     click.echo(json.dumps(report, indent=2, sort_keys=True))
 
 
-def _render_table(report: Dict[str, Any]) -> None:
+def _render_table(report: dict[str, Any]) -> None:
     """Render the report as a Rich table (with a plain-text fallback)."""
     rows = [
         ("Outcome", report["outcome"]),

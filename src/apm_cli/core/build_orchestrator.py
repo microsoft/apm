@@ -15,9 +15,10 @@ adds no new build logic, only routing.
 from __future__ import annotations
 
 import enum
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol, Sequence
+from typing import Any, Protocol
 
 import yaml
 
@@ -132,6 +133,8 @@ class MarketplaceProducer:
     def produce(self, options: BuildOptions, logger: Any) -> ProducerResult:
         from ..marketplace.builder import (
             BuildOptions as MktBuildOptions,
+        )
+        from ..marketplace.builder import (
             MarketplaceBuilder,
         )
         from ..marketplace.errors import BuildError as MktBuildError
@@ -180,7 +183,7 @@ class MarketplaceProducer:
         )
         # Bind the synthetic yml path to the actual on-disk file when it
         # exists so any downstream diagnostics report a real location.
-        builder._yml_path = yml_for_builder  # noqa: SLF001 -- intentional
+        builder._yml_path = yml_for_builder
 
         try:
             report = builder.build()
@@ -218,9 +221,7 @@ def detect_outputs(apm_yml_path: Path) -> set[OutputKind]:
         except yaml.YAMLError as exc:
             raise BuildError(f"Failed to parse {apm_yml_path}: {exc}") from exc
         if loaded is not None and not isinstance(loaded, dict):
-            raise BuildError(
-                f"{apm_yml_path} must be a YAML mapping at the top level."
-            )
+            raise BuildError(f"{apm_yml_path} must be a YAML mapping at the top level.")
         data = loaded or {}
 
     if data and data.get("dependencies"):
@@ -248,9 +249,7 @@ class BuildOrchestrator:
         producers: Sequence[ArtifactProducer] | None = None,
     ) -> None:
         self._producers: list[ArtifactProducer] = (
-            list(producers)
-            if producers is not None
-            else [BundleProducer(), MarketplaceProducer()]
+            list(producers) if producers is not None else [BundleProducer(), MarketplaceProducer()]
         )
 
     def run(self, options: BuildOptions, logger: Any = None) -> BuildResult:

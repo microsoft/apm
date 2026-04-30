@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import builtins
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple  # noqa: F401, UP035
 
 from apm_cli.install.services import integrate_local_content
 from apm_cli.install.sources import make_dependency_source
@@ -33,18 +33,18 @@ if TYPE_CHECKING:
 
 
 def _resolve_download_strategy(
-    ctx: "InstallContext",
+    ctx: InstallContext,
     dep_ref: Any,
     install_path: Path,
-) -> Tuple[Any, bool, Any, bool]:
+) -> tuple[Any, bool, Any, bool]:
     """Determine whether *dep_ref* can be served from cache.
 
     Returns ``(resolved_ref, skip_download, dep_locked_chk, ref_changed)``
     where *skip_download* is ``True`` when the package at *install_path*
     is already up-to-date.
     """
-    from apm_cli.models.apm_package import GitReferenceType
     from apm_cli.drift import detect_ref_change
+    from apm_cli.models.apm_package import GitReferenceType
     from apm_cli.utils.path_security import safe_rmtree
 
     existing_lockfile = ctx.existing_lockfile
@@ -67,7 +67,7 @@ def _resolve_download_strategy(
                 _lck and _lck.resolved_commit and _lck.resolved_commit != "cached"
             )
         if dep_ref.reference or (update_refs and _has_lockfile_sha):
-            try:
+            try:  # noqa: SIM105
                 resolved_ref = ctx.downloader.resolve_git_reference(dep_ref)
             except Exception:
                 pass  # If resolution fails, skip cache (fetch latest)
@@ -82,13 +82,9 @@ def _resolve_download_strategy(
     # Detect if manifest ref changed vs what the lockfile recorded.
     # detect_ref_change() handles all transitions including None->ref.
     _dep_locked_chk = (
-        existing_lockfile.get_dependency(dep_ref.get_unique_key())
-        if existing_lockfile
-        else None
+        existing_lockfile.get_dependency(dep_ref.get_unique_key()) if existing_lockfile else None
     )
-    ref_changed = detect_ref_change(
-        dep_ref, _dep_locked_chk, update_refs=update_refs
-    )
+    ref_changed = detect_ref_change(dep_ref, _dep_locked_chk, update_refs=update_refs)
     # Phase 5 (#171): Also skip when lockfile SHA matches local HEAD
     # -- but not when the manifest ref has changed (user wants different version).
     lockfile_match = False
@@ -104,6 +100,7 @@ def _resolve_download_strategy(
                 if resolved_ref and resolved_ref.resolved_commit == locked_dep.resolved_commit:
                     try:
                         from git import Repo as GitRepo
+
                         local_repo = GitRepo(install_path)
                         if local_repo.head.commit.hexsha == locked_dep.resolved_commit:
                             lockfile_match = True
@@ -112,12 +109,14 @@ def _resolve_download_strategy(
                         # content-hash verification (#763).
                         if locked_dep.content_hash and install_path.is_dir():
                             from apm_cli.utils.content_hash import verify_package_hash
+
                             if verify_package_hash(install_path, locked_dep.content_hash):
                                 lockfile_match = True
             elif not ref_changed:
                 # Normal mode: compare local HEAD with lockfile SHA.
                 try:
                     from git import Repo as GitRepo
+
                     local_repo = GitRepo(install_path)
                     if local_repo.head.commit.hexsha == locked_dep.resolved_commit:
                         lockfile_match = True
@@ -126,6 +125,7 @@ def _resolve_download_strategy(
                     # content-hash verification (#763).
                     if locked_dep.content_hash and install_path.is_dir():
                         from apm_cli.utils.content_hash import verify_package_hash
+
                         if verify_package_hash(install_path, locked_dep.content_hash):
                             lockfile_match = True
     skip_download = install_path.exists() and (
@@ -137,11 +137,9 @@ def _resolve_download_strategy(
     # Verify content integrity when lockfile has a hash
     if skip_download and _dep_locked_chk and _dep_locked_chk.content_hash:
         from apm_cli.utils.content_hash import verify_package_hash
+
         if not verify_package_hash(install_path, _dep_locked_chk.content_hash):
-            _hash_msg = (
-                f"Content hash mismatch for "
-                f"{dep_ref.get_unique_key()} -- re-downloading"
-            )
+            _hash_msg = f"Content hash mismatch for {dep_ref.get_unique_key()} -- re-downloading"
             diagnostics.warn(_hash_msg, package=dep_ref.get_unique_key())
             if logger:
                 logger.progress(_hash_msg)
@@ -165,10 +163,9 @@ def _resolve_download_strategy(
     return resolved_ref, skip_download, _dep_locked_chk, ref_changed
 
 
-
 def _integrate_root_project(
-    ctx: "InstallContext",
-) -> Optional[Dict[str, int]]:
+    ctx: InstallContext,
+) -> dict[str, int] | None:
     """Integrate root project's own .apm/ primitives (#714).
 
     Users should not need a dummy "./agent/apm.yml" stub to get their
@@ -190,6 +187,7 @@ def _integrate_root_project(
         return None
 
     import builtins
+
     from apm_cli.integration.base_integrator import BaseIntegrator
 
     logger = ctx.logger
@@ -236,13 +234,18 @@ def _integrate_root_project(
 
         _local_total = sum(
             _root_result.get(k, 0)
-            for k in ("prompts", "agents", "skills", "sub_skills",
-                      "instructions", "commands", "hooks")
+            for k in (
+                "prompts",
+                "agents",
+                "skills",
+                "sub_skills",
+                "instructions",
+                "commands",
+                "hooks",
+            )
         )
         if _local_total > 0 and logger:
-            logger.verbose_detail(
-                f"Deployed {_local_total} local primitive(s) from .apm/"
-            )
+            logger.verbose_detail(f"Deployed {_local_total} local primitive(s) from .apm/")
 
         return {
             "installed": 1,
@@ -257,6 +260,7 @@ def _integrate_root_project(
         }
     except Exception as e:
         import traceback as _tb
+
         diagnostics.error(
             f"Failed to integrate root project primitives: {e}",
             package="<root>",
@@ -265,9 +269,7 @@ def _integrate_root_project(
         # When root integration is the *only* action (no external deps),
         # a failure means nothing was deployed -- surface it clearly.
         if not ctx.all_apm_deps and logger:
-            logger.error(
-                f"Root project primitives could not be integrated: {e}"
-            )
+            logger.error(f"Root project primitives could not be integrated: {e}")
         return None
 
 
@@ -282,7 +284,7 @@ _COWORK_MAX_SKILL_SIZE: int = 1_048_576  # 1 MB
 """Warn when any source SKILL.md exceeds this size in bytes."""
 
 
-def _check_cowork_caps(ctx: "InstallContext") -> None:
+def _check_cowork_caps(ctx: InstallContext) -> None:
     """Emit warn-only diagnostics for cowork skill count and size caps.
 
     Walks ``<cowork_root>/skills/*/SKILL.md`` (existing + just-installed)
@@ -303,8 +305,7 @@ def _check_cowork_caps(ctx: "InstallContext") -> None:
         return
 
     skill_dirs = sorted(
-        d for d in cowork_root.iterdir()
-        if d.is_dir() and (d / "SKILL.md").exists()
+        d for d in cowork_root.iterdir() if d.is_dir() and (d / "SKILL.md").exists()
     )
 
     # --- count cap ---
@@ -342,7 +343,7 @@ def _check_cowork_caps(ctx: "InstallContext") -> None:
 # ======================================================================
 
 
-def run(ctx: "InstallContext") -> None:
+def run(ctx: InstallContext) -> None:
     """Execute the sequential integration phase.
 
     On return the following *ctx* fields are populated / updated:
@@ -372,9 +373,7 @@ def run(ctx: "InstallContext") -> None:
 
     # Direct dep keys: used to distinguish direct vs transitive failures
     # so direct failures can be surfaced immediately.
-    direct_dep_keys = builtins.set(
-        dep.get_unique_key() for dep in ctx.all_apm_deps
-    )
+    direct_dep_keys = builtins.set(dep.get_unique_key() for dep in ctx.all_apm_deps)
 
     # Int counters (written back to ctx at end of function)
     installed_count = ctx.installed_count
@@ -416,20 +415,28 @@ def run(ctx: "InstallContext") -> None:
             dep_key = dep_ref.get_unique_key()
             if dep_key in ctx.callback_failures:
                 if ctx.logger:
-                    ctx.logger.verbose_detail(f"  Skipping {dep_key} (already failed during resolution)")
+                    ctx.logger.verbose_detail(
+                        f"  Skipping {dep_key} (already failed during resolution)"
+                    )
                 continue
 
             # --- Build the right DependencySource and run the template ---
             if dep_ref.is_local and dep_ref.local_path:
                 source = make_dependency_source(
-                    ctx, dep_ref, install_path, dep_key,
+                    ctx,
+                    dep_ref,
+                    install_path,
+                    dep_key,
                 )
             else:
                 resolved_ref, skip_download, dep_locked_chk, ref_changed = (
                     _resolve_download_strategy(ctx, dep_ref, install_path)
                 )
                 source = make_dependency_source(
-                    ctx, dep_ref, install_path, dep_key,
+                    ctx,
+                    dep_ref,
+                    install_path,
+                    dep_key,
                     resolved_ref=resolved_ref,
                     dep_locked_chk=dep_locked_chk,
                     ref_changed=ref_changed,
@@ -451,10 +458,7 @@ def run(ctx: "InstallContext") -> None:
                         ctx.diagnostics.error(
                             f"{dep_key}: integration failed",
                             package=dep_key,
-                            detail=(
-                                f"Resolved at {install_path}. "
-                                f"Run with --verbose for details."
-                            ),
+                            detail=(f"Resolved at {install_path}. Run with --verbose for details."),
                         )
                     elif ctx.logger:
                         ctx.logger.error(f"{dep_key}: integration failed")
