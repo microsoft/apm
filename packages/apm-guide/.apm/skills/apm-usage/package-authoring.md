@@ -58,6 +58,38 @@ my-package/
         resource2.md
 ```
 
+## Hook files
+
+Packages can ship hooks (pre/post tool-use scripts) by placing JSON
+files under `hooks/` or `.apm/hooks/`.  When a package targets multiple
+tools, use target-specific filenames so each tool receives only its own
+hooks:
+
+| Filename pattern | Deployed to |
+|---|---|
+| `*-copilot-hooks.json` | GitHub Copilot only |
+| `*-cursor-hooks.json` | Cursor only |
+| `*-claude-hooks.json` | Claude Code only |
+| `*-codex-hooks.json` | Codex CLI only |
+| `*-gemini-hooks.json` | Gemini CLI only |
+| Any other name (e.g. `hooks.json`, `telemetry-hooks.json`) | All targets |
+
+Example directory tree for a multi-target hook package:
+
+```
+my-hooks-pkg/
+  hooks/
+    hooks.json              # deployed to all targets
+    copilot-hooks.json      # Copilot only
+    cursor-hooks.json       # Cursor only
+    claude-hooks.json       # Claude Code only
+```
+
+APM automatically normalises event names per target (e.g. `postToolUse`
+becomes `PostToolUse` in Claude) and rewrites path variables
+(`${PLUGIN_ROOT}`, `${CURSOR_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`) to
+the correct target-specific form.
+
 ## Manifest fields: `target:` validation contract
 
 The `target:` field in `apm.yml` controls which output runtimes the package

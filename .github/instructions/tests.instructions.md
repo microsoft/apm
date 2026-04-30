@@ -83,8 +83,8 @@ URL string is the same code shape as a security-critical sanitizer check, and
 the analyzer cannot tell them apart. Treating every URL assertion uniformly
 through `urlparse` keeps CI green AND reinforces the security pattern that
 production code must follow (see
-`src/apm_cli/install/mcp_registry.py::_redact_url_credentials` and
-`src/apm_cli/install/mcp_registry.py::_is_local_or_metadata_host`).
+`src/apm_cli/install/mcp/registry.py::_redact_url_credentials` and
+`src/apm_cli/install/mcp/registry.py::_is_local_or_metadata_host`).
 
 ## Other rules
 

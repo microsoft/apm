@@ -1,4 +1,4 @@
-"""Unit tests for ``apm_cli.install.mcp_registry``.
+"""Unit tests for ``apm_cli.install.mcp.registry``.
 
 Covers:
 - ``resolve_registry_url`` precedence chain and visibility of overrides.
@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from apm_cli.install.mcp_registry import (
+from apm_cli.install.mcp.registry import (
     registry_env_override,
     resolve_registry_url,
     validate_registry_url,
@@ -178,12 +178,44 @@ class TestValidateRegistryUrl:
         with pytest.raises(Exception):
             validate_registry_url("")
 
+    def test_credentials_redacted_in_invalid_url_message(self):
+        """UsageError text for an unparseable URL must not echo credentials."""
+        import click
+        with pytest.raises(click.UsageError) as exc_info:
+            validate_registry_url("nothttp://user:topsecret@example.com")
+        msg = str(exc_info.value.message)
+        assert "topsecret" not in msg
+        assert "user:" not in msg
+
+    def test_credentials_redacted_in_unsupported_scheme_message(self):
+        """UsageError text for an unsupported scheme must not echo credentials."""
+        import click
+        with pytest.raises(click.UsageError) as exc_info:
+            validate_registry_url("ws://user:topsecret@example.com")
+        msg = str(exc_info.value.message)
+        assert "topsecret" not in msg
+        assert "user:" not in msg
+
+
+class TestValidateMcpDryRunEntrySignature:
+    """Public-API contract: explicit typed kwargs, no silent **kwargs."""
+
+    def test_unknown_kwarg_raises_type_error(self):
+        from apm_cli.install.mcp.registry import validate_mcp_dry_run_entry
+        with pytest.raises(TypeError):
+            validate_mcp_dry_run_entry("srv", bogus_kwarg="x")
+
+    def test_accepts_documented_kwargs(self):
+        from apm_cli.install.mcp.registry import validate_mcp_dry_run_entry
+        # Should not raise -- bare-string registry shorthand is valid.
+        validate_mcp_dry_run_entry("srv")
+
 
 class TestRedactUrlCredentials:
     """U3 regression: never echo URL credentials in logger output."""
 
     def test_strips_user_password(self):
-        from apm_cli.install.mcp_registry import _redact_url_credentials
+        from apm_cli.install.mcp.registry import _redact_url_credentials
         from urllib.parse import urlparse
         out = _redact_url_credentials("https://user:secret@registry.example.com/v0")
         assert "secret" not in out
@@ -192,7 +224,7 @@ class TestRedactUrlCredentials:
         assert parsed.hostname == "registry.example.com"
 
     def test_keeps_port(self):
-        from apm_cli.install.mcp_registry import _redact_url_credentials
+        from apm_cli.install.mcp.registry import _redact_url_credentials
         from urllib.parse import urlparse
         out = _redact_url_credentials("https://u:p@registry.example.com:8443/x")
         parsed = urlparse(out)
@@ -201,7 +233,7 @@ class TestRedactUrlCredentials:
         assert "p" not in (parsed.password or "")
 
     def test_no_creds_passthrough(self):
-        from apm_cli.install.mcp_registry import _redact_url_credentials
+        from apm_cli.install.mcp.registry import _redact_url_credentials
         url = "https://registry.example.com/v0"
         assert _redact_url_credentials(url) == url
 
