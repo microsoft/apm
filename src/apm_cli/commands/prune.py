@@ -13,7 +13,11 @@ from ..core.command_logger import CommandLogger
 from ..deps.lockfile import LockFile, get_lockfile_path
 from ..models.apm_package import APMPackage
 from ..utils.path_security import PathTraversalError, safe_rmtree  # noqa: F401
-from ._helpers import _build_expected_install_paths, _scan_installed_packages
+from ._helpers import (
+    _build_expected_install_paths,
+    _expand_with_ancestors,
+    _scan_installed_packages,
+)
 
 
 @click.command(help="Remove APM packages not listed in apm.yml")
@@ -57,7 +61,8 @@ def prune(ctx, dry_run):
             sys.exit(1)
 
         installed_packages = _scan_installed_packages(apm_modules_dir)
-        orphaned_packages = [p for p in installed_packages if p not in expected_installed]
+        expected_with_ancestors = _expand_with_ancestors(expected_installed)
+        orphaned_packages = [p for p in installed_packages if p not in expected_with_ancestors]
 
         if not orphaned_packages:
             logger.success("No orphaned packages found. apm_modules/ is clean.", symbol="check")

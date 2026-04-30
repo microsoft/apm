@@ -12,6 +12,7 @@ from ...constants import APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FI
 from ...core.command_logger import CommandLogger
 from ...core.target_detection import TargetParamType
 from ...models.apm_package import APMPackage, ValidationResult, validate_apm_package  # noqa: F401
+from .._helpers import _expand_with_ancestors
 from ._utils import (
     _count_package_files,  # noqa: F401
     _count_primitives,
@@ -144,6 +145,9 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     except Exception:
         pass  # Continue without lockfile if it can't be read
 
+    # Precompute expected paths + ancestors for O(1) orphan checks
+    declared_with_ancestors = _expand_with_ancestors(declared_sources.keys())
+
     # Scan for installed packages in org-namespaced structure
     # Walks the tree to find directories containing apm.yml or SKILL.md,
     # handling GitHub (2-level), ADO (3-level), and subdirectory (4+ level) packages.
@@ -181,7 +185,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                 version = package.version or "unknown"
             primitives = _count_primitives(candidate)
 
-            is_orphaned = org_repo_name not in declared_sources
+            is_orphaned = org_repo_name not in declared_with_ancestors
             if is_orphaned:
                 orphaned_packages.append(org_repo_name)
 

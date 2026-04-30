@@ -279,6 +279,35 @@ class TestDepsListCommand(_DepsCmdBase):
         assert result.exit_code == 0
         assert "No insecure APM dependencies installed" in result.output
 
+    def test_list_subdirectory_parent_not_orphaned(self):
+        """Parent dir of a subdirectory virtual package is not flagged orphaned."""
+        with self._chdir_tmp() as tmp:
+            # Declare a dict-form dependency with path: pointing into .apm/skills/
+            (tmp / "apm.yml").write_text(
+                "name: test-project\n"
+                "version: 1.0.0\n"
+                "dependencies:\n"
+                "  apm:\n"
+                "    - git: github.example.com/owner/repo\n"
+                "      path: .apm/skills/my-skill\n",
+                encoding="utf-8",
+            )
+
+            # Simulate installed layout: owner/repo/ with apm.yml (so deps list
+            # scans it as a package) plus the nested skill content.
+            repo_dir = tmp / "apm_modules" / "owner" / "repo"
+            repo_dir.mkdir(parents=True)
+            (repo_dir / "apm.yml").write_text("name: repo\nversion: 1.0.0\n", encoding="utf-8")
+            skill_dir = repo_dir / ".apm" / "skills" / "my-skill"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text("# Skill", encoding="utf-8")
+
+            with patch("apm_cli.core.scope.get_apm_dir", return_value=tmp), _force_rich_fallback():
+                result = self.runner.invoke(cli, ["deps", "list"])
+
+            assert result.exit_code == 0
+            assert "orphaned package(s) found" not in result.output
+
 
 class TestDepsTreeCommand(_DepsCmdBase):
     """Tests for apm deps tree."""
