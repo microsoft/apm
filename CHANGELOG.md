@@ -48,28 +48,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`shared/apm.md` single-credential-group runs no longer fail validation** with a spurious `missing APM bundles: apm-default` -- a normalisation step recreates the per-group subdir layout that `actions/download-artifact@v5+` flattens away. (#1051)
 - **`apm pack` works against GitHub Enterprise and other Git hosts** -- honors `GITHUB_HOST` for GHES auth and accepts GitHub / GHES / GitLab / Bitbucket / ADO / SSH URL forms. (#1008)
 - **ADO Entra ID auth no longer silently fails.** Bearer tokens from `az account get-access-token` are plumbed through, errors are typed + actionable (4-case diagnostic), and `apm install --update` pre-flights auth before touching files. (#1015)
+- `apm marketplace add` now uses the `name` field from the fetched `marketplace.json` as the default local alias, falling back to the repo name only when the manifest omits it or declares an invalid value. This restores parity with Claude Code install instructions (e.g. `addyosmani/agent-skills` registers as `addy-agent-skills` as that repo's README documents). Existing marketplace entries are unaffected; use `--name` to override explicitly. (#1032)
 - `GEMINI.md` is now only created when explicitly targeted. (#1019)
 - Windows-friendly: auto-discovery CLI output uses POSIX paths so `apm install` / `apm compile` output is readable on Windows. (#1018)
 - Generated-file footer no longer prints stray `specify` before `apm compile`. (#996)
 - CodeQL `clear-text-storage` false-positive resolved (variable rename). (#1002)
-
-### Maintainer tooling
-
-- **NOTICE.md** added at repo root per CELA template -- one entry per direct dependency with verbatim license text. (#1043)
-- **NOTICE.md is self-maintaining**: a CI drift gate fails with an exact diff + a `make notice` fix command, plus `dependency-review-action` denies GPL/AGPL/SSPL additions on PR. (#1045, closes #1044)
-- `shared/apm.md` ships a `repair_string_array` helper to unblock `apm-prep` on gh-aw's `[a b]` Go-default formatting (paper-cut filed upstream). (#1033)
-- PR-review-panel and triage-panel skip cleanly (gray ⊘) on unmatched labels instead of failing -- no failed check, no quota burn. Bumps `gh-aw` to v0.71.1. (#1030)
-- `shared/apm.md` recompiled against `microsoft/apm-action@v1.5.0` for the new `bundles-file:` matrix restore (used by #982). (#1026)
-- Review-panel: true matrix fan-out per reviewer persona, binary `approve` / `request-changes` aggregation, label-driven merge gate. (#1022)
-- **Dev Container Feature scaffolded** under `devcontainer/` (closes #717) -- `install.sh` + 37 bats unit tests + 6-distro integration matrix. Not yet published to `ghcr.io`; will be announced in the release that publishes the OCI artifact. (#861)
-
-### Security
-
-- `apm audit --ci` and `apm install` now fail-closed when `apm.yml` is malformed YAML or not a mapping -- previously, policy and baseline checks were silently skipped (severity: medium -- policy bypass). **Migration:** repos with latently malformed `apm.yml` will go from CI-pass to CI-fail on upgrade. Validate before upgrading with `python -c "import yaml; yaml.safe_load(open('apm.yml'))"` or run `apm audit --ci` locally. Fix any YAML syntax errors in `apm.yml` (stray tabs, unquoted colons, non-mapping root). (#936)
-
-### Changed
-
-- Replace `black` + `isort` with Ruff for linting and formatting; add deterministic CI lint gate (~3s), configure 10 rule sets with strangler-fig complexity thresholds, and fix a Python 3.10 f-string compatibility bug in `audit_report.py` -- by @sergio-sisternes-epam (#999)
 
 ## [0.10.0] - 2026-04-27
 
