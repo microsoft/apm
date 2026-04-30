@@ -118,7 +118,12 @@ check, not a redesign.
 2. Create a new branch for your feature/fix: `git checkout -b feature/your-feature-name` or `git checkout -b fix/issue-description`.
 3. Make your changes.
 4. Run tests: `uv run pytest tests/unit tests/test_console.py -x`
-5. Ensure your code passes linting: `uv run ruff check src/ tests/`
+5. Mirror the CI `Lint` job locally before pushing -- both commands must be silent:
+   ```bash
+   uv run --extra dev ruff check src/ tests/
+   uv run --extra dev ruff format --check src/ tests/
+   ```
+   Auto-fix with `ruff check --fix` and `ruff format` (without `--check`). The full contract -- including common surprises like `RUF043`, `UP006`, `I001` -- lives in [`.apm/instructions/linting.instructions.md`](.apm/instructions/linting.instructions.md), the canonical source of truth that CI, the `pr-description-skill`, and the dogfood `apm compile -t copilot` all mirror.
 6. Commit your changes with a descriptive message.
 7. Push to your fork.
 8. Submit a pull request.
@@ -215,13 +220,21 @@ This project follows:
 - [PEP 8](https://pep8.org/) for Python style guidelines
 - We use [Ruff](https://docs.astral.sh/ruff/) for linting and formatting
 
-CI enforces all lint and formatting rules automatically. You can run them locally:
+CI enforces all lint and formatting rules automatically. The CI `Lint` job runs the following two commands -- both must be silent before you open a PR:
 
 ```bash
-uv run ruff check src/ tests/        # lint
-uv run ruff check --fix src/ tests/   # lint with auto-fix
-uv run ruff format src/ tests/        # format
+uv run --extra dev ruff check src/ tests/         # lint (CI-mirror)
+uv run --extra dev ruff format --check src/ tests/ # format check (CI-mirror)
 ```
+
+Auto-fix locally with:
+
+```bash
+uv run --extra dev ruff check src/ tests/ --fix   # lint with auto-fix
+uv run --extra dev ruff format src/ tests/        # apply formatter
+```
+
+The canonical lint contract (with common diagnostics and lifecycle binding for skills that claim green CI) lives in [`.apm/instructions/linting.instructions.md`](.apm/instructions/linting.instructions.md). Do not redefine these commands elsewhere -- honor that instruction.
 
 ### Optional: local pre-commit hooks
 

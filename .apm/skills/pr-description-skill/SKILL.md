@@ -216,8 +216,7 @@ Run these steps in order. Tick each before moving on.
 1. [ ] Confirm every row of the activation contract is filled in.
    Defense-in-depth gate: before drafting the body, confirm the
    repo's lint contract is green (canonical commands and lifecycle
-   binding live in the project's `copilot-instructions.md` Linting
-   block - do NOT inline or restate them here). If lint is red,
+   binding live in `.apm/instructions/linting.instructions.md`). If lint is red,
    STOP, fix, re-run; a PR body claiming green CI while lint fails
    is a credibility tax we refuse to take on.
 2. [ ] Read the diff in full. Identify per-file change summary,
