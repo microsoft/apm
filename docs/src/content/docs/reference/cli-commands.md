@@ -1187,7 +1187,7 @@ apm add OWNER/REPO [OWNER/REPO ...]
 When you pass more than one `OWNER/REPO`, registrations run in order.
 Non-security failures (404, network, parse error) are reported and the
 loop continues; a final summary line reports `N registered, M failed`.
-Security-class failures (path traversal, signature mismatch) abort the
+Security-class failures (path traversal) abort the
 batch immediately and any remaining sources are skipped (fail-closed).
 
 **Examples:**

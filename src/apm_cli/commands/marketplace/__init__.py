@@ -9,7 +9,6 @@ from __future__ import annotations
 import builtins
 import json
 import os  # noqa: F401
-import re
 import sys
 import traceback
 from pathlib import Path
@@ -53,16 +52,6 @@ from .._helpers import _get_console
 
 # Restore builtins shadowed by subcommand names
 list = builtins.list
-
-
-# Marketplace alias must satisfy this pattern so it can appear on the right of
-# ``@`` in ``apm install <plugin>@<marketplace>`` syntax.
-_ALIAS_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
-
-
-def _is_valid_alias(value: str) -> bool:
-    """Return True when ``value`` is a legal marketplace alias."""
-    return bool(value) and _ALIAS_PATTERN.match(value) is not None
 
 
 # ---------------------------------------------------------------------------

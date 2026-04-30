@@ -25,6 +25,7 @@ import traceback
 import click
 
 from ...core.command_logger import CommandLogger
+from ...marketplace.aliasing import is_valid_alias as _is_valid_alias
 from ...utils.console import STATUS_SYMBOLS
 from ...utils.path_security import PathTraversalError
 from .._helpers import _is_interactive
@@ -54,7 +55,6 @@ def _add_single(repo, name, branch, host, verbose) -> int:
         from ...marketplace.models import MarketplaceSource
         from ...marketplace.registry import add_marketplace
         from ...utils.github_host import default_host, is_valid_fqdn
-        from . import _is_valid_alias  # local import to avoid cycle
 
         if "/" not in repo:
             logger.error(

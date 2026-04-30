@@ -29,7 +29,8 @@ import click
 @click.command(
     name="add",
     help=(
-        "Register one or more plugin marketplaces from OWNER/REPO. Alias for `apm marketplace add`."
+        "Register one or more plugin marketplaces from OWNER/REPO. "
+        "Legacy spelling: `apm marketplace add`."
     ),
 )
 @click.argument("repos", nargs=-1, required=True, metavar="OWNER/REPO [OWNER/REPO ...]")
@@ -67,7 +68,7 @@ def add(repos, name, branch, host, verbose):
 
 @click.command(
     name="remove",
-    help=("Unregister a plugin marketplace by name. Alias for `apm marketplace remove`."),
+    help=("Unregister a plugin marketplace by name. Legacy spelling: `apm marketplace remove`."),
 )
 @click.argument("name", required=True, metavar="NAME")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
