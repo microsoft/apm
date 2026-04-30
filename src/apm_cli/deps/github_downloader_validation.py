@@ -12,20 +12,44 @@ the first argument; the public class still exposes
 ``validate_virtual_package_exists`` as a thin delegating method so test
 mocks (``patch("...GitHubPackageDownloader.validate_virtual_package_exists")``)
 keep working unchanged.
+
+Security gates (round-2 panel findings)
+---------------------------------------
+* ``validate_path_segments`` is invoked at the entry point on the
+  user-supplied ``virtual_path`` before any URL interpolation, blocking
+  ``..`` traversal segments from leaking into Contents API or archive
+  URLs.
+* The ``ls-remote`` fallback no longer fails open: a successful
+  ``ls-remote`` only proves the *ref* exists, so we additionally
+  shallow-fetch + ``ls-tree`` to confirm ``vpath`` resolves at that ref
+  before returning ``True``.
+* For Azure DevOps, credentials (PAT or AAD bearer) are injected via
+  ``http.extraheader`` (see ``build_authorization_header_git_env``) and
+  never embedded in the clone URL.  This keeps tokens out of the OS
+  process table, git's own logs, and any downstream debug output.
 """
 
 from __future__ import annotations
 
+import contextlib
 import re
+import tempfile
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import quote
 
 import git
 import requests
 from git.exc import GitCommandError
 
-from ..utils.github_host import default_host, is_github_hostname
+from ..config import get_apm_temp_dir
+from ..utils.file_ops import robust_rmtree
+from ..utils.github_host import (
+    build_authorization_header_git_env,
+    default_host,
+    is_github_hostname,
+)
+from ..utils.path_security import PathTraversalError, validate_path_segments
 
 if TYPE_CHECKING:
     from .dependency_reference import DependencyReference
@@ -40,6 +64,18 @@ def _is_sha_pin(ref: str) -> bool:
     return bool(_SHA_RE.fullmatch(ref))
 
 
+def _split_owner_repo(repo_url: str) -> tuple[str, str] | None:
+    """Split ``owner/repo`` safely; return ``None`` if the shape is wrong.
+
+    Guards against ``ValueError`` on tuple-unpacking when ``repo_url``
+    has no ``/`` (panel round-2 finding 2).
+    """
+    parts = repo_url.split("/", 1)
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        return None
+    return parts[0], parts[1]
+
+
 def validate_virtual_package_exists(
     downloader: GitHubPackageDownloader,
     dep_ref: DependencyReference,
@@ -51,20 +87,20 @@ def validate_virtual_package_exists(
     Supports virtual files, collections, and subdirectory packages.  For
     subdirectory packages the marker-file probes are a fast positive
     signal; their absence is not a failure -- two fallbacks (Contents API
-    directory probe, then ``git ls-remote`` mirroring the install auth
-    chain) catch packages whose API auth is stricter than their git
-    auth.  See PR #941 for the auth-alignment rationale.
+    directory probe, then ``git ls-remote`` + shallow-fetch path probe
+    mirroring the install auth chain) catch packages whose API auth is
+    stricter than their git auth.  See PR #941 for the auth-alignment
+    rationale.
 
     Args:
         downloader: The ``GitHubPackageDownloader`` instance providing
             transport, auth, and helper methods.
         dep_ref: Parsed dependency reference for the virtual package.
         verbose_callback: Optional per-probe log callback (verbose mode).
-        warn_callback: Optional non-verbose warning callback.  When the
-            ls-remote fallback resolves the ref but the path could not
-            be probed, a single ``[!]`` warning is emitted here so users
-            in default-verbosity mode still see that path validation
-            was deferred to install-time.
+        warn_callback: Optional non-verbose warning callback.  Emitted
+            when the ls-remote + shallow-fetch fallback resolves both
+            the ref and the path, so users in default-verbosity mode
+            still see that strict API validation was bypassed.
 
     Returns:
         True if the package exists / is accessible, False otherwise.
@@ -72,8 +108,18 @@ def validate_virtual_package_exists(
     if not dep_ref.is_virtual:
         raise ValueError("Can only validate virtual packages with this method")
 
-    ref = dep_ref.reference or "main"
-    vpath = dep_ref.virtual_path
+    ref: str = dep_ref.reference or "main"
+    vpath: str = dep_ref.virtual_path
+
+    # SECURITY (round-2 finding 7): reject traversal segments before any
+    # URL interpolation. Empty / single-dot segments are tolerated only
+    # because some legitimate vpaths normalise to them; '..' is hard-rejected.
+    try:
+        validate_path_segments(vpath, context="virtual path")
+    except PathTraversalError as exc:
+        if verbose_callback:
+            verbose_callback(f"  [x] virtual path rejected: {exc}")
+        return False
 
     def _log(msg: str) -> None:
         if verbose_callback:
@@ -86,8 +132,7 @@ def validate_virtual_package_exists(
             return True
         except RuntimeError as exc:
             # Marker-file misses on the success path are expected, not
-            # errors -- reserve [x] for genuine failures.  See panel
-            # finding 3 on PR #941.
+            # errors -- reserve [x] for genuine failures.
             _log(f"  [i] {path}@{ref} ({exc})")
             return False
 
@@ -117,21 +162,31 @@ def validate_virtual_package_exists(
         if _directory_exists_at_ref(downloader, dep_ref, vpath, ref, _log):
             return True
 
-        # Fallback 2: explicit ref + git ls-remote.  Mirrors install's
-        # auth chain so we accept packages whose API auth is stricter
-        # than their git auth.  Only kicks in with an explicit ref --
-        # without one, strict validation keeps path typos failing fast
-        # on the default branch.
+        # Fallback 2: explicit ref + git ls-remote + shallow-fetch path
+        # probe.  Mirrors install's auth chain so we accept packages
+        # whose API auth is stricter than their git auth.  Only kicks in
+        # with an explicit ref -- without one, strict validation keeps
+        # path typos failing fast on the default branch.
         if dep_ref.reference is not None and _ref_exists_via_ls_remote(
             downloader, dep_ref, ref, _log
         ):
-            _log(f'  [+] ref "{ref}" resolves via ls-remote; deferring path validation to install')
-            if warn_callback is not None:
-                warn_callback(
-                    "[!] path validation deferred to install (API probe "
-                    "inconclusive); use --verbose to see probe detail"
-                )
-            return True
+            # SECURITY (round-2 finding 6): close the fail-open.  ls-remote
+            # only confirms the ref exists; we MUST also confirm the
+            # subdirectory exists at that ref via a shallow-fetch +
+            # ls-tree probe, otherwise a typo'd vpath silently passes
+            # validation.
+            if _path_exists_in_tree_at_ref(downloader, dep_ref, vpath, ref, _log):
+                _log(f'  [+] "{vpath}@{ref}" confirmed via shallow-fetch + ls-tree')
+                if warn_callback is not None:
+                    warn_callback(
+                        f"Path '{vpath}@{ref}' validated via git fallback "
+                        "(API probe was inconclusive). To fix the API gap: "
+                        "verify your token's Contents-API scope, or run "
+                        "'apm install --verbose' to see the probe chain."
+                    )
+                return True
+            _log(f'  [i] ref "{ref}" resolves but "{vpath}" not present in the tree at that ref')
+            return False
         return False
 
     return _probe(vpath)
@@ -155,13 +210,19 @@ def _directory_exists_at_ref(
     implemented for github.com / GHE; non-GitHub hosts return ``False``
     and rely on the marker-file probes above.
     """
-    host = dep_ref.host or default_host()
+    host: str = dep_ref.host or default_host()
     if dep_ref.is_azure_devops() or not is_github_hostname(host):
         log(f"  [i] directory-exists probe skipped (host {host} not supported)")
         return False
 
-    owner, repo = dep_ref.repo_url.split("/", 1)
+    parts = _split_owner_repo(dep_ref.repo_url)
+    if parts is None:
+        log(f"  [x] repo_url '{dep_ref.repo_url}' missing owner/repo split")
+        return False
+    owner, repo = parts
     token = downloader.auth_resolver.resolve(host, owner, port=dep_ref.port).token
+
+    from urllib.parse import quote
 
     encoded_path = quote(path, safe="/")
     encoded_ref = quote(ref, safe="")
@@ -180,7 +241,7 @@ def _directory_exists_at_ref(
             f"https://{host}/api/v3/repos/{owner}/{repo}/contents/{encoded_path}?ref={encoded_ref}"
         )
 
-    headers = {"Accept": "application/vnd.github+json"}
+    headers: dict[str, str] = {"Accept": "application/vnd.github+json"}
     if token:
         headers["Authorization"] = f"token {token}"
 
@@ -202,67 +263,66 @@ def _directory_exists_at_ref(
         return False
 
 
-def _ref_exists_via_ls_remote(
+def _build_validation_attempts(
     downloader: GitHubPackageDownloader,
     dep_ref: DependencyReference,
-    ref: str,
     log: Callable[[str], None],
-) -> bool:
-    """Check if ``ref`` exists in the remote repo via ``git ls-remote``.
+) -> list[tuple[str, str, dict]]:
+    """Return the (label, url, env) attempts for a probe against ``dep_ref``.
 
-    Lenient fallback for when the Contents API rejects a path with 404
-    even though ``git clone`` would succeed -- e.g. SSO-half-authorized
-    PATs, fine-grained PAT scope mismatches between API and git
-    protocols, or repo policies that gate the Contents API more
-    strictly than git.
+    Mirrors the auth chain in ``_clone_with_fallback`` and centralises the
+    ADO header-injection switch so both ``ls-remote`` and the shallow-fetch
+    path probe reuse it.
 
-    Mirrors the auth chain in ``_clone_with_fallback``:
-
-    1. Authenticated HTTPS -- explicit PAT in ``downloader.git_env``
-       (silences credential helpers via ``GIT_ASKPASS=echo``).
-    2. Plain HTTPS w/ credential helper -- token stripped from the URL,
-       relaxed env, so the user's git credential helper resolves the
-       credential install ultimately uses.
-    3. SSH -- only when the user signaled SSH is acceptable (``--ssh``
-       or ``--allow-protocol-fallback``).  Wrapped in
-       ``ssh -o BatchMode=yes -o ConnectTimeout=10`` so it never hangs
-       on a passphrase prompt.
-
-    For SHA-pinned refs (hex-only, 7-40 chars) the ls-remote call omits
-    ``--heads --tags`` because those filters silently drop commit SHAs
-    -- the full ref list is scanned for a SHA-prefix match instead.
-    See panel finding 1 on PR #941.
-
-    Returns ``True`` on the first attempt that resolves the ref;
-    ``False`` if every attempt fails.
+    SECURITY (round-2 finding 8): for Azure DevOps we inject the token via
+    ``http.extraheader`` (``Authorization: Bearer ...``) regardless of
+    whether the resolved scheme is ``basic`` (PAT) or ``bearer`` (AAD JWT).
+    This keeps tokens out of the OS process table, git's own logs, and the
+    URLs that ``_sanitize_git_error`` would otherwise need to scrub.
     """
     if dep_ref.is_artifactory():
-        return False
+        return []
 
-    dep_token = downloader._resolve_dep_token(dep_ref)
+    dep_token: str | None = downloader._resolve_dep_token(dep_ref)
     dep_auth_ctx = downloader._resolve_dep_auth_ctx(dep_ref)
-    dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
-    is_insecure = dep_ref.is_insecure
+    dep_auth_scheme: str = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
+    is_insecure: bool = bool(getattr(dep_ref, "is_insecure", False))
+    is_ado: bool = dep_ref.is_azure_devops()
 
-    attempts: list = []
+    attempts: list[tuple[str, str, dict]] = []
 
-    # Attempt 1: explicit PAT, locked-down env. Skipped when no token.
+    # Attempt 1: explicit token, locked-down env. Skipped when no token.
     if dep_token:
-        token_env = (
-            dep_auth_ctx.git_env
-            if dep_auth_scheme == "bearer" and dep_auth_ctx is not None
-            else downloader.git_env
-        )
-        token_url = downloader._build_repo_url(
-            dep_ref.repo_url,
-            use_ssh=False,
-            dep_ref=dep_ref,
-            token=dep_token,
-            auth_scheme=dep_auth_scheme,
-        )
-        attempts.append(("authenticated HTTPS", token_url, token_env))
+        if is_ado:
+            # ADO: ALWAYS use header injection, never URL embedding.
+            token_env = {
+                **downloader.git_env,
+                **build_authorization_header_git_env("Bearer", dep_token),
+            }
+            token_url = downloader._build_repo_url(
+                dep_ref.repo_url,
+                use_ssh=False,
+                dep_ref=dep_ref,
+                token="",  # tokenless URL
+                auth_scheme="bearer",
+            )
+            attempts.append(("ADO authenticated HTTPS (bearer header)", token_url, token_env))
+        else:
+            token_env = (
+                dep_auth_ctx.git_env
+                if dep_auth_scheme == "bearer" and dep_auth_ctx is not None
+                else downloader.git_env
+            )
+            token_url = downloader._build_repo_url(
+                dep_ref.repo_url,
+                use_ssh=False,
+                dep_ref=dep_ref,
+                token=dep_token,
+                auth_scheme=dep_auth_scheme,
+            )
+            attempts.append(("authenticated HTTPS", token_url, token_env))
 
-    # Attempt 2: plain HTTPS w/ credential helper.
+    # Attempt 2: plain HTTPS w/ credential helper (no token).
     plain_env = downloader._build_noninteractive_git_env(
         preserve_config_isolation=is_insecure,
         suppress_credential_helpers=is_insecure,
@@ -288,6 +348,34 @@ def _ref_exists_via_ls_remote(
             attempts.append(("SSH", ssh_url, ssh_env))
         except Exception as exc:
             log(f"  [i] SSH URL build skipped: {exc}")
+
+    return attempts
+
+
+def _ref_exists_via_ls_remote(
+    downloader: GitHubPackageDownloader,
+    dep_ref: DependencyReference,
+    ref: str,
+    log: Callable[[str], None],
+) -> bool:
+    """Check if ``ref`` exists in the remote repo via ``git ls-remote``.
+
+    Lenient fallback for when the Contents API rejects a path with 404
+    even though ``git clone`` would succeed -- e.g. SSO-half-authorized
+    PATs, fine-grained PAT scope mismatches between API and git
+    protocols, or repo policies that gate the Contents API more
+    strictly than git.
+
+    For SHA-pinned refs (hex-only, 7-40 chars) the ls-remote call omits
+    ``--heads --tags`` because those filters silently drop commit SHAs
+    -- the full ref list is scanned for a SHA-prefix match instead.
+
+    Returns ``True`` on the first attempt that resolves the ref;
+    ``False`` if every attempt fails.
+    """
+    attempts = _build_validation_attempts(downloader, dep_ref, log)
+    if not attempts:
+        return False
 
     is_sha = _is_sha_pin(ref)
     ref_lc = ref.lower()
@@ -317,6 +405,76 @@ def _ref_exists_via_ls_remote(
             log(f"  [x] ls-remote failed via {label}: {downloader._sanitize_git_error(str(exc))}")
 
     return False
+
+
+def _path_exists_in_tree_at_ref(
+    downloader: GitHubPackageDownloader,
+    dep_ref: DependencyReference,
+    vpath: str,
+    ref: str,
+    log: Callable[[str], None],
+) -> bool:
+    """Confirm ``vpath`` exists at ``ref`` via shallow fetch + ``ls-tree``.
+
+    Closes the fail-open hole in ``_ref_exists_via_ls_remote``: knowing
+    that the ref exists is not the same as knowing the subdirectory
+    exists at that ref.  This helper initialises a temporary bare repo,
+    fetches a single commit with ``--filter=tree:0`` (no blob bodies,
+    cheap), and then runs ``ls-tree`` to assert the path is present in
+    the resolved tree.  Cleans up the temp dir regardless of outcome.
+
+    Returns:
+        True iff the shallow fetch succeeded AND ``ls-tree`` reported
+        at least one entry for ``vpath`` at the resolved ref.
+    """
+    attempts = _build_validation_attempts(downloader, dep_ref, log)
+    if not attempts:
+        return False
+
+    # Pick the first attempt that has a token (or fall back to the plain
+    # attempt) -- we don't need the full chain here since the ls-remote
+    # caller already proved at least one of these works.
+    label, url, env = attempts[0]
+
+    base_temp = get_apm_temp_dir()
+    tmpdir = Path(tempfile.mkdtemp(prefix="apm-validate-", dir=base_temp))
+    try:
+        bare = tmpdir / "probe.git"
+        bare.mkdir()
+        g = git.cmd.Git(str(bare))
+        try:
+            g.init("--bare")
+            g.remote("add", "origin", url)
+            # --filter=tree:0 keeps the fetch payload tiny: we get the
+            # commit + a single tree object, no blob contents.
+            g.fetch(
+                "--depth=1",
+                "--filter=tree:0",
+                "origin",
+                ref,
+                env=env,
+            )
+        except (GitCommandError, OSError) as exc:
+            log(
+                f"  [x] shallow fetch failed via {label}: "
+                f"{downloader._sanitize_git_error(str(exc))}"
+            )
+            return False
+
+        try:
+            output = g.ls_tree("FETCH_HEAD", vpath, env=env)
+        except (GitCommandError, OSError) as exc:
+            log(f"  [x] ls-tree failed via {label}: {downloader._sanitize_git_error(str(exc))}")
+            return False
+
+        if output and output.strip():
+            log(f"  [+] {vpath}@{ref} present in tree")
+            return True
+        log(f"  [i] {vpath} not present in tree at {ref}")
+        return False
+    finally:
+        with contextlib.suppress(Exception):
+            robust_rmtree(tmpdir)
 
 
 def _ssh_attempt_allowed(downloader: GitHubPackageDownloader) -> bool:
