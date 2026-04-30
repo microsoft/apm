@@ -298,7 +298,7 @@ class TestMarketplaceAdd:
         )
         assert result.exit_code != 0
         assert "gitlab.com" in result.output
-        assert "not yet supported" in result.output.lower()
+        assert "not supported" in result.output.lower()
 
     def test_add_rejects_non_github_host_shorthand(self, runner):
         from apm_cli.commands.marketplace import marketplace
@@ -306,7 +306,7 @@ class TestMarketplaceAdd:
         result = runner.invoke(marketplace, ["add", "gitlab.com/acme/team/plugin-marketplace"])
         assert result.exit_code != 0
         assert "gitlab.com" in result.output
-        assert "not yet supported" in result.output.lower()
+        assert "not supported" in result.output.lower()
 
     def test_add_rejects_http_url(self, runner):
         """Plain HTTP URLs are rejected -- no --allow-insecure escape hatch."""
@@ -360,6 +360,72 @@ class TestMarketplaceAdd:
         result = runner.invoke(marketplace, ["add", "https://github.com/onlyone"])
         assert result.exit_code != 0
         assert "OWNER/REPO" in result.output or "Expected" in result.output
+
+    def test_marketplace_host_classification_via_auth_resolver(self):
+        """Round 3: _is_trusted_marketplace_host must not exist; classification
+        routes through AuthResolver.classify_host (single source of truth)."""
+        from apm_cli.commands import marketplace as marketplace_cmd_pkg
+
+        assert not hasattr(marketplace_cmd_pkg, "_is_trusted_marketplace_host"), (
+            "Round 3 panel: _is_trusted_marketplace_host must be removed; "
+            "classification is owned by AuthResolver.classify_host"
+        )
+
+    def test_untrusted_host_error_has_action_in_first_sentence(self, runner):
+        """Round 3 panel: untrusted-host error leads with the outcome and the fix,
+        not internal security rationale."""
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(
+            marketplace, ["add", "https://gitlab.com/acme/team/plugin-marketplace"]
+        )
+        assert result.exit_code != 0
+        # First non-empty line must state the outcome ("not supported") and name
+        # the host. Security rationale ("forward GitHub credentials", "credential
+        # leak", etc.) must NOT appear in the default error path.
+        first_line = next((line for line in result.output.splitlines() if line.strip()), "").lower()
+        assert "not supported" in first_line
+        assert "gitlab.com" in first_line
+        assert "credential" not in result.output.lower()
+        assert "leak" not in result.output.lower()
+
+    def test_path_traversal_error_message_no_double_exception_text(self, runner):
+        """Round 3 panel: PathTraversalError message must not embed the raw
+        exception text mid-sentence (no double 'rejected: ... rejected' noise)."""
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(
+            marketplace, ["add", "https://github.com/acme/../evil/plugin-marketplace"]
+        )
+        assert result.exit_code != 0
+        out = result.output.lower()
+        # The phrase "path-traversal sequence" must appear at most once.
+        assert out.count("path-traversal sequence") <= 1
+        # Must not duplicate the "rejected" keyword (old form: "rejected: ...
+        # rejected").
+        assert out.count("rejected") <= 1
+
+    def test_conflicting_host_error_includes_runnable_command(self, runner):
+        """Round 3 panel: conflicting-host error must give a copy-pasteable next
+        command (apm marketplace add <raw>) rather than abstract advice."""
+        from apm_cli.commands.marketplace import marketplace
+
+        result = runner.invoke(
+            marketplace,
+            [
+                "add",
+                "https://github.com/acme/plugin-marketplace",
+                "--host",
+                "ghes.corp.example.com",
+            ],
+        )
+        assert result.exit_code != 0
+        # Rich console may soft-wrap long lines; collapse whitespace before
+        # asserting the runnable command appears intact.
+        normalized = " ".join(result.output.split())
+        assert (
+            "apm marketplace add https://github.com/acme/plugin-marketplace" in normalized
+        )
 
 
 class TestMarketplaceList:

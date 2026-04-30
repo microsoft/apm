@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import builtins
 import json
-import os
 import re
 import sys
 import traceback
@@ -299,7 +298,10 @@ def _parse_marketplace_repo(repo: str, host_flag: str | None) -> tuple[str, str,
             path = path[:-4]
         segments = [seg for seg in path.split("/") if seg]
     else:
-        segments = [seg for seg in raw.split("/") if seg]
+        # Mirror the HTTPS branch: decode percent-encoded sequences before splitting
+        # so '%2E%2E' becomes '..' and is caught by validate_path_segments below.
+        raw_decoded = _up.unquote(raw)
+        segments = [seg for seg in raw_decoded.split("/") if seg]
 
     if len(segments) < 2:
         raise ValueError(
@@ -327,7 +329,8 @@ def _parse_marketplace_repo(repo: str, host_flag: str | None) -> tuple[str, str,
     if embedded_host and host_flag and host_flag.strip().lower() != embedded_host:
         raise ValueError(
             f"Conflicting host: --host '{host_flag}' does not match "
-            f"'{embedded_host}' in '{raw}'. Drop --host or use a matching value."
+            f"'{embedded_host}' in '{raw}'.\n"
+            f"To fix: drop --host and run: apm marketplace add {raw}"
         )
 
     # validate_path_segments rejects '.', '..', '~' and cross-platform backslash
@@ -340,29 +343,12 @@ def _parse_marketplace_repo(repo: str, host_flag: str | None) -> tuple[str, str,
     return owner_path, repo_name, embedded_host
 
 
-def _is_trusted_marketplace_host(host: str) -> bool:
-    """Return True when ``host`` is a trusted marketplace host.
-
-    APM's marketplace fetch path is GitHub Contents API only. Sending a
-    bearer token (``GITHUB_TOKEN`` / ``GITHUB_APM_PAT``) to a non-GitHub host
-    would leak credentials to attacker-controlled or unrelated infrastructure,
-    so we reject non-GitHub hosts at registration time -- before any network
-    request is made.
-
-    Trusted hosts:
-      * ``github.com``
-      * ``*.ghe.com``                              (GitHub Enterprise Cloud)
-      * The host configured via ``GITHUB_HOST``    (custom GHES instance)
-    """
-    from ...utils.github_host import is_github_hostname
-
-    h = (host or "").strip().lower()
-    if not h:
-        return False
-    if is_github_hostname(h):
-        return True
-    configured = os.environ.get("GITHUB_HOST", "").strip().lower()
-    return bool(configured and h == configured)
+# Host-trust classification is owned by AuthResolver.classify_host (see
+# core/auth.py). The marketplace command layer routes through it so that the
+# credential-leakage guard at registration time uses the same single source of
+# truth as the fetch-time guard in marketplace/client.py. Adding a second
+# implementation here would create silent drift on a security-critical path.
+_TRUSTED_MARKETPLACE_HOST_KINDS = ("github", "ghe_cloud", "ghes")
 
 
 @marketplace.command(help="Register a marketplace")
@@ -382,15 +368,14 @@ def add(repo, name, branch, host, verbose):
 
         try:
             owner, repo_name, embedded_host = _parse_marketplace_repo(repo, host)
-        except PathTraversalError as exc:
+        except PathTraversalError:
             logger.error(
-                f"Invalid format: '{repo}'. Path-traversal sequence rejected: {exc}. "
-                f"Remove '..', '.', or '~' from the repository path.",
-                symbol="error",
+                f"Invalid repo path '{repo}': contains a path-traversal sequence. "
+                f"Remove '..', '.', or '~' from each path segment."
             )
             sys.exit(1)
         except ValueError as exc:
-            logger.error(str(exc), symbol="error")
+            logger.error(str(exc))
             sys.exit(1)
 
         # Resolve the effective host: explicit --host wins, then host embedded
@@ -410,23 +395,17 @@ def add(repo, name, branch, host, verbose):
         else:
             resolved_host = default_host()
 
-        # Trusted-host gate. APM's marketplace fetch path uses the GitHub
-        # Contents API and would forward GITHUB_TOKEN / GITHUB_APM_PAT to the
-        # host. Sending those to GitLab / Bitbucket / arbitrary FQDNs is a
-        # credential-leak surface, so we reject upfront with an actionable
-        # message instead of letting the fetch silently 404 (or worse, succeed
-        # against a hostile responder).
-        if not _is_trusted_marketplace_host(resolved_host):
+        # Trusted-host gate. Routes through AuthResolver.classify_host so the
+        # registration-time guard and the fetch-time guard in client.py share a
+        # single classification implementation.
+        from ...core.auth import AuthResolver
+
+        if AuthResolver.classify_host(resolved_host).kind not in _TRUSTED_MARKETPLACE_HOST_KINDS:
             logger.error(
-                f"Host '{resolved_host}' is not yet supported for "
-                f"'apm marketplace add'. Currently supported hosts: "
-                f"github.com, *.ghe.com (GitHub Enterprise Cloud), and the "
-                f"host set via the GITHUB_HOST environment variable. "
-                f"GitLab, Bitbucket, and other generic Git hosts are tracked "
-                f"separately -- registering them today would silently fail at "
-                f"fetch time and may forward GitHub credentials to an "
-                f"unintended host.",
-                symbol="error",
+                f"Host '{resolved_host}' is not supported.\n"
+                f"Supported hosts: github.com, *.ghe.com, "
+                f"or the host set via GITHUB_HOST.\n"
+                f"Set GITHUB_HOST or use a supported host, then re-run the command."
             )
             sys.exit(1)
 

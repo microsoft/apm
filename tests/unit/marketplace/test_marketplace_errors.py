@@ -23,6 +23,12 @@ class TestMarketplaceErrors:
         err = MarketplaceNotFoundError("acme")
         assert "acme" in str(err)
         assert "apm marketplace add" in str(err)
+        # Round 3 panel (devx-ux): copy-paste-friendly URL form must appear on
+        # the first line of the recovery hint, not buried in a parenthetical.
+        assert "https://github.com/OWNER/REPO" in str(err)
+        idx_url = str(err).index("https://github.com/OWNER/REPO")
+        idx_short = str(err).index("apm marketplace add OWNER/REPO")
+        assert idx_url < idx_short, "URL form must precede shorthand form in the recovery hint"
         assert err.name == "acme"
 
     def test_plugin_not_found_message(self):
