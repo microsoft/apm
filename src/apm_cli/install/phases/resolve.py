@@ -159,7 +159,8 @@ def run(ctx: "InstallContext") -> None:
                     else project_root
                 )
                 result_path = _copy_local_package(
-                    dep_ref, install_path, base_dir, logger=logger
+                    dep_ref, install_path, base_dir, logger=logger,
+                    project_root=project_root,
                 )
                 if result_path:
                     callback_downloaded[dep_ref.get_unique_key()] = None

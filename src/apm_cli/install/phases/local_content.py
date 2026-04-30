@@ -31,7 +31,11 @@ _copy_local_package
 from pathlib import Path
 
 from apm_cli.utils.console import _rich_error
-from apm_cli.utils.path_security import safe_rmtree
+from apm_cli.utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    safe_rmtree,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +79,9 @@ def _has_local_apm_content(project_root):
 # ---------------------------------------------------------------------------
 
 
-def _copy_local_package(dep_ref, install_path, base_dir, logger=None):
+def _copy_local_package(
+    dep_ref, install_path, base_dir, logger=None, project_root=None
+):
     """Copy a local package to apm_modules/.
 
     Args:
@@ -86,6 +92,15 @@ def _copy_local_package(dep_ref, install_path, base_dir, logger=None):
             for transitive deps it is the source directory of the package
             whose apm.yml declared *dep_ref* (#857).
         logger: Optional CommandLogger for structured output
+        project_root: Optional path to the root project. When supplied, the
+            resolved local source is asserted to lie within ``project_root``
+            via :func:`ensure_path_within`, so a transitive declaration like
+            ``../../../etc/passwd`` is rejected even though ``base_dir`` is
+            now a transitive parent's source directory rather than the root
+            (#940). Note: we deliberately do *not* call
+            ``validate_path_segments`` on ``dep_ref.local_path`` -- that
+            would reject the legitimate one-level-up form ``../sibling``
+            which is the very pattern this PR enables.
 
     Returns:
         install_path on success, None on failure
@@ -97,6 +112,20 @@ def _copy_local_package(dep_ref, install_path, base_dir, logger=None):
         local = (base_dir / local).resolve()
     else:
         local = local.resolve()
+
+    if project_root is not None:
+        try:
+            ensure_path_within(local, project_root)
+        except PathTraversalError as exc:
+            msg = (
+                f"Refusing to copy local package: {dep_ref.local_path!r} "
+                f"resolves outside the project root ({exc})."
+            )
+            if logger:
+                logger.error(msg)
+            else:
+                _rich_error(msg)
+            return None
 
     if not local.is_dir():
         msg = f"Local package path does not exist: {dep_ref.local_path}"

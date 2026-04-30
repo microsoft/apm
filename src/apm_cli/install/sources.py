@@ -154,7 +154,8 @@ class LocalDependencySource(DependencySource):
             return None
 
         result_path = _copy_local_package(
-            dep_ref, install_path, ctx.project_root, logger=logger
+            dep_ref, install_path, ctx.project_root, logger=logger,
+            project_root=ctx.project_root,
         )
         if not result_path:
             diagnostics.error(

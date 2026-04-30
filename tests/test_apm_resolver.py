@@ -748,5 +748,148 @@ class TestDownloadDedupKey(unittest.TestCase):
         assert "team-y" in key_b
 
 
+class TestEffectiveBaseDir(unittest.TestCase):
+    """``_effective_base_dir`` centralizes the parent-or-project-root choice
+    used by ``_download_dedup_key`` and ``_compute_dep_source_path`` (#940)."""
+
+    def test_uses_parent_source_path_when_set(self):
+        resolver = APMDependencyResolver()
+        resolver._project_root = Path("/proj")
+        parent = APMPackage(
+            name="p", version="1.0.0",
+            source_path=Path("/proj/packages/handbook"),
+        )
+        assert resolver._effective_base_dir(parent) == Path("/proj/packages/handbook")
+
+    def test_falls_back_to_project_root_when_parent_is_none(self):
+        resolver = APMDependencyResolver()
+        resolver._project_root = Path("/proj")
+        assert resolver._effective_base_dir(None) == Path("/proj")
+
+    def test_falls_back_to_project_root_when_parent_has_no_source_path(self):
+        resolver = APMDependencyResolver()
+        resolver._project_root = Path("/proj")
+        legacy_parent = APMPackage(name="legacy", version="1.0.0")
+        assert resolver._effective_base_dir(legacy_parent) == Path("/proj")
+
+    def test_returns_none_when_neither_parent_nor_project_root(self):
+        resolver = APMDependencyResolver()
+        # _project_root left as None
+        assert resolver._effective_base_dir(None) is None
+
+
+class TestRejectsLocalPathInRemoteParent(unittest.TestCase):
+    """Relative ``local_path`` declared inside a remotely-fetched package is
+    rejected as a path-traversal vector (#940)."""
+
+    def test_remote_parent_with_relative_local_dep_returns_none(self):
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_modules = project_root / "apm_modules"
+            apm_modules.mkdir()
+            remote_pkg_dir = apm_modules / "evil-pkg"
+            remote_pkg_dir.mkdir()
+
+            resolver = APMDependencyResolver()
+            resolver._project_root = project_root
+            resolver._apm_modules_dir = apm_modules
+
+            remote_parent = APMPackage(
+                name="evil-pkg", version="1.0.0",
+                source_path=remote_pkg_dir,
+            )
+            dep = DependencyReference(
+                repo_url="../../etc/passwd",
+                is_local=True,
+                local_path="../../etc/passwd",
+            )
+            result = resolver._try_load_dependency_package(
+                dep, parent_chain="root > evil-pkg", parent_pkg=remote_parent
+            )
+            assert result is None
+
+    def test_root_project_relative_local_dep_is_allowed(self):
+        # Sanity check: rejection only fires for *remote* parents. A direct
+        # local dep declared by the root project (parent_pkg is None) must
+        # still be processed normally -- here it just won't find anything
+        # on disk and returns None for that reason, not for rejection.
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_modules = project_root / "apm_modules"
+            apm_modules.mkdir()
+            resolver = APMDependencyResolver()
+            resolver._project_root = project_root
+            resolver._apm_modules_dir = apm_modules
+            dep = DependencyReference(
+                repo_url="./packages/foo", is_local=True,
+                local_path="./packages/foo",
+            )
+            # No download_callback set, so it returns None without raising.
+            result = resolver._try_load_dependency_package(
+                dep, parent_chain="", parent_pkg=None
+            )
+            assert result is None  # not found, but reached the install_path branch
+
+    def test_remote_parent_with_absolute_local_dep_not_rejected_by_this_guard(self):
+        # The reject guard only targets *relative* local paths; absolute
+        # paths bypass the relative-anchor ambiguity (the path-traversal
+        # vector this guard addresses) and are handled by the existing
+        # install-path lookup (will return None if not on disk).
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_modules = project_root / "apm_modules"
+            apm_modules.mkdir()
+            remote_pkg_dir = apm_modules / "remote-pkg"
+            remote_pkg_dir.mkdir()
+            resolver = APMDependencyResolver()
+            resolver._project_root = project_root
+            resolver._apm_modules_dir = apm_modules
+            remote_parent = APMPackage(
+                name="remote-pkg", version="1.0.0", source_path=remote_pkg_dir,
+            )
+            dep = DependencyReference(
+                repo_url="/abs/missing", is_local=True, local_path="/abs/missing",
+            )
+            # Should reach the install_path lookup and return None for
+            # "not found" rather than for rejection.
+            result = resolver._try_load_dependency_package(
+                dep, parent_chain="root > remote-pkg", parent_pkg=remote_parent,
+            )
+            assert result is None
+
+
+class TestSilentDownloadFailureLogsWarning(unittest.TestCase):
+    """Failed transitive downloads no longer fail silently -- the underlying
+    error is surfaced via the stdlib logger so ``--verbose`` makes the skip
+    diagnosable (#940)."""
+
+    def test_download_callback_exception_logs_warning(self):
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_modules = project_root / "apm_modules"
+            apm_modules.mkdir()
+
+            def boom(*args, **kwargs):
+                raise RuntimeError("simulated network failure")
+
+            resolver = APMDependencyResolver(download_callback=boom)
+            resolver._project_root = project_root
+            resolver._apm_modules_dir = apm_modules
+
+            dep = DependencyReference(repo_url="user/repo")
+
+            from src.apm_cli.deps import apm_resolver as _resolver_mod
+            with self.assertLogs(
+                _resolver_mod._logger.name, level="WARNING"
+            ) as captured:
+                result = resolver._try_load_dependency_package(
+                    dep, parent_chain="root", parent_pkg=None
+                )
+            assert result is None
+            joined = "\n".join(captured.output)
+            assert "simulated network failure" in joined
+            assert "user/repo" in joined or "user_repo" in joined or "repo" in joined
+
+
 if __name__ == '__main__':
     unittest.main()

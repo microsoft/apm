@@ -1,9 +1,12 @@
 """APM dependency resolution engine with recursive resolution and conflict detection."""
 
 import inspect
+import logging
 from pathlib import Path
 from typing import List, Set, Optional, Protocol, Tuple, runtime_checkable
 from collections import deque
+
+_logger = logging.getLogger(__name__)
 
 from ..models.apm_package import APMPackage, DependencyReference
 from .dependency_graph import (
@@ -427,6 +430,27 @@ class APMDependencyResolver:
         if self._apm_modules_dir is None:
             return None
 
+        # Reject relative ``local_path`` deps declared inside a package that
+        # was itself fetched remotely. The originating apm.yml is not
+        # user-controlled, so a string like ``../../etc/passwd`` is the most
+        # plausible path-traversal vector. Direct deps from the root project
+        # (parent_pkg is None) and absolute paths are unaffected.
+        if (
+            dep_ref.is_local
+            and dep_ref.local_path
+            and not Path(dep_ref.local_path).expanduser().is_absolute()
+            and self._is_remote_parent(parent_pkg)
+        ):
+            _logger.warning(
+                "Rejecting relative local_path %r declared inside remotely-fetched "
+                "package %r (parent chain: %s); local_path is only allowed in the "
+                "root project's apm.yml.",
+                dep_ref.local_path,
+                getattr(parent_pkg, "name", "<unknown>"),
+                parent_chain or "<root>",
+            )
+            return None
+
         # Get the canonical install path for this dependency
         install_path = dep_ref.get_install_path(self._apm_modules_dir)
 
@@ -462,9 +486,20 @@ class APMDependencyResolver:
                         if downloaded_path and downloaded_path.exists():
                             self._downloaded_packages.add(unique_key)
                             install_path = downloaded_path
-                    except Exception:
-                        # Download failed - continue without this dependency's sub-deps
-                        pass
+                    except Exception as exc:
+                        # Download failed - continue without this dependency's
+                        # sub-deps. Surface the underlying error via the stdlib
+                        # logger so ``--verbose`` (which configures handlers)
+                        # makes the silent skip diagnosable; we deliberately
+                        # do not raise so partial resolution still works.
+                        _logger.warning(
+                            "Download of dependency %r (parent chain: %s) failed; "
+                            "skipping its sub-dependencies: %s",
+                            dep_ref.get_display_name(),
+                            parent_chain or "<root>",
+                            exc,
+                            exc_info=True,
+                        )
 
             # Still doesn't exist after download attempt
             if not install_path.exists():
@@ -510,6 +545,48 @@ class APMDependencyResolver:
             # In production, we might want to surface this to the user
             return None
 
+    def _effective_base_dir(
+        self, parent_pkg: Optional[APMPackage]
+    ) -> Optional[Path]:
+        """Return the directory used to anchor relative ``local_path`` deps.
+
+        Per #857, a relative ``local_path`` declared inside a transitive
+        package's apm.yml resolves against *that* package's directory, not
+        the root consumer. For direct deps from the root project (or for
+        legacy parents loaded without a ``source_path``), we fall back to
+        ``self._project_root``.
+
+        Centralizes the parent-vs-root selection used by
+        ``_download_dedup_key`` and ``_compute_dep_source_path`` so the
+        anchoring rule cannot drift between the two call sites.
+        """
+        if parent_pkg is not None and parent_pkg.source_path is not None:
+            return parent_pkg.source_path
+        return self._project_root
+
+    def _is_remote_parent(self, parent_pkg: Optional[APMPackage]) -> bool:
+        """Return True iff *parent_pkg* was fetched from a remote source.
+
+        We treat a parent package as "remote" when its ``source_path`` lives
+        inside ``self._apm_modules_dir`` -- that is the directory the
+        downloader writes into. Direct deps from the root project
+        (``parent_pkg is None``) and packages whose ``source_path`` is
+        outside apm_modules (e.g. user-edited local-path deps) return
+        False. Used to gate path-traversal-prone behavior in
+        ``_try_load_dependency_package``.
+        """
+        if parent_pkg is None or parent_pkg.source_path is None:
+            return False
+        if self._apm_modules_dir is None:
+            return False
+        try:
+            parent_pkg.source_path.resolve().relative_to(
+                self._apm_modules_dir.resolve()
+            )
+        except (ValueError, OSError):
+            return False
+        return True
+
     def _download_dedup_key(
         self,
         dep_ref: DependencyReference,
@@ -530,11 +607,7 @@ class APMDependencyResolver:
             if local.is_absolute():
                 resolved = local.resolve()
             else:
-                base_dir = (
-                    parent_pkg.source_path
-                    if parent_pkg is not None and parent_pkg.source_path is not None
-                    else self._project_root
-                )
+                base_dir = self._effective_base_dir(parent_pkg)
                 resolved = (base_dir / local).resolve() if base_dir else local.resolve()
             return f"local::{resolved}"
         return dep_ref.get_unique_key()
@@ -557,11 +630,7 @@ class APMDependencyResolver:
             local = Path(dep_ref.local_path).expanduser()
             if local.is_absolute():
                 return local.resolve()
-            base_dir = (
-                parent_pkg.source_path
-                if parent_pkg is not None and parent_pkg.source_path is not None
-                else self._project_root
-            )
+            base_dir = self._effective_base_dir(parent_pkg)
             if base_dir is None:
                 # Fallback: best-effort relative-to-cwd. Rare; only hit if
                 # the resolver was driven without a project root.

@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Slash commands installed from APM packages now surface argument hints in Claude Code -- `apm install` automatically maps prompt `input:` to Claude's `arguments:` front-matter, rewrites `${input:name}` references to `$name`, and auto-generates `argument-hint`. Argument names are validated against an allowlist to prevent YAML injection from third-party packages, and the mapping is reported at install time. (#1039)
 
+### Fixed
+
+- **Transitive `local_path` dependencies now anchor on the declaring `apm.yml`.** Relative paths declared inside a transitive package (e.g. `../sibling`) resolve against that package's directory, not the root consumer, matching what a developer reading the file expects. Hardening: relative `local_path` declarations found inside remotely-fetched packages are now rejected, `_copy_local_package` enforces that the resolved source lies within the project root via `ensure_path_within`, and silent download failures during transitive resolution are now logged for `--verbose` runs. Thanks @JahanzaibTayyab. (#940, closes #857)
+
 ## [0.11.0] - 2026-04-29
 
 ### Added
