@@ -46,6 +46,7 @@ dev = [
     "black>=26.3.1; python_version>='3.10'",
     "isort>=5.0.0",
     "mypy>=1.0.0",
+    "jsonschema>=4.0.0",
 ]
 build = [
     "pyinstaller>=6.0.0",

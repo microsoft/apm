@@ -34,7 +34,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import yaml
 
@@ -103,6 +103,61 @@ _PACKAGE_ENTRY_KEYS = frozenset({
 _MAX_TAGS_COUNT = 50
 _MAX_TAG_LENGTH = 100
 
+# Keys permitted inside an ``author`` object (rejected if anything else
+# present). Mirrors the Claude Code plugin manifest schema.
+_AUTHOR_OBJECT_KEYS = frozenset({"name", "email", "url"})
+
+
+def _parse_author(
+    raw: Any, index: int
+) -> Optional[Dict[str, str]]:
+    """Normalize a curator-supplied ``author`` value to a Claude-Code-
+    compliant object ``{name, email?, url?}``.
+
+    Accepts either a non-empty string (treated as ``name``) or a mapping
+    with at least ``name`` and only the permitted keys. Returns ``None``
+    when ``raw`` is ``None``. Raises :class:`MarketplaceYmlError` on any
+    other shape.
+    """
+    if raw is None:
+        return None
+    ctx = f"packages[{index}].author"
+    if isinstance(raw, str):
+        name = raw.strip()
+        if not name:
+            raise MarketplaceYmlError(
+                f"'{ctx}' must be a non-empty string or "
+                f"object with 'name'"
+            )
+        return {"name": name}
+    if isinstance(raw, dict):
+        unknown = set(raw.keys()) - _AUTHOR_OBJECT_KEYS
+        if unknown:
+            raise MarketplaceYmlError(
+                f"'{ctx}' has unknown key(s): "
+                f"{', '.join(sorted(unknown))}; allowed: "
+                f"{', '.join(sorted(_AUTHOR_OBJECT_KEYS))}"
+            )
+        name = raw.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise MarketplaceYmlError(
+                f"'{ctx}.name' is required and must be a non-empty string"
+            )
+        out: Dict[str, str] = {"name": name.strip()}
+        for key in ("email", "url"):
+            val = raw.get(key)
+            if val is None:
+                continue
+            if not isinstance(val, str) or not val.strip():
+                raise MarketplaceYmlError(
+                    f"'{ctx}.{key}' must be a non-empty string"
+                )
+            out[key] = val.strip()
+        return out
+    raise MarketplaceYmlError(
+        f"'{ctx}' must be a string or object, got {type(raw).__name__}"
+    )
+
 # Keys permitted inside the ``marketplace:`` block of apm.yml.  This is
 # distinct from the legacy top-level keys (which include ``name``,
 # ``description``, ``version`` -- those are inherited from apm.yml's
@@ -165,7 +220,10 @@ class PackageEntry:
     description: Optional[str] = None
     homepage: Optional[str] = None
     tags: Tuple[str, ...] = ()
-    author: Optional[str] = None
+    # ``author`` is normalized to a Claude-Code-compliant object:
+    # ``{"name": str, "email"?: str, "url"?: str}``. Accepts either a
+    # bare string (treated as ``name``) or a mapping at parse time.
+    author: Optional[Mapping[str, str]] = None
     license: Optional[str] = None
     repository: Optional[str] = None
     # Derived (set by loader, not by user)
@@ -468,14 +526,10 @@ def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
         tags = tags[:_MAX_TAGS_COUNT]
     tags = tuple(t[:_MAX_TAG_LENGTH] for t in tags)
 
-    # Anthropic pass-through: author (S3 -- must be str)
-    author: Optional[str] = raw.get("author")
-    if author is not None:
-        if not isinstance(author, str) or not author.strip():
-            raise MarketplaceYmlError(
-                f"'packages[{index}].author' must be a non-empty string"
-            )
-        author = author.strip()
+    # Anthropic pass-through: author -- accept string OR object input,
+    # normalize to ``{name, email?, url?}`` per the Claude Code plugin
+    # manifest schema (json.schemastore.org/claude-code-plugin-manifest.json).
+    author = _parse_author(raw.get("author"), index)
 
     # Anthropic pass-through: license (S3 -- must be str)
     license_val: Optional[str] = raw.get("license")

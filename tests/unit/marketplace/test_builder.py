@@ -1028,7 +1028,8 @@ class TestComposeMarketplaceJson:
         result = builder.compose_marketplace_json(resolved)
         assert isinstance(result, OrderedDict)
         assert result["name"] == "acme-tools"
-        assert result["plugins"][0]["source"]["type"] == "github"
+        assert result["plugins"][0]["source"]["source"] == "github"
+        assert result["plugins"][0]["source"]["repo"] == "acme/test-pkg"
 
     def test_empty_packages(self, tmp_path: Path) -> None:
         yml = """\
@@ -2031,7 +2032,8 @@ class TestRemoteOverrideSemantics:
         resolved = [builder._resolve_entry(local_entry)]
         doc = builder.compose_marketplace_json(resolved)
         plugin = doc["plugins"][0]
-        assert plugin["author"] == "ACME Inc"
+        # Per Claude Code plugin manifest schema, author must be an object.
+        assert plugin["author"] == {"name": "ACME Inc"}
         assert plugin["license"] == "MIT"
         assert plugin["repository"] == "https://github.com/acme/tool"
 
@@ -2042,9 +2044,22 @@ class TestRemoteOverrideSemantics:
         )
         doc = builder.compose_marketplace_json(resolved)
         plugin = doc["plugins"][0]
-        assert plugin["author"] == "ACME"
+        assert plugin["author"] == {"name": "ACME"}
         assert plugin["license"] == "Apache-2.0"
         assert plugin["repository"] == "https://github.com/acme/remote"
+
+    def test_author_object_form_preserved(self, tmp_path):
+        builder, resolved = self._make_remote_builder(
+            tmp_path,
+            'author:\n                    name: "ACME"\n                    email: "team@acme.example"\n                    url: "https://acme.example"'
+        )
+        doc = builder.compose_marketplace_json(resolved)
+        plugin = doc["plugins"][0]
+        assert plugin["author"] == {
+            "name": "ACME",
+            "email": "team@acme.example",
+            "url": "https://acme.example",
+        }
 
     def test_serialization_order(self, tmp_path):
         from apm_cli.marketplace.builder import BuildOptions

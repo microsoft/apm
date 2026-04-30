@@ -828,8 +828,11 @@ class MarketplaceBuilder:
                     plugin["version"] = meta["version"]
 
             # -- author / license / repository (curator-only pass-through) --
+            # ``author`` is normalized to an object by the loader, so we can
+            # serialize it as-is into the JSON. dict() drops the read-only
+            # Mapping wrapper while preserving insertion order (3.7+).
             if entry and entry.author:
-                plugin["author"] = entry.author
+                plugin["author"] = dict(entry.author)
             if entry and entry.license:
                 plugin["license"] = entry.license
             if entry and entry.repository:
@@ -873,13 +876,23 @@ class MarketplaceBuilder:
                         ))
                 plugin["source"] = source_value
             else:
+                # Remote source: emit per the official Claude Code marketplace
+                # schema (json.schemastore.org/claude-code-marketplace.json).
+                # Subdirs use the ``git-subdir`` form; everything else uses
+                # ``github`` shorthand. Field names: ``source``/``repo``/``sha``
+                # (NOT ``type``/``repository``/``commit``).
                 source_obj: Dict[str, Any] = OrderedDict()
-                source_obj["type"] = "github"
-                source_obj["repository"] = pkg.source_repo
                 if pkg.subdir:
+                    source_obj["source"] = "git-subdir"
+                    source_obj["url"] = pkg.source_repo
                     source_obj["path"] = pkg.subdir
-                source_obj["ref"] = pkg.ref
-                source_obj["commit"] = pkg.sha
+                else:
+                    source_obj["source"] = "github"
+                    source_obj["repo"] = pkg.source_repo
+                if pkg.ref:
+                    source_obj["ref"] = pkg.ref
+                if pkg.sha:
+                    source_obj["sha"] = pkg.sha
                 plugin["source"] = source_obj
 
             plugins.append(plugin)
@@ -911,7 +924,14 @@ class MarketplaceBuilder:
             if isinstance(src, str):
                 src_label = src
             else:
-                src_label = src.get("path") or src.get("repository", "?")
+                # Prefer ``path`` (git-subdir form) for disambiguation, then
+                # fall back to ``repo`` (github form, post-1061) or
+                # ``repository`` (legacy emit shape, kept for back-compat).
+                src_label = (
+                    src.get("path")
+                    or src.get("repo")
+                    or src.get("repository", "?")
+                )
             if pname in seen_names:
                 build_warnings.append(
                     f"Duplicate package name '{pname}': "
@@ -946,7 +966,10 @@ class MarketplaceBuilder:
             sha = ""
             src = p.get("source", {})
             if isinstance(src, dict):
-                sha = src.get("commit", "")
+                # Accept both the new ``sha`` field (Claude-spec compliant)
+                # and the legacy ``commit`` field for backward-compatibility
+                # with marketplace.json files written before this PR.
+                sha = src.get("sha") or src.get("commit", "")
             elif isinstance(src, str):
                 sha = src  # local-path packages: use the path string itself
             old_plugins[name] = sha
@@ -957,7 +980,7 @@ class MarketplaceBuilder:
             sha = ""
             src = p.get("source", {})
             if isinstance(src, dict):
-                sha = src.get("commit", "")
+                sha = src.get("sha") or src.get("commit", "")
             elif isinstance(src, str):
                 sha = src
             new_plugins[name] = sha

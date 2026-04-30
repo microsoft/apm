@@ -775,9 +775,63 @@ class TestNewPassthroughFields:
         yml = _write_yml(tmp_path, content)
         result = load_marketplace_yml(yml)
         entry = result.packages[0]
-        assert entry.author == "ACME Inc"
+        # String author is normalized to an object per the Claude schema.
+        assert entry.author == {"name": "ACME Inc"}
         assert entry.license == "MIT"
         assert entry.repository == "https://github.com/acme/tool"
+
+    def test_package_entry_accepts_author_object(self, tmp_path: Path):
+        content = _minimal_yml(
+            packages=(
+                "packages:\n"
+                "  - name: tool\n"
+                "    source: acme/tool\n"
+                "    version: \">=1.0.0\"\n"
+                "    author:\n"
+                "      name: \"ACME\"\n"
+                "      email: \"team@acme.example\"\n"
+                "      url: \"https://acme.example\"\n"
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        result = load_marketplace_yml(yml)
+        entry = result.packages[0]
+        assert entry.author == {
+            "name": "ACME",
+            "email": "team@acme.example",
+            "url": "https://acme.example",
+        }
+
+    def test_author_object_requires_name(self, tmp_path: Path):
+        content = _minimal_yml(
+            packages=(
+                "packages:\n"
+                "  - name: tool\n"
+                "    source: acme/tool\n"
+                "    version: \">=1.0.0\"\n"
+                "    author:\n"
+                "      email: \"team@acme.example\"\n"
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        with pytest.raises(MarketplaceYmlError, match="author.name.*required"):
+            load_marketplace_yml(yml)
+
+    def test_author_object_rejects_unknown_keys(self, tmp_path: Path):
+        content = _minimal_yml(
+            packages=(
+                "packages:\n"
+                "  - name: tool\n"
+                "    source: acme/tool\n"
+                "    version: \">=1.0.0\"\n"
+                "    author:\n"
+                "      name: ACME\n"
+                "      website: \"https://acme.example\"\n"
+            )
+        )
+        yml = _write_yml(tmp_path, content)
+        with pytest.raises(MarketplaceYmlError, match="author.*unknown key"):
+            load_marketplace_yml(yml)
 
     def test_package_entry_new_fields_optional(self, tmp_path: Path):
         content = _minimal_yml()
@@ -831,7 +885,7 @@ class TestNewPassthroughFields:
             )
         )
         yml = _write_yml(tmp_path, content)
-        with pytest.raises(MarketplaceYmlError, match="author.*non-empty string"):
+        with pytest.raises(MarketplaceYmlError, match="author.*string or object"):
             load_marketplace_yml(yml)
 
     def test_tags_length_cap_applied(self, tmp_path: Path):

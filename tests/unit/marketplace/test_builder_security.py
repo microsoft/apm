@@ -99,8 +99,8 @@ def test_plugin_root_subtraction_absolute_result() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_author_must_be_string(tmp_path: Path) -> None:
-    """author as dict/object must be rejected."""
+def test_author_object_with_unknown_key_rejected(tmp_path: Path) -> None:
+    """author object with unknown keys is rejected (S3 hardening)."""
     _write(
         tmp_path / "apm.yml",
         """\
@@ -115,11 +115,37 @@ def test_author_must_be_string(tmp_path: Path) -> None:
               source: ./plugins/tool
               author:
                 name: x
-                url: y
+                website: y
         """,
     )
-    with pytest.raises(MarketplaceYmlError, match="author.*non-empty string"):
+    with pytest.raises(MarketplaceYmlError, match="author.*unknown key"):
         load_marketplace_config(tmp_path)
+
+
+def test_author_object_form_accepted(tmp_path: Path) -> None:
+    """author as object {name, email?, url?} is accepted per Claude schema."""
+    _write(
+        tmp_path / "apm.yml",
+        """\
+        name: test
+        description: x
+        version: 1.0.0
+        marketplace:
+          owner:
+            name: ACME
+          packages:
+            - name: tool
+              source: ./plugins/tool
+              author:
+                name: ACME
+                email: team@acme.example
+        """,
+    )
+    config = load_marketplace_config(tmp_path)
+    assert config.packages[0].author == {
+        "name": "ACME",
+        "email": "team@acme.example",
+    }
 
 
 def test_repository_must_be_string(tmp_path: Path) -> None:
