@@ -15,6 +15,11 @@ import frontmatter
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.security.gate import WARN_POLICY, SecurityGate
+from apm_cli.utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    validate_path_segments,
+)
 from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
@@ -29,6 +34,23 @@ logger = logging.getLogger(__name__)
 # Claude command bodies as $name placeholders. Rejects YAML-significant
 # characters (newline, colon, quote, etc.) to prevent frontmatter injection.
 _INPUT_NAME_RE = re.compile(r"^[A-Za-z][\w-]{0,63}$")
+
+
+# Frontmatter keys preserved (or consumed) by the shared claude_command
+# transformer.  Any key in source frontmatter not in this set is dropped
+# during transformation and surfaced as a diagnostic warning so package
+# authors can act on it.  See command_integrator.integrate_command().
+_PRESERVED_COMMAND_KEYS = frozenset(
+    {
+        "description",
+        "allowed-tools",
+        "allowedTools",
+        "model",
+        "argument-hint",
+        "argumentHint",
+        "input",
+    }
+)
 
 
 def _is_valid_input_name(name: str) -> bool:
@@ -115,14 +137,17 @@ class CommandIntegrator(BaseIntegrator):
     def _transform_prompt_to_command(
         self,
         source: Path,
-    ) -> tuple[str, frontmatter.Post, list[str]]:
+    ) -> tuple[str, frontmatter.Post, list[str], list[str]]:
         """Transform a .prompt.md file into Claude command format.
 
         Args:
             source: Path to the .prompt.md file
 
         Returns:
-            Tuple of (command_name, post, warnings).
+            Tuple of (command_name, post, warnings, dropped_keys).
+            ``dropped_keys`` lists source frontmatter keys that the shared
+            command transformer does not preserve (e.g. ``author``,
+            ``mcp``, ``parameters`` for Cursor-specific frontmatter).
         """
         warnings: list[str] = []
 
@@ -181,7 +206,12 @@ class CommandIntegrator(BaseIntegrator):
         new_post = frontmatter.Post(content)
         new_post.metadata = claude_metadata
 
-        return (command_name, new_post, warnings)
+        # Compute keys present in source frontmatter but not preserved by
+        # the shared command transformer.  Surfaced by integrate_command()
+        # via diagnostics so users see the lossy transform at install time.
+        dropped_keys = sorted(set(post.metadata.keys()) - _PRESERVED_COMMAND_KEYS)
+
+        return (command_name, new_post, warnings, dropped_keys)
 
     def integrate_command(
         self,
@@ -191,21 +221,39 @@ class CommandIntegrator(BaseIntegrator):
         original_path: Path,
         *,
         diagnostics: DiagnosticCollector | None = None,
+        target_name: str = "claude",
     ) -> int:
-        """Integrate a prompt file as a Claude command (verbatim copy with format conversion).
+        """Integrate a prompt file as a slash command (verbatim copy with format conversion).
+
+        Deploys to ``.claude/commands/`` (Claude Code), ``.cursor/commands/``
+        (Cursor), or any other target whose ``commands`` primitive uses the
+        shared ``claude_command`` format_id.  ``target_name`` is woven into
+        diagnostic messages so users can tell which IDE the command was
+        installed for.
+
+        TODO(cursor-command-format): https://github.com/microsoft/apm/issues/1046
+        Cursor currently reuses the ``claude_command`` transformer which
+        preserves only a common subset of frontmatter (description,
+        allowed-tools, model, argument-hint).  When a dedicated
+        ``cursor_command`` transformer lands, the target dispatch in
+        ``integrate_commands_for_target`` should branch to it.
 
         Args:
             source: Source .prompt.md file path
-            target: Target command file path in .claude/commands/
+            target: Target command file path (e.g. .claude/commands/foo.md
+                    or .cursor/commands/foo.md)
             package_info: PackageInfo object with package metadata
             original_path: Original path to the prompt file
             diagnostics: Optional DiagnosticCollector for surfacing warnings.
+            target_name: Name of the deployment target (e.g. ``"claude"``,
+                ``"cursor"``, ``"opencode"``) so diagnostic messages stay
+                target-agnostic instead of always saying "Claude".
 
         Returns:
             int: Number of links resolved
         """
         # Transform to command format
-        command_name, post, warnings = self._transform_prompt_to_command(source)  # noqa: RUF059
+        command_name, post, warnings, dropped_keys = self._transform_prompt_to_command(source)
 
         # Resolve context links in content
         post.content, links_resolved = self.resolve_links(post.content, source, target)
@@ -216,13 +264,31 @@ class CommandIntegrator(BaseIntegrator):
             "",
         )
 
+        # Surface dropped (lossy-transform) frontmatter keys.  The shared
+        # claude_command transformer preserves only a common subset of
+        # frontmatter; any other source key is silently discarded by the
+        # transformer.  Warn so users see the lossy transform at install
+        # time -- core "install adds, never silently mutates" contract.
+        if dropped_keys and diagnostics is not None:
+            diagnostics.warn(
+                message=(
+                    f"{target_name.capitalize()} command {command_name}: "
+                    f"frontmatter keys not written by the shared command "
+                    f"transformer: {', '.join(dropped_keys)}. "
+                    f"Only description, allowed-tools, model, argument-hint, "
+                    f"and input are preserved."
+                ),
+                package=pkg_name,
+            )
+
         # Surface install-time info when input -> arguments mapping happened so
         # users aren't surprised by content that differs from the source package.
         mapped_args = post.metadata.get("arguments") if post.metadata else None
         if mapped_args and diagnostics is not None:
             diagnostics.info(
                 message=(
-                    f"Mapped input -> Claude arguments in {target.name}: [{', '.join(mapped_args)}]"
+                    f"Mapped input -> command arguments in {target.name}: "
+                    f"[{', '.join(mapped_args)}]"
                 ),
                 package=pkg_name,
                 detail=(
@@ -334,6 +400,23 @@ class CommandIntegrator(BaseIntegrator):
         effective_root = mapping.deploy_root or target.root_dir
         target_root = project_root / effective_root
         if not target.auto_create and not (project_root / target.root_dir).is_dir():
+            # Surface a discoverability note so users (and CI logs) see
+            # why the target was skipped instead of silently diverging
+            # from a dev machine that has the directory.
+            if diagnostics is not None:
+                pkg_name = getattr(
+                    getattr(package_info, "package", None),
+                    "name",
+                    "",
+                )
+                diagnostics.info(
+                    message=(
+                        f"Skipped {target.root_dir}/{mapping.subdir}/ -- "
+                        f"create a {target.root_dir}/ directory to enable "
+                        f"{target.name} command deployment."
+                    ),
+                    package=pkg_name,
+                )
             return IntegrationResult(0, 0, 0, [], 0)
 
         prompt_files = self.find_prompt_files(package_info.install_path)
@@ -348,6 +431,32 @@ class CommandIntegrator(BaseIntegrator):
         target_paths: list[Path] = []
         total_links_resolved = 0
 
+        # Threat #8: deploying package-supplied .md files into a directory
+        # the IDE treats as executable slash commands is post-install code
+        # execution.  Surface a one-time consent signal per package so the
+        # user sees that commands are being registered as IDE-invokable
+        # actions, not just files copied to disk.
+        if target.name == "cursor" and prompt_files and diagnostics is not None:
+            pkg_name = getattr(
+                getattr(package_info, "package", None),
+                "name",
+                "",
+            )
+            diagnostics.warn(
+                message=(
+                    f"Cursor command deployment: {len(prompt_files)} "
+                    f"command(s) from this package will be registered as "
+                    f"Cursor slash commands and become invokable inside "
+                    f"the IDE."
+                ),
+                package=pkg_name,
+                detail=(
+                    "Cursor reads .cursor/commands/*.md as executable "
+                    "slash commands. Inspect the deployed files in "
+                    f"{target.root_dir}/{mapping.subdir}/ before invoking."
+                ),
+            )
+
         for prompt_file in prompt_files:
             filename = prompt_file.name
             if filename.endswith(".prompt.md"):
@@ -355,7 +464,45 @@ class CommandIntegrator(BaseIntegrator):
             else:
                 base_name = prompt_file.stem
 
+            # Containment: reject base names containing path traversal
+            # sequences before joining into commands_dir.  A malicious
+            # package shipping ``../../evil.prompt.md`` would otherwise
+            # escape the target commands directory.
+            try:
+                validate_path_segments(base_name, context="command filename")
+            except PathTraversalError as exc:
+                if diagnostics is not None:
+                    diagnostics.warn(
+                        message=f"Rejected command filename: {exc}",
+                        package=getattr(
+                            getattr(package_info, "package", None),
+                            "name",
+                            "",
+                        ),
+                    )
+                files_skipped += 1
+                continue
+
             target_path = commands_dir / f"{base_name}{mapping.extension}"
+
+            # Defense-in-depth: assert the resolved target stays inside
+            # the commands directory even if validate_path_segments was
+            # bypassed by a future regression.
+            try:
+                ensure_path_within(target_path, commands_dir)
+            except PathTraversalError as exc:
+                if diagnostics is not None:
+                    diagnostics.warn(
+                        message=f"Rejected command target path: {exc}",
+                        package=getattr(
+                            getattr(package_info, "package", None),
+                            "name",
+                            "",
+                        ),
+                    )
+                files_skipped += 1
+                continue
+
             rel_path = portable_relpath(target_path, project_root)
 
             if self.check_collision(
@@ -372,12 +519,17 @@ class CommandIntegrator(BaseIntegrator):
                 self._write_gemini_command(prompt_file, target_path)
                 links_resolved = 0
             else:
+                # TODO(cursor-command-format): https://github.com/microsoft/apm/issues/1046
+                # Cursor reuses the shared claude_command transformer; pass
+                # target.name so diagnostic messages stay target-agnostic
+                # (no Claude branding for Cursor installs).
                 links_resolved = self.integrate_command(
                     prompt_file,
                     target_path,
                     package_info,
                     prompt_file,
                     diagnostics=diagnostics,
+                    target_name=target.name,
                 )
             files_integrated += 1
             total_links_resolved += links_resolved

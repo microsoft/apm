@@ -180,6 +180,7 @@ class BaseIntegrator:
         "prompts_copilot": "prompts",
         "agents_copilot": "agents_github",
         "commands_claude": "commands",
+        "commands_cursor": "commands_cursor",
         "commands_opencode": "commands_opencode",
         "instructions_copilot": "instructions",
         "instructions_cursor": "rules_cursor",
@@ -518,6 +519,18 @@ class BaseIntegrator:
                 if f.is_symlink():
                     continue
                 resolved = f.resolve()
+                # Containment guard: skip files whose resolved path
+                # escapes the package root.  Hardlinks are not symlinks
+                # so the is_symlink() check above does not catch them.
+                # See path_security.ensure_path_within for the canonical
+                # predicate; we inline the check here to stay loop-fast
+                # and avoid raising on every malicious entry.
+                try:
+                    pkg_resolved = package_path.resolve()
+                    if not resolved.is_relative_to(pkg_resolved):
+                        continue
+                except (ValueError, OSError):
+                    continue
                 if resolved not in seen:
                     seen.add(resolved)
                     results.append(f)

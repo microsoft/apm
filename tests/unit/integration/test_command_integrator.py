@@ -22,6 +22,28 @@ from apm_cli.integration.command_integrator import (
 )
 
 
+def _make_package(project_root, prompts):
+    """Create a test package with .prompt.md files and return a mock PackageInfo.
+
+    Module-level helper shared by every test class in this module that
+    needs a package-on-disk.  Replaces five duplicated copies that used
+    to live as ``_make_package`` methods on individual test classes.
+    """
+    pkg_dir = project_root / "apm_modules" / "test-pkg"
+    pkg_dir.mkdir(parents=True)
+    prompts_dir = pkg_dir / ".apm" / "prompts"
+    prompts_dir.mkdir(parents=True)
+    for name, content in prompts.items():
+        (prompts_dir / name).write_text(content)
+
+    mock_info = MagicMock()
+    mock_info.install_path = pkg_dir
+    mock_info.resolved_reference = None
+    mock_info.package = MagicMock()
+    mock_info.package.name = "test-pkg"
+    return mock_info
+
+
 class TestCommandIntegratorSyncIntegration:
     """Tests for sync_integration method (nuke-and-regenerate)."""
 
@@ -366,25 +388,9 @@ class TestOpenCodeCommandIntegration:
         yield temp_path
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def _make_package(self, project_root, prompts):
-        """Create a package with .prompt.md files and return PackageInfo."""
-        pkg_dir = project_root / "apm_modules" / "test-pkg"
-        pkg_dir.mkdir(parents=True)
-        prompts_dir = pkg_dir / ".apm" / "prompts"
-        prompts_dir.mkdir(parents=True)
-        for name, content in prompts.items():
-            (prompts_dir / name).write_text(content)
-
-        mock_info = MagicMock()
-        mock_info.install_path = pkg_dir
-        mock_info.resolved_reference = None
-        mock_info.package = MagicMock()
-        mock_info.package.name = "test-pkg"
-        return mock_info
-
     def test_skips_when_opencode_dir_missing(self, temp_project_no_opencode):
         """Opt-in: skip if .opencode/ does not exist."""
-        pkg_info = self._make_package(
+        pkg_info = _make_package(
             temp_project_no_opencode,
             {"test.prompt.md": "---\ndescription: Test\n---\n# Test"},
         )
@@ -395,7 +401,7 @@ class TestOpenCodeCommandIntegration:
 
     def test_deploys_prompts_to_opencode_commands(self, temp_project):
         """Deploy .prompt.md → .opencode/commands/<name>.md."""
-        pkg_info = self._make_package(
+        pkg_info = _make_package(
             temp_project,
             {"test.prompt.md": "---\ndescription: A test\n---\n# Test command"},
         )
@@ -407,7 +413,7 @@ class TestOpenCodeCommandIntegration:
 
     def test_deploys_multiple_prompts(self, temp_project):
         """Deploy multiple prompts to .opencode/commands/."""
-        pkg_info = self._make_package(
+        pkg_info = _make_package(
             temp_project,
             {
                 "review.prompt.md": "---\ndescription: Review\n---\n# Review",
@@ -589,21 +595,6 @@ class TestCursorCommandEndToEnd:
         yield temp_path
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def _make_package(self, project_root, prompts):
-        pkg_dir = project_root / "apm_modules" / "test-pkg"
-        pkg_dir.mkdir(parents=True)
-        prompts_dir = pkg_dir / ".apm" / "prompts"
-        prompts_dir.mkdir(parents=True)
-        for name, content in prompts.items():
-            (prompts_dir / name).write_text(content)
-
-        mock_info = MagicMock()
-        mock_info.install_path = pkg_dir
-        mock_info.resolved_reference = None
-        mock_info.package = MagicMock()
-        mock_info.package.name = "test-pkg"
-        return mock_info
-
     def test_full_dispatch_deploys_to_cursor(self, temp_project):
         """Prompt files deploy to .cursor/commands/ via full dispatch pipeline."""
         from apm_cli.install.services import integrate_package_primitives
@@ -617,7 +608,7 @@ class TestCursorCommandEndToEnd:
         from apm_cli.integration.targets import KNOWN_TARGETS
         from apm_cli.utils.diagnostics import DiagnosticCollector
 
-        pkg_info = self._make_package(
+        pkg_info = _make_package(
             temp_project,
             {
                 "review.prompt.md": (
@@ -758,21 +749,6 @@ class TestInputToArgumentsEndToEnd:
         yield temp_path
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def _make_package(self, project_root, prompts):
-        pkg_dir = project_root / "apm_modules" / "test-pkg"
-        pkg_dir.mkdir(parents=True)
-        prompts_dir = pkg_dir / ".apm" / "prompts"
-        prompts_dir.mkdir(parents=True)
-        for name, content in prompts.items():
-            (prompts_dir / name).write_text(content)
-
-        mock_info = MagicMock()
-        mock_info.install_path = pkg_dir
-        mock_info.resolved_reference = None
-        mock_info.package = MagicMock()
-        mock_info.package.name = "test-pkg"
-        return mock_info
-
     def test_full_dispatch_maps_input_to_arguments(self, temp_project):
         """input: [name, category] produces Claude arguments via full dispatch."""
         from apm_cli.install.services import integrate_package_primitives
@@ -786,7 +762,7 @@ class TestInputToArgumentsEndToEnd:
         from apm_cli.integration.targets import KNOWN_TARGETS
         from apm_cli.utils.diagnostics import DiagnosticCollector
 
-        pkg_info = self._make_package(
+        pkg_info = _make_package(
             temp_project,
             {
                 "gen.prompt.md": (
@@ -837,24 +813,9 @@ class TestInputToArgumentsIntegration:
         yield temp_path
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def _make_package(self, project_root, prompts):
-        pkg_dir = project_root / "apm_modules" / "test-pkg"
-        pkg_dir.mkdir(parents=True)
-        prompts_dir = pkg_dir / ".apm" / "prompts"
-        prompts_dir.mkdir(parents=True)
-        for name, content in prompts.items():
-            (prompts_dir / name).write_text(content)
-
-        mock_info = MagicMock()
-        mock_info.install_path = pkg_dir
-        mock_info.resolved_reference = None
-        mock_info.package = MagicMock()
-        mock_info.package.name = "test-pkg"
-        return mock_info
-
     def test_input_list_becomes_arguments(self, temp_project):
         """input: [name, category] maps to arguments: [name, category]."""
-        pkg_info = self._make_package(
+        pkg_info = _make_package(
             temp_project,
             {
                 "gen.prompt.md": (
@@ -887,7 +848,7 @@ class TestInputToArgumentsIntegration:
 
     def test_input_object_list_becomes_arguments(self, temp_project):
         """input as object list extracts keys as argument names."""
-        pkg_info = self._make_package(
+        pkg_info = _make_package(
             temp_project,
             {
                 "feat.prompt.md": (
@@ -918,7 +879,7 @@ class TestInputToArgumentsIntegration:
 
     def test_explicit_argument_hint_not_overridden(self, temp_project):
         """When argument-hint is already set, input does not override it."""
-        pkg_info = self._make_package(
+        pkg_info = _make_package(
             temp_project,
             {
                 "cmd.prompt.md": (
@@ -947,7 +908,7 @@ class TestInputToArgumentsIntegration:
 
     def test_bare_dict_input_becomes_arguments(self, temp_project):
         """input: {a: 'desc'} (bare dict) maps to arguments: [a]."""
-        pkg_info = self._make_package(
+        pkg_info = _make_package(
             temp_project,
             {
                 "d.prompt.md": (
@@ -979,7 +940,7 @@ class TestInputToArgumentsIntegration:
 
     def test_hyphenated_input_names_substituted(self, temp_project):
         """Hyphenated names like feature-name are replaced in content."""
-        pkg_info = self._make_package(
+        pkg_info = _make_package(
             temp_project,
             {
                 "h.prompt.md": (
@@ -1007,7 +968,7 @@ class TestInputToArgumentsIntegration:
 
     def test_single_brace_input_references_substituted(self, temp_project):
         """${input:name} (single-brace, the canonical docs format) is rewritten."""
-        pkg_info = self._make_package(
+        pkg_info = _make_package(
             temp_project,
             {
                 "s.prompt.md": (
@@ -1076,7 +1037,7 @@ class TestInputMappingDiagnostics:
 
         info_items = diag.by_category().get("info", [])
         assert any(
-            "Mapped input -> Claude arguments" in i.message
+            "Mapped input -> command arguments" in i.message
             and "feature_name" in i.message
             and "priority" in i.message
             for i in info_items
@@ -1189,24 +1150,9 @@ class TestGeminiCommandIntegration:
         yield temp_path
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def _make_package(self, project_root, prompts):
-        pkg_dir = project_root / "apm_modules" / "test-pkg"
-        pkg_dir.mkdir(parents=True)
-        prompts_dir = pkg_dir / ".apm" / "prompts"
-        prompts_dir.mkdir(parents=True)
-        for name, content in prompts.items():
-            (prompts_dir / name).write_text(content)
-
-        mock_info = MagicMock()
-        mock_info.install_path = pkg_dir
-        mock_info.resolved_reference = None
-        mock_info.package = MagicMock()
-        mock_info.package.name = "test-pkg"
-        return mock_info
-
     def test_skips_when_no_gemini_dir(self, temp_project_no_gemini):
         """Opt-in: skip if .gemini/ does not exist."""
-        pkg_info = self._make_package(
+        pkg_info = _make_package(
             temp_project_no_gemini,
             {"test.prompt.md": "---\ndescription: Test\n---\n# Test"},
         )
@@ -1220,7 +1166,7 @@ class TestGeminiCommandIntegration:
 
     def test_deploys_toml_commands(self, temp_project):
         """Deploy .prompt.md → .gemini/commands/<name>.toml."""
-        pkg_info = self._make_package(
+        pkg_info = _make_package(
             temp_project,
             {"review.prompt.md": "---\ndescription: Review code\n---\nReview the code."},
         )
@@ -1241,7 +1187,7 @@ class TestGeminiCommandIntegration:
         """Verify generated file is valid TOML."""
         import toml
 
-        pkg_info = self._make_package(
+        pkg_info = _make_package(
             temp_project,
             {"test.prompt.md": "---\ndescription: A test\n---\nDo the thing."},
         )
@@ -1256,7 +1202,7 @@ class TestGeminiCommandIntegration:
 
     def test_arguments_replacement(self, temp_project):
         """$ARGUMENTS is replaced with {{args}}."""
-        pkg_info = self._make_package(
+        pkg_info = _make_package(
             temp_project,
             {"cmd.prompt.md": "---\ndescription: Run cmd\n---\nRun with $ARGUMENTS"},
         )
@@ -1271,7 +1217,7 @@ class TestGeminiCommandIntegration:
 
     def test_positional_args_prepends_args_line(self, temp_project):
         """When $1 or $2 are found, prepend 'Arguments: {{args}}'."""
-        pkg_info = self._make_package(
+        pkg_info = _make_package(
             temp_project,
             {"cmd.prompt.md": "---\ndescription: Fix\n---\nFix file $1"},
         )
@@ -1287,7 +1233,7 @@ class TestGeminiCommandIntegration:
 
     def test_no_description_omits_key(self, temp_project):
         """When no description in frontmatter, TOML omits description key."""
-        pkg_info = self._make_package(
+        pkg_info = _make_package(
             temp_project,
             {"cmd.prompt.md": "Just do the thing."},
         )
@@ -1362,24 +1308,9 @@ class TestCursorCommandIntegration:
         yield temp_path
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def _make_package(self, project_root, prompts):
-        pkg_dir = project_root / "apm_modules" / "test-pkg"
-        pkg_dir.mkdir(parents=True)
-        prompts_dir = pkg_dir / ".apm" / "prompts"
-        prompts_dir.mkdir(parents=True)
-        for name, content in prompts.items():
-            (prompts_dir / name).write_text(content)
-
-        mock_info = MagicMock()
-        mock_info.install_path = pkg_dir
-        mock_info.resolved_reference = None
-        mock_info.package = MagicMock()
-        mock_info.package.name = "test-pkg"
-        return mock_info
-
     def test_skips_when_cursor_dir_missing(self, temp_project_no_cursor):
         """Opt-in: skip if .cursor/ does not exist."""
-        pkg_info = self._make_package(
+        pkg_info = _make_package(
             temp_project_no_cursor,
             {"test.prompt.md": "---\ndescription: Test\n---\n# Test"},
         )
@@ -1394,7 +1325,7 @@ class TestCursorCommandIntegration:
 
     def test_deploys_prompts_to_cursor_commands(self, temp_project):
         """Deploy .prompt.md to .cursor/commands/<name>.md."""
-        pkg_info = self._make_package(
+        pkg_info = _make_package(
             temp_project,
             {"test.prompt.md": "---\ndescription: A test\n---\n# Test command"},
         )
@@ -1410,7 +1341,7 @@ class TestCursorCommandIntegration:
 
     def test_deploys_multiple_prompts(self, temp_project):
         """Deploy multiple prompts to .cursor/commands/."""
-        pkg_info = self._make_package(
+        pkg_info = _make_package(
             temp_project,
             {
                 "review.prompt.md": "---\ndescription: Review\n---\n# Review",
@@ -1433,7 +1364,7 @@ class TestCursorCommandIntegration:
         parameters).  This is intentional -- only the command-relevant
         subset is emitted.
         """
-        pkg_info = self._make_package(
+        pkg_info = _make_package(
             temp_project,
             {
                 "cmd.prompt.md": (
@@ -1494,3 +1425,161 @@ class TestCursorCommandIntegration:
 
         result = integrator.sync_for_target(KNOWN_TARGETS["cursor"], None, temp_project_no_cursor)
         assert result["files_removed"] == 0
+
+
+class TestCursorCommandPanelFindings:
+    """Regression tests for APM Review Panel findings on PR #1046.
+
+    Covers dropped-frontmatter warnings, path traversal rejection,
+    target-aware diagnostics, IDE consent surface, and skip notes.
+    """
+
+    @pytest.fixture
+    def temp_project(self):
+        temp_dir = tempfile.mkdtemp()
+        temp_path = Path(temp_dir)
+        (temp_path / ".cursor").mkdir()
+        yield temp_path
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    @pytest.fixture
+    def temp_project_no_cursor(self):
+        temp_dir = tempfile.mkdtemp()
+        temp_path = Path(temp_dir)
+        yield temp_path
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_dropped_frontmatter_keys_warn(self, temp_project):
+        """Cursor-specific frontmatter (author, mcp, parameters) -> warn diag."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        pkg_info = _make_package(
+            temp_project,
+            {
+                "deploy.prompt.md": (
+                    "---\n"
+                    "description: Deploy command\n"
+                    "author: alice\n"
+                    "mcp:\n"
+                    "  - github\n"
+                    "parameters:\n"
+                    "  - foo\n"
+                    "---\n"
+                    "Deploy the thing.\n"
+                ),
+            },
+        )
+        diag = DiagnosticCollector()
+        CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["cursor"],
+            pkg_info,
+            temp_project,
+            diagnostics=diag,
+        )
+
+        warnings = diag.by_category().get("warning", [])
+        assert any(
+            "frontmatter keys not written" in w.message
+            and "author" in w.message
+            and "mcp" in w.message
+            and "parameters" in w.message
+            for w in warnings
+        ), f"expected dropped-key warning, got: {[w.message for w in warnings]}"
+
+    def test_path_traversal_filename_rejected(self, temp_project):
+        """A package shipping a traversal-laden filename is skipped, not deployed."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        # Filename ``..prompt.md`` strips to base_name "." which is a
+        # traversal segment that validate_path_segments must reject.
+        pkg_info = _make_package(
+            temp_project,
+            {"..prompt.md": "---\ndescription: x\n---\nbody"},
+        )
+        diag = DiagnosticCollector()
+        result = CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["cursor"],
+            pkg_info,
+            temp_project,
+            diagnostics=diag,
+        )
+
+        warnings = diag.by_category().get("warning", [])
+        assert any(
+            "Rejected command filename" in w.message or "Rejected command target path" in w.message
+            for w in warnings
+        ), f"expected traversal rejection warning, got: {[w.message for w in warnings]}"
+        # Nothing was written.
+        assert result.files_integrated == 0
+        assert not (temp_project / ".cursor" / "commands" / "..md").exists()
+
+    def test_target_aware_info_message(self, temp_project):
+        """Cursor install must NOT emit Claude-branded mapping diagnostic."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        pkg_info = _make_package(
+            temp_project,
+            {
+                "review.prompt.md": (
+                    "---\ndescription: Review\ninput: [feature]\n---\nLook at ${input:feature}.\n"
+                ),
+            },
+        )
+        diag = DiagnosticCollector()
+        CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["cursor"],
+            pkg_info,
+            temp_project,
+            diagnostics=diag,
+        )
+        info_items = diag.by_category().get("info", [])
+        assert all("Claude arguments" not in i.message for i in info_items), (
+            "Cursor installs must not surface Claude-branded diagnostic strings"
+        )
+        assert any("Mapped input -> command arguments" in i.message for i in info_items)
+
+    def test_cursor_consent_warning_emitted(self, temp_project):
+        """Cursor commands deployment surfaces an IDE-consent warning per package."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        pkg_info = _make_package(
+            temp_project,
+            {"hello.prompt.md": "---\ndescription: Hi\n---\nbody"},
+        )
+        diag = DiagnosticCollector()
+        CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["cursor"],
+            pkg_info,
+            temp_project,
+            diagnostics=diag,
+        )
+        warnings = diag.by_category().get("warning", [])
+        assert any(
+            "Cursor command deployment" in w.message and "IDE" in w.message for w in warnings
+        ), f"expected consent warning, got: {[w.message for w in warnings]}"
+
+    def test_skip_note_when_cursor_dir_missing(self, temp_project_no_cursor):
+        """No .cursor/ -> info note explaining the skip (no silent skip)."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        pkg_info = _make_package(
+            temp_project_no_cursor,
+            {"x.prompt.md": "---\ndescription: x\n---\nbody"},
+        )
+        diag = DiagnosticCollector()
+        CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["cursor"],
+            pkg_info,
+            temp_project_no_cursor,
+            diagnostics=diag,
+        )
+        info_items = diag.by_category().get("info", [])
+        assert any(
+            "Skipped .cursor/commands/" in i.message and "create a .cursor/" in i.message
+            for i in info_items
+        ), f"expected skip note, got: {[i.message for i in info_items]}"

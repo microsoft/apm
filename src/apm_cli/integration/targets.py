@@ -326,13 +326,15 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         primitives={
             "instructions": PrimitiveMapping("rules", ".mdc", "cursor_rules"),
             "agents": PrimitiveMapping("agents", ".md", "cursor_agent"),
-            # Cursor command deployment currently reuses the shared command
-            # transformer (claude_command), which preserves only the supported
-            # common frontmatter subset (description, allowed-tools, model,
-            # argument-hint). Switch to a dedicated "cursor_command" format
-            # only when the integrator implements a Cursor-specific writer
-            # that preserves Cursor-specific prompt metadata (author, input,
-            # mcp, parameters, etc.) verbatim.
+            # TODO(cursor-command-format): https://github.com/microsoft/apm/issues/1046
+            # Cursor command deployment reuses the shared command transformer
+            # (claude_command), which preserves only the supported common
+            # frontmatter subset (description, allowed-tools, model,
+            # argument-hint).  Switch to a dedicated "cursor_command" format
+            # when the integrator implements a Cursor-specific writer that
+            # preserves Cursor-specific prompt metadata (author, input, mcp,
+            # parameters, etc.) verbatim.  Dropped keys are surfaced via
+            # diagnostics.warn() at install time -- see command_integrator.
             "commands": PrimitiveMapping("commands", ".md", "claude_command"),
             "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
             "hooks": PrimitiveMapping("hooks", ".json", "cursor_hooks"),
