@@ -477,9 +477,12 @@ class TestResolvePathInputGuards:
     def test_embedded_nul_byte_does_not_crash(self, base_dir):
         """An embedded NUL byte must not crash _resolve_path itself.
 
-        The current containment relies on the caller's `.exists()` check to
-        reject the resulting path -- this lock-in is documented in the issue
-        ("Current containment code handles these correctly").
+        Downstream containment is the caller's responsibility: on most
+        platforms `Path.exists()` raises `ValueError` for paths containing
+        NUL bytes (it does NOT silently return False). Either an early
+        `None` return from the resolver or a downstream ValueError on
+        `.exists()` is acceptable -- what we guard here is that the
+        resolver itself does not crash.
         """
         # Either return value is acceptable; what matters is no exception.
         result = _resolve_path("foo\x00bar", base_dir)

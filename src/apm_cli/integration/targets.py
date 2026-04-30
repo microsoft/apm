@@ -235,6 +235,12 @@ class TargetProfile:
                     # Keep ``root_dir`` home-relative so cleanup prefix matching holds.
                     new_root = abs_path.relative_to(home).as_posix()
                 except ValueError:
+                    # Fallback: when CLAUDE_CONFIG_DIR points outside $HOME the
+                    # user has explicitly opted out of the home-relative model.
+                    # Storing an absolute path is safe because every downstream
+                    # consumer joins it as ``project_root / target.root_dir`` and
+                    # ``pathlib.Path / <absolute>`` evaluates to ``<absolute>``,
+                    # so deploy + cleanup both write to the absolute target.
                     new_root = str(abs_path)
 
         if self.unsupported_user_primitives:
