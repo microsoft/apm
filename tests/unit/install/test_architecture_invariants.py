@@ -155,6 +155,13 @@ def test_install_py_under_legacy_budget():
     Post-rebase (main merged into #999) install.py shrank from 2100 to
     ~1700 as upstream refactors extracted helpers. Budget tightened to
     1800 to track the improvement.
+
+    Issue #888 (``--root``) keeps the budget at 1800.  The flag adds
+    a ``--root`` Click option, a single ``UsageError`` validating its
+    interaction with ``--global``, and the ``install_root_redirect``
+    context manager around the handler body (~16 LOC total).  The
+    redirect itself is fully extracted into
+    :mod:`apm_cli.install.root_redirect`.
     """
     install_py = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "commands" / "install.py"
     assert install_py.is_file()

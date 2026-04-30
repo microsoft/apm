@@ -18,18 +18,27 @@ class TemplateData:
     version: str
     chatmode_content: str | None = None
 
-
-def build_conditional_sections(instructions: list[Instruction]) -> str:
+def build_conditional_sections(
+    instructions: list[Instruction],
+    source_dir: Path | None = None,
+) -> str:
     """Build sections grouped by applyTo patterns.
 
     Args:
-        instructions (List[Instruction]): List of instruction primitives.
+        instructions: List of instruction primitives.
+        source_dir: Root used to compute display-relative paths in
+            ``<!-- Source: ... -->`` comments.  Defaults to ``Path.cwd()``;
+            callers using ``apm compile --root`` should pass the source
+            root so attribution paths render relative to the user's
+            working directory rather than the deploy target.
 
     Returns:
         str: Formatted conditional sections content.
     """
     if not instructions:
         return ""
+
+    relpath_root = source_dir if source_dir is not None else Path.cwd()
 
     # Group instructions by pattern - use raw patterns
     pattern_groups = _group_instructions_by_pattern(instructions)
@@ -42,7 +51,8 @@ def build_conditional_sections(instructions: list[Instruction]) -> str:
 
         # Combine content from all instructions for this pattern
         for instruction in sorted(
-            pattern_instructions, key=lambda i: portable_relpath(i.file_path, Path.cwd())
+            pattern_instructions,
+            key=lambda i: portable_relpath(i.file_path, relpath_root),
         ):
             content = instruction.content.strip()
             if content:
@@ -50,7 +60,7 @@ def build_conditional_sections(instructions: list[Instruction]) -> str:
                 try:
                     # Try to get relative path for cleaner display
                     if instruction.file_path.is_absolute():
-                        relative_path = portable_relpath(instruction.file_path, Path.cwd())
+                        relative_path = portable_relpath(instruction.file_path, relpath_root)
                     else:
                         relative_path = str(instruction.file_path)
                 except (ValueError, OSError):

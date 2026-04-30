@@ -225,6 +225,7 @@ def _integrate_root_project(
             diagnostics=diagnostics,
             logger=logger,
             scope=ctx.scope,
+            source_root=ctx.source_root,
             ctx=ctx,
         )
 

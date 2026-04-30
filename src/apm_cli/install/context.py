@@ -34,6 +34,15 @@ class InstallContext:
     # ------------------------------------------------------------------
     project_root: Path
     apm_dir: Path
+    # Source root for reads (``apm.yml``, ``.apm/``, local-path
+    # packages).  Equal to ``project_root`` unless ``apm install --root``
+    # redirects writes -- then ``source_root`` stays at ``$PWD`` while
+    # ``project_root`` is the override.
+    #
+    # Required.  Resolve at the CLI boundary
+    # (``run_install_pipeline``); phases must NOT fall back to
+    # ``project_root`` -- that masks bugs whenever the two diverge.
+    source_root: Path
 
     # ------------------------------------------------------------------
     # Inputs: populated by the caller from CLI args / APMPackage

@@ -71,27 +71,61 @@ class CompilationResult:
 class DistributedAgentsCompiler:
     """Main compiler for generating distributed AGENTS.md files."""
 
-    def __init__(self, base_dir: str = ".", exclude_patterns: builtins.list[str] | None = None):
+    def __init__(
+        self,
+        base_dir: str = ".",
+        exclude_patterns: builtins.list[str] | None = None,
+        source_dir: str | None = None,
+    ):
         """Initialize the distributed AGENTS.md compiler.
 
         Args:
-            base_dir (str): Base directory for compilation.
-            exclude_patterns (Optional[List[str]]): Glob patterns for directories to exclude.
+            base_dir (str): Base directory for compilation -- root used to
+                construct AGENTS.md write paths.  Defaults to the current
+                directory.
+            exclude_patterns (Optional[List[str]]): Glob patterns for
+                directories to exclude.
+            source_dir (Optional[str]): Where primitives and the project
+                tree are scanned for placement scoring.  Defaults to
+                ``base_dir`` for back-compat; set explicitly when ``apm
+                compile --root`` redirects writes but sources remain in
+                ``$PWD``.
         """
         try:
             self.base_dir = Path(base_dir).resolve()
         except (OSError, FileNotFoundError):
             self.base_dir = Path(base_dir).absolute()
+        if source_dir is None:
+            self.source_dir = self.base_dir
+        else:
+            try:
+                self.source_dir = Path(source_dir).resolve()
+            except (OSError, FileNotFoundError):
+                self.source_dir = Path(source_dir).absolute()
 
         self.warnings: builtins.list[str] = []
         self.errors: builtins.list[str] = []
         self.total_files_written = 0
         self.context_optimizer = ContextOptimizer(
-            str(self.base_dir), exclude_patterns=exclude_patterns
+            str(self.source_dir), exclude_patterns=exclude_patterns
         )
-        self.link_resolver = UnifiedLinkResolver(self.base_dir)
+        self.link_resolver = UnifiedLinkResolver(self.source_dir)
         self.output_formatter = CompilationFormatter()
         self._placement_map = None
+
+    def _source_to_base(self, path: Path) -> Path:
+        """Map a path rooted at source_dir to the equivalent base_dir path.
+
+        Returns *path* unchanged when source_dir == base_dir (the default
+        case) or when *path* is not under source_dir (defensive fallback).
+        """
+        if self.source_dir == self.base_dir:
+            return path
+        try:
+            rel = path.resolve().relative_to(self.source_dir.resolve())
+        except (ValueError, OSError):
+            return path
+        return self.base_dir / rel
 
     def compile_distributed(
         self, primitives: PrimitiveCollection, config: dict | None = None
@@ -296,18 +330,26 @@ class DistributedAgentsCompiler:
         Returns:
             Dict[Path, List[Instruction]]: Optimized mapping of directory paths to instructions.
         """
-        # Use the Context Optimization Engine for intelligent placement
+        # Use the Context Optimization Engine for intelligent placement.
+        # The optimizer scans source_dir, so the returned placement keys
+        # are rooted at source_dir; translate them to base_dir below so
+        # writes land at the deploy root when source_dir != base_dir
+        # (`apm compile --root`).
         optimized_placement = self.context_optimizer.optimize_instruction_placement(
             instructions,
             verbose=debug,
             enable_timing=debug,  # Enable timing when debug mode is on
         )
+        if optimized_placement and self.source_dir != self.base_dir:
+            optimized_placement = {
+                self._source_to_base(p): v for p, v in optimized_placement.items()
+            }
 
         # Special case: if no instructions but constitution exists, create root placement
         if not optimized_placement:
             from .constitution import find_constitution
 
-            constitution_path = find_constitution(Path(self.base_dir))
+            constitution_path = find_constitution(Path(self.source_dir))
             if constitution_path.exists():
                 # Create an empty placement for the root directory to enable verbose output
                 optimized_placement = {Path(self.base_dir): []}
@@ -357,7 +399,7 @@ class DistributedAgentsCompiler:
         if not placement_map:
             from .constitution import find_constitution
 
-            constitution_path = find_constitution(Path(self.base_dir))
+            constitution_path = find_constitution(Path(self.source_dir))
             if constitution_path.exists():
                 # Create a root placement for constitution-only projects
                 root_path = Path(self.base_dir)
@@ -548,16 +590,20 @@ class DistributedAgentsCompiler:
 
             for instruction in sorted(
                 pattern_instructions,
-                key=lambda i: portable_relpath(i.file_path, self.base_dir),
+                key=lambda i: portable_relpath(i.file_path, self.source_dir),
             ):
                 content = instruction.content.strip()
                 if content:
-                    # Add source attribution for individual instructions
+                    # Add source attribution for individual instructions.
+                    # Source files live under source_dir (which equals
+                    # base_dir except when `apm compile --root` is in
+                    # play), so format the display path relative to
+                    # source_dir for stable output.
                     if placement.source_attribution:
                         source = placement.source_attribution.get(
                             str(instruction.file_path), "local"
                         )
-                        rel_path = portable_relpath(instruction.file_path, self.base_dir)
+                        rel_path = portable_relpath(instruction.file_path, self.source_dir)
 
                         sections.append(f"<!-- Source: {source} {rel_path} -->")
 

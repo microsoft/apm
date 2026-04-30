@@ -634,12 +634,14 @@ class TestInstallRequestNoPolicy:
         ctx = InstallContext(
             project_root=Path("/tmp/fake"),
             apm_dir=Path("/tmp/fake/.apm"),
+            source_root=Path("/tmp/fake"),
         )
         assert ctx.no_policy is False
 
         ctx = InstallContext(
             project_root=Path("/tmp/fake"),
             apm_dir=Path("/tmp/fake/.apm"),
+            source_root=Path("/tmp/fake"),
             no_policy=True,
         )
         assert ctx.no_policy is True

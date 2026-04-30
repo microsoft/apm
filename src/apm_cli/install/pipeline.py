@@ -17,6 +17,25 @@ Design notes
 * Symbols on the ``commands/install`` module that phases access via
   ``_install_mod.X`` stay as re-exports there -- this module does NOT
   duplicate those re-exports.
+
+Source-vs-deploy root convention
+--------------------------------
+:class:`InstallContext` carries two roots; phases must pick the
+correct one or ``apm install --root`` silently produces wrong paths
+(the bug surfaces only when ``project_root != source_root``).
+
+* ``ctx.source_root`` -- read sources here (``apm.yml``, ``.apm/``
+  primitives, local-path packages).  Equal to ``$PWD`` regardless of
+  ``--root``.
+* ``ctx.project_root`` / ``ctx.apm_dir`` -- write deploy artefacts
+  here (``apm_modules/``, ``apm.lock.yaml``, ``.claude/``, ``.codex/``,
+  etc.).  Becomes the ``--root`` target when set.
+
+Convention: a phase that *reads* an existing project file uses
+``source_root``; a phase that *writes* anything uses ``project_root``
+(or the helper that already does -- e.g. :func:`get_apm_dir`).  When
+a new field is added to :class:`InstallContext`, the source-vs-write
+side must be an explicit, documented choice -- not implicit.
 """
 
 from __future__ import annotations
@@ -182,7 +201,12 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     except ImportError:
         raise RuntimeError("APM dependency system not available")  # noqa: B904
 
-    from ..core.scope import InstallScope, get_apm_dir, get_deploy_root
+    from ..core.scope import (
+        InstallScope,
+        get_apm_dir,
+        get_deploy_root,
+        get_source_root,
+    )
 
     if scope is None:
         scope = InstallScope.PROJECT
@@ -191,13 +215,16 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     dev_apm_deps = apm_package.get_dev_apm_dependencies()
     all_apm_deps = apm_deps + dev_apm_deps
 
-    project_root = get_deploy_root(scope)
+    project_root = get_deploy_root(scope)  # write target
+    source_root = get_source_root(scope)   # source reads (apm.yml, .apm/)
     apm_dir = get_apm_dir(scope)
 
-    # Check whether the project root itself has local .apm/ primitives (#714).
+    # Check whether the source root has local .apm/ primitives (#714).
+    # Sources resolve from $PWD even when --root redirects writes, so the
+    # check uses source_root rather than project_root.
     from apm_cli.install.phases.local_content import _project_has_root_primitives
 
-    _root_has_local_primitives = _project_has_root_primitives(project_root)
+    _root_has_local_primitives = _project_has_root_primitives(source_root)
 
     # Read old local deployed files from the existing lockfile so the
     # post-deps-local phase can run stale cleanup even when no current
@@ -218,6 +245,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     ctx = InstallContext(
         project_root=project_root,
         apm_dir=apm_dir,
+        source_root=source_root,
         apm_package=apm_package,
         update_refs=update_refs,
         verbose=verbose,

@@ -109,6 +109,11 @@ def run(ctx: InstallContext) -> None:
     # This matches the original code's closure over function-level locals.
     scope = ctx.scope
     project_root = ctx.project_root
+    # Local-path package references in apm.yml are relative to the
+    # manifest's location (source_root), not the deploy override.
+    # source_root is required on InstallContext; equals project_root
+    # when --root is not used.
+    source_root = ctx.source_root
     update_refs = ctx.update_refs
     logger = ctx.logger
     verbose = ctx.verbose  # noqa: F841
@@ -135,7 +140,7 @@ def run(ctx: InstallContext) -> None:
                     callback_failures.add(dep_ref.get_unique_key())
                     return None
                 result_path = _copy_local_package(
-                    dep_ref, install_path, project_root, logger=logger
+                    dep_ref, install_path, source_root, logger=logger
                 )
                 if result_path:
                     callback_downloaded[dep_ref.get_unique_key()] = None
@@ -200,7 +205,10 @@ def run(ctx: InstallContext) -> None:
         download_callback=download_callback,
     )
 
-    dependency_graph = resolver.resolve_dependencies(ctx.apm_dir)
+    # Resolver reads ``source_root / "apm.yml"`` -- always the source
+    # root, never the deploy root, so ``apm install --root`` keeps
+    # finding the manifest in the user's working directory.
+    dependency_graph = resolver.resolve_dependencies(ctx.source_root)
     ctx.dependency_graph = dependency_graph
 
     # Verbose: show resolved tree summary
