@@ -890,10 +890,9 @@ class SkillIntegrator(BaseIntegrator):
                     # Check both the lockfile (previous runs) and the in-memory session
                     # map (current run) so that same-manifest collisions are caught even
                     # before the lockfile has been written for this run.
-                    prev_owner = (
-                        lockfile_native_owners.get(owner_key)
-                        or self._native_skill_session_owners.get(owner_key)
-                    )
+                    prev_owner = lockfile_native_owners.get(
+                        owner_key
+                    ) or self._native_skill_session_owners.get(owner_key)
                     is_self_overwrite = prev_owner is not None and prev_owner == current_key
                     if prev_owner is not None and not is_self_overwrite:
                         try:
@@ -975,12 +974,10 @@ class SkillIntegrator(BaseIntegrator):
         # Count unique sub-skills from primary target only
         primary_root = project_root / ".github" / "skills"
         sub_skills_count = sum(
-            1 for p in all_target_paths
+            1
+            for p in all_target_paths
             if (
-                (
-                    p.parent == primary_root
-                    or (namespace and p.parent == primary_root / namespace)
-                )
+                (p.parent == primary_root or (namespace and p.parent == primary_root / namespace))
                 and p.name != skill_name
             )
         )

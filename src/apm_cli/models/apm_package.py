@@ -211,8 +211,8 @@ class APMPackage:
                 raise ValueError("'includes' must be 'auto' or a list of strings")
 
         namespace = None
-        if 'namespace' in data and data['namespace'] is not None:
-            namespace_value = data['namespace']
+        if "namespace" in data and data["namespace"] is not None:
+            namespace_value = data["namespace"]
             if not isinstance(namespace_value, str):
                 raise ValueError(
                     f"Invalid 'namespace' field: expected string, got {type(namespace_value).__name__}"
@@ -221,6 +221,7 @@ class APMPackage:
             if not namespace:
                 raise ValueError("'namespace' must not be empty")
             from ..utils.path_security import validate_path_segments
+
             validate_path_segments(
                 namespace,
                 context="namespace",

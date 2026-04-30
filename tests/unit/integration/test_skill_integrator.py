@@ -446,9 +446,7 @@ class TestSkillIntegrator:
             namespace="example",
         )
 
-        result = self.integrator.integrate_package_skill(
-            package_info, self.project_root
-        )
+        result = self.integrator.integrate_package_skill(package_info, self.project_root)
 
         target = self.project_root / ".github" / "skills" / "example" / "my-skill"
         assert result.skill_created is True
@@ -470,9 +468,7 @@ class TestSkillIntegrator:
             namespace="example",
         )
 
-        result = self.integrator.integrate_package_skill(
-            package_info, self.project_root
-        )
+        result = self.integrator.integrate_package_skill(package_info, self.project_root)
 
         assert result.sub_skills_promoted == 1
         assert (
