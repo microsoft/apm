@@ -196,6 +196,18 @@ def should_compile_gemini_md(target: CompileTargetType) -> bool:
     return target in ("gemini", "all")
 
 
+def should_compile_copilot_instructions_md(target: TargetType) -> bool:
+    """Check if .github/copilot-instructions.md should be compiled.
+
+    Args:
+        target: The detected or configured target
+
+    Returns:
+        bool: True if Copilot root instructions should be generated
+    """
+    return target in ("vscode", "all")
+
+
 def get_target_description(target: UserTargetType) -> str:
     """Get a human-readable description of what will be generated for a target.
 
@@ -210,14 +222,14 @@ def get_target_description(target: UserTargetType) -> str:
     # Normalize aliases to internal value for lookup
     normalized = "vscode" if target in ("copilot", "agents") else target
     descriptions = {
-        "vscode": "AGENTS.md + .github/prompts/ + .github/agents/",
+        "vscode": "AGENTS.md + .github/copilot-instructions.md + .github/prompts/ + .github/agents/",
         "claude": "CLAUDE.md + .claude/commands/ + .claude/agents/ + .claude/skills/",
         "cursor": ".cursor/agents/ + .cursor/skills/ + .cursor/rules/",
         "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .opencode/skills/",
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
         "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
-        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .agents/",
-        "minimal": "AGENTS.md only (create a target folder for full integration)",
+        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .agents/",
+        "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }
     return descriptions.get(normalized, "unknown target")
 
