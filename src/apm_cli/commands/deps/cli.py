@@ -12,6 +12,7 @@ from ...constants import APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FI
 from ...core.command_logger import CommandLogger
 from ...core.target_detection import TargetParamType
 from ...models.apm_package import APMPackage, ValidationResult, validate_apm_package  # noqa: F401
+from .._helpers import _expand_with_ancestors, _standalone_installed_packages
 from ._utils import (
     _count_package_files,  # noqa: F401
     _count_primitives,
@@ -147,8 +148,8 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     # Scan for installed packages in org-namespaced structure
     # Walks the tree to find directories containing apm.yml or SKILL.md,
     # handling GitHub (2-level), ADO (3-level), and subdirectory (4+ level) packages.
-    installed_packages = []
-    orphaned_packages = []
+    # First pass: collect valid candidate paths for ancestor-aware orphan check.
+    scanned_candidates = []
     for candidate in apm_modules_path.rglob("*"):
         if not candidate.is_dir() or candidate.name.startswith("."):
             continue
@@ -159,8 +160,6 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
         rel_parts = candidate.relative_to(apm_modules_path).parts
         if len(rel_parts) < 2:
             continue
-        org_repo_name = "/".join(rel_parts)
-
         # Skip sub-skills inside .apm/ directories -- they belong to the parent package
         if ".apm" in rel_parts:
             continue
@@ -173,7 +172,34 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
             and _is_nested_under_package(candidate, apm_modules_path)
         ):
             continue
+        scanned_candidates.append((candidate, "/".join(rel_parts), has_apm_yml, has_skill_md))
 
+    # Precompute expected paths + ancestors for O(1) orphan checks.
+    # Mirror prune.py / _check_orphaned_packages: pass the standalone
+    # installed paths (lockfile-membership + apm.yml fallback) so a
+    # genuinely orphaned ``owner/repo`` package is not masked when a
+    # sibling subdirectory dep shares the same install root.
+    try:
+        try:
+            lockfile_path_for_check = get_lockfile_path(apm_dir)
+            lockfile_for_check = (
+                LockFile.read(lockfile_path_for_check) if lockfile_path_for_check.exists() else None
+            )
+        except Exception:
+            lockfile_for_check = None
+        scanned_names = [name for _c, name, _h, _s in scanned_candidates]
+        standalone_installed_for_check = _standalone_installed_packages(
+            scanned_names, apm_modules_path, lockfile=lockfile_for_check
+        )
+    except Exception:
+        standalone_installed_for_check = []
+    declared_with_ancestors = _expand_with_ancestors(
+        declared_sources.keys(), standalone_installed_for_check
+    )
+
+    installed_packages = []
+    orphaned_packages = []
+    for candidate, org_repo_name, has_apm_yml, _has_skill_md in scanned_candidates:
         try:
             version = "unknown"
             if has_apm_yml:
@@ -181,7 +207,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                 version = package.version or "unknown"
             primitives = _count_primitives(candidate)
 
-            is_orphaned = org_repo_name not in declared_sources
+            is_orphaned = org_repo_name not in declared_with_ancestors
             if is_orphaned:
                 orphaned_packages.append(org_repo_name)
 
@@ -210,7 +236,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     if insecure_only:
         installed_packages = [pkg for pkg in installed_packages if pkg["is_insecure"]]
 
-    return installed_packages, orphaned_packages
+    return installed_packages, sorted(orphaned_packages)
 
 
 @click.group(help="Manage APM package dependencies")
@@ -277,15 +303,15 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
 
         console.print(table)
 
-        # Show orphaned packages warning
+        # Show orphaned packages warning -- routed through CommandLogger
+        # so output goes through the central STATUS_SYMBOLS prefix path
+        # (no raw `[!]` literal that Rich would parse as markup) and so
+        # behaviour is consistent with prune.py.
         if orphaned_packages:
-            console.print(
-                f"\n[!]  {len(orphaned_packages)} orphaned package(s) found (not in apm.yml):",
-                style="yellow",
-            )
+            logger.warning(f"{len(orphaned_packages)} orphaned package(s) found (not in apm.yml):")
             for pkg in orphaned_packages:
-                console.print(f"  * {pkg}", style="dim yellow")
-            console.print("\n Run 'apm prune' to remove orphaned packages", style="cyan")
+                logger.warning(f"  - {pkg}")
+            logger.info("Run 'apm prune' to remove orphaned packages")
     else:
         # Fallback text table
         if insecure_only:
@@ -323,14 +349,13 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
                     f"{name:<30} {version:<10} {source:<12} {prompts:>7} {instructions:>7} {agents:>7} {skills:>7} {hooks:>7}"
                 )
 
-        # Show orphaned packages warning
+        # Show orphaned packages warning -- route through CommandLogger
+        # for consistency with the rich branch above and with prune.py.
         if orphaned_packages:
-            click.echo(
-                f"\n[!]  {len(orphaned_packages)} orphaned package(s) found (not in apm.yml):"
-            )
+            logger.warning(f"{len(orphaned_packages)} orphaned package(s) found (not in apm.yml):")
             for pkg in orphaned_packages:
-                click.echo(f"  * {pkg}")
-            click.echo("\n Run 'apm prune' to remove orphaned packages")
+                logger.warning(f"  - {pkg}")
+            logger.info("Run 'apm prune' to remove orphaned packages")
 
 
 @deps.command(name="list", help="List installed APM dependencies")
