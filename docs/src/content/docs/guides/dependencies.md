@@ -335,13 +335,15 @@ Coverage varies by target and primitive type:
 
 | Target | Status | User-level dir | Primitives | Not supported |
 |--------|--------|---------------|------------|---------------|
-| Claude Code | Supported | `~/.claude/` | Skills, agents, commands, hooks, instructions | -- |
+| Claude Code | Supported | `~/.claude/` (or `$CLAUDE_CONFIG_DIR`) | Skills, agents, commands, hooks, instructions | -- |
 | Copilot CLI | Partial | `~/.copilot/` | Skills, agents, hooks | Prompts, instructions |
 | Cursor | Partial | `~/.cursor/` | Skills, agents, hooks | Rules |
 | OpenCode | Partial | `~/.config/opencode/` | Skills, agents, commands | Hooks |
 
 Target detection mirrors project scope: APM auto-detects by `~/.<target>/` directory presence,
 falling back to Copilot. Security scanning runs for global installs.
+
+For Claude Code, if `CLAUDE_CONFIG_DIR` is set (and points inside `$HOME`), `apm install -g --target claude` deploys there instead of `~/.claude/` so primitives land where Claude Code reads them.
 
 ### When to use each scope
 
