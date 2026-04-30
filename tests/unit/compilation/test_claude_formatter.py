@@ -209,12 +209,18 @@ class TestDependenciesImportSyntax:
         apm_modules = temp_path / "apm_modules"
         # Packages WITH CLAUDE.md - should be included
         (apm_modules / "owner1" / "package1").mkdir(parents=True)
-        (apm_modules / "owner1" / "package1" / "CLAUDE.md").write_text("# Package 1", encoding="utf-8")
+        (apm_modules / "owner1" / "package1" / "CLAUDE.md").write_text(
+            "# Package 1", encoding="utf-8"
+        )
         (apm_modules / "owner2" / "package2").mkdir(parents=True)
-        (apm_modules / "owner2" / "package2" / "CLAUDE.md").write_text("# Package 2", encoding="utf-8")
+        (apm_modules / "owner2" / "package2" / "CLAUDE.md").write_text(
+            "# Package 2", encoding="utf-8"
+        )
         # Packages WITHOUT CLAUDE.md - should be excluded
         (apm_modules / "owner1" / "no-claude").mkdir(parents=True)
-        (apm_modules / "owner1" / "no-claude" / "README.md").write_text("# No Claude", encoding="utf-8")
+        (apm_modules / "owner1" / "no-claude" / "README.md").write_text(
+            "# No Claude", encoding="utf-8"
+        )
         (apm_modules / "owner3" / "skills-only").mkdir(parents=True)
 
         yield temp_path
