@@ -44,6 +44,15 @@ git clone <org/repo> && cd <repo>
 apm install    # every agent is configured
 ```
 
+**Coming from `npx skills add`?** Drop-in:
+
+```bash
+apm install vercel-labs/agent-skills                            # whole bundle, like npx skills add
+apm install vercel-labs/agent-skills --skill deploy-to-vercel   # one skill, persisted to apm.yml
+```
+
+Same install gesture. You also get a [manifest, lockfile, and reproducibility](https://microsoft.github.io/apm/reference/package-types/#skill-collection-skillsnameskillmd).
+
 ## The three promises
 
 ### 1. Portable by manifest

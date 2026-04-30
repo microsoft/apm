@@ -124,9 +124,10 @@ dependencies:
 **Lock.** `apm.lock.yaml` pins every dependency to an exact commit. Two developers
 running `apm install` on the same lock file get identical setups.
 
-**Build.** `apm compile` produces optimized output files for each AI tool —
+**Build.** `apm compile` produces optimized output files for each AI tool --
 `AGENTS.md` for Copilot, Cursor, and Codex; `CLAUDE.md` for Claude.
-`apm pack` creates self-contained bundles for portable distribution.
+`apm pack` creates a Claude Code plugin directory by default, or a portable
+APM bundle (`--format apm`) for restore-mode distribution.
 
 ```bash
 apm compile

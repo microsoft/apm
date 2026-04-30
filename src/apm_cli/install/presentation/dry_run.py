@@ -7,7 +7,8 @@ original block that lived at lines 525-581.
 from __future__ import annotations
 
 import builtins
-from typing import TYPE_CHECKING, Any, Optional, Sequence
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, Optional  # noqa: F401
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -24,7 +25,7 @@ def render_and_exit(
     dev_apm_deps: Sequence[Any],
     should_install_mcp: bool,
     update: bool,
-    only_packages: Optional[Sequence[str]] = None,
+    only_packages: Sequence[str] | None = None,
     apm_dir: Path,
 ) -> None:
     """Render the dry-run preview to the user.
@@ -41,9 +42,7 @@ def render_and_exit(
         logger.progress(f"APM dependencies ({len(apm_deps)}):")
         for dep in apm_deps:
             action = "update" if update else "install"
-            logger.progress(
-                f"  - {dep.repo_url}#{dep.reference or 'main'} -> {action}"
-            )
+            logger.progress(f"  - {dep.repo_url}#{dep.reference or 'main'} -> {action}")
 
     if should_install_mcp and mcp_deps:
         logger.progress(f"MCP dependencies ({len(mcp_deps)}):")
@@ -64,12 +63,14 @@ def render_and_exit(
         # site where ``set`` may be shadowed in the enclosing scope.
         _intended_keys = builtins.set()
         for _dep in (apm_deps or []) + (dev_apm_deps or []):
-            try:
+            try:  # noqa: SIM105
                 _intended_keys.add(_dep.get_unique_key())
             except Exception:
                 pass
         _orphan_preview = detect_orphans(
-            _dryrun_lock, _intended_keys, only_packages=only_packages,
+            _dryrun_lock,
+            _intended_keys,
+            only_packages=only_packages,
         )
         if _orphan_preview:
             logger.progress(
@@ -79,11 +80,9 @@ def render_and_exit(
             for _orphan in sorted(_orphan_preview)[:10]:
                 logger.progress(f"  - {_orphan}")
             if len(_orphan_preview) > 10:
-                logger.progress(
-                    f"  ... and {len(_orphan_preview) - 10} more"
-                )
+                logger.progress(f"  ... and {len(_orphan_preview) - 10} more")
 
-    if (apm_deps or dev_apm_deps):
+    if apm_deps or dev_apm_deps:
         logger.dry_run_notice(
             "Per-package stale-file cleanup (renames within a package) is "
             "not previewed -- it requires running integration. Run without "

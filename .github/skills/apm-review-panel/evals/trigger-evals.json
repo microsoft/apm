@@ -1,0 +1,31 @@
+{
+  "description": "Trigger evals for the apm-review-panel skill dispatch description. 8 should-trigger + 8 should-NOT-trigger. 60/40 train/val split (10 train, 6 val). Validation split is the ship gate.",
+  "should_trigger": {
+    "train": [
+      "review this PR with the expert panel",
+      "run the apm-review-panel against this branch",
+      "do a multi-persona review of PR #1234",
+      "panel-review this PR",
+      "get the architecture + security + UX review on this PR"
+    ],
+    "val": [
+      "ask the python architect, cli logging expert, and security expert to weigh in on this PR",
+      "have the apm panel verdict this PR",
+      "i need a cross-cutting expert review of this change before merge"
+    ]
+  },
+  "should_not_trigger": {
+    "train": [
+      "give me a code review of this file",
+      "what does the python architect think of this class hierarchy",
+      "review this docstring",
+      "fix the lint errors in src/",
+      "what is the apm-review-panel skill"
+    ],
+    "val": [
+      "explain how the auth resolver works",
+      "summarize the diff of PR #1234",
+      "draft a PR description for me"
+    ]
+  }
+}

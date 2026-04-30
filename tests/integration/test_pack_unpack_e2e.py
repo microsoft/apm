@@ -8,10 +8,9 @@ Requires network access and GITHUB_TOKEN/GITHUB_APM_PAT for GitHub API.
 import os
 import shutil
 import subprocess
-
-import pytest
 from pathlib import Path
 
+import pytest
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("GITHUB_APM_PAT") and not os.environ.get("GITHUB_TOKEN"),
@@ -54,7 +53,7 @@ def temp_project(tmp_path):
 def _run_apm(apm_command, args, cwd, timeout=120):
     """Run an apm CLI command and return the result."""
     return subprocess.run(
-        [apm_command] + args,
+        [apm_command] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -71,9 +70,7 @@ class TestPackUnpackE2E:
         assert (temp_project / "apm.lock.yaml").exists()
 
         # 2. Pack
-        result = _run_apm(
-            apm_command, ["pack", "--archive"], cwd=temp_project
-        )
+        result = _run_apm(apm_command, ["pack", "--archive"], cwd=temp_project)
         assert result.returncode == 0, f"pack failed: {result.stderr}"
 
         build_dir = temp_project / "build"
@@ -85,9 +82,7 @@ class TestPackUnpackE2E:
         consumer.mkdir()
         archive = archives[0]
 
-        result = _run_apm(
-            apm_command, ["unpack", str(archive)], cwd=consumer
-        )
+        result = _run_apm(apm_command, ["unpack", str(archive)], cwd=consumer)
         assert result.returncode == 0, f"unpack failed: {result.stderr}"
 
         # 4. Verify .github/ files are present
@@ -98,9 +93,7 @@ class TestPackUnpackE2E:
         result = _run_apm(apm_command, ["install"], cwd=temp_project)
         assert result.returncode == 0
 
-        result = _run_apm(
-            apm_command, ["pack", "--dry-run"], cwd=temp_project
-        )
+        result = _run_apm(apm_command, ["pack", "--dry-run"], cwd=temp_project)
         assert result.returncode == 0
 
         assert not (temp_project / "build").exists()

@@ -38,7 +38,7 @@ class CursorClientAdapter(CopilotClientAdapter):
         ``.cursor/`` directory is *not* created automatically — APM only
         writes here when the directory already exists.
         """
-        cursor_dir = Path(os.getcwd()) / ".cursor"
+        cursor_dir = self.project_root / ".cursor"
         return str(cursor_dir / "mcp.json")
 
     # ------------------------------------------------------------------ #
@@ -74,9 +74,9 @@ class CursorClientAdapter(CopilotClientAdapter):
             return {}
 
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             return {}
 
     # ------------------------------------------------------------------ #
@@ -102,7 +102,7 @@ class CursorClientAdapter(CopilotClientAdapter):
             return False
 
         # Opt-in: skip silently when .cursor/ does not exist
-        cursor_dir = Path(os.getcwd()) / ".cursor"
+        cursor_dir = self.project_root / ".cursor"
         if not cursor_dir.exists():
             return True  # nothing to do, not an error
 
@@ -125,14 +125,10 @@ class CursorClientAdapter(CopilotClientAdapter):
             else:
                 config_key = server_url
 
-            server_config = self._format_server_config(
-                server_info, env_overrides, runtime_vars
-            )
+            server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             self.update_config({config_key: server_config})
 
-            print(
-                f"Successfully configured MCP server '{config_key}' for Cursor"
-            )
+            print(f"Successfully configured MCP server '{config_key}' for Cursor")
             return True
 
         except Exception as e:

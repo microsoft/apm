@@ -38,7 +38,6 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.models.results import InstallResult
 
-
 # ---------------------------------------------------------------------------
 # Placeholder policy exception (C2 coordination with W2-gate-phase)
 # ---------------------------------------------------------------------------
@@ -50,8 +49,10 @@ from apm_cli.models.results import InstallResult
 try:
     from apm_cli.install.phases.policy_gate import PolicyViolationError
 except ImportError:  # pragma: no cover -- defensive
+
     class PolicyViolationError(RuntimeError):
         """Placeholder for the policy-gate block exception."""
+
 
 # Alias for backward compatibility with the original test plan name.
 PolicyBlockError = PolicyViolationError
@@ -120,6 +121,7 @@ def _mock_apm_package():
 # Fixture: apm-policy-deny.yml exists
 # ---------------------------------------------------------------------------
 
+
 def test_policy_deny_fixture_exists():
     """Sanity: the deny-list policy fixture must be present."""
     deny_fixture = FIXTURE_DIR / "apm-policy-deny.yml"
@@ -132,6 +134,7 @@ def test_policy_deny_fixture_exists():
 # ---------------------------------------------------------------------------
 # Core rollback tests
 # ---------------------------------------------------------------------------
+
 
 class TestInstallPkgPolicyRollback:
     """Test manifest rollback when ``apm install <pkg>`` + pipeline failure."""
@@ -170,13 +173,9 @@ class TestInstallPkgPolicyRollback:
                 "Dependency test-blocked/denied-pkg denied by org policy"
             )
 
-            result = self.runner.invoke(
-                cli, ["install", "test-blocked/denied-pkg"]
-            )
+            result = self.runner.invoke(cli, ["install", "test-blocked/denied-pkg"])
 
-            assert result.exit_code != 0, (
-                f"Expected non-zero exit, got {result.exit_code}"
-            )
+            assert result.exit_code != 0, f"Expected non-zero exit, got {result.exit_code}"
             # Verify byte-exact restoration
             restored_bytes = (tmp_dir / "apm.yml").read_bytes()
             assert restored_bytes == original_bytes, (
@@ -202,9 +201,7 @@ class TestInstallPkgPolicyRollback:
                 "Dependency test-blocked/denied-pkg denied by org policy"
             )
 
-            result = self.runner.invoke(
-                cli, ["install", "test-blocked/denied-pkg"]
-            )
+            result = self.runner.invoke(cli, ["install", "test-blocked/denied-pkg"])
 
             assert result.exit_code != 0
             assert "restored to its previous state" in result.output, (
@@ -246,9 +243,7 @@ class TestInstallPkgPolicyRollback:
             mock_apm_package.from_apm_yml.return_value = _mock_apm_package()
             mock_install_apm.return_value = _successful_install_result()
 
-            result = self.runner.invoke(
-                cli, ["install", "test-ok/new-package"]
-            )
+            result = self.runner.invoke(cli, ["install", "test-ok/new-package"])
 
             assert result.exit_code == 0, (
                 f"Expected exit 0, got {result.exit_code}\n{result.output}"
@@ -256,9 +251,7 @@ class TestInstallPkgPolicyRollback:
             # apm.yml should contain the new dep (written by
             # _validate_and_add_packages_to_apm_yml)
             content = (tmp_dir / "apm.yml").read_text(encoding="utf-8")
-            assert "test-ok/new-package" in content, (
-                f"New dep missing from apm.yml:\n{content}"
-            )
+            assert "test-ok/new-package" in content, f"New dep missing from apm.yml:\n{content}"
             # Rollback notice should NOT appear
             assert "restored to its previous state" not in result.output
 
@@ -268,9 +261,7 @@ class TestInstallPkgPolicyRollback:
     @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
     @patch("apm_cli.commands.install.APMPackage")
     @patch("apm_cli.commands.install._install_apm_dependencies")
-    def test_allowed_package_keeps_new_dep(
-        self, mock_install_apm, mock_apm_package, mock_validate
-    ):
+    def test_allowed_package_keeps_new_dep(self, mock_install_apm, mock_apm_package, mock_validate):
         """Normal install (no policy violation) -> apm.yml has the new dep."""
         with _chdir_tmp(self.original_dir) as tmp_dir:
             _write_seed_apm_yml(tmp_dir)
@@ -279,9 +270,7 @@ class TestInstallPkgPolicyRollback:
             mock_apm_package.from_apm_yml.return_value = _mock_apm_package()
             mock_install_apm.return_value = _successful_install_result()
 
-            result = self.runner.invoke(
-                cli, ["install", "allowed-org/good-package"]
-            )
+            result = self.runner.invoke(cli, ["install", "allowed-org/good-package"])
 
             assert result.exit_code == 0
             content = (tmp_dir / "apm.yml").read_text(encoding="utf-8")
@@ -302,13 +291,9 @@ class TestInstallPkgPolicyRollback:
 
             mock_validate.return_value = True
             mock_apm_package.from_apm_yml.return_value = _mock_apm_package()
-            mock_install_apm.side_effect = ConnectionError(
-                "Failed to download: connection refused"
-            )
+            mock_install_apm.side_effect = ConnectionError("Failed to download: connection refused")
 
-            result = self.runner.invoke(
-                cli, ["install", "some-org/failing-pkg"]
-            )
+            result = self.runner.invoke(cli, ["install", "some-org/failing-pkg"])
 
             assert result.exit_code != 0
             restored_bytes = (tmp_dir / "apm.yml").read_bytes()
@@ -333,9 +318,7 @@ class TestInstallPkgPolicyRollback:
             mock_apm_package.from_apm_yml.return_value = _mock_apm_package()
             mock_install_apm.side_effect = RuntimeError("download timeout")
 
-            result = self.runner.invoke(
-                cli, ["install", "some-org/timeout-pkg"]
-            )
+            result = self.runner.invoke(cli, ["install", "some-org/timeout-pkg"])
 
             assert result.exit_code != 0
             assert "restored to its previous state" in result.output
@@ -361,9 +344,7 @@ class TestInstallPkgPolicyRollback:
             mock_apm_package.from_apm_yml.return_value = _mock_apm_package()
             mock_install_apm.return_value = _successful_install_result()
 
-            result = self.runner.invoke(
-                cli, ["install", "test-blocked/denied-pkg"]
-            )
+            result = self.runner.invoke(cli, ["install", "test-blocked/denied-pkg"])
 
             assert result.exit_code == 0
             content = (tmp_dir / "apm.yml").read_text(encoding="utf-8")
@@ -374,6 +355,7 @@ class TestInstallPkgPolicyRollback:
 # ---------------------------------------------------------------------------
 # Byte-equality stress tests
 # ---------------------------------------------------------------------------
+
 
 class TestSnapshotByteIntegrity:
     """Verify that the raw-bytes snapshot survives YAML round-trip drift."""
@@ -424,14 +406,14 @@ class TestSnapshotByteIntegrity:
         """UTF-8 content (comments, descriptions) must survive rollback."""
         with _chdir_tmp(self.original_dir) as tmp_dir:
             raw_utf8 = (
-                "# Project: Test\n"
-                "name: unicode-test\n"
-                "version: 0.1.0\n"
-                "dependencies:\n"
-                "  apm:\n"
-                "    - existing/package\n"
-                "  mcp: []\n"
-            ).encode("utf-8")
+                b"# Project: Test\n"
+                b"name: unicode-test\n"
+                b"version: 0.1.0\n"
+                b"dependencies:\n"
+                b"  apm:\n"
+                b"    - existing/package\n"
+                b"  mcp: []\n"
+            )
             (tmp_dir / "apm.yml").write_bytes(raw_utf8)
 
             mock_validate.return_value = True
@@ -456,16 +438,16 @@ class TestSnapshotByteIntegrity:
         """
         with _chdir_tmp(self.original_dir) as tmp_dir:
             raw_with_comments = (
-                "# This is my project\n"
-                "name: commented-project\n"
-                "version: 1.0.0\n"
-                "\n"
-                "# Dependencies managed by APM\n"
-                "dependencies:\n"
-                "  apm:\n"
-                "    - existing/dep  # pinned for stability\n"
-                "  mcp: []\n"
-            ).encode("utf-8")
+                b"# This is my project\n"
+                b"name: commented-project\n"
+                b"version: 1.0.0\n"
+                b"\n"
+                b"# Dependencies managed by APM\n"
+                b"dependencies:\n"
+                b"  apm:\n"
+                b"    - existing/dep  # pinned for stability\n"
+                b"  mcp: []\n"
+            )
             (tmp_dir / "apm.yml").write_bytes(raw_with_comments)
 
             mock_validate.return_value = True
@@ -484,6 +466,7 @@ class TestSnapshotByteIntegrity:
 # ---------------------------------------------------------------------------
 # Rollback helper unit tests
 # ---------------------------------------------------------------------------
+
 
 class TestRestoreManifestFromSnapshot:
     """Direct tests for _restore_manifest_from_snapshot."""
@@ -554,9 +537,7 @@ class TestMaybeRollbackManifest:
         _maybe_rollback_manifest(target, b"original", logger)
 
         assert target.read_bytes() == b"original"
-        logger.progress.assert_called_once_with(
-            "apm.yml restored to its previous state."
-        )
+        logger.progress.assert_called_once_with("apm.yml restored to its previous state.")
 
     def test_warns_on_restore_failure(self, tmp_path):
         """If restore fails, warn but don't mask the original error."""
@@ -576,6 +557,7 @@ class TestMaybeRollbackManifest:
 # ---------------------------------------------------------------------------
 # No rollback when ``apm install`` (without packages)
 # ---------------------------------------------------------------------------
+
 
 class TestNoRollbackWithoutPackages:
     """When running bare ``apm install``, no snapshot is taken."""
@@ -598,9 +580,7 @@ class TestNoRollbackWithoutPackages:
     @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
     @patch("apm_cli.commands.install.APMPackage")
     @patch("apm_cli.commands.install._install_apm_dependencies")
-    def test_bare_install_failure_does_not_rollback(
-        self, mock_install_apm, mock_apm_package
-    ):
+    def test_bare_install_failure_does_not_rollback(self, mock_install_apm, mock_apm_package):
         """``apm install`` (no pkgs) -> pipeline error does NOT touch apm.yml."""
         with _chdir_tmp(self.original_dir) as tmp_dir:
             # Write a known apm.yml

@@ -3,7 +3,7 @@
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import mock_open, patch
+from unittest.mock import mock_open, patch  # noqa: F401
 
 import pytest
 import yaml
@@ -17,7 +17,7 @@ from src.apm_cli.models.apm_package import (
     PackageInfo,
     PackageType,
     ResolvedReference,
-    ValidationError,
+    ValidationError,  # noqa: F401
     ValidationResult,
     parse_git_reference,
     validate_apm_package,
@@ -196,7 +196,7 @@ class TestDependencyReference:
         assert dep.ado_organization == "dmeppiel-org"
         assert dep.ado_project == "market-js-app"
         assert dep.ado_repo == "compliance-rules"
-        assert dep.is_azure_devops() == True
+        assert dep.is_azure_devops() == True  # noqa: E712
         assert dep.repo_url == "dmeppiel-org/market-js-app/compliance-rules"
 
         # Simplified ADO format (without _git)
@@ -205,14 +205,12 @@ class TestDependencyReference:
         assert dep.ado_organization == "myorg"
         assert dep.ado_project == "myproject"
         assert dep.ado_repo == "myrepo"
-        assert dep.is_azure_devops() == True
+        assert dep.is_azure_devops() == True  # noqa: E712
 
         # Legacy visualstudio.com format
-        dep = DependencyReference.parse(
-            "mycompany.visualstudio.com/myorg/myproject/myrepo"
-        )
+        dep = DependencyReference.parse("mycompany.visualstudio.com/myorg/myproject/myrepo")
         assert dep.host == "mycompany.visualstudio.com"
-        assert dep.is_azure_devops() == True
+        assert dep.is_azure_devops() == True  # noqa: E712
         assert dep.ado_organization == "myorg"
         assert dep.ado_project == "myproject"
         assert dep.ado_repo == "myrepo"
@@ -223,8 +221,8 @@ class TestDependencyReference:
         dep = DependencyReference.parse(
             "dev.azure.com/myorg/myproject/myrepo/prompts/code-review.prompt.md"
         )
-        assert dep.is_azure_devops() == True
-        assert dep.is_virtual == True
+        assert dep.is_azure_devops() == True  # noqa: E712
+        assert dep.is_virtual == True  # noqa: E712
         assert dep.repo_url == "myorg/myproject/myrepo"
         assert dep.virtual_path == "prompts/code-review.prompt.md"
         assert dep.ado_organization == "myorg"
@@ -235,8 +233,8 @@ class TestDependencyReference:
         dep = DependencyReference.parse(
             "dev.azure.com/myorg/myproject/_git/myrepo/prompts/test.prompt.md"
         )
-        assert dep.is_azure_devops() == True
-        assert dep.is_virtual == True
+        assert dep.is_azure_devops() == True  # noqa: E712
+        assert dep.is_virtual == True  # noqa: E712
         assert dep.virtual_path == "prompts/test.prompt.md"
 
     def test_parse_azure_devops_invalid_virtual_package(self):
@@ -251,12 +249,12 @@ class TestDependencyReference:
 
         # Valid 4-segment ADO virtual package should work
         dep = DependencyReference.parse("dev.azure.com/org/proj/repo/file.prompt.md")
-        assert dep.is_virtual == True
+        assert dep.is_virtual == True  # noqa: E712
         assert dep.repo_url == "org/proj/repo"
 
         # 3 segments after host (org/proj/repo) without a path - this is a regular package, not virtual
         dep = DependencyReference.parse("dev.azure.com/myorg/myproject/myrepo")
-        assert dep.is_virtual == False
+        assert dep.is_virtual == False  # noqa: E712
         assert dep.repo_url == "myorg/myproject/myrepo"
 
     def test_parse_azure_devops_project_with_spaces(self):
@@ -271,7 +269,7 @@ class TestDependencyReference:
         assert dep.ado_organization == "myorg"
         assert dep.ado_project == "My Project"
         assert dep.ado_repo == "myrepo"
-        assert dep.is_azure_devops() == True
+        assert dep.is_azure_devops() == True  # noqa: E712
         assert dep.repo_url == "myorg/My Project/myrepo"
 
         # Literal space in project name (simplified format without _git)
@@ -280,7 +278,7 @@ class TestDependencyReference:
         assert dep.ado_organization == "myorg"
         assert dep.ado_project == "My Project"
         assert dep.ado_repo == "myrepo"
-        assert dep.is_azure_devops() == True
+        assert dep.is_azure_devops() == True  # noqa: E712
 
         # Percent-encoded space in simplified format
         dep = DependencyReference.parse("dev.azure.com/org/America%20Oh%20Yeah/repo")
@@ -300,7 +298,7 @@ class TestDependencyReference:
         assert dep.ado_organization == "Zifo"
         assert dep.ado_project == "AIdeate and AIterate"
         assert dep.ado_repo == "AiDeate SDLC Guidelines"
-        assert dep.is_azure_devops() == True
+        assert dep.is_azure_devops() == True  # noqa: E712
         assert dep.repo_url == "Zifo/AIdeate and AIterate/AiDeate SDLC Guidelines"
 
         # Spaces in both project and repo names (literal)
@@ -310,9 +308,7 @@ class TestDependencyReference:
         assert dep.ado_repo == "My Repo Name"
 
         # Spaces in repo name only (percent-encoded, no _git)
-        dep = DependencyReference.parse(
-            "dev.azure.com/myorg/myproject/My%20Repo%20Name"
-        )
+        dep = DependencyReference.parse("dev.azure.com/myorg/myproject/My%20Repo%20Name")
         assert dep.ado_organization == "myorg"
         assert dep.ado_project == "myproject"
         assert dep.ado_repo == "My Repo Name"
@@ -336,21 +332,15 @@ class TestDependencyReference:
         """
         # Path injection: still rejected (creates invalid repo format)
         with pytest.raises(ValueError):
-            DependencyReference.parse(
-                "evil.com/github.com/user/repo/prompts/file.prompt.md"
-            )
+            DependencyReference.parse("evil.com/github.com/user/repo/prompts/file.prompt.md")
 
         # Valid generic hosts: now accepted with generic git URL support
-        dep1 = DependencyReference.parse(
-            "github.com.evil.com/user/repo/prompts/file.prompt.md"
-        )
+        dep1 = DependencyReference.parse("github.com.evil.com/user/repo/prompts/file.prompt.md")
         assert dep1.host == "github.com.evil.com"
         assert dep1.repo_url == "user/repo"
         assert dep1.is_virtual is True
 
-        dep2 = DependencyReference.parse(
-            "attacker.net/user/repo/prompts/file.prompt.md"
-        )
+        dep2 = DependencyReference.parse("attacker.net/user/repo/prompts/file.prompt.md")
         assert dep2.host == "attacker.net"
         assert dep2.repo_url == "user/repo"
         assert dep2.is_virtual is True
@@ -367,9 +357,7 @@ class TestDependencyReference:
 
     def test_parse_virtual_file_with_reference(self):
         """Test parsing virtual file package with git reference."""
-        dep = DependencyReference.parse(
-            "owner/test-repo/prompts/code-review.prompt.md#v1.0.0"
-        )
+        dep = DependencyReference.parse("owner/test-repo/prompts/code-review.prompt.md#v1.0.0")
         assert dep.repo_url == "owner/test-repo"
         assert dep.is_virtual is True
         assert dep.virtual_path == "prompts/code-review.prompt.md"
@@ -415,9 +403,7 @@ class TestDependencyReference:
         ]
 
         for path in invalid_paths:
-            with pytest.raises(
-                ValueError, match="Individual files must end with one of"
-            ):
+            with pytest.raises(ValueError, match="Individual files must end with one of"):
                 DependencyReference.parse(path)
 
     def test_virtual_package_str_representation(self):
@@ -425,17 +411,13 @@ class TestDependencyReference:
 
         Note: After PR #33, host is explicit in string representation.
         """
-        dep = DependencyReference.parse(
-            "owner/test-repo/prompts/code-review.prompt.md#v1.0.0"
-        )
+        dep = DependencyReference.parse("owner/test-repo/prompts/code-review.prompt.md#v1.0.0")
         # Check that key components are present (host may be explicit now)
         assert "owner/test-repo" in str(dep)
         assert "prompts/code-review.prompt.md" in str(dep)
         assert "#v1.0.0" in str(dep)
 
-        dep_with_ref = DependencyReference.parse(
-            "owner/test-repo/prompts/test.prompt.md#v2.0"
-        )
+        dep_with_ref = DependencyReference.parse("owner/test-repo/prompts/test.prompt.md#v2.0")
         assert "owner/test-repo" in str(dep_with_ref)
         assert "prompts/test.prompt.md" in str(dep_with_ref)
         assert "#v2.0" in str(dep_with_ref)
@@ -458,7 +440,7 @@ class TestDependencyReference:
         for invalid_format in invalid_formats:
             with pytest.raises(
                 ValueError,
-                match="Invalid Git host|Empty dependency string|Invalid repository|Use 'user/repo'|path component",
+                match="Invalid Git host|Empty dependency string|Invalid repository|Use 'user/repo'|path component",  # noqa: RUF043
             ):
                 DependencyReference.parse(invalid_format)
 
@@ -633,15 +615,145 @@ class TestAPMPackage:
         assert not pkg1.has_apm_dependencies()
 
         # Package with MCP dependencies only
-        pkg2 = APMPackage(
-            name="test", version="1.0.0", dependencies={"mcp": ["server"]}
-        )
+        pkg2 = APMPackage(name="test", version="1.0.0", dependencies={"mcp": ["server"]})
         assert not pkg2.has_apm_dependencies()
 
         # Package with APM dependencies
         apm_deps = [DependencyReference.parse("user/repo")]
         pkg3 = APMPackage(name="test", version="1.0.0", dependencies={"apm": apm_deps})
         assert pkg3.has_apm_dependencies()
+
+    # ------------------------------------------------------------------
+    # target field parsing -- shared with --target via parse_target_field
+    # (regression suite for #820)
+    # ------------------------------------------------------------------
+
+    def test_csv_string_in_apm_yml_parses_like_cli(self):
+        """CSV string in apm.yml resolves identically to ``--target``.
+
+        The exact value from issue #820 -- previously this returned a raw
+        CSV string and downstream silently produced ``[]``, leaving
+        ``apm install`` and ``apm compile`` to exit 0 with nothing
+        deployed.  Now the value parses through the same validator as the
+        CLI flag and yields the canonical multi-target list.
+        """
+        apm_content = {
+            "name": "x",
+            "version": "0.1.0",
+            "target": "opencode,claude,copilot,agents",
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+            yaml.dump(apm_content, f)
+            f.flush()
+
+            package = APMPackage.from_apm_yml(Path(f.name))
+            assert package.target == ["opencode", "claude", "vscode"]
+
+        Path(f.name).unlink()
+
+    def test_unknown_target_in_apm_yml_raises_with_pointer(self):
+        """An unknown token in ``target:`` raises a ValueError that names
+        the offending token AND the apm.yml path, so users can jump to
+        the file directly.  Replaces the previous silently-ignored
+        contract from manifest-schema.md (see #820 spec revision)."""
+        apm_content = {
+            "name": "x",
+            "version": "0.1.0",
+            "target": "claude,bogus,copilot",
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+            yaml.dump(apm_content, f)
+            f.flush()
+            yml_path = f.name
+
+            with pytest.raises(ValueError) as excinfo:
+                APMPackage.from_apm_yml(Path(yml_path))
+            msg = str(excinfo.value)
+            assert "'bogus'" in msg
+            assert "not a valid target" in msg
+            assert yml_path in msg  # apm.yml path is part of the error
+
+        Path(yml_path).unlink()
+
+    def test_yaml_list_target_still_parses(self):
+        """Native YAML list form (``target: [claude, copilot]``) keeps
+        working through the shared parser.  Smoke test ensuring the
+        change didn't break the supported list shape."""
+        apm_content = {
+            "name": "x",
+            "version": "0.1.0",
+            "target": ["claude", "copilot"],
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+            yaml.dump(apm_content, f)
+            f.flush()
+
+            package = APMPackage.from_apm_yml(Path(f.name))
+            assert package.target == ["claude", "vscode"]
+
+        Path(f.name).unlink()
+
+    def test_target_unset_remains_none(self):
+        """Omitting ``target:`` yields ``None`` -- auto-detection takes
+        over at consumption time (active_targets / detect_target)."""
+        apm_content = {"name": "x", "version": "0.1.0"}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+            yaml.dump(apm_content, f)
+            f.flush()
+
+            package = APMPackage.from_apm_yml(Path(f.name))
+            assert package.target is None
+
+        Path(f.name).unlink()
+
+    def test_target_empty_string_raises(self):
+        """``target: ""`` is user error and now raises (was: silently
+        auto-detected before #820).  See CHANGELOG migration note."""
+        apm_content = {"name": "x", "version": "0.1.0", "target": ""}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+            yaml.dump(apm_content, f)
+            f.flush()
+            yml_path = f.name
+
+            with pytest.raises(ValueError, match="must not be empty"):
+                APMPackage.from_apm_yml(Path(yml_path))
+
+        Path(yml_path).unlink()
+
+    def test_target_empty_list_raises(self):
+        """``target: []`` is user error and now raises (was: silently
+        auto-detected before #820).  Empty list is "set to nothing",
+        which is not the same as "unset" -- to opt into auto-detection
+        the field must be omitted entirely."""
+        apm_content = {"name": "x", "version": "0.1.0", "target": []}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+            yaml.dump(apm_content, f)
+            f.flush()
+            yml_path = f.name
+
+            with pytest.raises(ValueError, match="must not be empty"):
+                APMPackage.from_apm_yml(Path(yml_path))
+
+        Path(yml_path).unlink()
+
+    def test_target_all_combined_with_other_raises(self):
+        """``all`` is exclusive -- mixing it with other targets is now
+        rejected at parse time, matching the existing ``--target`` flag
+        contract (TargetParamType test_target_combined_with_all_rejected)."""
+        apm_content = {
+            "name": "x",
+            "version": "0.1.0",
+            "target": ["all", "claude"],
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+            yaml.dump(apm_content, f)
+            f.flush()
+            yml_path = f.name
+
+            with pytest.raises(ValueError, match="cannot be combined"):
+                APMPackage.from_apm_yml(Path(yml_path))
+
+        Path(yml_path).unlink()
 
 
 class TestValidationResult:
@@ -716,26 +828,25 @@ class TestPackageValidation:
             assert result.package_type == PackageType.INVALID
 
     def test_validate_invalid_apm_yml(self):
-        """Test validating directory with invalid apm.yml."""
+        """Test validating directory with apm.yml but no .apm/ directory."""
         with tempfile.TemporaryDirectory() as tmpdir:
             apm_yml = Path(tmpdir) / "apm.yml"
             apm_yml.write_text("invalid: [yaml")
 
             result = validate_apm_package(Path(tmpdir))
             assert not result.is_valid
-            assert any("Invalid apm.yml" in error for error in result.errors)
+            # apm.yml exists but .apm/ is missing -> INVALID with helpful message
+            assert any("missing the required .apm/ directory" in error for error in result.errors)
 
     def test_validate_missing_apm_directory(self):
-        """Test validating package without .apm directory."""
+        """Test validating package with apm.yml but no .apm directory."""
         with tempfile.TemporaryDirectory() as tmpdir:
             apm_yml = Path(tmpdir) / "apm.yml"
             apm_yml.write_text("name: test\nversion: 1.0.0")
 
             result = validate_apm_package(Path(tmpdir))
             assert not result.is_valid
-            assert any(
-                "Missing required directory: .apm/" in error for error in result.errors
-            )
+            assert any("missing the required .apm/ directory" in error for error in result.errors)
 
     def test_validate_apm_file_instead_of_directory(self):
         """Test validating package with .apm as file instead of directory."""
@@ -761,9 +872,7 @@ class TestPackageValidation:
 
             result = validate_apm_package(Path(tmpdir))
             assert result.is_valid  # Should be valid but with warning
-            assert any(
-                "No primitive files found" in warning for warning in result.warnings
-            )
+            assert any("No primitive files found" in warning for warning in result.warnings)
 
     def test_validate_valid_package(self):
         """Test validating completely valid package."""
@@ -805,8 +914,7 @@ class TestPackageValidation:
             result = validate_apm_package(Path(tmpdir))
             assert result.is_valid
             assert any(
-                "doesn't follow semantic versioning" in warning
-                for warning in result.warnings
+                "doesn't follow semantic versioning" in warning for warning in result.warnings
             )
 
     def test_validate_numeric_version_types(self):
@@ -946,11 +1054,7 @@ class TestHookPackageValidation:
                     {
                         "hooks": {
                             "PreToolUse": [
-                                {
-                                    "hooks": [
-                                        {"type": "command", "command": "echo hello"}
-                                    ]
-                                }
+                                {"hooks": [{"type": "command", "command": "echo hello"}]}
                             ]
                         }
                     }
@@ -971,13 +1075,7 @@ class TestHookPackageValidation:
             hooks_json = hooks_dir / "my-hooks.json"
             hooks_json.write_text(
                 json.dumps(
-                    {
-                        "hooks": {
-                            "Stop": [
-                                {"hooks": [{"type": "command", "command": "echo bye"}]}
-                            ]
-                        }
-                    }
+                    {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo bye"}]}]}}
                 )
             )
 
@@ -1011,7 +1109,7 @@ class TestHookPackageValidation:
             assert result.package_type == PackageType.INVALID
 
 
-from src.apm_cli.models.validation import detect_package_type
+from src.apm_cli.models.validation import detect_package_type  # noqa: E402
 
 
 class TestDetectPackageType:
@@ -1025,7 +1123,17 @@ class TestDetectPackageType:
         assert pj_path is None
 
     def test_apm_package_when_only_apm_yml(self, tmp_path):
+        """apm.yml without .apm/ is now INVALID (needs .apm/ for APM_PACKAGE)."""
         (tmp_path / "apm.yml").write_text("name: test")
+        pkg_type, pj_path = detect_package_type(tmp_path)
+        assert pkg_type == PackageType.INVALID
+        assert pj_path is None
+
+    def test_apm_package_when_apm_yml_and_apm_dir(self, tmp_path):
+        """apm.yml + .apm/ directory -> APM_PACKAGE."""
+        (tmp_path / "apm.yml").write_text("name: test")
+        (tmp_path / ".apm").mkdir()
+        (tmp_path / ".apm" / "instructions").mkdir()
         pkg_type, pj_path = detect_package_type(tmp_path)
         assert pkg_type == PackageType.APM_PACKAGE
         assert pj_path is None
@@ -1052,19 +1160,30 @@ class TestDetectPackageType:
         assert pj_path.name == "plugin.json"
 
     def test_marketplace_plugin_with_agents_dir(self, tmp_path):
+        """Bare agents/ without plugin manifest is no longer MARKETPLACE_PLUGIN."""
         (tmp_path / "agents").mkdir()
         pkg_type, pj_path = detect_package_type(tmp_path)
-        assert pkg_type == PackageType.MARKETPLACE_PLUGIN
+        # Bare dirs without plugin manifest are INVALID (tightened in SKILL_BUNDLE work)
+        assert pkg_type == PackageType.INVALID
         assert pj_path is None
 
     def test_marketplace_plugin_with_skills_dir(self, tmp_path):
+        """Bare skills/ without SKILL.md or plugin manifest is INVALID."""
         (tmp_path / "skills").mkdir()
         pkg_type, pj_path = detect_package_type(tmp_path)
-        assert pkg_type == PackageType.MARKETPLACE_PLUGIN
+        assert pkg_type == PackageType.INVALID
         assert pj_path is None
 
     def test_marketplace_plugin_with_commands_dir(self, tmp_path):
+        """Bare commands/ without plugin manifest is INVALID."""
         (tmp_path / "commands").mkdir()
+        pkg_type, pj_path = detect_package_type(tmp_path)
+        assert pkg_type == PackageType.INVALID
+        assert pj_path is None
+
+    def test_marketplace_plugin_with_claude_plugin_dir(self, tmp_path):
+        """.claude-plugin/ directory alone -> MARKETPLACE_PLUGIN."""
+        (tmp_path / ".claude-plugin").mkdir()
         pkg_type, pj_path = detect_package_type(tmp_path)
         assert pkg_type == PackageType.MARKETPLACE_PLUGIN
         assert pj_path is None
@@ -1075,14 +1194,27 @@ class TestDetectPackageType:
         assert pj_path is None
 
     def test_apm_yml_takes_precedence_over_plugin_json(self, tmp_path):
+        """plugin.json (manifest) now takes priority over apm.yml."""
         (tmp_path / "apm.yml").write_text("name: test")
         (tmp_path / "plugin.json").write_text('{"name": "test"}')
         pkg_type, _ = detect_package_type(tmp_path)
-        assert pkg_type == PackageType.APM_PACKAGE
+        # In the new cascade, plugin manifest wins (step 1)
+        assert pkg_type == PackageType.MARKETPLACE_PLUGIN
 
     def test_hook_package_apm_yml_precedence(self, tmp_path):
-        """apm.yml takes precedence even when hooks exist."""
+        """apm.yml + hooks/ but no .apm/ -> INVALID (needs .apm/ for APM_PACKAGE)."""
         (tmp_path / "apm.yml").write_text("name: test")
+        hooks_dir = tmp_path / "hooks"
+        hooks_dir.mkdir()
+        (hooks_dir / "pre-commit.json").write_text("{}")
+        pkg_type, _ = detect_package_type(tmp_path)
+        # apm.yml without .apm/ dir is now INVALID
+        assert pkg_type == PackageType.INVALID
+
+    def test_apm_package_with_hooks_and_apm_dir(self, tmp_path):
+        """apm.yml + .apm/ + hooks/ -> APM_PACKAGE."""
+        (tmp_path / "apm.yml").write_text("name: test")
+        (tmp_path / ".apm").mkdir()
         hooks_dir = tmp_path / "hooks"
         hooks_dir.mkdir()
         (hooks_dir / "pre-commit.json").write_text("{}")
@@ -1090,14 +1222,26 @@ class TestDetectPackageType:
         assert pkg_type == PackageType.APM_PACKAGE
 
     def test_marketplace_plugin_wins_over_hooks_via_agents_dir(self, tmp_path):
-        """Regression: a Claude plugin that ships hooks AND agents/ must
-        classify as MARKETPLACE_PLUGIN so the plugin synthesizer maps
-        agents alongside hooks. See microsoft/apm#780.
+        """A plugin that ships hooks AND agents/ needs a manifest (plugin.json
+        or .claude-plugin/) to classify as MARKETPLACE_PLUGIN.  Bare agents/
+        alone no longer triggers plugin classification.
         """
         hooks_dir = tmp_path / "hooks"
         hooks_dir.mkdir()
         (hooks_dir / "hooks.json").write_text("{}")
         (tmp_path / "agents").mkdir()
+        # Without a plugin manifest, this is a HOOK_PACKAGE
+        pkg_type, pj_path = detect_package_type(tmp_path)
+        assert pkg_type == PackageType.HOOK_PACKAGE
+        assert pj_path is None
+
+    def test_marketplace_plugin_wins_over_hooks_with_manifest(self, tmp_path):
+        """With .claude-plugin/ manifest, hooks + agents -> MARKETPLACE_PLUGIN."""
+        hooks_dir = tmp_path / "hooks"
+        hooks_dir.mkdir()
+        (hooks_dir / "hooks.json").write_text("{}")
+        (tmp_path / "agents").mkdir()
+        (tmp_path / ".claude-plugin").mkdir()
         pkg_type, pj_path = detect_package_type(tmp_path)
         assert pkg_type == PackageType.MARKETPLACE_PLUGIN
         assert pj_path is None
@@ -1127,9 +1271,7 @@ class TestDetectPackageType:
         (tmp_path / "hooks" / "hooks.json").write_text("{}")
         # Plugin shape.
         (tmp_path / ".claude-plugin").mkdir()
-        (tmp_path / ".claude-plugin" / "plugin.json").write_text(
-            '{"name": "superpowers"}'
-        )
+        (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"name": "superpowers"}')
         (tmp_path / "agents").mkdir()
         (tmp_path / "agents" / "code-reviewer.md").write_text("# agent")
         (tmp_path / "skills").mkdir()
@@ -1141,6 +1283,166 @@ class TestDetectPackageType:
         assert pkg_type == PackageType.MARKETPLACE_PLUGIN
         assert pj_path is not None
         assert pj_path.name == "plugin.json"
+
+
+class TestHybridPackageValidation:
+    """Tests for HYBRID package validation (apm.yml + SKILL.md, no .apm/).
+
+    Genesis-layout reproducer: apm.yml + SKILL.md + optional agents/ at
+    repo root, no .apm/ directory.  validate_apm_package must return
+    package_type == HYBRID with no errors.
+    """
+
+    def test_hybrid_no_apm_dir_validates_as_skill_bundle(self, tmp_path):
+        """Core reproducer: HYBRID layout without .apm/ is valid."""
+        (tmp_path / "apm.yml").write_text(
+            "name: genesis\nversion: 1.0.0\ndescription: Genesis architect\n"
+        )
+        (tmp_path / "SKILL.md").write_text(
+            "---\nname: genesis\ndescription: skill desc\n---\n# Genesis Skill\n"
+        )
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        (agents_dir / "genesis-architect.agent.md").write_text("# Agent")
+
+        result = validate_apm_package(tmp_path)
+        assert result.is_valid, f"Expected valid but got errors: {result.errors}"
+        assert result.package_type == PackageType.HYBRID
+        assert result.package is not None
+        assert result.package.name == "genesis"
+        assert result.package.version == "1.0.0"
+
+    def test_hybrid_with_apm_dir_falls_through_to_standard(self, tmp_path):
+        """HYBRID with .apm/ present uses standard APM package validation."""
+        (tmp_path / "apm.yml").write_text("name: hybrid-classic\nversion: 2.0.0\n")
+        (tmp_path / "SKILL.md").write_text("# Skill")
+        apm_dir = tmp_path / ".apm"
+        apm_dir.mkdir()
+        inst_dir = apm_dir / "instructions"
+        inst_dir.mkdir()
+        (inst_dir / "foo.instructions.md").write_text("# Foo")
+
+        result = validate_apm_package(tmp_path)
+        assert result.is_valid, f"Expected valid but got errors: {result.errors}"
+        assert result.package_type == PackageType.HYBRID
+
+    def test_hybrid_bad_apm_yml_reports_error(self, tmp_path):
+        """HYBRID with malformed apm.yml is invalid."""
+        (tmp_path / "apm.yml").write_text("invalid: [yaml")
+        (tmp_path / "SKILL.md").write_text("# Skill")
+
+        result = validate_apm_package(tmp_path)
+        assert not result.is_valid
+        assert any("Invalid apm.yml" in e for e in result.errors)
+
+    def test_hybrid_skill_md_description_does_not_backfill_into_apm_yml(self, tmp_path):
+        """apm.yml.description and SKILL.md description are independent.
+
+        SKILL.md is consumed by the agent runtime (invocation matcher per
+        agentskills.io); apm.yml.description is consumed by APM tooling
+        (`apm view`, search, listings). They serve different consumers
+        and APM never merges them. When apm.yml omits its description,
+        ``APMPackage.description`` stays ``None`` -- the SKILL.md value
+        does NOT silently leak into the human-facing tagline slot.
+        """
+        (tmp_path / "apm.yml").write_text("name: genesis\nversion: 1.0.0\n")
+        (tmp_path / "SKILL.md").write_text("---\ndescription: from-skill-md\n---\n# Skill\n")
+
+        result = validate_apm_package(tmp_path)
+        assert result.is_valid
+        assert result.package.description is None
+
+    def test_hybrid_apm_yml_description_wins_over_skill_md(self, tmp_path):
+        """apm.yml.description is the only source for APMPackage.description.
+
+        When apm.yml provides a description, that value is used verbatim
+        regardless of SKILL.md frontmatter -- there is no merge.
+        """
+        (tmp_path / "apm.yml").write_text(
+            "name: genesis\nversion: 1.0.0\ndescription: from-apm-yml\n"
+        )
+        (tmp_path / "SKILL.md").write_text("---\ndescription: from-skill-md\n---\n# Skill\n")
+
+        result = validate_apm_package(tmp_path)
+        assert result.is_valid
+        assert result.package.description == "from-apm-yml"
+
+    def test_hybrid_both_descriptions_independent(self, tmp_path):
+        """SKILL.md content is preserved on disk untouched after validation.
+
+        APM must never mutate the SKILL.md file; the agent runtime reads
+        it byte-for-byte from `<target>/skills/<name>/SKILL.md` after
+        integration. This test asserts (a) APMPackage.description comes
+        only from apm.yml and (b) SKILL.md is untouched on disk.
+        """
+        skill_md_content = (
+            "---\n"
+            "name: genesis\n"
+            "description: This skill should be invoked when the user asks "
+            "about Genesis architecture decisions.\n"
+            "allowed-tools: [bash, view]\n"
+            "---\n"
+            "# Genesis Skill\n"
+        )
+        (tmp_path / "apm.yml").write_text(
+            "name: genesis\nversion: 1.0.0\ndescription: short tagline\n"
+        )
+        (tmp_path / "SKILL.md").write_text(skill_md_content)
+
+        result = validate_apm_package(tmp_path)
+        assert result.is_valid
+        assert result.package.description == "short tagline"
+        # SKILL.md must be untouched -- the agent runtime reads it verbatim.
+        assert (tmp_path / "SKILL.md").read_text() == skill_md_content
+
+
+class TestClaudeSkillPackageValidation:
+    """Tests for CLAUDE_SKILL packages (SKILL.md only, no apm.yml).
+
+    Verifies the ``SKILL.md + agents/ + assets/`` layout (no apm.yml)
+    classifies as CLAUDE_SKILL and is NOT misclassified as
+    MARKETPLACE_PLUGIN even though ``agents/`` is in ``_PLUGIN_DIRS``.
+    """
+
+    def test_claude_skill_with_agents_and_assets_validates(self, tmp_path):
+        """CLAUDE_SKILL with agents/ and assets/ sub-dirs passes validation."""
+        (tmp_path / "SKILL.md").write_text(
+            "---\nname: my-skill\ndescription: A skill with agents\n---\n# My Skill\n"
+        )
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        (agents_dir / "foo.agent.md").write_text("# Foo Agent")
+        assets_dir = tmp_path / "assets"
+        assets_dir.mkdir()
+        (assets_dir / "logo.png").write_bytes(b"\x89PNG")
+
+        result = validate_apm_package(tmp_path)
+        assert result.is_valid, f"Expected valid but got errors: {result.errors}"
+        assert result.package_type == PackageType.CLAUDE_SKILL
+        assert result.package is not None
+        assert result.package.name == "my-skill"
+
+    def test_claude_skill_with_agents_dir_not_misclassified_as_plugin(self, tmp_path):
+        """SKILL.md presence beats agents/ directory in the detection cascade.
+
+        ``agents/`` is in ``_PLUGIN_DIRS``, so without SKILL.md it would
+        classify as MARKETPLACE_PLUGIN.  With SKILL.md present the cascade
+        must short-circuit to CLAUDE_SKILL (step 3 precedes step 4).
+        """
+        (tmp_path / "SKILL.md").write_text("---\nname: agents-skill\n---\n# Has Agents\n")
+        (tmp_path / "agents").mkdir()
+        (tmp_path / "agents" / "bar.agent.md").write_text("# Bar Agent")
+
+        # Detection level
+        pkg_type, pj = detect_package_type(tmp_path)
+        assert pkg_type == PackageType.CLAUDE_SKILL
+        assert pj is None
+
+        # Full validation level
+        result = validate_apm_package(tmp_path)
+        assert result.is_valid, f"Expected valid but got errors: {result.errors}"
+        assert result.package_type == PackageType.CLAUDE_SKILL
+        assert result.package_type != PackageType.MARKETPLACE_PLUGIN
 
 
 class TestGatherDetectionEvidence:
@@ -1166,7 +1468,8 @@ class TestGatherDetectionEvidence:
         (tmp_path / "skills").mkdir()
         evidence = gather_detection_evidence(tmp_path)
         assert evidence.plugin_dirs_present == ("agents", "skills", "commands")
-        assert evidence.has_plugin_evidence is True
+        # Bare dirs without plugin.json or .claude-plugin/ are NOT plugin evidence.
+        assert evidence.has_plugin_evidence is False
 
     def test_obra_superpowers_evidence(self, tmp_path):
         """Evidence on the #780 repro should expose every signal the
@@ -1177,9 +1480,7 @@ class TestGatherDetectionEvidence:
         (tmp_path / "hooks").mkdir()
         (tmp_path / "hooks" / "hooks.json").write_text("{}")
         (tmp_path / ".claude-plugin").mkdir()
-        (tmp_path / ".claude-plugin" / "plugin.json").write_text(
-            '{"name": "superpowers"}'
-        )
+        (tmp_path / ".claude-plugin" / "plugin.json").write_text('{"name": "superpowers"}')
         (tmp_path / "agents").mkdir()
         (tmp_path / "skills").mkdir()
         (tmp_path / "commands").mkdir()
@@ -1344,30 +1645,21 @@ class TestPackageContentType:
 
     def test_from_string_valid_values(self):
         """Test parsing all valid type values."""
-        assert (
-            PackageContentType.from_string("instructions")
-            == PackageContentType.INSTRUCTIONS
-        )
+        assert PackageContentType.from_string("instructions") == PackageContentType.INSTRUCTIONS
         assert PackageContentType.from_string("skill") == PackageContentType.SKILL
         assert PackageContentType.from_string("hybrid") == PackageContentType.HYBRID
         assert PackageContentType.from_string("prompts") == PackageContentType.PROMPTS
 
     def test_from_string_case_insensitive(self):
         """Test that parsing is case-insensitive."""
-        assert (
-            PackageContentType.from_string("INSTRUCTIONS")
-            == PackageContentType.INSTRUCTIONS
-        )
+        assert PackageContentType.from_string("INSTRUCTIONS") == PackageContentType.INSTRUCTIONS
         assert PackageContentType.from_string("Skill") == PackageContentType.SKILL
         assert PackageContentType.from_string("HYBRID") == PackageContentType.HYBRID
         assert PackageContentType.from_string("Prompts") == PackageContentType.PROMPTS
 
     def test_from_string_with_whitespace(self):
         """Test that parsing handles leading/trailing whitespace."""
-        assert (
-            PackageContentType.from_string("  instructions  ")
-            == PackageContentType.INSTRUCTIONS
-        )
+        assert PackageContentType.from_string("  instructions  ") == PackageContentType.INSTRUCTIONS
         assert PackageContentType.from_string("\tskill\n") == PackageContentType.SKILL
 
     def test_from_string_invalid_value(self):
@@ -1547,9 +1839,7 @@ type: null
 
     def test_package_dataclass_with_type(self):
         """Test that APMPackage dataclass accepts type parameter."""
-        package = APMPackage(
-            name="test", version="1.0.0", type=PackageContentType.SKILL
-        )
+        package = APMPackage(name="test", version="1.0.0", type=PackageContentType.SKILL)
         assert package.type == PackageContentType.SKILL
 
     def test_package_dataclass_type_defaults_to_none(self):
@@ -1681,6 +1971,8 @@ class TestGenericHostSubdirectoryRoundTrip:
         lockfile = Mock()
         locked_dep = Mock()
         locked_dep.resolved_commit = "abc123"
+        locked_dep.registry_prefix = None  # no proxy
+        locked_dep.host = None
         lockfile.get_dependency = Mock(return_value=locked_dep)
 
         result = build_download_ref(dep, lockfile, update_refs=False, ref_changed=False)

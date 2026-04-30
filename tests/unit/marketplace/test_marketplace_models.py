@@ -49,9 +49,7 @@ class TestMarketplaceSource:
         assert d["path"] == ".github/plugin/marketplace.json"
 
     def test_from_dict_minimal(self):
-        src = MarketplaceSource.from_dict(
-            {"name": "acme", "owner": "acme-org", "repo": "plugins"}
-        )
+        src = MarketplaceSource.from_dict({"name": "acme", "owner": "acme-org", "repo": "plugins"})
         assert src.name == "acme"
         assert src.host == "github.com"
 
@@ -369,5 +367,3 @@ class TestParseMarketplaceJson:
         data = {"name": "Test", "metadata": {"version": "1.0"}, "plugins": []}
         manifest = parse_marketplace_json(data)
         assert manifest.plugin_root == ""
-
-

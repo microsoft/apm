@@ -9,14 +9,15 @@ Covers:
 - only_packages filter in _install_apm_dependencies
 """
 
+from pathlib import Path  # noqa: F401
+from unittest.mock import MagicMock, patch  # noqa: F401
+
 import pytest
-from unittest.mock import patch, MagicMock
-from pathlib import Path
 
 from apm_cli.models.apm_package import DependencyReference
 
-
 # ── to_canonical() ──────────────────────────────────────────────────────────
+
 
 class TestToCanonical:
     """Test DependencyReference.to_canonical() method."""
@@ -131,6 +132,7 @@ class TestToCanonical:
 
 # ── get_identity() ──────────────────────────────────────────────────────────
 
+
 class TestGetIdentity:
     """Test DependencyReference.get_identity() — identity without ref/alias."""
 
@@ -216,6 +218,7 @@ class TestGetIdentity:
 
 # ── canonicalize() static method ────────────────────────────────────────────
 
+
 class TestCanonicalize:
     """Test DependencyReference.canonicalize() static convenience method."""
 
@@ -232,10 +235,14 @@ class TestCanonicalize:
         assert DependencyReference.canonicalize("github.com/o/r#v1") == "o/r#v1"
 
     def test_https_gitlab_with_ref(self):
-        assert DependencyReference.canonicalize("https://gitlab.com/o/r.git#main") == "gitlab.com/o/r#main"
+        assert (
+            DependencyReference.canonicalize("https://gitlab.com/o/r.git#main")
+            == "gitlab.com/o/r#main"
+        )
 
 
 # ── backward compat: get_canonical_dependency_string() ──────────────────────
+
 
 class TestGetCanonicalDependencyString:
     """Verify backward compat shim delegates to get_unique_key()."""
@@ -257,19 +264,26 @@ class TestGetCanonicalDependencyString:
 
 # ── Normalize-on-write in _validate_and_add_packages_to_apm_yml ────────────
 
+
 class TestNormalizeOnWrite:
     """Test that _validate_and_add_packages_to_apm_yml canonicalizes inputs."""
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
     @patch("apm_cli.commands.install._rich_success")
-    def test_https_url_stored_as_shorthand(self, mock_success, mock_validate, tmp_path, monkeypatch):
+    def test_https_url_stored_as_shorthand(
+        self, mock_success, mock_validate, tmp_path, monkeypatch
+    ):
         """HTTPS GitHub URL is stored as owner/repo in apm.yml."""
         import yaml
+
         apm_yml = tmp_path / "apm.yml"
-        apm_yml.write_text(yaml.dump({"name": "test", "version": "0.1.0", "dependencies": {"apm": []}}))
+        apm_yml.write_text(
+            yaml.dump({"name": "test", "version": "0.1.0", "dependencies": {"apm": []}})
+        )
         monkeypatch.chdir(tmp_path)
 
         from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml
+
         validated, _outcome = _validate_and_add_packages_to_apm_yml(
             ["https://github.com/microsoft/apm-sample-package.git"]
         )
@@ -283,11 +297,15 @@ class TestNormalizeOnWrite:
     def test_ssh_url_stored_as_shorthand(self, mock_success, mock_validate, tmp_path, monkeypatch):
         """SSH GitHub URL is stored as owner/repo in apm.yml."""
         import yaml
+
         apm_yml = tmp_path / "apm.yml"
-        apm_yml.write_text(yaml.dump({"name": "test", "version": "0.1.0", "dependencies": {"apm": []}}))
+        apm_yml.write_text(
+            yaml.dump({"name": "test", "version": "0.1.0", "dependencies": {"apm": []}})
+        )
         monkeypatch.chdir(tmp_path)
 
         from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml
+
         validated, _outcome = _validate_and_add_packages_to_apm_yml(
             ["git@github.com:microsoft/apm-sample-package.git"]
         )
@@ -296,14 +314,20 @@ class TestNormalizeOnWrite:
 
     @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
     @patch("apm_cli.commands.install._rich_success")
-    def test_fqdn_github_stored_as_shorthand(self, mock_success, mock_validate, tmp_path, monkeypatch):
+    def test_fqdn_github_stored_as_shorthand(
+        self, mock_success, mock_validate, tmp_path, monkeypatch
+    ):
         """FQDN github.com/owner/repo is stored as owner/repo."""
         import yaml
+
         apm_yml = tmp_path / "apm.yml"
-        apm_yml.write_text(yaml.dump({"name": "test", "version": "0.1.0", "dependencies": {"apm": []}}))
+        apm_yml.write_text(
+            yaml.dump({"name": "test", "version": "0.1.0", "dependencies": {"apm": []}})
+        )
         monkeypatch.chdir(tmp_path)
 
         from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml
+
         validated, _outcome = _validate_and_add_packages_to_apm_yml(
             ["github.com/microsoft/apm-sample-package"]
         )
@@ -315,11 +339,15 @@ class TestNormalizeOnWrite:
     def test_gitlab_url_preserves_host(self, mock_success, mock_validate, tmp_path, monkeypatch):
         """GitLab URL preserves the host in canonical form."""
         import yaml
+
         apm_yml = tmp_path / "apm.yml"
-        apm_yml.write_text(yaml.dump({"name": "test", "version": "0.1.0", "dependencies": {"apm": []}}))
+        apm_yml.write_text(
+            yaml.dump({"name": "test", "version": "0.1.0", "dependencies": {"apm": []}})
+        )
         monkeypatch.chdir(tmp_path)
 
         from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml
+
         validated, _outcome = _validate_and_add_packages_to_apm_yml(
             ["https://gitlab.com/acme/standards.git"]
         )
@@ -332,14 +360,21 @@ class TestNormalizeOnWrite:
     def test_duplicate_detection_different_forms(self, mock_validate, tmp_path, monkeypatch):
         """Installing the same package in different forms doesn't create duplicates."""
         import yaml
+
         apm_yml = tmp_path / "apm.yml"
-        apm_yml.write_text(yaml.dump({
-            "name": "test", "version": "0.1.0",
-            "dependencies": {"apm": ["microsoft/apm-sample-package"]}
-        }))
+        apm_yml.write_text(
+            yaml.dump(
+                {
+                    "name": "test",
+                    "version": "0.1.0",
+                    "dependencies": {"apm": ["microsoft/apm-sample-package"]},
+                }
+            )
+        )
         monkeypatch.chdir(tmp_path)
 
         from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml
+
         validated, _outcome = _validate_and_add_packages_to_apm_yml(
             ["https://github.com/microsoft/apm-sample-package.git"]
         )
@@ -355,15 +390,21 @@ class TestNormalizeOnWrite:
     def test_batch_dedup(self, mock_success, mock_validate, tmp_path, monkeypatch):
         """Installing the same package twice in one batch only adds once."""
         import yaml
+
         apm_yml = tmp_path / "apm.yml"
-        apm_yml.write_text(yaml.dump({"name": "test", "version": "0.1.0", "dependencies": {"apm": []}}))
+        apm_yml.write_text(
+            yaml.dump({"name": "test", "version": "0.1.0", "dependencies": {"apm": []}})
+        )
         monkeypatch.chdir(tmp_path)
 
         from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml
-        validated, _outcome = _validate_and_add_packages_to_apm_yml([
-            "microsoft/apm-sample-package",
-            "https://github.com/microsoft/apm-sample-package.git",
-        ])
+
+        validated, _outcome = _validate_and_add_packages_to_apm_yml(
+            [
+                "microsoft/apm-sample-package",
+                "https://github.com/microsoft/apm-sample-package.git",
+            ]
+        )
 
         assert len(validated) == 1
         assert validated[0] == "microsoft/apm-sample-package"
@@ -373,11 +414,15 @@ class TestNormalizeOnWrite:
     def test_ref_preserved_in_canonical(self, mock_success, mock_validate, tmp_path, monkeypatch):
         """Reference is preserved in the canonical form."""
         import yaml
+
         apm_yml = tmp_path / "apm.yml"
-        apm_yml.write_text(yaml.dump({"name": "test", "version": "0.1.0", "dependencies": {"apm": []}}))
+        apm_yml.write_text(
+            yaml.dump({"name": "test", "version": "0.1.0", "dependencies": {"apm": []}})
+        )
         monkeypatch.chdir(tmp_path)
 
         from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml
+
         validated, _outcome = _validate_and_add_packages_to_apm_yml(
             ["https://github.com/microsoft/apm-sample-package.git#v1.0.0"]
         )
@@ -387,16 +432,17 @@ class TestNormalizeOnWrite:
 
 # ── Uninstall identity matching ─────────────────────────────────────────────
 
+
 class TestUninstallIdentityMatching:
     """Test that uninstall matches packages by identity regardless of input form."""
 
     def _make_apm_yml(self, tmp_path, deps):
         import yaml
+
         apm_yml = tmp_path / "apm.yml"
-        apm_yml.write_text(yaml.dump({
-            "name": "test", "version": "0.1.0",
-            "dependencies": {"apm": deps}
-        }))
+        apm_yml.write_text(
+            yaml.dump({"name": "test", "version": "0.1.0", "dependencies": {"apm": deps}})
+        )
         return apm_yml
 
     def test_uninstall_shorthand_matches_canonical(self):
@@ -438,6 +484,7 @@ class TestUninstallIdentityMatching:
 
 # ── only_packages filter ────────────────────────────────────────────────────
 
+
 class TestOnlyPackagesFilter:
     """Test identity-based filtering in _install_apm_dependencies."""
 
@@ -450,7 +497,9 @@ class TestOnlyPackagesFilter:
     def test_filter_https_matches_shorthand_dep(self):
         """HTTPS URL filter matches shorthand-parsed dep."""
         dep = DependencyReference.parse("microsoft/apm-sample-package")
-        filter_ref = DependencyReference.parse("https://github.com/microsoft/apm-sample-package.git")
+        filter_ref = DependencyReference.parse(
+            "https://github.com/microsoft/apm-sample-package.git"
+        )
         assert dep.get_identity() == filter_ref.get_identity()
 
     def test_filter_shorthand_matches_https_dep(self):
@@ -467,6 +516,7 @@ class TestOnlyPackagesFilter:
 
 
 # ── HTTP (allow_insecure) ────────────────────────────────────────────────────
+
 
 class TestHttpInsecureDeps:
     """Tests for HTTP (insecure) dependency parsing and serialization."""
@@ -552,7 +602,11 @@ class TestHttpInsecureDeps:
 
     def test_parse_from_dict_git_http_with_ref(self):
         """parse_from_dict() reads ref from dict with git key."""
-        entry = {"git": "http://my-server.example.com/owner/repo", "ref": "main", "allow_insecure": True}
+        entry = {
+            "git": "http://my-server.example.com/owner/repo",
+            "ref": "main",
+            "allow_insecure": True,
+        }
         dep = DependencyReference.parse_from_dict(entry)
         assert dep.reference == "main"
 

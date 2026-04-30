@@ -26,7 +26,6 @@ from pathlib import Path
 
 import pytest
 
-
 SAMPLE_MARKETPLACE_NAME = "test-mkt"
 
 
@@ -60,7 +59,7 @@ def _env_with_home(fake_home):
 
 def _run_apm(apm_command, args, fake_home, cwd=None, timeout=60):
     return subprocess.run(
-        [apm_command] + args,
+        [apm_command] + args,  # noqa: RUF005
         cwd=str(cwd) if cwd else None,
         capture_output=True,
         text=True,
@@ -69,20 +68,15 @@ def _run_apm(apm_command, args, fake_home, cwd=None, timeout=60):
     )
 
 
-def _seed_marketplace(fake_home, name=SAMPLE_MARKETPLACE_NAME,
-                      owner="acme-org", repo="plugin-marketplace"):
+def _seed_marketplace(
+    fake_home, name=SAMPLE_MARKETPLACE_NAME, owner="acme-org", repo="plugin-marketplace"
+):
     """Write a valid marketplaces.json directly, bypassing the network call
     that `apm marketplace add` performs."""
     apm_dir = fake_home / ".apm"
     apm_dir.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "marketplaces": [
-            {"name": name, "owner": owner, "repo": repo}
-        ]
-    }
-    (apm_dir / "marketplaces.json").write_text(
-        json.dumps(payload, indent=2), encoding="utf-8"
-    )
+    payload = {"marketplaces": [{"name": name, "owner": owner, "repo": repo}]}
+    (apm_dir / "marketplaces.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 def test_marketplace_list_shows_seeded_entry(apm_command, fake_home):
@@ -91,9 +85,7 @@ def test_marketplace_list_shows_seeded_entry(apm_command, fake_home):
 
     result = _run_apm(apm_command, ["marketplace", "list"], fake_home)
 
-    assert result.returncode == 0, (
-        f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
-    )
+    assert result.returncode == 0, f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
     combined = result.stdout + result.stderr
     assert SAMPLE_MARKETPLACE_NAME in combined
     assert "acme-org/plugin-marketplace" in combined
@@ -102,9 +94,7 @@ def test_marketplace_list_shows_seeded_entry(apm_command, fake_home):
 def test_marketplace_add_rejects_invalid_format(apm_command, fake_home):
     """`apm marketplace add` validates OWNER/REPO format without hitting the
     network (validation happens before the GitHub fetch)."""
-    result = _run_apm(
-        apm_command, ["marketplace", "add", "not-a-valid-repo"], fake_home
-    )
+    result = _run_apm(apm_command, ["marketplace", "add", "not-a-valid-repo"], fake_home)
 
     assert result.returncode != 0
     combined = result.stdout + result.stderr

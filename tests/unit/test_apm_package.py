@@ -26,13 +26,16 @@ class TestDevDependencies:
 
     def test_parse_dev_dependencies(self, tmp_path):
         """devDependencies section is parsed from apm.yml."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-            "devDependencies": {
-                "apm": ["owner/dev-tool"],
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "devDependencies": {
+                    "apm": ["owner/dev-tool"],
+                },
             },
-        })
+        )
 
         pkg = APMPackage.from_apm_yml(yml)
 
@@ -41,13 +44,16 @@ class TestDevDependencies:
 
     def test_get_dev_apm_dependencies(self, tmp_path):
         """get_dev_apm_dependencies returns DependencyReference objects."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-            "devDependencies": {
-                "apm": ["owner/dev-tool", "org/test-helper"],
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "devDependencies": {
+                    "apm": ["owner/dev-tool", "org/test-helper"],
+                },
             },
-        })
+        )
 
         pkg = APMPackage.from_apm_yml(yml)
         dev_deps = pkg.get_dev_apm_dependencies()
@@ -60,15 +66,18 @@ class TestDevDependencies:
 
     def test_get_dev_mcp_dependencies(self, tmp_path):
         """get_dev_mcp_dependencies returns MCPDependency objects."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-            "devDependencies": {
-                "mcp": [
-                    {"name": "io.github.test/mcp-server", "transport": "stdio"},
-                ],
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "devDependencies": {
+                    "mcp": [
+                        {"name": "io.github.test/mcp-server", "transport": "stdio"},
+                    ],
+                },
             },
-        })
+        )
 
         pkg = APMPackage.from_apm_yml(yml)
         dev_mcp = pkg.get_dev_mcp_dependencies()
@@ -80,13 +89,16 @@ class TestDevDependencies:
 
     def test_get_dev_mcp_from_string(self, tmp_path):
         """MCP dev dependencies can be specified as plain strings."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-            "devDependencies": {
-                "mcp": ["io.github.test/mcp-server"],
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "devDependencies": {
+                    "mcp": ["io.github.test/mcp-server"],
+                },
             },
-        })
+        )
 
         pkg = APMPackage.from_apm_yml(yml)
         dev_mcp = pkg.get_dev_mcp_dependencies()
@@ -96,10 +108,13 @@ class TestDevDependencies:
 
     def test_missing_dev_dependencies_returns_empty(self, tmp_path):
         """No devDependencies section returns empty lists."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-        })
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+            },
+        )
 
         pkg = APMPackage.from_apm_yml(yml)
 
@@ -109,11 +124,14 @@ class TestDevDependencies:
 
     def test_empty_dev_dependencies_returns_empty(self, tmp_path):
         """Empty devDependencies.apm list returns empty."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-            "devDependencies": {"apm": []},
-        })
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "devDependencies": {"apm": []},
+            },
+        )
 
         pkg = APMPackage.from_apm_yml(yml)
 
@@ -122,16 +140,19 @@ class TestDevDependencies:
 
     def test_dev_and_prod_dependencies_independent(self, tmp_path):
         """devDeps and deps are independent — changing one doesn't affect other."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-            "dependencies": {
-                "apm": ["owner/prod-dep"],
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "dependencies": {
+                    "apm": ["owner/prod-dep"],
+                },
+                "devDependencies": {
+                    "apm": ["owner/dev-dep"],
+                },
             },
-            "devDependencies": {
-                "apm": ["owner/dev-dep"],
-            },
-        })
+        )
 
         pkg = APMPackage.from_apm_yml(yml)
 
@@ -145,14 +166,17 @@ class TestDevDependencies:
 
     def test_dev_dependencies_do_not_pollute_prod(self, tmp_path):
         """Dev dependencies don't appear in get_apm_dependencies()."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-            "dependencies": {"apm": []},
-            "devDependencies": {
-                "apm": ["owner/dev-only"],
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "dependencies": {"apm": []},
+                "devDependencies": {
+                    "apm": ["owner/dev-only"],
+                },
             },
-        })
+        )
 
         pkg = APMPackage.from_apm_yml(yml)
 
@@ -161,15 +185,18 @@ class TestDevDependencies:
 
     def test_dev_dependencies_dict_format(self, tmp_path):
         """devDependencies support dict-format entries (Cargo-style git objects)."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-            "devDependencies": {
-                "apm": [
-                    {"git": "https://github.com/owner/complex-dep.git", "ref": "main"},
-                ],
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "devDependencies": {
+                    "apm": [
+                        {"git": "https://github.com/owner/complex-dep.git", "ref": "main"},
+                    ],
+                },
             },
-        })
+        )
 
         pkg = APMPackage.from_apm_yml(yml)
         dev_deps = pkg.get_dev_apm_dependencies()
@@ -179,14 +206,17 @@ class TestDevDependencies:
 
     def test_mixed_dev_dependency_types(self, tmp_path):
         """devDependencies can have both apm and mcp types."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-            "devDependencies": {
-                "apm": ["owner/dev-apm"],
-                "mcp": ["io.github.test/mcp-debug"],
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "devDependencies": {
+                    "apm": ["owner/dev-apm"],
+                    "mcp": ["io.github.test/mcp-debug"],
+                },
             },
-        })
+        )
 
         pkg = APMPackage.from_apm_yml(yml)
 
@@ -195,13 +225,16 @@ class TestDevDependencies:
 
     def test_dev_apm_no_mcp_key(self, tmp_path):
         """get_dev_mcp_dependencies returns empty when only apm devDeps exist."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-            "devDependencies": {
-                "apm": ["owner/dev-tool"],
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "devDependencies": {
+                    "apm": ["owner/dev-tool"],
+                },
             },
-        })
+        )
 
         pkg = APMPackage.from_apm_yml(yml)
 
@@ -213,11 +246,14 @@ class TestTargetField:
 
     def test_target_string(self, tmp_path):
         """target: copilot → stored as string."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-            "target": "copilot",
-        })
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "target": "copilot",
+            },
+        )
 
         pkg = APMPackage.from_apm_yml(yml)
 
@@ -225,41 +261,55 @@ class TestTargetField:
         assert isinstance(pkg.target, str)
 
     def test_target_list(self, tmp_path):
-        """target: [claude, copilot] → stored as list."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-            "target": ["claude", "copilot"],
-        })
+        """``target: [claude, copilot]`` is now alias-resolved through the
+        shared parser -- ``copilot`` collapses to its canonical name
+        ``vscode`` (#820).  Multi-target lists stay as lists."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "target": ["claude", "copilot"],
+            },
+        )
 
         pkg = APMPackage.from_apm_yml(yml)
 
-        assert pkg.target == ["claude", "copilot"]
+        assert pkg.target == ["claude", "vscode"]
         assert isinstance(pkg.target, list)
 
     def test_target_missing(self, tmp_path):
         """No target field → None."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-        })
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+            },
+        )
 
         pkg = APMPackage.from_apm_yml(yml)
 
         assert pkg.target is None
 
     def test_target_single_item_list(self, tmp_path):
-        """target: [copilot] → stored as single-element list."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-            "target": ["copilot"],
-        })
+        """A single-element list (``target: [copilot]``) collapses to a
+        plain string -- the shared parser canonicalizes ``str`` and
+        ``[str]`` to the same shape so downstream code only ever sees one
+        ``Union[str, List[str]]`` form per cardinality (#820)."""
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "target": ["copilot"],
+            },
+        )
 
         pkg = APMPackage.from_apm_yml(yml)
 
-        assert pkg.target == ["copilot"]
-        assert isinstance(pkg.target, list)
+        assert pkg.target == "copilot"
+        assert isinstance(pkg.target, str)
 
     def test_target_direct_construction_string(self):
         """APMPackage can be constructed with target as string."""
@@ -277,19 +327,27 @@ class TestClearCache:
 
     def test_clear_forces_reparse(self, tmp_path):
         """After clear, the same file is re-parsed (not cached)."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-        })
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+            },
+        )
 
         pkg1 = APMPackage.from_apm_yml(yml)
 
         # Overwrite with different data
         clear_apm_yml_cache()
-        yml.write_text(yaml.dump({
-            "name": "changed-pkg",
-            "version": "2.0.0",
-        }), encoding="utf-8")
+        yml.write_text(
+            yaml.dump(
+                {
+                    "name": "changed-pkg",
+                    "version": "2.0.0",
+                }
+            ),
+            encoding="utf-8",
+        )
 
         pkg2 = APMPackage.from_apm_yml(yml)
 
@@ -301,64 +359,85 @@ class TestIncludesField:
     """Tests for the 'includes' field on APMPackage (auto-publish opt-in)."""
 
     def test_includes_auto_parses_to_string(self, tmp_path):
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-            "includes": "auto",
-        })
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "includes": "auto",
+            },
+        )
         pkg = APMPackage.from_apm_yml(yml)
         assert pkg.includes == "auto"
 
     def test_includes_list_parses_to_list(self, tmp_path):
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-            "includes": ["path/a", "path/b"],
-        })
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "includes": ["path/a", "path/b"],
+            },
+        )
         pkg = APMPackage.from_apm_yml(yml)
         assert pkg.includes == ["path/a", "path/b"]
 
     def test_includes_missing_is_none(self, tmp_path):
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-        })
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+            },
+        )
         pkg = APMPackage.from_apm_yml(yml)
         assert pkg.includes is None
 
     def test_includes_invalid_int_raises(self, tmp_path):
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-            "includes": 42,
-        })
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "includes": 42,
+            },
+        )
         with pytest.raises(ValueError, match="'includes' must be 'auto' or a list of strings"):
             APMPackage.from_apm_yml(yml)
 
     def test_includes_list_with_non_strings_raises(self, tmp_path):
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-            "includes": [1, 2],
-        })
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "includes": [1, 2],
+            },
+        )
         with pytest.raises(ValueError, match="'includes' must be 'auto' or a list of strings"):
             APMPackage.from_apm_yml(yml)
 
     def test_includes_other_string_raises(self, tmp_path):
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-            "includes": "explicit",
-        })
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "includes": "explicit",
+            },
+        )
         with pytest.raises(ValueError, match="'includes' must be 'auto' or a list of strings"):
             APMPackage.from_apm_yml(yml)
 
     def test_has_apm_dependencies_false_for_include_only_manifest(self, tmp_path):
         """Include-only manifests (no apm: deps) still report no APM dependencies."""
-        yml = _write_apm_yml(tmp_path, {
-            "name": "test-pkg",
-            "version": "1.0.0",
-            "includes": "auto",
-        })
+        yml = _write_apm_yml(
+            tmp_path,
+            {
+                "name": "test-pkg",
+                "version": "1.0.0",
+                "includes": "auto",
+            },
+        )
         pkg = APMPackage.from_apm_yml(yml)
         assert pkg.has_apm_dependencies() is False

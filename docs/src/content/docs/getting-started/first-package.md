@@ -242,14 +242,14 @@ consumers. This lets you target plugin-aware hosts (Copilot CLI plugins,
 the broader plugin ecosystem) with the primitives you already authored.
 
 ```bash
-apm pack --format plugin
+apm pack
 ```
 
-Output:
+Output (plugin format is the default):
 
 ```
 build/team-skills-1.0.0/
-+-- plugin.json        # synthesized from apm.yml
++-- plugin.json        # synthesized, schema-conformant per https://json.schemastore.org/claude-code-plugin.json
 +-- agents/
 |   +-- team-reviewer.agent.md
 +-- skills/
@@ -257,7 +257,9 @@ build/team-skills-1.0.0/
 ```
 
 No `apm.yml`, no `apm_modules/`, no `.apm/`. Just primitives in
-plugin-native layout.
+plugin-native layout. Convention dirs (`agents/`, `skills/`, `commands/`,
+`instructions/`) are auto-discovered by Claude Code, so the synthesized
+`plugin.json` does not list them.
 
 If you know up front that you want to ship a plugin, you can scaffold with
 `apm init --plugin team-skills`, which adds `plugin.json` next to `apm.yml`
@@ -266,6 +268,25 @@ audit while you author; pack produces the plugin bundle when you ship.
 
 For the full reference, see the [Pack & Distribute guide](/apm/guides/pack-distribute/)
 and the [Plugin authoring guide](/apm/guides/plugins/).
+
+## Choosing a package layout
+
+APM recognizes three layouts. Pick the one that matches what you are shipping:
+
+- **One skill** -- put `SKILL.md` at the repo root, with optional
+  `agents/`, `assets/`, or `scripts/` directories alongside it. Add
+  `apm.yml` if you need dependency management (this is a HYBRID package).
+  APM installs the whole directory as a single skill bundle.
+
+- **Multiple primitives** -- use the `.apm/` directory with `skills/`,
+  `agents/`, `instructions/` subdirectories (the layout used in this guide).
+  APM hoists each primitive into the consumer's runtime dirs individually.
+
+- **Claude plugin** -- if you already have a `plugin.json`, APM can consume
+  it directly without restructuring.
+
+For the full comparison and metadata precedence rules, see
+[Package Types](../../reference/package-types/).
 
 ## Next steps
 

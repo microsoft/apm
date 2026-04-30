@@ -143,6 +143,16 @@ classDiagram
 Read the PR's diff and surrounding code, then draw the actual
 problem-space classes.)
 
+**Mermaid `classDiagram` GitHub-render gotcha**: the `:::cssClass`
+shorthand is ONLY valid as a standalone `class Name:::cssClass`
+declaration (or inside a `class Name:::cssClass { ... }` block).
+GitHub's mermaid parser rejects `:::cssClass` appended to a
+relationship line (`A *-- B:::touched`) with `Expecting 'NEWLINE',
+'EOF', 'LABEL', got 'STYLE_SEPARATOR'`. Always declare the styled
+classes on their own lines BEFORE the `classDef` block. This trap
+does not apply to `flowchart` diagrams, where the inline form is
+valid.
+
 If the PR is purely procedural (no class changes anywhere in scope),
 state that explicitly and substitute a `classDiagram` showing the
 module boundaries and the function entry points -- still annotated
@@ -213,3 +223,28 @@ Rules for this subsection:
   over-engineering, write "Pragmatic suggestion: none -- the current
   shape is the simplest correct design at this scope." That is a valid
   and preferred answer when true.
+
+## Output contract when invoked by apm-review-panel
+
+When the apm-review-panel skill spawns you as a panelist task, you
+operate under these strict rules. They override any default behavior
+that would post comments or apply labels.
+
+- You read the persona scope above and the PR title/body/diff passed
+  in the task prompt.
+- You produce findings in TWO buckets only:
+  - `required`: blocks merge. Real, actionable, citing file/line where
+    possible. Anything you put here will produce a REJECT verdict.
+  - `nits`: one-line suggestions the author can skip. No third bucket,
+    no "consider", no "optional follow-up". If a finding is real and
+    matters, it is required. If not, it is a nit.
+- You return JSON matching `assets/panelist-return-schema.json` from
+  the apm-review-panel skill, as the FINAL message of your task. No
+  prose around the JSON; the orchestrator parses your last message.
+- You MUST NOT call `gh pr comment`, `gh pr edit`, `gh issue`, or any
+  other GitHub write command. You MUST NOT post to `safe-outputs`.
+  You MUST NOT touch the PR state. The orchestrator is the sole
+  writer; your only output channel is the JSON return.
+- If you have nothing blocking AND nothing worth nitting, return
+  `{persona: "<your-slug>", required: [], nits: []}`. That is a
+  valid and preferred answer when true.

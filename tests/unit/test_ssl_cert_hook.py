@@ -9,21 +9,21 @@ import importlib
 import os
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-import pytest
-
+import pytest  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 # The runtime hook is not inside a regular Python package, so we import it
 # manually from its file path.
 def _find_repo_root() -> Path:
     """Walk up from this file until we find pyproject.toml (the repo root)."""
     current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
+    for parent in [current] + list(current.parents):  # noqa: RUF005
         if (parent / "pyproject.toml").is_file():
             return parent
     raise RuntimeError("Cannot locate repository root (no pyproject.toml found)")
@@ -54,6 +54,7 @@ def _get_configure_fn():
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestSSLCertRuntimeHook:
     """Tests for _configure_ssl_certs behaviour."""

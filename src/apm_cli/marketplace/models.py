@@ -5,8 +5,8 @@ All dataclasses are frozen for thread-safety.
 """
 
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass, field  # noqa: F401
+from typing import Any, Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +25,9 @@ class MarketplaceSource:
     branch: str = "main"
     path: str = "marketplace.json"  # Detected on add
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for JSON storage."""
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "name": self.name,
             "owner": self.owner,
             "repo": self.repo,
@@ -41,7 +41,7 @@ class MarketplaceSource:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "MarketplaceSource":
+    def from_dict(cls, data: dict[str, Any]) -> "MarketplaceSource":
         """Deserialize from JSON dict."""
         return cls(
             name=data["name"],
@@ -61,7 +61,7 @@ class MarketplacePlugin:
     source: Any = None  # String (relative) or dict (github/url/git-subdir)
     description: str = ""
     version: str = ""
-    tags: Tuple[str, ...] = ()
+    tags: tuple[str, ...] = ()
     source_marketplace: str = ""  # Populated during resolution
 
     def matches_query(self, query: str) -> bool:
@@ -79,12 +79,12 @@ class MarketplaceManifest:
     """Parsed marketplace.json content."""
 
     name: str
-    plugins: Tuple[MarketplacePlugin, ...] = ()
+    plugins: tuple[MarketplacePlugin, ...] = ()
     owner_name: str = ""
     description: str = ""
     plugin_root: str = ""  # metadata.pluginRoot - base path for bare-name sources
 
-    def find_plugin(self, plugin_name: str) -> Optional[MarketplacePlugin]:
+    def find_plugin(self, plugin_name: str) -> MarketplacePlugin | None:
         """Find a plugin by exact name (case-insensitive)."""
         lower = plugin_name.lower()
         for p in self.plugins:
@@ -92,7 +92,7 @@ class MarketplaceManifest:
                 return p
         return None
 
-    def search(self, query: str) -> List[MarketplacePlugin]:
+    def search(self, query: str) -> list[MarketplacePlugin]:
         """Search plugins matching a query."""
         return [p for p in self.plugins if p.matches_query(query)]
 
@@ -107,9 +107,8 @@ class MarketplaceManifest:
 # Claude Code format:
 #   { "name": "...", "plugins": [ { "name": "...", "source": { "type": "github", ... } } ] }
 
-def _parse_plugin_entry(
-    entry: Dict[str, Any], source_name: str
-) -> Optional[MarketplacePlugin]:
+
+def _parse_plugin_entry(entry: dict[str, Any], source_name: str) -> MarketplacePlugin | None:
     """Parse a single plugin entry from either format."""
     name = entry.get("name", "").strip()
     if not name:
@@ -133,18 +132,14 @@ def _parse_plugin_entry(
             # Type discriminator: Copilot CLI uses "source" key, Claude uses "type"
             source_type = raw.get("type", "") or raw.get("source", "")
             if source_type == "npm":
-                logger.debug(
-                    "Skipping npm source type for plugin '%s' (unsupported)", name
-                )
+                logger.debug("Skipping npm source type for plugin '%s' (unsupported)", name)
                 return None
             # Normalize: ensure "type" key is set for downstream resolvers
             if source_type and "type" not in raw:
                 raw = {**raw, "type": source_type}
             source = raw
         else:
-            logger.debug(
-                "Skipping plugin '%s' with unrecognized source format", name
-            )
+            logger.debug("Skipping plugin '%s' with unrecognized source format", name)
             return None
     elif "repository" in entry:
         # Copilot CLI format: "repository": "owner/repo"
@@ -175,9 +170,7 @@ def _parse_plugin_entry(
     )
 
 
-def parse_marketplace_json(
-    data: Dict[str, Any], source_name: str = ""
-) -> MarketplaceManifest:
+def parse_marketplace_json(data: dict[str, Any], source_name: str = "") -> MarketplaceManifest:
     """Parse a marketplace.json dict into a ``MarketplaceManifest``.
 
     Accepts both Copilot CLI and Claude Code marketplace formats.
@@ -192,9 +185,11 @@ def parse_marketplace_json(
     """
     manifest_name = data.get("name", source_name or "unknown")
     description = data.get("description", "")
-    owner_name = data.get("owner", {}).get("name", "") if isinstance(
-        data.get("owner"), dict
-    ) else data.get("owner", "")
+    owner_name = (
+        data.get("owner", {}).get("name", "")
+        if isinstance(data.get("owner"), dict)
+        else data.get("owner", "")
+    )
 
     # Extract pluginRoot from metadata (base path for bare-name sources)
     metadata = data.get("metadata", {})
@@ -212,7 +207,7 @@ def parse_marketplace_json(
         )
         raw_plugins = []
 
-    plugins: List[MarketplacePlugin] = []
+    plugins: list[MarketplacePlugin] = []
     for entry in raw_plugins:
         if not isinstance(entry, dict):
             continue

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, Optional  # noqa: F401, UP035
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -25,7 +25,7 @@ import yaml
 
 from apm_cli.install.phases.policy_gate import PolicyViolationError
 from apm_cli.install.phases.policy_target_check import TARGET_CHECK_IDS, run
-from apm_cli.policy.models import CIAuditResult, CheckResult
+from apm_cli.policy.models import CheckResult, CIAuditResult
 from apm_cli.policy.schema import (
     ApmPolicy,
     CompilationPolicy,
@@ -45,7 +45,7 @@ TARGET_MISMATCH_DIR = FIXTURES_DIR / "projects" / "target-mismatch"
 class _FakePackage:
     """Minimal stand-in for APMPackage."""
 
-    target: Optional[str] = None
+    target: str | None = None
 
 
 @dataclass
@@ -56,8 +56,8 @@ class _FakePolicyFetch:
     outcome: str = "found"
     source: str = "org:contoso/.github"
     cached: bool = False
-    cache_age_seconds: Optional[int] = None
-    fetch_error: Optional[str] = None
+    cache_age_seconds: int | None = None
+    fetch_error: str | None = None
 
 
 @dataclass
@@ -68,12 +68,12 @@ class _FakeContext:
     apm_dir: Path = field(default_factory=lambda: Path("/tmp/fake-project/.apm"))
     verbose: bool = False
     logger: Any = None
-    deps_to_install: List[Any] = field(default_factory=list)
+    deps_to_install: list[Any] = field(default_factory=list)
     existing_lockfile: Any = None
 
     # From caller / CLI
     apm_package: Any = None
-    target_override: Optional[str] = None
+    target_override: str | None = None
 
     # From policy_gate
     policy_fetch: Any = None
@@ -134,9 +134,7 @@ def _target_failing_audit(*, target_value="claude", allowed=("vscode",)):
     return CIAuditResult(
         checks=[
             # Dep checks that already ran in gate phase (should be filtered out)
-            CheckResult(
-                name="dependency-allowlist", passed=True, message="OK"
-            ),
+            CheckResult(name="dependency-allowlist", passed=True, message="OK"),
             # The target check that should be processed
             CheckResult(
                 name="compilation-target",
@@ -152,9 +150,7 @@ def _target_passing_audit():
     """CIAuditResult where the compilation-target check passes."""
     return CIAuditResult(
         checks=[
-            CheckResult(
-                name="dependency-allowlist", passed=True, message="OK"
-            ),
+            CheckResult(name="dependency-allowlist", passed=True, message="OK"),
             CheckResult(
                 name="compilation-target",
                 passed=True,
@@ -392,7 +388,7 @@ class TestNoDoubleEmit:
 
     def test_target_check_ids_constant(self):
         """Sanity: TARGET_CHECK_IDS contains exactly the expected IDs."""
-        assert TARGET_CHECK_IDS == frozenset({"compilation-target"})
+        assert frozenset({"compilation-target"}) == TARGET_CHECK_IDS
 
 
 # =====================================================================
@@ -405,9 +401,7 @@ class TestWithFixtures:
 
     def test_fixture_loads_correctly(self):
         """Verify apm-policy-target-allow.yml fixture parses to allow=[vscode]."""
-        assert TARGET_POLICY_FIXTURE.exists(), (
-            f"Fixture not found: {TARGET_POLICY_FIXTURE}"
-        )
+        assert TARGET_POLICY_FIXTURE.exists(), f"Fixture not found: {TARGET_POLICY_FIXTURE}"
         policy = _load_target_policy_from_fixture()
         assert policy.enforcement == "block"
         assert policy.compilation.target.allow == ("vscode",)
@@ -425,9 +419,7 @@ class TestWithFixtures:
         policy = _load_target_policy_from_fixture()
         fetch = _FakePolicyFetch(policy=policy, outcome="found")
 
-        mock_checks.return_value = _target_failing_audit(
-            target_value="claude", allowed=("vscode",)
-        )
+        mock_checks.return_value = _target_failing_audit(target_value="claude", allowed=("vscode",))
 
         # Read manifest target from fixture
         apm_yml = TARGET_MISMATCH_DIR / "apm.yml"

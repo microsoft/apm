@@ -4,8 +4,8 @@ import pytest
 
 from apm_cli.marketplace.models import MarketplacePlugin
 from apm_cli.marketplace.resolver import (
-    _resolve_github_source,
     _resolve_git_subdir_source,
+    _resolve_github_source,
     _resolve_relative_source,
     _resolve_url_source,
     parse_marketplace_ref,
@@ -105,18 +105,22 @@ class TestResolveGithubSource:
 
     def test_with_path(self):
         """Copilot CLI format uses 'path' for subdirectory."""
-        result = _resolve_github_source({
-            "repo": "microsoft/azure-skills",
-            "path": ".github/plugins/azure-skills",
-        })
+        result = _resolve_github_source(
+            {
+                "repo": "microsoft/azure-skills",
+                "path": ".github/plugins/azure-skills",
+            }
+        )
         assert result == "microsoft/azure-skills/.github/plugins/azure-skills"
 
     def test_with_path_and_ref(self):
-        result = _resolve_github_source({
-            "repo": "owner/mono",
-            "path": "plugins/foo",
-            "ref": "v2.0",
-        })
+        result = _resolve_github_source(
+            {
+                "repo": "owner/mono",
+                "path": "plugins/foo",
+                "ref": "v2.0",
+            }
+        )
         assert result == "owner/mono/plugins/foo#v2.0"
 
     def test_path_traversal_rejected(self):
@@ -138,19 +142,63 @@ class TestResolveUrlSource:
         assert _resolve_url_source({"url": "https://github.com/owner/repo.git"}) == "owner/repo"
 
     def test_non_github_url(self):
+        # DependencyReference.parse() handles any valid Git host URL
+        assert _resolve_url_source({"url": "https://gitlab.com/owner/repo"}) == "owner/repo"
+
+    def test_url_host_is_not_preserved_in_output(self):
+        """Host from the URL is stripped -- only owner/repo is returned.
+
+        This is intentional: downstream RefResolver resolves owner/repo
+        against the configured GITHUB_HOST, not the URL's original host.
+        Cross-host resolution is tracked in #1010.
+        """
+        # Different hosts all resolve to the same owner/repo coordinate
+        urls = [
+            "https://github.com/acme/tools",
+            "https://gitlab.com/acme/tools",
+            "https://bitbucket.org/acme/tools",
+            "https://corp.ghe.com/acme/tools",
+        ]
+        for url in urls:
+            result = _resolve_url_source({"url": url})
+            assert result == "acme/tools", f"Expected 'acme/tools' for {url}, got '{result}'"
+
+    def test_ghes_url(self):
+        """GHES URLs are resolved via DependencyReference.parse()."""
+        assert _resolve_url_source({"url": "https://corp.ghe.com/org/repo"}) == "org/repo"
+
+    def test_ssh_url(self):
+        """SSH URLs are resolved via DependencyReference.parse()."""
+        assert _resolve_url_source({"url": "git@gitlab.com:org/repo.git"}) == "org/repo"
+
+    def test_url_with_ref_fragment(self):
+        """URL with #ref preserves the ref in owner/repo#ref format."""
+        assert _resolve_url_source({"url": "https://github.com/org/repo#v2.0"}) == "org/repo#v2.0"
+
+    def test_empty_url_rejected(self):
+        with pytest.raises(ValueError, match="non-empty"):
+            _resolve_url_source({"url": ""})
+
+    def test_local_path_rejected(self):
+        with pytest.raises(ValueError, match="local path"):
+            _resolve_url_source({"url": "./local/path"})
+
+    def test_invalid_url_rejected(self):
         with pytest.raises(ValueError, match="Cannot resolve URL source"):
-            _resolve_url_source({"url": "https://gitlab.com/owner/repo"})
+            _resolve_url_source({"url": ":::invalid:::"})
 
 
 class TestResolveGitSubdirSource:
     """Resolve git-subdir source type."""
 
     def test_with_ref(self):
-        result = _resolve_git_subdir_source({
-            "repo": "owner/monorepo",
-            "subdir": "packages/plugin-a",
-            "ref": "main",
-        })
+        result = _resolve_git_subdir_source(
+            {
+                "repo": "owner/monorepo",
+                "subdir": "packages/plugin-a",
+                "ref": "main",
+            }
+        )
         assert result == "owner/monorepo/packages/plugin-a#main"
 
     def test_without_ref(self):
@@ -193,7 +241,9 @@ class TestResolveRelativeSource:
     def test_bare_name_with_plugin_root(self):
         """Bare name with plugin_root gets prefixed."""
         result = _resolve_relative_source(
-            "azure-cloud-development", "github", "awesome-copilot",
+            "azure-cloud-development",
+            "github",
+            "awesome-copilot",
             plugin_root="./plugins",
         )
         assert result == "github/awesome-copilot/plugins/azure-cloud-development"
@@ -201,28 +251,40 @@ class TestResolveRelativeSource:
     def test_plugin_root_without_dot_slash(self):
         """plugin_root without leading ./ still works."""
         result = _resolve_relative_source(
-            "my-plugin", "org", "repo", plugin_root="packages",
+            "my-plugin",
+            "org",
+            "repo",
+            plugin_root="packages",
         )
         assert result == "org/repo/packages/my-plugin"
 
     def test_plugin_root_ignored_for_path_sources(self):
         """Sources with / are already paths -- plugin_root should not apply."""
         result = _resolve_relative_source(
-            "./custom/path/plugin", "org", "repo", plugin_root="./plugins",
+            "./custom/path/plugin",
+            "org",
+            "repo",
+            plugin_root="./plugins",
         )
         assert result == "org/repo/custom/path/plugin"
 
     def test_plugin_root_trailing_slashes(self):
         """Trailing slashes on plugin_root are normalized."""
         result = _resolve_relative_source(
-            "my-plugin", "org", "repo", plugin_root="./plugins/",
+            "my-plugin",
+            "org",
+            "repo",
+            plugin_root="./plugins/",
         )
         assert result == "org/repo/plugins/my-plugin"
 
     def test_dot_source_with_plugin_root(self):
         """source='.' means repo root -- plugin_root must not apply."""
         result = _resolve_relative_source(
-            ".", "org", "repo", plugin_root="./plugins",
+            ".",
+            "org",
+            "repo",
+            plugin_root="./plugins",
         )
         assert result == "org/repo"
 
@@ -275,9 +337,7 @@ class TestResolvePluginSource:
     def test_relative_bare_name_with_plugin_root(self):
         """Bare-name source with plugin_root gets prefixed (awesome-copilot pattern)."""
         p = MarketplacePlugin(name="azure-cloud-development", source="azure-cloud-development")
-        result = resolve_plugin_source(
-            p, "github", "awesome-copilot", plugin_root="./plugins"
-        )
+        result = resolve_plugin_source(p, "github", "awesome-copilot", plugin_root="./plugins")
         assert result == "github/awesome-copilot/plugins/azure-cloud-development"
 
     def test_npm_source_rejected(self):

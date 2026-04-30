@@ -8,8 +8,8 @@ Uses a throwaway local-path package fixture so these tests are fully local
 and do not require GITHUB_APM_PAT / GITHUB_TOKEN.
 """
 
-import subprocess
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -59,7 +59,7 @@ def local_pkg_root(tmp_path):
 def _run_apm(apm_command, args, cwd, timeout=180):
     """Run an apm CLI command and return the result."""
     return subprocess.run(
-        [apm_command] + args,
+        [apm_command] + args,  # noqa: RUF005
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -112,9 +112,7 @@ class TestFileRenamedWithinPackage:
     """Regression tests for issue #666: renaming a file inside a still-present
     package must delete the stale deployed artifacts on the next apm install."""
 
-    def test_renamed_file_cleanup_on_install(
-        self, temp_project, apm_command, local_pkg_root
-    ):
+    def test_renamed_file_cleanup_on_install(self, temp_project, apm_command, local_pkg_root):
         """Rename a source primitive, re-install, assert old files gone and
         lockfile deployed_files no longer lists the stale paths."""
         # -- Step 1: initial install --
@@ -129,8 +127,7 @@ class TestFileRenamedWithinPackage:
         dep_before = _find_local_dep(lockfile_before)
         assert dep_before is not None, "Local package not in lockfile"
         deployed_before = [
-            f for f in (dep_before.get("deployed_files") or [])
-            if (temp_project / f).exists()
+            f for f in (dep_before.get("deployed_files") or []) if (temp_project / f).exists()
         ]
         assert deployed_before, "No deployed files found -- cannot verify cleanup"
         old_files = list(deployed_before)
@@ -162,9 +159,7 @@ class TestFileRenamedWithinPackage:
                 f"Stale path {stale} still in lockfile deployed_files after cleanup"
             )
 
-    def test_partial_install_cleans_renamed_file(
-        self, temp_project, apm_command, local_pkg_root
-    ):
+    def test_partial_install_cleans_renamed_file(self, temp_project, apm_command, local_pkg_root):
         """`apm install --only=apm` on a package with a renamed file still cleans up.
 
         Verifies that partial installs clean files for the packages they touch
@@ -179,8 +174,7 @@ class TestFileRenamedWithinPackage:
         dep_before = _find_local_dep(lockfile_before)
         assert dep_before is not None
         old_files = [
-            f for f in (dep_before.get("deployed_files") or [])
-            if (temp_project / f).exists()
+            f for f in (dep_before.get("deployed_files") or []) if (temp_project / f).exists()
         ]
         assert old_files
 

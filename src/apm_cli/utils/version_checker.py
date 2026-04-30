@@ -2,13 +2,11 @@
 
 import re
 import sys
-from typing import Optional, Tuple
 from pathlib import Path
+from typing import Optional, Tuple  # noqa: F401, UP035
 
 
-def get_latest_version_from_github(
-    repo: str = "microsoft/apm", timeout: int = 2
-) -> Optional[str]:
+def get_latest_version_from_github(repo: str = "microsoft/apm", timeout: int = 2) -> str | None:
     """
     Fetch the latest release version from GitHub API.
 
@@ -48,7 +46,7 @@ def get_latest_version_from_github(
         return None
 
 
-def parse_version(version_str: str) -> Optional[Tuple[int, int, int, str]]:
+def parse_version(version_str: str) -> tuple[int, int, int, str] | None:
     """
     Parse a semantic version string into components.
 
@@ -163,7 +161,7 @@ def save_version_check_timestamp():
         pass
 
 
-def check_for_updates(current_version: str) -> Optional[str]:
+def check_for_updates(current_version: str) -> str | None:
     """
     Check if a newer version is available.
 

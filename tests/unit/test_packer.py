@@ -8,8 +8,8 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from apm_cli.bundle.packer import pack_bundle, PackResult, _filter_files_by_target
-from apm_cli.deps.lockfile import LockFile, LockedDependency
+from apm_cli.bundle.packer import PackResult, _filter_files_by_target, pack_bundle  # noqa: F401
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 
 
 def _setup_project(tmp_path: Path, deployed_files: list[str], *, target: str | None = None) -> Path:
@@ -248,7 +248,7 @@ class TestPackBundle:
         )
         out = tmp_path / "build"
 
-        with pytest.raises(FileNotFoundError, match="apm.lock.yaml not found"):
+        with pytest.raises(FileNotFoundError, match="apm.lock.yaml not found"):  # noqa: RUF043
             pack_bundle(project, out)
 
     def test_pack_missing_deployed_file(self, tmp_path):
@@ -339,9 +339,7 @@ class TestPackBundle:
 
         result = pack_bundle(project, out, target="claude")
 
-        lock_yaml = yaml.safe_load(
-            (result.bundle_path / "apm.lock.yaml").read_text()
-        )
+        lock_yaml = yaml.safe_load((result.bundle_path / "apm.lock.yaml").read_text())
         bundle_deployed = lock_yaml["dependencies"][0]["deployed_files"]
         assert ".claude/skills/x/SKILL.md" in bundle_deployed
         assert ".claude/agents/a.md" in bundle_deployed
@@ -425,7 +423,7 @@ class TestPackSecurityScan:
 
         # Inject a Unicode tag character (U+E0001) into the file
         sneaky = project / ".github/agents/sneaky.md"
-        sneaky.write_text(f"Hello \U000E0001 world", encoding="utf-8")
+        sneaky.write_text("Hello \U000e0001 world", encoding="utf-8")
 
         out = tmp_path / "build"
 
@@ -446,7 +444,7 @@ class TestPackSecurityScan:
 
         # Create a file with hidden chars inside the project tree
         poisoned = project / ".github/agents/poisoned.md"
-        poisoned.write_text(f"hidden \U000E0001 payload", encoding="utf-8")
+        poisoned.write_text("hidden \U000e0001 payload", encoding="utf-8")
 
         # Replace link.md with a symlink to the poisoned file (within project)
         link_file = project / ".github/agents/link.md"
@@ -496,7 +494,7 @@ class TestFilterFilesByTargetList:
     def test_list_copilot_vscode_dedup(self):
         """copilot and vscode share .github/ prefix -- should not duplicate."""
         files = [".github/agents/a.md"]
-        result, mappings = _filter_files_by_target(files, ["copilot", "vscode"])
+        result, mappings = _filter_files_by_target(files, ["copilot", "vscode"])  # noqa: RUF059
         assert result == [".github/agents/a.md"]
 
     def test_list_single_element_matches_string(self):
@@ -542,9 +540,7 @@ class TestPackBundleMultiTarget:
 
         result = pack_bundle(project, out, target=["claude", "vscode"])
 
-        lock_yaml = yaml.safe_load(
-            (result.bundle_path / "apm.lock.yaml").read_text()
-        )
+        lock_yaml = yaml.safe_load((result.bundle_path / "apm.lock.yaml").read_text())
         assert lock_yaml["pack"]["target"] == "claude,vscode"
 
     def test_pack_list_config_target_when_no_explicit(self, tmp_path):
@@ -725,8 +721,7 @@ class TestPackSourceLocalGuard:
         # through the deps loop, we'd see a collision (deps run before own).
         own_matches = [f for f in result.files if f.endswith("own.md")]
         assert len(own_matches) == 1, (
-            f"Self-entry should not be re-processed via deps loop; "
-            f"files={result.files}"
+            f"Self-entry should not be re-processed via deps loop; files={result.files}"
         )
 
     def test_plugin_format_self_entry_with_is_dev_false_would_leak(self, tmp_path):
@@ -828,9 +823,7 @@ class TestPackBundleStripsLocalFields:
             assert f not in result.files
 
         # Bundle lockfile: must not carry packager-side local-content metadata
-        bundle_lock_text = (result.bundle_path / "apm.lock.yaml").read_text(
-            encoding="utf-8"
-        )
+        bundle_lock_text = (result.bundle_path / "apm.lock.yaml").read_text(encoding="utf-8")
         bundle_lock = yaml.safe_load(bundle_lock_text)
         assert "local_deployed_files" not in bundle_lock
         assert "local_deployed_file_hashes" not in bundle_lock
@@ -937,3 +930,94 @@ class TestPackBundleStripsLocalFields:
         # Original lockfile object is not mutated
         assert lock.local_deployed_files == [".github/agents/own.md"]
         assert lock.local_deployed_file_hashes == {".github/agents/own.md": "h"}
+
+
+class TestPackHybridDescriptionWarning:
+    """pack_bundle warns when a HYBRID package is missing apm.yml.description.
+
+    HYBRID layout = apm.yml + SKILL.md at project root (no `.apm/`).
+    apm.yml.description and SKILL.md description are independent fields
+    with different consumers (CLI/search vs. agent invocation matcher).
+    A package can pack and ship without apm.yml.description, but its
+    `apm view` / `apm search` / marketplace listing will degrade to
+    "(no description)" while Claude/Copilot still invoke the skill
+    correctly. The pack-time warning catches this for the AUTHOR -- the
+    only actor who can fix it -- without forcing every CONSUMER to see
+    noise on `apm install`.
+    """
+
+    def _build_hybrid(
+        self, tmp_path: Path, *, apm_desc: str | None, skill_desc: str | None
+    ) -> Path:
+        project = tmp_path / "project"
+        project.mkdir()
+        apm_yml: dict = {"name": "genesis", "version": "1.0.0"}
+        if apm_desc is not None:
+            apm_yml["description"] = apm_desc
+        (project / "apm.yml").write_text(yaml.dump(apm_yml), encoding="utf-8")
+        skill_body = "---\n"
+        if skill_desc is not None:
+            skill_body += f"description: {skill_desc}\n"
+        skill_body += "---\n# Skill\n"
+        (project / "SKILL.md").write_text(skill_body, encoding="utf-8")
+
+        lockfile = LockFile()
+        dep = LockedDependency(repo_url="owner/repo", deployed_files=[])
+        lockfile.add_dependency(dep)
+        lockfile.write(project / "apm.lock.yaml")
+        return project
+
+    def test_warning_fires_when_apm_yml_missing_description(self, tmp_path):
+        """SKILL.md has description, apm.yml does not -- warn the author."""
+        project = self._build_hybrid(
+            tmp_path, apm_desc=None, skill_desc="Genesis architecture skill"
+        )
+        out = tmp_path / "build"
+
+        recorded: list[str] = []
+
+        class _Logger:
+            def warning(self, msg):
+                recorded.append(msg)
+
+        pack_bundle(project, out, dry_run=True, logger=_Logger())
+
+        assert any("apm.yml is missing 'description'" in m for m in recorded), (
+            f"Expected pack-time HYBRID warning, got: {recorded}"
+        )
+
+    def test_no_warning_when_apm_yml_has_description(self, tmp_path):
+        """apm.yml.description present -- silent regardless of SKILL.md."""
+        project = self._build_hybrid(
+            tmp_path, apm_desc="short tagline", skill_desc="long invocation matcher"
+        )
+        out = tmp_path / "build"
+
+        recorded: list[str] = []
+
+        class _Logger:
+            def warning(self, msg):
+                recorded.append(msg)
+
+        pack_bundle(project, out, dry_run=True, logger=_Logger())
+
+        assert not any("missing 'description'" in m for m in recorded), (
+            f"Did not expect HYBRID warning, got: {recorded}"
+        )
+
+    def test_no_warning_when_skill_md_also_missing_description(self, tmp_path):
+        """If neither has description, no warning -- nothing to nudge about."""
+        project = self._build_hybrid(tmp_path, apm_desc=None, skill_desc=None)
+        out = tmp_path / "build"
+
+        recorded: list[str] = []
+
+        class _Logger:
+            def warning(self, msg):
+                recorded.append(msg)
+
+        pack_bundle(project, out, dry_run=True, logger=_Logger())
+
+        assert not any("missing 'description'" in m for m in recorded), (
+            f"Did not expect HYBRID warning when SKILL.md also lacks description, got: {recorded}"
+        )

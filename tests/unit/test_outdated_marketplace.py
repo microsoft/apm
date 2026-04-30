@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
+import pytest  # noqa: F401
 
 from apm_cli.commands.outdated import (
     OutdatedRow,
@@ -17,10 +17,10 @@ from apm_cli.marketplace.models import (
 )
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _marketplace_dep(
     repo_url="acme-org/skill-auth",
@@ -103,6 +103,7 @@ class TestCheckMarketplaceRef:
     def test_marketplace_not_found(self, mock_get_mkt):
         """Unknown marketplace returns None (fall through to git check)."""
         from apm_cli.marketplace.errors import MarketplaceNotFoundError
+
         mock_get_mkt.side_effect = MarketplaceNotFoundError("nope")
         dep = _marketplace_dep()
         result = _check_marketplace_ref(dep, verbose=False)
@@ -143,8 +144,11 @@ class TestCheckOneDepMarketplace:
     def test_marketplace_dep_uses_ref_check(self, mock_ref_check):
         """When _check_marketplace_ref returns a result, it is used."""
         mock_ref_check.return_value = OutdatedRow(
-            package="skill-auth@acme-tools", current="v2.1.0", latest="v3.0.0",
-            status="outdated", source="marketplace: acme-tools",
+            package="skill-auth@acme-tools",
+            current="v2.1.0",
+            latest="v3.0.0",
+            status="outdated",
+            source="marketplace: acme-tools",
         )
         dep = _marketplace_dep()
         result = _check_one_dep(dep, downloader=MagicMock(), verbose=False)

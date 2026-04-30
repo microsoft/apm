@@ -10,12 +10,13 @@ APM manages LLM runtime installation and configuration automatically. This guide
 
 ## Overview
 
-APM acts as a runtime package manager, downloading and configuring LLM runtimes from their official sources. Currently supports three runtimes:
+APM acts as a runtime package manager, downloading and configuring LLM runtimes from their official sources. Currently supports four runtimes:
 
 | Runtime | Description | Best For | Configuration |
 |---------|-------------|----------|---------------|
 | [**GitHub Copilot CLI**](https://github.com/github/copilot-cli) | GitHub's Copilot CLI (Recommended) | Advanced AI coding, native MCP support | Auto-configured, no auth needed |
 | [**OpenAI Codex**](https://github.com/openai/codex) | OpenAI's Codex CLI | Code tasks, GitHub Models API | Auto-configured with GitHub Models |
+| [**Google Gemini CLI**](https://github.com/google-gemini/gemini-cli) | Google's Gemini CLI | Gemini models, sandboxed agentic tasks | Browser login or API key |
 | [**LLM Library**](https://llm.datasette.io/en/stable/index.html) | Simon Willison's `llm` CLI | General use, many providers | Manual API key setup |
 
 ## Quick Setup
@@ -35,6 +36,7 @@ apm runtime list              # Show installed runtimes
 apm runtime setup llm         # Install LLM library
 apm runtime setup copilot     # Install GitHub Copilot CLI (Recommended)
 apm runtime setup codex       # Install Codex CLI
+apm runtime setup gemini      # Install Google Gemini CLI
 ```
 
 ## GitHub Copilot CLI Runtime (Recommended)
@@ -108,6 +110,77 @@ scripts:
   start: "codex analyze-logs.prompt.md"
   debug: "RUST_LOG=debug codex analyze-logs.prompt.md"
 ```
+
+## Google Gemini CLI Runtime
+
+APM automatically installs Google Gemini CLI from the public npm registry. Gemini CLI provides agentic AI coding with sandboxed execution and support for Gemini models including Gemini Pro and Gemini Flash.
+
+### Setup
+
+#### 1. Install via APM
+```bash
+apm runtime setup gemini
+```
+
+This automatically:
+- Installs `@google/gemini-cli` from the public npm registry
+- Requires Node.js v20+ and npm v10+
+- Creates `~/.gemini/settings.json` with an empty `mcpServers` section
+
+#### 2. Authenticate
+
+Gemini CLI supports three authentication methods:
+
+```bash
+# Option A: Browser-based login (free tier, 60 req/min)
+gemini   # follow the interactive browser login flow
+
+# Option B: Gemini API key
+export GOOGLE_API_KEY=your_api_key
+
+# Option C: Vertex AI (Google Cloud)
+export GOOGLE_GENAI_USE_VERTEXAI=true
+export GOOGLE_CLOUD_PROJECT=your_project_id
+```
+
+### Usage
+
+```bash
+# Run scripts (from apm.yml) with parameters
+apm run start --param service_name=api-gateway
+
+# Interactive mode
+gemini
+
+# Sandboxed mode (isolated execution)
+gemini -s
+
+# Specify model
+gemini -m gemini-2.5-pro-preview
+```
+
+**Script Configuration (apm.yml):**
+```yaml
+scripts:
+  start: "gemini -y -p analyze-logs.prompt.md"
+  review: "gemini -s -p code-review.prompt.md"
+```
+
+### MCP Integration
+
+APM writes MCP server configuration to `.gemini/settings.json` when a `.gemini/` directory exists:
+
+```bash
+# Create .gemini/ to enable Gemini target auto-detection
+mkdir .gemini
+
+# Install packages and configure MCP servers
+apm install
+
+# Result: .gemini/settings.json updated with mcpServers entries
+```
+
+See the [IDE & Tool Integration guide](../../integrations/ide-tool-integration/#gemini-cli-gemini) for the full list of primitives deployed by `apm install --target gemini`.
 
 ## LLM Runtime
 
@@ -192,6 +265,7 @@ apm run summarize --param report_type="weekly"
 # Install missing runtime
 apm runtime setup copilot  # Recommended
 apm runtime setup codex
+apm runtime setup gemini
 apm runtime setup llm
 
 # Check installed runtimes
@@ -213,6 +287,16 @@ apm runtime setup copilot
 # Ensure PATH is updated (restart terminal)
 # Or reinstall runtime
 apm runtime setup codex
+```
+
+**"Command not found: gemini"**
+```bash
+# Ensure Node.js v20+ and npm v10+ are installed
+node --version  # Should be v20+
+npm --version   # Should be v10+
+
+# Reinstall Gemini CLI
+apm runtime setup gemini
 ```
 
 ## Extending APM with New Runtimes

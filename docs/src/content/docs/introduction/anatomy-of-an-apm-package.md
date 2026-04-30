@@ -143,10 +143,10 @@ The two are complementary, and APM treats them that way:
    pinning, lockfile entries, and transitive resolution. Marketplaces
    (`marketplace.json`) resolve through the same path. See
    [Plugins](../../guides/plugins/) and [Marketplaces](../../guides/marketplaces/).
-2. **APM compiles `.apm/` to plugin format.** Run `apm pack --format
-   plugin` and you get a standalone plugin directory -- no `apm.yml`, no
+2. **APM compiles `.apm/` to plugin format.** Run `apm pack` and you
+   get a standalone Claude Code plugin directory -- no `apm.yml`, no
    `apm_modules/`, no `.apm/` -- consumable by any plugin host. See
-   [Pack & Distribute -- Plugin format](../../guides/pack-distribute/#plugin-format).
+   [Pack & Distribute -- Plugin format](../../guides/pack-distribute/#plugin-format-vs-apm-format).
 3. **Hybrid mode is supported.** A repo can ship `apm.yml` + `plugin.json`
    together: author with APM (dependency management, lockfile, security
    scanning, dev/prod separation), distribute as a standard plugin.
@@ -280,6 +280,13 @@ next `apm install`?** Your edit gets overwritten. Edit the source under
 **I ran `ls` and don't see `.apm/`.** It's a dotfile directory, hidden by
 default. Use `ls -a`.
 
+**I have a skill I want for development but not shipped to consumers.
+Where does it go?** Outside `.apm/`. The local-content scanner that builds
+plugin bundles operates on `.apm/` only and does not consult the
+devDependency marker. Author dev-only primitives under `dev/` (or any
+non-`.apm/` path) and reference them via a local-path devDependency. See
+[Dev-only Primitives](../../guides/dev-only-primitives/).
+
 **Do I need `.apm/` to install packages?** No. `.apm/` is for authoring. If
 you only consume packages, `apm install` creates the runtime targets
 (`.github/`, `.claude/`, etc.) directly under `apm_modules/` and you never
@@ -291,7 +298,7 @@ at least one primitive under `.apm/`.
 **Isn't the industry converging on the plugin format? Why do I need
 `.apm/` at all?** APM consumes plugins natively (`plugin.json` packages
 install as first-class dependencies) and exports to plugin format
-(`apm pack --format plugin`). `.apm/` is the source layout that gives
+(`apm pack`). `.apm/` is the source layout that gives
 you dependency management, lockfiles, and security scanning during
 authoring; `plugin.json` is the runtime distribution format. Use both --
 see [Why not just ship a `plugin.json`?](#why-not-just-ship-a-pluginjson)

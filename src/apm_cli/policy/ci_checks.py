@@ -12,18 +12,28 @@ Exit-code contract (consumed by the ``apm audit --ci`` command):
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
-from typing import List
+from typing import List, Optional  # noqa: F401, UP035
 
-from .models import CIAuditResult, CheckResult
 from ..deps.lockfile import _SELF_KEY
+from .models import CheckResult, CIAuditResult
+
+_logger = logging.getLogger(__name__)
 
 
 # -- Individual checks ---------------------------------------------
 
 
-def _check_lockfile_exists(project_root: Path) -> CheckResult:
+def _check_lockfile_exists(
+    project_root: Path,
+    manifest: APMPackage | None,
+) -> CheckResult:
     """Check that ``apm.lock.yaml`` is present when relevant.
+
+    Receives the already-parsed manifest from :func:`run_baseline_checks`
+    (``None`` when no ``apm.yml`` exists on disk).  This function never
+    parses ``apm.yml`` itself and always returns ``name="lockfile-exists"``.
 
     Relevance is determined by either:
       * the manifest declaring APM/MCP dependencies, or
@@ -32,23 +42,11 @@ def _check_lockfile_exists(project_root: Path) -> CheckResult:
     """
     from ..deps.lockfile import LockFile, get_lockfile_path
 
-    apm_yml_path = project_root / "apm.yml"
-    if not apm_yml_path.exists():
+    if manifest is None:
         return CheckResult(
             name="lockfile-exists",
             passed=True,
             message="No apm.yml found -- nothing to check",
-        )
-
-    from ..models.apm_package import APMPackage
-
-    try:
-        manifest = APMPackage.from_apm_yml(apm_yml_path)
-    except (ValueError, FileNotFoundError):
-        return CheckResult(
-            name="lockfile-exists",
-            passed=True,
-            message="Could not parse apm.yml -- skipping lockfile check",
         )
 
     has_deps = manifest.has_apm_dependencies() or bool(manifest.get_mcp_dependencies())
@@ -63,8 +61,8 @@ def _check_lockfile_exists(project_root: Path) -> CheckResult:
             lock_for_gating = LockFile.read(lockfile_path)
             if lock_for_gating is not None and lock_for_gating.local_deployed_files:
                 has_deps = True
-        except Exception:
-            pass  # fall through; if unreadable the missing-lockfile branch warns
+        except Exception as exc:
+            _logger.debug("Could not read lockfile for gating: %s", exc)
 
     if not has_deps:
         return CheckResult(
@@ -89,13 +87,13 @@ def _check_lockfile_exists(project_root: Path) -> CheckResult:
 
 
 def _check_ref_consistency(
-    manifest: "APMPackage",
-    lock: "LockFile",
+    manifest: APMPackage,
+    lock: LockFile,
 ) -> CheckResult:
     """Verify every dependency's manifest ref matches lockfile resolved_ref."""
     from ..drift import detect_ref_change
 
-    mismatches: List[str] = []
+    mismatches: list[str] = []
     for dep_ref in manifest.get_apm_dependencies():
         key = dep_ref.get_unique_key()
         locked_dep = lock.get_dependency(key)
@@ -125,12 +123,12 @@ def _check_ref_consistency(
 
 def _check_deployed_files_present(
     project_root: Path,
-    lock: "LockFile",
+    lock: LockFile,
 ) -> CheckResult:
     """Verify all files listed in lockfile deployed_files exist on disk."""
     from ..integration.base_integrator import BaseIntegrator
 
-    missing: List[str] = []
+    missing: list[str] = []
     for _dep_key, dep in lock.dependencies.items():
         for rel_path in dep.deployed_files:
             safe_path = rel_path.rstrip("/")
@@ -149,17 +147,14 @@ def _check_deployed_files_present(
     return CheckResult(
         name="deployed-files-present",
         passed=False,
-        message=(
-            f"{len(missing)} deployed file(s) missing -- "
-            "run 'apm install' to restore"
-        ),
+        message=(f"{len(missing)} deployed file(s) missing -- run 'apm install' to restore"),
         details=missing,
     )
 
 
 def _check_no_orphans(
-    manifest: "APMPackage",
-    lock: "LockFile",
+    manifest: APMPackage,
+    lock: LockFile,
 ) -> CheckResult:
     """Verify no packages in lockfile are absent from manifest."""
     manifest_keys = {dep.get_unique_key() for dep in manifest.get_apm_dependencies()}
@@ -178,16 +173,52 @@ def _check_no_orphans(
         name="no-orphaned-packages",
         passed=False,
         message=(
-            f"{len(orphaned)} orphaned package(s) in lockfile -- "
-            "run 'apm install' to clean up"
+            f"{len(orphaned)} orphaned package(s) in lockfile -- run 'apm install' to clean up"
         ),
         details=orphaned,
     )
 
 
+def _check_skill_subset_consistency(
+    manifest: APMPackage,
+    lock: LockFile,
+) -> CheckResult:
+    """Verify lockfile skill_subset matches manifest skills: for each entry."""
+    mismatches: list[str] = []
+    for dep_ref in manifest.get_apm_dependencies():
+        key = dep_ref.get_unique_key()
+        locked_dep = lock.get_dependency(key)
+        if locked_dep is None:
+            continue
+        # Only check skill_bundle packages
+        if locked_dep.package_type != "skill_bundle":
+            continue
+        manifest_subset = sorted(dep_ref.skill_subset) if dep_ref.skill_subset else []
+        lock_subset = sorted(locked_dep.skill_subset) if locked_dep.skill_subset else []
+        if manifest_subset != lock_subset:
+            mismatches.append(
+                f"{key}: manifest skills {manifest_subset} != lockfile skill_subset {lock_subset}"
+            )
+
+    if not mismatches:
+        return CheckResult(
+            name="skill-subset-consistency",
+            passed=True,
+            message="Skill subset selections match lockfile",
+        )
+    return CheckResult(
+        name="skill-subset-consistency",
+        passed=False,
+        message=(
+            f"{len(mismatches)} skill subset mismatch(es) -- regenerate lockfile (apm install)"
+        ),
+        details=mismatches,
+    )
+
+
 def _check_config_consistency(
-    manifest: "APMPackage",
-    lock: "LockFile",
+    manifest: APMPackage,
+    lock: LockFile,
 ) -> CheckResult:
     """Verify MCP server configs match lockfile baseline."""
     from ..drift import detect_config_drift
@@ -205,7 +236,7 @@ def _check_config_consistency(
             message="No MCP configs to check",
         )
 
-    details: List[str] = []
+    details: list[str] = []
 
     # Detect drift on servers that exist in both sets
     drifted = detect_config_drift(current_configs, stored_configs)
@@ -231,17 +262,14 @@ def _check_config_consistency(
     return CheckResult(
         name="config-consistency",
         passed=False,
-        message=(
-            f"{len(details)} MCP config inconsistenc(ies) -- "
-            "run 'apm install' to reconcile"
-        ),
+        message=(f"{len(details)} MCP config inconsistenc(ies) -- run 'apm install' to reconcile"),
         details=details,
     )
 
 
 def _check_content_integrity(
     project_root: Path,
-    lock: "LockFile",
+    lock: LockFile,
 ) -> CheckResult:
     """Check deployed files for critical hidden Unicode and hash drift.
 
@@ -263,7 +291,7 @@ def _check_content_integrity(
     findings_by_file, _files_scanned = scan_lockfile_packages(project_root)
 
     # Only critical findings fail this check
-    critical_files: List[str] = []
+    critical_files: list[str] = []
     for rel_path, findings in findings_by_file.items():
         if any(f.severity == "critical" for f in findings):
             critical_files.append(rel_path)
@@ -271,10 +299,11 @@ def _check_content_integrity(
     # Per-file hash verification across all dependencies (the synthesized
     # self-entry is included in ``lock.dependencies`` so local content is
     # covered through the same iteration).
-    hash_mismatches: List[tuple] = []  # (dep_key, rel_path, expected, actual)
+    hash_mismatches: list[tuple] = []  # (dep_key, rel_path, expected, actual)
     # Local import: matches the scoping pattern used in
     # _check_deployed_files_present (line 131); avoids cycles.
     from ..integration.base_integrator import BaseIntegrator as _BaseIntegrator
+
     for dep_key, dep in lock.dependencies.items():
         if not dep.deployed_file_hashes:
             continue
@@ -304,7 +333,7 @@ def _check_content_integrity(
             message="No critical hidden Unicode or hash drift detected",
         )
 
-    details: List[str] = []
+    details: list[str] = []
     for rel_path in critical_files:
         details.append(f"unicode: {rel_path}")
     for dep_key, rel_path, expected, actual in hash_mismatches:
@@ -318,8 +347,8 @@ def _check_content_integrity(
             f"hash-drift: {rel_path} (dep={dep_label}, expected={exp_short}..., actual={act_short}...)"
         )
 
-    parts: List[str] = []
-    remedies: List[str] = []
+    parts: list[str] = []
+    remedies: list[str] = []
     if critical_files:
         parts.append(f"{len(critical_files)} file(s) with critical hidden Unicode")
         remedies.append("'apm audit --strip' to clean Unicode")
@@ -337,8 +366,8 @@ def _check_content_integrity(
 
 
 def _check_includes_consent(
-    manifest: "APMPackage",
-    lock: "LockFile",
+    manifest: APMPackage,
+    lock: LockFile,
 ) -> CheckResult:
     """Advisory check: nudge toward declaring 'includes:' when local content is deployed.
 
@@ -392,26 +421,39 @@ def run_baseline_checks(
     from ..models.apm_package import APMPackage, clear_apm_yml_cache
 
     result = CIAuditResult()
+    apm_yml_path = project_root / "apm.yml"
 
-    # Check 1: Lockfile exists
-    result.checks.append(_check_lockfile_exists(project_root))
+    # Parse manifest ONCE -- this function owns parse-error handling.
+    manifest = None
+    if apm_yml_path.exists():
+        import yaml
+
+        try:
+            clear_apm_yml_cache()
+            manifest = APMPackage.from_apm_yml(apm_yml_path)
+        except (ValueError, yaml.YAMLError, OSError) as exc:
+            result.checks.append(
+                CheckResult(
+                    name="manifest-parse",
+                    passed=False,
+                    message="Cannot parse apm.yml: %s -- fix the YAML syntax error in apm.yml and re-run."  # noqa: UP031
+                    % exc,
+                )
+            )
+            return result
+
+    # Check 1: Lockfile exists (manifest already parsed, pass it in)
+    result.checks.append(_check_lockfile_exists(project_root, manifest))
 
     # If lockfile doesn't exist or isn't needed, remaining checks can't run
     if not result.checks[0].passed:
         return result
 
-    apm_yml_path = project_root / "apm.yml"
     lockfile_path = get_lockfile_path(project_root)
 
     # If there's no apm.yml or no lockfile, the first check already passed
     # (no deps needed).  Skip remaining checks.
     if not apm_yml_path.exists() or not lockfile_path.exists():
-        return result
-
-    try:
-        clear_apm_yml_cache()
-        manifest = APMPackage.from_apm_yml(apm_yml_path)
-    except (ValueError, FileNotFoundError):
         return result
 
     lock = LockFile.read(lockfile_path)
@@ -433,6 +475,10 @@ def run_baseline_checks(
 
     # Check 4: No orphaned packages
     if _run(_check_no_orphans(manifest, lock)):
+        return result
+
+    # Check 4.5: Skill subset consistency (manifest vs lockfile)
+    if _run(_check_skill_subset_consistency(manifest, lock)):
         return result
 
     # Check 5: Config consistency (MCP)
