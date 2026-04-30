@@ -250,7 +250,7 @@ def _directory_exists_at_ref(
         log(f"  [x] repo_url '{dep_ref.repo_url}' missing owner/repo split")
         return False
     owner, repo = parts
-    token = downloader.auth_resolver.resolve(host, owner, port=dep_ref.port).token
+    token = downloader.auth_resolver.resolve_for_dep(dep_ref).token
 
     from urllib.parse import quote
 
