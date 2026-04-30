@@ -697,10 +697,10 @@ class TestNewPassthroughFields:
                 "packages:\n"
                 "  - name: tool\n"
                 "    source: acme/tool\n"
-                "    version: \">=1.0.0\"\n"
-                "    author: \"ACME Inc\"\n"
-                "    license: \"MIT\"\n"
-                "    repository: \"https://github.com/acme/tool\"\n"
+                '    version: ">=1.0.0"\n'
+                '    author: "ACME Inc"\n'
+                '    license: "MIT"\n'
+                '    repository: "https://github.com/acme/tool"\n'
             )
         )
         yml = _write_yml(tmp_path, content)
@@ -717,11 +717,11 @@ class TestNewPassthroughFields:
                 "packages:\n"
                 "  - name: tool\n"
                 "    source: acme/tool\n"
-                "    version: \">=1.0.0\"\n"
+                '    version: ">=1.0.0"\n'
                 "    author:\n"
-                "      name: \"ACME\"\n"
-                "      email: \"team@acme.example\"\n"
-                "      url: \"https://acme.example\"\n"
+                '      name: "ACME"\n'
+                '      email: "team@acme.example"\n'
+                '      url: "https://acme.example"\n'
             )
         )
         yml = _write_yml(tmp_path, content)
@@ -739,13 +739,13 @@ class TestNewPassthroughFields:
                 "packages:\n"
                 "  - name: tool\n"
                 "    source: acme/tool\n"
-                "    version: \">=1.0.0\"\n"
+                '    version: ">=1.0.0"\n'
                 "    author:\n"
-                "      email: \"team@acme.example\"\n"
+                '      email: "team@acme.example"\n'
             )
         )
         yml = _write_yml(tmp_path, content)
-        with pytest.raises(MarketplaceYmlError, match="author.name.*required"):
+        with pytest.raises(MarketplaceYmlError, match=r"author.name.*required"):
             load_marketplace_yml(yml)
 
     def test_author_object_rejects_unknown_keys(self, tmp_path: Path):
@@ -754,14 +754,14 @@ class TestNewPassthroughFields:
                 "packages:\n"
                 "  - name: tool\n"
                 "    source: acme/tool\n"
-                "    version: \">=1.0.0\"\n"
+                '    version: ">=1.0.0"\n'
                 "    author:\n"
                 "      name: ACME\n"
-                "      website: \"https://acme.example\"\n"
+                '      website: "https://acme.example"\n'
             )
         )
         yml = _write_yml(tmp_path, content)
-        with pytest.raises(MarketplaceYmlError, match="author.*unknown key"):
+        with pytest.raises(MarketplaceYmlError, match=r"author.*unknown key"):
             load_marketplace_yml(yml)
 
     def test_package_entry_new_fields_optional(self, tmp_path: Path):
@@ -779,7 +779,7 @@ class TestNewPassthroughFields:
                 "packages:\n"
                 "  - name: tool\n"
                 "    source: acme/tool\n"
-                "    version: \">=1.0.0\"\n"
+                '    version: ">=1.0.0"\n'
                 "    tags: [ai, tools]\n"
                 "    keywords: [tools, agents]\n"
             )
@@ -796,7 +796,7 @@ class TestNewPassthroughFields:
                 "packages:\n"
                 "  - name: tool\n"
                 "    source: acme/tool\n"
-                "    version: \">=1.0.0\"\n"
+                '    version: ">=1.0.0"\n'
                 "    keywords: [ai, agents]\n"
             )
         )
@@ -811,12 +811,12 @@ class TestNewPassthroughFields:
                 "packages:\n"
                 "  - name: tool\n"
                 "    source: acme/tool\n"
-                "    version: \">=1.0.0\"\n"
+                '    version: ">=1.0.0"\n'
                 "    author: 123\n"
             )
         )
         yml = _write_yml(tmp_path, content)
-        with pytest.raises(MarketplaceYmlError, match="author.*string or object"):
+        with pytest.raises(MarketplaceYmlError, match=r"author.*string or object"):
             load_marketplace_yml(yml)
 
     def test_tags_length_cap_applied(self, tmp_path: Path):
@@ -826,7 +826,7 @@ class TestNewPassthroughFields:
                 "packages:\n"
                 "  - name: tool\n"
                 "    source: acme/tool\n"
-                "    version: \">=1.0.0\"\n"
+                '    version: ">=1.0.0"\n'
                 f"    tags: [{tags_list}]\n"
             )
         )

@@ -1977,9 +1977,7 @@ class TestRemoteOverrideSemantics:
         """)
         (tmp_path / "apm.yml").write_text(content, encoding="utf-8")
         config = load_marketplace_config(tmp_path)
-        builder = MarketplaceBuilder.from_config(
-            config, tmp_path, BuildOptions(offline=True)
-        )
+        builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
         resolved = [
             ResolvedPackage(
                 name="remote-tool",
@@ -2036,9 +2034,7 @@ class TestRemoteOverrideSemantics:
         """)
         (tmp_path / "apm.yml").write_text(content, encoding="utf-8")
         config = load_marketplace_config(tmp_path)
-        builder = MarketplaceBuilder.from_config(
-            config, tmp_path, BuildOptions(offline=True)
-        )
+        builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
         local_entry = next(e for e in config.packages if e.is_local)
         resolved = [builder._resolve_entry(local_entry)]
         doc = builder.compose_marketplace_json(resolved)
@@ -2051,7 +2047,7 @@ class TestRemoteOverrideSemantics:
     def test_author_license_repository_emitted_for_remote(self, tmp_path):
         builder, resolved = self._make_remote_builder(
             tmp_path,
-            'author: "ACME"\n                  license: "Apache-2.0"\n                  repository: "https://github.com/acme/remote"'
+            'author: "ACME"\n                  license: "Apache-2.0"\n                  repository: "https://github.com/acme/remote"',
         )
         doc = builder.compose_marketplace_json(resolved)
         plugin = doc["plugins"][0]
@@ -2062,7 +2058,7 @@ class TestRemoteOverrideSemantics:
     def test_author_object_form_preserved(self, tmp_path):
         builder, resolved = self._make_remote_builder(
             tmp_path,
-            'author:\n                    name: "ACME"\n                    email: "team@acme.example"\n                    url: "https://acme.example"'
+            'author:\n                    name: "ACME"\n                    email: "team@acme.example"\n                    url: "https://acme.example"',
         )
         doc = builder.compose_marketplace_json(resolved)
         plugin = doc["plugins"][0]
@@ -2096,13 +2092,21 @@ class TestRemoteOverrideSemantics:
         """)
         (tmp_path / "apm.yml").write_text(content, encoding="utf-8")
         config = load_marketplace_config(tmp_path)
-        builder = MarketplaceBuilder.from_config(
-            config, tmp_path, BuildOptions(offline=True)
-        )
+        builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
         local_entry = next(e for e in config.packages if e.is_local)
         resolved = [builder._resolve_entry(local_entry)]
         doc = builder.compose_marketplace_json(resolved)
         plugin = doc["plugins"][0]
         keys = list(plugin.keys())
         # Expected order: name, description, version, author, license, repository, tags, homepage, source
-        assert keys == ["name", "description", "version", "author", "license", "repository", "tags", "homepage", "source"]
+        assert keys == [
+            "name",
+            "description",
+            "version",
+            "author",
+            "license",
+            "repository",
+            "tags",
+            "homepage",
+            "source",
+        ]

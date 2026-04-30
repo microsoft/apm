@@ -118,7 +118,7 @@ def test_author_object_with_unknown_key_rejected(tmp_path: Path) -> None:
                 website: y
         """,
     )
-    with pytest.raises(MarketplaceYmlError, match="author.*unknown key"):
+    with pytest.raises(MarketplaceYmlError, match=r"author.*unknown key"):
         load_marketplace_config(tmp_path)
 
 
@@ -166,7 +166,7 @@ def test_repository_must_be_string(tmp_path: Path) -> None:
                 - http://evil.com
         """,
     )
-    with pytest.raises(MarketplaceYmlError, match="repository.*non-empty string"):
+    with pytest.raises(MarketplaceYmlError, match=r"repository.*non-empty string"):
         load_marketplace_config(tmp_path)
 
 
@@ -177,7 +177,7 @@ def test_repository_must_be_string(tmp_path: Path) -> None:
 
 def test_keywords_array_length_cap(tmp_path: Path) -> None:
     """keywords exceeding 50 items must be truncated (not error)."""
-    keywords_list = ", ".join(f'kw{i}' for i in range(100))
+    keywords_list = ", ".join(f"kw{i}" for i in range(100))
     _write(
         tmp_path / "apm.yml",
         f"""\
@@ -214,7 +214,7 @@ def test_keywords_item_type_enforcement(tmp_path: Path) -> None:
               keywords: [123, "ok"]
         """,
     )
-    with pytest.raises(MarketplaceYmlError, match="keywords.*must be a string"):
+    with pytest.raises(MarketplaceYmlError, match=r"keywords.*must be a string"):
         load_marketplace_config(tmp_path)
 
 
@@ -243,9 +243,7 @@ def test_override_precedence_curator_wins(tmp_path: Path) -> None:
         """,
     )
     config = load_marketplace_config(tmp_path)
-    builder = MarketplaceBuilder.from_config(
-        config, tmp_path, BuildOptions(offline=True)
-    )
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
     # Simulate a resolved remote package
     from apm_cli.marketplace.builder import ResolvedPackage
 

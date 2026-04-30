@@ -12,10 +12,10 @@ version.
 from __future__ import annotations
 
 import json
+import textwrap
 from pathlib import Path
 
 import pytest
-import textwrap
 from jsonschema import Draft7Validator
 
 from apm_cli.marketplace.builder import (
@@ -25,9 +25,15 @@ from apm_cli.marketplace.builder import (
 )
 from apm_cli.marketplace.migration import load_marketplace_config
 
-
-_SCHEMA_PATH = Path(__file__).parent.parent.parent / "fixtures" / "schemas" / "claude-code-marketplace.schema.json"
-_PLUGIN_SCHEMA_PATH = Path(__file__).parent.parent.parent / "fixtures" / "schemas" / "claude-code-plugin.schema.json"
+_SCHEMA_PATH = (
+    Path(__file__).parent.parent.parent
+    / "fixtures"
+    / "schemas"
+    / "claude-code-marketplace.schema.json"
+)
+_PLUGIN_SCHEMA_PATH = (
+    Path(__file__).parent.parent.parent / "fixtures" / "schemas" / "claude-code-plugin.schema.json"
+)
 _SHA = "5544f427264d972b0e406d0b11a8ac31db9b18dc"
 
 
@@ -47,11 +53,13 @@ def plugin_validator() -> Draft7Validator:
 # marketplace plugin entry as a synthetic ``plugin.json``. See
 # https://json.schemastore.org/claude-code-marketplace.json -- these are
 # defined on the marketplace ``plugins[]`` item, not on the plugin manifest.
-_MARKETPLACE_ONLY_PLUGIN_FIELDS = frozenset({
-    "source",
-    "category",
-    "strict",
-})
+_MARKETPLACE_ONLY_PLUGIN_FIELDS = frozenset(
+    {
+        "source",
+        "category",
+        "strict",
+    }
+)
 
 
 def _entry_as_plugin_json(entry: dict) -> dict:
@@ -70,7 +78,7 @@ def test_remote_entry_with_all_passthrough_fields_validates(
     """A remote entry exercising every Finding 2 field validates clean."""
     _write(
         tmp_path / "apm.yml",
-        f"""\
+        """\
         name: validation
         description: x
         version: 1.0.0
@@ -93,9 +101,7 @@ def test_remote_entry_with_all_passthrough_fields_validates(
         """,
     )
     config = load_marketplace_config(tmp_path)
-    builder = MarketplaceBuilder.from_config(
-        config, tmp_path, BuildOptions(offline=True)
-    )
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
     resolved = [
         ResolvedPackage(
             name="azure",
@@ -113,14 +119,10 @@ def test_remote_entry_with_all_passthrough_fields_validates(
         marketplace_validator.iter_errors(doc),
         key=lambda e: e.absolute_path,
     )
-    assert errors == [], "\n".join(
-        f"{list(e.absolute_path)}: {e.message}" for e in errors
-    )
+    assert errors == [], "\n".join(f"{list(e.absolute_path)}: {e.message}" for e in errors)
 
 
-def test_local_entry_validates(
-    tmp_path: Path, marketplace_validator: Draft7Validator
-) -> None:
+def test_local_entry_validates(tmp_path: Path, marketplace_validator: Draft7Validator) -> None:
     """A local-source entry (post-pluginRoot subtraction) validates clean."""
     plugin_dir = tmp_path / "plugins" / "tool"
     plugin_dir.mkdir(parents=True)
@@ -146,9 +148,7 @@ def test_local_entry_validates(
         """,
     )
     config = load_marketplace_config(tmp_path)
-    builder = MarketplaceBuilder.from_config(
-        config, tmp_path, BuildOptions(offline=True)
-    )
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
     local_entry = next(e for e in config.packages if e.is_local)
     resolved = [builder._resolve_entry(local_entry)]
     doc = builder.compose_marketplace_json(resolved)
@@ -156,9 +156,7 @@ def test_local_entry_validates(
         marketplace_validator.iter_errors(doc),
         key=lambda e: e.absolute_path,
     )
-    assert errors == [], "\n".join(
-        f"{list(e.absolute_path)}: {e.message}" for e in errors
-    )
+    assert errors == [], "\n".join(f"{list(e.absolute_path)}: {e.message}" for e in errors)
 
 
 def test_remote_subdir_entry_uses_git_subdir_form(
@@ -183,9 +181,7 @@ def test_remote_subdir_entry_uses_git_subdir_form(
         """,
     )
     config = load_marketplace_config(tmp_path)
-    builder = MarketplaceBuilder.from_config(
-        config, tmp_path, BuildOptions(offline=True)
-    )
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
     resolved = [
         ResolvedPackage(
             name="subdir-tool",
@@ -208,9 +204,7 @@ def test_remote_subdir_entry_uses_git_subdir_form(
         marketplace_validator.iter_errors(doc),
         key=lambda e: e.absolute_path,
     )
-    assert errors == [], "\n".join(
-        f"{list(e.absolute_path)}: {e.message}" for e in errors
-    )
+    assert errors == [], "\n".join(f"{list(e.absolute_path)}: {e.message}" for e in errors)
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +230,7 @@ def test_remote_entry_validates_as_synthetic_plugin_json(
     """Each remote marketplace entry must validate as a plugin.json."""
     _write(
         tmp_path / "apm.yml",
-        f"""\
+        """\
         name: validation
         description: x
         version: 1.0.0
@@ -259,9 +253,7 @@ def test_remote_entry_validates_as_synthetic_plugin_json(
         """,
     )
     config = load_marketplace_config(tmp_path)
-    builder = MarketplaceBuilder.from_config(
-        config, tmp_path, BuildOptions(offline=True)
-    )
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
     resolved = [
         ResolvedPackage(
             name="azure",
@@ -290,10 +282,7 @@ def test_remote_entry_validates_as_synthetic_plugin_json(
         )
         assert plugin_errors == [], (
             f"entry {entry.get('name')!r} fails plugin schema:\n"
-            + "\n".join(
-                f"  {list(e.absolute_path)}: {e.message}"
-                for e in plugin_errors
-            )
+            + "\n".join(f"  {list(e.absolute_path)}: {e.message}" for e in plugin_errors)
         )
 
 
@@ -329,9 +318,7 @@ def test_local_entry_validates_as_synthetic_plugin_json(
         """,
     )
     config = load_marketplace_config(tmp_path)
-    builder = MarketplaceBuilder.from_config(
-        config, tmp_path, BuildOptions(offline=True)
-    )
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
     local_entry = next(e for e in config.packages if e.is_local)
     resolved = [builder._resolve_entry(local_entry)]
     doc = builder.compose_marketplace_json(resolved)
@@ -341,9 +328,7 @@ def test_local_entry_validates_as_synthetic_plugin_json(
             plugin_validator.iter_errors(synthetic),
             key=lambda e: e.absolute_path,
         )
-        assert errors == [], "\n".join(
-            f"{list(e.absolute_path)}: {e.message}" for e in errors
-        )
+        assert errors == [], "\n".join(f"{list(e.absolute_path)}: {e.message}" for e in errors)
 
 
 def test_minimal_entry_validates_as_synthetic_plugin_json(
@@ -368,9 +353,7 @@ def test_minimal_entry_validates_as_synthetic_plugin_json(
         """,
     )
     config = load_marketplace_config(tmp_path)
-    builder = MarketplaceBuilder.from_config(
-        config, tmp_path, BuildOptions(offline=True)
-    )
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
     resolved = [
         ResolvedPackage(
             name="minimal",
@@ -390,6 +373,4 @@ def test_minimal_entry_validates_as_synthetic_plugin_json(
             plugin_validator.iter_errors(synthetic),
             key=lambda e: e.absolute_path,
         )
-        assert errors == [], "\n".join(
-            f"{list(e.absolute_path)}: {e.message}" for e in errors
-        )
+        assert errors == [], "\n".join(f"{list(e.absolute_path)}: {e.message}" for e in errors)

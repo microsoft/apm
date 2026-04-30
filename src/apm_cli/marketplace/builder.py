@@ -24,7 +24,7 @@ import urllib.error
 import urllib.request
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field  # noqa: F401
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple  # noqa: F401, UP035
 
@@ -141,16 +141,14 @@ _SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 _VERSION_RANGE_CHARS = ("^", "~", ">", "<", "=")
 
 
-def _is_display_version(version: Optional[str]) -> bool:
+def _is_display_version(version: str | None) -> bool:
     """Return True if *version* looks like a fixed display version, not a range."""
     if not version:
         return False
     v = version.strip()
     if any(v.startswith(c) for c in _VERSION_RANGE_CHARS):
         return False
-    if " " in v or "*" in v or "x" in v.lower().split(".")[-1:]:
-        return False
-    return True
+    return not (" " in v or "*" in v or "x" in v.lower().split(".")[-1:])
 
 
 def _subtract_plugin_root(source: str, plugin_root: str) -> str:
@@ -185,19 +183,14 @@ def _subtract_plugin_root(source: str, plugin_root: str) -> str:
     # X1: empty result means source == pluginRoot exactly
     if not result or result == ".":
         raise BuildError(
-            f"subtracting pluginRoot '{plugin_root}' from source "
-            f"'{source}' yields empty path"
+            f"subtracting pluginRoot '{plugin_root}' from source '{source}' yields empty path"
         )
 
     # S2: post-subtraction guard -- no absolute paths, no traversal
     if result.startswith("/"):
-        raise BuildError(
-            f"pluginRoot subtraction produced absolute path: '{result}'"
-        )
+        raise BuildError(f"pluginRoot subtraction produced absolute path: '{result}'")
     if ".." in result.split("/"):
-        raise BuildError(
-            f"pluginRoot subtraction produced path with traversal: '{result}'"
-        )
+        raise BuildError(f"pluginRoot subtraction produced path with traversal: '{result}'")
 
     return "./" + result
 
@@ -778,14 +771,16 @@ class MarketplaceBuilder:
                     remote_desc = meta.get("description", "")
                     if remote_desc and remote_desc != entry.description:
                         override_count += 1
-                        diagnostics.append(BuildDiagnostic(
-                            level="verbose",
-                            message=(
-                                f"[i] Package '{pkg.name}': using curator "
-                                f"description (remote: "
-                                f"'{remote_desc[:40]}')"
-                            ),
-                        ))
+                        diagnostics.append(
+                            BuildDiagnostic(
+                                level="verbose",
+                                message=(
+                                    f"[i] Package '{pkg.name}': using curator "
+                                    f"description (remote: "
+                                    f"'{remote_desc[:40]}')"
+                                ),
+                            )
+                        )
                 elif meta.get("description"):
                     plugin["description"] = meta["description"]
 
@@ -794,14 +789,16 @@ class MarketplaceBuilder:
                     remote_ver = meta.get("version", "")
                     if remote_ver and remote_ver != entry.version:
                         override_count += 1
-                        diagnostics.append(BuildDiagnostic(
-                            level="verbose",
-                            message=(
-                                f"[i] Package '{pkg.name}': using curator "
-                                f"version '{entry.version}' "
-                                f"(remote: '{remote_ver}')"
-                            ),
-                        ))
+                        diagnostics.append(
+                            BuildDiagnostic(
+                                level="verbose",
+                                message=(
+                                    f"[i] Package '{pkg.name}': using curator "
+                                    f"version '{entry.version}' "
+                                    f"(remote: '{remote_ver}')"
+                                ),
+                            )
+                        )
                 elif meta.get("version"):
                     plugin["version"] = meta["version"]
 
@@ -829,29 +826,31 @@ class MarketplaceBuilder:
                 source_value = entry.source
                 if plugin_root:
                     try:
-                        source_value = _subtract_plugin_root(
-                            entry.source, plugin_root
-                        )
+                        source_value = _subtract_plugin_root(entry.source, plugin_root)
                         strip_count += 1
-                        diagnostics.append(BuildDiagnostic(
-                            level="verbose",
-                            message=(
-                                f"[i] Package '{pkg.name}': stripped "
-                                f"pluginRoot -- '{entry.source}' -> "
-                                f"'{source_value}'"
-                            ),
-                        ))
+                        diagnostics.append(
+                            BuildDiagnostic(
+                                level="verbose",
+                                message=(
+                                    f"[i] Package '{pkg.name}': stripped "
+                                    f"pluginRoot -- '{entry.source}' -> "
+                                    f"'{source_value}'"
+                                ),
+                            )
+                        )
                     except ValueError:
                         # W1: source outside pluginRoot -- emit as-is
                         source_value = entry.source
-                        diagnostics.append(BuildDiagnostic(
-                            level="warning",
-                            message=(
-                                f"[!] Package '{pkg.name}': source "
-                                f"'{entry.source}' is outside pluginRoot "
-                                f"'{plugin_root}' -- emitted as-is"
-                            ),
-                        ))
+                        diagnostics.append(
+                            BuildDiagnostic(
+                                level="warning",
+                                message=(
+                                    f"[!] Package '{pkg.name}': source "
+                                    f"'{entry.source}' is outside pluginRoot "
+                                    f"'{plugin_root}' -- emitted as-is"
+                                ),
+                            )
+                        )
                 plugin["source"] = source_value
             else:
                 # Remote source: emit per the official Claude Code marketplace
@@ -876,21 +875,20 @@ class MarketplaceBuilder:
             plugins.append(plugin)
 
         # Verbose summary line
-        summary_parts: List[str] = []
+        summary_parts: list[str] = []
         if plugin_root and strip_count > 0:
-            summary_parts.append(
-                f"stripped from {strip_count} local source(s)"
-            )
+            summary_parts.append(f"stripped from {strip_count} local source(s)")
         if override_count > 0:
             summary_parts.append(
-                f"{override_count} remote entry(ies) used "
-                f"curator-supplied overrides"
+                f"{override_count} remote entry(ies) used curator-supplied overrides"
             )
         if summary_parts:
-            diagnostics.append(BuildDiagnostic(
-                level="verbose",
-                message="pluginRoot: " + "; ".join(summary_parts),
-            ))
+            diagnostics.append(
+                BuildDiagnostic(
+                    level="verbose",
+                    message="pluginRoot: " + "; ".join(summary_parts),
+                )
+            )
 
         # Defence-in-depth: detect duplicate plugin names and record
         # warnings so the command layer can alert the maintainer.
@@ -905,11 +903,7 @@ class MarketplaceBuilder:
                 # Prefer ``path`` (git-subdir form) for disambiguation, then
                 # fall back to ``repo`` (github form, post-1061) or
                 # ``repository`` (legacy emit shape, kept for back-compat).
-                src_label = (
-                    src.get("path")
-                    or src.get("repo")
-                    or src.get("repository", "?")
-                )
+                src_label = src.get("path") or src.get("repo") or src.get("repository", "?")
             if pname in seen_names:
                 build_warnings.append(
                     f"Duplicate package name '{pname}': "

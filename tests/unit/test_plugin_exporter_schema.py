@@ -26,12 +26,8 @@ from apm_cli.bundle.plugin_exporter import export_plugin_bundle
 # don't duplicate the apm.yml + lockfile + .apm/ scaffolding.
 from tests.unit.test_plugin_exporter import _setup_plugin_project
 
-
 _PLUGIN_SCHEMA_PATH = (
-    Path(__file__).parent.parent
-    / "fixtures"
-    / "schemas"
-    / "claude-code-plugin.schema.json"
+    Path(__file__).parent.parent / "fixtures" / "schemas" / "claude-code-plugin.schema.json"
 )
 
 
@@ -63,9 +59,7 @@ class TestSynthesizedPluginJsonSchema:
         result = export_plugin_bundle(project, out)
         _validate(result.bundle_path / "plugin.json", plugin_validator)
 
-    def test_synthesis_with_full_apm_yml_metadata_validates(
-        self, tmp_path, plugin_validator
-    ):
+    def test_synthesis_with_full_apm_yml_metadata_validates(self, tmp_path, plugin_validator):
         project = _setup_plugin_project(
             tmp_path,
             agents=["a.agent.md"],
@@ -94,9 +88,7 @@ class TestAuthoredPluginJsonSchema:
         result = export_plugin_bundle(project, out)
         _validate(result.bundle_path / "plugin.json", plugin_validator)
 
-    def test_authored_with_author_object_validates(
-        self, tmp_path, plugin_validator
-    ):
+    def test_authored_with_author_object_validates(self, tmp_path, plugin_validator):
         project = _setup_plugin_project(
             tmp_path,
             agents=["a.agent.md"],

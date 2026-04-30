@@ -201,9 +201,7 @@ marketplace:
 """
     _write(tmp_path / "apm.yml", content)
     config = load_marketplace_config(tmp_path)
-    builder = MarketplaceBuilder.from_config(
-        config, tmp_path, BuildOptions(offline=True)
-    )
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
     local_entry = next(e for e in config.packages if e.is_local)
     resolved = [builder._resolve_entry(local_entry)]
     doc = builder.compose_marketplace_json(resolved)
@@ -229,9 +227,7 @@ marketplace:
 """
     _write(tmp_path / "apm.yml", content)
     config = load_marketplace_config(tmp_path)
-    builder = MarketplaceBuilder.from_config(
-        config, tmp_path, BuildOptions(offline=True)
-    )
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
     local_entry = next(e for e in config.packages if e.is_local)
     resolved = [builder._resolve_entry(local_entry)]
     doc = builder.compose_marketplace_json(resolved)
@@ -261,9 +257,7 @@ marketplace:
 """
     _write(tmp_path / "apm.yml", content)
     config = load_marketplace_config(tmp_path)
-    builder = MarketplaceBuilder.from_config(
-        config, tmp_path, BuildOptions(offline=True)
-    )
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
     local_entry = next(e for e in config.packages if e.is_local)
     resolved = [builder._resolve_entry(local_entry)]
     with pytest.raises(BuildError, match="yields empty path"):

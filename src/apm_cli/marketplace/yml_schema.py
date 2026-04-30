@@ -112,9 +112,7 @@ _MAX_TAG_LENGTH = 100
 _AUTHOR_OBJECT_KEYS = frozenset({"name", "email", "url"})
 
 
-def _parse_author(
-    raw: Any, index: int
-) -> Optional[Dict[str, str]]:
+def _parse_author(raw: Any, index: int) -> dict[str, str] | None:
     """Normalize a curator-supplied ``author`` value to a Claude-Code-
     compliant object ``{name, email?, url?}``.
 
@@ -129,10 +127,7 @@ def _parse_author(
     if isinstance(raw, str):
         name = raw.strip()
         if not name:
-            raise MarketplaceYmlError(
-                f"'{ctx}' must be a non-empty string or "
-                f"object with 'name'"
-            )
+            raise MarketplaceYmlError(f"'{ctx}' must be a non-empty string or object with 'name'")
         return {"name": name}
     if isinstance(raw, dict):
         unknown = set(raw.keys()) - _AUTHOR_OBJECT_KEYS
@@ -144,23 +139,18 @@ def _parse_author(
             )
         name = raw.get("name")
         if not isinstance(name, str) or not name.strip():
-            raise MarketplaceYmlError(
-                f"'{ctx}.name' is required and must be a non-empty string"
-            )
-        out: Dict[str, str] = {"name": name.strip()}
+            raise MarketplaceYmlError(f"'{ctx}.name' is required and must be a non-empty string")
+        out: dict[str, str] = {"name": name.strip()}
         for key in ("email", "url"):
             val = raw.get(key)
             if val is None:
                 continue
             if not isinstance(val, str) or not val.strip():
-                raise MarketplaceYmlError(
-                    f"'{ctx}.{key}' must be a non-empty string"
-                )
+                raise MarketplaceYmlError(f"'{ctx}.{key}' must be a non-empty string")
             out[key] = val.strip()
         return out
-    raise MarketplaceYmlError(
-        f"'{ctx}' must be a string or object, got {type(raw).__name__}"
-    )
+    raise MarketplaceYmlError(f"'{ctx}' must be a string or object, got {type(raw).__name__}")
+
 
 # Keys permitted inside the ``marketplace:`` block of apm.yml.  This is
 # distinct from the legacy top-level keys (which include ``name``,
@@ -474,14 +464,11 @@ def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
     raw_keywords = raw.get("keywords")
     if raw_keywords is not None:
         if not isinstance(raw_keywords, list):
-            raise MarketplaceYmlError(
-                f"'packages[{index}].keywords' must be a list of strings"
-            )
+            raise MarketplaceYmlError(f"'packages[{index}].keywords' must be a list of strings")
         for i, item in enumerate(raw_keywords):
             if not isinstance(item, str):
                 raise MarketplaceYmlError(
-                    f"'packages[{index}].keywords[{i}]' must be a string, "
-                    f"got {type(item).__name__}"
+                    f"'packages[{index}].keywords[{i}]' must be a string, got {type(item).__name__}"
                 )
         # Merge: tags first, then keywords entries (deduplicated)
         seen = set(tags)
@@ -495,9 +482,13 @@ def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
     # S4: cap tags array length and item length
     if len(tags) > _MAX_TAGS_COUNT:
         import logging as _logging
+
         _logging.getLogger(__name__).warning(
             "packages[%d] ('%s'): tags truncated from %d to %d items",
-            index, name, len(tags), _MAX_TAGS_COUNT,
+            index,
+            name,
+            len(tags),
+            _MAX_TAGS_COUNT,
         )
         tags = tags[:_MAX_TAGS_COUNT]
     tags = tuple(t[:_MAX_TAG_LENGTH] for t in tags)
@@ -508,21 +499,17 @@ def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
     author = _parse_author(raw.get("author"), index)
 
     # Anthropic pass-through: license (S3 -- must be str)
-    license_val: Optional[str] = raw.get("license")
+    license_val: str | None = raw.get("license")
     if license_val is not None:
         if not isinstance(license_val, str) or not license_val.strip():
-            raise MarketplaceYmlError(
-                f"'packages[{index}].license' must be a non-empty string"
-            )
+            raise MarketplaceYmlError(f"'packages[{index}].license' must be a non-empty string")
         license_val = license_val.strip()
 
     # Anthropic pass-through: repository (S3 -- must be str)
-    repository: Optional[str] = raw.get("repository")
+    repository: str | None = raw.get("repository")
     if repository is not None:
         if not isinstance(repository, str) or not repository.strip():
-            raise MarketplaceYmlError(
-                f"'packages[{index}].repository' must be a non-empty string"
-            )
+            raise MarketplaceYmlError(f"'packages[{index}].repository' must be a non-empty string")
         repository = repository.strip()
 
     return PackageEntry(

@@ -12,7 +12,6 @@ from pathlib import Path
 import pytest
 
 from apm_cli.marketplace.builder import (
-    BuildDiagnostic,
     BuildOptions,
     MarketplaceBuilder,
     ResolvedPackage,
@@ -33,9 +32,7 @@ def _make_config(tmp_path: Path, yml_content: str):
 def _build_local(tmp_path: Path, yml_content: str):
     """Build from a local-only config and return (doc, diagnostics)."""
     config = _make_config(tmp_path, yml_content)
-    builder = MarketplaceBuilder.from_config(
-        config, tmp_path, BuildOptions(offline=True)
-    )
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
     local_entries = [e for e in config.packages if e.is_local]
     resolved = [builder._resolve_entry(e) for e in local_entries]
     doc = builder.compose_marketplace_json(resolved)
@@ -150,9 +147,7 @@ def test_pluginroot_subtraction_empty_errors(tmp_path: Path) -> None:
               source: ./plugins
         """,
     )
-    builder = MarketplaceBuilder.from_config(
-        config, tmp_path, BuildOptions(offline=True)
-    )
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
     local_entries = [e for e in config.packages if e.is_local]
     resolved = [builder._resolve_entry(e) for e in local_entries]
     with pytest.raises(BuildError, match="yields empty path"):
@@ -182,9 +177,7 @@ def test_curator_version_override_silent_default(tmp_path: Path) -> None:
               version: "2.0.0"
         """,
     )
-    builder = MarketplaceBuilder.from_config(
-        config, tmp_path, BuildOptions(offline=True)
-    )
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
     resolved = [
         ResolvedPackage(
             name="remote-tool",
@@ -225,9 +218,7 @@ def test_curator_version_override_verbose(tmp_path: Path) -> None:
               description: "My desc"
         """,
     )
-    builder = MarketplaceBuilder.from_config(
-        config, tmp_path, BuildOptions(offline=True)
-    )
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
     # Patch _prefetch_metadata to return remote values
     builder._prefetch_metadata = lambda resolved: {
         "remote-tool": {"description": "Remote desc", "version": "1.5.0"}
@@ -283,14 +274,9 @@ def test_verbose_summary_both_clauses(tmp_path: Path) -> None:
               version: "2.0.0"
         """,
     )
-    builder = MarketplaceBuilder.from_config(
-        config, tmp_path, BuildOptions(offline=True)
-    )
-    builder._prefetch_metadata = lambda resolved: {
-        "remote-tool": {"version": "1.0.0"}
-    }
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+    builder._prefetch_metadata = lambda resolved: {"remote-tool": {"version": "1.0.0"}}
     local_entries = [e for e in config.packages if e.is_local]
-    remote_entry = next(e for e in config.packages if not e.is_local)
     resolved = [builder._resolve_entry(e) for e in local_entries] + [
         ResolvedPackage(
             name="remote-tool",
@@ -332,8 +318,9 @@ def test_verbose_summary_omitted_when_nothing(tmp_path: Path) -> None:
               source: ./foo
         """,
     )
-    summary = [d for d in diagnostics if "stripped from" in d.message
-               or "curator-supplied" in d.message]
+    summary = [
+        d for d in diagnostics if "stripped from" in d.message or "curator-supplied" in d.message
+    ]
     assert len(summary) == 0
 
 
