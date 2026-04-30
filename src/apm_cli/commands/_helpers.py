@@ -6,7 +6,6 @@ This module must NOT import from any command module.
 import builtins
 import os
 import sys
-import tempfile
 from pathlib import Path
 
 import click
@@ -21,6 +20,7 @@ from ..constants import (
     APM_YML_FILENAME,
     GITIGNORE_FILENAME,
 )
+from ..utils.atomic_io import atomic_write_text as _atomic_write
 from ..utils.console import _rich_echo, _rich_info, _rich_warning
 from ..update_policy import get_update_hint_message, is_self_update_enabled
 from ..version import get_build_sha, get_version
@@ -296,9 +296,6 @@ def _check_and_notify_updates():
     except Exception:
         # Silently fail - version checking should never block CLI usage
         pass
-
-
-from ..utils.atomic_io import atomic_write_text as _atomic_write
 
 
 def _update_gitignore_for_apm_modules(logger=None):

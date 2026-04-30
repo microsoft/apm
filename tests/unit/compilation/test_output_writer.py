@@ -43,11 +43,12 @@ def test_creates_parent_directories(tmp_path: Path):
 
 def test_writes_utf8_encoded(tmp_path: Path):
     target = tmp_path / "AGENTS.md"
-    content = f"# 中文標題\n{BUILD_ID_PLACEHOLDER}\nbody\n"
+    title = "\u4e2d\u6587\u6a19\u984c"
+    content = f"# {title}\n{BUILD_ID_PLACEHOLDER}\nbody\n"
 
     CompiledOutputWriter().write(target, content)
 
-    assert target.read_text(encoding="utf-8").startswith("# 中文標題")
+    assert target.read_text(encoding="utf-8").startswith(f"# {title}")
 
 
 def test_passes_through_content_without_placeholder(tmp_path: Path):
