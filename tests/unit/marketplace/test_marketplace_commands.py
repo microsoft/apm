@@ -1,7 +1,7 @@
 """Tests for marketplace CLI commands using CliRunner."""
 
-import json
-from unittest.mock import MagicMock, patch
+import json  # noqa: F401
+from unittest.mock import MagicMock, patch  # noqa: F401
 
 import pytest
 from click.testing import CliRunner
@@ -41,9 +41,7 @@ class TestMarketplaceAdd:
     @patch("apm_cli.marketplace.registry.add_marketplace")
     @patch("apm_cli.marketplace.client.fetch_marketplace")
     @patch("apm_cli.marketplace.client._auto_detect_path")
-    def test_add_uses_manifest_name_when_available(
-        self, mock_detect, mock_fetch, mock_add, runner
-    ):
+    def test_add_uses_manifest_name_when_available(self, mock_detect, mock_fetch, mock_add, runner):
         """Manifest's `name` field becomes the registered alias."""
         from apm_cli.commands.marketplace import marketplace
 
@@ -65,9 +63,7 @@ class TestMarketplaceAdd:
     @patch("apm_cli.marketplace.registry.add_marketplace")
     @patch("apm_cli.marketplace.client.fetch_marketplace")
     @patch("apm_cli.marketplace.client._auto_detect_path")
-    def test_add_cli_name_overrides_manifest(
-        self, mock_detect, mock_fetch, mock_add, runner
-    ):
+    def test_add_cli_name_overrides_manifest(self, mock_detect, mock_fetch, mock_add, runner):
         """An explicit --name flag wins over the manifest's name."""
         from apm_cli.commands.marketplace import marketplace
 
@@ -77,9 +73,7 @@ class TestMarketplaceAdd:
             plugins=(MarketplacePlugin(name="p1"),),
         )
 
-        result = runner.invoke(
-            marketplace, ["add", "acme/plugins", "--name", "custom-alias"]
-        )
+        result = runner.invoke(marketplace, ["add", "acme/plugins", "--name", "custom-alias"])
         assert result.exit_code == 0
         registered_source = mock_add.call_args[0][0]
         assert registered_source.name == "custom-alias"
@@ -138,18 +132,14 @@ class TestMarketplaceAdd:
         """An invalid --name flag is a user error and hard-fails."""
         from apm_cli.commands.marketplace import marketplace
 
-        result = runner.invoke(
-            marketplace, ["add", "acme/plugins", "--name", "bad name"]
-        )
+        result = runner.invoke(marketplace, ["add", "acme/plugins", "--name", "bad name"])
         assert result.exit_code != 0
         assert "Invalid marketplace name" in result.output
 
     @patch("apm_cli.marketplace.registry.add_marketplace")
     @patch("apm_cli.marketplace.client.fetch_marketplace")
     @patch("apm_cli.marketplace.client._auto_detect_path")
-    def test_add_awesome_copilot_pattern_unchanged(
-        self, mock_detect, mock_fetch, mock_add, runner
-    ):
+    def test_add_awesome_copilot_pattern_unchanged(self, mock_detect, mock_fetch, mock_add, runner):
         """Regression: github/awesome-copilot manifest name == repo name -> no behaviour change."""
         from apm_cli.commands.marketplace import marketplace
 
@@ -168,9 +158,7 @@ class TestMarketplaceAdd:
 
     @patch("apm_cli.marketplace.client.fetch_marketplace")
     @patch("apm_cli.marketplace.client._auto_detect_path")
-    def test_add_verbose_shows_alias_source(
-        self, mock_detect, mock_fetch, runner
-    ):
+    def test_add_verbose_shows_alias_source(self, mock_detect, mock_fetch, runner):
         """Verbose mode reports which precedence tier picked the alias."""
         from apm_cli.commands.marketplace import marketplace
 
@@ -180,9 +168,7 @@ class TestMarketplaceAdd:
             plugins=(MarketplacePlugin(name="p1"),),
         )
 
-        result = runner.invoke(
-            marketplace, ["add", "acme/plugins", "--verbose"]
-        )
+        result = runner.invoke(marketplace, ["add", "acme/plugins", "--verbose"])
         assert result.exit_code == 0
         assert "Alias source: manifest.name" in result.output
 
@@ -264,9 +250,7 @@ class TestMarketplaceBrowse:
     def test_browse_shows_plugins(self, mock_get, mock_fetch, runner):
         from apm_cli.commands.marketplace import marketplace
 
-        mock_get.return_value = MarketplaceSource(
-            name="acme", owner="acme-org", repo="plugins"
-        )
+        mock_get.return_value = MarketplaceSource(name="acme", owner="acme-org", repo="plugins")
         mock_fetch.return_value = MarketplaceManifest(
             name="Acme",
             plugins=(
@@ -288,9 +272,7 @@ class TestMarketplaceUpdate:
     def test_update_single(self, mock_get, mock_clear, mock_fetch, runner):
         from apm_cli.commands.marketplace import marketplace
 
-        mock_get.return_value = MarketplaceSource(
-            name="acme", owner="acme-org", repo="plugins"
-        )
+        mock_get.return_value = MarketplaceSource(name="acme", owner="acme-org", repo="plugins")
         mock_fetch.return_value = MarketplaceManifest(
             name="Acme", plugins=(MarketplacePlugin(name="p1"),)
         )
@@ -308,9 +290,7 @@ class TestMarketplaceRemove:
     def test_remove_with_confirm(self, mock_get, mock_remove, mock_clear, runner):
         from apm_cli.commands.marketplace import marketplace
 
-        mock_get.return_value = MarketplaceSource(
-            name="acme", owner="acme-org", repo="plugins"
-        )
+        mock_get.return_value = MarketplaceSource(name="acme", owner="acme-org", repo="plugins")
         result = runner.invoke(marketplace, ["remove", "acme", "--yes"])
         assert result.exit_code == 0
         mock_remove.assert_called_once()
@@ -357,7 +337,10 @@ class TestSearch:
         from apm_cli.commands.marketplace import search
 
         mock_get.return_value = MarketplaceSource(
-            name="skills", owner="anthropics", repo="anthropics/skills", path=".claude-plugin/marketplace.json"
+            name="skills",
+            owner="anthropics",
+            repo="anthropics/skills",
+            path=".claude-plugin/marketplace.json",
         )
         mock_search.return_value = [
             MarketplacePlugin(
@@ -376,7 +359,10 @@ class TestSearch:
         from apm_cli.commands.marketplace import search
 
         mock_get.return_value = MarketplaceSource(
-            name="skills", owner="anthropics", repo="anthropics/skills", path=".claude-plugin/marketplace.json"
+            name="skills",
+            owner="anthropics",
+            repo="anthropics/skills",
+            path=".claude-plugin/marketplace.json",
         )
         mock_search.return_value = []
         result = runner.invoke(search, ["zzz-nonexistent@skills"])

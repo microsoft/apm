@@ -1,11 +1,17 @@
 """Tests for the APM lock file module."""
 
-import pytest
-from pathlib import Path
+from pathlib import Path  # noqa: F401
 from unittest.mock import Mock
+
+import pytest  # noqa: F401
 import yaml
 
-from apm_cli.deps.lockfile import LockedDependency, LockFile, get_lockfile_path, migrate_lockfile_if_needed
+from apm_cli.deps.lockfile import (
+    LockedDependency,
+    LockFile,
+    get_lockfile_path,
+    migrate_lockfile_if_needed,
+)
 from apm_cli.models.apm_package import DependencyReference
 
 
@@ -17,7 +23,9 @@ class TestLockedDependency:
         assert dep.get_unique_key() == "owner/repo"
 
     def test_get_unique_key_virtual(self):
-        dep = LockedDependency(repo_url="owner/repo", virtual_path="prompts/file.md", is_virtual=True)
+        dep = LockedDependency(
+            repo_url="owner/repo", virtual_path="prompts/file.md", is_virtual=True
+        )
         assert dep.get_unique_key() == "owner/repo/prompts/file.md"
 
     def test_to_dict_minimal(self):
@@ -100,10 +108,7 @@ class TestLockedDependency:
         d = dep.to_dict()
         # Serialised deterministically (sorted by key).
         assert list(d["deployed_file_hashes"].keys()) == ["a.md", "b.md"]
-        assert (
-            LockedDependency.from_dict(d).deployed_file_hashes
-            == dep.deployed_file_hashes
-        )
+        assert LockedDependency.from_dict(d).deployed_file_hashes == dep.deployed_file_hashes
 
     def test_deployed_file_hashes_omitted_when_empty(self):
         """Backward compat: legacy dicts without the field stay clean."""
@@ -184,11 +189,7 @@ class TestLockFile:
 
     def test_mcp_servers_from_yaml(self):
         yaml_str = (
-            'lockfile_version: "1"\n'
-            'dependencies: []\n'
-            'mcp_servers:\n'
-            '  - github\n'
-            '  - acme-kb\n'
+            'lockfile_version: "1"\ndependencies: []\nmcp_servers:\n  - github\n  - acme-kb\n'
         )
         lock = LockFile.from_yaml(yaml_str)
         assert lock.mcp_servers == ["github", "acme-kb"]
@@ -221,23 +222,18 @@ class TestLockFile:
     def test_mcp_configs_from_yaml(self):
         yaml_str = (
             'lockfile_version: "1"\n'
-            'dependencies: []\n'
-            'mcp_configs:\n'
-            '  github:\n'
-            '    name: github\n'
-            '    transport: stdio\n'
+            "dependencies: []\n"
+            "mcp_configs:\n"
+            "  github:\n"
+            "    name: github\n"
+            "    transport: stdio\n"
         )
         lock = LockFile.from_yaml(yaml_str)
         assert lock.mcp_configs == {"github": {"name": "github", "transport": "stdio"}}
 
     def test_mcp_configs_backward_compat_missing(self):
         """Old lockfiles without mcp_configs should get an empty dict."""
-        yaml_str = (
-            'lockfile_version: "1"\n'
-            'dependencies: []\n'
-            'mcp_servers:\n'
-            '  - github\n'
-        )
+        yaml_str = 'lockfile_version: "1"\ndependencies: []\nmcp_servers:\n  - github\n'
         lock = LockFile.from_yaml(yaml_str)
         assert lock.mcp_servers == ["github"]
         assert lock.mcp_configs == {}
@@ -246,8 +242,8 @@ class TestLockFile:
         """Lockfiles with mcp_configs: (null) should get an empty dict, not raise TypeError."""
         yaml_str = (
             'lockfile_version: "1"\n'
-            'dependencies: []\n'
-            'mcp_configs:\n'  # YAML null value
+            "dependencies: []\n"
+            "mcp_configs:\n"  # YAML null value
         )
         lock = LockFile.from_yaml(yaml_str)
         assert lock.mcp_configs == {}
@@ -322,9 +318,13 @@ class TestLockFileSemanticEquivalence:
             generated_at="2025-01-01T00:00:00+00:00",
             apm_version="0.8.5",
         )
-        lock.add_dependency(LockedDependency(
-            repo_url="owner/repo", resolved_commit="abc123", depth=0,
-        ))
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="owner/repo",
+                resolved_commit="abc123",
+                depth=0,
+            )
+        )
         for k, v in overrides.items():
             setattr(lock, k, v)
         return lock

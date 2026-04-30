@@ -6,7 +6,6 @@ This module must NOT import from any command module.
 import builtins
 import os
 import sys
-import tempfile
 from pathlib import Path
 
 import click
@@ -15,16 +14,17 @@ from colorama import init as colorama_init
 
 from ..constants import (
     APM_DIR,
-    APM_LOCK_FILENAME,
+    APM_LOCK_FILENAME,  # noqa: F401
     APM_MODULES_DIR,
     APM_MODULES_GITIGNORE_PATTERN,
     APM_YML_FILENAME,
     GITIGNORE_FILENAME,
 )
-from ..utils.console import _rich_echo, _rich_info, _rich_warning
 from ..update_policy import get_update_hint_message, is_self_update_enabled
-from ..version import get_build_sha, get_version
+from ..utils.atomic_io import atomic_write_text as _atomic_write  # noqa: F401
+from ..utils.console import _rich_echo, _rich_info, _rich_warning
 from ..utils.version_checker import check_for_updates
+from ..version import get_build_sha, get_version
 
 # CRITICAL: Shadow Click commands at module level to prevent namespace collision
 # When Click commands like 'config set' are defined, calling set() can invoke the command
@@ -100,7 +100,7 @@ def _lazy_yaml():
 
         return yaml
     except ImportError:
-        raise ImportError("PyYAML is required but not installed")
+        raise ImportError("PyYAML is required but not installed")  # noqa: B904
 
 
 def _lazy_prompt():
@@ -126,6 +126,7 @@ def _lazy_confirm():
 # ------------------------------------------------------------------
 # Shared orphan-detection helpers
 # ------------------------------------------------------------------
+
 
 def _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir: Path) -> set:
     """Build expected package paths under *apm_modules_dir*.
@@ -198,8 +199,8 @@ def _check_orphaned_packages():
             return []
 
         try:
-            from ..models.apm_package import APMPackage
             from ..deps.lockfile import LockFile, get_lockfile_path
+            from ..models.apm_package import APMPackage
 
             apm_package = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
             declared_deps = apm_package.get_apm_dependencies()
@@ -231,14 +232,10 @@ def print_version(ctx, param, value):
                 f"[bold cyan]Agent Package Manager (APM) CLI[/bold cyan] version {version_str}"
             )
         except Exception:
-            click.echo(
-                f"{TITLE}Agent Package Manager (APM) CLI{RESET} version {version_str}"
-            )
+            click.echo(f"{TITLE}Agent Package Manager (APM) CLI{RESET} version {version_str}")
     else:
         # Graceful fallback when Rich isn't available (e.g., stripped automation environment)
-        click.echo(
-            f"{TITLE}Agent Package Manager (APM) CLI{RESET} version {version_str}"
-        )
+        click.echo(f"{TITLE}Agent Package Manager (APM) CLI{RESET} version {version_str}")
 
     # Gated verbose-version output (experimental flag)
     try:
@@ -298,21 +295,6 @@ def _check_and_notify_updates():
         pass
 
 
-def _atomic_write(path: Path, data: str) -> None:
-    """Atomically write text data to path (best-effort)."""
-    fd, tmp_name = tempfile.mkstemp(prefix="apm-write-", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(data)
-        os.replace(tmp_name, path)
-    except Exception:
-        try:
-            os.unlink(tmp_name)
-        except OSError:
-            pass
-        raise
-
-
 def _update_gitignore_for_apm_modules(logger=None):
     """Add apm_modules/ to .gitignore if not already present."""
     gitignore_path = Path(GITIGNORE_FILENAME)
@@ -322,7 +304,7 @@ def _update_gitignore_for_apm_modules(logger=None):
     current_content = []
     if gitignore_path.exists():
         try:
-            with open(gitignore_path, "r", encoding="utf-8") as f:
+            with open(gitignore_path, encoding="utf-8") as f:
                 current_content = [line.rstrip("\n\r") for line in f.readlines()]
         except Exception as e:
             if logger:
@@ -358,10 +340,12 @@ def _update_gitignore_for_apm_modules(logger=None):
 # Script / config helpers (shared by run, list, config commands)
 # ------------------------------------------------------------------
 
+
 def _load_apm_config():
     """Load configuration from apm.yml."""
     if Path(APM_YML_FILENAME).exists():
         from ..utils.yaml_io import load_yaml
+
         return load_yaml(APM_YML_FILENAME)
     return None
 
@@ -386,13 +370,18 @@ def _list_available_scripts():
 # Init helpers (shared by init and install commands)
 # ------------------------------------------------------------------
 
+
 def _auto_detect_author():
     """Auto-detect author from git config."""
     import subprocess
 
     try:
         result = subprocess.run(
-            ["git", "config", "user.name"], capture_output=True, text=True, encoding="utf-8", timeout=5
+            ["git", "config", "user.name"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=5,
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
@@ -454,9 +443,10 @@ def _validate_project_name(name):
     """
     if "/" in name or "\\" in name:
         return False
-    if name == "..":
+    if name == "..":  # noqa: SIM103
         return False
     return True
+
 
 def _create_plugin_json(config):
     """Create plugin.json file with package metadata.
@@ -508,5 +498,6 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
 
     # Write apm.yml
     from ..utils.yaml_io import dump_yaml
+
     out_path = target_path or APM_YML_FILENAME
     dump_yaml(apm_yml_data, out_path)

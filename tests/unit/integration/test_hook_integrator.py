@@ -10,14 +10,18 @@ Tests cover:
 """
 
 import json
-import tempfile
 import shutil
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-from apm_cli.integration.hook_integrator import HookIntegrator, HookIntegrationResult
+from apm_cli.integration.hook_integrator import (
+    HookIntegrationResult,  # noqa: F401
+    HookIntegrator,
+    _filter_hook_files_for_target,
+)
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 
 
@@ -359,13 +363,7 @@ class TestVSCodeIntegration:
 
         hook_data = {
             "hooks": {
-                "PreToolUse": [
-                    {
-                        "hooks": [
-                            {"type": "command", "command": "./scripts/validate.sh"}
-                        ]
-                    }
-                ]
+                "PreToolUse": [{"hooks": [{"type": "command", "command": "./scripts/validate.sh"}]}]
             }
         }
         (hooks_dir / "security.json").write_text(json.dumps(hook_data))
@@ -389,11 +387,7 @@ class TestVSCodeIntegration:
         hook_data = {
             "hooks": {
                 "PreToolUse": [
-                    {
-                        "hooks": [
-                            {"type": "command", "command": "npx prettier --check ."}
-                        ]
-                    }
+                    {"hooks": [{"type": "command", "command": "npx prettier --check ."}]}
                 ]
             }
         }
@@ -435,7 +429,7 @@ class TestVSCodeIntegration:
         pkg_info = _make_package_info(pkg_dir)
         integrator = HookIntegrator()
 
-        result = integrator.integrate_package_hooks(pkg_info, temp_project)
+        result = integrator.integrate_package_hooks(pkg_info, temp_project)  # noqa: F841
         assert (temp_project / ".github" / "hooks").exists()
 
 
@@ -537,12 +531,18 @@ class TestClaudeIntegration:
     def test_merge_into_existing_settings(self, temp_project):
         """Test that hooks are merged into existing settings.json without clobbering."""
         settings_path = temp_project / ".claude" / "settings.json"
-        settings_path.write_text(json.dumps({
-            "model": "claude-sonnet-4-20250514",
-            "hooks": {
-                "PreToolUse": [{"hooks": [{"type": "command", "command": "echo user-hook"}]}]
-            }
-        }))
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "model": "claude-sonnet-4-20250514",
+                    "hooks": {
+                        "PreToolUse": [
+                            {"hooks": [{"type": "command", "command": "echo user-hook"}]}
+                        ]
+                    },
+                }
+            )
+        )
 
         pkg_dir = temp_project / "pkg"
         hooks_dir = pkg_dir / "hooks"
@@ -553,7 +553,7 @@ class TestClaudeIntegration:
         pkg_info = _make_package_info(pkg_dir, "ralph-loop")
         integrator = HookIntegrator()
 
-        result = integrator.integrate_package_hooks_claude(pkg_info, temp_project)
+        result = integrator.integrate_package_hooks_claude(pkg_info, temp_project)  # noqa: F841
 
         settings = json.loads(settings_path.read_text())
         # Original settings preserved
@@ -582,9 +582,7 @@ class TestClaudeIntegration:
         hooks2_dir = pkg2_dir / "hooks"
         hooks2_dir.mkdir(parents=True, exist_ok=True)
         other_hooks = {
-            "hooks": {
-                "Stop": [{"hooks": [{"type": "command", "command": "echo other-stop"}]}]
-            }
+            "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo other-stop"}]}]}
         }
         (hooks2_dir / "hooks.json").write_text(json.dumps(other_hooks))
         pkg2_info = _make_package_info(pkg2_dir, "other-pkg")
@@ -647,27 +645,31 @@ class TestClaudeIntegration:
         }
         settings_path = temp_project / ".claude" / "settings.json"
         settings_path.parent.mkdir(parents=True, exist_ok=True)
-        settings_path.write_text(json.dumps({
-            "hooks": {
-                "Stop": [
-                    {"hooks": [{"type": "command", "command": "user-owned"}]},
-                    dup_entry,
-                    dup_entry,
-                    dup_entry,
-                ]
-            }
-        }))
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [
+                            {"hooks": [{"type": "command", "command": "user-owned"}]},
+                            dup_entry,
+                            dup_entry,
+                            dup_entry,
+                        ]
+                    }
+                }
+            )
+        )
 
         integrator.integrate_package_hooks_claude(pkg_info, temp_project)
 
         settings = json.loads(settings_path.read_text())
         apm_entries = [
-            e for e in settings["hooks"]["Stop"]
+            e
+            for e in settings["hooks"]["Stop"]
             if isinstance(e, dict) and e.get("_apm_source") == "ralph-loop"
         ]
         user_entries = [
-            e for e in settings["hooks"]["Stop"]
-            if not (isinstance(e, dict) and "_apm_source" in e)
+            e for e in settings["hooks"]["Stop"] if not (isinstance(e, dict) and "_apm_source" in e)
         ]
         assert len(apm_entries) == 1
         # Stale command replaced with the freshly rewritten one.
@@ -688,9 +690,20 @@ class TestClaudeIntegration:
         hooks_dir.mkdir(parents=True, exist_ok=True)
 
         def stop_hook(script: str) -> dict:
-            return {"hooks": {"Stop": [{"hooks": [
-                {"type": "command", "command": f"${{CLAUDE_PLUGIN_ROOT}}/hooks/{script}"}
-            ]}]}}
+            return {
+                "hooks": {
+                    "Stop": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": f"${{CLAUDE_PLUGIN_ROOT}}/hooks/{script}",
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
 
         (hooks_dir / "hooks-a.json").write_text(json.dumps(stop_hook("stop-a.sh")))
         (hooks_dir / "hooks-b.json").write_text(json.dumps(stop_hook("stop-b.sh")))
@@ -764,7 +777,7 @@ class TestClaudeIntegration:
                         "matcher": {"tool_name": "write_to_file"},
                         "hooks": [
                             {"type": "command", "command": "./scripts/lint.sh", "timeout": 10}
-                        ]
+                        ],
                     }
                 ]
             }
@@ -864,11 +877,9 @@ class TestCursorIntegration:
     def test_merge_into_existing_hooks_json(self, temp_project):
         """Test that hooks are merged into existing hooks.json without clobbering."""
         hooks_path = temp_project / ".cursor" / "hooks.json"
-        hooks_path.write_text(json.dumps({
-            "hooks": {
-                "afterFileEdit": [{"command": "echo user-hook"}]
-            }
-        }))
+        hooks_path.write_text(
+            json.dumps({"hooks": {"afterFileEdit": [{"command": "echo user-hook"}]}})
+        )
 
         pkg_dir = temp_project / "pkg"
         hooks_dir = pkg_dir / "hooks"
@@ -879,7 +890,7 @@ class TestCursorIntegration:
         pkg_info = _make_package_info(pkg_dir, "ralph-loop")
         integrator = HookIntegrator()
 
-        result = integrator.integrate_package_hooks_cursor(pkg_info, temp_project)
+        result = integrator.integrate_package_hooks_cursor(pkg_info, temp_project)  # noqa: F841
 
         config = json.loads(hooks_path.read_text())
         # User hook preserved
@@ -907,11 +918,15 @@ class TestCursorIntegration:
         pkg2_dir = temp_project / "apm_modules" / "other-pkg"
         hooks2_dir = pkg2_dir / "hooks"
         hooks2_dir.mkdir(parents=True, exist_ok=True)
-        (hooks2_dir / "hooks.json").write_text(json.dumps({
-            "hooks": {
-                "Stop": [{"hooks": [{"type": "command", "command": "echo other-stop"}]}]
-            }
-        }))
+        (hooks2_dir / "hooks.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [{"hooks": [{"type": "command", "command": "echo other-stop"}]}]
+                    }
+                }
+            )
+        )
         pkg2_info = _make_package_info(pkg2_dir, "other-pkg")
 
         integrator.integrate_package_hooks_cursor(pkg2_info, temp_project)
@@ -927,7 +942,7 @@ class TestCursorIntegration:
         pkg_info = self._setup_hookify_package(temp_project)
         integrator = HookIntegrator()
 
-        result = integrator.integrate_package_hooks_cursor(pkg_info, temp_project)
+        result = integrator.integrate_package_hooks_cursor(pkg_info, temp_project)  # noqa: F841
 
         # Verify scripts exist under .cursor/hooks/hookify/
         scripts_dir = temp_project / ".cursor" / "hooks" / "hookify" / "hooks"
@@ -940,20 +955,30 @@ class TestCursorIntegration:
     def test_sync_removes_cursor_hook_entries(self, temp_project):
         """Test that sync removes APM-managed entries from .cursor/hooks.json."""
         hooks_path = temp_project / ".cursor" / "hooks.json"
-        hooks_path.write_text(json.dumps({
-            "hooks": {
-                "Stop": [
-                    {"_apm_source": "ralph-loop", "hooks": [{"type": "command", "command": "..."}]},
-                    {"command": "echo user-hook"},
-                ],
-                "PreToolUse": [
-                    {"_apm_source": "hookify", "hooks": [{"type": "command", "command": "..."}]}
-                ],
-            }
-        }))
+        hooks_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [
+                            {
+                                "_apm_source": "ralph-loop",
+                                "hooks": [{"type": "command", "command": "..."}],
+                            },
+                            {"command": "echo user-hook"},
+                        ],
+                        "PreToolUse": [
+                            {
+                                "_apm_source": "hookify",
+                                "hooks": [{"type": "command", "command": "..."}],
+                            }
+                        ],
+                    }
+                }
+            )
+        )
 
         integrator = HookIntegrator()
-        stats = integrator.sync_integration(None, temp_project)
+        stats = integrator.sync_integration(None, temp_project)  # noqa: F841
 
         updated = json.loads(hooks_path.read_text())
         # APM entries removed, user entries preserved
@@ -979,11 +1004,9 @@ class TestCursorIntegration:
     def test_sync_removes_empty_hooks_key_cursor(self, temp_project):
         """Test that empty hooks key is removed from hooks.json after cleanup."""
         hooks_path = temp_project / ".cursor" / "hooks.json"
-        hooks_path.write_text(json.dumps({
-            "hooks": {
-                "Stop": [{"_apm_source": "test", "hooks": []}]
-            }
-        }))
+        hooks_path.write_text(
+            json.dumps({"hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}})
+        )
 
         integrator = HookIntegrator()
         integrator.sync_integration(None, temp_project)
@@ -1056,7 +1079,7 @@ class TestSyncIntegration:
         settings_path.write_text(json.dumps(settings))
 
         integrator = HookIntegrator()
-        stats = integrator.sync_integration(None, temp_project)
+        stats = integrator.sync_integration(None, temp_project)  # noqa: F841
 
         updated_settings = json.loads(settings_path.read_text())
         # Model preserved
@@ -1093,11 +1116,7 @@ class TestSyncIntegration:
         claude_dir = temp_project / ".claude"
         claude_dir.mkdir()
         settings_path = claude_dir / "settings.json"
-        settings = {
-            "hooks": {
-                "Stop": [{"_apm_source": "test", "hooks": []}]
-            }
-        }
+        settings = {"hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}}
         settings_path.write_text(json.dumps(settings))
 
         integrator = HookIntegrator()
@@ -1484,7 +1503,7 @@ class TestScriptPathRewriting:
         (temp_project / "secret.ps1").write_text("bad")
 
         integrator = HookIntegrator()
-        cmd, scripts = integrator._rewrite_command_for_target(
+        cmd, scripts = integrator._rewrite_command_for_target(  # noqa: RUF059
             ".\\..\\secret.ps1",
             pkg_dir,
             "my-pkg",
@@ -1514,7 +1533,10 @@ class TestScriptPathRewriting:
             }
         }
         rewritten, scripts = integrator._rewrite_hooks_data(
-            data, pkg_dir, "my-pkg", "vscode",
+            data,
+            pkg_dir,
+            "my-pkg",
+            "vscode",
         )
 
         hook = rewritten["hooks"]["preToolUse"][0]
@@ -1540,12 +1562,15 @@ class TestScriptPathRewriting:
                         "windows": "./scripts/validate.ps1",
                     }
                 ]
-            }
+            },
         }
 
         integrator = HookIntegrator()
         rewritten, scripts = integrator._rewrite_hooks_data(
-            data, pkg_dir, "my-pkg", "vscode",
+            data,
+            pkg_dir,
+            "my-pkg",
+            "vscode",
         )
 
         hook = rewritten["hooks"]["preToolUse"][0]
@@ -1571,7 +1596,7 @@ class TestScriptPathRewriting:
                                 "command": "./scripts/validate.sh",
                                 "windows": "./scripts/validate.ps1",
                             }
-                        ]
+                        ],
                     }
                 ]
             }
@@ -1579,7 +1604,10 @@ class TestScriptPathRewriting:
 
         integrator = HookIntegrator()
         rewritten, scripts = integrator._rewrite_hooks_data(
-            data, pkg_dir, "my-pkg", "vscode",
+            data,
+            pkg_dir,
+            "my-pkg",
+            "vscode",
         )
 
         hook = rewritten["hooks"]["PreToolUse"][0]["hooks"][0]
@@ -1608,7 +1636,10 @@ class TestScriptPathRewriting:
 
         integrator = HookIntegrator()
         rewritten, scripts = integrator._rewrite_hooks_data(
-            data, pkg_dir, "my-pkg", "vscode",
+            data,
+            pkg_dir,
+            "my-pkg",
+            "vscode",
         )
 
         hook = rewritten["hooks"]["PostToolUse"][0]
@@ -1634,7 +1665,7 @@ class TestScriptPathRewriting:
                                 "command": "./scripts/validate.sh",
                                 "linux": "./scripts/validate-linux.sh",
                             }
-                        ]
+                        ],
                     }
                 ]
             }
@@ -1642,7 +1673,10 @@ class TestScriptPathRewriting:
 
         integrator = HookIntegrator()
         rewritten, scripts = integrator._rewrite_hooks_data(
-            data, pkg_dir, "my-pkg", "vscode",
+            data,
+            pkg_dir,
+            "my-pkg",
+            "vscode",
         )
 
         hook = rewritten["hooks"]["PreToolUse"][0]["hooks"][0]
@@ -1671,7 +1705,10 @@ class TestScriptPathRewriting:
 
         integrator = HookIntegrator()
         rewritten, scripts = integrator._rewrite_hooks_data(
-            data, pkg_dir, "my-pkg", "vscode",
+            data,
+            pkg_dir,
+            "my-pkg",
+            "vscode",
         )
 
         hook = rewritten["hooks"]["PostToolUse"][0]
@@ -1697,7 +1734,7 @@ class TestScriptPathRewriting:
                                 "command": "./scripts/validate.sh",
                                 "osx": "./scripts/validate-mac.sh",
                             }
-                        ]
+                        ],
                     }
                 ]
             }
@@ -1705,7 +1742,10 @@ class TestScriptPathRewriting:
 
         integrator = HookIntegrator()
         rewritten, scripts = integrator._rewrite_hooks_data(
-            data, pkg_dir, "my-pkg", "vscode",
+            data,
+            pkg_dir,
+            "my-pkg",
+            "vscode",
         )
 
         hook = rewritten["hooks"]["PreToolUse"][0]["hooks"][0]
@@ -1737,12 +1777,15 @@ class TestScriptPathRewriting:
                         "osx": "./scripts/run-mac.sh",
                     }
                 ]
-            }
+            },
         }
 
         integrator = HookIntegrator()
         rewritten, scripts = integrator._rewrite_hooks_data(
-            data, pkg_dir, "my-pkg", "vscode",
+            data,
+            pkg_dir,
+            "my-pkg",
+            "vscode",
         )
 
         hook = rewritten["hooks"]["preToolUse"][0]
@@ -1779,12 +1822,15 @@ class TestScriptPathRewriting:
                         "powershell": "./scripts/validate.ps1",
                     }
                 ]
-            }
+            },
         }
 
         integrator = HookIntegrator()
         rewritten, scripts = integrator._rewrite_hooks_data(
-            data, pkg_dir, "my-pkg", "vscode",
+            data,
+            pkg_dir,
+            "my-pkg",
+            "vscode",
         )
 
         hook = rewritten["hooks"]["preToolUse"][0]
@@ -1803,9 +1849,7 @@ class TestScriptPathRewriting:
                 "PreToolUse": [
                     {
                         "matcher": "Bash",
-                        "hooks": [
-                            {"type": "command", "command": "./scripts/validate.sh"}
-                        ]
+                        "hooks": [{"type": "command", "command": "./scripts/validate.sh"}],
                     }
                 ]
             }
@@ -1813,7 +1857,10 @@ class TestScriptPathRewriting:
 
         integrator = HookIntegrator()
         rewritten, scripts = integrator._rewrite_hooks_data(
-            data, pkg_dir, "my-pkg", "vscode",
+            data,
+            pkg_dir,
+            "my-pkg",
+            "vscode",
         )
 
         hook = rewritten["hooks"]["PreToolUse"][0]["hooks"][0]
@@ -1834,7 +1881,7 @@ class TestScriptPathRewriting:
                         "matcher": {"tool_name": "write_to_file"},
                         "hooks": [
                             {"type": "command", "command": "./scripts/lint.sh", "timeout": 10}
-                        ]
+                        ],
                     }
                 ]
             }
@@ -1858,7 +1905,9 @@ class TestScriptPathRewriting:
         assert "./" not in cmd
 
         # Verify the script was actually copied
-        copied_script = temp_project / ".github" / "hooks" / "scripts" / "lint-hooks" / "scripts" / "lint.sh"
+        copied_script = (
+            temp_project / ".github" / "hooks" / "scripts" / "lint-hooks" / "scripts" / "lint.sh"
+        )
         assert copied_script.exists()
         assert copied_script.read_text() == "#!/bin/bash\necho lint"
 
@@ -1950,13 +1999,14 @@ class TestEndToEnd:
 
         # Cleanup removes all — manifest mode
         managed_files = {
-            str(p.relative_to(temp_project))
-            for p in r1.target_paths + r2.target_paths
+            str(p.relative_to(temp_project)) for p in r1.target_paths + r2.target_paths
         }
         stats = integrator.sync_integration(None, temp_project, managed_files=managed_files)
         assert stats["files_removed"] >= 2
         assert not (temp_project / ".github" / "hooks" / "ralph-loop-hooks.json").exists()
-        assert not (temp_project / ".github" / "hooks" / "learning-output-style-hooks.json").exists()
+        assert not (
+            temp_project / ".github" / "hooks" / "learning-output-style-hooks.json"
+        ).exists()
 
 
 # ─── Deep copy safety test ───────────────────────────────────────────────────
@@ -1979,7 +2029,13 @@ class TestDeepCopySafety:
 
         data = {
             "hooks": {
-                "Stop": [{"hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/script.sh"}]}]
+                "Stop": [
+                    {
+                        "hooks": [
+                            {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/script.sh"}
+                        ]
+                    }
+                ]
             }
         }
         original_cmd = data["hooks"]["Stop"][0]["hooks"][0]["command"]
@@ -2014,16 +2070,10 @@ class TestCodexHookIntegration:
         hooks_dir.mkdir(parents=True, exist_ok=True)
 
         if hook_data is None:
-            hook_data = {
-                "hooks": {
-                    "SessionStart": [
-                        {"type": "command", "command": "echo hello"}
-                    ]
-                }
-            }
+            hook_data = {"hooks": {"SessionStart": [{"type": "command", "command": "echo hello"}]}}
 
         hook_file = hooks_dir / "hooks.json"
-        with open(hook_file, 'w', encoding='utf-8') as f:
+        with open(hook_file, "w", encoding="utf-8") as f:
             json.dump(hook_data, f)
 
         pi = MagicMock()
@@ -2050,17 +2100,15 @@ class TestCodexHookIntegration:
         """Existing user hooks in .codex/hooks.json are preserved."""
         # Write existing user hooks
         hooks_json = self.root / ".codex" / "hooks.json"
-        hooks_json.write_text(json.dumps({
-            "hooks": {
-                "PreToolUse": [
-                    {"type": "command", "command": "echo user-hook"}
-                ]
-            }
-        }))
+        hooks_json.write_text(
+            json.dumps(
+                {"hooks": {"PreToolUse": [{"type": "command", "command": "echo user-hook"}]}}
+            )
+        )
 
         pi = self._make_package_info()
         integrator = HookIntegrator()
-        result = integrator.integrate_package_hooks_codex(pi, self.root)
+        result = integrator.integrate_package_hooks_codex(pi, self.root)  # noqa: F841
 
         data = json.loads(hooks_json.read_text())
         # User hook preserved
@@ -2107,6 +2155,7 @@ class TestGeminiHookIntegration:
     def test_integrate_hooks_gemini(self, temp_project):
         """Test Gemini integration merges hooks into settings.json."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         pkg_info = self._setup_hook_package(temp_project, "ralph-loop")
         target = KNOWN_TARGETS["gemini"]
         integrator = HookIntegrator()
@@ -2114,9 +2163,7 @@ class TestGeminiHookIntegration:
         result = integrator.integrate_hooks_for_target(target, pkg_info, temp_project)
 
         assert result.files_integrated == 1
-        settings = json.loads(
-            (temp_project / ".gemini" / "settings.json").read_text()
-        )
+        settings = json.loads((temp_project / ".gemini" / "settings.json").read_text())
         assert "hooks" in settings
         # "Stop" is mapped to "SessionEnd" for Gemini
         assert "SessionEnd" in settings["hooks"]
@@ -2128,6 +2175,7 @@ class TestGeminiHookIntegration:
         shutil.rmtree(temp_project / ".gemini")
 
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         pkg_info = self._setup_hook_package(temp_project, "ralph-loop")
         target = KNOWN_TARGETS["gemini"]
         integrator = HookIntegrator()
@@ -2140,12 +2188,17 @@ class TestGeminiHookIntegration:
     def test_merge_preserves_existing_keys(self, temp_project):
         """Hook merge preserves mcpServers and other top-level keys."""
         settings_path = temp_project / ".gemini" / "settings.json"
-        settings_path.write_text(json.dumps({
-            "mcpServers": {"srv": {"command": "echo"}},
-            "theme": "dark",
-        }))
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {"srv": {"command": "echo"}},
+                    "theme": "dark",
+                }
+            )
+        )
 
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         pkg_info = self._setup_hook_package(temp_project, "ralph-loop")
         target = KNOWN_TARGETS["gemini"]
         integrator = HookIntegrator()
@@ -2160,6 +2213,7 @@ class TestGeminiHookIntegration:
     def test_additive_merge_same_event(self, temp_project):
         """Multiple packages can add hooks to the same event."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         target = KNOWN_TARGETS["gemini"]
         integrator = HookIntegrator()
 
@@ -2169,23 +2223,26 @@ class TestGeminiHookIntegration:
         pkg2_dir = temp_project / "apm_modules" / "other-pkg"
         hooks2_dir = pkg2_dir / "hooks"
         hooks2_dir.mkdir(parents=True, exist_ok=True)
-        (hooks2_dir / "hooks.json").write_text(json.dumps({
-            "hooks": {"Stop": [{"hooks": [
-                {"type": "command", "command": "echo other-stop"}
-            ]}]}
-        }))
+        (hooks2_dir / "hooks.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [{"hooks": [{"type": "command", "command": "echo other-stop"}]}]
+                    }
+                }
+            )
+        )
         pkg2_info = _make_package_info(pkg2_dir, "other-pkg")
         integrator.integrate_hooks_for_target(target, pkg2_info, temp_project)
 
-        settings = json.loads(
-            (temp_project / ".gemini" / "settings.json").read_text()
-        )
+        settings = json.loads((temp_project / ".gemini" / "settings.json").read_text())
         # Both "Stop" entries land under "SessionEnd" after mapping
         assert len(settings["hooks"]["SessionEnd"]) == 2
 
     def test_reinstall_is_idempotent(self, temp_project):
         """Re-running integration does not duplicate hook entries."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         target = KNOWN_TARGETS["gemini"]
         pkg_info = self._setup_hook_package(temp_project, "ralph-loop")
         integrator = HookIntegrator()
@@ -2196,27 +2253,31 @@ class TestGeminiHookIntegration:
         for _ in range(2):
             integrator.integrate_hooks_for_target(target, pkg_info, temp_project)
 
-        settings = json.loads(
-            (temp_project / ".gemini" / "settings.json").read_text()
-        )
+        settings = json.loads((temp_project / ".gemini" / "settings.json").read_text())
         assert len(settings["hooks"]["SessionEnd"]) == 1
         assert (temp_project / ".gemini" / "settings.json").read_text() == first
 
     def test_sync_removes_gemini_hook_entries(self, temp_project):
         """Sync removes APM-managed entries from .gemini/settings.json."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         settings_path = temp_project / ".gemini" / "settings.json"
-        settings_path.write_text(json.dumps({
-            "mcpServers": {"srv": {"command": "echo"}},
-            "hooks": {
-                "SessionEnd": [
-                    {"_apm_source": "ralph-loop", "hooks": [
-                        {"type": "command", "command": "..."}
-                    ]},
-                    {"hooks": [{"type": "command", "command": "echo user-hook"}]},
-                ],
-            }
-        }))
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {"srv": {"command": "echo"}},
+                    "hooks": {
+                        "SessionEnd": [
+                            {
+                                "_apm_source": "ralph-loop",
+                                "hooks": [{"type": "command", "command": "..."}],
+                            },
+                            {"hooks": [{"type": "command", "command": "echo user-hook"}]},
+                        ],
+                    },
+                }
+            )
+        )
 
         target = KNOWN_TARGETS["gemini"]
         integrator = HookIntegrator()
@@ -2231,13 +2292,16 @@ class TestGeminiHookIntegration:
     def test_sync_removes_empty_hooks_key(self, temp_project):
         """Empty hooks key is removed after sync cleanup."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         settings_path = temp_project / ".gemini" / "settings.json"
-        settings_path.write_text(json.dumps({
-            "mcpServers": {"srv": {"command": "echo"}},
-            "hooks": {
-                "SessionEnd": [{"_apm_source": "test", "hooks": []}]
-            }
-        }))
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {"srv": {"command": "echo"}},
+                    "hooks": {"SessionEnd": [{"_apm_source": "test", "hooks": []}]},
+                }
+            )
+        )
 
         target = KNOWN_TARGETS["gemini"]
         integrator = HookIntegrator()
@@ -2254,25 +2318,23 @@ class TestGeminiHookIntegration:
         pkg_dir = temp_project / "apm_modules" / "lint-pkg"
         hooks_dir = pkg_dir / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
-        (hooks_dir / "hooks.json").write_text(json.dumps({
-            "hooks": {
-                "preToolUse": [{"hooks": [
-                    {"type": "command", "command": "echo lint"}
-                ]}],
-                "postToolUse": [{"hooks": [
-                    {"type": "command", "command": "echo done"}
-                ]}],
-            }
-        }))
+        (hooks_dir / "hooks.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "preToolUse": [{"hooks": [{"type": "command", "command": "echo lint"}]}],
+                        "postToolUse": [{"hooks": [{"type": "command", "command": "echo done"}]}],
+                    }
+                }
+            )
+        )
         pkg_info = _make_package_info(pkg_dir, "lint-pkg")
 
         target = KNOWN_TARGETS["gemini"]
         integrator = HookIntegrator()
         integrator.integrate_hooks_for_target(target, pkg_info, temp_project)
 
-        settings = json.loads(
-            (temp_project / ".gemini" / "settings.json").read_text()
-        )
+        settings = json.loads((temp_project / ".gemini" / "settings.json").read_text())
         assert "BeforeTool" in settings["hooks"]
         assert "AfterTool" in settings["hooks"]
         assert "preToolUse" not in settings["hooks"]
@@ -2285,22 +2347,22 @@ class TestGeminiHookIntegration:
         pkg_dir = temp_project / "apm_modules" / "agent-pkg"
         hooks_dir = pkg_dir / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
-        (hooks_dir / "hooks.json").write_text(json.dumps({
-            "hooks": {
-                "BeforeAgent": [{"hooks": [
-                    {"type": "command", "command": "echo agent"}
-                ]}],
-            }
-        }))
+        (hooks_dir / "hooks.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "BeforeAgent": [{"hooks": [{"type": "command", "command": "echo agent"}]}],
+                    }
+                }
+            )
+        )
         pkg_info = _make_package_info(pkg_dir, "agent-pkg")
 
         target = KNOWN_TARGETS["gemini"]
         integrator = HookIntegrator()
         integrator.integrate_hooks_for_target(target, pkg_info, temp_project)
 
-        settings = json.loads(
-            (temp_project / ".gemini" / "settings.json").read_text()
-        )
+        settings = json.loads((temp_project / ".gemini" / "settings.json").read_text())
         assert "BeforeAgent" in settings["hooks"]
 
     def test_flat_copilot_entries_become_nested_gemini(self, temp_project):
@@ -2310,22 +2372,22 @@ class TestGeminiHookIntegration:
         pkg_dir = temp_project / "apm_modules" / "flat-pkg"
         hooks_dir = pkg_dir / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
-        (hooks_dir / "hooks.json").write_text(json.dumps({
-            "hooks": {
-                "preToolUse": [
-                    {"type": "command", "bash": "echo lint", "timeoutSec": 10}
-                ],
-            }
-        }))
+        (hooks_dir / "hooks.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "preToolUse": [{"type": "command", "bash": "echo lint", "timeoutSec": 10}],
+                    }
+                }
+            )
+        )
         pkg_info = _make_package_info(pkg_dir, "flat-pkg")
 
         target = KNOWN_TARGETS["gemini"]
         integrator = HookIntegrator()
         integrator.integrate_hooks_for_target(target, pkg_info, temp_project)
 
-        settings = json.loads(
-            (temp_project / ".gemini" / "settings.json").read_text()
-        )
+        settings = json.loads((temp_project / ".gemini" / "settings.json").read_text())
         assert "BeforeTool" in settings["hooks"]
         entry = settings["hooks"]["BeforeTool"][0]
         # Must be nested: outer has "hooks" list, inner has "command" not "bash"
@@ -2351,11 +2413,10 @@ class TestScopeResolvedHookDeployment:
         self.pkg_dir = self.root / "apm_modules" / "scope-pkg"
         hooks_dir = self.pkg_dir / ".apm" / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
-        hooks_dir.joinpath("hooks.json").write_text(json.dumps({
-            "hooks": {
-                "SessionStart": [{"type": "command", "command": "echo hello"}]
-            }
-        }), encoding="utf-8")
+        hooks_dir.joinpath("hooks.json").write_text(
+            json.dumps({"hooks": {"SessionStart": [{"type": "command", "command": "echo hello"}]}}),
+            encoding="utf-8",
+        )
 
     def teardown_method(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -2363,6 +2424,7 @@ class TestScopeResolvedHookDeployment:
     def _make_target(self, name, root_dir, primitives=None):
         """Create a minimal mock TargetProfile."""
         from unittest.mock import MagicMock
+
         t = MagicMock()
         t.name = name
         t.root_dir = root_dir
@@ -2383,7 +2445,9 @@ class TestScopeResolvedHookDeployment:
         integrator = HookIntegrator()
 
         result = integrator.integrate_package_hooks(
-            pi, self.root, target=copilot_target,
+            pi,
+            self.root,
+            target=copilot_target,
         )
 
         assert result.files_integrated > 0
@@ -2410,7 +2474,9 @@ class TestScopeResolvedHookDeployment:
         integrator = HookIntegrator()
 
         result = integrator.integrate_hooks_for_target(
-            claude_target, pi, self.root,
+            claude_target,
+            pi,
+            self.root,
         )
 
         assert result.files_integrated > 0
@@ -2424,7 +2490,9 @@ class TestScopeResolvedHookDeployment:
         integrator = HookIntegrator()
 
         result = integrator.integrate_hooks_for_target(
-            codex_target, pi, self.root,
+            codex_target,
+            pi,
+            self.root,
         )
 
         assert result.files_integrated > 0
@@ -2436,18 +2504,19 @@ class TestScopeResolvedHookDeployment:
         hooks_dir = self.pkg_dir / ".apm" / "hooks"
         script = hooks_dir / "run.sh"
         script.write_text("#!/bin/bash\necho test", encoding="utf-8")
-        hooks_dir.joinpath("hooks.json").write_text(json.dumps({
-            "hooks": {
-                "SessionStart": [{"type": "command", "command": "./run.sh"}]
-            }
-        }), encoding="utf-8")
+        hooks_dir.joinpath("hooks.json").write_text(
+            json.dumps({"hooks": {"SessionStart": [{"type": "command", "command": "./run.sh"}]}}),
+            encoding="utf-8",
+        )
 
         copilot_target = self._make_target("copilot", ".copilot")
         pi = _make_package_info(self.pkg_dir, "scope-pkg")
         integrator = HookIntegrator()
 
-        result = integrator.integrate_package_hooks(
-            pi, self.root, target=copilot_target,
+        result = integrator.integrate_package_hooks(  # noqa: F841
+            pi,
+            self.root,
+            target=copilot_target,
         )
 
         # Script should be copied to .copilot/hooks/scripts/scope-pkg/
@@ -2462,26 +2531,32 @@ class TestScopeResolvedHookDeployment:
         pi = _make_package_info(self.pkg_dir, "scope-pkg")
         integrator = HookIntegrator()
         result = integrator.integrate_package_hooks(
-            pi, self.root, target=copilot_target,
+            pi,
+            self.root,
+            target=copilot_target,
         )
 
         # Collect deployed paths
         managed = set()
         for p in result.target_paths:
-            try:
+            try:  # noqa: SIM105
                 managed.add(str(p.relative_to(self.root)).replace("\\", "/"))
             except ValueError:
                 pass
 
         # Sync should clean them up
         stats = integrator.sync_integration(
-            None, self.root, managed_files=managed, targets=[copilot_target],
+            None,
+            self.root,
+            managed_files=managed,
+            targets=[copilot_target],
         )
-        assert stats['files_removed'] > 0
+        assert stats["files_removed"] > 0
 
     def test_auto_create_guard(self):
         """Targets with auto_create=False should not get directories created."""
         from apm_cli.integration.targets import KNOWN_TARGETS
+
         # All targets except copilot have auto_create=False
         for name, profile in KNOWN_TARGETS.items():
             if not profile.auto_create:
@@ -2540,7 +2615,10 @@ class TestBackslashPathRewrite:
 
         integrator = HookIntegrator()
         rewritten, scripts = integrator._rewrite_hooks_data(
-            data, pkg_dir, "my-pkg", "vscode",
+            data,
+            pkg_dir,
+            "my-pkg",
+            "vscode",
         )
 
         hook = rewritten["hooks"]["Stop"][0]
@@ -2567,7 +2645,7 @@ class TestBackslashPathRewrite:
                                 "command": "./session-auto-commit/auto-commit.sh",
                                 "windows": "pwsh -File .\\session-auto-commit\\auto-commit.ps1",
                             }
-                        ]
+                        ],
                     }
                 ]
             }
@@ -2575,7 +2653,10 @@ class TestBackslashPathRewrite:
 
         integrator = HookIntegrator()
         rewritten, scripts = integrator._rewrite_hooks_data(
-            data, pkg_dir, "my-pkg", "vscode",
+            data,
+            pkg_dir,
+            "my-pkg",
+            "vscode",
         )
 
         hook = rewritten["hooks"]["Stop"][0]["hooks"][0]
@@ -2599,3 +2680,493 @@ class TestBackslashPathRewrite:
 
         assert ".github/hooks/scripts/my-pkg/scripts/scan.ps1" in cmd
         assert len(scripts) == 1
+
+
+# === Issue #1007: Claude settings.json hook emission fixes ====================
+
+
+class TestIssue1007Fixes:
+    """Regression tests for the four bug-fixes shipped in issue #1007.
+
+    Fix 1 -- Target-aware hook file routing (_filter_hook_files_for_target)
+    Fix 2 -- Variable pattern expansion (${PLUGIN_ROOT} / ${CURSOR_PLUGIN_ROOT})
+    Fix 3 -- Event name normalisation for Claude (camelCase -> PascalCase)
+    Fix 4a -- Alias-aware clearing during reinstall
+    Fix 4b -- Content-based deduplication within a package
+    """
+
+    @pytest.fixture
+    def temp_project(self, tmp_path: Path) -> Path:
+        """Minimal project root; .claude/ is NOT pre-created (claude require_dir=False)."""
+        return tmp_path
+
+    @pytest.fixture
+    def temp_project_with_cursor(self, tmp_path: Path) -> Path:
+        """Project root with .cursor/ pre-created (cursor require_dir=True)."""
+        (tmp_path / ".cursor").mkdir()
+        return tmp_path
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _make_pkg(
+        self,
+        project: Path,
+        pkg_name: str,
+        hook_files: dict,
+    ) -> PackageInfo:
+        """Create a package directory with the given hook JSON files.
+
+        Args:
+            project: Project root path.
+            pkg_name: Package name used as directory name.
+            hook_files: Mapping of filename -> hook dict to write under hooks/.
+        """
+        pkg_dir = project / "apm_modules" / pkg_name
+        hooks_dir = pkg_dir / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        for filename, data in hook_files.items():
+            (hooks_dir / filename).write_text(json.dumps(data), encoding="utf-8")
+        return _make_package_info(pkg_dir, pkg_name)
+
+    def _read_claude_settings(self, project: Path) -> dict:
+        """Return parsed .claude/settings.json (or empty dict if absent)."""
+        path = project / ".claude" / "settings.json"
+        if not path.exists():
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def _read_cursor_hooks(self, project: Path) -> dict:
+        """Return parsed .cursor/hooks.json (or empty dict if absent)."""
+        path = project / ".cursor" / "hooks.json"
+        if not path.exists():
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    # ------------------------------------------------------------------
+    # Group A: Target-aware file routing
+    # ------------------------------------------------------------------
+
+    def test_filter_copilot_hooks_excluded_from_claude(self, tmp_path: Path) -> None:
+        """Files with *-copilot-hooks stem must be excluded from the claude target."""
+        files = [
+            tmp_path / "copilot-hooks.json",
+            tmp_path / "cursor-hooks.json",
+            tmp_path / "hooks.json",
+        ]
+        for f in files:
+            f.write_text("{}")
+
+        result = _filter_hook_files_for_target(files, "claude")
+
+        names = {f.name for f in result}
+        assert names == {"hooks.json"}, (
+            f"Only the generic hooks.json should reach the claude target; got {names}"
+        )
+
+    def test_filter_cursor_hooks_excluded_from_copilot(self, tmp_path: Path) -> None:
+        """Files with *-cursor-hooks stem must be excluded from the copilot target."""
+        files = [
+            tmp_path / "copilot-hooks.json",
+            tmp_path / "cursor-hooks.json",
+            tmp_path / "hooks.json",
+        ]
+        for f in files:
+            f.write_text("{}")
+
+        result = _filter_hook_files_for_target(files, "copilot")
+
+        names = {f.name for f in result}
+        assert "cursor-hooks.json" not in names, "cursor-hooks.json must not reach copilot"
+        assert "copilot-hooks.json" in names, "copilot-hooks.json must reach copilot"
+        assert "hooks.json" in names, "Generic hooks.json must reach copilot"
+
+    def test_filter_generic_hooks_universal(self, tmp_path: Path) -> None:
+        """Generic stems (no *-<agent>-hooks suffix) pass through for ALL targets."""
+        generic_files = [
+            tmp_path / "hooks.json",
+            tmp_path / "telemetry-hooks.json",
+        ]
+        for f in generic_files:
+            f.write_text("{}")
+
+        for target in ("claude", "cursor", "copilot", "codex", "gemini"):
+            result = _filter_hook_files_for_target(generic_files, target)
+            assert set(result) == set(generic_files), (
+                f"Generic hook files must be universal; target={target!r} got {result}"
+            )
+
+    def test_filter_prefixed_stem_routing(self, tmp_path: Path) -> None:
+        """Stems like azure-skills-cursor-hooks route only to cursor."""
+        prefixed = tmp_path / "azure-skills-cursor-hooks.json"
+        prefixed.write_text("{}")
+
+        assert _filter_hook_files_for_target([prefixed], "cursor") == [prefixed]
+        assert _filter_hook_files_for_target([prefixed], "claude") == []
+        assert _filter_hook_files_for_target([prefixed], "copilot") == []
+        assert _filter_hook_files_for_target([prefixed], "codex") == []
+        assert _filter_hook_files_for_target([prefixed], "gemini") == []
+
+    def test_filter_case_insensitive(self, tmp_path: Path) -> None:
+        """Stem routing must be case-insensitive (Azure-Skills-Cursor-Hooks)."""
+        mixed = tmp_path / "Azure-Skills-Cursor-Hooks.json"
+        mixed.write_text("{}")
+
+        assert _filter_hook_files_for_target([mixed], "cursor") == [mixed], (
+            "Mixed-case cursor-hooks stem must route to cursor"
+        )
+        assert _filter_hook_files_for_target([mixed], "claude") == [], (
+            "Mixed-case cursor-hooks stem must NOT route to claude"
+        )
+
+    def test_claude_integration_skips_cursor_hook_files(self, temp_project: Path) -> None:
+        """End-to-end: .claude/settings.json must not contain entries from cursor-hooks.json."""
+        pkg_info = self._make_pkg(
+            temp_project,
+            "multi-hooks-pkg",
+            {
+                # Claude-specific hooks (PascalCase events, no cursor variable)
+                "hooks.json": {
+                    "hooks": {"PostToolUse": [{"type": "command", "command": "echo claude-only"}]}
+                },
+                # Cursor-specific hooks -- must NOT appear in Claude output
+                "cursor-hooks.json": {
+                    "hooks": {
+                        "postToolUse": [
+                            {
+                                "type": "command",
+                                "command": "${CURSOR_PLUGIN_ROOT}/scripts/track.sh",
+                            }
+                        ]
+                    }
+                },
+            },
+        )
+
+        integrator = HookIntegrator()
+        result = integrator.integrate_package_hooks_claude(pkg_info, temp_project)
+
+        assert result.files_integrated == 1, "Exactly hooks.json should be integrated"
+        settings = self._read_claude_settings(temp_project)
+        hooks = settings.get("hooks", {})
+
+        # Must have the generic hook entry
+        assert "PostToolUse" in hooks, "PostToolUse from hooks.json must be present"
+
+        # Must NOT have anything from cursor-hooks.json
+        all_commands = [
+            entry.get("command", "")
+            for entries in hooks.values()
+            for entry in entries
+            if isinstance(entry, dict)
+        ]
+        assert not any("CURSOR_PLUGIN_ROOT" in cmd for cmd in all_commands), (
+            "No ${CURSOR_PLUGIN_ROOT} reference should appear in Claude settings.json"
+        )
+
+    # ------------------------------------------------------------------
+    # Group B: Variable pattern expansion
+    # ------------------------------------------------------------------
+
+    def test_rewrite_plugin_root_variable(self, tmp_path: Path) -> None:
+        """${PLUGIN_ROOT}/path must be rewritten to the installed script path."""
+        pkg_dir = tmp_path / "pkg"
+        script = pkg_dir / "scripts" / "track.sh"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text("#!/bin/bash\necho track", encoding="utf-8")
+
+        integrator = HookIntegrator()
+        cmd, scripts = integrator._rewrite_command_for_target(
+            "${PLUGIN_ROOT}/scripts/track.sh",
+            pkg_dir,
+            "my-pkg",
+            "claude",
+        )
+
+        assert "${PLUGIN_ROOT}" not in cmd, "Variable must be replaced"
+        assert len(scripts) == 1, "Script copy entry must be produced"
+        assert "scripts/track.sh" in cmd
+
+    def test_rewrite_cursor_plugin_root_variable(self, tmp_path: Path) -> None:
+        """${CURSOR_PLUGIN_ROOT}/path must be rewritten to the installed script path."""
+        pkg_dir = tmp_path / "pkg"
+        script = pkg_dir / "scripts" / "track.sh"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text("#!/bin/bash\necho track", encoding="utf-8")
+
+        integrator = HookIntegrator()
+        cmd, scripts = integrator._rewrite_command_for_target(
+            "${CURSOR_PLUGIN_ROOT}/scripts/track.sh",
+            pkg_dir,
+            "my-pkg",
+            "claude",
+        )
+
+        assert "${CURSOR_PLUGIN_ROOT}" not in cmd, "Variable must be replaced"
+        assert len(scripts) == 1, "Script copy entry must be produced"
+        assert "scripts/track.sh" in cmd
+
+    def test_rewrite_all_variable_forms_equivalent(self, tmp_path: Path) -> None:
+        """${PLUGIN_ROOT}, ${CURSOR_PLUGIN_ROOT}, ${CLAUDE_PLUGIN_ROOT} all produce the same output."""
+        pkg_dir = tmp_path / "pkg"
+        script = pkg_dir / "x.sh"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+        script.write_text("#!/bin/bash\necho x", encoding="utf-8")
+
+        integrator = HookIntegrator()
+        results = []
+        for var in ("PLUGIN_ROOT", "CURSOR_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"):
+            cmd, scripts = integrator._rewrite_command_for_target(
+                f"${{{var}}}/x.sh",
+                pkg_dir,
+                "my-pkg",
+                "claude",
+            )
+            results.append((cmd, len(scripts)))
+
+        cmds = [r[0] for r in results]
+        script_counts = [r[1] for r in results]
+
+        assert len(set(cmds)) == 1, (
+            f"All three variable forms must produce identical commands; got {cmds}"
+        )
+        assert script_counts == [1, 1, 1], "Each form must produce one script copy entry"
+
+    def test_rewrite_partial_variable_no_match(self, tmp_path: Path) -> None:
+        """${MY_PLUGIN_ROOT} (unknown variable) must pass through unchanged."""
+        pkg_dir = tmp_path / "pkg"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+
+        integrator = HookIntegrator()
+        original = "${MY_PLUGIN_ROOT}/scripts/x.sh"
+        cmd, scripts = integrator._rewrite_command_for_target(
+            original,
+            pkg_dir,
+            "my-pkg",
+            "claude",
+        )
+
+        assert cmd == original, "Unknown variable must not be modified"
+        assert scripts == [], "No scripts should be scheduled for copy"
+
+    # ------------------------------------------------------------------
+    # Group C: Event normalisation for Claude
+    # ------------------------------------------------------------------
+
+    def test_claude_normalises_camelcase_events(self, temp_project: Path) -> None:
+        """postToolUse (camelCase) in hook files must be stored as PostToolUse."""
+        pkg_info = self._make_pkg(
+            temp_project,
+            "camel-pkg",
+            {
+                "hooks.json": {
+                    "hooks": {"postToolUse": [{"type": "command", "command": "echo post"}]}
+                }
+            },
+        )
+
+        HookIntegrator().integrate_package_hooks_claude(pkg_info, temp_project)
+
+        hooks = self._read_claude_settings(temp_project).get("hooks", {})
+        assert "PostToolUse" in hooks, "Normalised PascalCase key must be present"
+        assert "postToolUse" not in hooks, "Original camelCase key must not remain"
+
+    def test_claude_preserves_pascal_case_events(self, temp_project: Path) -> None:
+        """PostToolUse (already PascalCase) must be stored unchanged."""
+        pkg_info = self._make_pkg(
+            temp_project,
+            "pascal-pkg",
+            {
+                "hooks.json": {
+                    "hooks": {"PostToolUse": [{"type": "command", "command": "echo post"}]}
+                }
+            },
+        )
+
+        HookIntegrator().integrate_package_hooks_claude(pkg_info, temp_project)
+
+        hooks = self._read_claude_settings(temp_project).get("hooks", {})
+        assert "PostToolUse" in hooks, "PascalCase key must be preserved"
+        assert "postToolUse" not in hooks, "No duplicate camelCase key should appear"
+
+    def test_cursor_no_normalisation(self, temp_project_with_cursor: Path) -> None:
+        """Cursor target has no event-name mapping; PostToolUse passes through as-is."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        project = temp_project_with_cursor
+        pkg_info = self._make_pkg(
+            project,
+            "cursor-no-norm-pkg",
+            {
+                "cursor-hooks.json": {
+                    "hooks": {"PostToolUse": [{"type": "command", "command": "echo cursor-post"}]}
+                }
+            },
+        )
+
+        target = KNOWN_TARGETS["cursor"]
+        HookIntegrator().integrate_hooks_for_target(target, pkg_info, project)
+
+        hooks = self._read_cursor_hooks(project).get("hooks", {})
+        assert "PostToolUse" in hooks, "PostToolUse must survive cursor integration unchanged"
+
+    # ------------------------------------------------------------------
+    # Group D: Deduplication
+    # ------------------------------------------------------------------
+
+    def test_single_install_no_duplicates(self, temp_project: Path) -> None:
+        """End-to-end reproducer for issue #1007.
+
+        A package with copilot-hooks.json, cursor-hooks.json, and hooks.json
+        must produce exactly ONE PostToolUse entry in .claude/settings.json
+        with no residual postToolUse key.
+        """
+        pkg_info = self._make_pkg(
+            temp_project,
+            "multi-format-pkg",
+            {
+                # Generic (Claude) hooks -- should be integrated
+                "hooks.json": {
+                    "hooks": {"PostToolUse": [{"type": "command", "command": "echo generic-post"}]}
+                },
+                # Copilot-specific -- must be filtered out for Claude
+                "copilot-hooks.json": {
+                    "hooks": {"postToolUse": [{"type": "command", "command": "echo copilot-post"}]}
+                },
+                # Cursor-specific -- must be filtered out for Claude
+                "cursor-hooks.json": {
+                    "hooks": {"postToolUse": [{"type": "command", "command": "echo cursor-post"}]}
+                },
+            },
+        )
+
+        HookIntegrator().integrate_package_hooks_claude(pkg_info, temp_project)
+
+        hooks = self._read_claude_settings(temp_project).get("hooks", {})
+        assert "postToolUse" not in hooks, (
+            "Residual camelCase key must not exist after Claude integration"
+        )
+        assert "PostToolUse" in hooks, "PostToolUse key must be present"
+        assert len(hooks["PostToolUse"]) == 1, (
+            f"Exactly 1 PostToolUse entry expected; got {len(hooks['PostToolUse'])}"
+        )
+
+    def test_content_dedup_same_package(self, temp_project: Path) -> None:
+        """Two hook files in the same package producing identical entries yield only 1."""
+        identical_entry = {
+            "hooks": {"PostToolUse": [{"type": "command", "command": "echo dedup-test"}]}
+        }
+        pkg_info = self._make_pkg(
+            temp_project,
+            "dedup-pkg",
+            {
+                "a-hooks.json": identical_entry,
+                "b-hooks.json": identical_entry,
+            },
+        )
+
+        HookIntegrator().integrate_package_hooks_claude(pkg_info, temp_project)
+
+        hooks = self._read_claude_settings(temp_project).get("hooks", {})
+        entries = hooks.get("PostToolUse", [])
+        assert len(entries) == 1, (
+            f"Identical entries from same package must be deduplicated; got {len(entries)}"
+        )
+
+    def test_content_dedup_preserves_cross_package(self, temp_project: Path) -> None:
+        """Identical hook entries from DIFFERENT packages must both be kept."""
+        identical_entry = {
+            "hooks": {"PostToolUse": [{"type": "command", "command": "echo shared-command"}]}
+        }
+        pkg_a = self._make_pkg(temp_project, "pkg-alpha", {"hooks.json": identical_entry})
+        pkg_b = self._make_pkg(temp_project, "pkg-beta", {"hooks.json": identical_entry})
+
+        integrator = HookIntegrator()
+        integrator.integrate_package_hooks_claude(pkg_a, temp_project)
+        integrator.integrate_package_hooks_claude(pkg_b, temp_project)
+
+        hooks = self._read_claude_settings(temp_project).get("hooks", {})
+        entries = hooks.get("PostToolUse", [])
+        sources = {e.get("_apm_source") for e in entries if isinstance(e, dict)}
+        assert "pkg-alpha" in sources, "pkg-alpha entry must be retained"
+        assert "pkg-beta" in sources, "pkg-beta entry must be retained"
+        assert len(entries) == 2, (
+            f"Cross-package identical entries must both be present; got {len(entries)}"
+        )
+
+    def test_reinstall_clears_aliased_events(self, temp_project: Path) -> None:
+        """Re-integration removes stale postToolUse (camelCase) aliases.
+
+        Simulates a corrupted pre-fix state where the same package has entries
+        under both PostToolUse and postToolUse, then verifies that after a
+        fresh install only the PascalCase key survives.
+        """
+        # Simulate corrupted pre-fix state
+        claude_dir = temp_project / ".claude"
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        corrupted = {
+            "hooks": {
+                "PostToolUse": [
+                    {"type": "command", "command": "echo stale", "_apm_source": "alias-pkg"}
+                ],
+                "postToolUse": [
+                    {"type": "command", "command": "echo stale-alias", "_apm_source": "alias-pkg"}
+                ],
+            }
+        }
+        (claude_dir / "settings.json").write_text(json.dumps(corrupted, indent=2), encoding="utf-8")
+
+        pkg_info = self._make_pkg(
+            temp_project,
+            "alias-pkg",
+            {
+                "hooks.json": {
+                    "hooks": {"PostToolUse": [{"type": "command", "command": "echo fresh"}]}
+                }
+            },
+        )
+
+        HookIntegrator().integrate_package_hooks_claude(pkg_info, temp_project)
+
+        hooks = self._read_claude_settings(temp_project).get("hooks", {})
+        assert "postToolUse" not in hooks, (
+            "Stale camelCase alias key must be removed after reinstall"
+        )
+        assert "PostToolUse" in hooks, "PascalCase key must remain after reinstall"
+        # Ensure the stale alias entry is gone -- only the fresh entry survives
+        commands = [e.get("command", "") for e in hooks["PostToolUse"] if isinstance(e, dict)]
+        assert all("stale" not in cmd for cmd in commands), (
+            f"Stale alias entries must be cleared; found: {commands}"
+        )
+
+    # ------------------------------------------------------------------
+    # Group E: Regression
+    # ------------------------------------------------------------------
+
+    def test_reinstall_still_idempotent_with_routing(self, temp_project: Path) -> None:
+        """Running Claude integration 3 times with routing active must not grow entries."""
+        pkg_info = self._make_pkg(
+            temp_project,
+            "idempotent-pkg",
+            {
+                # Only hooks.json passes the claude filter
+                "hooks.json": {
+                    "hooks": {"PostToolUse": [{"type": "command", "command": "echo idempotent"}]}
+                },
+                # This file is filtered out for claude -- must not affect count
+                "cursor-hooks.json": {
+                    "hooks": {"postToolUse": [{"type": "command", "command": "echo cursor-only"}]}
+                },
+            },
+        )
+
+        integrator = HookIntegrator()
+        for _ in range(3):
+            integrator.integrate_package_hooks_claude(pkg_info, temp_project)
+
+        hooks = self._read_claude_settings(temp_project).get("hooks", {})
+        entries = hooks.get("PostToolUse", [])
+        assert len(entries) == 1, (
+            f"Entry count must remain constant across re-installs; got {len(entries)}"
+        )

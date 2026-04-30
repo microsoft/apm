@@ -6,12 +6,12 @@ and update notification helper (_check_and_notify_updates).
 """
 
 import os
-import tempfile
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+import tempfile  # noqa: F401
+from pathlib import Path  # noqa: F401
+from unittest.mock import MagicMock, patch  # noqa: F401
 
 import pytest
-import yaml
+import yaml  # noqa: F401
 
 from apm_cli.commands._helpers import (
     _atomic_write,
@@ -64,8 +64,9 @@ class TestAtomicWrite:
         with patch("os.replace", side_effect=OSError("replace failed")):
             with pytest.raises(OSError, match="replace failed"):
                 _atomic_write(target, "data")
-        # No stale temp file should remain in tmp_path
-        leftover = list(tmp_path.glob("apm-write-*"))
+        # No stale temp file should remain in tmp_path. Prefix-agnostic so
+        # the assertion does not silently pass if the temp prefix changes.
+        leftover = [f for f in tmp_path.iterdir() if f != target]
         assert leftover == [], f"Temp file not cleaned up: {leftover}"
 
 
@@ -89,7 +90,7 @@ class TestUpdateGitignoreForApmModules:
         monkeypatch.chdir(tmp_path)
         gitignore = tmp_path / ".gitignore"
         gitignore.write_text("node_modules/\napm_modules/\n")
-        mtime_before = gitignore.stat().st_mtime
+        mtime_before = gitignore.stat().st_mtime  # noqa: F841
         _update_gitignore_for_apm_modules()
         # File should not have been modified
         assert gitignore.read_text() == "node_modules/\napm_modules/\n"
@@ -138,9 +139,7 @@ class TestLoadApmConfig:
     def test_returns_parsed_config(self, tmp_path, monkeypatch):
         """Returns parsed dict when apm.yml exists."""
         monkeypatch.chdir(tmp_path)
-        (tmp_path / "apm.yml").write_text(
-            "name: my-project\nversion: 1.0.0\n", encoding="utf-8"
-        )
+        (tmp_path / "apm.yml").write_text("name: my-project\nversion: 1.0.0\n", encoding="utf-8")
         result = _load_apm_config()
         assert result == {"name": "my-project", "version": "1.0.0"}
 
@@ -190,9 +189,7 @@ class TestListAvailableScripts:
     def test_returns_all_scripts(self, tmp_path, monkeypatch):
         """Returns the full scripts dict."""
         monkeypatch.chdir(tmp_path)
-        (tmp_path / "apm.yml").write_text(
-            "name: p\nscripts:\n  start: run\n  test: pytest\n"
-        )
+        (tmp_path / "apm.yml").write_text("name: p\nscripts:\n  start: run\n  test: pytest\n")
         scripts = _list_available_scripts()
         assert scripts == {"start": "run", "test": "pytest"}
 
@@ -262,9 +259,7 @@ class TestCheckAndNotifyUpdates:
 
     def test_skips_when_self_update_disabled(self):
         """Returns immediately when distribution disables self-update."""
-        with patch(
-            "apm_cli.commands._helpers.is_self_update_enabled", return_value=False
-        ):
+        with patch("apm_cli.commands._helpers.is_self_update_enabled", return_value=False):
             with patch("apm_cli.commands._helpers.check_for_updates") as mock_check:
                 _check_and_notify_updates()
                 mock_check.assert_not_called()
@@ -290,9 +285,7 @@ class TestCheckAndNotifyUpdates:
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("APM_E2E_TESTS", None)
             with patch("apm_cli.commands._helpers.get_version", return_value="1.0.0"):
-                with patch(
-                    "apm_cli.commands._helpers.check_for_updates", return_value=None
-                ):
+                with patch("apm_cli.commands._helpers.check_for_updates", return_value=None):
                     with patch("apm_cli.commands._helpers._rich_warning") as mock_warn:
                         _check_and_notify_updates()
                         mock_warn.assert_not_called()
@@ -302,9 +295,7 @@ class TestCheckAndNotifyUpdates:
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("APM_E2E_TESTS", None)
             with patch("apm_cli.commands._helpers.get_version", return_value="1.0.0"):
-                with patch(
-                    "apm_cli.commands._helpers.check_for_updates", return_value="1.1.0"
-                ):
+                with patch("apm_cli.commands._helpers.check_for_updates", return_value="1.1.0"):
                     with patch("apm_cli.commands._helpers._rich_warning") as mock_warn:
                         _check_and_notify_updates()
                         mock_warn.assert_called_once()

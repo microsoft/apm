@@ -15,7 +15,6 @@ from apm_cli.models.apm_package import clear_apm_yml_cache
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.schema import ApmPolicy
 
-
 # -- Fixtures -------------------------------------------------------
 
 
@@ -138,7 +137,9 @@ class TestCiWithPolicyOrg:
 
         mock_result = PolicyFetchResult(policy=ApmPolicy(), source="org:test/.github")
 
-        with patch("apm_cli.policy.discovery.discover_policy", return_value=mock_result) as mock_disc:
+        with patch(
+            "apm_cli.policy.discovery.discover_policy", return_value=mock_result
+        ) as mock_disc:
             result = runner.invoke(
                 audit,
                 ["--ci", "--policy", "org"],
@@ -202,7 +203,9 @@ class TestNoCacheFlag:
 
         mock_result = PolicyFetchResult(policy=ApmPolicy(), source="org:test/.github")
 
-        with patch("apm_cli.policy.discovery.discover_policy", return_value=mock_result) as mock_disc:
+        with patch(
+            "apm_cli.policy.discovery.discover_policy", return_value=mock_result
+        ) as mock_disc:
             result = runner.invoke(
                 audit,
                 ["--ci", "--policy", "org", "--no-cache"],

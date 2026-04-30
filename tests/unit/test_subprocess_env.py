@@ -6,6 +6,7 @@ every PyInstaller-managed library-path variable from its ``_ORIG``
 sibling (or drop it) inside a frozen build, without disturbing any
 other inherited variable.
 """
+
 from __future__ import annotations
 
 import os
@@ -122,11 +123,14 @@ class TestExternalProcessEnvFrozen(unittest.TestCase):
         """``base`` must take precedence over the live environment."""
         # Inject noise into os.environ that the helper must ignore when
         # ``base`` is supplied.
-        with patch.dict(
-            os.environ,
-            {"LD_LIBRARY_PATH": "/noise", "LD_LIBRARY_PATH_ORIG": "/noise_orig"},
-            clear=False,
-        ), patch.object(sys, "frozen", True, create=True):
+        with (
+            patch.dict(
+                os.environ,
+                {"LD_LIBRARY_PATH": "/noise", "LD_LIBRARY_PATH_ORIG": "/noise_orig"},
+                clear=False,
+            ),
+            patch.object(sys, "frozen", True, create=True),
+        ):
             base = {
                 "LD_LIBRARY_PATH": "/bundle",
                 "LD_LIBRARY_PATH_ORIG": "/real_orig",
@@ -146,14 +150,17 @@ class TestExternalProcessEnvFrozen(unittest.TestCase):
         self.assertEqual(base, snapshot)
 
     def test_does_not_mutate_os_environ(self):
-        with patch.dict(
-            os.environ,
-            {
-                "LD_LIBRARY_PATH": "/bundle",
-                "LD_LIBRARY_PATH_ORIG": "/usr/lib",
-            },
-            clear=False,
-        ), patch.object(sys, "frozen", True, create=True):
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "LD_LIBRARY_PATH": "/bundle",
+                    "LD_LIBRARY_PATH_ORIG": "/usr/lib",
+                },
+                clear=False,
+            ),
+            patch.object(sys, "frozen", True, create=True),
+        ):
             snapshot = dict(os.environ)
             external_process_env()
             self.assertEqual(dict(os.environ), snapshot)

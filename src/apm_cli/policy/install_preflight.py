@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple  # noqa: F401, UP035
 
 # #832: Canonical exception type lives in ``apm_cli.install.errors``.
 # ``PolicyBlockError`` remains as an alias re-exported below so external
@@ -23,11 +23,10 @@ from typing import Optional, Tuple
 from apm_cli.install.errors import PolicyViolationError
 
 from .discovery import PolicyFetchResult, discover_policy_with_chain
-from .models import CIAuditResult
+from .models import CIAuditResult  # noqa: F401
 from .outcome_routing import route_discovery_outcome
 from .policy_checks import run_dependency_policy_checks
-from .schema import ApmPolicy
-
+from .schema import ApmPolicy  # noqa: F401
 
 # Deprecated alias kept for backward compatibility (#832).  New code
 # should ``raise``/``except`` :class:`PolicyViolationError` directly.
@@ -72,7 +71,7 @@ def run_policy_preflight(
     no_policy: bool = False,
     logger,
     dry_run: bool = False,
-) -> Tuple[Optional[PolicyFetchResult], bool]:
+) -> tuple[PolicyFetchResult | None, bool]:
     """Discover + enforce policy for a non-pipeline command site.
 
     Parameters
@@ -171,9 +170,7 @@ def run_policy_preflight(
 
             # Emit block bucket (capped)
             for dep_ref, detail in block_lines[:_DRY_RUN_PREVIEW_LIMIT]:
-                logger.warning(
-                    f"Would be blocked by policy: {dep_ref} -- {detail}"
-                )
+                logger.warning(f"Would be blocked by policy: {dep_ref} -- {detail}")
             overflow = len(block_lines) - _DRY_RUN_PREVIEW_LIMIT
             if overflow > 0:
                 logger.warning(
@@ -183,14 +180,11 @@ def run_policy_preflight(
 
             # Emit warn bucket (capped)
             for dep_ref, detail in warn_lines[:_DRY_RUN_PREVIEW_LIMIT]:
-                logger.warning(
-                    f"Policy warning: {dep_ref} -- {detail}"
-                )
+                logger.warning(f"Policy warning: {dep_ref} -- {detail}")
             overflow = len(warn_lines) - _DRY_RUN_PREVIEW_LIMIT
             if overflow > 0:
                 logger.warning(
-                    f"... and {overflow} more policy warnings. "
-                    "Run `apm audit` for full report."
+                    f"... and {overflow} more policy warnings. Run `apm audit` for full report."
                 )
         else:
             # -- Real install: push each violation to DiagnosticCollector
@@ -209,11 +203,9 @@ def run_policy_preflight(
 
         if enforcement == "block" and not dry_run:
             raise PolicyViolationError(
-                f"Install blocked by org policy: "
-                f"{len(audit_result.failed_checks)} check(s) failed",
+                f"Install blocked by org policy: {len(audit_result.failed_checks)} check(s) failed",
                 audit_result=audit_result,
                 policy_source=fetch_result.source,
             )
 
     return fetch_result, True
-

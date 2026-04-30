@@ -12,7 +12,7 @@ import json
 import os
 from unittest.mock import patch
 
-import pytest
+import pytest  # noqa: F401
 
 from apm_cli.marketplace.version_pins import (
     _pin_key,
@@ -22,7 +22,6 @@ from apm_cli.marketplace.version_pins import (
     record_ref_pin,
     save_ref_pins,
 )
-
 
 # ---------------------------------------------------------------------------
 # Unit tests -- load / save
@@ -40,6 +39,7 @@ class TestLoadRefPins:
     def test_load_missing_no_warning_by_default(self, tmp_path, caplog):
         """Missing file does NOT warn when expect_exists is False (default)."""
         import logging
+
         with caplog.at_level(logging.WARNING):
             result = load_ref_pins(pins_dir=str(tmp_path))
         assert result == {}
@@ -48,6 +48,7 @@ class TestLoadRefPins:
     def test_load_missing_warns_when_expected(self, tmp_path, caplog):
         """Missing file warns when expect_exists=True."""
         import logging
+
         with caplog.at_level(logging.WARNING):
             result = load_ref_pins(pins_dir=str(tmp_path), expect_exists=True)
         assert result == {}
@@ -155,12 +156,21 @@ class TestRecordAndCheck:
         record_ref_pin("mkt", "plug", "sha-bbb", version="2.0.0", pins_dir=str(tmp_path))
 
         # Each version has its own pin
-        assert check_ref_pin("mkt", "plug", "sha-aaa", version="1.0.0", pins_dir=str(tmp_path)) is None
-        assert check_ref_pin("mkt", "plug", "sha-bbb", version="2.0.0", pins_dir=str(tmp_path)) is None
+        assert (
+            check_ref_pin("mkt", "plug", "sha-aaa", version="1.0.0", pins_dir=str(tmp_path)) is None
+        )
+        assert (
+            check_ref_pin("mkt", "plug", "sha-bbb", version="2.0.0", pins_dir=str(tmp_path)) is None
+        )
 
         # Changing v1's ref flags it without affecting v2
-        assert check_ref_pin("mkt", "plug", "sha-xxx", version="1.0.0", pins_dir=str(tmp_path)) == "sha-aaa"
-        assert check_ref_pin("mkt", "plug", "sha-bbb", version="2.0.0", pins_dir=str(tmp_path)) is None
+        assert (
+            check_ref_pin("mkt", "plug", "sha-xxx", version="1.0.0", pins_dir=str(tmp_path))
+            == "sha-aaa"
+        )
+        assert (
+            check_ref_pin("mkt", "plug", "sha-bbb", version="2.0.0", pins_dir=str(tmp_path)) is None
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -9,7 +9,7 @@ import logging
 import re
 import sys
 from dataclasses import dataclass, field
-from typing import List
+from typing import List  # noqa: F401, UP035
 
 import click
 
@@ -26,7 +26,7 @@ class OutdatedRow:
     current: str
     latest: str
     status: str
-    extra_tags: List[str] = field(default_factory=list)
+    extra_tags: list[str] = field(default_factory=list)
     source: str = ""
 
 
@@ -52,8 +52,9 @@ def _find_remote_tip(ref_name, remote_refs):
     if not remote_refs:
         return None
 
-    branch_refs = {r.name: r.commit_sha for r in remote_refs
-                   if r.ref_type == GitReferenceType.BRANCH}
+    branch_refs = {
+        r.name: r.commit_sha for r in remote_refs if r.ref_type == GitReferenceType.BRANCH
+    }
 
     if ref_name:
         return branch_refs.get(ref_name)
@@ -105,8 +106,7 @@ def _check_marketplace_ref(dep, verbose):
         manifest = fetch_or_cache(source_obj)
     except MarketplaceError:
         logger.warning(
-            "Failed to fetch marketplace '%s'; "
-            "falling back to git check for '%s'",
+            "Failed to fetch marketplace '%s'; falling back to git check for '%s'",
             dep.discovered_via,
             dep.marketplace_plugin_name,
         )
@@ -141,14 +141,18 @@ def _check_marketplace_ref(dep, verbose):
 
     if installed_ref != mkt_ref:
         return OutdatedRow(
-            package=package_name, current=current_display,
-            latest=latest_display, status="outdated",
+            package=package_name,
+            current=current_display,
+            latest=latest_display,
+            status="outdated",
             source=source_label,
         )
 
     return OutdatedRow(
-        package=package_name, current=current_display,
-        latest=latest_display, status="up-to-date",
+        package=package_name,
+        current=current_display,
+        latest=latest_display,
+        status="up-to-date",
         source=source_label,
     )
 
@@ -179,20 +183,30 @@ def _check_one_dep(dep, downloader, verbose):
         full_url = f"{dep.host}/{dep.repo_url}" if dep.host else dep.repo_url
         dep_ref = DependencyReference.parse(full_url)
     except Exception:
-        return OutdatedRow(package=package_name, current=current_ref or "(none)", latest="-", status="unknown")
+        return OutdatedRow(
+            package=package_name, current=current_ref or "(none)", latest="-", status="unknown"
+        )
 
     # Fetch remote refs
     try:
         remote_refs = downloader.list_remote_refs(dep_ref)
     except Exception:
-        return OutdatedRow(package=package_name, current=current_ref or "(none)", latest="-", status="unknown")
+        return OutdatedRow(
+            package=package_name, current=current_ref or "(none)", latest="-", status="unknown"
+        )
 
     is_tag = _is_tag_ref(current_ref)
 
     if is_tag:
         tag_refs = [r for r in remote_refs if r.ref_type == GitReferenceType.TAG]
         if not tag_refs:
-            return OutdatedRow(package=package_name, current=current_ref, latest="-", status="unknown", source="git tags")
+            return OutdatedRow(
+                package=package_name,
+                current=current_ref,
+                latest="-",
+                status="unknown",
+                source="git tags",
+            )
 
         latest_tag = tag_refs[0].name
         current_ver = _strip_v(current_ref)
@@ -200,30 +214,77 @@ def _check_one_dep(dep, downloader, verbose):
 
         if is_newer_version(current_ver, latest_ver):
             extra = [r.name for r in tag_refs[:10]] if verbose else []
-            return OutdatedRow(package=package_name, current=current_ref, latest=latest_tag, status="outdated", extra_tags=extra, source="git tags")
+            return OutdatedRow(
+                package=package_name,
+                current=current_ref,
+                latest=latest_tag,
+                status="outdated",
+                extra_tags=extra,
+                source="git tags",
+            )
         else:
-            return OutdatedRow(package=package_name, current=current_ref, latest=latest_tag, status="up-to-date", source="git tags")
+            return OutdatedRow(
+                package=package_name,
+                current=current_ref,
+                latest=latest_tag,
+                status="up-to-date",
+                source="git tags",
+            )
     else:
         remote_tip_sha = _find_remote_tip(current_ref, remote_refs)
 
         if not remote_tip_sha:
-            return OutdatedRow(package=package_name, current=current_ref or "(none)", latest="-", status="unknown", source="git branch")
+            return OutdatedRow(
+                package=package_name,
+                current=current_ref or "(none)",
+                latest="-",
+                status="unknown",
+                source="git branch",
+            )
 
         display_ref = current_ref or "(default)"
         if locked_sha and locked_sha != remote_tip_sha:
             latest_display = remote_tip_sha[:8]
-            return OutdatedRow(package=package_name, current=display_ref, latest=latest_display, status="outdated", source="git branch")
+            return OutdatedRow(
+                package=package_name,
+                current=display_ref,
+                latest=latest_display,
+                status="outdated",
+                source="git branch",
+            )
         else:
-            return OutdatedRow(package=package_name, current=display_ref, latest=remote_tip_sha[:8], status="up-to-date", source="git branch")
+            return OutdatedRow(
+                package=package_name,
+                current=display_ref,
+                latest=remote_tip_sha[:8],
+                status="up-to-date",
+                source="git branch",
+            )
 
 
 @click.command(name="outdated")
-@click.option("--global", "-g", "global_", is_flag=True, default=False,
-              help="Check user-scope dependencies (~/.apm/)")
-@click.option("--verbose", "-v", is_flag=True, default=False,
-              help="Show additional info (e.g., available tags for outdated deps)")
-@click.option("--parallel-checks", "-j", type=int, default=4,
-              help="Max concurrent remote checks (default: 4, 0 = sequential)")
+@click.option(
+    "--global",
+    "-g",
+    "global_",
+    is_flag=True,
+    default=False,
+    help="Check user-scope dependencies (~/.apm/)",
+)
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    default=False,
+    help="Show additional info (e.g., available tags for outdated deps)",
+)
+@click.option(
+    "--parallel-checks",
+    "-j",
+    type=int,
+    default=4,
+    help="Max concurrent remote checks (default: 4, 0 = sequential)",
+)
 def outdated(global_, verbose, parallel_checks):
     """Show outdated locked dependencies
 
@@ -283,8 +344,7 @@ def outdated(global_, verbose, parallel_checks):
         return
 
     # Check deps with progress feedback and optional parallelism
-    rows = _check_deps_with_progress(checkable, downloader, verbose,
-                                     parallel_checks, logger)
+    rows = _check_deps_with_progress(checkable, downloader, verbose, parallel_checks, logger)
 
     if not rows:
         logger.success("No remote dependencies to check")
@@ -328,7 +388,9 @@ def outdated(global_, verbose, parallel_checks):
         for row in rows:
             style = status_styles.get(row.status, "white")
             table.add_row(
-                row.package, row.current, row.latest,
+                row.package,
+                row.current,
+                row.latest,
                 f"[{style}]{row.status}[/{style}]",
                 row.source,
             )
@@ -341,15 +403,11 @@ def outdated(global_, verbose, parallel_checks):
 
     except (ImportError, Exception):
         # Fallback: plain text output
-        click.echo(
-            f"{'Package':<24}{'Current':<13}{'Latest':<13}"
-            f"{'Status':<15}{'Source'}"
-        )
+        click.echo(f"{'Package':<24}{'Current':<13}{'Latest':<13}{'Status':<15}{'Source'}")
         click.echo("-" * 82)
         for row in rows:
             click.echo(
-                f"{row.package:<24}{row.current:<13}{row.latest:<13}"
-                f"{row.status:<15}{row.source}"
+                f"{row.package:<24}{row.current:<13}{row.latest:<13}{row.status:<15}{row.source}"
             )
             if verbose and row.extra_tags:
                 click.echo(f"{'':24}tags: {', '.join(row.extra_tags)}")
@@ -357,14 +415,15 @@ def outdated(global_, verbose, parallel_checks):
     # Summary
     outdated_count = sum(1 for row in rows if row.status == "outdated")
     if outdated_count:
-        logger.warning(f"{outdated_count} outdated "
-                       f"{'dependency' if outdated_count == 1 else 'dependencies'} found")
+        logger.warning(
+            f"{outdated_count} outdated "
+            f"{'dependency' if outdated_count == 1 else 'dependencies'} found"
+        )
     elif has_unknown:
         logger.progress("Some dependencies could not be checked (branch/commit refs)")
 
 
-def _check_deps_with_progress(checkable, downloader, verbose, parallel_checks,
-                              logger):
+def _check_deps_with_progress(checkable, downloader, verbose, parallel_checks, logger):
     """Check all deps with Rich progress bar and optional parallelism."""
     rows = []
     total = len(checkable)
@@ -387,12 +446,17 @@ def _check_deps_with_progress(checkable, downloader, verbose, parallel_checks,
         ) as progress:
             if parallel_checks > 0 and total > 1:
                 rows = _check_parallel(
-                    checkable, downloader, verbose, parallel_checks,
-                    progress, logger,
+                    checkable,
+                    downloader,
+                    verbose,
+                    parallel_checks,
+                    progress,
+                    logger,
                 )
             else:
                 task_id = progress.add_task(
-                    f"Checking {total} dependencies", total=total,
+                    f"Checking {total} dependencies",
+                    total=total,
                 )
                 for dep in checkable:
                     short = dep.get_unique_key().split("/")[-1]
@@ -405,7 +469,10 @@ def _check_deps_with_progress(checkable, downloader, verbose, parallel_checks,
         logger.progress(f"Checking {total} dependencies...")
         if parallel_checks > 0 and total > 1:
             rows = _check_parallel_plain(
-                checkable, downloader, verbose, parallel_checks,
+                checkable,
+                downloader,
+                verbose,
+                parallel_checks,
             )
         else:
             for dep in checkable:
@@ -414,15 +481,15 @@ def _check_deps_with_progress(checkable, downloader, verbose, parallel_checks,
     return rows
 
 
-def _check_parallel(checkable, downloader, verbose, max_workers,
-                    progress, logger):
+def _check_parallel(checkable, downloader, verbose, max_workers, progress, logger):
     """Run checks in parallel with Rich progress display."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     total = len(checkable)
     max_workers = min(max_workers, total)
     overall_id = progress.add_task(
-        f"Checking {total} dependencies", total=total,
+        f"Checking {total} dependencies",
+        total=total,
     )
 
     results = {}
@@ -446,8 +513,7 @@ def _check_parallel(checkable, downloader, verbose, max_workers,
             progress.advance(overall_id)
 
     # Preserve original order
-    return [results[dep.get_unique_key()] for dep in checkable
-            if dep.get_unique_key() in results]
+    return [results[dep.get_unique_key()] for dep in checkable if dep.get_unique_key() in results]
 
 
 def _check_parallel_plain(checkable, downloader, verbose, max_workers):
@@ -458,8 +524,7 @@ def _check_parallel_plain(checkable, downloader, verbose, max_workers):
     results = {}
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(_check_one_dep, dep, downloader, verbose): dep
-            for dep in checkable
+            executor.submit(_check_one_dep, dep, downloader, verbose): dep for dep in checkable
         }
         for fut in as_completed(futures):
             dep = futures[fut]
@@ -470,5 +535,4 @@ def _check_parallel_plain(checkable, downloader, verbose, max_workers):
                 result = OutdatedRow(package=pkg, current="(none)", latest="-", status="unknown")
             results[dep.get_unique_key()] = result
 
-    return [results[dep.get_unique_key()] for dep in checkable
-            if dep.get_unique_key() in results]
+    return [results[dep.get_unique_key()] for dep in checkable if dep.get_unique_key() in results]

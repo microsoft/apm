@@ -26,36 +26,37 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 if TYPE_CHECKING:
     from ..core.auth import HostInfo
 
 import yaml
 
+from ..utils.github_host import default_host
+from ..utils.path_security import ensure_path_within
+from ._io import atomic_write
 from .errors import (
     BuildError,
     HeadNotAllowedError,
     NoMatchingVersionError,
-    OfflineMissError,
+    OfflineMissError,  # noqa: F401
     RefNotFoundError,
 )
-from ._io import atomic_write
-from .ref_resolver import RefResolver, RemoteRef
+from .ref_resolver import RefResolver, RemoteRef  # noqa: F401
 from .semver import SemVer, parse_semver, satisfies_range
-from .tag_pattern import build_tag_regex, render_tag
-from ..utils.path_security import ensure_path_within
-from ..utils.github_host import default_host
+from .tag_pattern import build_tag_regex, render_tag  # noqa: F401
 from .yml_schema import MarketplaceYml, PackageEntry, load_marketplace_yml
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "ResolvedPackage",
-    "ResolveResult",
-    "BuildReport",
+    "BuildDiagnostic",
     "BuildOptions",
+    "BuildReport",
     "MarketplaceBuilder",
+    "ResolveResult",
+    "ResolvedPackage",
 ]
 
 # ---------------------------------------------------------------------------
@@ -64,25 +65,33 @@ __all__ = [
 
 
 @dataclass(frozen=True)
+class BuildDiagnostic:
+    """Structured diagnostic emitted during marketplace.json composition."""
+
+    level: str  # "warning" | "verbose"
+    message: str
+
+
+@dataclass(frozen=True)
 class ResolvedPackage:
     """A package entry after ref resolution."""
 
     name: str
-    source_repo: str          # "owner/repo" only
-    subdir: Optional[str]     # APM-only (used to compose the output ``source`` object)
-    ref: str                  # resolved tag name, e.g. "v1.2.0"
-    sha: str                  # 40-char git SHA
-    requested_version: Optional[str]  # original APM-only range (for diagnostics)
-    tags: Tuple[str, ...]
-    is_prerelease: bool       # True if the resolved ref was a prerelease semver
+    source_repo: str  # "owner/repo" only
+    subdir: str | None  # APM-only (used to compose the output ``source`` object)
+    ref: str  # resolved tag name, e.g. "v1.2.0"
+    sha: str  # 40-char git SHA
+    requested_version: str | None  # original APM-only range (for diagnostics)
+    tags: tuple[str, ...]
+    is_prerelease: bool  # True if the resolved ref was a prerelease semver
 
 
 @dataclass(frozen=True)
 class ResolveResult:
     """Result of resolving package refs in a marketplace build."""
 
-    entries: Tuple[ResolvedPackage, ...]
-    errors: Tuple[Tuple[str, str], ...]  # (package name, error message) pairs
+    entries: tuple[ResolvedPackage, ...]
+    errors: tuple[tuple[str, str], ...]  # (package name, error message) pairs
 
     @property
     def ok(self) -> bool:
@@ -94,15 +103,16 @@ class ResolveResult:
 class BuildReport:
     """Summary of a build run."""
 
-    resolved: Tuple[ResolvedPackage, ...]
-    errors: Tuple[Tuple[str, str], ...]  # (package name, error message) pairs
-    warnings: Tuple[str, ...]  # non-fatal diagnostic messages
-    unchanged_count: int
-    added_count: int
-    updated_count: int
-    removed_count: int
-    output_path: Path
-    dry_run: bool
+    resolved: tuple[ResolvedPackage, ...]
+    errors: tuple[tuple[str, str], ...]  # (package name, error message) pairs
+    warnings: tuple[str, ...]  # non-fatal diagnostic messages
+    diagnostics: tuple[BuildDiagnostic, ...] = ()  # structured diagnostics
+    unchanged_count: int = 0
+    added_count: int = 0
+    updated_count: int = 0
+    removed_count: int = 0
+    output_path: Path = field(default_factory=lambda: Path("."))
+    dry_run: bool = False
 
 
 @dataclass
@@ -115,7 +125,7 @@ class BuildOptions:
     allow_head: bool = False
     continue_on_error: bool = False
     offline: bool = False
-    output_override: Optional[Path] = None
+    output_override: Path | None = None
     dry_run: bool = False
 
 
@@ -125,6 +135,64 @@ class BuildOptions:
 
 # 40-char hex SHA pattern
 _SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+
+# Version range indicators -- if a version string starts with any of these
+# or contains spaces, it's a resolution constraint, not a display override.
+_VERSION_RANGE_CHARS = ("^", "~", ">", "<", "=")
+
+
+def _is_display_version(version: str | None) -> bool:
+    """Return True if *version* looks like a fixed display version, not a range."""
+    if not version:
+        return False
+    v = version.strip()
+    if any(v.startswith(c) for c in _VERSION_RANGE_CHARS):
+        return False
+    return not (" " in v or "*" in v or "x" in v.lower().split(".")[-1:])
+
+
+def _subtract_plugin_root(source: str, plugin_root: str) -> str:
+    """Remove pluginRoot prefix from a local source path for emit.
+
+    Uses PurePosixPath.relative_to() for robust normalization.
+    Returns the relative path prefixed with ``./``.
+
+    Raises
+    ------
+    ValueError
+        If *source* does not start with *plugin_root*.
+    BuildError
+        If subtraction yields an empty or invalid path (S2 guard).
+    """
+    from pathlib import PurePosixPath
+
+    # Normalize: strip leading "./" for comparison
+    norm_source = source.lstrip("./") if source.startswith("./") else source
+    norm_root = plugin_root.lstrip("./") if plugin_root.startswith("./") else plugin_root
+    # Strip trailing slashes
+    norm_root = norm_root.rstrip("/")
+    norm_source = norm_source.rstrip("/")
+
+    src_path = PurePosixPath(norm_source)
+    root_path = PurePosixPath(norm_root)
+
+    # relative_to raises ValueError if not a prefix
+    relative = src_path.relative_to(root_path)
+    result = str(relative)
+
+    # X1: empty result means source == pluginRoot exactly
+    if not result or result == ".":
+        raise BuildError(
+            f"subtracting pluginRoot '{plugin_root}' from source '{source}' yields empty path"
+        )
+
+    # S2: post-subtraction guard -- no absolute paths, no traversal
+    if result.startswith("/"):
+        raise BuildError(f"pluginRoot subtraction produced absolute path: '{result}'")
+    if ".." in result.split("/"):
+        raise BuildError(f"pluginRoot subtraction produced path with traversal: '{result}'")
+
+    return "./" + result
 
 
 class MarketplaceBuilder:
@@ -145,19 +213,19 @@ class MarketplaceBuilder:
     def __init__(
         self,
         marketplace_yml_path: Path,
-        options: Optional[BuildOptions] = None,
-        auth_resolver: Optional[object] = None,
+        options: BuildOptions | None = None,
+        auth_resolver: object | None = None,
     ) -> None:
         self._yml_path = marketplace_yml_path
         self._project_root = marketplace_yml_path.parent
         self._options = options or BuildOptions()
-        self._yml: Optional[MarketplaceYml] = None
-        self._resolver: Optional[RefResolver] = None
+        self._yml: MarketplaceYml | None = None
+        self._resolver: RefResolver | None = None
         self._auth_resolver = auth_resolver
         # Resolved once per build, used by worker threads (read-only).
-        self._github_token: Optional[str] = None
+        self._github_token: str | None = None
         self._host: str = default_host() or "github.com"
-        self._host_info: Optional["HostInfo"] = None
+        self._host_info: HostInfo | None = None
         self._auth_resolved: bool = False
 
     @classmethod
@@ -165,9 +233,9 @@ class MarketplaceBuilder:
         cls,
         config: MarketplaceYml,
         project_root: Path,
-        options: Optional[BuildOptions] = None,
-        auth_resolver: Optional[object] = None,
-    ) -> "MarketplaceBuilder":
+        options: BuildOptions | None = None,
+        auth_resolver: object | None = None,
+    ) -> MarketplaceBuilder:
         """Construct a builder from an already-loaded MarketplaceConfig.
 
         Use this when the caller has already chosen between apm.yml and
@@ -178,9 +246,7 @@ class MarketplaceBuilder:
         # Use a synthetic path so legacy code paths that consult
         # ``self._yml_path.parent`` still resolve to the project root.
         synthetic_path = project_root / (
-            config.source_path.name
-            if config.source_path is not None
-            else "apm.yml"
+            config.source_path.name if config.source_path is not None else "apm.yml"
         )
         instance = cls(synthetic_path, options=options, auth_resolver=auth_resolver)
         instance._project_root = project_root
@@ -275,7 +341,7 @@ class MarketplaceBuilder:
     ) -> ResolvedPackage:
         """Resolve an entry with an explicit ``ref:`` field."""
         ref_text = entry.ref
-        assert ref_text is not None
+        assert ref_text is not None  # noqa: S101
 
         # If it looks like a 40-char SHA, accept it directly
         if _SHA40_RE.match(ref_text):
@@ -362,7 +428,7 @@ class MarketplaceBuilder:
     ) -> ResolvedPackage:
         """Resolve an entry using its ``version:`` semver range."""
         version_range = entry.version
-        assert version_range is not None
+        assert version_range is not None  # noqa: S101
 
         # Determine tag pattern: entry > build > default
         pattern = entry.tag_pattern or yml.build.tag_pattern
@@ -375,7 +441,7 @@ class MarketplaceBuilder:
         for remote_ref in refs:
             if not remote_ref.name.startswith("refs/tags/"):
                 continue
-            tag_name = remote_ref.name[len("refs/tags/"):]
+            tag_name = remote_ref.name[len("refs/tags/") :]
             m = tag_rx.match(tag_name)
             if not m:
                 continue
@@ -385,9 +451,7 @@ class MarketplaceBuilder:
                 continue
 
             # Prerelease filter
-            include_pre = (
-                entry.include_prerelease or self._options.include_prerelease
-            )
+            include_pre = entry.include_prerelease or self._options.include_prerelease
             if sv.is_prerelease and not include_pre:
                 continue
 
@@ -437,20 +501,17 @@ class MarketplaceBuilder:
         if not entries:
             return ResolveResult(entries=(), errors=())
 
-        results: Dict[int, ResolvedPackage] = {}
-        errors: List[Tuple[str, str]] = []
+        results: dict[int, ResolvedPackage] = {}
+        errors: list[tuple[str, str]] = []
 
         # Eagerly resolve auth + create the shared RefResolver before
         # spawning workers -- avoids a race on _ensure_auth() and
         # matches the pattern used in _prefetch_metadata().
         self._get_resolver()
 
-        with ThreadPoolExecutor(
-            max_workers=min(self._options.concurrency, len(entries))
-        ) as pool:
+        with ThreadPoolExecutor(max_workers=min(self._options.concurrency, len(entries))) as pool:
             future_to_index = {
-                pool.submit(self._resolve_entry, entry): idx
-                for idx, entry in enumerate(entries)
+                pool.submit(self._resolve_entry, entry): idx for idx, entry in enumerate(entries)
             }
             for future in as_completed(future_to_index):
                 idx = future_to_index[future]
@@ -463,7 +524,7 @@ class MarketplaceBuilder:
                         errors.append((entry.name, str(exc)))
                     else:
                         raise
-                except Exception as exc:  # noqa: BLE001 -- thread-pool catch-all wraps to BuildError
+                except Exception as exc:
                     logger.debug("Unexpected error resolving '%s'", entry.name, exc_info=True)
                     if self._options.continue_on_error:
                         errors.append((entry.name, str(exc)))
@@ -474,7 +535,7 @@ class MarketplaceBuilder:
                         ) from exc
 
         # Return in yml order
-        ordered: List[ResolvedPackage] = []
+        ordered: list[ResolvedPackage] = []
         for idx in range(len(entries)):
             if idx in results:
                 ordered.append(results[idx])
@@ -482,7 +543,7 @@ class MarketplaceBuilder:
 
     # -- remote description fetcher -----------------------------------------
 
-    def _fetch_remote_metadata(self, pkg: ResolvedPackage) -> Optional[Dict[str, str]]:
+    def _fetch_remote_metadata(self, pkg: ResolvedPackage) -> dict[str, str] | None:
         """Best-effort: fetch ``description`` and ``version`` from the
         package's remote ``apm.yml``.
 
@@ -524,25 +585,17 @@ class MarketplaceBuilder:
 
             if self._host == "github.com":
                 # github.com -- use fast raw.githubusercontent.com CDN
-                url = (
-                    f"https://raw.githubusercontent.com/"
-                    f"{pkg.source_repo}/{pkg.sha}/{file_path}"
-                )
-                req = urllib.request.Request(url)
+                url = f"https://raw.githubusercontent.com/{pkg.source_repo}/{pkg.sha}/{file_path}"
+                req = urllib.request.Request(url)  # noqa: S310
                 if self._github_token:
                     req.add_header("Authorization", f"token {self._github_token}")
             else:
                 # GHES / GHE Cloud -- use REST API
                 api_base = (
-                    self._host_info.api_base
-                    if self._host_info
-                    else None
+                    self._host_info.api_base if self._host_info else None
                 ) or f"https://{self._host}/api/v3"
-                url = (
-                    f"{api_base}/repos/{pkg.source_repo}/contents/{file_path}"
-                    f"?ref={pkg.sha}"
-                )
-                req = urllib.request.Request(url)
+                url = f"{api_base}/repos/{pkg.source_repo}/contents/{file_path}?ref={pkg.sha}"
+                req = urllib.request.Request(url)  # noqa: S310
                 req.add_header("Accept", "application/vnd.github.raw")
                 if self._github_token:
                     req.add_header("Authorization", f"token {self._github_token}")
@@ -552,7 +605,7 @@ class MarketplaceBuilder:
             data = yaml.safe_load(raw)
             if not isinstance(data, dict):
                 return None
-            result: Dict[str, str] = {}
+            result: dict[str, str] = {}
             desc = data.get("description")
             if isinstance(desc, str) and desc:
                 result["description"] = desc
@@ -568,7 +621,7 @@ class MarketplaceBuilder:
                     ", ".join(result.keys()),
                 )
                 return result
-        except Exception:  # noqa: BLE001 -- best-effort enrichment
+        except Exception:
             logger.debug(
                 "Could not fetch remote metadata for %s",
                 pkg.name,
@@ -576,7 +629,7 @@ class MarketplaceBuilder:
             )
         return None
 
-    def _resolve_github_token(self) -> Optional[str]:
+    def _resolve_github_token(self) -> str | None:
         """Resolve a GitHub token using ``AuthResolver``.
 
         Called once before concurrent fetches.  Returns the token string
@@ -598,13 +651,11 @@ class MarketplaceBuilder:
             if ctx.token:
                 logger.debug("Resolved GitHub token for metadata fetch (source=%s)", ctx.source)
                 return ctx.token
-        except Exception:  # noqa: BLE001 -- best-effort
+        except Exception:
             logger.debug("Could not resolve GitHub token for metadata fetch", exc_info=True)
         return None
 
-    def _prefetch_metadata(
-        self, resolved: List[ResolvedPackage]
-    ) -> Dict[str, Dict[str, str]]:
+    def _prefetch_metadata(self, resolved: list[ResolvedPackage]) -> dict[str, dict[str, str]]:
         """Concurrently fetch remote metadata for all packages.
 
         Returns a mapping of ``{package_name: {"description": ..., "version": ...}}``
@@ -625,12 +676,11 @@ class MarketplaceBuilder:
         # Resolve token once -- threads read self._github_token (immutable).
         self._ensure_auth()
 
-        results: Dict[str, Dict[str, str]] = {}
+        results: dict[str, dict[str, str]] = {}
         workers = min(self._options.concurrency, len(remote))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             future_to_name = {
-                pool.submit(self._fetch_remote_metadata, pkg): pkg.name
-                for pkg in remote
+                pool.submit(self._fetch_remote_metadata, pkg): pkg.name for pkg in remote
             }
             for future in as_completed(future_to_name):
                 name = future_to_name[future]
@@ -638,15 +688,13 @@ class MarketplaceBuilder:
                     meta = future.result()
                     if meta:
                         results[name] = meta
-                except Exception:  # noqa: BLE001 -- best-effort
+                except Exception:
                     pass
         return results
 
     # -- composition --------------------------------------------------------
 
-    def compose_marketplace_json(
-        self, resolved: List[ResolvedPackage]
-    ) -> Dict[str, Any]:
+    def compose_marketplace_json(self, resolved: list[ResolvedPackage]) -> dict[str, Any]:
         """Produce an Anthropic-compliant marketplace.json dict.
 
         All APM-only fields are stripped.  Key order follows the Anthropic
@@ -669,11 +717,9 @@ class MarketplaceBuilder:
 
         # Build a name -> entry map so we can reach back for local-package
         # description / homepage that came from the yml itself.
-        entry_by_name: Dict[str, PackageEntry] = {
-            e.name: e for e in yml.packages
-        }
+        entry_by_name: dict[str, PackageEntry] = {e.name: e for e in yml.packages}
 
-        doc: Dict[str, Any] = OrderedDict()
+        doc: dict[str, Any] = OrderedDict()
         doc["name"] = yml.name
         # Top-level description / version are emitted only when explicitly
         # set in the marketplace block (or in a legacy marketplace.yml).
@@ -685,7 +731,7 @@ class MarketplaceBuilder:
             doc["version"] = yml.version
 
         # Owner -- omit empty optional sub-fields
-        owner_dict: Dict[str, Any] = OrderedDict()
+        owner_dict: dict[str, Any] = OrderedDict()
         owner_dict["name"] = yml.owner.name
         if yml.owner.email:
             owner_dict["email"] = yml.owner.email
@@ -698,53 +744,155 @@ class MarketplaceBuilder:
             doc["metadata"] = yml.metadata
 
         # Plugins (packages -> plugins)
-        plugins: List[Dict[str, Any]] = []
+        plugins: list[dict[str, Any]] = []
+        diagnostics: list[BuildDiagnostic] = []
+        plugin_root = yml.metadata.get("pluginRoot", "")
+        strip_count = 0
+        override_count = 0
+
         for pkg in resolved:
-            plugin: Dict[str, Any] = OrderedDict()
+            plugin: dict[str, Any] = OrderedDict()
             plugin["name"] = pkg.name
 
             entry = entry_by_name.get(pkg.name)
             is_local = entry is not None and entry.is_local
 
+            # -- description / version (with curator-wins override for remote) --
             if is_local:
-                # Local packages: description/version come from the yml
-                # entry itself (not a remote fetch).
                 if entry.description:
                     plugin["description"] = entry.description
                 if entry.version:
                     plugin["version"] = entry.version
             else:
                 meta = remote_metadata.get(pkg.name, {})
-                if meta.get("description"):
+                # Curator-wins: entry-level value overrides remote-fetched
+                if entry and entry.description:
+                    plugin["description"] = entry.description
+                    remote_desc = meta.get("description", "")
+                    if remote_desc and remote_desc != entry.description:
+                        override_count += 1
+                        diagnostics.append(
+                            BuildDiagnostic(
+                                level="verbose",
+                                message=(
+                                    f"[i] Package '{pkg.name}': using curator "
+                                    f"description (remote: "
+                                    f"'{remote_desc[:40]}')"
+                                ),
+                            )
+                        )
+                elif meta.get("description"):
                     plugin["description"] = meta["description"]
-                if meta.get("version"):
+
+                if entry and _is_display_version(entry.version):
+                    plugin["version"] = entry.version
+                    remote_ver = meta.get("version", "")
+                    if remote_ver and remote_ver != entry.version:
+                        override_count += 1
+                        diagnostics.append(
+                            BuildDiagnostic(
+                                level="verbose",
+                                message=(
+                                    f"[i] Package '{pkg.name}': using curator "
+                                    f"version '{entry.version}' "
+                                    f"(remote: '{remote_ver}')"
+                                ),
+                            )
+                        )
+                elif meta.get("version"):
                     plugin["version"] = meta["version"]
 
+            # -- author / license / repository (curator-only pass-through) --
+            # ``author`` is normalized to an object by the loader, so we can
+            # serialize it as-is into the JSON. dict() drops the read-only
+            # Mapping wrapper while preserving insertion order (3.7+).
+            if entry and entry.author:
+                plugin["author"] = dict(entry.author)
+            if entry and entry.license:
+                plugin["license"] = entry.license
+            if entry and entry.repository:
+                plugin["repository"] = entry.repository
+
+            # -- tags --
             if pkg.tags:
                 plugin["tags"] = list(pkg.tags)
 
+            # -- homepage (local only) --
+            if is_local and entry.homepage:
+                plugin["homepage"] = entry.homepage
+
+            # -- source --
             if is_local:
-                # Anthropic spec: local sources are emitted as plain
-                # strings (the path), not the {type, repository, ref,
-                # commit} object used for remote sources.
-                plugin["source"] = entry.source
-                if entry.homepage:
-                    plugin["homepage"] = entry.homepage
+                source_value = entry.source
+                if plugin_root:
+                    try:
+                        source_value = _subtract_plugin_root(entry.source, plugin_root)
+                        strip_count += 1
+                        diagnostics.append(
+                            BuildDiagnostic(
+                                level="verbose",
+                                message=(
+                                    f"[i] Package '{pkg.name}': stripped "
+                                    f"pluginRoot -- '{entry.source}' -> "
+                                    f"'{source_value}'"
+                                ),
+                            )
+                        )
+                    except ValueError:
+                        # W1: source outside pluginRoot -- emit as-is
+                        source_value = entry.source
+                        diagnostics.append(
+                            BuildDiagnostic(
+                                level="warning",
+                                message=(
+                                    f"[!] Package '{pkg.name}': source "
+                                    f"'{entry.source}' is outside pluginRoot "
+                                    f"'{plugin_root}' -- emitted as-is"
+                                ),
+                            )
+                        )
+                plugin["source"] = source_value
             else:
-                source: Dict[str, Any] = OrderedDict()
-                source["type"] = "github"
-                source["repository"] = pkg.source_repo
+                # Remote source: emit per the official Claude Code marketplace
+                # schema (json.schemastore.org/claude-code-marketplace.json).
+                # Subdirs use the ``git-subdir`` form; everything else uses
+                # ``github`` shorthand. Field names: ``source``/``repo``/``sha``
+                # (NOT ``type``/``repository``/``commit``).
+                source_obj: dict[str, Any] = OrderedDict()
                 if pkg.subdir:
-                    source["path"] = pkg.subdir
-                source["ref"] = pkg.ref
-                source["commit"] = pkg.sha
-                plugin["source"] = source
+                    source_obj["source"] = "git-subdir"
+                    source_obj["url"] = pkg.source_repo
+                    source_obj["path"] = pkg.subdir
+                else:
+                    source_obj["source"] = "github"
+                    source_obj["repo"] = pkg.source_repo
+                if pkg.ref:
+                    source_obj["ref"] = pkg.ref
+                if pkg.sha:
+                    source_obj["sha"] = pkg.sha
+                plugin["source"] = source_obj
 
             plugins.append(plugin)
 
+        # Verbose summary line
+        summary_parts: list[str] = []
+        if plugin_root and strip_count > 0:
+            summary_parts.append(f"stripped from {strip_count} local source(s)")
+        if override_count > 0:
+            summary_parts.append(
+                f"{override_count} remote entry(ies) used curator-supplied overrides"
+            )
+        if summary_parts:
+            diagnostics.append(
+                BuildDiagnostic(
+                    level="verbose",
+                    message="pluginRoot: " + "; ".join(summary_parts),
+                )
+            )
+
         # Defence-in-depth: detect duplicate plugin names and record
         # warnings so the command layer can alert the maintainer.
-        seen_names: Dict[str, str] = {}
+        seen_names: dict[str, str] = {}
         build_warnings: list[str] = []
         for p in plugins:
             pname = p["name"]
@@ -752,7 +900,10 @@ class MarketplaceBuilder:
             if isinstance(src, str):
                 src_label = src
             else:
-                src_label = src.get("path") or src.get("repository", "?")
+                # Prefer ``path`` (git-subdir form) for disambiguation, then
+                # fall back to ``repo`` (github form, post-1061) or
+                # ``repository`` (legacy emit shape, kept for back-compat).
+                src_label = src.get("path") or src.get("repo") or src.get("repository", "?")
             if pname in seen_names:
                 build_warnings.append(
                     f"Duplicate package name '{pname}': "
@@ -762,6 +913,7 @@ class MarketplaceBuilder:
             else:
                 seen_names[pname] = src_label
         self._compose_warnings = tuple(build_warnings)
+        self._compose_diagnostics = tuple(diagnostics)
 
         doc["plugins"] = plugins
         return doc
@@ -770,9 +922,9 @@ class MarketplaceBuilder:
 
     @staticmethod
     def _compute_diff(
-        old_json: Optional[Dict[str, Any]],
-        new_json: Dict[str, Any],
-    ) -> Tuple[int, int, int, int]:
+        old_json: dict[str, Any] | None,
+        new_json: dict[str, Any],
+    ) -> tuple[int, int, int, int]:
         """Compare old vs new marketplace.json and classify each plugin.
 
         Returns (unchanged, added, updated, removed) counts.
@@ -780,24 +932,27 @@ class MarketplaceBuilder:
         if old_json is None:
             return (0, len(new_json.get("plugins", [])), 0, 0)
 
-        old_plugins: Dict[str, str] = {}
+        old_plugins: dict[str, str] = {}
         for p in old_json.get("plugins", []):
             name = p.get("name", "")
             sha = ""
             src = p.get("source", {})
             if isinstance(src, dict):
-                sha = src.get("commit", "")
+                # Accept both the new ``sha`` field (Claude-spec compliant)
+                # and the legacy ``commit`` field for backward-compatibility
+                # with marketplace.json files written before this PR.
+                sha = src.get("sha") or src.get("commit", "")
             elif isinstance(src, str):
                 sha = src  # local-path packages: use the path string itself
             old_plugins[name] = sha
 
-        new_plugins: Dict[str, str] = {}
+        new_plugins: dict[str, str] = {}
         for p in new_json.get("plugins", []):
             name = p.get("name", "")
             sha = ""
             src = p.get("source", {})
             if isinstance(src, dict):
-                sha = src.get("commit", "")
+                sha = src.get("sha") or src.get("commit", "")
             elif isinstance(src, str):
                 sha = src
             new_plugins[name] = sha
@@ -824,7 +979,7 @@ class MarketplaceBuilder:
     # -- atomic write -------------------------------------------------------
 
     @staticmethod
-    def _serialize_json(data: Dict[str, Any]) -> str:
+    def _serialize_json(data: dict[str, Any]) -> str:
         """Serialize to JSON with 2-space indent, LF endings, trailing newline."""
         return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
@@ -833,7 +988,7 @@ class MarketplaceBuilder:
         """Write *content* to *path* atomically via tmp + rename."""
         atomic_write(path, content)
 
-    def _load_existing_json(self, path: Path) -> Optional[Dict[str, Any]]:
+    def _load_existing_json(self, path: Path) -> dict[str, Any] | None:
         """Load existing marketplace.json for diff, or None."""
         if not path.exists():
             return None
@@ -859,6 +1014,7 @@ class MarketplaceBuilder:
 
         new_json = self.compose_marketplace_json(resolved)
         build_warnings = getattr(self, "_compose_warnings", ())
+        build_diagnostics = getattr(self, "_compose_diagnostics", ())
         output_path = self._output_path()
 
         # Load existing for diff
@@ -879,6 +1035,7 @@ class MarketplaceBuilder:
             resolved=tuple(resolved),
             errors=tuple(errors),
             warnings=tuple(build_warnings),
+            diagnostics=tuple(build_diagnostics),
             unchanged_count=unchanged,
             added_count=added,
             updated_count=updated,
@@ -896,7 +1053,7 @@ class MarketplaceBuilder:
 def _strip_ref_prefix(refname: str) -> str:
     """Strip ``refs/tags/`` or ``refs/heads/`` prefix."""
     if refname.startswith("refs/tags/"):
-        return refname[len("refs/tags/"):]
+        return refname[len("refs/tags/") :]
     if refname.startswith("refs/heads/"):
-        return refname[len("refs/heads/"):]
+        return refname[len("refs/heads/") :]
     return refname

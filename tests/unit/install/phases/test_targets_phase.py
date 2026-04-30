@@ -1,9 +1,10 @@
 """Tests for apm_cli.install.phases.targets (project-scope gate, auto-create)."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, replace  # noqa: F401
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional  # noqa: F401, UP035
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -11,7 +12,6 @@ import pytest
 from apm_cli.core.scope import InstallScope
 from apm_cli.integration.copilot_cowork_paths import CoworkResolutionError
 from apm_cli.integration.targets import KNOWN_TARGETS, TargetProfile
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -33,7 +33,7 @@ def inject_config(monkeypatch: pytest.MonkeyPatch):
     """Directly inject a dict into the config cache -- no disk I/O."""
     import apm_cli.config as _conf
 
-    def _set(cfg: Dict[str, Any]) -> None:
+    def _set(cfg: dict[str, Any]) -> None:
         monkeypatch.setattr(_conf, "_config_cache", cfg)
 
     return _set
@@ -54,7 +54,7 @@ def _make_cowork_target(cowork_root: Path) -> TargetProfile:
 def _make_ctx(
     tmp_path: Path,
     scope: InstallScope = InstallScope.PROJECT,
-    target_override: Optional[str] = None,
+    target_override: str | None = None,
 ) -> MagicMock:
     """Build a minimal ctx mock for phase tests.
 
@@ -94,15 +94,19 @@ class TestProjectScopeGateForCowork:
         cowork_target = _make_cowork_target(tmp_path / "cowork")
         ctx = _make_ctx(tmp_path, scope=InstallScope.PROJECT)
 
-        with patch(
-            "apm_cli.integration.targets.resolve_targets",
-            return_value=[cowork_target],
-        ), patch(
-            "apm_cli.core.target_detection.detect_target",
+        with (
+            patch(
+                "apm_cli.integration.targets.resolve_targets",
+                return_value=[cowork_target],
+            ),
+            patch(
+                "apm_cli.core.target_detection.detect_target",
+            ),
+            pytest.raises(SystemExit),
         ):
-            with pytest.raises(SystemExit):
-                from apm_cli.install.phases.targets import run
-                run(ctx)
+            from apm_cli.install.phases.targets import run
+
+            run(ctx)
 
     def test_project_scope_with_cowork_logs_error_before_exit(
         self, tmp_path: Path, inject_config: Any
@@ -111,15 +115,19 @@ class TestProjectScopeGateForCowork:
         cowork_target = _make_cowork_target(tmp_path / "cowork")
         ctx = _make_ctx(tmp_path, scope=InstallScope.PROJECT)
 
-        with patch(
-            "apm_cli.integration.targets.resolve_targets",
-            return_value=[cowork_target],
-        ), patch(
-            "apm_cli.core.target_detection.detect_target",
+        with (
+            patch(
+                "apm_cli.integration.targets.resolve_targets",
+                return_value=[cowork_target],
+            ),
+            patch(
+                "apm_cli.core.target_detection.detect_target",
+            ),
+            pytest.raises(SystemExit),
         ):
-            with pytest.raises(SystemExit):
-                from apm_cli.install.phases.targets import run
-                run(ctx)
+            from apm_cli.install.phases.targets import run
+
+            run(ctx)
         # Check that the error was logged with --global hint
         error_calls = ctx.logger.error.call_args_list
         assert len(error_calls) >= 1
@@ -133,15 +141,19 @@ class TestProjectScopeGateForCowork:
         cowork_target = _make_cowork_target(tmp_path / "cowork")
         ctx = _make_ctx(tmp_path, scope=InstallScope.PROJECT)
 
-        with patch(
-            "apm_cli.integration.targets.resolve_targets",
-            return_value=[cowork_target],
-        ), patch(
-            "apm_cli.core.target_detection.detect_target",
+        with (
+            patch(
+                "apm_cli.integration.targets.resolve_targets",
+                return_value=[cowork_target],
+            ),
+            patch(
+                "apm_cli.core.target_detection.detect_target",
+            ),
+            pytest.raises(SystemExit),
         ):
-            with pytest.raises(SystemExit):
-                from apm_cli.install.phases.targets import run
-                run(ctx)
+            from apm_cli.install.phases.targets import run
+
+            run(ctx)
         assert not (ctx.project_root / "copilot-cowork").exists()
 
     def test_user_scope_with_cowork_does_not_raise(
@@ -151,13 +163,17 @@ class TestProjectScopeGateForCowork:
         cowork_target = _make_cowork_target(tmp_path / "cowork")
         ctx = _make_ctx(tmp_path, scope=InstallScope.USER)
 
-        with patch(
-            "apm_cli.integration.targets.resolve_targets",
-            return_value=[cowork_target],
-        ), patch(
-            "apm_cli.core.target_detection.detect_target",
+        with (
+            patch(
+                "apm_cli.integration.targets.resolve_targets",
+                return_value=[cowork_target],
+            ),
+            patch(
+                "apm_cli.core.target_detection.detect_target",
+            ),
         ):
             from apm_cli.install.phases.targets import run
+
             run(ctx)  # Should not raise
 
     def test_project_scope_non_cowork_target_unaffected(
@@ -167,13 +183,17 @@ class TestProjectScopeGateForCowork:
         copilot = KNOWN_TARGETS["copilot"]
         ctx = _make_ctx(tmp_path, scope=InstallScope.PROJECT)
 
-        with patch(
-            "apm_cli.integration.targets.resolve_targets",
-            return_value=[copilot],
-        ), patch(
-            "apm_cli.core.target_detection.detect_target",
+        with (
+            patch(
+                "apm_cli.integration.targets.resolve_targets",
+                return_value=[copilot],
+            ),
+            patch(
+                "apm_cli.core.target_detection.detect_target",
+            ),
         ):
             from apm_cli.install.phases.targets import run
+
             run(ctx)  # Should not raise
 
 
@@ -185,39 +205,43 @@ class TestProjectScopeGateForCowork:
 class TestAutoCreateSkipForDynamicRoot:
     """Tests for auto-create directory skipping with dynamic-root targets."""
 
-    def test_dynamic_root_target_skips_mkdir(
-        self, tmp_path: Path, inject_config: Any
-    ) -> None:
+    def test_dynamic_root_target_skips_mkdir(self, tmp_path: Path, inject_config: Any) -> None:
         inject_config({"experimental": {"copilot_cowork": True}})
         cowork_target = _make_cowork_target(tmp_path / "cowork")
         ctx = _make_ctx(tmp_path, scope=InstallScope.USER)
         ctx.target_override = "copilot-cowork"
 
-        with patch(
-            "apm_cli.integration.targets.resolve_targets",
-            return_value=[cowork_target],
-        ), patch(
-            "apm_cli.core.target_detection.detect_target",
+        with (
+            patch(
+                "apm_cli.integration.targets.resolve_targets",
+                return_value=[cowork_target],
+            ),
+            patch(
+                "apm_cli.core.target_detection.detect_target",
+            ),
         ):
             from apm_cli.install.phases.targets import run
+
             run(ctx)
         assert not (ctx.project_root / "copilot-cowork").exists()
 
-    def test_static_root_target_does_mkdir(
-        self, tmp_path: Path, inject_config: Any
-    ) -> None:
+    def test_static_root_target_does_mkdir(self, tmp_path: Path, inject_config: Any) -> None:
         inject_config({})
         copilot = KNOWN_TARGETS["copilot"]
         ctx = _make_ctx(tmp_path, scope=InstallScope.PROJECT)
         ctx.target_override = "copilot"
 
-        with patch(
-            "apm_cli.integration.targets.resolve_targets",
-            return_value=[copilot],
-        ), patch(
-            "apm_cli.core.target_detection.detect_target",
+        with (
+            patch(
+                "apm_cli.integration.targets.resolve_targets",
+                return_value=[copilot],
+            ),
+            patch(
+                "apm_cli.core.target_detection.detect_target",
+            ),
         ):
             from apm_cli.install.phases.targets import run
+
             run(ctx)
         assert (ctx.project_root / ".github").exists()
 
@@ -230,20 +254,22 @@ class TestAutoCreateSkipForDynamicRoot:
 class TestCoworkResolutionErrorHandling:
     """Tests for CoworkResolutionError catch in phases/targets.py run()."""
 
-    def test_resolution_error_raises_system_exit(
-        self, tmp_path: Path, inject_config: Any
-    ) -> None:
+    def test_resolution_error_raises_system_exit(self, tmp_path: Path, inject_config: Any) -> None:
         inject_config({"experimental": {"copilot_cowork": True}})
         ctx = _make_ctx(tmp_path, scope=InstallScope.USER, target_override="copilot-cowork")
 
-        with patch(
-            "apm_cli.integration.targets.resolve_targets",
-            side_effect=CoworkResolutionError("Multiple OneDrive mounts detected"),
-        ), patch(
-            "apm_cli.core.target_detection.detect_target",
+        with (
+            patch(
+                "apm_cli.integration.targets.resolve_targets",
+                side_effect=CoworkResolutionError("Multiple OneDrive mounts detected"),
+            ),
+            patch(
+                "apm_cli.core.target_detection.detect_target",
+            ),
         ):
             with pytest.raises(SystemExit) as exc_info:
                 from apm_cli.install.phases.targets import run
+
                 run(ctx)
             assert exc_info.value.code == 1
 
@@ -254,15 +280,19 @@ class TestCoworkResolutionErrorHandling:
         ctx = _make_ctx(tmp_path, scope=InstallScope.USER, target_override="copilot-cowork")
         error_msg = "Multiple OneDrive mounts detected:\n  - /a\n  - /b"
 
-        with patch(
-            "apm_cli.integration.targets.resolve_targets",
-            side_effect=CoworkResolutionError(error_msg),
-        ), patch(
-            "apm_cli.core.target_detection.detect_target",
+        with (
+            patch(
+                "apm_cli.integration.targets.resolve_targets",
+                side_effect=CoworkResolutionError(error_msg),
+            ),
+            patch(
+                "apm_cli.core.target_detection.detect_target",
+            ),
+            pytest.raises(SystemExit),
         ):
-            with pytest.raises(SystemExit):
-                from apm_cli.install.phases.targets import run
-                run(ctx)
+            from apm_cli.install.phases.targets import run
+
+            run(ctx)
 
         ctx.logger.error.assert_called_once_with(error_msg, symbol="cross")
 
@@ -273,14 +303,18 @@ class TestCoworkResolutionErrorHandling:
         ctx = _make_ctx(tmp_path, scope=InstallScope.USER, target_override="copilot-cowork")
         ctx.logger = None
 
-        with patch(
-            "apm_cli.integration.targets.resolve_targets",
-            side_effect=CoworkResolutionError("test"),
-        ), patch(
-            "apm_cli.core.target_detection.detect_target",
+        with (
+            patch(
+                "apm_cli.integration.targets.resolve_targets",
+                side_effect=CoworkResolutionError("test"),
+            ),
+            patch(
+                "apm_cli.core.target_detection.detect_target",
+            ),
         ):
             with pytest.raises(SystemExit) as exc_info:
                 from apm_cli.install.phases.targets import run
+
                 run(ctx)
             assert exc_info.value.code == 1
 
@@ -313,23 +347,23 @@ class TestCoworkLinuxSpecificMessage:
 
         non_cowork = [KNOWN_TARGETS["copilot"]]
 
-        with patch(
-            "apm_cli.integration.targets.resolve_targets",
-            return_value=non_cowork,
-        ), patch(
-            "apm_cli.core.target_detection.detect_target",
-        ), patch(
-            "sys.platform", platform_value
+        with (
+            patch(
+                "apm_cli.integration.targets.resolve_targets",
+                return_value=non_cowork,
+            ),
+            patch(
+                "apm_cli.core.target_detection.detect_target",
+            ),
+            patch("sys.platform", platform_value),
+            pytest.raises(SystemExit),
         ):
-            with pytest.raises(SystemExit):
-                from apm_cli.install.phases.targets import run
+            from apm_cli.install.phases.targets import run
 
-                run(ctx)
+            run(ctx)
         return ctx
 
-    def test_linux_message_contains_no_auto_detection(
-        self, tmp_path: Path, inject_config
-    ) -> None:
+    def test_linux_message_contains_no_auto_detection(self, tmp_path: Path, inject_config) -> None:
         ctx = self._run_cowork_no_onedrive(tmp_path, inject_config, "linux")
         msg = ctx.logger.error.call_args[0][0]
         assert "no auto-detection on Linux" in msg

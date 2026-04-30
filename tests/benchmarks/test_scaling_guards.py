@@ -14,22 +14,22 @@ caught.
 
 import os
 import statistics
-import tempfile
+import tempfile  # noqa: F401
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field  # noqa: F401
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional  # noqa: F401, UP035
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _median_time(fn, *, repeats=5):
     """Return the median wall-clock time of *fn* over *repeats* runs."""
-    times: List[float] = []
+    times: list[float] = []
     for _ in range(repeats):
         t0 = time.perf_counter()
         fn()
@@ -42,23 +42,24 @@ def _median_time(fn, *, repeats=5):
 # 1. Phase 2 -- Children-index scaling (_build_children_index)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _FakeDep:
     """Minimal stand-in for ``LockedDependency`` used by ``_build_children_index``."""
 
     repo_url: str
-    resolved_by: Optional[str] = None
-    local_path: Optional[str] = None
+    resolved_by: str | None = None
+    local_path: str | None = None
     depth: int = 1
 
 
 class _FakeLockFile:
     """Minimal stand-in for ``LockFile`` exposing ``get_package_dependencies``."""
 
-    def __init__(self, deps: List[_FakeDep]):
+    def __init__(self, deps: list[_FakeDep]):
         self._deps = deps
 
-    def get_package_dependencies(self) -> List[_FakeDep]:
+    def get_package_dependencies(self) -> list[_FakeDep]:
         return self._deps
 
 
@@ -68,12 +69,10 @@ def _make_lockfile(n: int) -> _FakeLockFile:
     Half the deps are resolved_by a parent URL, the other half are
     top-level (resolved_by=None) to mirror realistic lockfiles.
     """
-    deps: List[_FakeDep] = []
+    deps: list[_FakeDep] = []
     for i in range(n):
         parent = f"org/parent-{i % 10}" if i % 2 == 0 else None
-        deps.append(
-            _FakeDep(repo_url=f"org/repo-{i}", resolved_by=parent)
-        )
+        deps.append(_FakeDep(repo_url=f"org/repo-{i}", resolved_by=parent))
     return _FakeLockFile(deps)
 
 
@@ -104,6 +103,7 @@ class TestChildrenIndexScaling:
 # ---------------------------------------------------------------------------
 # 2. Phase 6 -- Discovery scanning scaling (find_primitive_files)
 # ---------------------------------------------------------------------------
+
 
 def _create_file_tree(root: str, n: int) -> None:
     """Populate *root* with *n* files spread across subdirectories.
@@ -142,12 +142,8 @@ class TestDiscoveryScaling:
         _create_file_tree(small_dir, 100)
         _create_file_tree(large_dir, 1000)
 
-        t_small = _median_time(
-            lambda: find_primitive_files(small_dir, patterns)
-        )
-        t_large = _median_time(
-            lambda: find_primitive_files(large_dir, patterns)
-        )
+        t_small = _median_time(lambda: find_primitive_files(small_dir, patterns))
+        t_large = _median_time(lambda: find_primitive_files(large_dir, patterns))
 
         if t_small < 1e-7:
             pytest.skip("below measurement threshold -- too fast to measure reliably")
@@ -163,6 +159,7 @@ class TestDiscoveryScaling:
 # ---------------------------------------------------------------------------
 # 3. Console singleton scaling (_get_console)
 # ---------------------------------------------------------------------------
+
 
 class TestConsoleSingletonScaling:
     """Repeated _get_console() calls must be O(1) per call after init."""
@@ -202,6 +199,7 @@ class TestConsoleSingletonScaling:
 # 4. compute_package_hash scaling
 # ---------------------------------------------------------------------------
 
+
 def _populate_hash_dir(base: Path, file_count: int) -> None:
     """Create *file_count* files (~1 KB each) under *base*."""
     base.mkdir(parents=True, exist_ok=True)
@@ -240,9 +238,10 @@ class TestComputePackageHashScaling:
 # 5. is_semantically_equivalent scaling
 # ---------------------------------------------------------------------------
 
+
 def _make_equiv_lockfile_pair(n: int, files_per_dep: int = 10):
     """Build two identical LockFiles with *n* deps, each carrying *files_per_dep* files."""
-    from apm_cli.deps.lockfile import LockFile, LockedDependency
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
 
     def _build(count: int) -> "LockFile":
         lf = LockFile()
@@ -251,8 +250,7 @@ def _make_equiv_lockfile_pair(n: int, files_per_dep: int = 10):
                 repo_url=f"https://github.com/org/pkg-{i}",
                 depth=(i % 5) + 1,
                 deployed_files=[
-                    f".github/agents/agent-{i}-{j}.agent.md"
-                    for j in range(files_per_dep)
+                    f".github/agents/agent-{i}-{j}.agent.md" for j in range(files_per_dep)
                 ],
                 deployed_file_hashes={
                     f".github/agents/agent-{i}-{j}.agent.md": f"sha256:{'ab' * 32}"
@@ -272,12 +270,8 @@ class TestSemanticEquivalenceScaling:
         lf1_small, lf2_small = _make_equiv_lockfile_pair(50)
         lf1_large, lf2_large = _make_equiv_lockfile_pair(500)
 
-        t_small = _median_time(
-            lambda: lf1_small.is_semantically_equivalent(lf2_small)
-        )
-        t_large = _median_time(
-            lambda: lf1_large.is_semantically_equivalent(lf2_large)
-        )
+        t_small = _median_time(lambda: lf1_small.is_semantically_equivalent(lf2_small))
+        t_large = _median_time(lambda: lf1_large.is_semantically_equivalent(lf2_large))
 
         if t_small < 1e-7:
             pytest.skip("below measurement threshold -- too fast to measure reliably")
@@ -293,6 +287,7 @@ class TestSemanticEquivalenceScaling:
 # ---------------------------------------------------------------------------
 # 6. should_exclude scaling with ** patterns
 # ---------------------------------------------------------------------------
+
 
 def _make_test_tree(base: Path, depth: int) -> Path:
     """Create a file at the given depth under *base* and return its path.
@@ -334,9 +329,7 @@ class TestShouldExcludeScaling:
         t_shallow = _median_time(
             lambda: should_exclude(shallow_file, tmp_path / "shallow", pattern)
         )
-        t_deep = _median_time(
-            lambda: should_exclude(deep_file, tmp_path / "deep", pattern)
-        )
+        t_deep = _median_time(lambda: should_exclude(deep_file, tmp_path / "deep", pattern))
 
         if t_shallow < 1e-7:
             pytest.skip("below measurement threshold -- too fast to measure reliably")

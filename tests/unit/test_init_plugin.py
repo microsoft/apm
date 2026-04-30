@@ -9,13 +9,12 @@ import os
 import tempfile
 from pathlib import Path
 
-import pytest
+import pytest  # noqa: F401
 import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.commands._helpers import _validate_plugin_name
-
 
 # ---------------------------------------------------------------------------
 # CLI integration tests
@@ -256,9 +255,7 @@ class TestInitPlugin:
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
-                result = self.runner.invoke(
-                    cli, ["init", "cool-plugin", "--plugin", "--yes"]
-                )
+                result = self.runner.invoke(cli, ["init", "cool-plugin", "--plugin", "--yes"])
                 assert result.exit_code == 0, result.output
 
                 project_path = Path(tmp_dir) / "cool-plugin"

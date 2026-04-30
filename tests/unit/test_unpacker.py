@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from apm_cli.bundle.unpacker import unpack_bundle
-from apm_cli.deps.lockfile import LockFile, LockedDependency
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 
 
 def _build_bundle_dir(tmp_path: Path, deployed_files: list[str]) -> Path:
@@ -169,7 +169,9 @@ class TestUnpackBundle:
 
         unpack_bundle(bundle, output)
 
-        assert (output / ".github" / "agents" / "a.md").read_text() == "content of .github/agents/a.md"
+        assert (
+            output / ".github" / "agents" / "a.md"
+        ).read_text() == "content of .github/agents/a.md"
 
     def test_unpack_lockfile_not_scattered(self, tmp_path):
         deployed = [".github/agents/a.md"]
@@ -236,12 +238,8 @@ class TestUnpackBundle:
             p.write_text(f"content of {f}")
 
         lockfile = LockFile()
-        lockfile.add_dependency(
-            LockedDependency(repo_url="org/repo-a", deployed_files=files_a)
-        )
-        lockfile.add_dependency(
-            LockedDependency(repo_url="org/repo-b", deployed_files=files_b)
-        )
+        lockfile.add_dependency(LockedDependency(repo_url="org/repo-a", deployed_files=files_a))
+        lockfile.add_dependency(LockedDependency(repo_url="org/repo-b", deployed_files=files_b))
         lockfile.write(bundle_dir / "apm.lock.yaml")
 
         output = tmp_path / "target"
@@ -315,9 +313,7 @@ class TestUnpackBundle:
         (bundle_dir / ".github" / "agents" / "a.md").write_text("ok")
 
         lockfile = LockFile()
-        lockfile.add_dependency(
-            LockedDependency(repo_url="owner/repo", deployed_files=deployed)
-        )
+        lockfile.add_dependency(LockedDependency(repo_url="owner/repo", deployed_files=deployed))
         lockfile.write(bundle_dir / "apm.lock.yaml")
 
         output = tmp_path / "target"
@@ -349,9 +345,7 @@ class TestUnpackBundle:
         (bundle_dir / ".github" / "agents" / "a.md").write_text("ok")
 
         lockfile = LockFile()
-        lockfile.add_dependency(
-            LockedDependency(repo_url="owner/repo", deployed_files=deployed)
-        )
+        lockfile.add_dependency(LockedDependency(repo_url="owner/repo", deployed_files=deployed))
         # Write using the legacy name to simulate an old bundle
         lockfile.write(bundle_dir / "apm.lock")
 
@@ -403,9 +397,11 @@ class TestUnpackCmdLogging:
 
     def test_unpack_cmd_logs_file_list(self, tmp_path):
         """unpack command outputs each file under its dependency name."""
-        from click.testing import CliRunner
-        from apm_cli.commands.pack import unpack_cmd
         import os
+
+        from click.testing import CliRunner
+
+        from apm_cli.commands.pack import unpack_cmd
 
         deployed = [".github/agents/a.md", ".github/prompts/b.md"]
         bundle = _build_bundle_dir(tmp_path, deployed)
@@ -430,9 +426,11 @@ class TestUnpackCmdLogging:
 
     def test_unpack_cmd_dry_run_logs_files(self, tmp_path):
         """Dry-run output includes per-dependency file listing."""
-        from click.testing import CliRunner
-        from apm_cli.commands.pack import unpack_cmd
         import os
+
+        from click.testing import CliRunner
+
+        from apm_cli.commands.pack import unpack_cmd
 
         deployed = [".github/agents/a.md"]
         bundle = _build_bundle_dir(tmp_path, deployed)
@@ -457,9 +455,11 @@ class TestUnpackCmdLogging:
 
     def test_unpack_cmd_logs_skipped_files(self, tmp_path):
         """Skipped files warning appears when skip_verify allows missing files."""
-        from click.testing import CliRunner
-        from apm_cli.commands.pack import unpack_cmd
         import os
+
+        from click.testing import CliRunner
+
+        from apm_cli.commands.pack import unpack_cmd
 
         deployed = [".github/agents/a.md", ".github/agents/missing.md"]
         bundle_dir = tmp_path / "bundle" / "test-pkg"
@@ -469,9 +469,7 @@ class TestUnpackCmdLogging:
         (bundle_dir / ".github" / "agents" / "a.md").write_text("ok")
 
         lockfile = LockFile()
-        lockfile.add_dependency(
-            LockedDependency(repo_url="owner/repo", deployed_files=deployed)
-        )
+        lockfile.add_dependency(LockedDependency(repo_url="owner/repo", deployed_files=deployed))
         lockfile.write(bundle_dir / "apm.lock.yaml")
 
         output = tmp_path / "target"
@@ -493,9 +491,11 @@ class TestUnpackCmdLogging:
 
     def test_unpack_cmd_multi_dep_logging(self, tmp_path):
         """Multiple dependencies are each logged with their file lists."""
-        from click.testing import CliRunner
-        from apm_cli.commands.pack import unpack_cmd
         import os
+
+        from click.testing import CliRunner
+
+        from apm_cli.commands.pack import unpack_cmd
 
         bundle_dir = tmp_path / "bundle" / "multi-pkg"
         bundle_dir.mkdir(parents=True)
@@ -508,12 +508,8 @@ class TestUnpackCmdLogging:
             p.write_text(f"content of {f}")
 
         lockfile = LockFile()
-        lockfile.add_dependency(
-            LockedDependency(repo_url="org/repo-a", deployed_files=files_a)
-        )
-        lockfile.add_dependency(
-            LockedDependency(repo_url="org/repo-b", deployed_files=files_b)
-        )
+        lockfile.add_dependency(LockedDependency(repo_url="org/repo-a", deployed_files=files_a))
+        lockfile.add_dependency(LockedDependency(repo_url="org/repo-b", deployed_files=files_b))
         lockfile.write(bundle_dir / "apm.lock.yaml")
 
         output = tmp_path / "target"

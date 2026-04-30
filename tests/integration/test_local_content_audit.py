@@ -23,7 +23,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -57,15 +56,11 @@ def _seed_local_content(project: Path) -> None:
     """Create a SKILL.md and an instruction file under .apm/."""
     skill_dir = project / ".apm" / "skills" / "foo"
     skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text(
-        "---\ndescription: foo skill for tests\n---\n# Foo\nbody\n"
-    )
+    (skill_dir / "SKILL.md").write_text("---\ndescription: foo skill for tests\n---\n# Foo\nbody\n")
 
     instr_dir = project / ".apm" / "instructions"
     instr_dir.mkdir(parents=True)
-    (instr_dir / "bar.instructions.md").write_text(
-        "---\napplyTo: '**'\n---\n# Bar\nbody\n"
-    )
+    (instr_dir / "bar.instructions.md").write_text("---\napplyTo: '**'\n---\n# Bar\nbody\n")
 
     # .github/ already-exists triggers copilot target detection (and the
     # default fallback is also copilot, so this is belt-and-suspenders).
@@ -119,8 +114,7 @@ def _audit_json(apm_command: str, project: Path, extra_args=()):
         if idx >= 0:
             payload = json.loads(result.stdout[idx:])
     assert payload is not None, (
-        f"audit JSON parse failed:\nSTDOUT:\n{result.stdout}\n"
-        f"STDERR:\n{result.stderr}"
+        f"audit JSON parse failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
     )
     return result.returncode, payload, result
 
@@ -130,8 +124,7 @@ def _check(payload: dict, name: str) -> dict:
         if c["name"] == name:
             return c
     raise AssertionError(
-        f"check '{name}' not found in payload (have: "
-        f"{[c['name'] for c in payload['checks']]})"
+        f"check '{name}' not found in payload (have: {[c['name'] for c in payload['checks']]})"
     )
 
 
@@ -163,20 +156,14 @@ class TestLocalContentAudit:
         # Both seeded primitives should be deployed under .github/ (copilot
         # target).  Skill goes to .github/skills/foo/, instruction to
         # .github/instructions/bar.instructions.md.
-        assert any(
-            "instructions/bar.instructions.md" in p for p in deployed
-        ), f"instruction not deployed: {deployed}"
-        assert any("skills/foo" in p for p in deployed), (
-            f"skill not deployed: {deployed}"
+        assert any("instructions/bar.instructions.md" in p for p in deployed), (
+            f"instruction not deployed: {deployed}"
         )
+        assert any("skills/foo" in p for p in deployed), f"skill not deployed: {deployed}"
 
         # The instruction file (a regular file) must have a hash entry.
-        instr_keys = [
-            k for k in hashes if k.endswith("bar.instructions.md")
-        ]
-        assert instr_keys, (
-            f"no hash recorded for bar.instructions.md: {list(hashes)}"
-        )
+        instr_keys = [k for k in hashes if k.endswith("bar.instructions.md")]
+        assert instr_keys, f"no hash recorded for bar.instructions.md: {list(hashes)}"
         assert hashes[instr_keys[0]].startswith("sha256:"), (
             f"hash not sha256-prefixed: {hashes[instr_keys[0]]!r}"
         )
@@ -187,9 +174,7 @@ class TestLocalContentAudit:
         _install(apm_command, project)
 
         exit_code, payload, _ = _audit_json(apm_command, project)
-        assert exit_code == 0, (
-            f"audit --ci failed on clean install: {payload}"
-        )
+        assert exit_code == 0, f"audit --ci failed on clean install: {payload}"
         assert payload["passed"] is True
 
         ci = _check(payload, "content-integrity")
@@ -200,8 +185,7 @@ class TestLocalContentAudit:
         # not guarantee CLI-style status markers such as [!].
         assert consent["passed"] is True
         assert "includes:" in consent["message"], (
-            f"expected includes guidance in includes-consent message, got: "
-            f"{consent['message']!r}"
+            f"expected includes guidance in includes-consent message, got: {consent['message']!r}"
         )
         assert "includes: auto" in consent["message"], (
             f"expected auto-includes advisory in includes-consent message, "
@@ -214,28 +198,21 @@ class TestLocalContentAudit:
         _install(apm_command, project)
 
         # Tamper with the deployed copy under .github/.
-        deployed_instr = (
-            project / ".github" / "instructions" / "bar.instructions.md"
-        )
-        assert deployed_instr.exists(), (
-            f"target file missing post-install: {deployed_instr}"
-        )
+        deployed_instr = project / ".github" / "instructions" / "bar.instructions.md"
+        assert deployed_instr.exists(), f"target file missing post-install: {deployed_instr}"
         with open(deployed_instr, "a") as f:
             f.write("\nTAMPERED\n")
 
         exit_code, payload, result = _audit_json(apm_command, project)
         assert exit_code != 0, (
-            f"audit --ci should fail on drift but passed: {payload}\n"
-            f"STDERR: {result.stderr}"
+            f"audit --ci should fail on drift but passed: {payload}\nSTDERR: {result.stderr}"
         )
         ci = _check(payload, "content-integrity")
         assert ci["passed"] is False, f"content-integrity should fail: {ci}"
         # Either the message or details should reference hash-drift and the
         # path of the modified file.
         haystack = ci["message"] + " " + " ".join(ci.get("details") or [])
-        assert "hash-drift" in haystack, (
-            f"'hash-drift' not in failure output: {haystack!r}"
-        )
+        assert "hash-drift" in haystack, f"'hash-drift' not in failure output: {haystack!r}"
         assert "bar.instructions.md" in haystack, (
             f"path of modified file not surfaced: {haystack!r}"
         )
@@ -252,8 +229,7 @@ class TestLocalContentAudit:
         consent = _check(payload, "includes-consent")
         assert consent["passed"] is True
         assert "[!]" not in consent["message"], (
-            f"unexpected '[!]' advisory when includes is declared: "
-            f"{consent['message']!r}"
+            f"unexpected '[!]' advisory when includes is declared: {consent['message']!r}"
         )
 
         # Also verify the explicit-list form by rewriting and re-auditing.

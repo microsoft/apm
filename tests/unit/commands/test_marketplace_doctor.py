@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 import textwrap
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -18,7 +16,6 @@ from apm_cli.marketplace.yml_schema import (
     MarketplaceYml,
     PackageEntry,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -69,11 +66,16 @@ def runner():
 def _make_run_result(returncode=0, stdout="", stderr=""):
     """Build a fake subprocess.CompletedProcess."""
     return subprocess.CompletedProcess(
-        args=["git"], returncode=returncode, stdout=stdout, stderr=stderr,
+        args=["git"],
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
     )
 
 
-_GH_OK = _make_run_result(0, stdout="gh version 2.50.0 (2024-06-01)\nhttps://github.com/cli/cli/releases/tag/v2.50.0")
+_GH_OK = _make_run_result(
+    0, stdout="gh version 2.50.0 (2024-06-01)\nhttps://github.com/cli/cli/releases/tag/v2.50.0"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +84,7 @@ _GH_OK = _make_run_result(0, stdout="gh version 2.50.0 (2024-06-01)\nhttps://git
 
 
 class TestDoctorAllPass:
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_all_pass_exit_0(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("GITHUB_TOKEN", "test-token")
@@ -97,7 +99,7 @@ class TestDoctorAllPass:
         result = runner.invoke(marketplace, ["doctor"])
         assert result.exit_code == 0
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_git_version_shown(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = [
@@ -109,7 +111,7 @@ class TestDoctorAllPass:
         result = runner.invoke(marketplace, ["doctor"])
         assert "git version" in result.output
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_network_reachable_shown(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = [
@@ -128,7 +130,7 @@ class TestDoctorAllPass:
 
 
 class TestDoctorGitCheck:
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_git_missing_exits_1(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = FileNotFoundError("git not found")
@@ -137,7 +139,7 @@ class TestDoctorGitCheck:
         assert result.exit_code == 1
         assert "not found" in result.output.lower()
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_git_timeout(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="git", timeout=5)
@@ -146,7 +148,7 @@ class TestDoctorGitCheck:
         assert result.exit_code == 1
         assert "timed out" in result.output.lower()
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_git_nonzero_exit(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = [
@@ -165,7 +167,7 @@ class TestDoctorGitCheck:
 
 
 class TestDoctorNetworkCheck:
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_network_failure_exits_1(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = [
@@ -177,7 +179,7 @@ class TestDoctorNetworkCheck:
         result = runner.invoke(marketplace, ["doctor"])
         assert result.exit_code == 1
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_network_timeout(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = [
@@ -190,7 +192,7 @@ class TestDoctorNetworkCheck:
         assert result.exit_code == 1
         assert "timed out" in result.output.lower()
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_network_auth_error(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = [
@@ -209,7 +211,7 @@ class TestDoctorNetworkCheck:
 
 
 class TestDoctorAuthCheck:
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_github_token_detected(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("GITHUB_TOKEN", "ghp_test123")
@@ -224,7 +226,7 @@ class TestDoctorAuthCheck:
         # Must NOT print the actual token
         assert "ghp_test123" not in result.output
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_gh_token_detected(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
@@ -239,7 +241,7 @@ class TestDoctorAuthCheck:
         assert "Token detected" in result.output
         assert "gho_test456" not in result.output
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_no_token_informational(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         # Override the autouse mock so AuthResolver reports no token.
@@ -265,20 +267,23 @@ class TestDoctorAuthCheck:
 
 
 class TestDoctorGhCliCheck:
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_gh_found_shows_version(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = [
             _make_run_result(0, stdout="git version 2.40.0"),
             _make_run_result(0),
-            _make_run_result(0, stdout="gh version 2.50.0 (2024-06-01)\nhttps://github.com/cli/cli/releases/tag/v2.50.0"),
+            _make_run_result(
+                0,
+                stdout="gh version 2.50.0 (2024-06-01)\nhttps://github.com/cli/cli/releases/tag/v2.50.0",
+            ),
         ]
 
         result = runner.invoke(marketplace, ["doctor"])
         assert result.exit_code == 0
         assert "gh version" in result.output
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_gh_missing_is_warning_not_error(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = [
@@ -292,7 +297,7 @@ class TestDoctorGhCliCheck:
         assert "not found" in result.output.lower()
         assert "cli.github.com" in result.output
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_gh_nonzero_exit(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = [
@@ -305,7 +310,7 @@ class TestDoctorGhCliCheck:
         assert result.exit_code == 0  # informational
         assert "non-zero" in result.output.lower()
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_gh_timeout(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = [
@@ -318,7 +323,7 @@ class TestDoctorGhCliCheck:
         assert result.exit_code == 0  # informational
         assert "timed out" in result.output.lower()
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_gh_general_exception(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = [
@@ -331,7 +336,7 @@ class TestDoctorGhCliCheck:
         assert result.exit_code == 0  # informational
         assert "Permission denied" in result.output
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_gh_shown_in_table(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = [
@@ -350,7 +355,7 @@ class TestDoctorGhCliCheck:
 
 
 class TestDoctorYmlCheck:
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_yml_present_and_valid(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "marketplace.yml").write_text(_BASIC_YML, encoding="utf-8")
@@ -364,7 +369,7 @@ class TestDoctorYmlCheck:
         assert result.exit_code == 0
         assert "valid" in result.output.lower() or "found" in result.output.lower()
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_yml_present_but_invalid(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "marketplace.yml").write_text("bad: true\n", encoding="utf-8")
@@ -379,7 +384,7 @@ class TestDoctorYmlCheck:
         assert result.exit_code == 0
         assert "error" in result.output.lower()
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_yml_absent(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = [
@@ -399,7 +404,7 @@ class TestDoctorYmlCheck:
 
 
 class TestDoctorExitCodes:
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_yml_invalid_does_not_cause_exit_1(self, mock_run, runner, tmp_path, monkeypatch):
         """Check 5 is informational; invalid yml alone should not exit 1."""
         monkeypatch.chdir(tmp_path)
@@ -413,7 +418,7 @@ class TestDoctorExitCodes:
         result = runner.invoke(marketplace, ["doctor"])
         assert result.exit_code == 0
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_git_fail_plus_valid_yml_exits_1(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "marketplace.yml").write_text(_BASIC_YML, encoding="utf-8")
@@ -429,7 +434,7 @@ class TestDoctorExitCodes:
 
 
 class TestDoctorVerbose:
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_verbose_no_crash(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = [
@@ -448,7 +453,7 @@ class TestDoctorVerbose:
 
 
 class TestDoctorTable:
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_table_has_check_column(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = [
@@ -463,7 +468,7 @@ class TestDoctorTable:
         assert "network" in result.output.lower()
         assert "auth" in result.output.lower()
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_info_icon_for_auth(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
@@ -477,7 +482,7 @@ class TestDoctorTable:
         result = runner.invoke(marketplace, ["doctor"])
         assert "[i]" in result.output
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_pass_icon_for_git(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = [
@@ -489,7 +494,7 @@ class TestDoctorTable:
         result = runner.invoke(marketplace, ["doctor"])
         assert "[+]" in result.output
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_fail_icon_for_git_missing(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = FileNotFoundError("not found")
@@ -504,7 +509,7 @@ class TestDoctorTable:
 
 
 class TestDoctorEdgeCases:
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_general_exception_in_git_check(self, mock_run, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         mock_run.side_effect = OSError("Permission denied")
@@ -513,7 +518,7 @@ class TestDoctorEdgeCases:
         assert result.exit_code == 1
         assert "Permission denied" in result.output
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_git_ok_network_file_not_found(self, mock_run, runner, tmp_path, monkeypatch):
         """When git works but network check raises FileNotFoundError."""
         monkeypatch.chdir(tmp_path)
@@ -535,10 +540,15 @@ class TestDoctorEdgeCases:
 class TestDoctorDuplicateNames:
     """Defence-in-depth duplicate name check in the doctor command."""
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
-    @patch("apm_cli.commands.marketplace.load_marketplace_yml")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.load_marketplace_yml")
     def test_duplicate_names_flagged(
-        self, mock_load, mock_run, runner, tmp_path, monkeypatch,
+        self,
+        mock_load,
+        mock_run,
+        runner,
+        tmp_path,
+        monkeypatch,
     ):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "marketplace.yml").write_text("---\n", encoding="utf-8")
@@ -554,11 +564,15 @@ class TestDoctorDuplicateNames:
             owner=MarketplaceOwner(name="Owner"),
             packages=(
                 PackageEntry(
-                    name="learning", source="acme/repo", subdir="general",
+                    name="learning",
+                    source="acme/repo",
+                    subdir="general",
                     version="^1.0.0",
                 ),
                 PackageEntry(
-                    name="learning", source="acme/repo", subdir="special",
+                    name="learning",
+                    source="acme/repo",
+                    subdir="special",
                     version="^1.0.0",
                 ),
             ),
@@ -568,10 +582,15 @@ class TestDoctorDuplicateNames:
         assert "duplicate" in result.output.lower()
         assert "learning" in result.output
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
-    @patch("apm_cli.commands.marketplace.load_marketplace_yml")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.load_marketplace_yml")
     def test_no_duplicate_names_shows_pass(
-        self, mock_load, mock_run, runner, tmp_path, monkeypatch,
+        self,
+        mock_load,
+        mock_run,
+        runner,
+        tmp_path,
+        monkeypatch,
     ):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "marketplace.yml").write_text("---\n", encoding="utf-8")
@@ -587,10 +606,14 @@ class TestDoctorDuplicateNames:
             owner=MarketplaceOwner(name="Owner"),
             packages=(
                 PackageEntry(
-                    name="alpha", source="acme/alpha", version="^1.0.0",
+                    name="alpha",
+                    source="acme/alpha",
+                    version="^1.0.0",
                 ),
                 PackageEntry(
-                    name="beta", source="acme/beta", version="^1.0.0",
+                    name="beta",
+                    source="acme/beta",
+                    version="^1.0.0",
                 ),
             ),
         )
@@ -599,9 +622,13 @@ class TestDoctorDuplicateNames:
         assert result.exit_code == 0
         assert "No duplicate package names" in result.output
 
-    @patch("apm_cli.commands.marketplace.subprocess.run")
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
     def test_no_duplicate_check_when_yml_absent(
-        self, mock_run, runner, tmp_path, monkeypatch,
+        self,
+        mock_run,
+        runner,
+        tmp_path,
+        monkeypatch,
     ):
         """When marketplace.yml is missing, duplicate check is skipped."""
         monkeypatch.chdir(tmp_path)

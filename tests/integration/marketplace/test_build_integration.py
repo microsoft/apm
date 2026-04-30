@@ -14,13 +14,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, call, patch  # noqa: F401
 
 import pytest
 
 from apm_cli.marketplace.builder import BuildOptions, MarketplaceBuilder
-from apm_cli.marketplace.ref_resolver import RemoteRef
-from apm_cli.marketplace.yml_schema import load_marketplace_yml
+from apm_cli.marketplace.ref_resolver import RemoteRef  # noqa: F401
+from apm_cli.marketplace.yml_schema import load_marketplace_yml  # noqa: F401
 
 from .conftest import (
     GOLDEN_YML,
@@ -28,7 +28,6 @@ from .conftest import (
     _project_uv_bin,
     run_cli,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -62,7 +61,7 @@ class TestBuildGoldenFile:
 
         opts = BuildOptions(dry_run=False)
         builder = MarketplaceBuilder(tmp_path / "marketplace.yml", options=opts)
-        report = builder.build()
+        report = builder.build()  # noqa: F841
 
         out_path = tmp_path / "marketplace.json"
         assert out_path.exists(), "marketplace.json was not produced"
@@ -70,14 +69,12 @@ class TestBuildGoldenFile:
         actual = json.loads(out_path.read_text(encoding="utf-8"))
         assert actual == golden_marketplace_json
 
-    def test_key_order_follows_anthropic_schema(
-        self, tmp_path: Path, mock_ref_resolver_golden
-    ):
+    def test_key_order_follows_anthropic_schema(self, tmp_path: Path, mock_ref_resolver_golden):
         """Top-level keys must appear in Anthropic canonical order."""
         _write_yml(tmp_path, GOLDEN_YML)
 
         builder = MarketplaceBuilder(tmp_path / "marketplace.yml")
-        report = builder.build()
+        report = builder.build()  # noqa: F841
 
         out_path = tmp_path / "marketplace.json"
         raw_text = out_path.read_text(encoding="utf-8")
@@ -86,9 +83,7 @@ class TestBuildGoldenFile:
 
         # Anthropic schema order: name, description, version, owner, metadata, plugins
         expected_order = ["name", "description", "version", "owner", "metadata", "plugins"]
-        assert top_keys == expected_order, (
-            f"Expected key order {expected_order}, got {top_keys}"
-        )
+        assert top_keys == expected_order, f"Expected key order {expected_order}, got {top_keys}"
 
     def test_plugin_key_order(self, tmp_path: Path, mock_ref_resolver_golden):
         """Each plugin must have keys in Anthropic order."""
@@ -98,7 +93,7 @@ class TestBuildGoldenFile:
 
         data = _read_json(tmp_path)
         for plugin in data["plugins"]:
-            keys = [k for k in plugin.keys() if k != "description"]
+            keys = [k for k in plugin.keys() if k != "description"]  # noqa: SIM118
             # name must be first; tags before source; source last
             assert keys[0] == "name"
             assert "tags" in keys
@@ -188,9 +183,7 @@ class TestBuildHappyPath:
         assert not out.exists()
         assert report.dry_run is True
 
-    def test_incremental_build_counts_unchanged(
-        self, tmp_path: Path, mock_ref_resolver
-    ):
+    def test_incremental_build_counts_unchanged(self, tmp_path: Path, mock_ref_resolver):
         """Second build with same refs reports unchanged packages, not added."""
         _write_yml(tmp_path, MINIMAL_YML)
         builder = MarketplaceBuilder(tmp_path / "marketplace.yml")
@@ -271,9 +264,7 @@ class TestBuildCLI:
 
     def test_schema_error_exits_2(self, tmp_path: Path):
         """Malformed marketplace.yml must exit 2."""
-        (tmp_path / "marketplace.yml").write_text(
-            "name: [\nbad: yaml\n", encoding="utf-8"
-        )
+        (tmp_path / "marketplace.yml").write_text("name: [\nbad: yaml\n", encoding="utf-8")
         result = run_cli(["marketplace", "build"], cwd=tmp_path)
         assert result.returncode == 2
 

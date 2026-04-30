@@ -12,7 +12,7 @@ from apm_cli.core.build_orchestrator import (
     BuildError,
     BuildOptions,
     BuildOrchestrator,
-    BuildResult,
+    BuildResult,  # noqa: F401
     OutputKind,
     ProducerResult,
     detect_outputs,
@@ -34,8 +34,7 @@ class TestDetectOutputs:
         apm = tmp_path / "apm.yml"
         _write(
             apm,
-            "name: x\nversion: 0.1.0\ndescription: y\n"
-            "dependencies:\n  apm:\n    - owner/repo\n",
+            "name: x\nversion: 0.1.0\ndescription: y\ndependencies:\n  apm:\n    - owner/repo\n",
         )
         assert detect_outputs(apm) == {OutputKind.BUNDLE}
 
@@ -43,8 +42,7 @@ class TestDetectOutputs:
         apm = tmp_path / "apm.yml"
         _write(
             apm,
-            "name: x\nversion: 0.1.0\ndescription: y\n"
-            "marketplace:\n  owner:\n    name: o\n",
+            "name: x\nversion: 0.1.0\ndescription: y\nmarketplace:\n  owner:\n    name: o\n",
         )
         assert detect_outputs(apm) == {OutputKind.MARKETPLACE}
 
@@ -105,8 +103,7 @@ class TestBuildOrchestrator:
         apm = tmp_path / "apm.yml"
         _write(
             apm,
-            "name: x\nversion: 0.1.0\ndescription: y\n"
-            "dependencies:\n  apm:\n    - owner/repo\n",
+            "name: x\nversion: 0.1.0\ndescription: y\ndependencies:\n  apm:\n    - owner/repo\n",
         )
         bp = _make_producer(OutputKind.BUNDLE, tmp_path / "build")
         mp = _make_producer(OutputKind.MARKETPLACE, tmp_path / "m.json")
@@ -122,8 +119,7 @@ class TestBuildOrchestrator:
         apm = tmp_path / "apm.yml"
         _write(
             apm,
-            "name: x\nversion: 0.1.0\ndescription: y\n"
-            "marketplace:\n  owner:\n    name: o\n",
+            "name: x\nversion: 0.1.0\ndescription: y\nmarketplace:\n  owner:\n    name: o\n",
         )
         bp = _make_producer(OutputKind.BUNDLE, tmp_path / "build")
         mp = _make_producer(OutputKind.MARKETPLACE, tmp_path / "m.json")

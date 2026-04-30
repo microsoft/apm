@@ -196,7 +196,7 @@ connected host, transport it, restore it offline.
 export PROXY_REGISTRY_URL=https://art.corp.example.com/artifactory/github
 export PROXY_REGISTRY_ONLY=1
 apm install
-apm pack --archive -o ./artifacts/
+apm pack --format apm --archive -o ./artifacts/
 
 # Transport ./artifacts/*.tar.gz to the air-gapped network
 

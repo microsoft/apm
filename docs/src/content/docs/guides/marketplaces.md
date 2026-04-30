@@ -91,8 +91,25 @@ You can author and publish your own marketplace registry.
 See the [Marketplace Authoring Guide](../marketplace-authoring/) for details.
 :::
 
+### Default alias resolution
+
+When `--name` is not provided, APM resolves the local alias in this order:
+
+1. `name` field declared in the marketplace's `marketplace.json` (if present and valid)
+2. Repository name (fallback)
+
+This ensures parity with Claude Code install instructions -- if a marketplace's `marketplace.json` declares `"name": "addy-agent-skills"`, APM registers it under that alias and shows a hint:
+
+```
+[*] Registering marketplace 'addy-agent-skills'...
+[+] Marketplace 'addy-agent-skills' registered (1 plugins)
+[i] Install plugins with: apm install <plugin>@addy-agent-skills
+```
+
+Use `--name` to override the alias explicitly.
+
 **Options:**
-- `--name/-n` -- Custom display name for the marketplace
+- `--name/-n` -- Override the local alias (defaults to the `marketplace.json` `name` field, then repo name)
 - `--branch/-b` -- Branch to track (default: `main`)
 - `--host` -- Git host FQDN for non-github.com hosts (default: `github.com` or `GITHUB_HOST` env var)
 

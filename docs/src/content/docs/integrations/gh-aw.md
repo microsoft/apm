@@ -123,7 +123,7 @@ The repo needs an `apm.yml` with dependencies and `apm.lock.yaml` for reproducib
 
 For sandboxed environments where network access is restricted during workflow execution, use pre-built APM bundles:
 
-1. Run `apm pack` in your CI pipeline to produce a self-contained bundle.
+1. Run `apm pack --format apm --archive` in your CI pipeline to produce a self-contained APM bundle (the format restorable via `tar xzf` or `apm-action` restore mode).
 2. Distribute the bundle as a workflow artifact or commit it to the repository.
 3. Reference the bundled primitives directly from `.github/agents/` in your workflow.
 

@@ -25,15 +25,15 @@ from pathlib import Path
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _find_repo_root() -> Path:
     """Walk up from this file until pyproject.toml is found (the repo root)."""
     current = Path(__file__).resolve().parent
-    for candidate in [current] + list(current.parents):
+    for candidate in [current] + list(current.parents):  # noqa: RUF005
         if (candidate / "pyproject.toml").is_file():
             return candidate
     raise RuntimeError("Cannot locate repository root (no pyproject.toml found)")
@@ -67,7 +67,7 @@ def _extract_spec_helpers() -> str:
     ]
 
     func_parts: list[str] = []
-    for node in tree.body:          # iterate in source order
+    for node in tree.body:  # iterate in source order
         if isinstance(node, ast.FunctionDef) and node.name in wanted:
             func_src = "\n".join(lines[node.lineno - 1 : node.end_lineno])
             func_parts.append(func_src)
@@ -89,13 +89,14 @@ def _make_helpers_ns(repo_root: Path | None = None) -> dict:
     """
     ns: dict = {"repo_root": repo_root if repo_root is not None else _REPO_ROOT}
     code = compile(_extract_spec_helpers(), "<spec_helpers>", "exec")
-    exec(code, ns)  # noqa: S102   -- deliberate, controlled exec
+    exec(code, ns)  # noqa: S102
     return ns
 
 
 # ---------------------------------------------------------------------------
 # 1. Syntax check
 # ---------------------------------------------------------------------------
+
 
 class TestSpecFileSyntax:
     """The spec file must be valid Python at all times."""
@@ -124,6 +125,7 @@ class TestSpecFileSyntax:
 # 2. should_use_upx()
 # ---------------------------------------------------------------------------
 
+
 class TestShouldUseUpx:
     """``should_use_upx()`` disables UPX on Windows, delegates on other platforms."""
 
@@ -138,7 +140,7 @@ class TestShouldUseUpx:
         """On Linux, should_use_upx() returns True when UPX is installed."""
         monkeypatch.setattr(sys, "platform", "linux")
         ns = _make_helpers_ns()
-        ns["is_upx_available"] = lambda: True          # inject mock into helpers' namespace
+        ns["is_upx_available"] = lambda: True  # inject mock into helpers' namespace
         result = ns["should_use_upx"]()
         assert result is True
 
@@ -177,6 +179,7 @@ class TestShouldUseUpx:
 # 3. _read_version_from_pyproject()
 # ---------------------------------------------------------------------------
 
+
 class TestReadVersionFromPyproject:
     """``_read_version_from_pyproject()`` must parse semver strings robustly."""
 
@@ -210,7 +213,7 @@ class TestReadVersionFromPyproject:
 
     def test_returns_zero_tuple_when_pyproject_missing(self, tmp_path):
         """If pyproject.toml does not exist the function must return (0,0,0,0)."""
-        ns = _make_helpers_ns(repo_root=tmp_path)   # tmp_path has no pyproject.toml
+        ns = _make_helpers_ns(repo_root=tmp_path)  # tmp_path has no pyproject.toml
         assert ns["_read_version_from_pyproject"](tmp_path) == (0, 0, 0, 0)
 
     def test_returns_zero_tuple_when_version_key_absent(self, tmp_path):

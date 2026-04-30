@@ -28,9 +28,9 @@ import logging
 import os
 from pathlib import Path
 
-from .copilot import CopilotClientAdapter
 from ...core.docker_args import DockerArgsProcessor
 from ...utils.console import _rich_error, _rich_success
+from .copilot import CopilotClientAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -80,9 +80,9 @@ class GeminiClientAdapter(CopilotClientAdapter):
         if not os.path.exists(config_path):
             return {}
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             return {}
 
     def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):
@@ -114,9 +114,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
             config["args"] = raw["args"]
             if raw.get("env"):
                 config["env"] = raw["env"]
-                self._warn_input_variables(
-                    raw["env"], server_info.get("name", ""), "Gemini CLI"
-                )
+                self._warn_input_variables(raw["env"], server_info.get("name", ""), "Gemini CLI")
             return config
 
         # --- remote endpoints ---
@@ -145,8 +143,8 @@ class GeminiClientAdapter(CopilotClientAdapter):
                 name = header.get("name", "")
                 value = header.get("value", "")
                 if name and value:
-                    config.setdefault("headers", {})[name] = (
-                        self._resolve_env_variable(name, value, env_overrides)
+                    config.setdefault("headers", {})[name] = self._resolve_env_variable(
+                        name, value, env_overrides
                     )
 
             if config.get("headers"):
@@ -176,36 +174,26 @@ class GeminiClientAdapter(CopilotClientAdapter):
         package_arguments = package.get("package_arguments", [])
         env_vars = package.get("environment_variables", [])
 
-        resolved_env = self._resolve_environment_variables(
-            env_vars, env_overrides
-        )
-        processed_rt = self._process_arguments(
-            runtime_arguments, resolved_env, runtime_vars
-        )
-        processed_pkg = self._process_arguments(
-            package_arguments, resolved_env, runtime_vars
-        )
+        resolved_env = self._resolve_environment_variables(env_vars, env_overrides)
+        processed_rt = self._process_arguments(runtime_arguments, resolved_env, runtime_vars)
+        processed_pkg = self._process_arguments(package_arguments, resolved_env, runtime_vars)
 
         if registry_name == "npm":
             config["command"] = runtime_hint or "npx"
-            config["args"] = ["-y", package_name] + processed_rt + processed_pkg
+            config["args"] = ["-y", package_name] + processed_rt + processed_pkg  # noqa: RUF005
         elif registry_name == "docker":
             config["command"] = "docker"
             if processed_rt:
-                config["args"] = self._inject_env_vars_into_docker_args(
-                    processed_rt, resolved_env
-                )
+                config["args"] = self._inject_env_vars_into_docker_args(processed_rt, resolved_env)
             else:
                 config["args"] = DockerArgsProcessor.process_docker_args(
                     ["run", "-i", "--rm", package_name], resolved_env
                 )
         elif registry_name == "pypi":
             config["command"] = runtime_hint or "uvx"
-            config["args"] = [package_name] + processed_rt + processed_pkg
+            config["args"] = [package_name] + processed_rt + processed_pkg  # noqa: RUF005
         elif registry_name == "homebrew":
-            config["command"] = (
-                package_name.split("/")[-1] if "/" in package_name else package_name
-            )
+            config["command"] = package_name.split("/")[-1] if "/" in package_name else package_name
             config["args"] = processed_rt + processed_pkg
         else:
             config["command"] = runtime_hint or package_name
@@ -255,14 +243,10 @@ class GeminiClientAdapter(CopilotClientAdapter):
             else:
                 config_key = server_url
 
-            server_config = self._format_server_config(
-                server_info, env_overrides, runtime_vars
-            )
+            server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             self.update_config({config_key: server_config})
 
-            _rich_success(
-                f"Configured MCP server '{config_key}' for Gemini CLI", symbol="success"
-            )
+            _rich_success(f"Configured MCP server '{config_key}' for Gemini CLI", symbol="success")
             return True
 
         except Exception as e:

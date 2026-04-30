@@ -12,7 +12,7 @@ be tested and used independently.
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 
 @dataclass(frozen=True)
@@ -31,97 +31,86 @@ class ScanFinding:
 
 # Each entry: (range_start, range_end, severity, category, description)
 # range_end is inclusive.
-_SUSPICIOUS_RANGES: List[Tuple[int, int, str, str, str]] = [
+_SUSPICIOUS_RANGES: list[tuple[int, int, str, str, str]] = [
     # ── Critical: no legitimate use in prompt/instruction files ──
     # Unicode tag characters — invisible ASCII mapping
-    (0xE0001, 0xE007F, "critical", "tag-character",
-     "Unicode tag character (invisible ASCII mapping)"),
+    (
+        0xE0001,
+        0xE007F,
+        "critical",
+        "tag-character",
+        "Unicode tag character (invisible ASCII mapping)",
+    ),
     # Bidirectional override characters
-    (0x202A, 0x202A, "critical", "bidi-override",
-     "Left-to-right embedding (LRE)"),
-    (0x202B, 0x202B, "critical", "bidi-override",
-     "Right-to-left embedding (RLE)"),
-    (0x202C, 0x202C, "critical", "bidi-override",
-     "Pop directional formatting (PDF)"),
-    (0x202D, 0x202D, "critical", "bidi-override",
-     "Left-to-right override (LRO)"),
-    (0x202E, 0x202E, "critical", "bidi-override",
-     "Right-to-left override (RLO)"),
-    (0x2066, 0x2066, "critical", "bidi-override",
-     "Left-to-right isolate (LRI)"),
-    (0x2067, 0x2067, "critical", "bidi-override",
-     "Right-to-left isolate (RLI)"),
-    (0x2068, 0x2068, "critical", "bidi-override",
-     "First strong isolate (FSI)"),
-    (0x2069, 0x2069, "critical", "bidi-override",
-     "Pop directional isolate (PDI)"),
+    (0x202A, 0x202A, "critical", "bidi-override", "Left-to-right embedding (LRE)"),
+    (0x202B, 0x202B, "critical", "bidi-override", "Right-to-left embedding (RLE)"),
+    (0x202C, 0x202C, "critical", "bidi-override", "Pop directional formatting (PDF)"),
+    (0x202D, 0x202D, "critical", "bidi-override", "Left-to-right override (LRO)"),
+    (0x202E, 0x202E, "critical", "bidi-override", "Right-to-left override (RLO)"),
+    (0x2066, 0x2066, "critical", "bidi-override", "Left-to-right isolate (LRI)"),
+    (0x2067, 0x2067, "critical", "bidi-override", "Right-to-left isolate (RLI)"),
+    (0x2068, 0x2068, "critical", "bidi-override", "First strong isolate (FSI)"),
+    (0x2069, 0x2069, "critical", "bidi-override", "Pop directional isolate (PDI)"),
     # Variation selectors — Glassworm supply-chain attack vector.
     # These attach to visible characters, embedding invisible payload bytes
     # that AST-based tools skip entirely.  Sequences of variation selectors
     # can encode arbitrary hidden data/instructions.
-    (0xE0100, 0xE01EF, "critical", "variation-selector",
-     "Variation selector (SMP) — no legitimate use in prompt files"),
+    (
+        0xE0100,
+        0xE01EF,
+        "critical",
+        "variation-selector",
+        "Variation selector (SMP) — no legitimate use in prompt files",
+    ),
     # ── Warning: common copy-paste debris but can hide instructions ──
-    (0x200B, 0x200B, "warning", "zero-width",
-     "Zero-width space"),
-    (0x200C, 0x200C, "warning", "zero-width",
-     "Zero-width non-joiner (ZWNJ)"),
-    (0x200D, 0x200D, "warning", "zero-width",
-     "Zero-width joiner (ZWJ)"),
-    (0x2060, 0x2060, "warning", "zero-width",
-     "Word joiner"),
+    (0x200B, 0x200B, "warning", "zero-width", "Zero-width space"),
+    (0x200C, 0x200C, "warning", "zero-width", "Zero-width non-joiner (ZWNJ)"),
+    (0x200D, 0x200D, "warning", "zero-width", "Zero-width joiner (ZWJ)"),
+    (0x2060, 0x2060, "warning", "zero-width", "Word joiner"),
     # BMP variation selectors — uncommon in prompt files
-    (0xFE00, 0xFE0D, "warning", "variation-selector",
-     "Variation selector (CJK typography variant)"),
-    (0xFE0E, 0xFE0E, "warning", "variation-selector",
-     "Text presentation selector"),
-    (0x00AD, 0x00AD, "warning", "invisible-formatting",
-     "Soft hyphen"),
+    (
+        0xFE00,
+        0xFE0D,
+        "warning",
+        "variation-selector",
+        "Variation selector (CJK typography variant)",
+    ),
+    (0xFE0E, 0xFE0E, "warning", "variation-selector", "Text presentation selector"),
+    (0x00AD, 0x00AD, "warning", "invisible-formatting", "Soft hyphen"),
     # Bidirectional marks — invisible, no legitimate use in prompt files
-    (0x200E, 0x200E, "warning", "bidi-mark",
-     "Left-to-right mark (LRM)"),
-    (0x200F, 0x200F, "warning", "bidi-mark",
-     "Right-to-left mark (RLM)"),
-    (0x061C, 0x061C, "warning", "bidi-mark",
-     "Arabic letter mark (ALM)"),
+    (0x200E, 0x200E, "warning", "bidi-mark", "Left-to-right mark (LRM)"),
+    (0x200F, 0x200F, "warning", "bidi-mark", "Right-to-left mark (RLM)"),
+    (0x061C, 0x061C, "warning", "bidi-mark", "Arabic letter mark (ALM)"),
     # Invisible math operators — zero-width, no use in prompt files
-    (0x2061, 0x2061, "warning", "invisible-formatting",
-     "Function application (invisible operator)"),
-    (0x2062, 0x2062, "warning", "invisible-formatting",
-     "Invisible times"),
-    (0x2063, 0x2063, "warning", "invisible-formatting",
-     "Invisible separator"),
-    (0x2064, 0x2064, "warning", "invisible-formatting",
-     "Invisible plus"),
+    (
+        0x2061,
+        0x2061,
+        "warning",
+        "invisible-formatting",
+        "Function application (invisible operator)",
+    ),
+    (0x2062, 0x2062, "warning", "invisible-formatting", "Invisible times"),
+    (0x2063, 0x2063, "warning", "invisible-formatting", "Invisible separator"),
+    (0x2064, 0x2064, "warning", "invisible-formatting", "Invisible plus"),
     # Interlinear annotation markers — can hide text between delimiters
-    (0xFFF9, 0xFFF9, "warning", "annotation-marker",
-     "Interlinear annotation anchor"),
-    (0xFFFA, 0xFFFA, "warning", "annotation-marker",
-     "Interlinear annotation separator"),
-    (0xFFFB, 0xFFFB, "warning", "annotation-marker",
-     "Interlinear annotation terminator"),
+    (0xFFF9, 0xFFF9, "warning", "annotation-marker", "Interlinear annotation anchor"),
+    (0xFFFA, 0xFFFA, "warning", "annotation-marker", "Interlinear annotation separator"),
+    (0xFFFB, 0xFFFB, "warning", "annotation-marker", "Interlinear annotation terminator"),
     # Deprecated formatting — invisible, deprecated since Unicode 3.0
-    (0x206A, 0x206F, "warning", "deprecated-formatting",
-     "Deprecated formatting character"),
+    (0x206A, 0x206F, "warning", "deprecated-formatting", "Deprecated formatting character"),
     # FEFF as mid-file BOM is handled separately in scan logic
     # ── Info: unusual whitespace, mostly harmless ──
-    (0xFE0F, 0xFE0F, "info", "variation-selector",
-     "Emoji presentation selector"),
-    (0x00A0, 0x00A0, "info", "unusual-whitespace",
-     "Non-breaking space"),
-    (0x2000, 0x200A, "info", "unusual-whitespace",
-     "Unicode whitespace character"),
-    (0x205F, 0x205F, "info", "unusual-whitespace",
-     "Medium mathematical space"),
-    (0x3000, 0x3000, "info", "unusual-whitespace",
-     "Ideographic space"),
-    (0x180E, 0x180E, "info", "unusual-whitespace",
-     "Mongolian vowel separator"),
+    (0xFE0F, 0xFE0F, "info", "variation-selector", "Emoji presentation selector"),
+    (0x00A0, 0x00A0, "info", "unusual-whitespace", "Non-breaking space"),
+    (0x2000, 0x200A, "info", "unusual-whitespace", "Unicode whitespace character"),
+    (0x205F, 0x205F, "info", "unusual-whitespace", "Medium mathematical space"),
+    (0x3000, 0x3000, "info", "unusual-whitespace", "Ideographic space"),
+    (0x180E, 0x180E, "info", "unusual-whitespace", "Mongolian vowel separator"),
 ]
 
 # Pre-build a lookup for O(1) per-character classification.
 # Maps codepoint → (severity, category, description)
-_CHAR_LOOKUP: Dict[int, Tuple[str, str, str]] = {}
+_CHAR_LOOKUP: dict[int, tuple[str, str, str]] = {}
 for _start, _end, _sev, _cat, _desc in _SUSPICIOUS_RANGES:
     for _cp in range(_start, _end + 1):
         _CHAR_LOOKUP[_cp] = (_sev, _cat, _desc)
@@ -161,7 +150,7 @@ class ContentScanner:
     """Scans text content for hidden or suspicious Unicode characters."""
 
     @staticmethod
-    def scan_text(content: str, filename: str = "") -> List[ScanFinding]:
+    def scan_text(content: str, filename: str = "") -> list[ScanFinding]:
         """Scan a string for suspicious Unicode characters.
 
         Returns a list of findings, one per suspicious character, with
@@ -177,7 +166,7 @@ class ContentScanner:
         if content.isascii():
             return []
 
-        findings: List[ScanFinding] = []
+        findings: list[ScanFinding] = []
         lines = content.split("\n")
 
         for line_idx, line_text in enumerate(lines):
@@ -188,28 +177,32 @@ class ContentScanner:
                 # file is standard practice; mid-file is suspicious.
                 if cp == 0xFEFF:
                     if line_idx == 0 and col_idx == 0:
-                        findings.append(ScanFinding(
-                            file=filename,
-                            line=1,
-                            column=1,
-                            char=repr(ch),
-                            codepoint="U+FEFF",
-                            severity="info",
-                            category="bom",
-                            description="Byte order mark at start of file",
-                        ))
+                        findings.append(
+                            ScanFinding(
+                                file=filename,
+                                line=1,
+                                column=1,
+                                char=repr(ch),
+                                codepoint="U+FEFF",
+                                severity="info",
+                                category="bom",
+                                description="Byte order mark at start of file",
+                            )
+                        )
                     else:
-                        findings.append(ScanFinding(
-                            file=filename,
-                            line=line_idx + 1,
-                            column=col_idx + 1,
-                            char=repr(ch),
-                            codepoint="U+FEFF",
-                            severity="warning",
-                            category="zero-width",
-                            description="Byte order mark in middle of file "
-                                        "(possible hidden content)",
-                        ))
+                        findings.append(
+                            ScanFinding(
+                                file=filename,
+                                line=line_idx + 1,
+                                column=col_idx + 1,
+                                char=repr(ch),
+                                codepoint="U+FEFF",
+                                severity="warning",
+                                category="zero-width",
+                                description="Byte order mark in middle of file "
+                                "(possible hidden content)",
+                            )
+                        )
                     continue
 
                 entry = _CHAR_LOOKUP.get(cp)
@@ -219,21 +212,23 @@ class ContentScanner:
                     if cp == 0x200D and _zwj_in_emoji_context(line_text, col_idx):
                         sev = "info"
                         desc = "Zero-width joiner (emoji sequence)"
-                    findings.append(ScanFinding(
-                        file=filename,
-                        line=line_idx + 1,
-                        column=col_idx + 1,
-                        char=repr(ch),
-                        codepoint=f"U+{cp:04X}",
-                        severity=sev,
-                        category=cat,
-                        description=desc,
-                    ))
+                    findings.append(
+                        ScanFinding(
+                            file=filename,
+                            line=line_idx + 1,
+                            column=col_idx + 1,
+                            char=repr(ch),
+                            codepoint=f"U+{cp:04X}",
+                            severity=sev,
+                            category=cat,
+                            description=desc,
+                        )
+                    )
 
         return findings
 
     @staticmethod
-    def scan_file(path: Path) -> List[ScanFinding]:
+    def scan_file(path: Path) -> list[ScanFinding]:
         """Read a file and scan its content.
 
         Handles encoding errors gracefully — returns an empty list if the
@@ -246,28 +241,28 @@ class ContentScanner:
         return ContentScanner.scan_text(content, filename=str(path))
 
     @staticmethod
-    def has_critical(findings: List[ScanFinding]) -> bool:
+    def has_critical(findings: list[ScanFinding]) -> bool:
         """Return True if any finding has critical severity."""
         return any(f.severity == "critical" for f in findings)
 
     @staticmethod
-    def summarize(findings: List[ScanFinding]) -> Dict[str, int]:
+    def summarize(findings: list[ScanFinding]) -> dict[str, int]:
         """Return counts by severity level."""
-        counts: Dict[str, int] = {"critical": 0, "warning": 0, "info": 0}
+        counts: dict[str, int] = {"critical": 0, "warning": 0, "info": 0}
         for f in findings:
             counts[f.severity] = counts.get(f.severity, 0) + 1
         return counts
 
     @staticmethod
     def classify(
-        findings: List[ScanFinding],
-    ) -> Tuple[bool, Dict[str, int]]:
+        findings: list[ScanFinding],
+    ) -> tuple[bool, dict[str, int]]:
         """Combined has_critical + summarize in a single pass.
 
         Returns (has_critical, severity_counts).
         """
         critical = False
-        counts: Dict[str, int] = {"critical": 0, "warning": 0, "info": 0}
+        counts: dict[str, int] = {"critical": 0, "warning": 0, "info": 0}
         for f in findings:
             counts[f.severity] = counts.get(f.severity, 0) + 1
             if f.severity == "critical":
@@ -285,7 +280,7 @@ class ContentScanner:
         ZWJ between emoji characters is treated as info (preserved) to
         keep compound emoji like 👨‍👩‍👧 intact.
         """
-        result: List[str] = []
+        result: list[str] = []
         for i, ch in enumerate(content):
             cp = ord(ch)
             entry = _CHAR_LOOKUP.get(cp)

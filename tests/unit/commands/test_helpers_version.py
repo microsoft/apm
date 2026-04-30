@@ -17,7 +17,6 @@ from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
 
-
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
@@ -81,9 +80,7 @@ def _invoke_version(runner: CliRunner) -> Any:
 class TestPrintVersionVerboseVersionFlag:
     """Tests for the experimental verbose_version branch in print_version."""
 
-    def test_baseline_output_when_flag_disabled(
-        self, runner: CliRunner, monkeypatch
-    ) -> None:
+    def test_baseline_output_when_flag_disabled(self, runner: CliRunner, monkeypatch) -> None:
         """Standard --version output when verbose_version is disabled (default)."""
         import apm_cli.config as _conf
 
@@ -134,13 +131,9 @@ class TestPrintVersionVerboseVersionFlag:
         )
         assert re.search(r"  Install path: \S", result.output) or (
             "  Install path: " in result.output
-        ), (
-            "Install path: label not found with 14-char padding and 2-space indent"
-        )
+        ), "Install path: label not found with 14-char padding and 2-space indent"
 
-    def test_graceful_failure_when_is_enabled_raises(
-        self, runner: CliRunner, monkeypatch
-    ) -> None:
+    def test_graceful_failure_when_is_enabled_raises(self, runner: CliRunner, monkeypatch) -> None:
         """If is_enabled throws, --version still prints the baseline and exits 0."""
         import apm_cli.config as _conf
 
@@ -149,9 +142,7 @@ class TestPrintVersionVerboseVersionFlag:
         def _always_raise(name: str) -> bool:
             raise RuntimeError("simulated experimental subsystem failure")
 
-        monkeypatch.setattr(
-            "apm_cli.core.experimental.is_enabled", _always_raise
-        )
+        monkeypatch.setattr("apm_cli.core.experimental.is_enabled", _always_raise)
 
         result = _invoke_version(runner)
 

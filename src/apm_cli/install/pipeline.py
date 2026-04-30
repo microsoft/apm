@@ -23,13 +23,13 @@ from __future__ import annotations
 
 import builtins
 import sys
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, List, Optional  # noqa: F401, UP035
 
 from ..models.results import InstallResult
 from ..utils.console import _rich_error
 from ..utils.diagnostics import DiagnosticCollector
 from ..utils.path_security import PathTraversalError
-from .errors import AuthenticationError, DirectDependencyError, PolicyViolationError
+from .errors import AuthenticationError, DirectDependencyError, PolicyViolationError  # noqa: F401
 
 if TYPE_CHECKING:
     from ..core.auth import AuthResolver
@@ -65,11 +65,7 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
         host = dep.host
         if not host or is_github_hostname(host):
             continue  # github.com uses API probe with unauth fallback
-        org = (
-            dep.repo_url.split("/")[0]
-            if dep.repo_url and "/" in dep.repo_url
-            else None
-        )
+        org = dep.repo_url.split("/")[0] if dep.repo_url and "/" in dep.repo_url else None
         key = (host, org)
         if key in seen:
             continue
@@ -79,11 +75,15 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
         _auth_scheme = getattr(dep_ctx, "auth_scheme", "basic") or "basic"
 
         from ..deps.github_downloader import GitHubPackageDownloader
+
         _dl = GitHubPackageDownloader(auth_resolver=auth_resolver)
         _dl.github_host = host
         probe_url = _dl._build_repo_url(
-            dep.repo_url, use_ssh=False, dep_ref=dep,
-            token=dep_ctx.token, auth_scheme=_auth_scheme,
+            dep.repo_url,
+            use_ssh=False,
+            dep_ref=dep,
+            token=dep_ctx.token,
+            auth_scheme=_auth_scheme,
         )
         _ctx_env = getattr(dep_ctx, "git_env", {}) or {}
         probe_env = {**os.environ, **_dl.git_env, **_ctx_env}
@@ -91,8 +91,11 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
         try:
             result = _sp.run(
                 ["git", "ls-remote", "--heads", "--exit-code", probe_url],
-                capture_output=True, text=True, encoding="utf-8",
-                timeout=30, env=probe_env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=30,
+                env=probe_env,
             )
         except _sp.TimeoutExpired:
             continue  # network timeout is not auth -- let the real phase handle it
@@ -108,7 +111,10 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
             )
             if _auth_signals:
                 _diag = auth_resolver.build_error_context(
-                    host, "install --update", org=org, dep_url=dep.repo_url,
+                    host,
+                    "install --update",
+                    org=org,
+                    dep_url=dep.repo_url,
                 )
                 raise AuthenticationError(
                     f"Authentication failed for {host}",
@@ -120,24 +126,24 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
                 )
 
 
-def run_install_pipeline(
-    apm_package: "APMPackage",
+def run_install_pipeline(  # noqa: PLR0913, RUF100
+    apm_package: APMPackage,
     update_refs: bool = False,
     verbose: bool = False,
-    only_packages: "builtins.list" = None,
+    only_packages: builtins.list = None,  # noqa: RUF013
     force: bool = False,
     parallel_downloads: int = 4,
-    logger: "InstallLogger" = None,
+    logger: InstallLogger = None,
     scope=None,
-    auth_resolver: "AuthResolver" = None,
-    target: str = None,
+    auth_resolver: AuthResolver = None,
+    target: str = None,  # noqa: RUF013
     allow_insecure: bool = False,
     allow_insecure_hosts=(),
     marketplace_provenance: dict = None,
     protocol_pref=None,
-    allow_protocol_fallback: "Optional[bool]" = None,
+    allow_protocol_fallback: bool | None = None,
     no_policy: bool = False,
-    skill_subset: "Optional[tuple]" = None,
+    skill_subset: tuple | None = None,
     skill_subset_from_cli: bool = False,
 ):
     """Install APM package dependencies.
@@ -172,11 +178,11 @@ def run_install_pipeline(
     # already prevents callers from reaching here when deps are missing, but
     # keep the check as a defensive belt-and-suspenders measure.
     try:
-        from ..deps.lockfile import LockFile, get_lockfile_path  # noqa: F401
+        from ..deps.lockfile import LockFile, get_lockfile_path
     except ImportError:
-        raise RuntimeError("APM dependency system not available")
+        raise RuntimeError("APM dependency system not available")  # noqa: B904
 
-    from ..core.scope import InstallScope, get_deploy_root, get_apm_dir
+    from ..core.scope import InstallScope, get_apm_dir, get_deploy_root
 
     if scope is None:
         scope = InstallScope.PROJECT
@@ -328,11 +334,11 @@ def run_install_pipeline(
             diagnostics.error(fail_msg, package=dep_display)
 
         # Collect installed packages for lockfile generation
-        from ..deps.lockfile import LockFile, get_lockfile_path
         from ..deps.installed_package import InstalledPackage
+        from ..deps.lockfile import LockFile, get_lockfile_path
         from ..deps.registry_proxy import RegistryConfig
 
-        installed_packages: List[InstalledPackage] = []
+        installed_packages: builtins.list[InstalledPackage] = []
 
         # Resolve registry proxy configuration once for this install session.
         registry_config = RegistryConfig.from_env()
@@ -423,8 +429,7 @@ def run_install_pipeline(
             if ctx.diagnostics and ctx.diagnostics.has_diagnostics:
                 ctx.diagnostics.render_summary()
             raise DirectDependencyError(
-                "One or more direct dependencies failed validation. "
-                "Run with --verbose for details."
+                "One or more direct dependencies failed validation. Run with --verbose for details."
             )
 
         # Update .gitignore
@@ -488,4 +493,4 @@ def run_install_pipeline(
         # resolution -- surface as-is for actionable user guidance.
         raise
     except Exception as e:
-        raise RuntimeError(f"Failed to resolve APM dependencies: {e}")
+        raise RuntimeError(f"Failed to resolve APM dependencies: {e}")  # noqa: B904

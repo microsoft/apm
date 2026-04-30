@@ -68,6 +68,7 @@ def run(ctx: InstallContext) -> None:
         # set would then misclassify it as removed and delete its previously
         # deployed files even though it is still in apm.yml.
         from apm_cli.deps.lockfile import _SELF_KEY
+
         _orphan_total_deleted = 0
         _orphan_deleted_targets: list = []
         for _orphan_key, _orphan_dep in existing_lockfile.dependencies.items():
@@ -104,9 +105,7 @@ def run(ctx: InstallContext) -> None:
                 if logger:
                     logger.cleanup_skipped_user_edit(_skipped, _orphan_key)
         if _orphan_deleted_targets:
-            BaseIntegrator.cleanup_empty_parents(
-                _orphan_deleted_targets, project_root
-            )
+            BaseIntegrator.cleanup_empty_parents(_orphan_deleted_targets, project_root)
         if logger:
             logger.orphan_cleanup(_orphan_total_deleted)
 
@@ -134,7 +133,8 @@ def run(ctx: InstallContext) -> None:
                 continue
 
             cleanup_result = remove_stale_deployed_files(
-                stale, project_root,
+                stale,
+                project_root,
                 dep_key=dep_key,
                 # `_targets or None` mirrors the pre-refactor behavior: when
                 # no targets were resolved (e.g. unknown runtime), pass None
@@ -150,9 +150,7 @@ def run(ctx: InstallContext) -> None:
             # retry on the next install.
             new_deployed.extend(cleanup_result.failed)
             if cleanup_result.deleted_targets:
-                BaseIntegrator.cleanup_empty_parents(
-                    cleanup_result.deleted_targets, project_root
-                )
+                BaseIntegrator.cleanup_empty_parents(cleanup_result.deleted_targets, project_root)
             for _skipped in cleanup_result.skipped_user_edit:
                 if logger:
                     logger.cleanup_skipped_user_edit(_skipped, dep_key)

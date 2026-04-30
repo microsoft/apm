@@ -6,13 +6,12 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
+import pytest  # noqa: F401
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
-
 
 # ---------------------------------------------------------------------------
 # Patch targets -- imports are lazy (inside function body), so we patch
@@ -102,9 +101,7 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_LOCKFILE_PATH)
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
-    def test_no_lockfile_exits_1(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path, mock_migrate
-    ):
+    def test_no_lockfile_exits_1(self, mock_lf_cls, mock_get_apm_dir, mock_get_path, mock_migrate):
         """Exit 1 with error when no lockfile exists."""
         with self._chdir_tmp() as tmp:
             mock_get_apm_dir.return_value = tmp
@@ -145,8 +142,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_all_up_to_date(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """Show success message when all deps are at latest tag."""
         with self._chdir_tmp() as tmp:
@@ -181,8 +183,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_some_outdated_shows_table(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """Table is shown when some deps are outdated; exit code is still 0."""
         with self._chdir_tmp() as tmp:
@@ -199,7 +206,7 @@ class TestOutdatedCommand:
             mock_dl_cls.return_value = mock_downloader
             mock_downloader.list_remote_refs.side_effect = [
                 [_remote_tag("v2.0.0"), _remote_tag("v1.0.0")],  # alpha outdated
-                [_remote_tag("v2.0.0")],                          # beta up-to-date
+                [_remote_tag("v2.0.0")],  # beta up-to-date
             ]
 
             result = self.runner.invoke(cli, ["outdated"])
@@ -219,8 +226,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_branch_ref_outdated_when_sha_differs(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """Branch-pinned dep is outdated when locked SHA differs from remote tip."""
         with self._chdir_tmp() as tmp:
@@ -254,8 +266,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_branch_ref_up_to_date_when_sha_matches(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """Branch-pinned dep is up-to-date when locked SHA matches remote tip."""
         with self._chdir_tmp() as tmp:
@@ -290,8 +307,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_commit_ref_shown_as_unknown(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """Deps locked to a commit SHA show 'unknown' when ref is a raw SHA."""
         with self._chdir_tmp() as tmp:
@@ -328,8 +350,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_local_dep_skipped(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """Local deps (source='local') should be skipped entirely."""
         with self._chdir_tmp() as tmp:
@@ -337,9 +364,7 @@ class TestOutdatedCommand:
             mock_get_path.return_value = tmp / "apm.lock.yaml"
 
             deps = {
-                "./local/pkg": _locked_dep(
-                    "./local/pkg", resolved_ref="v1.0.0", source="local"
-                ),
+                "./local/pkg": _locked_dep("./local/pkg", resolved_ref="v1.0.0", source="local"),
                 "org/remote": _locked_dep("org/remote", resolved_ref="v1.0.0"),
             }
             mock_lf_cls.read.return_value = _make_lockfile(deps)
@@ -365,8 +390,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_artifactory_dep_skipped(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """Artifactory deps (registry_prefix set) should be skipped."""
         with self._chdir_tmp() as tmp:
@@ -402,8 +432,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_error_fetching_refs_shows_unknown(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """When list_remote_refs raises for one dep, show 'unknown' and continue."""
         with self._chdir_tmp() as tmp:
@@ -441,8 +476,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_no_remote_tags_shows_unknown(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """When no remote tags are found, status should be 'unknown'."""
         with self._chdir_tmp() as tmp:
@@ -476,8 +516,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_global_flag_uses_user_scope(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """--global should resolve scope to USER (~/.apm/)."""
         with self._chdir_tmp() as tmp:
@@ -502,8 +547,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_verbose_shows_tags(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """--verbose should include available tags for outdated deps."""
         with self._chdir_tmp() as tmp:
@@ -539,8 +589,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_mixed_scenario(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """Mix of local, up-to-date, outdated, and error deps."""
         with self._chdir_tmp() as tmp:
@@ -558,9 +613,9 @@ class TestOutdatedCommand:
             mock_downloader = MagicMock()
             mock_dl_cls.return_value = mock_downloader
             mock_downloader.list_remote_refs.side_effect = [
-                [_remote_tag("v3.0.0")],                          # current: up-to-date
+                [_remote_tag("v3.0.0")],  # current: up-to-date
                 [_remote_tag("v2.0.0"), _remote_tag("v1.0.0")],  # stale: outdated
-                RuntimeError("network error"),                     # broken: error
+                RuntimeError("network error"),  # broken: error
             ]
 
             result = self.runner.invoke(cli, ["outdated"])
@@ -584,8 +639,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_no_resolved_ref_compares_against_default_branch(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """Dep with no resolved_ref compares SHA against default branch tip."""
         with self._chdir_tmp() as tmp:
@@ -593,9 +653,7 @@ class TestOutdatedCommand:
             mock_get_path.return_value = tmp / "apm.lock.yaml"
 
             deps = {
-                "org/noref": _locked_dep(
-                    "org/noref", resolved_ref=None, resolved_commit="old_sha"
-                ),
+                "org/noref": _locked_dep("org/noref", resolved_ref=None, resolved_commit="old_sha"),
             }
             mock_lf_cls.read.return_value = _make_lockfile(deps)
 
@@ -618,8 +676,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_no_resolved_ref_no_branches_shows_unknown(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """Dep with no resolved_ref and no branches returns unknown."""
         with self._chdir_tmp() as tmp:
@@ -627,9 +690,7 @@ class TestOutdatedCommand:
             mock_get_path.return_value = tmp / "apm.lock.yaml"
 
             deps = {
-                "org/noref": _locked_dep(
-                    "org/noref", resolved_ref=None, resolved_commit="old_sha"
-                ),
+                "org/noref": _locked_dep("org/noref", resolved_ref=None, resolved_commit="old_sha"),
             }
             mock_lf_cls.read.return_value = _make_lockfile(deps)
 
@@ -649,7 +710,11 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_no_lockfile_global_exits_1(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path, mock_migrate,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
     ):
         """--global with no lockfile exits 1 with user-scope hint."""
         with self._chdir_tmp() as tmp:
@@ -671,8 +736,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_virtual_dep_processed_normally(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """Virtual package deps are not skipped; their parent repo tags are fetched."""
         with self._chdir_tmp() as tmp:
@@ -711,8 +781,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_dev_dep_included_in_output(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """Dev dependencies (is_dev=True) are included in the outdated check."""
         with self._chdir_tmp() as tmp:
@@ -752,8 +827,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_multiple_packages_same_version_all_shown(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """Two packages pinned to the same version both appear in output (no dedup)."""
         with self._chdir_tmp() as tmp:
@@ -762,7 +842,7 @@ class TestOutdatedCommand:
 
             deps = {
                 "org/alpha": _locked_dep("org/alpha", resolved_ref="v2.0.0"),
-                "org/beta":  _locked_dep("org/beta",  resolved_ref="v2.0.0"),
+                "org/beta": _locked_dep("org/beta", resolved_ref="v2.0.0"),
             }
             mock_lf_cls.read.return_value = _make_lockfile(deps)
 
@@ -789,8 +869,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_parallel_checks_default(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """Default parallel-checks=4 should still check all deps."""
         with self._chdir_tmp() as tmp:
@@ -799,7 +884,8 @@ class TestOutdatedCommand:
 
             deps = {
                 f"org/pkg{i}": _locked_dep(
-                    f"org/pkg{i}", resolved_ref=None,
+                    f"org/pkg{i}",
+                    resolved_ref=None,
                     resolved_commit="aaa",
                 )
                 for i in range(6)
@@ -825,8 +911,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_sequential_checks_flag(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """--parallel-checks 0 forces sequential checking."""
         with self._chdir_tmp() as tmp:
@@ -835,11 +926,13 @@ class TestOutdatedCommand:
 
             deps = {
                 "org/alpha": _locked_dep(
-                    "org/alpha", resolved_ref=None,
+                    "org/alpha",
+                    resolved_ref=None,
                     resolved_commit="aaa",
                 ),
                 "org/beta": _locked_dep(
-                    "org/beta", resolved_ref=None,
+                    "org/beta",
+                    resolved_ref=None,
                     resolved_commit="aaa",
                 ),
             }
@@ -851,9 +944,7 @@ class TestOutdatedCommand:
             ]
             mock_dl_cls.return_value = mock_downloader
 
-            result = self.runner.invoke(
-                cli, ["outdated", "--parallel-checks", "0"]
-            )
+            result = self.runner.invoke(cli, ["outdated", "--parallel-checks", "0"])
 
             assert result.exit_code == 0
             assert "up-to-date" in result.output.lower()
@@ -866,8 +957,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_parallel_checks_custom_value(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """--parallel-checks 2 uses at most 2 workers but checks all deps."""
         with self._chdir_tmp() as tmp:
@@ -876,7 +972,8 @@ class TestOutdatedCommand:
 
             deps = {
                 f"org/pkg{i}": _locked_dep(
-                    f"org/pkg{i}", resolved_ref="v1.0.0",
+                    f"org/pkg{i}",
+                    resolved_ref="v1.0.0",
                     resolved_commit="aaa",
                 )
                 for i in range(4)
@@ -890,9 +987,7 @@ class TestOutdatedCommand:
             ]
             mock_dl_cls.return_value = mock_downloader
 
-            result = self.runner.invoke(
-                cli, ["outdated", "-j", "2"]
-            )
+            result = self.runner.invoke(cli, ["outdated", "-j", "2"])
 
             assert result.exit_code == 0
             assert mock_downloader.list_remote_refs.call_count == 4
@@ -905,8 +1000,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_parallel_check_exception_handled(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """A failing remote check in parallel mode should not crash."""
         with self._chdir_tmp() as tmp:
@@ -915,11 +1015,13 @@ class TestOutdatedCommand:
 
             deps = {
                 "org/good": _locked_dep(
-                    "org/good", resolved_ref="v1.0.0",
+                    "org/good",
+                    resolved_ref="v1.0.0",
                     resolved_commit="aaa",
                 ),
                 "org/bad": _locked_dep(
-                    "org/bad", resolved_ref="v1.0.0",
+                    "org/bad",
+                    resolved_ref="v1.0.0",
                     resolved_commit="bbb",
                 ),
             }
@@ -935,9 +1037,7 @@ class TestOutdatedCommand:
             mock_downloader.list_remote_refs.side_effect = _side_effect
             mock_dl_cls.return_value = mock_downloader
 
-            result = self.runner.invoke(
-                cli, ["outdated", "-j", "4"]
-            )
+            result = self.runner.invoke(cli, ["outdated", "-j", "4"])
 
             # Should not crash -- bad dep becomes "unknown"
             assert result.exit_code == 0
@@ -952,8 +1052,13 @@ class TestOutdatedCommand:
     @patch(_PATCH_GET_APM_DIR)
     @patch(_PATCH_LOCKFILE)
     def test_ado_dep_builds_correct_reference(
-        self, mock_lf_cls, mock_get_apm_dir, mock_get_path,
-        mock_migrate, mock_dl_cls, mock_auth,
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
     ):
         """ADO deps (host=dev.azure.com) should pass full URL to DependencyReference.parse()."""
         with self._chdir_tmp() as tmp:

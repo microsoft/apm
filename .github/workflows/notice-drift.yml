@@ -1,10 +1,10 @@
-# NOTICE Drift Check -- guards the third-party attribution file (NOTICE.md)
+# NOTICE Drift Check -- guards the third-party attribution file (NOTICE)
 # against silent drift on every PR and every merge-queue entry. Also runs
 # a license-policy gate (dependency-review-action) on PR-time only.
 #
 # Why this gate exists
 # --------------------
-# `NOTICE.md` is a legally significant artifact: it lists every third-party
+# `NOTICE` is a legally significant artifact: it lists every third-party
 # OSS component shipped inside the apm-cli wheel, with verbatim license
 # texts. Microsoft CELA's "Manual NOTICE Generation" process makes this
 # file *normative* -- if it drifts from the actual install graph (someone
@@ -81,7 +81,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Pinned to the same Python version as ci.yml. NOTICE.md content
+      # Pinned to the same Python version as ci.yml. NOTICE content
       # depends on which dist-info layout the installed wheels use, and
       # different interpreters can resolve different conditional deps
       # (e.g. tomli is only installed under python_version<'3.11').
@@ -101,14 +101,14 @@ jobs:
         # --extra dev brings in ruamel.yaml that the generator imports.
         # --frozen guarantees we resolve to the exact versions that the
         # maintainer locked, so the LICENSE text read from dist-info
-        # matches what NOTICE.md was generated against locally.
+        # matches what NOTICE was generated against locally.
         run: uv sync --frozen --extra dev
 
-      # Drift check: regenerate NOTICE.md to memory and diff against the
+      # Drift check: regenerate NOTICE to memory and diff against the
       # committed copy. Exit 1 with a unified diff to stderr if they
       # differ -- the diff lands in the GitHub Actions log so the PR
       # author can see exactly what to regenerate.
-      - name: Verify NOTICE.md is up to date
+      - name: Verify NOTICE is up to date
         run: uv run python scripts/generate-notice.py --check
 
       # Supply-chain hygiene: surface any newly-introduced dep whose
