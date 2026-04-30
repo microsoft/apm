@@ -235,6 +235,17 @@ class TargetProfile:
                     # Keep ``root_dir`` home-relative so cleanup prefix matching holds.
                     new_root = abs_path.relative_to(home).as_posix()
                 except ValueError:
+                    # Fallback: when CLAUDE_CONFIG_DIR points outside $HOME we
+                    # store an absolute path. ``pathlib.Path / <absolute>`` is
+                    # ``<absolute>`` so deploy + cleanup write to the right
+                    # place. Caveat: the lockfile path translator
+                    # (``install/services._deployed_path_entry``) calls
+                    # ``relative_to(project_root)`` and raises ``RuntimeError``
+                    # for out-of-tree paths that are not dynamic-root targets.
+                    # Today this is unreachable because user-scope CLAUDE
+                    # installs do not flow through that translator, but any
+                    # future refactor that lockfiles user-scope deploys must
+                    # treat absolute ``root_dir`` as a dynamic-root case.
                     new_root = str(abs_path)
 
         if self.unsupported_user_primitives:

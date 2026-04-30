@@ -474,16 +474,20 @@ class TestResolvePathInputGuards:
         assert _resolve_path("\t", base_dir) is None
         assert _resolve_path("\n", base_dir) is None
 
-    def test_embedded_nul_byte_does_not_crash(self, base_dir):
-        """An embedded NUL byte must not crash _resolve_path itself.
+    def test_embedded_nul_byte_returns_none(self, base_dir):
+        """An embedded NUL byte must produce ``None``, not a ``Path``.
 
-        The current containment relies on the caller's `.exists()` check to
-        reject the resulting path -- this lock-in is documented in the issue
-        ("Current containment code handles these correctly").
+        NUL bytes survive ``Path()`` construction on POSIX, but every
+        downstream filesystem call (``.exists()``, ``.is_file()``,
+        ``.read_text()``) raises ``ValueError``. Callers in
+        ``link_resolver`` (``resolve_markdown_links`` /
+        ``validate_link_targets``) do not catch ``ValueError``, so
+        returning a ``Path`` here would abort markdown link
+        resolution. The resolver rejects NUL at its boundary instead.
         """
-        # Either return value is acceptable; what matters is no exception.
-        result = _resolve_path("foo\x00bar", base_dir)
-        assert result is None or isinstance(result, Path)
+        assert _resolve_path("foo\x00bar", base_dir) is None
+        assert _resolve_path("\x00", base_dir) is None
+        assert _resolve_path("a/b\x00c.md", base_dir) is None
 
     def test_posix_backslash_traversal_stays_relative(self, base_dir):
         """Backslashes are literal characters on POSIX, so the path stays under base_dir."""
