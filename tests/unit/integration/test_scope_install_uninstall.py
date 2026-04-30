@@ -331,11 +331,11 @@ class TestClaudeInstallUninstallCycle:
         for p in deployed:
             assert not (self.project_root / p).exists()
 
-    def test_user_scope(self):
+    def test_user_scope(self, monkeypatch):
         """Claude user scope: same root (.claude/), all primitives available."""
+        monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
         target = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
         assert target is not None
-        # Claude has no user_root_dir so root stays .claude
         assert target.root_dir == ".claude"
         # All primitives available at user scope
         assert "instructions" in target.primitives
@@ -398,6 +398,33 @@ class TestClaudeInstallUninstallCycle:
             + cmd_sync["files_removed"]
         )
         assert total_removed == len(deployed)
+        for p in deployed:
+            assert not (self.project_root / p).exists()
+
+    def test_user_scope_with_claude_config_dir(self, monkeypatch):
+        """CLAUDE_CONFIG_DIR override: deploy lands at custom root and uninstall cleans it."""
+        monkeypatch.setenv("HOME", str(self.project_root))
+        custom = self.project_root / ".config" / "test-claude"
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(custom))
+        custom.mkdir(parents=True)
+
+        target = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
+        assert target is not None
+        assert target.root_dir == ".config/test-claude"
+
+        pkg_info = _make_pkg(self.project_root, instructions=False, agents=True)
+        integrator = AgentIntegrator()
+
+        result = integrator.integrate_agents_for_target(target, pkg_info, self.project_root)
+        deployed = _posix_relpaths(self.project_root, result.target_paths)
+        assert deployed
+        for p in deployed:
+            assert p.startswith(".config/test-claude/agents/"), f"unexpected path: {p}"
+
+        sync = integrator.sync_for_target(
+            target, pkg_info.package, self.project_root, managed_files=deployed
+        )
+        assert sync["files_removed"] == len(deployed)
         for p in deployed:
             assert not (self.project_root / p).exists()
 

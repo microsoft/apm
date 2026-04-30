@@ -688,8 +688,10 @@ class TestForScope:
         assert resolved.root_dir == ".copilot"
         assert resolved.name == "copilot"
 
-    def test_user_root_dir_none_keeps_root_dir(self):
-        """When user_root_dir is None, root_dir stays unchanged."""
+    def test_user_root_dir_none_keeps_root_dir(self, monkeypatch):
+        """When user_root_dir is None and CLAUDE_CONFIG_DIR is unset,
+        the user-scope root_dir falls back to the project-scope value."""
+        monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
         from apm_cli.integration.targets import KNOWN_TARGETS
         claude = KNOWN_TARGETS["claude"]
         assert claude.user_root_dir is None

@@ -214,6 +214,25 @@ class TargetProfile:
             return None
 
         new_root = self.user_root_dir or self.root_dir
+
+        # Claude Code honors CLAUDE_CONFIG_DIR (default ~/.claude); mirror
+        # that at user scope so `apm install -g` lands where Claude reads.
+        if self.name == "claude":
+            import os
+            from pathlib import Path
+
+            env = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+            if env:
+                # ``resolve`` collapses ``..`` so traversal segments cannot
+                # leak into ``root_dir`` and escape ``project_root / root_dir``.
+                abs_path = Path(env).expanduser().resolve(strict=False)
+                home = Path.home().resolve(strict=False)
+                try:
+                    # Keep ``root_dir`` home-relative so cleanup prefix matching holds.
+                    new_root = abs_path.relative_to(home).as_posix()
+                except ValueError:
+                    new_root = str(abs_path)
+
         if self.unsupported_user_primitives:
             filtered = {
                 k: v for k, v in self.primitives.items()
@@ -259,10 +278,12 @@ KNOWN_TARGETS: Dict[str, TargetProfile] = {
         user_root_dir=".copilot",
         unsupported_user_primitives=("prompts", "instructions"),
     ),
-    # Claude Code -- ~/.claude/ is the documented user-level config directory.
+    # Claude Code -- the user-level config directory is whatever
+    # ``CLAUDE_CONFIG_DIR`` points to (default ``~/.claude``).  The env
+    # var override is honored by ``for_scope(user_scope=True)``.
     # All primitives are supported at user scope.
     # Ref: https://docs.anthropic.com/en/docs/claude-code/settings
-    # Instructions deploy to .claude/rules/*.md with paths: frontmatter.
+    # Instructions deploy to <root>/rules/*.md with paths: frontmatter.
     # Ref: https://code.claude.com/docs/en/memory#organize-rules-with-claude%2Frules%2F
     "claude": TargetProfile(
         name="claude",
