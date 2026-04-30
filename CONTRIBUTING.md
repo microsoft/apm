@@ -30,7 +30,89 @@ Enhancement suggestions are welcome! Please:
 2. Clearly describe the enhancement and its benefits.
 3. Provide examples of how the enhancement would work.
 
-### Development Process
+### Author your PR with the agent skills shipped in this repo (APM dogfoods APM)
+
+This repo *uses* APM to ship its own author and review skills. The
+canonical sources live under [`.apm/skills/`](.apm/skills/) and
+[`.apm/agents/`](.apm/agents/) -- the same primitive layout any APM
+package uses. They are not magically loaded by your editor; you have
+to install them like any other APM dependency.
+
+After cloning, run APM against this repo the way you would against any
+other APM project:
+
+```bash
+# 1. Install APM itself if you haven't already.
+#    See https://github.com/microsoft/apm#install for all install options.
+curl -sSL https://aka.ms/apm-unix | sh        # macOS / Linux
+# irm https://aka.ms/apm-windows | iex        # Windows PowerShell
+
+# 2. From the root of this repo:
+apm install
+```
+
+`apm install` reads this repo's [`apm.yml`](apm.yml) (`includes: auto`),
+picks up everything under `.apm/`, and deploys it into the harness
+directories your coding agent already watches -- `.github/skills/`,
+`.github/agents/`, `.claude/skills/`, `.cursor/`, etc. -- depending on
+which targets are detected on your machine. Once that is done, your
+harness (Claude Code, GitHub Copilot CLI, Cursor, OpenCode, Codex,
+Gemini, ...) can discover and invoke the skills by name.
+
+For most PRs, two of those skills carry most of the weight:
+
+| Skill | When to use it |
+|---|---|
+| [`pr-description-skill`](.apm/skills/pr-description-skill/SKILL.md) | **Every PR.** Drafts a self-sufficient PR body (TL;DR, Problem / Approach / Implementation, mermaid diagrams, validation evidence, How-to-test) that anchors every WHY-claim to PROSE / Agent Skills. Avoids the "what does this PR even do?" round-trip with reviewers. |
+| [`apm-review-panel`](.apm/skills/apm-review-panel/SKILL.md) | **Non-trivial PRs** (new behaviour, security-relevant code, CLI UX changes, manifest/schema changes). Runs the same multi-persona panel CI runs in `pr-review-panel.yml` -- locally, on your working tree, before you push. Surfaces the `required` findings while the cost of fixing is still cheap. |
+
+Typical local flow (after `apm install`):
+
+1. Implement your change against `main`.
+2. Ask your agent: *"Run the apm-review-panel skill on my working tree."*
+   The panel fans out to the architectural, CLI-logging, DevX,
+   supply-chain, growth, and (if relevant) auth personas, and returns
+   a single verdict with `required` findings split from `nits`.
+   Address the `required` items in-place.
+3. Ask your agent: *"Use the pr-description-skill to draft the PR body
+   for this branch."* Review the draft, paste it into
+   `gh pr create --body-file`.
+4. Push and open the PR. The same panel runs in CI on label, but most
+   `required` findings will already be addressed -- the comment thread
+   stays focused on substance instead of correctness debt.
+
+You don't have to use these skills, but the panel verdict in CI applies
+the same rubric either way, and PRs that have already been through it
+locally tend to merge faster.
+
+The full persona roster lives in [`.apm/agents/`](.apm/agents/) -- you
+can also summon any single persona (e.g. `python-architect`,
+`supply-chain-security-expert`) for a focused review of a specific file
+or design question without running the full panel.
+
+#### When to summon which persona during design and implementation
+
+Don't wait for the panel verdict to discover you should have talked to
+a specialist. The same personas the panel runs are the ones to consult
+*while* you are designing and building. Recommended pairings:
+
+| Situation | Persona to summon | Why |
+|---|---|---|
+| Any new feature or feature change | [`devx-ux-expert`](.apm/agents/devx-ux-expert.agent.md) **first** | Validate the user-facing approach (flags, defaults, error messages, manifest shape) *before* you write code. Cheaper than re-doing the implementation after the panel rejects it. |
+| Anything that prints to the terminal | [`cli-logging-expert`](.apm/agents/cli-logging-expert.agent.md) | Always include this. Keeps log levels, colours, prefixes, and progress indicators consistent across the CLI. |
+| Refactor, new module, or non-trivial architecture decision | [`python-architect`](.apm/agents/python-architect.agent.md) | Get the boundaries / interfaces / dependency direction right up front. |
+| Anything that fetches packages, evaluates manifests, scans content, signs / verifies / locks, or touches `apm install` | [`supply-chain-security-expert`](.apm/agents/supply-chain-security-expert.agent.md) **mandatory** | A core promise of APM is that `apm install` blocks compromised packages before agents read them. This persona is **non-optional** for any PR that touches the supply chain -- the panel will reject it otherwise. |
+| Any change touching authentication, tokens, credential resolution, or remote host auth (GitHub, GHE, ADO, EMU, GitHub Apps) | [`auth-expert`](.apm/agents/auth-expert.agent.md) | Auth bugs are silent and expensive. Run this persona on the design and again on the diff. |
+| New primitive type, manifest schema change, or cross-target deployment behaviour | [`apm-primitives-architect`](.apm/agents/apm-primitives-architect.agent.md) | Keeps the primitive model coherent across Copilot, Claude, Cursor, OpenCode, Codex, Gemini. |
+| Public-facing copy, README, docs site, or release notes | [`doc-writer`](.apm/agents/doc-writer.agent.md) and/or [`oss-growth-hacker`](.apm/agents/oss-growth-hacker.agent.md) | Voice consistency and positioning for new-user moments. |
+
+Rule of thumb: ask the matching persona to **critique your plan before
+you implement**, then ask it again to **review the diff before you
+push**. Two cheap, focused passes per persona beat one expensive panel
+rejection. The `apm-review-panel` skill at the end is then a sanity
+check, not a redesign.
+
+
 
 1. Fork the repository.
 2. Create a new branch for your feature/fix: `git checkout -b feature/your-feature-name` or `git checkout -b fix/issue-description`.

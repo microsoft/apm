@@ -301,11 +301,20 @@ class TestWriteOutputFile(unittest.TestCase):
 
     def test_write_output_file_oserror_adds_error(self):
         """_write_output_file adds error message when OS error occurs."""
-        compiler = AgentsCompiler(self.tmp)
-        bad_path = str(Path(self.tmp) / "nodir" / "deep" / "AGENTS.md")
+        from unittest.mock import patch
 
-        # Don't create parent directory so the write fails.
-        compiler._write_output_file(bad_path, "content")
+        compiler = AgentsCompiler(self.tmp)
+        target = str(Path(self.tmp) / "AGENTS.md")
+
+        # Force the atomic-write rename to fail so we exercise the OSError
+        # path. Parent directory is now auto-created by CompiledOutputWriter,
+        # so we cannot rely on a missing-parent failure mode.
+        with patch(
+            "apm_cli.utils.atomic_io.os.replace",
+            side_effect=OSError("simulated rename failure"),
+        ):
+            compiler._write_output_file(target, "content")
+
         self.assertEqual(len(compiler.errors), 1)
         self.assertIn("Failed to write", compiler.errors[0])
 

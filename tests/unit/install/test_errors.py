@@ -1,9 +1,9 @@
 """Unit tests for install/errors.py exception types."""
 
-from apm_cli.install.errors import (  # noqa: F401
+from apm_cli.install.errors import (
     AuthenticationError,
-    DirectDependencyError,
-    PolicyViolationError,
+    DirectDependencyError,  # noqa: F401
+    PolicyViolationError,  # noqa: F401
 )
 
 

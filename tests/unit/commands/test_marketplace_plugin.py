@@ -10,7 +10,7 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import marketplace
-from apm_cli.commands.marketplace_plugin import _SHA_RE, _resolve_ref  # noqa: F401
+from apm_cli.commands.marketplace.plugin import _SHA_RE, _resolve_ref  # noqa: F401
 from apm_cli.core.command_logger import CommandLogger
 from apm_cli.marketplace.ref_resolver import RemoteRef
 

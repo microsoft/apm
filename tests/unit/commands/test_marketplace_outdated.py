@@ -102,7 +102,7 @@ def yml_cwd(tmp_path, monkeypatch):
 class TestOutdatedHappyPath:
     """outdated -- basic success."""
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
     def test_shows_package_names(self, MockResolver, runner, yml_cwd):
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = [_REFS_ALPHA, _REFS_BETA]
@@ -114,7 +114,7 @@ class TestOutdatedHappyPath:
         assert "pkg-alpha" in result.output
         assert "pkg-beta" in result.output
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
     def test_shows_latest_in_range(self, MockResolver, runner, yml_cwd):
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = [_REFS_ALPHA, _REFS_BETA]
@@ -126,7 +126,7 @@ class TestOutdatedHappyPath:
         # v1.2.0 is highest in ^1.0.0 range
         assert "v1.2.0" in result.output
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
     def test_shows_latest_overall(self, MockResolver, runner, yml_cwd):
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = [_REFS_ALPHA, _REFS_BETA]
@@ -136,7 +136,7 @@ class TestOutdatedHappyPath:
         # v2.0.0 is highest overall for alpha
         assert "v2.0.0" in result.output
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
     def test_exit_code_one_when_outdated(self, MockResolver, runner, yml_cwd):
         """Exit code 1 when packages are outdated (CI-friendly)."""
         mock_inst = MockResolver.return_value
@@ -146,7 +146,7 @@ class TestOutdatedHappyPath:
         result = runner.invoke(marketplace, ["outdated"])
         assert result.exit_code == 1
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
     def test_with_marketplace_json_present(self, MockResolver, runner, yml_cwd):
         """Current versions read from marketplace.json."""
         mkt = {
@@ -174,7 +174,7 @@ class TestOutdatedHappyPath:
 class TestOutdatedRefPinned:
     """Entries with explicit ref: are skipped."""
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
     def test_ref_pinned_shows_skip_note(self, MockResolver, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "marketplace.yml").write_text(_YML_WITH_REF, encoding="utf-8")
@@ -211,7 +211,7 @@ class TestOutdatedMissingYml:
 
 
 class TestOutdatedOffline:
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
     def test_offline_passed_to_resolver(self, MockResolver, runner, yml_cwd):
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = OfflineMissError(
@@ -230,7 +230,7 @@ class TestOutdatedOffline:
 
 
 class TestOutdatedErrors:
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
     def test_resolver_error_shows_in_table(self, MockResolver, runner, yml_cwd):
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = GitLsRemoteError(
@@ -242,7 +242,7 @@ class TestOutdatedErrors:
         assert result.exit_code == 0
         assert "pkg-alpha" in result.output
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
     def test_no_matching_tags(self, MockResolver, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "marketplace.yml").write_text(_YML_SINGLE, encoding="utf-8")
@@ -264,7 +264,7 @@ class TestOutdatedErrors:
 
 
 class TestOutdatedVerbose:
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
     def test_verbose_shows_upgradable_count(self, MockResolver, runner, yml_cwd):
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = [_REFS_ALPHA, _REFS_BETA]
@@ -282,7 +282,7 @@ class TestOutdatedVerbose:
 
 
 class TestOutdatedStatusSymbols:
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
     def test_up_to_date_status(self, MockResolver, runner, yml_cwd):
         """When current == latest-in-range, status is [+]."""
         mkt = {
@@ -299,7 +299,7 @@ class TestOutdatedStatusSymbols:
         result = runner.invoke(marketplace, ["outdated"])
         assert result.exit_code == 0
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
     def test_major_upgrade_status(self, MockResolver, runner, yml_cwd):
         """When latest-overall differs from latest-in-range, status is [*]."""
         mock_inst = MockResolver.return_value
@@ -319,7 +319,7 @@ class TestOutdatedStatusSymbols:
 
 
 class TestOutdatedResolverCleanup:
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
     def test_resolver_close_called(self, MockResolver, runner, yml_cwd):
         mock_inst = MockResolver.return_value
         mock_inst.list_remote_refs.side_effect = [_REFS_ALPHA, _REFS_BETA]
@@ -337,7 +337,7 @@ class TestOutdatedResolverCleanup:
 class TestOutdatedSummaryLine:
     """outdated -- summary line and CI exit code."""
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
     def test_summary_line_when_outdated(self, MockResolver, runner, yml_cwd):
         """Summary line reports outdated and up-to-date counts."""
         mock_inst = MockResolver.return_value
@@ -347,7 +347,7 @@ class TestOutdatedSummaryLine:
         result = runner.invoke(marketplace, ["outdated"])
         assert "package(s) can be updated" in result.output
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
     def test_exit_code_zero_when_up_to_date(self, MockResolver, runner, yml_cwd):
         """Exit code 0 when all packages are up to date."""
         mkt = {
@@ -365,7 +365,7 @@ class TestOutdatedSummaryLine:
         assert result.exit_code == 0
         assert "All packages are up to date" in result.output
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
     def test_exit_code_one_when_outdated(self, MockResolver, runner, yml_cwd):
         """Exit code 1 when packages are outdated (CI-friendly)."""
         mock_inst = MockResolver.return_value
@@ -375,7 +375,7 @@ class TestOutdatedSummaryLine:
         result = runner.invoke(marketplace, ["outdated"])
         assert result.exit_code == 1
 
-    @patch("apm_cli.commands.marketplace.RefResolver")
+    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
     def test_summary_counts_up_to_date(self, MockResolver, runner, yml_cwd):
         """Up-to-date count reflects packages at latest in range."""
         mkt = {

@@ -151,12 +151,16 @@ def test_install_py_under_legacy_budget():
     pre-existing patterns (F401, RUF013, B904, etc.) that make violations
     visible and searchable. The line count increase is mechanical, not
     new logic -- each noqa is a cleanup target for future PRs.
+
+    Post-rebase (main merged into #999) install.py shrank from 2100 to
+    ~1700 as upstream refactors extracted helpers. Budget tightened to
+    1800 to track the improvement.
     """
     install_py = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "commands" / "install.py"
     assert install_py.is_file()
     n = _line_count(install_py)
-    assert n <= 2100, (
-        f"commands/install.py grew to {n} LOC (budget 2100). "
+    assert n <= 1800, (
+        f"commands/install.py grew to {n} LOC (budget 1800). "
         "Do NOT trim cosmetically -- engage the python-architecture skill "
         "(.github/skills/python-architecture/SKILL.md) and propose an "
         "extraction into apm_cli/install/."

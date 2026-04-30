@@ -174,23 +174,23 @@ def _run_publish(
 
         with (
             patch(
-                "apm_cli.commands.marketplace.MarketplacePublisher.plan",
+                "apm_cli.commands.marketplace.publish.MarketplacePublisher.plan",
                 return_value=plan,
             ),
             patch(
-                "apm_cli.commands.marketplace.MarketplacePublisher.execute",
+                "apm_cli.commands.marketplace.publish.MarketplacePublisher.execute",
                 return_value=results,
             ),
             patch(
-                "apm_cli.commands.marketplace.PrIntegrator.check_available",
+                "apm_cli.commands.marketplace.publish.PrIntegrator.check_available",
                 return_value=(mock_pr_available, "gh available"),
             ),
             patch(
-                "apm_cli.commands.marketplace.PrIntegrator.open_or_update",
+                "apm_cli.commands.marketplace.publish.PrIntegrator.open_or_update",
                 side_effect=pr_results,
             ),
             patch(
-                "apm_cli.commands.marketplace._is_interactive",
+                "apm_cli.commands.marketplace.publish._is_interactive",
                 return_value=False,
             ),
             patch.dict(os.environ, env, clear=False),
@@ -265,23 +265,23 @@ class TestPublishDryRun:
 
             with (
                 patch(
-                    "apm_cli.commands.marketplace.MarketplacePublisher.plan",
+                    "apm_cli.commands.marketplace.publish.MarketplacePublisher.plan",
                     return_value=plan,
                 ),
                 patch(
-                    "apm_cli.commands.marketplace.MarketplacePublisher.execute",
+                    "apm_cli.commands.marketplace.publish.MarketplacePublisher.execute",
                     execute_mock,
                 ),
                 patch(
-                    "apm_cli.commands.marketplace.PrIntegrator.check_available",
+                    "apm_cli.commands.marketplace.publish.PrIntegrator.check_available",
                     return_value=(True, "ok"),
                 ),
                 patch(
-                    "apm_cli.commands.marketplace.PrIntegrator.open_or_update",
+                    "apm_cli.commands.marketplace.publish.PrIntegrator.open_or_update",
                     return_value=_make_pr_result("consumer-org/service-a", PrState.SKIPPED),
                 ),
                 patch(
-                    "apm_cli.commands.marketplace._is_interactive",
+                    "apm_cli.commands.marketplace.publish._is_interactive",
                     return_value=False,
                 ),
             ):
@@ -394,21 +394,21 @@ class TestPublishNoPr:
 
             with (
                 patch(
-                    "apm_cli.commands.marketplace.MarketplacePublisher.plan",
+                    "apm_cli.commands.marketplace.publish.MarketplacePublisher.plan",
                     return_value=plan,
                 ),
                 patch(
-                    "apm_cli.commands.marketplace.MarketplacePublisher.execute",
+                    "apm_cli.commands.marketplace.publish.MarketplacePublisher.execute",
                     return_value=[
                         _make_target_result("consumer-org/service-a", PublishOutcome.UPDATED)
                     ],
                 ),
                 patch(
-                    "apm_cli.commands.marketplace.PrIntegrator.open_or_update",
+                    "apm_cli.commands.marketplace.publish.PrIntegrator.open_or_update",
                     open_or_update_mock,
                 ),
                 patch(
-                    "apm_cli.commands.marketplace._is_interactive",
+                    "apm_cli.commands.marketplace.publish._is_interactive",
                     return_value=False,
                 ),
             ):

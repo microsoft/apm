@@ -57,7 +57,10 @@ devDependencies:
   mcp:         <list<McpDependency>>
 compilation:   <CompilationConfig>
 policy:        <PolicyConfig>
+marketplace:   <MarketplaceConfig>           # OPTIONAL; marketplace authoring
 ```
+
+`marketplace:` is the source for `apm pack`'s marketplace output and is OPTIONAL. Repositories that do not publish a marketplace omit it entirely. The block, its schema, and the build flow are documented in the [Authoring a marketplace guide](../../guides/marketplace-authoring/). Within `marketplace:`, the inheritable fields `name`, `description`, and `version` default to the top-level values above and SHOULD be omitted unless an override is required.
 
 ---
 

@@ -6,7 +6,6 @@ This module must NOT import from any command module.
 import builtins
 import os
 import sys
-import tempfile
 from pathlib import Path
 
 import click
@@ -22,6 +21,7 @@ from ..constants import (
     GITIGNORE_FILENAME,
 )
 from ..update_policy import get_update_hint_message, is_self_update_enabled
+from ..utils.atomic_io import atomic_write_text as _atomic_write  # noqa: F401
 from ..utils.console import _rich_echo, _rich_info, _rich_warning
 from ..utils.version_checker import check_for_updates
 from ..version import get_build_sha, get_version
@@ -293,21 +293,6 @@ def _check_and_notify_updates():
     except Exception:
         # Silently fail - version checking should never block CLI usage
         pass
-
-
-def _atomic_write(path: Path, data: str) -> None:
-    """Atomically write text data to path (best-effort)."""
-    fd, tmp_name = tempfile.mkstemp(prefix="apm-write-", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(data)
-        os.replace(tmp_name, path)
-    except Exception:
-        try:  # noqa: SIM105
-            os.unlink(tmp_name)
-        except OSError:
-            pass
-        raise
 
 
 def _update_gitignore_for_apm_modules(logger=None):

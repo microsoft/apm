@@ -7,16 +7,36 @@ They are always run in addition to the baseline checks in ``ci_checks``.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import List, Optional  # noqa: F401, UP035
 
 from .models import CheckResult, CIAuditResult
 
+_logger = logging.getLogger(__name__)
+
+
 # -- Helpers -------------------------------------------------------
 
 
 def _load_raw_apm_yml(project_root: Path) -> dict | None:
-    """Load raw apm.yml as a dict for policy checks that inspect raw fields."""
+    """Load raw apm.yml as a dict for policy checks that inspect raw fields.
+
+    This helper is called **after** :pymethod:`APMPackage.from_apm_yml` has
+    already succeeded in :func:`run_policy_checks`.  The primary security
+    gate is ``from_apm_yml()`` -- if it fails, the audit aborts with a
+    ``manifest-parse`` check result and this function is never reached.
+
+    Returning ``None`` here is therefore **defence-in-depth**: it covers
+    edge cases (TOCTOU race, transient I/O error) where the file becomes
+    unreadable between the two calls.  Callers that receive ``None``
+    gracefully skip supplementary raw-field checks (e.g.
+    ``compilation-target``, ``extensions-present``) rather than hard-failing.
+
+    Returns ``None`` when the file is absent, unreadable, malformed YAML,
+    or not a mapping -- but logs a warning so the failure is visible
+    rather than silently swallowed.
+    """
     import yaml
 
     apm_yml_path = project_root / "apm.yml"
@@ -25,9 +45,25 @@ def _load_raw_apm_yml(project_root: Path) -> dict | None:
     try:
         with open(apm_yml_path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
-        return data if isinstance(data, dict) else None
-    except Exception:
+    except FileNotFoundError:
+        # TOCTOU: file disappeared between exists() check and open(); normal condition.
         return None
+    except yaml.YAMLError as exc:
+        _logger.warning("Malformed YAML in %s: %s", apm_yml_path, exc)
+        return None
+    except OSError as exc:
+        _logger.warning("Cannot read %s: %s", apm_yml_path, exc)
+        return None
+    except UnicodeDecodeError as exc:
+        _logger.warning("Cannot decode %s as UTF-8: %s", apm_yml_path, exc)
+        return None
+    if not isinstance(data, dict):
+        _logger.warning(
+            "apm.yml is not a YAML mapping (got %s) -- skipping raw-field checks",
+            type(data).__name__,
+        )
+        return None
+    return data
 
 
 # -- Individual policy checks --------------------------------------
@@ -898,10 +934,20 @@ def run_policy_checks(
     if not apm_yml_path.exists():
         return result
 
+    import yaml
+
     try:
         clear_apm_yml_cache()
         manifest = APMPackage.from_apm_yml(apm_yml_path)
-    except (ValueError, FileNotFoundError):
+    except (ValueError, yaml.YAMLError, OSError) as exc:
+        result.checks.append(
+            CheckResult(
+                name="manifest-parse",
+                passed=False,
+                message="Cannot parse apm.yml: %s -- fix the YAML syntax error in apm.yml and re-run."  # noqa: UP031
+                % exc,
+            )
+        )
         return result
 
     # Load lockfile (optional -- some checks work without it)

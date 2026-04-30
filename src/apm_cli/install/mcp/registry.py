@@ -22,13 +22,13 @@ from __future__ import annotations
 import contextlib
 import ipaddress
 import os
-from collections.abc import Iterator
-from typing import Optional, Tuple  # noqa: F401, UP035
+from collections.abc import Iterator, Mapping, Sequence
+from typing import Any, Optional, Tuple  # noqa: F401, UP035
 from urllib.parse import urlparse, urlunparse
 
 import click
 
-from ..models.dependency.mcp import _ALLOWED_URL_SCHEMES
+from ...models.dependency.mcp import _ALLOWED_URL_SCHEMES
 
 # Defensive cap on registry URL length to keep apm.yml diffs reviewable
 # and to bound any downstream URL parsing/logging surface.
@@ -119,15 +119,19 @@ def validate_registry_url(value: str | None) -> str | None:
             f"{_MAX_REGISTRY_URL_LENGTH} characters)"
         )
     parsed = urlparse(normalized)
+    # Redact credentials before echoing the URL back to the user: any
+    # ``user:password@`` segment in `value` would otherwise land in
+    # `UsageError` text and be captured by CI logs / shell history.
+    safe_value = _redact_url_credentials(value)
     if not parsed.scheme or not parsed.netloc:
         raise click.UsageError(
-            f"--registry: Invalid URL '{value}': expected scheme://host "
+            f"--registry: Invalid URL '{safe_value}': expected scheme://host "
             f"(e.g. https://mcp.internal.example.com)"
         )
     scheme = parsed.scheme.lower()
     if scheme not in _ALLOWED_URL_SCHEMES:
         raise click.UsageError(
-            f"--registry: Invalid URL '{value}': scheme '{scheme}' is not "
+            f"--registry: Invalid URL '{safe_value}': scheme '{scheme}' is not "
             f"supported; use http:// or https://. WebSocket URLs (ws/wss) "
             f"and file:// paths are rejected for security."
         )
@@ -235,21 +239,39 @@ def registry_env_override(registry_url: str | None) -> Iterator[None]:
                 os.environ[k] = v
 
 
-def validate_mcp_dry_run_entry(name, **kwargs) -> None:
+def validate_mcp_dry_run_entry(
+    name: str,
+    *,
+    transport: str | None = None,
+    url: str | None = None,
+    env: Mapping[str, str] | None = None,
+    headers: Mapping[str, str] | None = None,
+    version: str | None = None,
+    command_argv: Sequence[str] | None = None,
+    registry_url: str | None = None,
+) -> None:
     """C1: validate the MCP entry that ``apm install --mcp ... --dry-run``
     would persist, raising :class:`click.UsageError` on rejection.
 
-    Mirrors the validation that real install runs via ``_build_mcp_entry``,
+    Mirrors the validation that real install runs via ``build_mcp_entry``,
     so dry-run never previews "success" for an entry the real install
     would reject. Lives here (not in commands/install.py) per the LOC-budget
-    invariant on that module.
+    invariant on that module. The keyword-only signature matches
+    :func:`build_mcp_entry` exactly so unknown kwargs surface as
+    ``TypeError`` at the boundary instead of being silently swallowed.
     """
-    # Local import: ``_build_mcp_entry`` lives in commands/install.py and
-    # imports from this module, so the import must be deferred to call time
-    # to avoid a circular import.
-    from ..commands.install import _build_mcp_entry
+    from .entry import build_mcp_entry
 
     try:
-        _build_mcp_entry(name, **kwargs)
+        build_mcp_entry(
+            name,
+            transport=transport,
+            url=url,
+            env=env,
+            headers=headers,
+            version=version,
+            command_argv=command_argv,
+            registry_url=registry_url,
+        )
     except ValueError as exc:
         raise click.UsageError(str(exc))  # noqa: B904

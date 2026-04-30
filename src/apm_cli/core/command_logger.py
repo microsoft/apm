@@ -111,6 +111,10 @@ class CommandLogger:
         """
         _rich_echo(message, color="green")
 
+    def blank_line(self):
+        """Log a blank line through the shared console output path."""
+        _rich_echo("")
+
     def package_inline_warning(self, message: str):
         """Log an inline warning under a package block (verbose only).
 

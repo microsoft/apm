@@ -64,8 +64,9 @@ class TestAtomicWrite:
         with patch("os.replace", side_effect=OSError("replace failed")):
             with pytest.raises(OSError, match="replace failed"):
                 _atomic_write(target, "data")
-        # No stale temp file should remain in tmp_path
-        leftover = list(tmp_path.glob("apm-write-*"))
+        # No stale temp file should remain in tmp_path. Prefix-agnostic so
+        # the assertion does not silently pass if the temp prefix changes.
+        leftover = [f for f in tmp_path.iterdir() if f != target]
         assert leftover == [], f"Temp file not cleaned up: {leftover}"
 
 

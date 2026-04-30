@@ -33,6 +33,7 @@ _CHECK_ARTIFACT_MAP: dict[str, str] = {
     "required-manifest-fields": "apm.yml",
     "scripts-policy": "apm.yml",
     "unmanaged-files": "apm.yml",
+    "manifest-parse": "apm.yml",
 }
 
 
