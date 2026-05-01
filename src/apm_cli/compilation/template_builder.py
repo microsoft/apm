@@ -1,12 +1,15 @@
 """Template building system for AGENTS.md compilation."""
 
 import re  # noqa: F401
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 from ..primitives.models import Chatmode, Instruction
 from ..utils.paths import portable_relpath
+
+GLOBAL_INSTRUCTIONS_HEADING = "## Global Instructions"
 
 
 @dataclass
@@ -17,6 +20,70 @@ class TemplateData:
     # Removed volatile timestamp for deterministic builds
     version: str
     chatmode_content: str | None = None
+
+
+def render_instructions_block(
+    instructions: list[Instruction],
+    *,
+    base_dir: Path,
+    emit_instruction: Callable[[Instruction], list[str]],
+    global_heading: str = GLOBAL_INSTRUCTIONS_HEADING,
+) -> list[str]:
+    """Render the body lines of an instructions section.
+
+    Renders global instructions (those with no ``applyTo`` pattern) under a
+    single ``global_heading`` block, then renders pattern-scoped instructions
+    grouped under ``## Files matching `<pattern>``` headings (sorted by
+    pattern). Within each group, instructions are sorted by file path
+    relative to ``base_dir`` for deterministic output.
+
+    The caller controls per-instruction emission via ``emit_instruction`` so
+    each renderer keeps its own source-attribution format unchanged.
+
+    Args:
+        instructions: Mixed global and scoped instructions (any order).
+        base_dir: Directory used as the anchor for stable sort keys.
+        emit_instruction: Callback that returns the lines to emit for one
+            instruction. Typically the source-attribution comment, the
+            instruction body, and a trailing blank line. Empty-content
+            instructions are filtered out before this is invoked.
+        global_heading: Heading line for the global section.
+
+    Returns:
+        Lines that the caller will join. Empty list when ``instructions`` is
+        empty.
+    """
+    if not instructions:
+        return []
+
+    sections: list[str] = []
+
+    def _sort_key(inst: Instruction) -> str:
+        return portable_relpath(inst.file_path, base_dir)
+
+    globals_: list[Instruction] = []
+    pattern_groups: dict[str, list[Instruction]] = {}
+    for instruction in instructions:
+        if not instruction.apply_to:
+            globals_.append(instruction)
+        else:
+            pattern_groups.setdefault(instruction.apply_to, []).append(instruction)
+
+    if globals_:
+        sections.append(global_heading)
+        sections.append("")
+        for instruction in sorted(globals_, key=_sort_key):
+            if instruction.content.strip():
+                sections.extend(emit_instruction(instruction))
+
+    for pattern, pattern_instructions in sorted(pattern_groups.items()):
+        sections.append(f"## Files matching `{pattern}`")
+        sections.append("")
+        for instruction in sorted(pattern_instructions, key=_sort_key):
+            if instruction.content.strip():
+                sections.extend(emit_instruction(instruction))
+
+    return sections
 
 
 def build_conditional_sections(instructions: list[Instruction]) -> str:
@@ -31,37 +98,25 @@ def build_conditional_sections(instructions: list[Instruction]) -> str:
     if not instructions:
         return ""
 
-    # Group instructions by pattern - use raw patterns
-    pattern_groups = _group_instructions_by_pattern(instructions)
+    cwd = Path.cwd()
 
-    sections = []
+    def emit(instruction: Instruction) -> list[str]:
+        try:
+            if instruction.file_path.is_absolute():
+                relative_path = portable_relpath(instruction.file_path, cwd)
+            else:
+                relative_path = str(instruction.file_path)
+        except (ValueError, OSError):
+            relative_path = instruction.file_path.as_posix()
 
-    for pattern, pattern_instructions in sorted(pattern_groups.items()):
-        sections.append(f"## Files matching `{pattern}`")
-        sections.append("")
+        return [
+            f"<!-- Source: {relative_path} -->",
+            instruction.content.strip(),
+            f"<!-- End source: {relative_path} -->",
+            "",
+        ]
 
-        # Combine content from all instructions for this pattern
-        for instruction in sorted(
-            pattern_instructions, key=lambda i: portable_relpath(i.file_path, Path.cwd())
-        ):
-            content = instruction.content.strip()
-            if content:
-                # Add source file comment before the content
-                try:
-                    # Try to get relative path for cleaner display
-                    if instruction.file_path.is_absolute():
-                        relative_path = portable_relpath(instruction.file_path, Path.cwd())
-                    else:
-                        relative_path = str(instruction.file_path)
-                except (ValueError, OSError):
-                    # Fall back to absolute or given path if relative fails
-                    relative_path = instruction.file_path.as_posix()
-
-                sections.append(f"<!-- Source: {relative_path} -->")
-                sections.append(content)
-                sections.append(f"<!-- End source: {relative_path} -->")
-                sections.append("")
-
+    sections = render_instructions_block(instructions, base_dir=cwd, emit_instruction=emit)
     return "\n".join(sections)
 
 
@@ -79,31 +134,6 @@ def find_chatmode_by_name(chatmodes: list[Chatmode], chatmode_name: str) -> Chat
         if chatmode.name == chatmode_name:
             return chatmode
     return None
-
-
-def _group_instructions_by_pattern(instructions: list[Instruction]) -> dict[str, list[Instruction]]:
-    """Group instructions by applyTo patterns.
-
-    Args:
-        instructions (List[Instruction]): List of instructions to group.
-
-    Returns:
-        Dict[str, List[Instruction]]: Grouped instructions with raw patterns as keys.
-    """
-    pattern_groups: dict[str, list[Instruction]] = {}
-
-    for instruction in instructions:
-        if not instruction.apply_to:
-            continue
-
-        pattern = instruction.apply_to
-
-        if pattern not in pattern_groups:
-            pattern_groups[pattern] = []
-
-        pattern_groups[pattern].append(instruction)
-
-    return pattern_groups
 
 
 def generate_agents_md_template(template_data: TemplateData) -> str:
