@@ -455,10 +455,12 @@ class TestFQDNVirtualPaths:
         assert dep.is_virtual_file() is True
 
     def test_bitbucket_virtual_collection(self):
-        dep = DependencyReference.parse("bitbucket.org/team/rules/collections/security")
+        dep = DependencyReference.parse(
+            "bitbucket.org/team/rules/collections/security.collection.yml"
+        )
         assert dep.host == "bitbucket.org"
         assert dep.repo_url == "team/rules"
-        assert dep.virtual_path == "collections/security"
+        assert dep.virtual_path == "collections/security.collection.yml"
         assert dep.is_virtual is True
         assert dep.is_virtual_collection() is True
 

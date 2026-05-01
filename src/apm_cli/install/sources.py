@@ -58,6 +58,7 @@ def _format_package_type_label(pkg_type) -> str | None:
         PackageType.APM_PACKAGE: "APM Package (apm.yml)",
         PackageType.HOOK_PACKAGE: "Hook Package (hooks/*.json only)",
         PackageType.SKILL_BUNDLE: "Skill Bundle (skills/<name>/SKILL.md)",
+        PackageType.META_PACKAGE: "Meta Package (apm.yml dependency aggregator)",
     }.get(pkg_type)
 
 

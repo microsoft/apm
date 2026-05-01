@@ -374,22 +374,48 @@ class TestDependencyReference:
             assert dep.is_virtual_file() is True
             assert dep.virtual_path == f"path/to/file{ext}"
 
-    def test_parse_virtual_collection(self):
-        """Test parsing virtual collection package."""
+    def test_parse_virtual_collection_explicit_extension(self):
+        """Test parsing virtual collection with explicit `.collection.yml`.
+
+        Per #1094, the legacy `/collections/<name>` path heuristic no
+        longer eagerly classifies as COLLECTION; the actual shape is
+        resolved at fetch time. Explicit `.collection.yml` URLs remain
+        classified as COLLECTION up-front.
+        """
+        dep = DependencyReference.parse(
+            "owner/test-repo/collections/project-planning.collection.yml"
+        )
+        assert dep.repo_url == "owner/test-repo"
+        assert dep.is_virtual is True
+        assert dep.virtual_path == "collections/project-planning.collection.yml"
+        assert dep.is_virtual_file() is False
+        assert dep.is_virtual_collection() is True
+        assert dep.get_virtual_package_name() == "test-repo-project-planning"
+
+    def test_parse_collections_path_resolves_at_fetch_time(self):
+        """A `/collections/<name>` URL is SUBDIRECTORY now (#1094).
+
+        The actual shape (APM package vs legacy collection manifest) is
+        resolved at fetch time by probing `apm.yml` first, then
+        `<name>.collection.yml` as a fallback.
+        """
         dep = DependencyReference.parse("owner/test-repo/collections/project-planning")
         assert dep.repo_url == "owner/test-repo"
         assert dep.is_virtual is True
         assert dep.virtual_path == "collections/project-planning"
         assert dep.is_virtual_file() is False
-        assert dep.is_virtual_collection() is True
+        assert dep.is_virtual_collection() is False
+        assert dep.is_virtual_subdirectory() is True
+        # Naming preserved across the reclassification: same package name
+        # whether the URL has the explicit extension or not.
         assert dep.get_virtual_package_name() == "test-repo-project-planning"
 
     def test_parse_virtual_collection_with_reference(self):
-        """Test parsing virtual collection with git reference."""
-        dep = DependencyReference.parse("owner/test-repo/collections/testing#main")
+        """Explicit `.collection.yml` reference still parses as COLLECTION."""
+        dep = DependencyReference.parse("owner/test-repo/collections/testing.collection.yml#main")
         assert dep.repo_url == "owner/test-repo"
         assert dep.is_virtual is True
-        assert dep.virtual_path == "collections/testing"
+        assert dep.virtual_path == "collections/testing.collection.yml"
         assert dep.reference == "main"
         assert dep.is_virtual_collection() is True
 

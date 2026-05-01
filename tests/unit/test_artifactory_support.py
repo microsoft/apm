@@ -903,7 +903,8 @@ class TestProxyRegistryOnlyMode:
         with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True):
             dl = GitHubPackageDownloader()
             dep = DependencyReference.parse(
-                "art.example.com/artifactory/github/owner/repo/collections/my-collection"
+                "art.example.com/artifactory/github/owner/repo/collections/"
+                "my-collection.collection.yml"
             )
             assert dep.is_artifactory()
             assert dep.is_virtual_collection()

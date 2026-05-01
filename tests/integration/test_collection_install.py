@@ -14,24 +14,39 @@ class TestCollectionInstallation:
     """Test collection virtual package installation from GitHub."""
 
     def test_parse_collection_dependency(self):
-        """Test parsing a collection dependency reference."""
-        dep_ref = DependencyReference.parse("owner/test-repo/collections/awesome-copilot")
+        """Test parsing a collection dependency reference.
 
+        Per #1094, `/collections/<name>` (no extension) is now SUBDIRECTORY;
+        the legacy collection shape is resolved at fetch time via the
+        `<name>.collection.yml` fallback probe. Explicit-extension URLs
+        remain classified as COLLECTION up-front.
+        """
+        # Implicit form: classified as SUBDIRECTORY, resolved at fetch time.
+        dep_ref = DependencyReference.parse("owner/test-repo/collections/awesome-copilot")
         assert dep_ref.is_virtual is True
-        assert dep_ref.is_virtual_collection() is True
+        assert dep_ref.is_virtual_subdirectory() is True
+        assert dep_ref.is_virtual_collection() is False
         assert dep_ref.is_virtual_file() is False
         assert dep_ref.repo_url == "owner/test-repo"
         assert dep_ref.virtual_path == "collections/awesome-copilot"
         assert dep_ref.get_virtual_package_name() == "test-repo-awesome-copilot"
 
+        # Explicit form: classified as COLLECTION up-front.
+        dep_ref_explicit = DependencyReference.parse(
+            "owner/test-repo/collections/awesome-copilot.collection.yml"
+        )
+        assert dep_ref_explicit.is_virtual_collection() is True
+        assert dep_ref_explicit.get_virtual_package_name() == "test-repo-awesome-copilot"
+
     def test_parse_collection_with_reference(self):
         """Test parsing a collection dependency with git reference."""
-        dep_ref = DependencyReference.parse("owner/test-repo/collections/project-planning#main")
-
+        dep_ref = DependencyReference.parse(
+            "owner/test-repo/collections/project-planning.collection.yml#main"
+        )
         assert dep_ref.is_virtual is True
         assert dep_ref.is_virtual_collection() is True
         assert dep_ref.reference == "main"
-        assert dep_ref.virtual_path == "collections/project-planning"
+        assert dep_ref.virtual_path == "collections/project-planning.collection.yml"
 
     @pytest.mark.integration
     @pytest.mark.slow

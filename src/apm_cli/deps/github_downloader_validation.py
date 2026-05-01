@@ -156,12 +156,22 @@ def validate_virtual_package_exists(
     _log(f'  [i] Validating virtual package at ref "{ref}": {dep_ref.repo_url}/{vpath}')
 
     if dep_ref.is_virtual_collection():
-        return _probe(f"{vpath}.collection.yml")
+        # COLLECTION refs always have an explicit `.collection.yml` /
+        # `.collection.yaml` extension at the end of vpath (per the
+        # extension-only classification in `virtual_type`). Probe the file
+        # directly -- appending another `.collection.yml` would produce a
+        # non-existent double-extension path.
+        return _probe(vpath)
 
     if dep_ref.is_virtual_file():
         return _probe(vpath)
 
     if dep_ref.is_virtual_subdirectory():
+        # Probe order is intentional: apm.yml takes priority over the legacy
+        # `<vpath>.collection.yml` fallback so a `collections/<name>/apm.yml`
+        # is recognised as an APM package, not as a missing collection
+        # manifest (microsoft/apm#1094). Sibling .collection.yml files at the
+        # parent path remain a recognised legacy form.
         marker_paths = [
             f"{vpath}/apm.yml",
             f"{vpath}/SKILL.md",
@@ -169,6 +179,8 @@ def validate_virtual_package_exists(
             f"{vpath}/.github/plugin/plugin.json",
             f"{vpath}/.claude-plugin/plugin.json",
             f"{vpath}/.cursor-plugin/plugin.json",
+            f"{vpath}.collection.yml",
+            f"{vpath}.collection.yaml",
             f"{vpath}/README.md",
         ]
         for marker_path in marker_paths:

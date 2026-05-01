@@ -452,7 +452,9 @@ class TestADOVirtualPackagePaths:
 
     def test_github_virtual_package_uses_2_level_path(self):
         """Verify GitHub virtual packages install to 2-level path."""
-        dep = DependencyReference.parse("owner/test-repo/collections/project-planning")
+        dep = DependencyReference.parse(
+            "owner/test-repo/collections/project-planning.collection.yml"
+        )
 
         assert dep.is_virtual is True
         assert dep.is_virtual_collection() is True
@@ -474,7 +476,7 @@ class TestADOVirtualPackagePaths:
     def test_ado_virtual_collection_uses_3_level_path(self):
         """Verify ADO virtual collections install to 3-level path."""
         dep = DependencyReference.parse(
-            "dev.azure.com/myorg/myproject/myrepo/collections/my-collection"
+            "dev.azure.com/myorg/myproject/myrepo/collections/my-collection.collection.yml"
         )
 
         assert dep.is_azure_devops() is True
@@ -524,14 +526,15 @@ class TestADOVirtualPackagePaths:
     def test_ado_collection_with_git_segment(self):
         """Verify ADO collections with _git segment work correctly."""
         dep = DependencyReference.parse(
-            "dev.azure.com/myorg/myproject/_git/copilot-instructions/collections/csharp-ddd"
+            "dev.azure.com/myorg/myproject/_git/copilot-instructions/collections/"
+            "csharp-ddd.collection.yml"
         )
 
         assert dep.is_azure_devops() is True
         assert dep.is_virtual is True
         assert dep.is_virtual_collection() is True
         assert dep.repo_url == "myorg/myproject/copilot-instructions"
-        assert dep.virtual_path == "collections/csharp-ddd"
+        assert dep.virtual_path == "collections/csharp-ddd.collection.yml"
 
         # Verify correct install path
         repo_parts = dep.repo_url.split("/")

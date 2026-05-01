@@ -622,7 +622,10 @@ class TestScriptRunnerAutoInstall:
         mock_downloader.download_virtual_collection_package.return_value = mock_package_info
 
         # Test auto-install
-        ref = "owner/test-repo/collections/project-planning"
+        # Use the explicit `.collection.yml` URL form so the dep is classified
+        # as COLLECTION up-front (per #1094, the implicit `collections/<name>`
+        # form is now SUBDIRECTORY and resolved at fetch time).
+        ref = "owner/test-repo/collections/project-planning.collection.yml"
         result = self.script_runner._auto_install_virtual_package(ref)
 
         assert result is True

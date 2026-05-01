@@ -1449,7 +1449,12 @@ class GitHubPackageDownloader:
         if not dep_ref.is_virtual or not dep_ref.virtual_path:
             raise ValueError("Dependency must be a virtual collection package")
 
-        if not dep_ref.is_virtual_collection():
+        # Accept both COLLECTION (explicit `.collection.yml` URL) and
+        # SUBDIRECTORY (legacy `/collections/<name>` heuristic resolved at
+        # fetch time per #1094). The dispatcher in `download_package`
+        # decides which downloader to invoke; here we only reject
+        # non-virtual or shape-incompatible references.
+        if not (dep_ref.is_virtual_collection() or dep_ref.is_virtual_subdirectory()):
             raise ValueError(f"Path '{dep_ref.virtual_path}' is not a valid collection path")
 
         # Determine the ref to use
@@ -1650,6 +1655,55 @@ class GitHubPackageDownloader:
         except Exception as e:
             _debug(f"Sparse-checkout failed: {e}")
             return False
+
+    def _is_legacy_collection_fallback(self, dep_ref: DependencyReference) -> bool:
+        """Return True iff this SUBDIRECTORY ref is a legacy collection ref.
+
+        A legacy collection reference is a path like ``collections/<name>``
+        with NO ``apm.yml`` at the path but WITH a sibling
+        ``<path>.collection.yml`` (or ``.yaml``) at the parent. Predates the
+        extension-based URL form ``collections/<name>.collection.yml``.
+
+        Resolution order matches `validate_virtual_package_exists` and the
+        issue #1094 acceptance criterion: ``apm.yml`` always wins; the
+        collection manifest is the documented fallback. The ``apm.yml``
+        probe is intentionally first so it short-circuits the (cheap) but
+        still-unnecessary collection probes for the common case.
+
+        Performance: the probes only run for paths that match the legacy
+        ``/collections/`` convention -- a path-shape *hint*, not a
+        classification. The actual shape is still confirmed by network
+        probes; this only narrows the search space so SUBDIRECTORY refs
+        outside the ``/collections/`` convention (skill bundles, plugin
+        repos, etc.) skip 2-3 wasted HTTP calls per install.
+        """
+        if not dep_ref.is_virtual_subdirectory():
+            return False
+        vpath = dep_ref.virtual_path
+        # Perf hint: legacy `.collection.yml` files conventionally live
+        # under a `collections/` segment. Skip the probes for paths that
+        # don't match this shape -- the dispatcher will fall through to
+        # the regular subdirectory clone path with no extra HTTP cost.
+        if "/collections/" not in vpath and not vpath.startswith("collections/"):
+            return False
+        ref = dep_ref.reference or "main"
+        # If `<vpath>/apm.yml` exists, this is a real APM/meta package, not a
+        # legacy collection reference. Short-circuit immediately so we never
+        # mis-route a fixed-but-similarly-shaped layout to the collection
+        # downloader.
+        try:
+            self.download_raw_file(dep_ref, f"{vpath}/apm.yml", ref)
+            return False
+        except RuntimeError:
+            pass
+        # Probe sibling collection manifests in priority order.
+        for ext in (".collection.yml", ".collection.yaml"):
+            try:
+                self.download_raw_file(dep_ref, f"{vpath}{ext}", ref)
+                return True
+            except RuntimeError:
+                continue
+        return False
 
     def download_subdirectory_package(
         self,
@@ -2102,6 +2156,16 @@ class GitHubPackageDownloader:
                 if self._is_artifactory_only() and art_proxy:
                     return self._download_subdirectory_from_artifactory(
                         dep_ref, target_path, art_proxy, progress_task_id, progress_obj
+                    )
+                # Legacy collection fallback (#1094): a SUBDIRECTORY reference
+                # whose path has no `apm.yml` but whose sibling
+                # `<vpath>.collection.yml` exists is a legacy collection
+                # reference (predates the extension-based URL form). Route to
+                # the collection downloader instead of cloning a directory
+                # that does not exist.
+                if self._is_legacy_collection_fallback(dep_ref):
+                    return self.download_collection_package(
+                        dep_ref, target_path, progress_task_id, progress_obj
                     )
                 return self.download_subdirectory_package(
                     dep_ref, target_path, progress_task_id, progress_obj

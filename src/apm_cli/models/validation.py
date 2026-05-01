@@ -27,6 +27,9 @@ class PackageType(Enum):
     HYBRID = "hybrid"  # Has both apm.yml and SKILL.md (root)
     MARKETPLACE_PLUGIN = "marketplace_plugin"  # Has plugin.json or .claude-plugin/
     SKILL_BUNDLE = "skill_bundle"  # Has skills/<name>/SKILL.md (nested), apm.yml optional
+    META_PACKAGE = (
+        "meta_package"  # apm.yml declares deps but no .apm/ -- a curated dep aggregator (#1094)
+    )
     INVALID = "invalid"  # None of the above
 
 
@@ -233,10 +236,14 @@ def detect_package_type(
     4. ``SKILL_BUNDLE`` -- nested ``skills/<x>/SKILL.md`` detected;
        ``apm.yml`` optional; no ``.apm/`` required.
     5. ``APM_PACKAGE`` -- ``apm.yml`` AND ``.apm/`` directory present.
-    6. ``INVALID`` -- ``apm.yml`` present but no ``.apm/`` and no nested
-       skills (helpful error: author likely needs to add .apm/).
-    7. ``HOOK_PACKAGE`` -- ``hooks/*.json`` only, no other signals.
-    8. ``INVALID`` -- nothing recognisable.
+    6. ``META_PACKAGE`` -- ``apm.yml`` only, no ``.apm/`` and no nested
+       skills, but ``apm.yml`` declares dependencies. The package is a
+       curated aggregator that contributes no own primitives (#1094).
+    7. ``INVALID`` -- ``apm.yml`` present but no ``.apm/``, no nested
+       skills, AND no declared dependencies (helpful error: author
+       likely needs to add .apm/ or dependencies).
+    8. ``HOOK_PACKAGE`` -- ``hooks/*.json`` only, no other signals.
+    9. ``INVALID`` -- nothing recognisable.
 
     Returns:
         A ``(package_type, plugin_json_path)`` tuple.  *plugin_json_path*
@@ -266,15 +273,51 @@ def detect_package_type(
         apm_dir = package_path / APM_DIR
         if apm_dir.is_dir():
             return PackageType.APM_PACKAGE, None
-        # 6. apm.yml only (no .apm/, no nested skills) -> INVALID
+        # 6. apm.yml + dependencies (no .apm/, no nested skills) -> META_PACKAGE.
+        # A meta-package is a curated dep aggregator with no own primitives;
+        # validation passes through to dependency resolution unchanged (#1094).
+        if _apm_yml_declares_dependencies(package_path / APM_YML_FILENAME):
+            return PackageType.META_PACKAGE, None
+        # 7. apm.yml only, nothing useful in it -> INVALID (the original
+        # error wording still applies: author likely needs `.apm/` or deps).
         return PackageType.INVALID, None
 
-    # 7. hooks/*.json only -> HOOK_PACKAGE
+    # 8. hooks/*.json only -> HOOK_PACKAGE
     if evidence.has_hook_json:
         return PackageType.HOOK_PACKAGE, None
 
-    # 8. Nothing recognisable -> INVALID
+    # 9. Nothing recognisable -> INVALID
     return PackageType.INVALID, None
+
+
+def _apm_yml_declares_dependencies(apm_yml_path: Path) -> bool:
+    """Return True iff ``apm.yml`` declares at least one dependency.
+
+    Used to distinguish a META_PACKAGE (intentional curated aggregator)
+    from an unfinished APM_PACKAGE (apm.yml authored but `.apm/` not yet
+    added). Any non-empty ``apm`` or ``mcp`` list under ``dependencies``
+    OR ``devDependencies`` qualifies. Tolerant of malformed YAML /
+    missing keys: returns False on any parse problem so callers get the
+    legacy INVALID diagnostic rather than a silent reclassification
+    (#1094).
+    """
+    try:
+        from ..utils.yaml_io import load_yaml
+
+        data = load_yaml(apm_yml_path) or {}
+    except Exception:
+        return False
+    if not isinstance(data, dict):
+        return False
+
+    def _has_listed_deps(block: object) -> bool:
+        if not isinstance(block, dict):
+            return False
+        return bool(block.get("apm") or block.get("mcp"))
+
+    return _has_listed_deps(data.get("dependencies")) or _has_listed_deps(
+        data.get("devDependencies")
+    )
 
 
 def validate_apm_package(package_path: Path) -> ValidationResult:
@@ -354,6 +397,12 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
 
     # Standard APM package or HYBRID validation (has apm.yml)
     apm_yml_path = package_path / APM_YML_FILENAME
+
+    # Meta-packages (#1094): apm.yml is purely a curated dep aggregator
+    # with no `.apm/` and no own primitives. Validation parses apm.yml and
+    # returns; transitive resolution is handled downstream.
+    if result.package_type == PackageType.META_PACKAGE:
+        return _validate_meta_package(package_path, apm_yml_path, result)
 
     # HYBRID packages: if .apm/ exists, fall through to standard validation
     # (back-compat for packages that ship both .apm/ primitives AND SKILL.md).
@@ -551,6 +600,34 @@ def _validate_skill_bundle(package_path: Path, result: ValidationResult) -> Vali
             package_path=package_path,
             type=PackageContentType.SKILL,
         )
+
+    result.package = package
+    return result
+
+
+def _validate_meta_package(
+    package_path: Path, apm_yml_path: Path, result: ValidationResult
+) -> ValidationResult:
+    """Validate a META_PACKAGE (apm.yml dep aggregator, no `.apm/`).
+
+    A meta-package is a curated dependency set: ``apm.yml`` declares
+    ``dependencies.apm`` and/or ``dependencies.mcp`` and contributes no
+    own primitives. There is nothing to integrate at the meta-package
+    level -- transitive resolution and integration happen on the
+    declared dependencies as usual (#1094).
+
+    Validation parses ``apm.yml`` to confirm it is structurally well-formed
+    so downstream resolution has a usable APMPackage handle. ``.apm/``
+    intentionally not required: requiring an empty placeholder directory
+    is the wart this type was added to remove.
+    """
+    from .apm_package import APMPackage
+
+    try:
+        package = APMPackage.from_apm_yml(apm_yml_path)
+    except (ValueError, FileNotFoundError) as e:
+        result.add_error(f"Invalid apm.yml: {e}")
+        return result
 
     result.package = package
     return result

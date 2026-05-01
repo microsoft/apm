@@ -65,6 +65,16 @@ class DependencyReference:
         ".agent.md",
     )
 
+    # Explicit collection-manifest extensions. A virtual_path that ends in one
+    # of these is unambiguously a `.collection.yml` reference. Paths that
+    # merely contain a `collections/` segment are NOT classified here -- they
+    # are SUBDIRECTORY references whose actual shape is resolved at fetch
+    # time, with `.collection.yml` as a documented fallback (see #1094).
+    VIRTUAL_COLLECTION_EXTENSIONS = (
+        ".collection.yml",
+        ".collection.yaml",
+    )
+
     def is_artifactory(self) -> bool:
         """Check if this reference points to a JFrog Artifactory VCS repository."""
         return self.artifactory_prefix is not None
@@ -77,12 +87,19 @@ class DependencyReference:
 
     @property
     def virtual_type(self) -> "VirtualPackageType | None":
-        """Return the type of virtual package, or None if not virtual."""
+        """Return the type of virtual package, or None if not virtual.
+
+        Classification is by extension only -- never by path segment. A path
+        like ``collections/foo`` is SUBDIRECTORY, NOT COLLECTION; the actual
+        shape is resolved at fetch time by probing for ``apm.yml`` first and
+        falling back to ``foo.collection.yml`` (see #1094). COLLECTION is
+        reserved for URLs that explicitly name a ``.collection.yml`` file.
+        """
         if not self.is_virtual or not self.virtual_path:
             return None
         if any(self.virtual_path.endswith(ext) for ext in self.VIRTUAL_FILE_EXTENSIONS):
             return VirtualPackageType.FILE
-        if "/collections/" in self.virtual_path or self.virtual_path.startswith("collections/"):
+        if any(self.virtual_path.endswith(ext) for ext in self.VIRTUAL_COLLECTION_EXTENSIONS):
             return VirtualPackageType.COLLECTION
         return VirtualPackageType.SUBDIRECTORY
 
@@ -97,15 +114,18 @@ class DependencyReference:
     def is_virtual_subdirectory(self) -> bool:
         """Check if this is a virtual subdirectory package (e.g., Claude Skill).
 
-        A subdirectory package is a virtual package that:
-        - Has a virtual_path that is NOT a file extension we recognize
-        - Is NOT a collection (doesn't have /collections/ in path)
-        - Is a directory path (likely containing SKILL.md or apm.yml)
+        A subdirectory package is a virtual package whose ``virtual_path``
+        does not end in a recognized FILE or COLLECTION extension. The
+        actual on-disk shape is resolved at fetch time -- ``apm.yml``,
+        ``SKILL.md``, ``plugin.json``, or a sibling ``.collection.yml``
+        (legacy fallback for ``/collections/`` paths, see #1094).
 
         Examples:
             - ComposioHQ/awesome-claude-skills/brand-guidelines -> True
             - owner/repo/prompts/file.prompt.md -> False (is_virtual_file)
-            - owner/repo/collections/name -> False (is_virtual_collection)
+            - owner/repo/collections/name -> True (resolved at fetch time)
+            - owner/repo/collections/name.collection.yml -> False
+              (is_virtual_collection)
         """
         return self.virtual_type == VirtualPackageType.SUBDIRECTORY
 
@@ -126,26 +146,15 @@ class DependencyReference:
 
         # Get the basename without extension
         path_parts = self.virtual_path.split("/")
-        if self.is_virtual_collection():
-            # For collections: use the collection name without extension
-            # collections/project-planning -> project-planning
-            # collections/project-planning.collection.yml -> project-planning
-            collection_name = path_parts[-1]
-            # Strip .collection.yml/.collection.yaml extension if present
-            for ext in (".collection.yml", ".collection.yaml"):
-                if collection_name.endswith(ext):
-                    collection_name = collection_name[: -len(ext)]
-                    break
-            return f"{repo_name}-{collection_name}"
-        else:
-            # For individual files: use the filename without extension
-            # prompts/code-review.prompt.md -> code-review
-            filename = path_parts[-1]
-            for ext in self.VIRTUAL_FILE_EXTENSIONS:
-                if filename.endswith(ext):
-                    filename = filename[: -len(ext)]
-                    break
-            return f"{repo_name}-{filename}"
+        last = path_parts[-1]
+        # Strip any recognised virtual extension (file, collection, or none).
+        # Same naming rule applies regardless of resolved shape: the directory
+        # name (or file basename) is the user-visible package name.
+        for ext in self.VIRTUAL_COLLECTION_EXTENSIONS + self.VIRTUAL_FILE_EXTENSIONS:
+            if last.endswith(ext):
+                last = last[: -len(ext)]
+                break
+        return f"{repo_name}-{last}"
 
     @staticmethod
     def is_local_path(dep_str: str) -> bool:
@@ -636,11 +645,12 @@ class DependencyReference:
             # Security: reject path traversal in virtual path
             validate_path_segments(virtual_path, context="virtual path")
 
-            if (
-                "/collections/" in check_str
-                or virtual_path.startswith("collections/")
-                or any(virtual_path.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS)
-            ):
+            # Accept any path ending in a recognised virtual extension
+            # (file or collection-manifest). Reject other dotted final
+            # segments so typos like `prompts/file.txt` fail fast instead
+            # of silently mis-classifying as a subdirectory.
+            recognised_exts = cls.VIRTUAL_FILE_EXTENSIONS + cls.VIRTUAL_COLLECTION_EXTENSIONS
+            if any(virtual_path.endswith(ext) for ext in recognised_exts):
                 pass
             else:
                 last_segment = virtual_path.split("/")[-1]
@@ -1020,7 +1030,8 @@ class DependencyReference:
         - user/repo@alias
         - user/repo#ref@alias
         - user/repo/path/to/file.prompt.md (virtual file package)
-        - user/repo/collections/name (virtual collection package)
+        - user/repo/collections/name.collection.yml (virtual collection package)
+        - user/repo/skills/foo (virtual subdirectory package)
         - https://gitlab.com/owner/repo.git (generic HTTPS git URL)
         - git@gitlab.com:owner/repo.git (SSH git URL)
         - ssh://git@gitlab.com/owner/repo.git (SSH protocol URL)
