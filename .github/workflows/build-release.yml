@@ -52,6 +52,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
+      id-token: write
+      attestations: write
 
     steps:
       - uses: actions/checkout@v4
@@ -109,6 +111,13 @@ jobs:
         run: |
           uv run pwsh scripts/windows/build-binary.ps1
 
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            ./dist/${{ matrix.binary_name }}/**/*
+            ./dist/${{ matrix.binary_name }}.sha256
+
       - name: Upload binary as workflow artifact
         uses: actions/upload-artifact@v4
         with:
@@ -136,6 +145,8 @@ jobs:
     runs-on: macos-15-intel
     permissions:
       contents: read
+      id-token: write
+      attestations: write
 
     steps:
       - name: Checkout code
@@ -175,6 +186,13 @@ jobs:
         run: |
           chmod +x scripts/build-binary.sh
           uv run ./scripts/build-binary.sh
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            ./dist/apm-darwin-x86_64/**/*
+            ./dist/apm-darwin-x86_64.sha256
 
       - name: Upload binary as workflow artifact
         uses: actions/upload-artifact@v4
@@ -242,6 +260,8 @@ jobs:
     runs-on: macos-latest
     permissions:
       contents: read
+      id-token: write
+      attestations: write
 
     steps:
       - name: Checkout code
@@ -276,6 +296,13 @@ jobs:
         run: |
           chmod +x scripts/build-binary.sh
           uv run ./scripts/build-binary.sh
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            ./dist/apm-darwin-arm64/**/*
+            ./dist/apm-darwin-arm64.sha256
 
       - name: Upload binary as workflow artifact
         uses: actions/upload-artifact@v4
@@ -838,7 +865,8 @@ jobs:
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
-          path: ./artifacts
+          pattern: apm-*
+          merge-multiple: true
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
