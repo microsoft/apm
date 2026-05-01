@@ -53,6 +53,14 @@ apm install vercel-labs/agent-skills --skill deploy-to-vercel   # one skill, per
 
 Same install gesture. You also get a [manifest, lockfile, and reproducibility](https://microsoft.github.io/apm/reference/package-types/#skill-collection-skillsnameskillmd).
 
+**Zero-config Copilot:**
+
+```bash
+apm compile -t copilot   # writes .github/copilot-instructions.md
+```
+
+One command, no configuration -- VS Code and GitHub Copilot read the file automatically. APM dogfoods this target on its own repository.
+
 ## The three promises
 
 ### 1. Portable by manifest

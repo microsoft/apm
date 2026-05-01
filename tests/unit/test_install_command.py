@@ -298,6 +298,36 @@ class TestValidationFailureReasonMessages:
             assert "not accessible or doesn't exist" in result.output
             assert "run with --verbose for auth details" not in result.output
 
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
+    def test_subdir_with_ref_failure_names_all_probes(self, mock_validate):
+        """Round-4 (devx-ux): when a virtual subdir+ref exhausts all four
+        probes, the failure reason must name them by step so the user
+        knows what was attempted before the failure.
+        """
+        with self._chdir_tmp():
+            Path("apm.yml").write_text("name: test\ndependencies:\n  apm: []\n  mcp: []\n")
+            result = self.runner.invoke(cli, ["install", "owner/repo/skills/foo#v1.2.0"])
+            output = " ".join(result.output.split())
+            assert "all probes failed" in output
+            assert "marker-file" in output
+            assert "Contents API" in output
+            assert "git ls-remote" in output
+            assert "shallow-fetch" in output
+            assert "run with --verbose for the full probe log" in output
+
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
+    def test_subdir_with_ref_failure_verbose_omits_probe_log_hint(self, mock_validate):
+        with self._chdir_tmp():
+            Path("apm.yml").write_text("name: test\ndependencies:\n  apm: []\n  mcp: []\n")
+            result = self.runner.invoke(
+                cli, ["install", "owner/repo/skills/foo#v1.2.0", "--verbose"]
+            )
+            output = " ".join(result.output.split())
+            assert "all probes failed" in output
+            # The "(run with --verbose...)" hint is suppressed once the
+            # user is already in verbose mode.
+            assert "run with --verbose for the full probe log" not in output
+
     @patch(
         "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
         return_value=None,
