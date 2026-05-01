@@ -150,6 +150,43 @@ class TestPluginExportIncludesLockfile:
         assert "target" in lock_data["pack"], "pack.target missing"
         assert lock_data["pack"]["target"] == "copilot"
 
+    def test_plugin_export_lockfile_multi_target(self, tmp_path: Path) -> None:
+        """IM11: when packing for multiple targets, ``pack.target`` must
+        be a comma-joined STRING (per ``lockfile_enrichment.py:175``).
+        Regression guard: any change to dict/list serialisation here would
+        break ``check_target_mismatch`` and the bundle-format contract."""
+        project = _setup_project_with_skill(tmp_path)
+        # Make sure both target trees exist with deployed files so the
+        # exporter can include them in either output mode.
+        for tgt_root in (".github", ".claude"):
+            d = project / tgt_root / "skills" / "coding"
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "SKILL.md").write_text("# Coding\nA skill.", encoding="utf-8")
+
+        output = tmp_path / "output"
+        output.mkdir()
+
+        result = export_plugin_bundle(
+            project_root=project,
+            output_dir=output,
+            target="copilot,claude",
+        )
+        lockfile_path = result.bundle_path / "apm.lock.yaml"
+        if not lockfile_path.exists():
+            pytest.skip("apm.lock.yaml not in bundle")
+
+        lock_data = yaml.safe_load(lockfile_path.read_text(encoding="utf-8"))
+        target = lock_data.get("pack", {}).get("target")
+        assert isinstance(target, str), (
+            f"pack.target must be a string (comma-joined), got {type(target).__name__}: {target!r}"
+        )
+        # Order is canonical via lockfile_enrichment.py:175 (input order
+        # preserved when caller supplies a comma-joined string).
+        parts = [p.strip() for p in target.split(",")]
+        assert "copilot" in parts and "claude" in parts, (
+            f"Multi-target string missing expected parts: {target!r}"
+        )
+
     def test_plugin_export_lockfile_has_bundle_files(self, tmp_path: Path) -> None:
         """pack.bundle_files must map bundle-relative paths to SHA-256 hashes
         matching the actual file contents in the bundle."""

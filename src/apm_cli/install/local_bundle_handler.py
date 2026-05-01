@@ -13,7 +13,6 @@ short-circuit network I/O (proven by the air-gap E2E test).
 from __future__ import annotations
 
 import shutil
-import sys
 from pathlib import Path
 
 import click
@@ -47,16 +46,23 @@ def install_local_bundle(
     from ..install.services import integrate_local_bundle
     from ..integration.targets import resolve_targets
 
-    # Reject incompatible flags with a single consolidated error.
+    # Reject incompatible flags with a single consolidated error.  Preserve
+    # dict insertion order (matches the order options are declared on the
+    # CLI command) rather than alphabetising -- M-cli-3.
     bad = [name for name, value in rejected_flags.items() if value]
     if bad:
         raise click.UsageError(
             "The following flag(s) are not valid with a local bundle install "
-            f"({bundle_arg}): {', '.join(sorted(bad))}.\n"
+            f"({bundle_arg}): {', '.join(bad)}.\n"
             "Local-bundle install is an imperative deploy and does not "
             "interact with the dependency resolver, MCP, registry, or "
             "policy machinery."
         )
+
+    # ``verbose`` is consumed by the InstallLogger on construction (the
+    # CLI seam wires it in) -- the handler doesn't need to gate calls on
+    # it because logger.verbose_detail self-gates.
+    del verbose
 
     scope = InstallScope.USER if global_ else InstallScope.PROJECT
     project_root = Path.home() if global_ else Path.cwd()
@@ -75,10 +81,10 @@ def install_local_bundle(
             if errors:
                 logger.error("Bundle integrity check failed:")
                 for err in errors:
-                    logger.error(f"  - {err}")
-                sys.exit(1)
-            if verbose:
-                logger.verbose_detail("Bundle integrity verified")
+                    # Plain detail lines -- no [x] symbol prefix per IM3.
+                    click.echo(f"  - {err}", err=True)
+                raise click.Abort()
+            logger.verbose_detail("Bundle integrity verified")
 
         # Resolve targets and warn on bundle/install target mismatch.
         explicit = target if target else None
@@ -119,8 +125,10 @@ def install_local_bundle(
 
         if dry_run:
             logger.dry_run_notice(f"Would deploy {len(deployed)} file(s) from local bundle")
+            # IM5: surface the file list in default mode (not just verbose)
+            # so users see WHICH files would deploy.
             for f in deployed:
-                logger.verbose_detail(f"  {f}")
+                logger.tree_item(f)
             return
 
         # Persist into project lockfile -- never mutate apm.yml (per design).

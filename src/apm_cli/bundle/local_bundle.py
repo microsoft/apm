@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 import tarfile
 import tempfile
 from dataclasses import dataclass, field
@@ -33,6 +34,12 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+from ..utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    validate_path_segments,
+)
 
 
 @dataclass(frozen=True)
@@ -178,7 +185,15 @@ def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
                         return None
                     if member.name.startswith("/") or ".." in Path(member.name).parts:
                         return None
-                tar.extractall(temp_dir, filter="data")
+                # tarfile.extractall(filter="data") requires Python 3.12+.
+                # The repo declares requires-python = ">=3.10", so on 3.10/3.11
+                # we extract without the filter.  The pre-extraction validation
+                # above is the primary gate (rejects symlinks, absolute paths,
+                # and any '..' segment), not filter="data".
+                if sys.version_info >= (3, 12):
+                    tar.extractall(temp_dir, filter="data")
+                else:
+                    tar.extractall(temp_dir)  # noqa: S202 -- validated above
         except (tarfile.TarError, OSError):
             return None
         bundle_root = _find_extracted_root(temp_dir)
@@ -195,9 +210,16 @@ def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
 
 
 def _normalize_hash(value: str) -> str:
-    """Strip an optional ``sha256:`` prefix and lowercase the hex digest."""
+    """Strip an optional ``sha256:`` prefix and lowercase the hex digest.
+
+    Raises :class:`ValueError` when the value carries an unsupported
+    algorithm prefix (e.g. ``sha512:...``) so callers cannot silently
+    accept a hash they will never compute.
+    """
     if value.startswith("sha256:"):
-        value = value[len("sha256:") :]
+        return value[len("sha256:") :].strip().lower()
+    if ":" in value:
+        raise ValueError(f"Unsupported hash algorithm prefix in: {value!r}")
     return value.strip().lower()
 
 
@@ -207,7 +229,9 @@ def verify_bundle_integrity(bundle_dir: Path, lockfile: dict[str, Any]) -> list[
     Returns a list of human-readable error strings -- empty means the bundle
     is intact.  Symlinks anywhere under *bundle_dir* are always rejected,
     even when not listed in the manifest (a symlink injected after pack
-    time is a tampering signal).
+    time is a tampering signal).  Files present in the bundle but absent
+    from ``pack.bundle_files`` (other than ``apm.lock.yaml`` and
+    ``plugin.json``) are also flagged: the manifest is the source of truth.
     """
     errors: list[str] = []
 
@@ -224,8 +248,21 @@ def verify_bundle_integrity(bundle_dir: Path, lockfile: dict[str, Any]) -> list[
         errors.append("pack.bundle_files is not a mapping")
         return errors
 
+    listed_rels: set[str] = set()
     for rel, expected in sorted(bundle_files.items()):
+        # Reject lockfile-content keys that try to escape the bundle root.
+        try:
+            validate_path_segments(str(rel), context="bundle_files key")
+        except PathTraversalError as exc:
+            errors.append(f"Unsafe bundle_files entry {rel!r}: {exc}")
+            continue
         target = bundle_dir / rel
+        try:
+            ensure_path_within(target, bundle_dir)
+        except PathTraversalError as exc:
+            errors.append(f"Unsafe bundle_files entry {rel!r}: {exc}")
+            continue
+        listed_rels.add(str(rel))
         if target.is_symlink():
             # Already reported by the symlink sweep above; skip hashing.
             continue
@@ -237,11 +274,29 @@ def verify_bundle_integrity(bundle_dir: Path, lockfile: dict[str, Any]) -> list[
         except OSError as exc:
             errors.append(f"Cannot read bundle file {rel}: {exc}")
             continue
-        if actual != _normalize_hash(str(expected)):
+        try:
+            normalized_expected = _normalize_hash(str(expected))
+        except ValueError as exc:
+            errors.append(f"Invalid hash for {rel}: {exc}")
+            continue
+        if actual != normalized_expected:
             errors.append(
                 f"Hash mismatch for {rel}: expected "
-                f"{_normalize_hash(str(expected))[:12]}..., got {actual[:12]}..."
+                f"{normalized_expected[:12]}..., got {actual[:12]}..."
             )
+
+    # 3) Detect extra files present in the bundle but not listed in
+    # pack.bundle_files.  Anything outside the manifest is a tampering
+    # signal -- the only allowed exclusions are the bundle's own
+    # apm.lock.yaml and plugin.json.
+    _ALLOWED_EXTRAS = {"apm.lock.yaml", "plugin.json"}
+    for fp in bundle_dir.rglob("*"):
+        if not fp.is_file() or fp.is_symlink():
+            continue
+        rel = fp.relative_to(bundle_dir).as_posix()
+        if rel in _ALLOWED_EXTRAS or rel in listed_rels:
+            continue
+        errors.append(f"Unlisted bundle file (not in pack.bundle_files): {rel}")
 
     return errors
 

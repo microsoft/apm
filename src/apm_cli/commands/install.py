@@ -1006,6 +1006,9 @@ def install(  # noqa: PLR0913
         apm install --mcp io.github.github/github-mcp-server   # MCP registry
         apm install --mcp api --url https://example.com/mcp    # MCP remote
         apm install --mcp fetch -- npx -y @mcp/server-fetch    # MCP stdio
+        apm install ./build/my-bundle           # Deploy a local bundle (directory)
+        apm install ./my-bundle.tar.gz          # Deploy a local bundle (archive)
+        apm install ./bundle --as custom-name   # Deploy local bundle with custom slug
     """
     # C1 #856: defaults BEFORE try so the finally clause never sees an
     # UnboundLocalError if InstallLogger(...) raises during construction.
@@ -1060,6 +1063,29 @@ def install(  # noqa: PLR0913
                     },
                 )
                 return
+            # IM7: path exists but isn't a recognised bundle.  For tarball
+            # extensions (.tar.gz / .tgz) the user clearly meant a bundle
+            # artifact, so raise a targeted UsageError instead of falling
+            # through to the registry path (which would try to clone).
+            # For bare directories we still fall through, because
+            # ``apm install ./packages/source-pkg`` is a supported local-path
+            # install that goes through the dependency-resolver pipeline.
+            _suffix = _probe.name.lower()
+            if _probe.is_file() and (_suffix.endswith(".tar.gz") or _suffix.endswith(".tgz")):
+                raise click.UsageError(
+                    f"'{packages[0]}' is not a valid APM bundle archive "
+                    "(no plugin.json found at the bundle root). "
+                    "Use 'apm install org/package' for registry installs, "
+                    "or repack the source with 'apm pack'."
+                )
+        # IM8: --as is only meaningful for local-bundle installs.  If we get
+        # here, no local bundle was detected, so reject --as instead of
+        # silently ignoring it.
+        if alias:
+            raise click.UsageError(
+                "--as requires a local bundle path (directory or .tar.gz "
+                "produced by 'apm pack'). It has no effect on registry installs."
+            )
         # HACK(#852): surface --verbose to deeper auth layers via env var until
         # AuthResolver gains a first-class verbose channel. Restored in finally
         # below to keep the mutation scoped to this command invocation.

@@ -357,6 +357,43 @@ class TestInstallLocalBundleCollision:
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
         assert dest.read_text(encoding="utf-8") == bundle_content
 
+    def test_collision_managed_file_overwritten_with_force(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """IM10: identical pre-existing content + --force -> idempotent
+        success, content byte-equal to the bundle file.
+
+        Regression guard against accidental ``shutil.copy2`` errors or
+        permission flips when the destination already matches the source
+        and the user opts into the force path.
+        """
+        bundle_content = "# Bundle version\nIdentical pre-existing content.\n"
+        bundle = _make_plugin_bundle(
+            tmp_path / "src",
+            files={"skills/coding/SKILL.md": bundle_content},
+        )
+        project = _make_project(tmp_path / "dst")
+
+        dest = project / ".github" / "skills" / "coding" / "SKILL.md"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(bundle_content, encoding="utf-8")
+        before_bytes = dest.read_bytes()
+
+        result = _invoke_install(
+            project,
+            str(bundle),
+            "--target",
+            "copilot",
+            "--force",
+            monkeypatch=monkeypatch,
+        )
+
+        assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
+        assert dest.is_file()
+        assert dest.read_bytes() == before_bytes, (
+            "Managed file content changed under --force despite identical input"
+        )
+
 
 # ---------------------------------------------------------------------------
 # E2E: Dry-run
@@ -486,10 +523,18 @@ class TestLocalInstallAirGap:
         def _fail_httpx(*a, **kw):
             raise AssertionError("Unexpected network I/O: httpx")
 
+        def _fail_socket_connect(*a, **kw):
+            raise AssertionError("Unexpected network I/O: socket.create_connection")
+
+        def _fail_socket_socket(*a, **kw):
+            raise AssertionError("Unexpected network I/O: socket.socket")
+
         patches = [
             patch("urllib.request.urlopen", side_effect=_fail_urlopen),
             patch("subprocess.run", side_effect=_network_sentinel_subprocess_run),
             patch("subprocess.Popen", side_effect=_network_sentinel_subprocess_popen),
+            patch("socket.create_connection", side_effect=_fail_socket_connect),
+            patch("socket.socket", side_effect=_fail_socket_socket),
         ]
 
         try:

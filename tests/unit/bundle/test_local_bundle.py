@@ -225,6 +225,66 @@ class TestVerifyBundleIntegrity:
         assert info is not None
         assert info.lockfile is None
 
+    def test_bundle_files_path_traversal_rejected(self, tmp_path: Path) -> None:
+        """CR1 regression: ``bundle_files`` keys must not allow `..` segments
+        or absolute paths -- both cases should produce errors and the bundle
+        must NOT be considered valid."""
+        bundle = _make_plugin_bundle(tmp_path)
+        # Rewrite the lockfile with a malicious bundle_files key.
+        evil_path = "../escape.md"
+        evil_hash = _sha256("nope")
+        lock_data = {
+            "pack": {
+                "format": "plugin",
+                "target": "copilot",
+                "bundle_files": {evil_path: evil_hash},
+            },
+            "dependencies": [],
+        }
+        (bundle / "apm.lock.yaml").write_text(
+            yaml.dump(lock_data, default_flow_style=False), encoding="utf-8"
+        )
+        info = detect_local_bundle(bundle)
+        assert info is not None and info.lockfile is not None
+        errors = verify_bundle_integrity(bundle, info.lockfile)
+        assert errors, "Path-traversal key must produce errors"
+        assert any(
+            "traversal" in e.lower() or ".." in e or "invalid" in e.lower() for e in errors
+        ), f"Expected path-traversal error, got: {errors}"
+
+    def test_bundle_files_absolute_path_rejected(self, tmp_path: Path) -> None:
+        """Absolute bundle_files keys must be rejected."""
+        bundle = _make_plugin_bundle(tmp_path)
+        lock_data = {
+            "pack": {
+                "format": "plugin",
+                "target": "copilot",
+                "bundle_files": {"/etc/passwd": _sha256("nope")},
+            },
+            "dependencies": [],
+        }
+        (bundle / "apm.lock.yaml").write_text(
+            yaml.dump(lock_data, default_flow_style=False), encoding="utf-8"
+        )
+        info = detect_local_bundle(bundle)
+        assert info is not None and info.lockfile is not None
+        errors = verify_bundle_integrity(bundle, info.lockfile)
+        assert errors, "Absolute path key must produce errors"
+
+    def test_unlisted_bundle_file_flagged(self, tmp_path: Path) -> None:
+        """IM1 regression: files present in the bundle but absent from
+        ``bundle_files`` must be flagged so silent payload smuggling is
+        impossible.  apm.lock.yaml and plugin.json are allowed extras."""
+        bundle = _make_plugin_bundle(tmp_path)
+        # Drop a sneaky extra file not listed in the manifest.
+        (bundle / "extra-payload.sh").write_text("#!/bin/sh\necho pwned", encoding="utf-8")
+        info = detect_local_bundle(bundle)
+        assert info is not None and info.lockfile is not None
+        errors = verify_bundle_integrity(bundle, info.lockfile)
+        assert any("extra-payload.sh" in e for e in errors), (
+            f"Unlisted file not flagged. errors={errors}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Target mismatch tests
