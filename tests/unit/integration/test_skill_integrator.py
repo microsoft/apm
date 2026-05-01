@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 from apm_cli.integration.skill_integrator import (
     SkillIntegrationResult,
     SkillIntegrator,
+    _skill_owner_key_from_deployed_path,
     copy_skill_to_target,
     normalize_skill_name,
     to_hyphen_case,
@@ -434,7 +435,7 @@ class TestSkillIntegrator:
         assert result.skill_path.exists()
 
     def test_integrate_package_skill_uses_manifest_namespace(self):
-        """Packages with namespace install skills under that namespace."""
+        """Packages with namespace get a direct, namespace-prefixed skill dir."""
         package_dir = self.project_root / "my-skill"
         package_dir.mkdir()
         (package_dir / "SKILL.md").write_text("# My Skill")
@@ -448,16 +449,36 @@ class TestSkillIntegrator:
 
         result = self.integrator.integrate_package_skill(package_info, self.project_root)
 
-        target = self.project_root / ".github" / "skills" / "example" / "my-skill"
+        target = self.project_root / ".github" / "skills" / "example-my-skill"
         assert result.skill_created is True
         assert result.skill_path == target / "SKILL.md"
         assert (target / "SKILL.md").exists()
+        assert "name: example-my-skill" in (target / "SKILL.md").read_text()
         assert not (self.project_root / ".github" / "skills" / "my-skill").exists()
 
-    def test_integrate_package_skill_namespace_emits_verbose_log(self):
-        """Verbose mode surfaces the namespaced deploy path so users can see why
-        the skill landed under skills/<namespace>/<name>/ instead of the legacy
-        flat layout. Regression test for PR #1028 panel finding 1.
+    def test_namespaced_deployed_path_maps_back_to_owner_key(self):
+        """Lockfile ownership keeps namespace identity for direct child paths."""
+        assert (
+            _skill_owner_key_from_deployed_path(
+                ".github/skills/example-my-skill",
+                namespace="example",
+            )
+            == "example/my-skill"
+        )
+
+    def test_nested_deployed_path_owner_key_stays_backward_compatible(self):
+        """Older nested lockfile paths already carry the namespace segment."""
+        assert (
+            _skill_owner_key_from_deployed_path(
+                ".github/skills/example/my-skill",
+                namespace="example",
+            )
+            == "example/my-skill"
+        )
+
+    def test_integrate_package_skill_namespace_does_not_emit_duplicate_verbose_log(self):
+        """Namespace routing is surfaced by install/services.py, not a second
+        inconsistent verbose line from the integrator.
         """
         package_dir = self.project_root / "brand-guidelines"
         package_dir.mkdir()
@@ -486,9 +507,7 @@ class TestSkillIntegrator:
             package_info, self.project_root, logger=_StubLogger()
         )
 
-        assert any(
-            'namespace "acme"' in m and "skills/acme/brand-guidelines/" in m for m in captured
-        ), captured
+        assert not any("namespace" in m for m in captured), captured
 
     def test_integrate_package_skill_namespace_no_log_when_absent(self):
         """When no namespace is set, no namespace-specific verbose line fires."""
@@ -522,9 +541,9 @@ class TestSkillIntegrator:
         assert not any("namespace" in m for m in captured), captured
 
     def test_integrate_package_skill_namespace_preserved_in_target_paths(self):
-        """IntegrationResult.target_paths must include the namespace segment so
-        downstream consumers (install summary, lockfile) can reconstruct the
-        full <namespace>/<skill-name> identity. Regression for PR #1028 finding 2.
+        """IntegrationResult.target_paths must include the namespace prefix so
+        downstream consumers can reconstruct the full <namespace>/<skill-name>
+        identity without relying on recursive harness discovery.
         """
         package_dir = self.project_root / "my-skill"
         package_dir.mkdir()
@@ -542,11 +561,8 @@ class TestSkillIntegrator:
         assert result.target_paths, "expected at least one deployed path"
         for tp in result.target_paths:
             rel_parts = tp.relative_to(self.project_root).parts
-            assert "acme" in rel_parts, f"namespace segment missing from deployed path: {tp}"
-            # parent of the leaf skill dir must end with the namespace segment
-            assert tp.parent.name == "acme", (
-                f"expected parent dir to be the namespace, got {tp.parent}"
-            )
+            assert "acme-my-skill" in rel_parts, f"namespace prefix missing from path: {tp}"
+            assert tp.parent.name == "skills", f"expected direct child of skills root: {tp}"
 
     def test_integrate_sub_skills_uses_manifest_namespace(self):
         """Sub-skills inherit the package namespace."""
@@ -565,9 +581,13 @@ class TestSkillIntegrator:
         result = self.integrator.integrate_package_skill(package_info, self.project_root)
 
         assert result.sub_skills_promoted == 1
+        assert (self.project_root / ".github" / "skills" / "example-helper" / "SKILL.md").exists()
         assert (
-            self.project_root / ".github" / "skills" / "example" / "helper" / "SKILL.md"
-        ).exists()
+            "name: example-helper"
+            in (
+                self.project_root / ".github" / "skills" / "example-helper" / "SKILL.md"
+            ).read_text()
+        )
         assert not (self.project_root / ".github" / "skills" / "helper").exists()
 
     def test_integrate_package_skill_multiple_virtual_file_packages_no_collision(self):
@@ -3823,10 +3843,10 @@ class TestUninstallPhase2SkillTargets:
 from dataclasses import replace as _dc_replace  # noqa: E402
 from unittest.mock import MagicMock  # noqa: E402
 
-from apm_cli.integration.targets import KNOWN_TARGETS  # noqa: E402
+from apm_cli.integration.targets import KNOWN_TARGETS, TargetProfile  # noqa: E402
 
 
-def _make_resolved_cowork_target(cowork_root: Path) -> "TargetProfile":  # noqa: F821
+def _make_resolved_cowork_target(cowork_root: Path) -> TargetProfile:
     """Return a frozen TargetProfile with resolved_deploy_root set for cowork.
 
     Args:
@@ -3835,8 +3855,6 @@ def _make_resolved_cowork_target(cowork_root: Path) -> "TargetProfile":  # noqa:
     Returns:
         A frozen TargetProfile suitable for cowork deployment tests.
     """
-    from apm_cli.integration.targets import TargetProfile  # noqa: F401
-
     return _dc_replace(KNOWN_TARGETS["copilot-cowork"], resolved_deploy_root=cowork_root)
 
 
@@ -4026,8 +4044,7 @@ class TestSkillDirContainmentGuard:
     """Regression tests for the runtime path-containment check inside
     ``_skill_dir``. Parse-time regex validation rejects traversal in the
     namespace value itself; this guard catches symlink-based escapes that
-    resolve only at runtime (e.g. a symlink planted at
-    ``skills/<namespace>`` by a prior malicious install)."""
+    resolve only at runtime."""
 
     def test_skill_dir_returns_namespaced_path_when_safe(self, tmp_path: Path) -> None:
         from apm_cli.integration.skill_integrator import _skill_dir
@@ -4035,7 +4052,7 @@ class TestSkillDirContainmentGuard:
         skills_root = tmp_path / "skills"
         skills_root.mkdir()
         result = _skill_dir(skills_root, "my-skill", "acme")
-        assert result == skills_root / "acme" / "my-skill"
+        assert result == skills_root / "acme-my-skill"
 
     def test_skill_dir_returns_flat_path_when_no_namespace(self, tmp_path: Path) -> None:
         from apm_cli.integration.skill_integrator import _skill_dir
@@ -4045,8 +4062,8 @@ class TestSkillDirContainmentGuard:
         result = _skill_dir(skills_root, "my-skill", None)
         assert result == skills_root / "my-skill"
 
-    def test_skill_dir_rejects_symlink_namespace_escaping_root(self, tmp_path: Path) -> None:
-        """If a previous install planted ``skills/<namespace>`` as a symlink
+    def test_skill_dir_rejects_symlink_skill_escaping_root(self, tmp_path: Path) -> None:
+        """If a previous install planted the computed skill dir as a symlink
         pointing outside the skills root, ``_skill_dir`` must raise
         ``PathTraversalError`` so ``shutil.copytree`` cannot follow it and
         write outside the deploy root."""
@@ -4059,8 +4076,8 @@ class TestSkillDirContainmentGuard:
         skills_root.mkdir()
         outside = tmp_path / "outside"
         outside.mkdir()
-        # Plant a malicious symlink at skills/evil -> outside
-        (skills_root / "evil").symlink_to(outside, target_is_directory=True)
+        # Plant a malicious symlink at skills/evil-my-skill -> outside.
+        (skills_root / "evil-my-skill").symlink_to(outside, target_is_directory=True)
 
         with pytest.raises(PathTraversalError):
             _skill_dir(skills_root, "my-skill", "evil")

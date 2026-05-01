@@ -118,7 +118,7 @@ class TestSimpleClaudeSkillInstall:
 
         # Check for skill detection/integration message
         assert (
-            "Skill integrated" in result.stdout
+            "Integrated skill" in result.stdout
             or "Claude Skill" in result.stdout
             or "SKILL.md detected" in result.stdout
         )

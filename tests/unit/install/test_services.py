@@ -555,7 +555,7 @@ class TestAmendment6Warning:
 
 class TestNamespaceTreeOutput:
     """Regression tests for PR #1028 panel findings 2 and 4: install summary
-    must surface the namespace segment when a package declares one."""
+    must surface namespace identity when a package declares one."""
 
     def _make_pkg_info(self, tmp_path: Path, namespace: str | None) -> MagicMock:
         pkg_dir = tmp_path / "pkg"
@@ -624,22 +624,22 @@ class TestNamespaceTreeOutput:
         return logger
 
     def test_namespaced_skill_install_label_includes_namespace(self, tmp_path: Path) -> None:
-        """When namespace is set, the per-skill confirmation line must show
-        ``skill <namespace>/<name> integrated -> .github/skills/<namespace>/``."""
+        """When namespace is set, the confirmation line leads with the outcome
+        and shows ``<namespace>/<name>`` plus the namespaced target path."""
         pkg_info = self._make_pkg_info(tmp_path, namespace="acme")
-        deployed = tmp_path / ".github" / "skills" / "acme" / "brand-guidelines"
+        deployed = tmp_path / ".github" / "skills" / "acme-brand-guidelines"
         deployed.mkdir(parents=True, exist_ok=True)
 
         logger = self._run(tmp_path, pkg_info, [deployed])
 
         tree_msgs = [str(c) for c in logger.tree_item.call_args_list]
         joined = "\n".join(tree_msgs)
+        assert "Integrated skill acme/brand-guidelines" in joined, joined
         assert "acme/brand-guidelines" in joined, joined
-        assert ".github/skills/acme/" in joined, joined
+        assert ".github/skills/acme-brand-guidelines/" in joined, joined
 
     def test_unnamespaced_skill_install_label_unchanged(self, tmp_path: Path) -> None:
-        """Packages without a namespace keep the legacy ``Skill integrated``
-        label so existing assertions and CI snapshots stay green."""
+        """Packages without a namespace still use the plain skill label."""
         pkg_info = self._make_pkg_info(tmp_path, namespace=None)
         deployed = tmp_path / ".github" / "skills" / "plain-skill"
         deployed.mkdir(parents=True, exist_ok=True)
@@ -648,7 +648,7 @@ class TestNamespaceTreeOutput:
 
         tree_msgs = [str(c) for c in logger.tree_item.call_args_list]
         joined = "\n".join(tree_msgs)
-        assert "Skill integrated" in joined, joined
+        assert "Integrated skill ->" in joined, joined
         assert ".github/skills/" in joined, joined
         # Must NOT contain a namespace-style label segment
         assert "skill /" not in joined, joined

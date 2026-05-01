@@ -61,6 +61,13 @@ def _format_package_type_label(pkg_type) -> str | None:
     }.get(pkg_type)
 
 
+def _store_namespace(ctx: InstallContext, dep_key: str, package_info: PackageInfo) -> None:
+    """Record a package namespace for later lockfile assembly."""
+    namespace = getattr(getattr(package_info, "package", None), "namespace", None)
+    if namespace:
+        ctx.package_namespaces[dep_key] = namespace
+
+
 @dataclass
 class Materialization:
     """Outcome of ``DependencySource.acquire()``.
@@ -223,8 +230,7 @@ class LocalDependencySource(DependencySource):
 
         if local_info.package_type:
             ctx.package_types[dep_key] = local_info.package_type.value
-        if getattr(local_info.package, "namespace", None):
-            ctx.package_namespaces[dep_key] = local_info.package.namespace
+        _store_namespace(ctx, dep_key, local_info)
 
         return Materialization(
             package_info=local_info,
@@ -379,8 +385,7 @@ class CachedDependencySource(DependencySource):
             ctx.package_hashes[dep_key] = _compute_hash(install_path)
         if cached_package_info.package_type:
             ctx.package_types[dep_key] = cached_package_info.package_type.value
-        if getattr(cached_package_info.package, "namespace", None):
-            ctx.package_namespaces[dep_key] = cached_package_info.package.namespace
+        _store_namespace(ctx, dep_key, cached_package_info)
 
         return Materialization(
             package_info=cached_package_info,
@@ -550,8 +555,7 @@ class FreshDependencySource(DependencySource):
 
             if hasattr(package_info, "package_type") and package_info.package_type:
                 ctx.package_types[dep_key] = package_info.package_type.value
-            if getattr(package_info.package, "namespace", None):
-                ctx.package_namespaces[dep_key] = package_info.package.namespace
+            _store_namespace(ctx, dep_key, package_info)
 
             if hasattr(package_info, "package_type"):
                 package_type = package_info.package_type

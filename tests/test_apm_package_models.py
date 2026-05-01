@@ -2023,3 +2023,29 @@ class TestPackageNamespace:
 
         with pytest.raises(ValueError, match="single path segment"):
             APMPackage.from_apm_yml(manifest)
+
+    def test_from_apm_yml_rejects_consecutive_hyphen_namespace(self, tmp_path):
+        from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
+
+        clear_apm_yml_cache()
+        manifest = tmp_path / "apm.yml"
+        manifest.write_text(
+            "name: pkg\nversion: 1.0.0\nnamespace: example--tools\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="consecutive hyphens"):
+            APMPackage.from_apm_yml(manifest)
+
+    def test_from_apm_yml_rejects_long_namespace(self, tmp_path):
+        from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
+
+        clear_apm_yml_cache()
+        manifest = tmp_path / "apm.yml"
+        manifest.write_text(
+            f"name: pkg\nversion: 1.0.0\nnamespace: {'a' * 65}\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="1-64 characters"):
+            APMPackage.from_apm_yml(manifest)

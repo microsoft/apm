@@ -5,7 +5,23 @@ sidebar:
   order: 5
 ---
 
-APM is additive. It never deletes, overwrites, or modifies your existing configuration files. Your current `.github/copilot-instructions.md`, `AGENTS.md`, `.claude/` config, `.cursor-rules` -- all stay exactly where they are, untouched. (Note: as of the [Unreleased] release, `apm compile --target vscode/all` no longer writes `.github/copilot-instructions.md` either; if you previously relied on the generated file, copy it into your repo or manage it via a dedicated APM package.)
+APM is additive. It never deletes, overwrites, or modifies your existing configuration files. Your current `.github/copilot-instructions.md`, `AGENTS.md`, `.claude/` config, `.cursor-rules` -- all stay exactly where they are, untouched.
+
+:::caution[Unreleased compile change]
+`apm compile --target vscode` and `apm compile --target all` no longer write `.github/copilot-instructions.md`. Existing files stay in place, but APM will not regenerate that path.
+
+Before: `apm compile --target vscode` generated `AGENTS.md`, `.github/` primitives, and `.github/copilot-instructions.md`.
+
+After: `apm compile --target vscode` generates `AGENTS.md` and `.github/` primitives only.
+
+To keep the last generated file from the previous commit:
+
+```bash
+git show HEAD~1:.github/copilot-instructions.md > .github/copilot-instructions.md
+```
+
+For CI, remove assertions that expect APM to regenerate `.github/copilot-instructions.md`, or commit the file and manage it as a normal repository-owned file.
+:::
 
 ## Add APM in three steps
 

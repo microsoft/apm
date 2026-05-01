@@ -51,10 +51,40 @@ __all__ = [  # noqa: RUF022
     "APMPackage",
     "PackageInfo",
     "clear_apm_yml_cache",
+    "validate_namespace",
 ]
 
 # Module-level parse cache: resolved path -> APMPackage (#171)
 _apm_yml_cache: dict[Path, "APMPackage"] = {}
+NAMESPACE_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9]|-(?!-))*[a-z0-9]$|^[a-z0-9]$")
+
+
+def validate_namespace(namespace: str, *, field_name: str = "namespace") -> str:
+    """Return a normalized package namespace or raise ``ValueError``."""
+    if not isinstance(namespace, str):
+        raise ValueError(
+            f"Invalid '{field_name}' field: expected string, got {type(namespace).__name__}"
+        )
+
+    normalized = namespace.strip()
+    if not normalized:
+        raise ValueError(f"'{field_name}' must not be empty")
+    if "/" in normalized or "\\" in normalized:
+        raise ValueError(f"'{field_name}' must be a single path segment")
+    if len(normalized) > 64:
+        raise ValueError(f"'{field_name}' must be 1-64 characters")
+    if "--" in normalized:
+        raise ValueError(f"'{field_name}' must not contain consecutive hyphens")
+    if not NAMESPACE_PATTERN.fullmatch(normalized):
+        raise ValueError(
+            f"'{field_name}' must contain only lowercase letters, digits, "
+            "and hyphens, and must not start or end with a hyphen"
+        )
+
+    from ..utils.path_security import validate_path_segments
+
+    validate_path_segments(normalized, context=field_name, reject_empty=True)
+    return normalized
 
 
 def clear_apm_yml_cache() -> None:
@@ -212,32 +242,7 @@ class APMPackage:
 
         namespace = None
         if "namespace" in data and data["namespace"] is not None:
-            namespace_value = data["namespace"]
-            if not isinstance(namespace_value, str):
-                raise ValueError(
-                    f"Invalid 'namespace' field: expected string, got {type(namespace_value).__name__}"
-                )
-            namespace = namespace_value.strip()
-            if not namespace:
-                raise ValueError("'namespace' must not be empty")
-            from ..utils.path_security import validate_path_segments
-
-            validate_path_segments(
-                namespace,
-                context="namespace",
-                reject_empty=True,
-            )
-            if "/" in namespace or "\\" in namespace:
-                raise ValueError("'namespace' must be a single path segment")
-            if len(namespace) > 64:
-                raise ValueError("'namespace' must be 1-64 characters")
-            if not re.match(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", namespace):
-                raise ValueError(
-                    "'namespace' must contain only lowercase letters, digits, "
-                    "and hyphens, and must not start or end with a hyphen"
-                )
-            if "--" in namespace:
-                raise ValueError("'namespace' must not contain consecutive hyphens")
+            namespace = validate_namespace(data["namespace"])
 
         # Parse target field through the same validator as --target so a CSV
         # string like ``target: "claude,copilot"`` resolves identically to

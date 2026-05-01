@@ -165,17 +165,21 @@ Declares how the package's content is processed during install and compile. Curr
 |---|---|
 | **Type** | `string` |
 | **Required** | OPTIONAL |
-| **Pattern** | `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$` |
-| **Description** | Optional namespace for package-owned skills. |
+| **Pattern** | `^[a-z0-9](?:[a-z0-9]|-(?!-))*[a-z0-9]$|^[a-z0-9]$` |
+| **Description** | Optional namespace for package-owned skills. Max 64 characters. Consecutive hyphens (`--`) are not allowed. |
 
 When present, installed native skills and promoted `.apm/skills/` entries are
-deployed under `skills/<namespace>/<skill-name>/` instead of the legacy flat
-`skills/<skill-name>/` layout. Packages without `namespace` continue to install
-flat for backward compatibility.
+deployed under `skills/<namespace>-<skill-name>/` instead of the legacy flat
+`skills/<skill-name>/` layout. The namespace remains a direct child directory
+prefix because target harnesses document direct skill directories, not a
+portable recursive `skills/**/SKILL.md` contract. Packages without `namespace`
+continue to install flat for backward compatibility.
 
 Namespace values MUST be a single safe path segment. Resolvers MUST reject empty
 values, traversal (`.` or `..`), path separators, uppercase characters, and
 filesystem-unsafe punctuation.
+
+See also: [Package Namespaces](../../guides/skills/#package-namespaces).
 
 ```yaml
 name: acme-tools

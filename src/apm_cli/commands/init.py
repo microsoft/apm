@@ -8,11 +8,13 @@ import click
 
 from ..constants import APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
+from ..models.apm_package import validate_namespace
 from ..utils.console import (
     _create_files_table,
     _rich_panel,
 )
 from ._helpers import (
+    ERROR,
     INFO,
     RESET,
     _create_minimal_apm_yml,
@@ -39,9 +41,13 @@ from ._helpers import (
     is_flag=True,
     help="Seed apm.yml with a 'marketplace:' authoring block",
 )
+@click.option(
+    "--namespace",
+    help="Optional namespace to prevent skill name collisions",
+)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.pass_context
-def init(ctx, project_name, yes, plugin, marketplace_flag, verbose):
+def init(ctx, project_name, yes, plugin, marketplace_flag, namespace, verbose):
     """Initialize a new APM project (like npm init).
 
     Creates a minimal apm.yml with auto-detected metadata.
@@ -50,6 +56,9 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, verbose):
     """
     logger = CommandLogger("init", verbose=verbose)
     try:
+        if namespace:
+            namespace = validate_namespace(namespace)
+
         # Handle explicit current directory
         if project_name == ".":
             project_name = None
@@ -100,10 +109,12 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, verbose):
 
         # Get project configuration (interactive mode or defaults)
         if not yes:
-            config = _interactive_project_setup(final_project_name, logger)
+            config = _interactive_project_setup(final_project_name, logger, namespace=namespace)
         else:
             # Use auto-detected defaults
             config = _get_default_config(final_project_name)
+            if namespace:
+                config["namespace"] = namespace
 
         # Plugin mode uses 0.1.0 as default version
         if plugin and yes:
@@ -209,7 +220,7 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, verbose):
         sys.exit(1)
 
 
-def _interactive_project_setup(default_name, logger):
+def _interactive_project_setup(default_name, logger, namespace=None):
     """Interactive setup for new APM projects with auto-detection."""
     from ._helpers import _auto_detect_author, _auto_detect_description, _validate_project_name
 
@@ -239,11 +250,19 @@ def _interactive_project_setup(default_name, logger):
         version = Prompt.ask("Version", default="1.0.0").strip()
         description = Prompt.ask("Description", default=auto_description).strip()
         author = Prompt.ask("Author", default=auto_author).strip()
+        if not namespace:
+            namespace = Prompt.ask("Namespace (optional)", default="").strip()
+        else:
+            namespace = namespace.strip()
+        if namespace:
+            namespace = validate_namespace(namespace)
 
         summary_content = f"""name: {name}
 version: {version}
 description: {description}
 author: {author}"""
+        if namespace:
+            summary_content += f"\nnamespace: {namespace}"
         console.print(Panel(summary_content, title="About to create", border_style="cyan"))
 
         if not Confirm.ask("\nIs this OK?", default=True):
@@ -267,20 +286,31 @@ author: {author}"""
         version = click.prompt("Version", default="1.0.0").strip()
         description = click.prompt("Description", default=auto_description).strip()
         author = click.prompt("Author", default=auto_author).strip()
+        if not namespace:
+            namespace = click.prompt("Namespace (optional)", default="").strip()
+        else:
+            namespace = namespace.strip()
+        if namespace:
+            namespace = validate_namespace(namespace)
 
         click.echo(f"\n{INFO}About to create:{RESET}")
         click.echo(f"  name: {name}")
         click.echo(f"  version: {version}")
         click.echo(f"  description: {description}")
         click.echo(f"  author: {author}")
+        if namespace:
+            click.echo(f"  namespace: {namespace}")
 
         if not click.confirm("\nIs this OK?", default=True):
             logger.progress("Aborted.")
             sys.exit(0)
 
-    return {
+    config = {
         "name": name,
         "version": version,
         "description": description,
         "author": author,
     }
+    if namespace:
+        config["namespace"] = namespace
+    return config

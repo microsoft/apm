@@ -490,6 +490,8 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
         # gate what gets deployed.
         "includes": "auto",
     }
+    if config.get("namespace"):
+        apm_yml_data["namespace"] = config["namespace"]
 
     if plugin:
         apm_yml_data["devDependencies"] = {"apm": []}

@@ -131,6 +131,12 @@ class TestLockedDependency:
         dep = LockedDependency(repo_url="owner/repo")
         assert "namespace" not in dep.to_dict()
 
+    def test_from_dict_drops_invalid_namespace(self):
+        dep = LockedDependency.from_dict(
+            {"repo_url": "owner/repo", "namespace": "../example--tools"}
+        )
+        assert dep.namespace is None
+
 
 class TestLockFile:
     def test_add_and_get_dependency(self):

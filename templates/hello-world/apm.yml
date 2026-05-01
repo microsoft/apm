@@ -3,7 +3,7 @@ version: {{version}}
 description: {{description}}
 author: {{author}}
 
-# namespace: my-org  # Optional: skills install under skills/my-org/<skill-name>/ (kebab-case, alphanumeric+hyphens)
+# namespace: my-org  # Optional: skills install under skills/my-org-<skill-name>/ (kebab-case, alphanumeric+hyphens)
 
 scripts:
   start: "copilot --log-level all --log-dir copilot-logs --allow-all-tools -p hello-world.prompt.md"

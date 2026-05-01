@@ -9,9 +9,10 @@ from datetime import datetime  # noqa: F401
 from pathlib import Path
 from typing import Dict, List, Optional  # noqa: F401, UP035
 
-import frontmatter  # noqa: F401
+import frontmatter
 
 from apm_cli.integration.base_integrator import BaseIntegrator
+from apm_cli.models.apm_package import PackageContentType
 
 
 # DEPRECATED -- use IntegrationResult directly for new code.
@@ -160,21 +161,52 @@ def _package_namespace(package_info) -> str | None:
     return namespace if isinstance(namespace, str) else None
 
 
+def _deployed_skill_name(skill_name: str, namespace: str | None) -> str:
+    """Return the runtime-visible skill directory name.
+
+    Harness docs describe skills as direct children of the target skills root
+    (for example ``.github/skills/<skill>/SKILL.md``).  Keep namespaced skills
+    as direct child directories instead of relying on recursive discovery under
+    ``skills/<namespace>/<skill>/``.
+    """
+    if namespace:
+        return f"{namespace}-{skill_name}"
+    return skill_name
+
+
+def _rewrite_skill_name(
+    target_skill_dir: Path, deployed_skill_name: str, namespace: str | None
+) -> None:
+    """Align copied SKILL.md metadata with the runtime-visible directory name."""
+    if not namespace:
+        return
+
+    skill_md = target_skill_dir / "SKILL.md"
+    if not skill_md.exists():
+        return
+
+    post = frontmatter.load(skill_md)
+    if post.metadata.get("name") == deployed_skill_name:
+        return
+    post.metadata["name"] = deployed_skill_name
+    skill_md.write_text(frontmatter.dumps(post), encoding="utf-8")
+
+
 def _skill_dir(target_skills_root: Path, skill_name: str, namespace: str | None) -> Path:
-    """Build a deployed skill directory, optionally under a namespace.
+    """Build a deployed skill directory, optionally namespaced.
 
     Applies a runtime path-containment check so that a symlink planted at
-    ``target_skills_root/<namespace>`` (e.g. by a prior malicious install)
-    cannot redirect ``shutil.copytree`` outside the skills root. Parse-time
-    regex validation rejects traversal in the namespace value itself; this
+    the computed skill directory cannot redirect ``shutil.copytree`` outside
+    the skills root. Parse-time regex validation rejects traversal in the
+    namespace value itself; this
     chokepoint catches symlink-based escapes that resolve at runtime.
     """
+    from apm_cli.models.apm_package import validate_namespace
     from apm_cli.utils.path_security import ensure_path_within
 
     if namespace:
-        path = target_skills_root / namespace / skill_name
-    else:
-        path = target_skills_root / skill_name
+        namespace = validate_namespace(namespace)
+    path = target_skills_root / _deployed_skill_name(skill_name, namespace)
     ensure_path_within(path, target_skills_root)
     return path
 
@@ -186,13 +218,14 @@ def _skill_owner_key(skill_name: str, namespace: str | None) -> str:
     return skill_name
 
 
-def _skill_owner_key_from_deployed_path(deployed_path: str) -> str:
+def _skill_owner_key_from_deployed_path(deployed_path: str, namespace: str | None = None) -> str:
     """Extract the path under ``skills/`` from a deployed_files entry."""
     normalized = deployed_path.rstrip("/").replace("\\", "/")
     marker = "/skills/"
-    if marker in normalized:
-        return normalized.split(marker, 1)[1]
-    return normalized.rsplit("/", 1)[-1]
+    key = normalized.split(marker, 1)[1] if marker in normalized else normalized.rsplit("/", 1)[-1]
+    if namespace and key.startswith(f"{namespace}-") and "/" not in key:
+        return f"{namespace}/{key[len(namespace) + 1 :]}"
+    return key
 
 
 # =============================================================================
@@ -208,7 +241,7 @@ def _skill_owner_key_from_deployed_path(deployed_path: str) -> str:
 # - Packages with only instructions -> compile to AGENTS.md, NOT skills
 
 
-def get_effective_type(package_info) -> "PackageContentType":
+def get_effective_type(package_info) -> PackageContentType:
     """Get effective package content type based on package structure.
 
     Determines type by:
@@ -222,7 +255,7 @@ def get_effective_type(package_info) -> "PackageContentType":
     Returns:
         PackageContentType: The effective type
     """
-    from apm_cli.models.apm_package import PackageContentType, PackageType
+    from apm_cli.models.apm_package import PackageType
 
     # Check if package has SKILL.md (via package_type field)
     # PackageType.CLAUDE_SKILL = has root SKILL.md only
@@ -323,7 +356,9 @@ def copy_skill_to_target(
     When *targets* is provided, only those targets are used.
     Otherwise falls back to ``active_targets()``.
 
-    Source SKILL.md is copied verbatim -- no metadata injection.
+    Source SKILL.md is copied verbatim unless a package namespace is applied,
+    in which case the copied ``name`` frontmatter is aligned to the deployed
+    namespace-prefixed directory.
 
     Copies:
     - SKILL.md (required)
@@ -588,6 +623,7 @@ class SkillIntegrator(BaseIntegrator):
             is_valid, _ = validate_skill_name(raw_sub_name)
             sub_name = raw_sub_name if is_valid else normalize_skill_name(raw_sub_name)
             target = _skill_dir(target_skills_root, sub_name, namespace)
+            deployed_name = _deployed_skill_name(sub_name, namespace)
             owner_key = _skill_owner_key(sub_name, namespace)
             rel_path = f"{rel_prefix}/{owner_key}"
             if target.exists():
@@ -651,6 +687,7 @@ class SkillIntegrator(BaseIntegrator):
             from apm_cli.security.gate import ignore_symlinks
 
             shutil.copytree(sub_skill_path, target, dirs_exist_ok=True, ignore=ignore_symlinks)
+            _rewrite_skill_name(target, deployed_name, namespace)
             promoted += 1
             deployed.append(target)
         return promoted, deployed
@@ -677,7 +714,7 @@ class SkillIntegrator(BaseIntegrator):
             unique_key = dep.get_unique_key()
             for deployed_path in dep.deployed_files:
                 normalized = deployed_path.rstrip("/").replace("\\", "/")
-                skill_name = _skill_owner_key_from_deployed_path(normalized)
+                skill_name = _skill_owner_key_from_deployed_path(normalized, dep.namespace)
                 # Both maps cover all paths for sub-skill self-overwrite tracking.
                 owned_by[skill_name] = short_owner
                 # Native-owner map is scoped to skill paths only to avoid false
@@ -798,8 +835,10 @@ class SkillIntegrator(BaseIntegrator):
         The skill folder name is the source folder name (e.g., ``mcp-builder``),
         validated and normalized per the agentskills.io spec.
 
-        Source SKILL.md is copied verbatim -- no metadata injection. Orphan
-        detection uses apm.lock via directory name matching instead.
+        Source SKILL.md is copied verbatim unless a package namespace is applied,
+        in which case the copied ``name`` frontmatter is aligned to the deployed
+        namespace-prefixed directory. Orphan detection uses apm.lock via
+        directory name matching instead.
 
         Copies:
         - SKILL.md (required)
@@ -953,13 +992,12 @@ class SkillIntegrator(BaseIntegrator):
                 )
 
             shutil.copytree(package_path, target_skill_dir, ignore=_ignore_symlinks_and_apm)
+            _rewrite_skill_name(
+                target_skill_dir,
+                _deployed_skill_name(skill_name, namespace),
+                namespace,
+            )
             all_target_paths.append(target_skill_dir)
-
-            if is_primary and namespace and logger is not None:
-                logger.verbose_detail(
-                    f'Skill deployed under namespace "{namespace}": '
-                    f"skills/{namespace}/{skill_name}/"
-                )
 
             if is_primary:
                 files_copied = sum(1 for _ in target_skill_dir.rglob("*") if _.is_file())
@@ -994,10 +1032,7 @@ class SkillIntegrator(BaseIntegrator):
         sub_skills_count = sum(
             1
             for p in all_target_paths
-            if (
-                (p.parent == primary_root or (namespace and p.parent == primary_root / namespace))
-                and p.name != skill_name
-            )
+            if p.parent == primary_root and p.name != _deployed_skill_name(skill_name, namespace)
         )
 
         return SkillIntegrationResult(

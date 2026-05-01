@@ -233,15 +233,12 @@ def integrate_package_primitives(
         skill_subset=skill_subset,
     )
     # Resolve the package namespace once so install-summary labels can
-    # surface the namespace segment that the skill_integrator used to
-    # decide deploy paths. Without this, namespaced installs are
-    # invisible in the tree output (panel finding 2/4, PR #1028).
-    from apm_cli.integration.skill_integrator import _package_namespace
-
-    _pkg_namespace = _package_namespace(package_info)
-    # Group target_paths by their parent directory (the skills root,
-    # including the namespace segment when present) so the displayed
-    # tree label preserves the full ``.../skills[/namespace]/`` prefix.
+    # surface the namespace identity while deploy paths stay direct children
+    # of the target skills root for runtime compatibility.
+    _pkg_namespace = getattr(getattr(package_info, "package", None), "namespace", None)
+    # Group target_paths by their parent directory (the skills root) for the
+    # default summary. Namespaced native skills override this with exact
+    # deployed directories below.
     _skill_target_dirs: set = builtins.set()
     for tp in skill_result.target_paths:
         try:
@@ -259,14 +256,31 @@ def integrate_package_primitives(
         result["skills"] += 1
         if _pkg_namespace:
             # Per-skill confirmation surfaces the namespace/name identity
-            # so users can tell why the skill landed at the namespaced
-            # path instead of the legacy flat layout.
-            _skill_name = skill_result.skill_path.parent.name
+            # while the deployed directory remains a direct child that
+            # current harnesses can discover.
+            _deployed_name = skill_result.skill_path.parent.name
+            _prefix = f"{_pkg_namespace}-"
+            _skill_name = (
+                _deployed_name[len(_prefix) :]
+                if _deployed_name.startswith(_prefix)
+                else _deployed_name
+            )
+            _exact_targets = []
+            for tp in skill_result.target_paths:
+                if tp.name != _deployed_name:
+                    continue
+                try:
+                    _exact_targets.append(tp.relative_to(project_root).as_posix())
+                except ValueError:
+                    _exact_targets.append(tp.as_posix())
+            _exact_target_str = (
+                ", ".join(f"{d}/" for d in sorted(_exact_targets)) or _skill_target_str
+            )
             _log_integration(
-                f"  |-- Skill {_pkg_namespace}/{_skill_name} integrated -> {_skill_target_str}"
+                f"  |-- Integrated skill {_pkg_namespace}/{_skill_name} -> {_exact_target_str}"
             )
         else:
-            _log_integration(f"  |-- Skill integrated -> {_skill_target_str}")
+            _log_integration(f"  |-- Integrated skill -> {_skill_target_str}")
     if skill_result.sub_skills_promoted > 0:
         result["sub_skills"] += skill_result.sub_skills_promoted
         _log_integration(
