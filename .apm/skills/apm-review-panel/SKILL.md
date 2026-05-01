@@ -3,8 +3,9 @@ name: apm-review-panel
 description: >-
   Use this skill to run a multi-persona expert advisory review on a labelled
   pull request in microsoft/apm. The panel fans out to five mandatory
-  specialists plus three conditional specialists (auth, doc-writer,
-  test-coverage), all running in their own agent threads, and a CEO
+  specialists plus a test-coverage specialist (active on every PR that
+  touches src/) plus two conditional specialists (auth, doc-writer),
+  all running in their own agent threads, and a CEO
   synthesizer. The orchestrator is the sole writer to the PR: ONE
   recommendation comment, no verdict labels, no merge gating. The panel
   is advisory -- it surfaces findings, prioritizes follow-ups, and renders
@@ -69,7 +70,7 @@ surfaces findings; the maintainer and the PR author decide ship.
 | [OSS Growth Hacker](../../agents/oss-growth-hacker.agent.md) | Adoption Strategist | Yes |
 | [Auth Expert](../../agents/auth-expert.agent.md) | Auth / Token Reviewer | Conditional (see below) |
 | [Doc Writer](../../agents/doc-writer.agent.md) | Documentation Reviewer | Conditional (see below) |
-| [Test Coverage Expert](../../agents/test-coverage-expert.agent.md) | Test-Presence Reviewer (paired with DevX UX) | Conditional (see below) |
+| [Test Coverage Expert](../../agents/test-coverage-expert.agent.md) | Test-Presence Reviewer (paired with DevX UX) | Yes (skipped only on docs-only PRs -- see below) |
 | [APM CEO](../../agents/apm-ceo.agent.md) | Strategic Arbiter / Synthesizer | Yes |
 
 ## Topology
@@ -112,10 +113,13 @@ surfaces findings; the maintainer and the PR author decide ship.
 
 ## Conditional panelists
 
-Three personas are conditional. The orchestrator ALWAYS spawns their
-tasks to keep the schema return shape uniform; the prompt instructs the
-subagent to set `active: false` with an `inactive_reason` if the
-condition does not hold.
+Two personas are conditional (auth, doc-writer). A third
+(test-coverage) is mandatory on every PR that touches `src/` and only
+skipped on documentation-only PRs -- see its section below for why.
+The orchestrator ALWAYS spawns ALL three tasks to keep the schema
+return shape uniform; the prompt instructs the subagent to set
+`active: false` with an `inactive_reason` if the condition does not
+hold.
 
 ### Auth Expert
 
@@ -166,22 +170,23 @@ that gap as a finding.
 
 ### Test Coverage Expert
 
-Activate when the PR diff includes ANY of:
-- changes under `src/apm_cli/cli.py` or `src/apm_cli/commands/`
-- new or changed CLI flag, argument, or exit code
-- changed user-facing error string (literals near `_rich_error`,
-  `_rich_warning`, or in raised exceptions)
-- changes under `src/apm_cli/install/`, `src/apm_cli/deps/`,
-  `src/apm_cli/marketplace/`, `src/apm_cli/integration/`,
-  `src/apm_cli/lockfile/`, or `src/apm_cli/core/auth.py`
-- a bug-fix marker in the PR body or commit message ("fixes #",
-  "closes #", "regression", "user reported")
+**Active by default on every PR that touches `src/**/*.py`.** The only
+condition that flips this persona to `active: false` is a
+documentation-only PR -- the diff contains zero `src/**/*.py` files.
+In that case set `inactive_reason: "documentation-only PR -- no
+runtime code paths to defend"`.
 
-Fallback self-check (when no fast-path file matched): "Does this PR
-change behavior a user can observe -- a command, flag, exit code, error
-wording, install/lockfile/auth/hook flow -- such that a future drift
-in this code path could ship without any test failing? If unsure,
-answer YES."
+The activation rule is intentionally narrow: under the advisory regime,
+test outcomes are LOAD-BEARING for CEO arbitration (passed / failed /
+missing test evidence outranks opinion-only findings -- see
+`apm-ceo.agent.md` and `panelist-return-schema.json` evidence block).
+A persona whose findings carry that weight cannot be silently skipped
+on a heuristic. Better to spawn it on a pure refactor and have it
+return a single `nit`-severity "no behavior surface touched -- no
+coverage finding" line than to skip it and leave the CEO without
+evidence to weigh. (Earlier revisions of this skill paired test-coverage
+with auth and doc-writer as conditional for symmetry; that symmetry
+broke when test evidence became load-bearing.)
 
 The test-coverage-expert is paired with the devx-ux-expert lens and
 defends the user-promise contracts the DevX persona enumerates (CLI
@@ -286,7 +291,36 @@ output to the PR before step 6.
    Validate the CEO return against `assets/ceo-return-schema.json`. On
    failure, re-spawn once with the violation cited.
 
-6. **Render the comment.** Load `assets/recommendation-template.md`,
+6. **Resolve the notification audience.** The advisory comment must
+   surface in the inboxes of the people who will act on it. Run:
+
+   ```
+   gh pr view <PR_NUMBER> --json author,reviewRequests
+   ```
+
+   Build `notify_audience` as the deduplicated list:
+   - the PR author's `@login` (always included);
+   - every requested reviewer's `@login` (these are the
+     CODEOWNERS-resolved reviewers GitHub auto-requested for the
+     touched paths, plus any explicitly-requested human reviewers);
+   - every requested team's `@org/team-slug` (CODEOWNERS team
+     entries).
+
+   Filter out:
+   - bot logins (login ending in `[bot]` or matching
+     `dependabot|github-actions|copilot-pull-request-reviewer`);
+   - the orchestrator's own identity (avoid self-ping).
+
+   Cap the final list at 6 handles to avoid notification noise (PR
+   author + up to 5 reviewers/teams). If the cap trims, prefer team
+   handles over individual logins. Pass the resulting list to the
+   template renderer as `notify_audience`.
+
+   This step replaces the maintainer-notification signal that the
+   pre-advisory verdict labels carried. It is the only mechanism by
+   which a fresh panel pass announces itself.
+
+7. **Render the comment.** Load `assets/recommendation-template.md`,
    fill the placeholders from the panelist + CEO JSON, and emit it as
    exactly ONE comment.
 
@@ -302,7 +336,7 @@ output to the PR before step 6.
    - NEVER render the words "Verdict", "APPROVE", "REJECT", "blocked",
      "merge gate", or any equivalent. The panel is advisory.
 
-7. **Sweep labels** via `safe-outputs.remove-labels`. The list MUST be
+8. **Sweep labels** via `safe-outputs.remove-labels`. The list MUST be
    `[panel-review, panel-approved, panel-rejected]` -- always all three,
    regardless of which are currently on the PR. `panel-review` is the
    re-run idempotency reset; the other two are LEGACY VERDICT LABELS

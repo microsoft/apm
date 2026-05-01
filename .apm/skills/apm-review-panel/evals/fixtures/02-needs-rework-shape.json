@@ -7,8 +7,21 @@
       "active": true,
       "summary": "Refactor splits a clean module into a circular import; same logic now lives in two places.",
       "findings": [
-        {"severity": "blocking", "summary": "Circular import between resolver.py and downloader.py", "rationale": "The new factory in resolver.py imports downloader.GithubDownloader at module top, while downloader.py imports resolver.create_resolver at module top. This works only because Python silently tolerates partial modules in sys.modules; the first import that fails will cascade across the whole install path.", "file": "src/apm_cli/deps/resolver.py", "line": 12, "suggestion": "Move the factory to a third module (deps/factory.py) that both depend on, or defer the import inside the function body."},
-        {"severity": "recommended", "summary": "validate_url duplicated across resolver.py and downloader.py", "rationale": "Two copies that already disagree on trailing-slash handling. R3 EXTRACT trigger fired (>=3 call sites in the diff).", "file": "src/apm_cli/deps/resolver.py", "line": 88}
+        {
+          "severity": "blocking",
+          "summary": "Circular import between resolver.py and downloader.py",
+          "rationale": "The new factory in resolver.py imports downloader.GithubDownloader at module top, while downloader.py imports resolver.create_resolver at module top. This works only because Python silently tolerates partial modules in sys.modules; the first import that fails will cascade across the whole install path.",
+          "file": "src/apm_cli/deps/resolver.py",
+          "line": 12,
+          "suggestion": "Move the factory to a third module (deps/factory.py) that both depend on, or defer the import inside the function body."
+        },
+        {
+          "severity": "recommended",
+          "summary": "validate_url duplicated across resolver.py and downloader.py",
+          "rationale": "Two copies that already disagree on trailing-slash handling. R3 EXTRACT trigger fired (>=3 call sites in the diff).",
+          "file": "src/apm_cli/deps/resolver.py",
+          "line": 88
+        }
       ]
     },
     {
@@ -16,8 +29,21 @@
       "active": true,
       "summary": "Two new error strings ship outside STATUS_SYMBOLS; one new emoji slipped in.",
       "findings": [
-        {"severity": "blocking", "summary": "Emoji character in error message will crash on Windows cp1252 terminals", "rationale": "encoding.instructions.md is unambiguous: ASCII-only U+0020-U+007E. The rocket character on line 211 will raise UnicodeEncodeError under charmap.", "file": "src/apm_cli/deps/resolver.py", "line": 211, "suggestion": "Replace with `[!]` or `[*]` per STATUS_SYMBOLS."},
-        {"severity": "recommended", "summary": "New error path bypasses _rich_error helper", "rationale": "Direct print() loses the panel's colorization and TTY-detection. Inconsistent with the other 38 call sites in this module.", "file": "src/apm_cli/deps/resolver.py", "line": 203}
+        {
+          "severity": "blocking",
+          "summary": "Emoji character in error message will crash on Windows cp1252 terminals",
+          "rationale": "encoding.instructions.md is unambiguous: ASCII-only U+0020-U+007E. The rocket character on line 211 will raise UnicodeEncodeError under charmap.",
+          "file": "src/apm_cli/deps/resolver.py",
+          "line": 211,
+          "suggestion": "Replace with `[!]` or `[*]` per STATUS_SYMBOLS."
+        },
+        {
+          "severity": "recommended",
+          "summary": "New error path bypasses _rich_error helper",
+          "rationale": "Direct print() loses the panel's colorization and TTY-detection. Inconsistent with the other 38 call sites in this module.",
+          "file": "src/apm_cli/deps/resolver.py",
+          "line": 203
+        }
       ]
     },
     {
@@ -25,7 +51,14 @@
       "active": true,
       "summary": "New error message is technically accurate but unhelpful to a user encountering it cold.",
       "findings": [
-        {"severity": "recommended", "summary": "Error message lacks an actionable next step", "rationale": "'Invalid dependency reference' tells the user WHAT failed but not WHY or what to do. Compare to the message in install/pipeline.py:147 which suggests three remediations.", "file": "src/apm_cli/deps/resolver.py", "line": 211, "suggestion": "Suffix with 'Run `apm install --verbose` to see the resolved URL, or check `apm.yml` for typos.'"}
+        {
+          "severity": "recommended",
+          "summary": "Error message lacks an actionable next step",
+          "rationale": "'Invalid dependency reference' tells the user WHAT failed but not WHY or what to do. Compare to the message in install/pipeline.py:147 which suggests three remediations.",
+          "file": "src/apm_cli/deps/resolver.py",
+          "line": 211,
+          "suggestion": "Suffix with 'Run `apm install --verbose` to see the resolved URL, or check `apm.yml` for typos.'"
+        }
       ]
     },
     {
@@ -33,8 +66,22 @@
       "active": true,
       "summary": "Path-traversal regression: new code joins user-controlled segments without validate_path_segments.",
       "findings": [
-        {"severity": "blocking", "summary": "User-controlled `dep.name` is path-joined without traversal validation", "rationale": "path_security.instructions.md mandates validate_path_segments() at parse time for any user-provided value used in path construction. The new code at line 156 calls Path(install_dir) / dep.name directly. A malicious manifest with `name: ../../../etc/passwd` would traverse out of the install dir.", "file": "src/apm_cli/deps/resolver.py", "line": 156, "suggestion": "Wrap with `validate_path_segments(dep.name, context='dep.name')` before the join, then `ensure_path_within(result, install_dir)` after."},
-        {"severity": "recommended", "summary": "New URL probe uses raw requests.get without timeout", "rationale": "Default no-timeout means a hostile or hung server can stall the install pipeline indefinitely.", "file": "src/apm_cli/deps/resolver.py", "line": 178, "suggestion": "Add timeout=30 (matches the convention in github_downloader.py:412)."}
+        {
+          "severity": "blocking",
+          "summary": "User-controlled `dep.name` is path-joined without traversal validation",
+          "rationale": "path_security.instructions.md mandates validate_path_segments() at parse time for any user-provided value used in path construction. The new code at line 156 calls Path(install_dir) / dep.name directly. A malicious manifest with `name: ../../../etc/passwd` would traverse out of the install dir.",
+          "file": "src/apm_cli/deps/resolver.py",
+          "line": 156,
+          "suggestion": "Wrap with `validate_path_segments(dep.name, context='dep.name')` before the join, then `ensure_path_within(result, install_dir)` after."
+        },
+        {
+          "severity": "recommended",
+          "summary": "New URL probe uses raw requests.get without timeout",
+          "rationale": "Default no-timeout means a hostile or hung server can stall the install pipeline indefinitely.",
+          "file": "src/apm_cli/deps/resolver.py",
+          "line": 178,
+          "suggestion": "Add timeout=30 (matches the convention in github_downloader.py:412)."
+        }
       ]
     },
     {
@@ -55,7 +102,14 @@
       "active": true,
       "summary": "Drift: behavior change but docs/src/content/docs/reference/dependencies.md still describes the pre-refactor flow.",
       "findings": [
-        {"severity": "recommended", "summary": "docs/reference/dependencies.md describes pre-refactor flow", "rationale": "The doc says 'resolution is performed by GithubDownloader directly' but the refactor introduces a separate Resolver. Documentation drift will mislead first-time readers.", "file": "docs/src/content/docs/reference/dependencies.md", "line": 47, "suggestion": "Update the resolution-flow section to name the new Resolver, or add a note that downloader-direct resolution is being phased out."}
+        {
+          "severity": "recommended",
+          "summary": "docs/reference/dependencies.md describes pre-refactor flow",
+          "rationale": "The doc says 'resolution is performed by GithubDownloader directly' but the refactor introduces a separate Resolver. Documentation drift will mislead first-time readers.",
+          "file": "docs/src/content/docs/reference/dependencies.md",
+          "line": 47,
+          "suggestion": "Update the resolution-flow section to name the new Resolver, or add a note that downloader-direct resolution is being phased out."
+        }
       ]
     },
     {
@@ -76,7 +130,10 @@
             "outcome": "missing",
             "assertion_excerpt": "with pytest.raises(ValueError): resolver.resolve(Dep(name='../../../etc/passwd', source='gh:...'))",
             "proves": "User-controlled dep.name cannot escape the install directory via traversal payloads.",
-            "principles": ["secure-by-default", "governed-by-policy"]
+            "principles": [
+              "secure-by-default",
+              "governed-by-policy"
+            ]
           }
         },
         {
@@ -92,7 +149,10 @@
             "outcome": "missing",
             "assertion_excerpt": "result = install(manifest_path, scope=USER); assert (target_dir / 'expected.md').exists()",
             "proves": "The new Resolver -> Downloader boundary actually delivers files to disk for a real apm.yml.",
-            "principles": ["portability-by-manifest", "devx"]
+            "principles": [
+              "portability-by-manifest",
+              "devx"
+            ]
           }
         }
       ]
@@ -107,15 +167,42 @@
     },
     "growth_amplification": "",
     "recommended_followups": [
-      {"from_persona": "supply-chain-security-expert", "summary": "Add validate_path_segments + ensure_path_within around the dep.name join at resolver.py:156", "why": "User-controlled path component without traversal validation; the codebase has a hard rule.", "blocking": true},
-      {"from_persona": "test-coverage-expert", "summary": "Add a regression-trap test exercising malicious dep.name (path-traversal payloads) against the resolver join", "why": "The path-traversal slip is exactly the surface a regression-trap test would have caught; lock the contract in so this never re-ships.", "blocking": true},
-      {"from_persona": "cli-logging-expert", "summary": "Replace the rocket emoji at resolver.py:211 with `[!]` per STATUS_SYMBOLS", "why": "Will crash on Windows cp1252 terminals.", "blocking": true},
-      {"from_persona": "python-architect", "summary": "Break the resolver.py <-> downloader.py circular import (factory module or deferred import)", "why": "Tolerated by Python today but fragile to any change in import order."},
-      {"from_persona": "doc-writer", "summary": "Update docs/reference/dependencies.md to name the new Resolver", "why": "Docs still describe the pre-refactor flow; drift will mislead first-time readers."}
+      {
+        "from_persona": "supply-chain-security-expert",
+        "summary": "Add validate_path_segments + ensure_path_within around the dep.name join at resolver.py:156",
+        "why": "User-controlled path component without traversal validation; the codebase has a hard rule.",
+        "blocking": true
+      },
+      {
+        "from_persona": "test-coverage-expert",
+        "summary": "Add a regression-trap test exercising malicious dep.name (path-traversal payloads) against the resolver join",
+        "why": "The path-traversal slip is exactly the surface a regression-trap test would have caught; lock the contract in so this never re-ships.",
+        "blocking": true
+      },
+      {
+        "from_persona": "cli-logging-expert",
+        "summary": "Replace the rocket emoji at resolver.py:211 with `[!]` per STATUS_SYMBOLS",
+        "why": "Will crash on Windows cp1252 terminals.",
+        "blocking": true
+      },
+      {
+        "from_persona": "python-architect",
+        "summary": "Break the resolver.py <-> downloader.py circular import (factory module or deferred import)",
+        "why": "Tolerated by Python today but fragile to any change in import order."
+      },
+      {
+        "from_persona": "doc-writer",
+        "summary": "Update docs/reference/dependencies.md to name the new Resolver",
+        "why": "Docs still describe the pre-refactor flow; drift will mislead first-time readers."
+      }
     ],
     "ship_recommendation": {
       "stance": "needs_rework",
       "prose": "Address the two blocking-severity items (path-traversal validation and Windows-encoding fix) before re-requesting review. The circular import is fragile but does not gate; resolve it in this PR if convenient, otherwise track as a follow-up. The remaining recommended items can land in this PR or in a series of small follow-ups -- maintainer's call."
     }
-  }
+  },
+  "notify_audience": [
+    "@danielmeppiel",
+    "@microsoft/apm-maintainers"
+  ]
 }

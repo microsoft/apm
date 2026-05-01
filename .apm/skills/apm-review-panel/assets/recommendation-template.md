@@ -27,6 +27,13 @@ RENDERING RULES (the orchestrator follows these literally):
 - Growth amplification renders ONLY when non-empty AND the PR is
   non-trivial (CEO judgment encoded in arbitration prose; if growth
   field is non-empty, render it).
+- The `notify_audience` line renders ONLY when the orchestrator passes
+  a non-empty list. The orchestrator computes it from `gh pr view
+  --json author,reviewRequests` (PR author + CODEOWNERS-resolved
+  requested reviewers, bots filtered, capped at 6 handles). The line
+  is the only mechanism by which a fresh panel pass surfaces in
+  reviewer / author inboxes (replaces the verdict-label notification
+  signal of the pre-advisory regime).
 - The full per-persona findings live in a <details> block at the
   bottom. Out of sight unless the maintainer wants depth.
 -->
@@ -34,6 +41,10 @@ RENDERING RULES (the orchestrator follows these literally):
 ## APM Review Panel: `{{ ceo.ship_recommendation.stance }}`
 
 > {{ ceo.headline }}
+
+{{#if notify_audience }}
+cc {{ notify_audience | space_join }} -- a fresh advisory pass is ready for your review.
+{{/if}}
 
 {{ ceo.arbitration }}
 

@@ -2,6 +2,8 @@
 
 > Refactor direction is sound, but two correctness regressions (path traversal, Windows encoding) need to land before this can ship.
 
+cc @danielmeppiel @microsoft/apm-maintainers -- a fresh advisory pass is ready for your review.
+
 The architectural intent -- separating dependency resolution from download orchestration -- is the right call (Python Architect previously flagged the conflation as tech debt). However, this round introduces three regressions worth flagging before the next push:
 
 The path-traversal slip at line 156 is the most important. `dep.name` is user-controlled via apm.yml, and the codebase has a strict invariant (path_security.instructions.md) that any path construction from user input MUST go through `validate_path_segments` + `ensure_path_within`. This is not a style nit -- it's the exact attack surface the centralized helpers exist to prevent.
@@ -96,11 +98,15 @@ PR touches only deps/resolver.py and deps/downloader.py refactor; no AuthResolve
 #### Test Coverage
 
 - **[blocking]** No test exercises a malicious dep.name (path-traversal payload) against the new resolver join at `tests/unit/deps/test_resolver.py`
-  The path-traversal regression at resolver.py:156 is exactly the surface that validate_path_segments + ensure_path_within exist to defend. A test that constructs a Dep with `name='../../../etc/passwd'` and asserts the resolver raises before joining is the regression-trap that prevents this from re-shipping. Absence of such a test in tests/unit/deps/ confirmed by grep on `validate_path_segments` and `path_traversal`.
-  *Suggested:* Add a test with a parametrized list of traversal payloads ('../', '..\\', '/etc/passwd', '..%2f..') and assert each raises before any filesystem operation.
+  The path-traversal regression at resolver.py:156 is exactly the surface that validate_path_segments + ensure_path_within exist to defend. A test that constructs a Dep with `name='../../../etc/passwd'` and asserts the resolver raises before joining is the regression-trap that prevents this from re-shipping. Absence of such a test in tests/unit/deps/ confirmed by `grep -rn 'validate_path_segments\|path_traversal' tests/unit/deps/` returning no match.
+  *Suggested:* Add a parametrized test with traversal payloads ('../', '..\\', '/etc/passwd', '..%2f..') and assert each raises ValueError before any filesystem operation.
+  *Proof (test MISSING at):* `tests/unit/deps/test_resolver.py::test_resolver_rejects_path_traversal_in_dep_name` -- proves: User-controlled dep.name cannot escape the install directory via traversal payloads. [secure-by-default,governed-by-policy]
+  `with pytest.raises(ValueError): resolver.resolve(Dep(name='../../../etc/passwd', source='gh:...'))`
 - **[recommended]** Refactor changes resolver/downloader integration but no integration test covers the cross-module flow at `tests/integration/test_install_pipeline.py`
   Existing tests cover resolver.py and downloader.py in isolation; no test exercises the full install path end-to-end through both modules. A refactor that splits responsibilities across a module boundary needs at least one integration test that proves the boundary works.
   *Suggested:* Add an integration test that installs a real (test-fixture) dependency and asserts the file ends up in the expected location after going through both Resolver and Downloader.
+  *Proof (test MISSING at):* `tests/integration/test_install_pipeline.py::test_install_pipeline_resolver_to_downloader_e2e` -- proves: The new Resolver -> Downloader boundary actually delivers files to disk for a real apm.yml. [portability-by-manifest,devx]
+  `result = install(manifest_path, scope=USER); assert (target_dir / 'expected.md').exists()`
 
 </details>
 

@@ -59,6 +59,12 @@ def render(fixture: dict) -> str:
     out.append("")
     out.append(f"> {ceo['headline']}")
     out.append("")
+
+    notify = fixture.get("notify_audience") or []
+    if notify:
+        out.append(f"cc {' '.join(notify)} -- a fresh advisory pass is ready for your review.")
+        out.append("")
+
     out.append(ceo["arbitration"])
     out.append("")
 

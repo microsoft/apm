@@ -2,6 +2,8 @@
 
 > Refactor direction is sound, but two correctness regressions (path traversal, Windows encoding) need to land before this can ship.
 
+cc @danielmeppiel @microsoft/apm-maintainers -- a fresh advisory pass is ready for your review.
+
 The architectural intent -- separating dependency resolution from download orchestration -- is the right call (Python Architect previously flagged the conflation as tech debt). However, this round introduces three regressions worth flagging before the next push:
 
 The path-traversal slip at line 156 is the most important. `dep.name` is user-controlled via apm.yml, and the codebase has a strict invariant (path_security.instructions.md) that any path construction from user input MUST go through `validate_path_segments` + `ensure_path_within`. This is not a style nit -- it's the exact attack surface the centralized helpers exist to prevent.
