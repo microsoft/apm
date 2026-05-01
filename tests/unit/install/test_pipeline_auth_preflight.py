@@ -130,3 +130,95 @@ class TestPreflightClustersDeduplicate:
 
         _preflight_auth_check(ctx, resolver, verbose=False)
         assert mock_run.call_count == 1
+
+
+def _make_generic_dep(host="gitlab.internal.corp", repo_url="org/repo"):
+    """Create a mock dep for a generic (non-GitHub, non-ADO) host."""
+    dep = MagicMock()
+    dep.host = host
+    dep.repo_url = repo_url
+    dep.port = None
+    dep.is_azure_devops.return_value = False
+    dep.explicit_scheme = None
+    dep.is_insecure = False
+    return dep
+
+
+class TestPreflightGenericHostAllowsCredentialHelpers:
+    """Generic hosts (GHES, GitLab, etc.) must not block credential helpers (#1082)."""
+
+    @patch("subprocess.run")
+    def test_generic_host_env_omits_credential_blocking_vars(self, mock_run):
+        """The probe env for generic hosts must not contain any of the vars
+        that block credential helpers: GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM,
+        or GIT_ASKPASS.
+
+        These vars prevent git from reading ~/.gitconfig (where credential
+        helpers are configured), which is the primary auth mechanism for
+        non-GitHub/non-ADO hosts.
+        """
+        mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
+
+        dep = _make_generic_dep(host="ghes.corp.example.com")
+        ctx = _make_ctx(deps=[dep])
+        resolver = _make_resolver(token="some-token")
+
+        from apm_cli.install.pipeline import _preflight_auth_check
+
+        _preflight_auth_check(ctx, resolver, verbose=False)
+
+        assert mock_run.call_count == 1
+        call_env = mock_run.call_args[1]["env"]
+        assert "GIT_CONFIG_GLOBAL" not in call_env
+        assert "GIT_CONFIG_NOSYSTEM" not in call_env
+        assert "GIT_ASKPASS" not in call_env
+
+    @patch("subprocess.run")
+    def test_generic_host_auth_failure_still_raises(self, mock_run):
+        """Auth failures on generic hosts still raise AuthenticationError."""
+        mock_run.return_value = MagicMock(
+            returncode=128,
+            stderr="fatal: Authentication failed for 'https://ghes.corp.example.com/'",
+            stdout="",
+        )
+
+        dep = _make_generic_dep(host="ghes.corp.example.com")
+        ctx = _make_ctx(deps=[dep])
+        resolver = _make_resolver(token="some-token")
+
+        from apm_cli.install.pipeline import _preflight_auth_check
+
+        with pytest.raises(AuthenticationError) as exc_info:
+            _preflight_auth_check(ctx, resolver, verbose=False)
+
+        assert str(exc_info.value).startswith("Authentication failed for ghes.corp.example.com")
+
+    @patch("subprocess.run")
+    def test_ado_host_retains_credential_blocking_env(self, mock_run):
+        """ADO hosts should retain GIT_ASKPASS (locked-down env with token in URL).
+
+        Generic hosts strip GIT_ASKPASS to allow credential helpers; ADO hosts
+        keep it because auth is via token embedded in the URL.
+        """
+        mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
+
+        dep = _make_dep(host="dev.azure.com", repo_url="myorg/myproject/_git/myrepo")
+        ctx = _make_ctx(deps=[dep])
+        # Simulate ADO git_env that carries the blocking vars (as real AuthResolver does)
+        resolver = _make_resolver(
+            token="ado-pat",
+            git_env={
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_ASKPASS": "echo",
+                "GIT_CONFIG_GLOBAL": "/dev/null",
+            },
+        )
+
+        from apm_cli.install.pipeline import _preflight_auth_check
+
+        _preflight_auth_check(ctx, resolver, verbose=False)
+
+        call_env = mock_run.call_args[1]["env"]
+        # ADO hosts keep the locked-down env since tokens are embedded in the URL
+        assert call_env.get("GIT_CONFIG_NOSYSTEM") == "1"
+        assert call_env.get("GIT_ASKPASS") == "echo"
