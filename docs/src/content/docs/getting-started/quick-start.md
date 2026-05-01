@@ -113,6 +113,16 @@ dependencies:
     - microsoft/apm-sample-package#v1.0.0
 ```
 
+## Get Copilot reading your packages in under a minute
+
+Run one more command:
+
+```bash
+apm compile -t copilot
+```
+
+APM assembles every global instruction it just installed into `.github/copilot-instructions.md` -- the file VS Code and GitHub Copilot read automatically. No configuration, no extra setup; open the project in VS Code and Copilot is already grounded in your packages' standards.
+
 ## That's it
 
 Open your editor. GitHub Copilot, Claude, Cursor, and OpenCode pick up the new context immediately -- no extra configuration, no compile step, no restart. The agent now knows your project's design standards, can run your prompt templates, and follows the conventions defined in the package.

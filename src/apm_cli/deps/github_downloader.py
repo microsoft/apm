@@ -8,7 +8,7 @@ import stat  # noqa: F401
 import sys
 import tempfile
 import time  # noqa: F401
-from collections.abc import Callable  # noqa: F401
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union  # noqa: F401, UP035
@@ -1235,92 +1235,61 @@ class GitHubPackageDownloader:
             verbose_callback=verbose_callback,
         )
 
-    def validate_virtual_package_exists(self, dep_ref: DependencyReference) -> bool:
-        """Validate that a virtual package (file, collection, or subdirectory) exists on GitHub.
+    def validate_virtual_package_exists(
+        self,
+        dep_ref: DependencyReference,
+        verbose_callback: Callable[[str], None] | None = None,
+        warn_callback: Callable[[str], None] | None = None,
+    ) -> bool:
+        """Validate that a virtual package exists at ``dep_ref``.
 
-        Supports:
-        - Virtual files: owner/repo/path/file.prompt.md
-        - Collections: owner/repo/collections/name (checks for .collection.yml)
-        - Subdirectory packages: owner/repo/path/subdir (checks for apm.yml, SKILL.md, or plugin.json)
-
-        Args:
-            dep_ref: Parsed dependency reference for virtual package
-
-        Returns:
-            bool: True if the package exists and is accessible, False otherwise
+        Thin delegation to :func:`github_downloader_validation.validate_virtual_package_exists`
+        -- see that module for the full validation strategy (marker-file
+        probes, Contents API directory probe, ``git ls-remote`` fallback).
         """
-        if not dep_ref.is_virtual:
-            raise ValueError("Can only validate virtual packages with this method")
+        from .github_downloader_validation import validate_virtual_package_exists as _v
 
-        ref = dep_ref.reference or "main"
-        file_path = dep_ref.virtual_path
+        return _v(
+            self,
+            dep_ref,
+            verbose_callback=verbose_callback,
+            warn_callback=warn_callback,
+        )
 
-        # For collections, check for .collection.yml file
-        if dep_ref.is_virtual_collection():
-            file_path = f"{dep_ref.virtual_path}.collection.yml"
-            try:
-                self.download_raw_file(dep_ref, file_path, ref)
-                return True
-            except RuntimeError:
-                return False
+    def _directory_exists_at_ref(
+        self,
+        dep_ref: DependencyReference,
+        path: str,
+        ref: str,
+        log: Callable[[str], None],
+    ) -> bool:
+        """Backward-compat shim -- delegates to the validation module."""
+        from .github_downloader_validation import _directory_exists_at_ref as _impl
 
-        # For virtual files, check the file directly
-        if dep_ref.is_virtual_file():
-            try:
-                self.download_raw_file(dep_ref, file_path, ref)
-                return True
-            except RuntimeError:
-                return False
+        return _impl(self, dep_ref, path, ref, log)
 
-        # For subdirectory packages: apm.yml or SKILL.md confirm the type;
-        # plugin.json confirms a Claude plugin; README.md is a last-resort
-        # signal that the directory exists (any directory that follows the
-        # Claude plugin spec may have none of the above).
-        if dep_ref.is_virtual_subdirectory():
-            # Try apm.yml first
-            try:
-                self.download_raw_file(dep_ref, f"{dep_ref.virtual_path}/apm.yml", ref)
-                return True
-            except RuntimeError:
-                pass
+    def _ref_exists_via_ls_remote(
+        self,
+        dep_ref: DependencyReference,
+        ref: str,
+        log: Callable[[str], None],
+    ) -> bool:
+        """Backward-compat shim -- delegates to the validation module.
 
-            # Try SKILL.md
-            try:
-                self.download_raw_file(dep_ref, f"{dep_ref.virtual_path}/SKILL.md", ref)
-                return True
-            except RuntimeError:
-                pass
+        Returns ``bool`` (success only); the underlying impl now also
+        returns the winning AttemptSpec, but legacy callers only need
+        the success flag.
+        """
+        from .github_downloader_validation import _ref_exists_via_ls_remote as _impl
 
-            # Try plugin.json at various plugin locations
-            plugin_locations = [
-                f"{dep_ref.virtual_path}/plugin.json",  # Root
-                f"{dep_ref.virtual_path}/.github/plugin/plugin.json",  # GitHub Copilot format
-                f"{dep_ref.virtual_path}/.claude-plugin/plugin.json",  # Claude format
-                f"{dep_ref.virtual_path}/.cursor-plugin/plugin.json",  # Cursor format
-            ]
+        ok, _winning = _impl(self, dep_ref, ref, log)
+        return ok
 
-            for plugin_path in plugin_locations:
-                try:
-                    self.download_raw_file(dep_ref, plugin_path, ref)
-                    return True
-                except RuntimeError:
-                    continue
+    def _ssh_attempt_allowed(self) -> bool:
+        """Backward-compat shim -- delegates to the validation module."""
+        from .github_downloader_validation import _ssh_attempt_allowed as _impl
 
-            # Last resort: README.md  -- any well-formed directory should have one.
-            # A directory that follows the Claude plugin spec (agents/, commands/,
-            # skills/ ...) with no manifest files is still a valid plugin.
-            try:
-                self.download_raw_file(dep_ref, f"{dep_ref.virtual_path}/README.md", ref)
-                return True
-            except RuntimeError:
-                pass
-
-        # Fallback: try to download the file directly
-        try:
-            self.download_raw_file(dep_ref, file_path, ref)
-            return True
-        except RuntimeError:
-            return False
+        return _impl(self)
 
     def download_virtual_file_package(
         self,

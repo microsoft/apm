@@ -421,9 +421,29 @@ def _resolve_package_references(
         else:
             reason = _local_path_failure_reason(dep_ref)
             if not reason:
-                reason = "not accessible or doesn't exist"
-                if not verbose:
-                    reason += " -- run with --verbose for auth details"
+                # Round-4 panel fix (devx-ux): name the four-step probe
+                # chain explicitly when the validator exhausted it
+                # (virtual subdirectory + explicit ref). Generic "not
+                # accessible" hides the failure mode for the precise
+                # case where the most diagnostics are available.
+                is_subdir_ref_chain = (
+                    dep_ref.is_virtual
+                    and dep_ref.is_virtual_subdirectory()
+                    and bool(dep_ref.reference)
+                )
+                if is_subdir_ref_chain:
+                    reason = (
+                        "all probes failed (marker-file, Contents API, "
+                        "git ls-remote, shallow-fetch) -- verify the path "
+                        "and ref exist and that your credentials have "
+                        "read access"
+                    )
+                    if not verbose:
+                        reason += " (run with --verbose for the full probe log)"
+                else:
+                    reason = "not accessible or doesn't exist"
+                    if not verbose:
+                        reason += " -- run with --verbose for auth details"
             invalid_outcomes.append((package, reason))
             if logger:
                 logger.validation_fail(package, reason)

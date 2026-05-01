@@ -261,6 +261,28 @@ class TestShouldCompileCopilotInstructionsMd:
     def test_claude_target(self):
         assert should_compile_copilot_instructions_md("claude") is False
 
+    def test_frozenset_with_vscode_returns_true(self):
+        """Multi-target lists containing 'vscode' family member must emit."""
+        assert (
+            should_compile_copilot_instructions_md(frozenset({"vscode", "agents", "claude"}))
+            is True
+        )
+
+    def test_frozenset_with_agents_only_returns_false(self):
+        """Multi-target lists that map cursor/opencode/codex to 'agents'
+        family for AGENTS.md routing must NOT trigger copilot-instructions.md.
+
+        This is the round-3 regression: previously the predicate checked
+        '"agents" in target' which over-fired on cursor/opencode/codex combos.
+        """
+        assert should_compile_copilot_instructions_md(frozenset({"agents", "claude"})) is False
+        assert should_compile_copilot_instructions_md(frozenset({"agents"})) is False
+
+    def test_frozenset_without_vscode_returns_false(self):
+        """Multi-target lists without 'vscode' family must not emit."""
+        assert should_compile_copilot_instructions_md(frozenset({"claude", "gemini"})) is False
+        assert should_compile_copilot_instructions_md(frozenset({"claude"})) is False
+
 
 class TestGetTargetDescription:
     """Tests for get_target_description function."""

@@ -185,25 +185,47 @@ def _resolve_compile_target(target):
         return None  # will trigger detect_target() auto-detection
     if isinstance(target, list):
         target_set = set(target)
-        agents_family = {"copilot", "vscode", "agents", "cursor", "opencode", "codex"}
-        has_agents_family = bool(target_set & agents_family)
+        # Two distinct families overlap on copilot/vscode/agents:
+        #   copilot_family   -> requests .github/copilot-instructions.md AND AGENTS.md
+        #   agents_md_family -> requests AGENTS.md only (cursor/opencode/codex)
+        # Splitting these prevents the over-fire bug where -t cursor,claude or
+        # -t cursor,opencode,codex used to incorrectly emit copilot-instructions.md.
+        copilot_family = {"copilot", "vscode", "agents"}
+        agents_md_family = {"cursor", "opencode", "codex"}
+        has_copilot = bool(target_set & copilot_family)
+        has_agents_md_only = bool(target_set & agents_md_family)
         has_claude = "claude" in target_set
         has_gemini = "gemini" in target_set
         families = set()
-        if has_agents_family:
-            families.add("agents")
+        if has_copilot:
+            families.add("vscode")  # gates copilot-instructions.md
+            families.add("agents")  # also gates AGENTS.md
+        elif has_agents_md_only:
+            families.add("agents")  # AGENTS.md only -- no copilot-instructions
         if has_claude:
             families.add("claude")
         if has_gemini:
             families.add("gemini")
         if len(families) >= 2:
+            # Single-target copilot collapses {"vscode","agents"} to bare "vscode"
+            # for routing parity with single-string -t copilot.
+            if families == {"vscode", "agents"}:
+                return "vscode"
             return frozenset(families)
         elif has_claude:
             return "claude"
         elif has_gemini:
             return "gemini"
+        elif has_copilot:
+            return "vscode"
         else:
-            return "vscode"  # agents-family only
+            # cursor/opencode/codex only -- preserve the bare target name so
+            # single-element list routing matches single-string semantics
+            # (-t cursor and -t cursor both end up as "cursor").
+            for bare in ("cursor", "opencode", "codex"):
+                if bare in target_set:
+                    return bare
+            return "vscode"  # defensive fallback (unreachable)
     return target  # single string pass-through
 
 
