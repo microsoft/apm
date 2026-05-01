@@ -20,7 +20,7 @@ When you run `apm compile` without specifying a target, APM automatically detect
 
 | Project Structure | Target | What Gets Generated |
 |-------------------|--------|---------------------|
-| `.github/` folder only | `copilot` | AGENTS.md (instructions only) |
+| `.github/` folder only | `copilot` | AGENTS.md + `.github/copilot-instructions.md` (global instructions) |
 | `.claude/` folder only | `claude` | CLAUDE.md (instructions only) |
 | `.codex/` folder exists | `codex` | AGENTS.md (instructions only) |
 | `.gemini/` folder exists | `gemini` | GEMINI.md (instructions only) |
@@ -53,7 +53,7 @@ target: [claude, copilot]  # multiple targets -- only these are compiled
 
 | Target | Files Generated | Consumers |
 |--------|-----------------|-----------|
-| `copilot` | `AGENTS.md` | GitHub Copilot, Cursor, OpenCode |
+| `copilot` | `AGENTS.md` + `.github/copilot-instructions.md` | GitHub Copilot, Cursor, OpenCode |
 | `claude` | `CLAUDE.md` | Claude Code, Claude Desktop |
 | `gemini` | `GEMINI.md` | Gemini CLI |
 | `codex` | `AGENTS.md` | Codex CLI |
@@ -61,6 +61,8 @@ target: [claude, copilot]  # multiple targets -- only these are compiled
 | `minimal` | `AGENTS.md` only | Works everywhere, no folder integration |
 
 > **Aliases**: `vscode` and `agents` are accepted as aliases for `copilot`.
+
+> **Note**: For the `copilot` target, instructions without an `applyTo` pattern (global instructions) are also synthesized into `.github/copilot-instructions.md`. Instructions with `applyTo` patterns continue to flow into per-pattern `.github/instructions/*.instructions.md` files. The generated `.github/copilot-instructions.md` carries a build-id marker so `apm compile` can cleanly remove it when switching to a non-Copilot target -- manually-authored files at the same path are preserved.
 
 > **Note**: `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` contain **only instructions** (grouped by `applyTo` patterns). Prompts, agents, commands, hooks, and skills are integrated by `apm install`, not `apm compile`. See the [Integrations Guide](../../integrations/ide-tool-integration/) for details on how `apm install` populates `.github/prompts/`, `.github/agents/`, `.github/skills/`, `.claude/commands/`, `.cursor/rules/`, `.cursor/agents/`, `.opencode/agents/`, `.opencode/commands/`, `.codex/agents/`, `.gemini/commands/`, and `.agents/skills/`.
 
@@ -73,11 +75,13 @@ target: [claude, copilot]  # multiple targets -- only these are compiled
 
 ### Example Output
 
-**After `apm compile`:**
+**After `apm compile` (copilot target):**
 ```
 my-project/
-├── AGENTS.md              # Instructions only (for Copilot, Cursor, etc.)
-└── CLAUDE.md              # Instructions only (for Claude)
+├── AGENTS.md                          # Instructions (for Copilot, Cursor, etc.)
+├── CLAUDE.md                          # Instructions (for Claude)
+└── .github/
+    └── copilot-instructions.md        # Global instructions synthesized from .apm/instructions/ (no applyTo)
 ```
 
 **After `apm install` (folder integration):**
@@ -445,7 +449,7 @@ Different AI tools get different levels of support from `apm install` vs `apm co
 
 | AI Tool | What `apm install` deploys | What `apm compile` adds | Support level |
 |---------|--------------------------|------------------------|---------------|
-| GitHub Copilot | `.github/instructions/`, `.github/prompts/`, agents, hooks, plugins, MCP | `AGENTS.md` (optional) | **Full** |
+| GitHub Copilot | `.github/instructions/`, `.github/prompts/`, agents, hooks, plugins, MCP | `AGENTS.md` + `.github/copilot-instructions.md` (global instructions) | **Full** |
 | Claude | `.claude/` commands, skills, MCP | `CLAUDE.md` | **Full** |
 | Cursor | `.cursor/rules/`, `.cursor/agents/`, `.cursor/skills/`, `.cursor/hooks.json`, `.cursor/mcp.json` | `AGENTS.md` (optional) | **Full** |
 | OpenCode | `.opencode/agents/`, `.opencode/commands/`, `.opencode/skills/`, `opencode.json` (MCP) | Via `AGENTS.md` | **Full** |
