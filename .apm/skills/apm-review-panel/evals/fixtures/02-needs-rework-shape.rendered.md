@@ -26,6 +26,7 @@ Everything else (validate_url duplication, error-message helpfulness, doc drift,
 | Supply Chain Security | 1 | 1 | 0 | Path-traversal regression: new code joins user-controlled segments without validate_path_segments. |
 | OSS Growth Hacker | 0 | 0 | 0 | No README/CHANGELOG impact; nothing to amplify or warn about externally. |
 | Doc Writer | 0 | 1 | 0 | Drift: behavior change but docs/src/content/docs/reference/dependencies.md still describes the pre-refactor flow. |
+| Test Coverage | 1 | 1 | 0 | Path-traversal regression has no regression-trap test; the malicious-name case is the test that would have caught this slip. |
 
 > B = blocking-severity findings, R = recommended, N = nits.
 > Counts are signal strength, not gates. The maintainer ships.
@@ -33,9 +34,9 @@ Everything else (validate_url duplication, error-message helpfulness, doc drift,
 ### Top 5 follow-ups
 
 1. **[Supply Chain Security] *(blocking-severity)*** Add validate_path_segments + ensure_path_within around the dep.name join at resolver.py:156 -- User-controlled path component without traversal validation; the codebase has a hard rule.
-2. **[CLI Logging Expert] *(blocking-severity)*** Replace the rocket emoji at resolver.py:211 with `[!]` per STATUS_SYMBOLS -- Will crash on Windows cp1252 terminals.
-3. **[Python Architect]** Break the resolver.py <-> downloader.py circular import (factory module or deferred import) -- Tolerated by Python today but fragile to any change in import order.
-4. **[Supply Chain Security]** Add timeout=30 to the new requests.get in resolver.py:178 -- Matches the convention in github_downloader.py:412; prevents indefinite stall on a slow or hostile server.
+2. **[Test Coverage] *(blocking-severity)*** Add a regression-trap test exercising malicious dep.name (path-traversal payloads) against the resolver join -- The path-traversal slip is exactly the surface a regression-trap test would have caught; lock the contract in so this never re-ships.
+3. **[CLI Logging Expert] *(blocking-severity)*** Replace the rocket emoji at resolver.py:211 with `[!]` per STATUS_SYMBOLS -- Will crash on Windows cp1252 terminals.
+4. **[Python Architect]** Break the resolver.py <-> downloader.py circular import (factory module or deferred import) -- Tolerated by Python today but fragile to any change in import order.
 5. **[Doc Writer]** Update docs/reference/dependencies.md to name the new Resolver -- Docs still describe the pre-refactor flow; drift will mislead first-time readers.
 
 ### Recommendation
@@ -91,6 +92,15 @@ PR touches only deps/resolver.py and deps/downloader.py refactor; no AuthResolve
 - **[recommended]** docs/reference/dependencies.md describes pre-refactor flow at `docs/src/content/docs/reference/dependencies.md:47`
   The doc says 'resolution is performed by GithubDownloader directly' but the refactor introduces a separate Resolver. Documentation drift will mislead first-time readers.
   *Suggested:* Update the resolution-flow section to name the new Resolver, or add a note that downloader-direct resolution is being phased out.
+
+#### Test Coverage
+
+- **[blocking]** No test exercises a malicious dep.name (path-traversal payload) against the new resolver join at `tests/unit/deps/test_resolver.py`
+  The path-traversal regression at resolver.py:156 is exactly the surface that validate_path_segments + ensure_path_within exist to defend. A test that constructs a Dep with `name='../../../etc/passwd'` and asserts the resolver raises before joining is the regression-trap that prevents this from re-shipping. Absence of such a test in tests/unit/deps/ confirmed by grep on `validate_path_segments` and `path_traversal`.
+  *Suggested:* Add a test with a parametrized list of traversal payloads ('../', '..\\', '/etc/passwd', '..%2f..') and assert each raises before any filesystem operation.
+- **[recommended]** Refactor changes resolver/downloader integration but no integration test covers the cross-module flow at `tests/integration/test_install_pipeline.py`
+  Existing tests cover resolver.py and downloader.py in isolation; no test exercises the full install path end-to-end through both modules. A refactor that splits responsibilities across a module boundary needs at least one integration test that proves the boundary works.
+  *Suggested:* Add an integration test that installs a real (test-fixture) dependency and asserts the file ends up in the expected location after going through both Resolver and Downloader.
 
 </details>
 

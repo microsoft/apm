@@ -3,15 +3,16 @@ name: apm-review-panel
 description: >-
   Use this skill to run a multi-persona expert advisory review on a labelled
   pull request in microsoft/apm. The panel fans out to five mandatory
-  specialists plus two conditional specialists (auth, doc-writer), all
-  running in their own agent threads, and a CEO synthesizer. The
-  orchestrator is the sole writer to the PR: ONE recommendation comment,
-  no verdict labels, no merge gating. The panel is advisory -- it surfaces
-  findings, prioritizes follow-ups, and renders a ship-recommendation that
-  the maintainer and author weigh. Activate when a non-trivial PR needs a
-  cross-cutting recommendation (architecture, CLI logging, DevX UX,
-  supply-chain security, growth/positioning, optionally auth and docs,
-  with CEO arbitration).
+  specialists plus three conditional specialists (auth, doc-writer,
+  test-coverage), all running in their own agent threads, and a CEO
+  synthesizer. The orchestrator is the sole writer to the PR: ONE
+  recommendation comment, no verdict labels, no merge gating. The panel
+  is advisory -- it surfaces findings, prioritizes follow-ups, and renders
+  a ship-recommendation that the maintainer and author weigh. Activate
+  when a non-trivial PR needs a cross-cutting recommendation
+  (architecture, CLI logging, DevX UX, supply-chain security,
+  growth/positioning, optionally auth, docs, and test coverage, with CEO
+  arbitration).
 ---
 
 # APM Review Panel - Fan-Out Advisory Review
@@ -68,6 +69,7 @@ surfaces findings; the maintainer and the PR author decide ship.
 | [OSS Growth Hacker](../../agents/oss-growth-hacker.agent.md) | Adoption Strategist | Yes |
 | [Auth Expert](../../agents/auth-expert.agent.md) | Auth / Token Reviewer | Conditional (see below) |
 | [Doc Writer](../../agents/doc-writer.agent.md) | Documentation Reviewer | Conditional (see below) |
+| [Test Coverage Expert](../../agents/test-coverage-expert.agent.md) | Test-Presence Reviewer (paired with DevX UX) | Conditional (see below) |
 | [APM CEO](../../agents/apm-ceo.agent.md) | Strategic Arbiter / Synthesizer | Yes |
 
 ## Topology
@@ -77,12 +79,12 @@ surfaces findings; the maintainer and the PR author decide ship.
                       |
    FAN-OUT via task tool (panelists in parallel)
                       |
-   +-----+-------+-------+-----+-----+------+-------+
-   v     v       v       v     v     v      v       v (cond.)
-  py    cli     dx-ux   sec   grw   auth   doc-writer
-   |     |       |       |     |     |      |
+   +-----+-------+-------+-----+-----+------+-----------+----------+
+   v     v       v       v     v     v      v           v          v (cond.)
+  py    cli     dx-ux   sec   grw   auth   doc-writer  test-cov
+   |     |       |       |     |     |      |           |
    |   each returns JSON per panelist-return-schema.json
-   +-----+-------+-------+-----+-----+------+-------+
+   +-----+-------+-------+-----+-----+------+-----------+----------+
                       |
                       v   <-- S4 schema-validate
                       v   <-- on malformed: re-spawn that persona
@@ -110,8 +112,8 @@ surfaces findings; the maintainer and the PR author decide ship.
 
 ## Conditional panelists
 
-Two personas are conditional. The orchestrator ALWAYS spawns their tasks
-to keep the schema return shape uniform; the prompt instructs the
+Three personas are conditional. The orchestrator ALWAYS spawns their
+tasks to keep the schema return shape uniform; the prompt instructs the
 subagent to set `active: false` with an `inactive_reason` if the
 condition does not hold.
 
@@ -162,6 +164,34 @@ Starlight content). When the doc-writer is active because of code
 changes that SHOULD have updated docs but did not, the persona surfaces
 that gap as a finding.
 
+### Test Coverage Expert
+
+Activate when the PR diff includes ANY of:
+- changes under `src/apm_cli/cli.py` or `src/apm_cli/commands/`
+- new or changed CLI flag, argument, or exit code
+- changed user-facing error string (literals near `_rich_error`,
+  `_rich_warning`, or in raised exceptions)
+- changes under `src/apm_cli/install/`, `src/apm_cli/deps/`,
+  `src/apm_cli/marketplace/`, `src/apm_cli/integration/`,
+  `src/apm_cli/lockfile/`, or `src/apm_cli/core/auth.py`
+- a bug-fix marker in the PR body or commit message ("fixes #",
+  "closes #", "regression", "user reported")
+
+Fallback self-check (when no fast-path file matched): "Does this PR
+change behavior a user can observe -- a command, flag, exit code, error
+wording, install/lockfile/auth/hook flow -- such that a future drift
+in this code path could ship without any test failing? If unsure,
+answer YES."
+
+The test-coverage-expert is paired with the devx-ux-expert lens and
+defends the user-promise contracts the DevX persona enumerates (CLI
+surface, error wording, install idempotency, lockfile determinism, auth
+resolution). It MUST verify "no test exists" claims with `view`/`grep`
+on the test tree before emitting a finding -- false-positive coverage
+findings destroy trust in the field. It does NOT compute coverage
+percentages, does NOT flag tests for pure refactors, and does NOT
+duplicate python-architect on test-code design.
+
 ## Routing matrix (CEO synthesis emphasis only)
 
 These routes describe WHICH specialist's findings the CEO weights more
@@ -178,6 +208,11 @@ every mandatory persona always runs. Routing is a CEO synthesis hint.
   AuthResolver / token precedence; Supply Chain on token-scoping.
 - **Docs / release / comms PR** (doc-writer active) -> CEO weights Doc
   Writer on accuracy and voice; Growth Hacker on hook and story angle.
+- **Behavior-change PR** (test-coverage active) -> CEO weights Test
+  Coverage Expert on regression-trap presence; DevX UX on which user
+  promises the change touches. A blocking-severity coverage finding on
+  a critical-promise surface (auth, lockfile, install, marketplace,
+  hooks) is the highest signal in this routing.
 - **Full panel** (default) -> CEO synthesizes equally; calls out any
   dissent in `dissent_notes`.
 
@@ -192,8 +227,9 @@ output to the PR before step 6.
 
 2. **Resolve the conditional panelists** using the rules above. Decide
    for EACH conditional persona: spawn active OR spawn with
-   `active: false` + an `inactive_reason`. Either way, both conditional
-   personas ARE spawned -- the schema requires uniform return shape.
+   `active: false` + an `inactive_reason`. Either way, all three
+   conditional personas ARE spawned -- the schema requires uniform
+   return shape.
 
 3. **Fan out panelist tasks.** Spawn the following tasks in PARALLEL
    via the `task` tool, one task per persona:
@@ -205,6 +241,7 @@ output to the PR before step 6.
    - `oss-growth-hacker`
    - `auth-expert` (always - active per step 2)
    - `doc-writer` (always - active per step 2)
+   - `test-coverage-expert` (always - active per step 2)
 
    Each task prompt MUST:
    - Reference its persona file by relative path so the subagent loads
@@ -317,6 +354,12 @@ output to the PR before step 6.
   a diff changes how a remote host, org, token source, or fallback path
   is selected and you are not certain it is auth-neutral, activate
   auth-expert as `active: true`.
+- **Test-coverage probe is mandatory.** The test-coverage-expert MUST
+  verify "no test exists for X" via `view`/`grep` on the `tests/` tree
+  before emitting a finding. A false-positive coverage finding (test
+  exists but persona claimed it does not) destroys maintainer trust in
+  the field. The persona scope file enforces this; the orchestrator
+  passes the diff and trusts the persona to probe.
 - **Subagent write enforcement is contract-based, not sandbox-based.**
   Tool permissions are workflow-scoped, not subagent-scoped, so every
   spawned task technically inherits the same `gh` toolset. The

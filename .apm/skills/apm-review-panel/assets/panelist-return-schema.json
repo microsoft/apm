@@ -17,12 +17,13 @@
         "supply-chain-security-expert",
         "oss-growth-hacker",
         "auth-expert",
-        "doc-writer"
+        "doc-writer",
+        "test-coverage-expert"
       ]
     },
     "active": {
       "type": "boolean",
-      "description": "Set to false ONLY for conditional personas (auth-expert, doc-writer) when their fast-path file triggers and fallback self-check both miss. All mandatory personas MUST set active=true. When false, findings MUST be empty and inactive_reason MUST be a one-sentence explanation citing the touched files."
+      "description": "Set to false ONLY for conditional personas (auth-expert, doc-writer, test-coverage-expert) when their fast-path file triggers and fallback self-check both miss. All mandatory personas MUST set active=true. When false, findings MUST be empty and inactive_reason MUST be a one-sentence explanation citing the touched files."
     },
     "inactive_reason": {
       "type": "string",

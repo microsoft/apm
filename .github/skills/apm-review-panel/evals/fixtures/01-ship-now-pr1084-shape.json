@@ -65,6 +65,14 @@
       "summary": "No user-facing documentation surface touched (only CHANGELOG entry, which is already accurate).",
       "inactive_reason": "PR touches only src/apm_cli/install/pipeline.py, tests/unit/install/test_pipeline_auth_preflight.py, and CHANGELOG.md (entry verified accurate against the diff).",
       "findings": []
+    },
+    {
+      "persona": "test-coverage-expert",
+      "active": true,
+      "summary": "All four critical surfaces touched (install pipeline, auth preflight, host classification, env-var handling) have regression-trap tests in this PR; ship.",
+      "findings": [
+        {"severity": "recommended", "summary": "Add a parametrized test exercising each of the three credential-helper env vars individually", "rationale": "The current tests assert all three are popped together; a future refactor that pops two of three would still pass the existing assertion. One parametrized test per env var locks in the contract.", "file": "tests/unit/install/test_pipeline_auth_preflight.py", "line": 147, "suggestion": "@pytest.mark.parametrize('env_var', ['GIT_TERMINAL_PROMPT', 'GCM_INTERACTIVE', 'GIT_ASKPASS'])"}
+      ]
     }
   ],
   "ceo": {

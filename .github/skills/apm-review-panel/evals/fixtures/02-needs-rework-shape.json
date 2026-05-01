@@ -57,6 +57,15 @@
       "findings": [
         {"severity": "recommended", "summary": "docs/reference/dependencies.md describes pre-refactor flow", "rationale": "The doc says 'resolution is performed by GithubDownloader directly' but the refactor introduces a separate Resolver. Documentation drift will mislead first-time readers.", "file": "docs/src/content/docs/reference/dependencies.md", "line": 47, "suggestion": "Update the resolution-flow section to name the new Resolver, or add a note that downloader-direct resolution is being phased out."}
       ]
+    },
+    {
+      "persona": "test-coverage-expert",
+      "active": true,
+      "summary": "Path-traversal regression has no regression-trap test; the malicious-name case is the test that would have caught this slip.",
+      "findings": [
+        {"severity": "blocking", "summary": "No test exercises a malicious dep.name (path-traversal payload) against the new resolver join", "rationale": "The path-traversal regression at resolver.py:156 is exactly the surface that validate_path_segments + ensure_path_within exist to defend. A test that constructs a Dep with `name='../../../etc/passwd'` and asserts the resolver raises before joining is the regression-trap that prevents this from re-shipping. Absence of such a test in tests/unit/deps/ confirmed by grep on `validate_path_segments` and `path_traversal`.", "file": "tests/unit/deps/test_resolver.py", "line": 0, "suggestion": "Add a test with a parametrized list of traversal payloads ('../', '..\\\\', '/etc/passwd', '..%2f..') and assert each raises before any filesystem operation."},
+        {"severity": "recommended", "summary": "Refactor changes resolver/downloader integration but no integration test covers the cross-module flow", "rationale": "Existing tests cover resolver.py and downloader.py in isolation; no test exercises the full install path end-to-end through both modules. A refactor that splits responsibilities across a module boundary needs at least one integration test that proves the boundary works.", "file": "tests/integration/test_install_pipeline.py", "line": 0, "suggestion": "Add an integration test that installs a real (test-fixture) dependency and asserts the file ends up in the expected location after going through both Resolver and Downloader."}
+      ]
     }
   ],
   "ceo": {
@@ -69,9 +78,9 @@
     "growth_amplification": "",
     "recommended_followups": [
       {"from_persona": "supply-chain-security-expert", "summary": "Add validate_path_segments + ensure_path_within around the dep.name join at resolver.py:156", "why": "User-controlled path component without traversal validation; the codebase has a hard rule.", "blocking": true},
+      {"from_persona": "test-coverage-expert", "summary": "Add a regression-trap test exercising malicious dep.name (path-traversal payloads) against the resolver join", "why": "The path-traversal slip is exactly the surface a regression-trap test would have caught; lock the contract in so this never re-ships.", "blocking": true},
       {"from_persona": "cli-logging-expert", "summary": "Replace the rocket emoji at resolver.py:211 with `[!]` per STATUS_SYMBOLS", "why": "Will crash on Windows cp1252 terminals.", "blocking": true},
       {"from_persona": "python-architect", "summary": "Break the resolver.py <-> downloader.py circular import (factory module or deferred import)", "why": "Tolerated by Python today but fragile to any change in import order."},
-      {"from_persona": "supply-chain-security-expert", "summary": "Add timeout=30 to the new requests.get in resolver.py:178", "why": "Matches the convention in github_downloader.py:412; prevents indefinite stall on a slow or hostile server."},
       {"from_persona": "doc-writer", "summary": "Update docs/reference/dependencies.md to name the new Resolver", "why": "Docs still describe the pre-refactor flow; drift will mislead first-time readers."}
     ],
     "ship_recommendation": {

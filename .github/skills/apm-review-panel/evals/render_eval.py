@@ -25,6 +25,7 @@ PERSONA_LABELS = {
     "oss-growth-hacker": "OSS Growth Hacker",
     "auth-expert": "Auth Expert",
     "doc-writer": "Doc Writer",
+    "test-coverage-expert": "Test Coverage",
 }
 
 PRINCIPLE_LABELS = {
@@ -145,6 +146,7 @@ def render(fixture: dict) -> str:
         "oss-growth-hacker",
         "auth-expert",
         "doc-writer",
+        "test-coverage-expert",
     ]
     by_key = {p["persona"]: p for p in panelists}
     for key in canonical_order:

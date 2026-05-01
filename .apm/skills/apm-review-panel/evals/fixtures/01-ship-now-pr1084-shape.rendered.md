@@ -20,6 +20,7 @@ The most actionable signal across the panel is the Auth Expert's recommended reg
 | Supply Chain Security | 0 | 0 | 1 | insteadOf-redirect not exploitable (probe is read-only ls-remote); host classification not spoofable; no token leak introduced. |
 | OSS Growth Hacker | 0 | 1 | 1 | First external bug-fix on the GHES + credential-helper surface. Mine for a release-notes story beat. |
 | Auth Expert | 0 | 1 | 1 | GHES correctly classified as generic; symmetry with clone path confirmed; AuthResolver invariant intact; bearer-header injection preserved. |
+| Test Coverage | 0 | 1 | 0 | All four critical surfaces touched (install pipeline, auth preflight, host classification, env-var handling) have regression-trap tests in this PR; ship. |
 
 > B = blocking-severity findings, R = recommended, N = nits.
 > Counts are signal strength, not gates. The maintainer ships.
@@ -102,6 +103,12 @@ No findings.
 #### Doc Writer -- inactive
 
 PR touches only src/apm_cli/install/pipeline.py, tests/unit/install/test_pipeline_auth_preflight.py, and CHANGELOG.md (entry verified accurate against the diff).
+
+#### Test Coverage
+
+- **[recommended]** Add a parametrized test exercising each of the three credential-helper env vars individually at `tests/unit/install/test_pipeline_auth_preflight.py:147`
+  The current tests assert all three are popped together; a future refactor that pops two of three would still pass the existing assertion. One parametrized test per env var locks in the contract.
+  *Suggested:* @pytest.mark.parametrize('env_var', ['GIT_TERMINAL_PROMPT', 'GCM_INTERACTIVE', 'GIT_ASKPASS'])
 
 </details>
 
