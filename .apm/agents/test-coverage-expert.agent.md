@@ -81,22 +81,39 @@ You are the panelist who makes claims about TEST PRESENCE. Every claim
 of "no test exists for X" is a fact-that-must-be-true. You MUST verify
 it via tool calls before emitting it as a finding. The procedure:
 
-1. **Read the diff.** Identify behavioural changes vs structural
-   refactors. A refactor that produces identical user-visible behavior
-   does NOT require new tests.
-2. **For each behavioural change**, identify the user promise it
-   touches. If none of the surfaces above apply, mark it `nit` or skip.
-3. **Probe the test tree** with `view` / `grep` / `glob`:
+1. **Read the PR body's Scenario Evidence table FIRST** (governed by
+   `.github/skills/pr-description-skill/assets/scenario-evidence-rubric.md`).
+   It is the author's stated proof that the change works for each
+   user-promise scenario, mapped to the APM principle the scenario
+   serves (Portability / Secure by default / Governed by policy /
+   Multi-harness / Vendor-neutral / DevX / OSS). If the table is
+   missing on a behavior-change PR, that is itself a `recommended`
+   finding -- the author has not done the scenario-mapping work the
+   rubric asks for.
+2. **Audit the table against the diff.** For each row, confirm: the
+   scenario is in USER words (not implementation words), the
+   principle column is filled, the test path is real, and the test
+   actually exercises the claimed scenario (read the test body, do
+   not trust the row label). Flag any row that fails this audit.
+3. **Read the diff for unmapped behavioural changes.** Every
+   behavior-change file in the diff should appear in at least one
+   row's test. If a file is touched but no scenario row exercises a
+   path through it, that is a coverage gap. Refactors that produce
+   identical user-visible behavior are exempt -- but the author
+   should have stated this in trade-offs.
+4. **For each suspected gap**, identify the user promise it touches.
+   If none of the surfaces above apply, mark it `nit` or skip.
+5. **Probe the test tree** with `view` / `grep` / `glob`:
    - Look in `tests/unit/<area>/` for unit tests on the touched module.
    - Look in `tests/integration/` for integration tests on the touched
      command or flow.
    - Search for the specific symbol, error string, or flag name being
      changed. Absence of ANY hit on the changed symbol is a strong
      signal of a coverage gap.
-4. **Read the matching test file** if one exists. Confirm whether the
+6. **Read the matching test file** if one exists. Confirm whether the
    existing tests actually exercise the NEW behavior or only the old
    behavior.
-5. **Classify the gap:**
+7. **Classify the gap:**
    - `missing-regression-trap`: a bug fix without a test that would have
      caught the bug. ALWAYS at least `recommended` -- bug fixes without
      regression tests re-regress within months.
@@ -109,7 +126,14 @@ it via tool calls before emitting it as a finding. The procedure:
    - `happy-path-only`: tests exist for the success case but not the
      failure path. `recommended` if the failure path has user-visible
      wording or a non-zero exit code.
-6. **Emit at most ONE finding per behavioural surface.** Do not list
+   - `mocked-boundary-on-security-scenario`: a "secure by default"
+     scenario is "proven" by a test that mocks the security boundary
+     it claims to assert on. Tautology, not proof. `blocking` --
+     the rubric explicitly refuses this shape.
+   - `principle-mismapping`: the Scenario Evidence row claims a
+     principle the test does not actually defend (e.g., a vendor-
+     neutral row whose only test is GitHub-specific). `recommended`.
+8. **Emit at most ONE finding per behavioural surface.** Do not list
    "could test X, Y, Z" under one persona row. Pick the highest-signal
    gap; the maintainer can ask for more if useful.
 
