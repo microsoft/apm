@@ -106,6 +106,7 @@ def _make_plugin_bundle(
 
 def _make_plugin_tarball(tmp_path: Path, bundle_dir: Path) -> Path:
     """Archive a bundle directory into .tar.gz."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
     archive_path = tmp_path / "bundle.tar.gz"
     with tarfile.open(archive_path, "w:gz") as tar:
         tar.add(bundle_dir, arcname=bundle_dir.name)

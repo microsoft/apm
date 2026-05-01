@@ -944,6 +944,17 @@ def _handle_mcp_install(
     default=False,
     help="Skip org policy enforcement for this invocation. Does NOT bypass apm audit --ci.",
 )
+@click.option(
+    "--as",
+    "alias",
+    default=None,
+    metavar="ALIAS",
+    help=(
+        "Override the package slug when installing a local bundle "
+        "(directory or .tar.gz produced by 'apm pack'). Ignored for "
+        "registry installs."
+    ),
+)
 @click.pass_context
 def install(  # noqa: PLR0913
     ctx,
@@ -974,6 +985,7 @@ def install(  # noqa: PLR0913
     registry_url,
     skill_names,
     no_policy,
+    alias,
 ):
     """Install APM and MCP dependencies from apm.yml (like npm install).
 
@@ -1004,6 +1016,50 @@ def install(  # noqa: PLR0913
         # scope initialisation below throws).
         is_partial = bool(packages)
         logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=is_partial)
+
+        # ----------------------------------------------------------------
+        # Local-bundle early-exit (issue #1098).  When the sole positional
+        # argument is a filesystem path that detect_local_bundle() recognises
+        # as an APM-pack bundle, we skip the dependency-resolution pipeline
+        # entirely and deploy the bundle's files directly.  Local bundles
+        # are imperative deploys -- they do NOT mutate apm.yml.
+        # ----------------------------------------------------------------
+        if len(packages) == 1 and not mcp_name and (_probe := Path(packages[0])).exists():
+            from ..bundle.local_bundle import detect_local_bundle as _detect_lb
+            from ..install.local_bundle_handler import install_local_bundle as _install_lb
+
+            _bundle_info = _detect_lb(_probe)
+            if _bundle_info is not None:
+                _install_lb(
+                    bundle_info=_bundle_info,
+                    bundle_arg=packages[0],
+                    target=target,
+                    global_=global_,
+                    force=force,
+                    dry_run=dry_run,
+                    verbose=verbose,
+                    alias=alias,
+                    logger=logger,
+                    # Rejected-flag context for consolidated UsageError:
+                    rejected_flags={
+                        "--update": update,
+                        "--only": only,
+                        "--runtime": runtime,
+                        "--exclude": exclude,
+                        "--dev": dev,
+                        "--ssh": use_ssh,
+                        "--https": use_https,
+                        "--allow-protocol-fallback": allow_protocol_fallback,
+                        "--mcp": mcp_name,
+                        "--registry": registry_url,
+                        "--skill": bool(skill_names),
+                        "--parallel-downloads": parallel_downloads != 4,
+                        "--allow-insecure": allow_insecure,
+                        "--allow-insecure-host": bool(allow_insecure_hosts),
+                        "--no-policy": no_policy,
+                    },
+                )
+                return
         # HACK(#852): surface --verbose to deeper auth layers via env var until
         # AuthResolver gains a first-class verbose channel. Restored in finally
         # below to keep the mutation scoped to this command invocation.
