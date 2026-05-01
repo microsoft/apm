@@ -41,6 +41,31 @@ Everything else (validate_url duplication, error-message helpfulness, doc drift,
 4. **[Python Architect]** Break the resolver.py <-> downloader.py circular import (factory module or deferred import) -- Tolerated by Python today but fragile to any change in import order.
 5. **[Doc Writer]** Update docs/reference/dependencies.md to name the new Resolver -- Docs still describe the pre-refactor flow; drift will mislead first-time readers.
 
+### Architecture
+
+```mermaid
+classDiagram
+    class Resolver:::touched {
+        +create_resolver()
+        +validate_url(u) bool
+    }
+    class GithubDownloader:::touched {
+        +download(url) Path
+        +validate_url(u) bool
+    }
+    Resolver ..> GithubDownloader : top-level import
+    GithubDownloader ..> Resolver : top-level import (cycle)
+    classDef touched fill:#fef3c7,stroke:#d97706
+```
+
+```mermaid
+flowchart TD
+    A[install pipeline] --> B[resolver.create_resolver]
+    B --> C[downloader.GithubDownloader]
+    C -->|imports at module top| B
+    B -->|imports at module top| C
+```
+
 ### Recommendation
 
 Address the two blocking-severity items (path-traversal validation and Windows-encoding fix) before re-requesting review. The circular import is fragile but does not gate; resolve it in this PR if convenient, otherwise track as a follow-up. The remaining recommended items can land in this PR or in a series of small follow-ups -- maintainer's call.

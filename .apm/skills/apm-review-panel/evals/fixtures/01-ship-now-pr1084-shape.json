@@ -11,6 +11,7 @@
       ],
       "extras": {
         "diagrams": {
+          "class_diagram": "classDiagram\n    class _preflight_auth_check:::touched {\n        <<Pure>>\n        +probe(host) bool\n    }\n    class Dep {\n        +name: str\n        +source: str\n        +is_azure_devops() bool\n    }\n    class AuthResolver {\n        <<Strategy>>\n        +resolve(host) Token\n    }\n    _preflight_auth_check ..> Dep : reads\n    _preflight_auth_check ..> AuthResolver : delegates\n    classDef touched fill:#fef3c7,stroke:#d97706",
           "component": "flowchart TD\n    A[apm install --update] --> B[_preflight_auth_check]\n    B --> C{is_generic = not GitHub and not ADO}\n    C -->|github.com or ADO| D[probe_env: locked down]\n    C -->|GHES, GitLab, Bitbucket| E[probe_env: pop credential-blocking vars]\n    D --> F[git ls-remote probe]\n    E --> F",
           "sequence": "sequenceDiagram\n    participant U as User\n    participant CLI as apm install --update\n    participant PF as _preflight_auth_check\n    participant Helper as git-credential-manager\n    U->>CLI: install GHES dep\n    CLI->>PF: probe(host=ghes.corp.example.com)\n    PF->>PF: is_generic=yes; pop blocking env vars\n    PF->>Helper: ls-remote with relaxed env\n    Helper-->>PF: token\n    PF-->>CLI: probe ok\n    CLI-->>U: install proceeds"
         }

@@ -40,13 +40,17 @@
     },
     "extras": {
       "type": "object",
-      "description": "Persona-specific structured payload. Reserved for python-architect mermaid diagrams (component + sequence) and oss-growth-hacker side-channel notes. Never affects shipping.",
+      "description": "Persona-specific structured payload. Reserved for python-architect mermaid diagrams (class_diagram + component + optional sequence) and oss-growth-hacker side-channel notes. Never affects shipping.",
       "additionalProperties": true,
       "properties": {
         "diagrams": {
           "type": "object",
-          "description": "Reserved for python-architect. Two mermaid blocks (string each) used by the comment template. If absent, the orchestrator renders a placeholder.",
+          "description": "Reserved for python-architect. Mermaid blocks (string each) used by the comment template. If absent, the orchestrator renders a placeholder.",
           "properties": {
+            "class_diagram": {
+              "type": "string",
+              "description": "Mermaid classDiagram of the problem-space classes the PR participates in, with pattern stereotypes annotated. Required by python-architect.agent.md section 1."
+            },
             "component": { "type": "string", "description": "Mermaid flowchart of the components/data flow touched by the PR." },
             "sequence": { "type": "string", "description": "Mermaid sequenceDiagram of the user-visible behavior change." }
           }

@@ -113,23 +113,23 @@ def render(fixture: dict) -> str:
             )
         out.append("")
 
-    # Architecture diagrams: render only when supplied.
+    # Architecture diagrams: render only when supplied. Order: class_diagram,
+    # component, sequence (matches python-architect.agent.md sections 1/2/3).
     arch = next(
         (p for p in active if p["persona"] == "python-architect"),
         None,
     )
     diagrams = (arch or {}).get("extras", {}).get("diagrams", {}) if arch else {}
-    if diagrams.get("component") or diagrams.get("sequence"):
+    diagram_order = ["class_diagram", "component", "sequence"]
+    if any(diagrams.get(k) for k in diagram_order):
         out.append("### Architecture")
         out.append("")
-        if diagrams.get("component"):
+        for key in diagram_order:
+            block = diagrams.get(key)
+            if not block:
+                continue
             out.append("```mermaid")
-            out.append(diagrams["component"])
-            out.append("```")
-            out.append("")
-        if diagrams.get("sequence"):
-            out.append("```mermaid")
-            out.append(diagrams["sequence"])
+            out.append(block)
             out.append("```")
             out.append("")
 

@@ -239,7 +239,9 @@ output to the PR before step 6.
 3. **Fan out panelist tasks.** Spawn the following tasks in PARALLEL
    via the `task` tool, one task per persona:
    - `python-architect` (also asked to supply `extras.diagrams`:
-     component + sequence mermaid blocks)
+     `class_diagram` (mermaid `classDiagram`), `component` (mermaid
+     `flowchart TD`), and OPTIONAL `sequence` (mermaid
+     `sequenceDiagram`) blocks per the persona's section 1/2/3 contract)
    - `cli-logging-expert`
    - `devx-ux-expert`
    - `supply-chain-security-expert`
@@ -372,10 +374,16 @@ output to the PR before step 6.
   the contract explicitly; the CEO arbitration prose is the safety
   valve when a panelist over-flags.
 - **Mermaid diagrams are template-required.** The python-architect
-  persona is asked to supply `extras.diagrams.component` and
-  `extras.diagrams.sequence`. The template renders a placeholder if
-  they are missing -- it does NOT invent diagrams. Real diagrams are
+  persona is asked to supply `extras.diagrams.class_diagram`,
+  `extras.diagrams.component`, and the OPTIONAL
+  `extras.diagrams.sequence`. The template renders nothing when they
+  are missing -- it does NOT invent diagrams. Real diagrams are
   what makes the comment scannable for the human reviewer.
+- **Mermaid `classDiagram` `:::cssClass` shorthand gotcha.** GitHub's
+  mermaid renderer rejects `:::cssClass` appended to relationship
+  lines (e.g. `A *-- B:::touched`); use standalone
+  `class Name:::cssClass` declarations instead. Authority:
+  `python-architect.agent.md:146-154`.
 - **Doc-writer detects DRIFT, not just edits.** When the PR changes
   user-facing code that SHOULD have updated docs but did not, doc-writer
   surfaces that as a finding. The conditional rule above is necessary

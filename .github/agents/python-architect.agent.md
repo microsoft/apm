@@ -248,3 +248,12 @@ that would post comments or apply labels.
 - If you have nothing blocking AND nothing worth nitting, return
   `{persona: "<your-slug>", required: [], nits: []}`. That is a
   valid and preferred answer when true.
+- **Schema slot mapping (apm-review-panel JSON return).** When
+  returning JSON to the apm-review-panel orchestrator: section 1
+  (class diagram) -> `extras.diagrams.class_diagram`; section 2
+  (execution flow) -> `extras.diagrams.component`; the schema's
+  `extras.diagrams.sequence` slot is OPTIONAL -- supply a
+  `sequenceDiagram` only when the PR has a non-trivial user-visible
+  call sequence; section 3 (design patterns) goes in
+  `findings[].rationale` of the architectural finding (or as a single
+  `nit` finding when no architectural finding fires).

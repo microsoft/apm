@@ -34,6 +34,26 @@ The most actionable signal across the panel is the Auth Expert's recommended reg
 ### Architecture
 
 ```mermaid
+classDiagram
+    class _preflight_auth_check:::touched {
+        <<Pure>>
+        +probe(host) bool
+    }
+    class Dep {
+        +name: str
+        +source: str
+        +is_azure_devops() bool
+    }
+    class AuthResolver {
+        <<Strategy>>
+        +resolve(host) Token
+    }
+    _preflight_auth_check ..> Dep : reads
+    _preflight_auth_check ..> AuthResolver : delegates
+    classDef touched fill:#fef3c7,stroke:#d97706
+```
+
+```mermaid
 flowchart TD
     A[apm install --update] --> B[_preflight_auth_check]
     B --> C{is_generic = not GitHub and not ADO}

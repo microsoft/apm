@@ -22,7 +22,13 @@
           "file": "src/apm_cli/deps/resolver.py",
           "line": 88
         }
-      ]
+      ],
+      "extras": {
+        "diagrams": {
+          "class_diagram": "classDiagram\n    class Resolver:::touched {\n        +create_resolver()\n        +validate_url(u) bool\n    }\n    class GithubDownloader:::touched {\n        +download(url) Path\n        +validate_url(u) bool\n    }\n    Resolver ..> GithubDownloader : top-level import\n    GithubDownloader ..> Resolver : top-level import (cycle)\n    classDef touched fill:#fef3c7,stroke:#d97706",
+          "component": "flowchart TD\n    A[install pipeline] --> B[resolver.create_resolver]\n    B --> C[downloader.GithubDownloader]\n    C -->|imports at module top| B\n    B -->|imports at module top| C"
+        }
+      }
     },
     {
       "persona": "cli-logging-expert",

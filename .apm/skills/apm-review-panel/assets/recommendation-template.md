@@ -79,9 +79,16 @@ cc {{ notify_audience | space_join }} -- a fresh advisory pass is ready for your
 {{/each}}
 {{/if}}
 
-{{#if python_architect.extras.diagrams.component }}
+{{#if (or python_architect.extras.diagrams.class_diagram python_architect.extras.diagrams.component) }}
 ### Architecture
 
+{{#if python_architect.extras.diagrams.class_diagram }}
+```mermaid
+{{ python_architect.extras.diagrams.class_diagram }}
+```
+{{/if}}
+
+{{#if python_architect.extras.diagrams.component }}
 ```mermaid
 {{ python_architect.extras.diagrams.component }}
 ```
@@ -91,6 +98,7 @@ cc {{ notify_audience | space_join }} -- a fresh advisory pass is ready for your
 ```mermaid
 {{ python_architect.extras.diagrams.sequence }}
 ```
+{{/if}}
 {{/if}}
 
 ### Recommendation
