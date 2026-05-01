@@ -1,10 +1,10 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "panelist-return-schema.json",
-  "title": "APM Review Panel - Panelist Return Shape",
-  "description": "Shape every panel persona MUST return when invoked by the apm-review-panel skill. Two severity buckets only: required (blocks merge) and nits (skip-if-you-want, single line). NO third bucket. NO disposition - the orchestrator computes verdict deterministically from aggregated required-counts.",
+  "title": "APM Review Panel - Panelist Return Shape (advisory regime)",
+  "description": "Shape every panel persona MUST return when invoked by the apm-review-panel skill. Single findings array with explicit severity. There is NO binary verdict; the orchestrator does not compute APPROVE/REJECT. Severity expresses the panelist's signal strength; the CEO synthesizer arbitrates and the human reviewer ships.",
   "type": "object",
-  "required": ["persona", "required", "nits"],
+  "required": ["persona", "active", "findings", "summary"],
   "additionalProperties": false,
   "properties": {
     "persona": {
@@ -16,47 +16,65 @@
         "devx-ux-expert",
         "supply-chain-security-expert",
         "oss-growth-hacker",
-        "auth-expert"
+        "auth-expert",
+        "doc-writer"
       ]
     },
     "active": {
       "type": "boolean",
-      "description": "Set to false ONLY for auth-expert when the conditional rule does not activate it. All other personas MUST set active=true. When false, required and nits MUST be empty arrays and inactive_reason MUST be a one-sentence explanation citing the touched files.",
-      "default": true
+      "description": "Set to false ONLY for conditional personas (auth-expert, doc-writer) when their fast-path file triggers and fallback self-check both miss. All mandatory personas MUST set active=true. When false, findings MUST be empty and inactive_reason MUST be a one-sentence explanation citing the touched files."
     },
     "inactive_reason": {
       "type": "string",
       "description": "Required when active=false. One sentence citing the touched files."
     },
-    "required": {
-      "type": "array",
-      "description": "Findings that MUST be addressed before merge. Empty array means this persona has no blocking concerns. Anything in this array causes the orchestrator to emit a REJECT verdict.",
-      "items": { "$ref": "#/definitions/finding" }
+    "summary": {
+      "type": "string",
+      "description": "One-line takeaway from this persona, suitable for the per-persona summary table in the comment. Imperative or declarative; under 200 chars; ASCII only. Required even when findings is empty (e.g. 'No persona-relevant surface touched; ship.')."
     },
-    "nits": {
+    "findings": {
       "type": "array",
-      "description": "One-line suggestions the author can skip. NEVER block merge. No cap - trust the panelist's judgement.",
+      "description": "Findings raised by this persona, ordered by signal strength (most important first). Empty array means 'no concerns from this lens'. The ADVISORY regime uses three severities; orchestrator does NOT gate on any of them.",
       "items": { "$ref": "#/definitions/finding" }
     },
     "extras": {
       "type": "object",
-      "description": "Persona-specific structured payload. Reserved for python-architect mermaid diagrams and oss-growth-hacker side-channel notes. Never blocks; never affects verdict.",
-      "additionalProperties": true
+      "description": "Persona-specific structured payload. Reserved for python-architect mermaid diagrams (component + sequence) and oss-growth-hacker side-channel notes. Never affects shipping.",
+      "additionalProperties": true,
+      "properties": {
+        "diagrams": {
+          "type": "object",
+          "description": "Reserved for python-architect. Two mermaid blocks (string each) used by the comment template. If absent, the orchestrator renders a placeholder.",
+          "properties": {
+            "component": { "type": "string", "description": "Mermaid flowchart of the components/data flow touched by the PR." },
+            "sequence": { "type": "string", "description": "Mermaid sequenceDiagram of the user-visible behavior change." }
+          }
+        },
+        "growth_strategy_note": {
+          "type": "string",
+          "description": "Reserved for oss-growth-hacker. Side-channel note for WIP/growth-strategy.md."
+        }
+      }
     }
   },
   "definitions": {
     "finding": {
       "type": "object",
-      "required": ["summary", "rationale"],
+      "required": ["severity", "summary", "rationale"],
       "additionalProperties": false,
       "properties": {
+        "severity": {
+          "type": "string",
+          "enum": ["blocking", "recommended", "nit"],
+          "description": "blocking: a correctness regression, security/auth bypass, or architectural fault that compounds. Use SPARINGLY and only with explicit evidence; the comment surfaces these prominently but does NOT block merge. recommended: a worthwhile improvement that the author and maintainer should weigh; the default for substantive feedback. nit: one-line polish; trivially skippable."
+        },
         "summary": {
           "type": "string",
           "description": "One-line description of the finding. ASCII only. No emojis."
         },
         "rationale": {
           "type": "string",
-          "description": "WHY this matters. Cite the rule or pattern violated. ASCII only."
+          "description": "WHY this matters. Cite the rule, pattern, or architectural invariant violated. ASCII only."
         },
         "file": {
           "type": "string",
