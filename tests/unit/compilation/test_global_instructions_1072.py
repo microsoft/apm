@@ -1,4 +1,4 @@
-"""Regression tests for issue #1072 — global instructions silently dropped.
+"""Regression tests for issue #1072 -- global instructions silently dropped.
 
 Issue: ``apm compile`` reports global instructions (no ``applyTo``) as placed
 at ``./AGENTS.md`` with ``rel: 100%``, but the rendered file did not contain
@@ -161,7 +161,7 @@ class TestRenderInstructionsBlock:
         )
 
         assert "REAL" in lines
-        # Empty content stripped — no trace of "empty.md" via the passthrough emitter
+        # Empty content stripped -- no trace of "empty.md" via the passthrough emitter
         assert "" in lines  # blank separators are fine
         assert sum(1 for line in lines if line == "REAL") == 1
 

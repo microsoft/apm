@@ -1841,6 +1841,7 @@ Command-line options always override `apm.yml` settings. Priority order:
   - Markers: `<!-- SPEC-KIT CONSTITUTION: BEGIN -->` / `<!-- SPEC-KIT CONSTITUTION: END -->`
   - Second line includes `hash: <sha256_12>` for drift detection
   - Entire raw file content in between (Phase 0: no summarization)
+- **(Optional) Global Instructions Section** - Instructions without an `applyTo` pattern are emitted under a single `## Global Instructions` heading (applies to every file)
 - **Pattern-based Sections** - Content grouped by exact `applyTo` patterns from instruction context files (e.g., "Files matching `**/*.py`")
 - **Footer** - Regeneration instructions
 
