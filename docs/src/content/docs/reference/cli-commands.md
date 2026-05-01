@@ -305,7 +305,7 @@ When you run `apm install`, APM automatically integrates primitives from install
 After installation completes, APM prints a grouped diagnostic summary instead of inline warnings. Categories include collisions (skipped files), cross-package skill replacements, warnings, and errors.
 
 - **Normal mode**: Shows counts and actionable tips (e.g., "9 files skipped -- use `apm install --force` to overwrite")
-- **Verbose mode** (`--verbose`): Additionally lists individual file paths grouped by package, full error details, and **the resolved auth source per remote host** (e.g., `[i] dev.azure.com -- using bearer from az cli (source: AAD_BEARER_AZ_CLI)` or `[i] github.com -- token from GITHUB_APM_PAT`). Useful for diagnosing PAT vs. Entra-ID-bearer behaviour against Azure DevOps.
+- **Verbose mode** (`--verbose`): Additionally lists individual file paths grouped by package, full error details, and **the resolved auth source per remote host** (e.g., `[i] dev.azure.com -- using bearer from az cli (source: AAD_BEARER_AZ_CLI)` or `[i] github.com -- token from GITHUB_APM_PAT`). Useful for diagnosing PAT vs. Entra-ID-bearer behaviour against Azure DevOps. For subdirectory packages with an explicit `#ref` (e.g. `owner/repo/sub#v1.2.0`), `--verbose` also shows each validation probe attempt -- marker-file lookups, the Contents API directory probe, and the `git ls-remote` fallback -- including which auth step (token, credential-helper, SSH) resolved the ref.
 
 ```bash
 # See exactly which files were skipped or had issues, and which auth source was used
@@ -1162,11 +1162,15 @@ Register a GitHub repository as a plugin marketplace.
 ```bash
 apm marketplace add OWNER/REPO [OPTIONS]
 apm marketplace add HOST/OWNER/REPO [OPTIONS]
+apm marketplace add HOST/group/sub/.../REPO [OPTIONS]
+apm marketplace add https://HOST/owner/.../repo[.git] [OPTIONS]
 ```
 
 **Arguments:**
 - `OWNER/REPO` - GitHub repository containing `marketplace.json`
 - `HOST/OWNER/REPO` - Repository on a non-github.com host (e.g., GitHub Enterprise)
+- `HOST/group/sub/.../REPO` - Repository nested under sub-paths (e.g., GHES org/team/repo)
+- `https://HOST/owner/.../repo[.git]` - Full HTTPS URL pasted from the browser. The `.git` suffix is stripped.
 
 **Options:**
 - `-n, --name TEXT` - Custom display name for the marketplace
@@ -1174,17 +1178,25 @@ apm marketplace add HOST/OWNER/REPO [OPTIONS]
 - `--host TEXT` - Git host FQDN (default: github.com or `GITHUB_HOST` env var)
 - `-v, --verbose` - Show detailed output
 
+> **Supported hosts.** `apm marketplace add` currently fetches `marketplace.json` via the GitHub Contents API, so only `github.com`, GitHub Enterprise Cloud (`*.ghe.com`), and the host configured via `GITHUB_HOST` are accepted. GitLab, Bitbucket, and other generic Git hosts are rejected at registration time with an actionable error -- this prevents silent fetch failures and avoids forwarding GitHub credentials to unintended hosts. Native non-GitHub support is tracked separately.
+
 **Examples:**
 ```bash
 # Register a marketplace
 apm marketplace add acme/plugin-marketplace
 
+# Register from a full HTTPS URL pasted from the browser
+apm marketplace add https://github.com/acme/plugin-marketplace
+
 # Register with a custom name and branch
 apm marketplace add acme/plugin-marketplace --name acme-plugins --branch release
 
-# Register from a GitHub Enterprise host
+# Register from a GitHub Enterprise host (Cloud or Server)
 apm marketplace add acme/plugin-marketplace --host ghes.corp.example.com
 apm marketplace add ghes.corp.example.com/acme/plugin-marketplace
+
+# Register a repo nested under sub-paths on a GHES instance
+apm marketplace add ghes.corp.example.com/org/team/plugin-marketplace
 ```
 
 #### `apm marketplace list` - List registered marketplaces
@@ -1736,13 +1748,13 @@ apm compile --watch
 apm compile --watch --dry-run
 
 # Target specific agent formats
-apm compile --target vscode    # AGENTS.md + .github/ only
+apm compile --target vscode    # AGENTS.md + .github/ (incl. copilot-instructions.md)
 apm compile --target claude    # CLAUDE.md + .claude/ only
 apm compile --target opencode  # AGENTS.md + .opencode/ only
 apm compile --target all       # All formats (default)
 
 # Multiple targets (comma-separated)
-apm compile -t claude,copilot  # Both CLAUDE.md and AGENTS.md
+apm compile -t claude,copilot  # CLAUDE.md + AGENTS.md + .github/copilot-instructions.md
 
 # Compile injecting Spec Kit constitution (auto-detected)
 apm compile --with-constitution
@@ -1766,6 +1778,9 @@ apm compile --no-constitution
 
 **Content Scanning:**
 Compiled output is scanned for hidden Unicode characters before writing to disk. Critical findings cause `apm compile` to exit with code 1 — defense-in-depth since source files are already scanned during `apm install`.
+
+**`.github/copilot-instructions.md` generation:**
+When the resolved target is `copilot` (alias `vscode`), `all`, or any multi-target list containing `copilot`, `apm compile` assembles all *global* instructions (entries in `.apm/instructions/` without an `apply_to` field) into `.github/copilot-instructions.md` -- the file VS Code and GitHub Copilot read automatically with zero user configuration. Generated content is wrapped with an APM-only marker (literal first line: `<!-- Generated by APM CLI from .apm/ primitives -->`). Switching to a non-Copilot target (e.g. `apm compile -t claude`) cleans up the file only when the marker is present; a hand-authored `.github/copilot-instructions.md` is left untouched on both write and cleanup paths. To adopt APM management of an existing hand-authored file, delete (or rename) it and re-run `apm compile`, or prepend the marker line `<!-- Generated by APM CLI from .apm/ primitives -->` to the top of the file and re-run `apm compile`.
 
 **Configuration Integration:**
 The compile command supports configuration via `apm.yml`:

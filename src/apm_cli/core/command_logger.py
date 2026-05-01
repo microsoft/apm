@@ -86,6 +86,19 @@ class CommandLogger:
         """Log progress during an operation."""
         _rich_info(message, symbol=symbol)
 
+    def info(self, message: str, symbol: str = "info"):
+        """Log static advisory / informational context.
+
+        Distinct from :meth:`progress` only at the semantic level:
+        ``progress`` narrates an in-flight step (may be suppressed in
+        ``--quiet``/CI), while ``info`` carries persistent advisory
+        context such as recovery hints that must survive quiet-mode
+        suppression. Both currently delegate to ``_rich_info``; the
+        split exists so future quiet-mode policy can drop ``progress``
+        without dropping advisory context.
+        """
+        _rich_info(message, symbol=symbol)
+
     def success(self, message: str, symbol: str = "sparkles"):
         """Log successful completion."""
         _rich_success(message, symbol=symbol)
