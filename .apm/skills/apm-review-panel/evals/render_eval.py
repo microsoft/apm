@@ -177,6 +177,35 @@ def render(fixture: dict) -> str:
             out.append(f"  {f['rationale']}")
             if f.get("suggestion"):
                 out.append(f"  *Suggested:* {f['suggestion']}")
+            ev = f.get("evidence")
+            if ev:
+                outcome = ev.get("outcome", "unknown")
+                tf = ev.get("test_file", "")
+                tn = ev.get("test_name", "")
+                ref = tf + (f"::{tn}" if tn and tf else "") if tf else (tn or "(no test ref)")
+                proves = ev.get("proves", "")
+                principles = ev.get("principles", []) or []
+                tags = (" [" + ",".join(principles) + "]") if principles else ""
+                if outcome == "passed":
+                    line = f"  *Proof (test {outcome}):* `{ref}`"
+                elif outcome == "failed":
+                    line = f"  *Proof (test FAILED):* `{ref}`"
+                elif outcome == "missing":
+                    line = f"  *Proof (test MISSING at):* `{ref}`"
+                elif outcome == "manual":
+                    line = f"  *Proof (manual only):* `{ref}`"
+                else:
+                    line = f"  *Proof ({outcome}):* `{ref}`"
+                if proves:
+                    line += f" -- proves: {proves}"
+                line += tags
+                out.append(line)
+                ax = ev.get("assertion_excerpt")
+                if ax:
+                    ax_one = " ".join(ax.split())
+                    if len(ax_one) > 200:
+                        ax_one = ax_one[:197] + "..."
+                    out.append(f"  `{ax_one}`")
         out.append("")
     out.append("</details>")
     out.append("")

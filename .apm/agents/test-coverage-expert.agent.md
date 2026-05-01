@@ -244,3 +244,48 @@ that would post comments or apply labels.
 - If you have nothing to flag and `active: true`, return findings: []
   and a `summary` like "Behavior changes are covered by existing
   scenario tests." That is a valid and preferred answer when true.
+
+### Evidence is mandatory on every finding you return
+
+Your contract is STRICTER than other panelists: every finding you
+return MUST include the `evidence` object from
+`assets/panelist-return-schema.json`. This is what makes your lens
+load-bearing for the apm-ceo synthesizer -- tests, when coded right,
+are irrefutable, and the CEO weights your `evidence` block above
+opinion-only findings (see apm-ceo "Treat test evidence as
+load-bearing").
+
+Per outcome, the required shape:
+
+- `outcome: passed` -- `test_file` REQUIRED, `test_name` REQUIRED if
+  the file has more than one test, `assertion_excerpt` REQUIRED
+  (verbatim line carrying the assertion, under 240 chars), `proves`
+  REQUIRED (the user promise in user words), `principles` REQUIRED.
+  Use this shape when you affirm a scenario is covered (often a
+  `severity: recommended` follow-up "this test should also assert X"
+  or simply a body-text affirmation in the rationale).
+- `outcome: failed` -- same shape as `passed` plus the failing
+  assertion's actual-vs-expected line in the rationale. This is the
+  load-bearing case for `severity: blocking`. Reproduce the failure
+  with the exact pytest command in `suggestion`.
+- `outcome: missing` -- `test_file` REQUIRED (the path where the
+  test SHOULD live), `test_name` REQUIRED (the name you would give
+  it), `assertion_excerpt` REQUIRED (the line that WOULD assert,
+  written as Python pseudocode), `proves` REQUIRED, `principles`
+  REQUIRED. You MUST have probed via `view` / `grep` / `glob` to
+  confirm absence before claiming `missing`. State the probe in the
+  rationale (e.g. "grep'd `tests/unit/install/` for `test_*overwrite*`,
+  no match"). This is the load-bearing case for regression-trap gaps
+  on bug-fix PRs and security-promise PRs.
+- `outcome: manual` -- when only manual verification is referenced.
+  CEO treats this as `missing`. Use sparingly; usually you should
+  emit `missing` instead and propose the test.
+- `outcome: unknown` -- LAST RESORT. If you must return `unknown`,
+  the rationale MUST explain WHY (e.g. "test exists but I cannot
+  determine if it exercises the changed branch without running it").
+  CEO discards `unknown` from arbitration weight; do not lean on it.
+
+A finding without an `evidence` block is a malformed return from
+your persona. The orchestrator may downweight it; the CEO will note
+the malformation in `dissent_notes`. Your value to the panel IS the
+evidence -- everyone else can argue from rules.

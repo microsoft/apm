@@ -102,6 +102,12 @@ RENDERING RULES (the orchestrator follows these literally):
   {{#if suggestion }}
   *Suggested:* {{ suggestion }}
   {{/if}}
+  {{#if evidence }}
+  *Proof ({{ evidence.outcome }}{{#if (eq evidence.outcome "missing") }} at{{/if}}):* `{{ evidence.test_file }}{{#if evidence.test_name }}::{{ evidence.test_name }}{{/if}}`{{#if evidence.proves }} -- proves: {{ evidence.proves }}{{/if}}{{#if evidence.principles }} [{{ join evidence.principles "," }}]{{/if}}
+  {{#if evidence.assertion_excerpt }}
+  `{{ evidence.assertion_excerpt | one_line | truncate 200 }}`
+  {{/if}}
+  {{/if}}
 {{/each}}
 {{else}}
 No findings.

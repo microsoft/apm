@@ -109,6 +109,8 @@ PR touches only src/apm_cli/install/pipeline.py, tests/unit/install/test_pipelin
 - **[recommended]** Add a parametrized test exercising each of the three credential-helper env vars individually at `tests/unit/install/test_pipeline_auth_preflight.py:147`
   The current tests assert all three are popped together; a future refactor that pops two of three would still pass the existing assertion. One parametrized test per env var locks in the contract.
   *Suggested:* @pytest.mark.parametrize('env_var', ['GIT_TERMINAL_PROMPT', 'GCM_INTERACTIVE', 'GIT_ASKPASS'])
+  *Proof (test passed):* `tests/unit/install/test_pipeline_auth_preflight.py::test_install_update_does_not_disable_credential_helpers_on_generic_host` -- proves: On non-GitHub non-ADO hosts, install --update does not block the user's system credential helpers. [multi-harness-support,vendor-neutral,devx]
+  `assert os.environ.get('GIT_TERMINAL_PROMPT') is None`
 
 </details>
 
