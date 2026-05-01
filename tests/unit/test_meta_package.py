@@ -119,6 +119,24 @@ class TestMetaPackageDetection:
         # so the user sees the standard "missing .apm/" diagnostic.
         assert pkg_type == PackageType.INVALID
 
+    def test_apm_string_value_is_invalid_not_meta(self, tmp_path):
+        """Schema requires apm to be a list; a string value is malformed -> INVALID."""
+        self._write_apm_yml(
+            tmp_path,
+            "name: malformed\nversion: 1.0.0\ndependencies:\n  apm: foo\n  mcp: []\n",
+        )
+        pkg_type, _ = detect_package_type(tmp_path)
+        assert pkg_type == PackageType.INVALID
+
+    def test_apm_dict_value_is_invalid_not_meta(self, tmp_path):
+        """Schema requires apm to be a list; a dict value is malformed -> INVALID."""
+        self._write_apm_yml(
+            tmp_path,
+            "name: malformed\nversion: 1.0.0\ndependencies:\n  apm:\n    key: value\n  mcp: []\n",
+        )
+        pkg_type, _ = detect_package_type(tmp_path)
+        assert pkg_type == PackageType.INVALID
+
 
 class TestMetaPackageValidation:
     """Full validate_apm_package: META_PACKAGE passes cleanly."""

@@ -329,9 +329,10 @@ A dependency MAY target a subdirectory, file, or collection within a repository 
 | Kind | Detection rule | Example |
 |---|---|---|
 | **File** | `virtual_path` ends in `.prompt.md`, `.instructions.md`, `.agent.md`, or `.chatmode.md` | `owner/repo/prompts/review.prompt.md` |
-| **Collection (dir)** | `virtual_path` contains `/collections/` (no collection extension) | `owner/repo/collections/security` |
-| **Collection (manifest)** | `virtual_path` contains `/collections/` and ends with `.collection.yml` or `.collection.yaml` | `owner/repo/collections/security.collection.yml` |
-| **Subdirectory** | `virtual_path` does not match any file, collection, or extension rule above | `owner/repo/skills/security` |
+| **Collection (manifest)** | `virtual_path` ends with `.collection.yml` or `.collection.yaml` | `owner/repo/collections/security.collection.yml` |
+| **Subdirectory** | `virtual_path` does not match any file or collection extension above | `owner/repo/skills/security` |
+
+Classification is by extension only -- never by path segment. A path like `owner/repo/collections/security` (no extension) is **Subdirectory**, not Collection: the actual on-disk shape (APM package, skill bundle, plugin, or legacy collection) is resolved at fetch time by probing for `apm.yml` first and falling back to a sibling `security.collection.yml` for the legacy form.
 
 #### 4.1.4. Canonical Normalisation
 
@@ -527,7 +528,7 @@ dependencies:                              # YAML list (not a map)
     is_virtual:      <bool>                # True for virtual (file/subdirectory) packages
     depth:           <int>                 # 1 = direct, 2+ = transitive
     resolved_by:     <string>              # Parent dependency (transitive only)
-    package_type:    <string>              # Package type (e.g. "apm_package", "marketplace_plugin")
+    package_type:    <string>              # Package type (e.g. "apm_package", "marketplace_plugin", "meta_package")
     content_hash:    <string>              # SHA-256 of package file tree (e.g. "sha256:a1b2c3...")
     is_dev:          <bool>                # True for devDependencies
     deployed_files:  <list<string>>        # Workspace-relative paths of installed files

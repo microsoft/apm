@@ -313,7 +313,15 @@ def _apm_yml_declares_dependencies(apm_yml_path: Path) -> bool:
     def _has_listed_deps(block: object) -> bool:
         if not isinstance(block, dict):
             return False
-        return bool(block.get("apm") or block.get("mcp"))
+        # Schema requires `apm` and `mcp` to be lists. Strings, dicts, and
+        # other truthy non-list values are malformed; treat them as "no
+        # declared dependencies" so the caller falls through to the legacy
+        # INVALID diagnostic instead of silently reclassifying as META.
+        for key in ("apm", "mcp"):
+            value = block.get(key)
+            if isinstance(value, list) and value:
+                return True
+        return False
 
     return _has_listed_deps(data.get("dependencies")) or _has_listed_deps(
         data.get("devDependencies")
@@ -323,13 +331,15 @@ def _apm_yml_declares_dependencies(apm_yml_path: Path) -> bool:
 def validate_apm_package(package_path: Path) -> ValidationResult:
     """Validate that a directory contains a valid APM package or Claude Skill.
 
-    Supports six package types:
+    Supports seven package types:
     - APM_PACKAGE: Has apm.yml and .apm/ directory
     - CLAUDE_SKILL: Has SKILL.md but no apm.yml (auto-generates apm.yml)
     - HOOK_PACKAGE: Has hooks/*.json but no apm.yml or SKILL.md
     - MARKETPLACE_PLUGIN: Has plugin.json or .claude-plugin/ (synthesizes apm.yml)
     - HYBRID: Has both apm.yml and root SKILL.md
     - SKILL_BUNDLE: Has skills/<name>/SKILL.md, apm.yml optional
+    - META_PACKAGE: apm.yml declares deps but no .apm/ -- a curated dep
+      aggregator with no own primitives (#1094)
 
     Args:
         package_path: Path to the directory to validate
