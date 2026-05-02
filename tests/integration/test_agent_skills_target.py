@@ -742,9 +742,7 @@ def test_auto_migration_skipped_with_legacy_flag(
     assert (project / ".github/skills" / SKILL_NAME / "SKILL.md").is_file()
 
 
-def test_auto_migration_idempotent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_auto_migration_idempotent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Running migration twice is a no-op the second time."""
     bundle = _make_plugin_bundle(tmp_path / "src", pack_target="copilot")
     project = _make_project(tmp_path / "dst")
@@ -763,3 +761,53 @@ def test_auto_migration_idempotent(
     assert (project / ".agents/skills" / SKILL_NAME / "SKILL.md").is_file()
     # Migration message should NOT appear (nothing to migrate):
     assert "Migrated" not in (r3.output or "")
+
+
+# ---------------------------------------------------------------------------
+# H11 -- Collision integration test
+# ---------------------------------------------------------------------------
+
+
+def test_auto_migration_collision_skips_gracefully(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When a hand-authored file at .agents/skills/ has different content from
+    the legacy file, migration skips with an actionable error message and exit 0.
+
+    The test simulates:
+    1. Legacy install -> .github/skills/ with content A
+    2. Hand-edit the legacy file to content A' so it diverges from the
+       converged destination that the integrate phase will write
+    3. Converged install -> integrate writes .agents/skills/ with content A,
+       then migration detects the legacy A' != destination A -> collision.
+    """
+    bundle = _make_plugin_bundle(tmp_path / "src", pack_target="copilot")
+    project = _make_project(tmp_path / "dst")
+
+    # Step 1: Legacy install so the lockfile records .github/skills/.
+    monkeypatch.setenv("APM_LEGACY_SKILL_PATHS", "1")
+    r1 = _invoke(project, ["install", str(bundle), "--target", "copilot"], monkeypatch)
+    assert r1.exit_code == 0
+    legacy = project / ".github/skills" / SKILL_NAME / "SKILL.md"
+    assert legacy.is_file()
+
+    # Step 2: Hand-edit the legacy file so its content diverges from what
+    # the converged install will write to .agents/skills/.
+    legacy.write_text("HAND-EDITED DIVERGENT CONTENT", encoding="utf-8")
+
+    # Step 3: Converged install — integrate writes the canonical content
+    # to .agents/skills/…, then migration detects legacy content differs.
+    monkeypatch.delenv("APM_LEGACY_SKILL_PATHS", raising=False)
+    r2 = _invoke(project, ["install", str(bundle), "--target", "copilot"], monkeypatch)
+
+    assert r2.exit_code == 0, f"output={r2.output!r}"
+    # Legacy file must be preserved (migration was skipped due to collision):
+    assert legacy.is_file(), "Legacy file should NOT be deleted on collision"
+    assert "HAND-EDITED" in legacy.read_text(encoding="utf-8")
+    # The converged file was written by the integrate phase:
+    converged = project / ".agents/skills" / SKILL_NAME / "SKILL.md"
+    assert converged.is_file()
+    # Output must contain the actionable collision message:
+    out = r2.output or ""
+    assert "Skill path migration skipped" in out or "already exist" in out
+    assert "--legacy-skill-paths" in out

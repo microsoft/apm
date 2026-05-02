@@ -112,9 +112,9 @@ Exit codes:
     is_flag=True,
     default=False,
     help=(
-        "Restore per-client skill paths (e.g. .cursor/skills/) instead of the "
-        "default .agents/skills/ convergence. Temporary compatibility flag, "
-        "removal in v1.0."
+        "Deploy skill files to per-client paths (e.g. .cursor/skills/) instead of "
+        "the shared .agents/skills/ directory. Compatibility flag for projects that "
+        "need per-client skill layouts."
     ),
 )
 @click.pass_context

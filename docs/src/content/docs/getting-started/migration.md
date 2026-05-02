@@ -126,3 +126,22 @@ When you upgrade APM and run `apm install`, the tool automatically detects legac
 - Any file not tracked in `apm.lock.yaml`
 
 **If a collision is detected** (e.g., a foreign file already exists at the destination `.agents/skills/` path with different content), the migration aborts entirely with a clear error. Use `--legacy-skill-paths` to skip migration and keep per-client paths.
+
+### CI / automation
+
+The first `apm install` after upgrading to this version will migrate legacy
+per-client skill paths to `.agents/skills/` and update `apm.lock.yaml`. In
+CI pipelines, this means the working tree will show:
+
+- Deletions under `.github/skills/`, `.cursor/skills/`, `.opencode/skills/`,
+  and/or `.gemini/skills/`
+- Additions under `.agents/skills/`
+- An updated `apm.lock.yaml`
+
+To handle this in CI, either:
+
+- Commit the migrated lockfile and `.agents/skills/` directory, then update
+  your CI to expect the new layout, OR
+- Set `APM_LEGACY_SKILL_PATHS=1` in your CI environment to defer the
+  migration until you are ready to update the lockfile in a controlled
+  commit.

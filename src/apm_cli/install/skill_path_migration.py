@@ -17,27 +17,59 @@ legacy paths (still in the lockfile) and retries deletion.  If a crash occurs
 between steps 2 and 3, the lockfile still has the old paths but the files are
 gone -- the next install sees them missing and the cleanup is a no-op.
 
-**Security**: all deletions are routed through :func:`safe_rmtree` which
-enforces ``ensure_path_within`` containment.
+**Security model**:
+
+- Plan creation (:func:`detect_legacy_skill_deployments`) rejects lockfile
+  entries containing path-traversal segments (``..``) via
+  :func:`~apm_cli.utils.path_security.validate_path_segments`.
+- File deletion (:func:`execute_migration`) guards ``unlink()`` with
+  :func:`~apm_cli.utils.path_security.ensure_path_within` so that even a
+  poisoned plan entry cannot delete outside the project root.
+- Directory deletion is routed through :func:`~apm_cli.utils.path_security.safe_rmtree`
+  which also calls ``ensure_path_within``.
+- Parent-directory cleanup (:func:`_cleanup_empty_parents`) is
+  containment-checked at every iteration step.
 """
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from apm_cli.utils.path_security import safe_rmtree
+from apm_cli.utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    safe_rmtree,
+    validate_path_segments,
+)
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
 
+_log = logging.getLogger(__name__)
+
 # Legacy per-client skill prefixes that have been converged into .agents/skills/.
 # .claude/skills/ is excluded (Claude is not in the convergence set).
 # .codex/skills/ was never a legacy path (Codex always used .agents/).
-_LEGACY_SKILL_PATTERN = re.compile(
-    r"^\.(github|cursor|opencode|gemini)/skills/([^/]+)/.+$"
+_LEGACY_SKILL_PATTERN = re.compile(r"^\.(github|cursor|opencode|gemini)/skills/([^/]+)/.+$")
+
+# ------------------------------------------------------------------
+# Shared message templates (single source of truth — H6)
+# ------------------------------------------------------------------
+MIGRATION_SUMMARY_TEMPLATE = (
+    "Migrated {count} skill file(s) from legacy per-client paths to .agents/skills/"
+)
+COLLISION_HEADER_TEMPLATE = (
+    "Skill path migration skipped: {count} file(s) at .agents/skills/ "
+    "already exist with different content."
+)
+COLLISION_DETAIL_TEMPLATE = "  {dst_path} conflicts with {src_path} (from {dep_name})"
+COLLISION_HINT = (
+    "Remove the conflicting file(s) and re-run `apm install`, "
+    "or pass --legacy-skill-paths to keep per-client paths."
 )
 
 
@@ -91,10 +123,26 @@ def detect_legacy_skill_deployments(
             m = _LEGACY_SKILL_PATTERN.match(rel_path)
             if not m:
                 continue
+
+            # B1: reject path-traversal in lockfile-recorded paths.
+            try:
+                validate_path_segments(rel_path, context="legacy skill path")
+            except PathTraversalError:
+                _log.warning("Skipping legacy path with traversal segments: %s", rel_path)
+                continue
+
             # Build the converged destination: .agents/skills/<name>/<rest>
             # e.g. ".github/skills/my-skill/SKILL.md" -> ".agents/skills/my-skill/SKILL.md"
             client_prefix = f".{m.group(1)}/skills/"
             suffix = rel_path[len(client_prefix) :]
+
+            # B1: also validate the computed destination suffix.
+            try:
+                validate_path_segments(suffix, context="migrated skill suffix")
+            except PathTraversalError:
+                _log.warning("Skipping legacy path whose suffix has traversal: %s", rel_path)
+                continue
+
             dst = f".agents/skills/{suffix}"
             plans.append(MigrationPlan(src_path=rel_path, dst_path=dst, dep_name=dep_key))
 
@@ -130,9 +178,7 @@ def check_collisions(
                 continue  # Identical content: not a real collision.
         except OSError:
             pass  # Fall through to report collision on I/O error.
-        collisions.append(
-            f"{plan.src_path} -> {plan.dst_path} (dep: {plan.dep_name})"
-        )
+        collisions.append(f"{plan.src_path} -> {plan.dst_path} (dep: {plan.dep_name})")
     return collisions
 
 
@@ -169,13 +215,15 @@ def execute_migration(
             continue
 
         try:
+            # B1: containment guard before any disk mutation.
+            ensure_path_within(abs_path, project_root)
             if abs_path.is_file():
                 abs_path.unlink()
             else:
                 safe_rmtree(abs_path, project_root)
             result.deleted.append(plan.src_path)
             _cleanup_empty_parents(abs_path, project_root)
-        except OSError:
+        except (OSError, PathTraversalError):
             result.failed.append(plan.src_path)
             continue  # Don't update lockfile for failed deletions.
 
@@ -232,10 +280,12 @@ def _cleanup_empty_parents(deleted_path: Path, base_dir: Path) -> None:
     base_resolved = base_dir.resolve()
     while parent.resolve() != base_resolved:
         try:
+            # H8: containment guard before rmdir.
+            ensure_path_within(parent, base_dir)
             if parent.is_dir() and not any(parent.iterdir()):
                 parent.rmdir()
             else:
                 break
-        except OSError:
+        except (OSError, PathTraversalError):
             break
         parent = parent.parent

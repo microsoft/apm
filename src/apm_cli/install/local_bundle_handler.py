@@ -157,7 +157,13 @@ def install_local_bundle(
             # any legacy paths (e.g. .github/skills/) still recorded in the
             # lockfile from a previous --legacy-skill-paths install.
             if not legacy_skill_paths:
-                from ..utils.console import _rich_info, _rich_warning
+                from ..utils.console import _rich_error, _rich_info
+                from .skill_path_migration import (
+                    COLLISION_DETAIL_TEMPLATE,
+                    COLLISION_HEADER_TEMPLATE,
+                    COLLISION_HINT,
+                    MIGRATION_SUMMARY_TEMPLATE,
+                )
                 from .skill_path_migration import (
                     check_collisions as _check_coll,
                 )
@@ -172,16 +178,36 @@ def install_local_bundle(
                 if _plans:
                     _colls = _check_coll(_plans, project_root)
                     if _colls:
-                        _rich_warning(
-                            f"Skill path migration: {len(_colls)} collision(s), skipping"
+                        # H2: collision is an error.
+                        _rich_error(
+                            COLLISION_HEADER_TEMPLATE.format(count=len(_colls)),
+                            symbol="error",
                         )
+                        # M2: enumerate each collision (parity with pipeline).
+                        for _plan in _plans:
+                            for _cd in _colls:
+                                if _plan.dst_path in _cd:
+                                    _rich_error(
+                                        COLLISION_DETAIL_TEMPLATE.format(
+                                            dst_path=_plan.dst_path,
+                                            src_path=_plan.src_path,
+                                            dep_name=_plan.dep_name,
+                                        ),
+                                        symbol="error",
+                                    )
+                                    break
+                        _rich_info(COLLISION_HINT, symbol="info")
                     else:
                         _mig_result = _exec_mig(_plans, lockfile, project_root)
                         _total = len(_mig_result.deleted) + len(_mig_result.skipped_no_file)
                         if _total:
                             _rich_info(
-                                f"Migrated {_total} skill file(s) from legacy paths to .agents/skills/"
+                                MIGRATION_SUMMARY_TEMPLATE.format(count=_total),
+                                symbol="info",
                             )
+                        if getattr(logger, "verbose", False) and _mig_result.deleted:
+                            for _dp in _mig_result.deleted:
+                                _rich_info(f"  removed {_dp}", symbol="info")
 
             lockfile.write(lockfile_path)
 

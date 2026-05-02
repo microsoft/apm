@@ -26,6 +26,7 @@ from apm_cli.install.skill_path_migration import (
 # Lightweight stubs -- avoid importing the real lockfile module
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _StubDep:
     deployed_files: list[str] = field(default_factory=list)
@@ -45,6 +46,7 @@ class _StubLockFile:
 # ===================================================================
 # _LEGACY_SKILL_PATTERN regex tests
 # ===================================================================
+
 
 class TestLegacySkillPattern:
     """Verify the regex matches only the expected per-client prefixes."""
@@ -66,10 +68,10 @@ class TestLegacySkillPattern:
         [
             ".agents/skills/my-skill/SKILL.md",  # converged, not legacy
             ".claude/skills/my-skill/SKILL.md",  # Claude excluded
-            ".codex/skills/my-skill/SKILL.md",   # Codex never legacy
-            ".github/instructions/foo.md",        # not skills
-            ".cursor/agents/something.md",        # not skills
-            "skills/my-skill/SKILL.md",           # no dot-prefix
+            ".codex/skills/my-skill/SKILL.md",  # Codex never legacy
+            ".github/instructions/foo.md",  # not skills
+            ".cursor/agents/something.md",  # not skills
+            "skills/my-skill/SKILL.md",  # no dot-prefix
         ],
     )
     def test_rejects_non_legacy(self, path: str) -> None:
@@ -85,6 +87,7 @@ class TestLegacySkillPattern:
 # ===================================================================
 # detect_legacy_skill_deployments
 # ===================================================================
+
 
 class TestDetectLegacySkillDeployments:
     """Tests for lockfile scanning."""
@@ -169,6 +172,7 @@ class TestDetectLegacySkillDeployments:
 # check_collisions
 # ===================================================================
 
+
 class TestCheckCollisions:
     """Tests for collision detection."""
 
@@ -238,6 +242,7 @@ class TestCheckCollisions:
 # ===================================================================
 # execute_migration
 # ===================================================================
+
 
 class TestExecuteMigration:
     """Tests for the migration executor."""
@@ -413,3 +418,102 @@ class TestExecuteMigration:
         lf = _StubLockFile()
         result = execute_migration([], lf, tmp_path)
         assert result == MigrationResult()
+
+
+# ===================================================================
+# Path-traversal security tests (H9)
+# ===================================================================
+
+
+class TestPathTraversalRejection:
+    """Ensure path-traversal attempts are rejected at plan creation and execution."""
+
+    def test_detect_rejects_path_traversal_in_lockfile_entry(self, tmp_path: Path) -> None:
+        """Lockfile entry with .. segments must NOT appear in the plan."""
+        lf = _StubLockFile(
+            dependencies={
+                "pkg-a": _StubDep(
+                    deployed_files=[".cursor/skills/x/../../../etc/passwd"],
+                ),
+            }
+        )
+        plans = detect_legacy_skill_deployments(lf, tmp_path)
+        # The traversal entry should have been rejected:
+        assert len(plans) == 0
+
+    def test_execute_rejects_path_traversal_at_unlink(self, tmp_path: Path) -> None:
+        """A MigrationPlan whose src_path resolves outside project_root must not delete."""
+
+        # Create a file outside the project root to serve as the "escape" target.
+        outer = tmp_path / "outer" / "victim.txt"
+        outer.parent.mkdir(parents=True)
+        outer.write_text("should survive")
+
+        project = tmp_path / "project"
+        project.mkdir()
+        # Construct a plan that would resolve outside project_root.
+        evil_plan = MigrationPlan(
+            src_path="../outer/victim.txt",
+            dst_path=".agents/skills/evil/SKILL.md",
+            dep_name="pkg-evil",
+        )
+        lf = _StubLockFile(
+            dependencies={
+                "pkg-evil": _StubDep(deployed_files=["../outer/victim.txt"]),
+            }
+        )
+
+        # ensure_path_within should prevent deletion; the file is outside project.
+        result = execute_migration([evil_plan], lf, project)
+        assert outer.exists(), "File outside project_root must NOT be deleted"
+        assert result.deleted == []
+        assert result.failed == ["../outer/victim.txt"]
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            ".github/skills.bak/foo/SKILL.md",
+            "./.github/skills/foo/SKILL.md",
+            ".github/skills/foo/",
+        ],
+    )
+    def test_regex_near_miss_rejects(self, path: str) -> None:
+        """Paths that look similar but shouldn't match the legacy pattern."""
+        assert not _LEGACY_SKILL_PATTERN.match(path)
+
+
+# ===================================================================
+# Mixed-content parent dir preservation (H10)
+# ===================================================================
+
+
+class TestMixedContentParentDir:
+    """Ensure non-empty parent dirs are preserved after migration."""
+
+    def test_preserves_nonempty_parent_dir(self, tmp_path: Path) -> None:
+        """Delete .cursor/skills/s1/ but keep .cursor/rules/foo.md and .cursor/ itself."""
+        # Legacy skill:
+        skill = tmp_path / ".cursor/skills/s1/SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text("content")
+
+        # Foreign file under .cursor/:
+        foreign = tmp_path / ".cursor/rules/foo.md"
+        foreign.parent.mkdir(parents=True)
+        foreign.write_text("keep me")
+
+        lf = _StubLockFile(
+            dependencies={
+                "pkg-a": _StubDep(deployed_files=[".cursor/skills/s1/SKILL.md"]),
+            }
+        )
+        plans = detect_legacy_skill_deployments(lf, tmp_path)
+        result = execute_migration(plans, lf, tmp_path)
+
+        assert len(result.deleted) == 1
+        # Skill dir should be cleaned up:
+        assert not (tmp_path / ".cursor/skills/s1").exists()
+        assert not (tmp_path / ".cursor/skills").exists()
+        # Foreign file and .cursor/ must survive:
+        assert foreign.exists()
+        assert (tmp_path / ".cursor").exists()

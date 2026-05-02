@@ -460,10 +460,13 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         # in place so the downstream lockfile phase persists the new paths.
         # Skipped when --legacy-skill-paths is active (opt-out).
         # ------------------------------------------------------------------
-        if not ctx.legacy_skill_paths and ctx.existing_lockfile:
+        if not ctx.legacy_skill_paths and ctx.existing_lockfile and not ctx.dry_run:
             from apm_cli.utils.console import _rich_info, _rich_warning
 
             from .skill_path_migration import (
+                COLLISION_HEADER_TEMPLATE,
+                COLLISION_HINT,
+                MIGRATION_SUMMARY_TEMPLATE,
                 check_collisions,
                 detect_legacy_skill_deployments,
                 execute_migration,
@@ -475,23 +478,42 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
             if _migration_plans:
                 _collisions = check_collisions(_migration_plans, ctx.project_root)
                 if _collisions:
-                    _rich_warning(
-                        f"Skill path migration: {len(_collisions)} collision(s) detected, skipping auto-migration"
+                    # H2: collision is an error, not a warning.
+                    _rich_error(
+                        COLLISION_HEADER_TEMPLATE.format(count=len(_collisions)),
+                        symbol="error",
                     )
                     for _c in _collisions:
-                        _rich_warning(f"  collision: {_c}")
+                        _rich_error(f"  {_c}", symbol="error")
+                    # H5: actionable next-step hint.
+                    _rich_info(COLLISION_HINT, symbol="info")
+                    # H2: surface via DiagnosticCollector.
+                    if ctx.diagnostics:
+                        for _c in _collisions:
+                            ctx.diagnostics.error(
+                                f"Skill migration collision: {_c}",
+                                package="skill-path-migration",
+                            )
                 else:
                     _migration_result = execute_migration(
                         _migration_plans, ctx.existing_lockfile, ctx.project_root
                     )
                     _total = len(_migration_result.deleted) + len(_migration_result.skipped_no_file)
                     if _total > 0:
-                        _rich_info(
-                            f"Migrated {_total} skill file(s) from legacy per-client paths to .agents/skills/"
-                        )
+                        # H3: suppress info when quiet.
+                        if not (ctx.logger and getattr(ctx.logger, "_quiet", False)):
+                            _rich_info(
+                                MIGRATION_SUMMARY_TEMPLATE.format(count=_total),
+                                symbol="info",
+                            )
+                        # H4: enumerate deleted paths when verbose.
+                        if ctx.verbose and _migration_result.deleted:
+                            for _dp in _migration_result.deleted:
+                                _rich_info(f"  removed {_dp}", symbol="info")
                     if _migration_result.failed:
                         _rich_warning(
-                            f"  {len(_migration_result.failed)} file(s) could not be deleted (will retry next install)"
+                            f"  {len(_migration_result.failed)} file(s) could not be deleted (will retry next install)",
+                            symbol="warning",
                         )
 
         # Generate apm.lock for reproducible installs (T4: lockfile generation)
