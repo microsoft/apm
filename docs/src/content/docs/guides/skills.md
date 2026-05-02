@@ -308,7 +308,7 @@ APM automatically detects package types:
 
 ## Skill Deployment Routing
 
-By default, APM routes skills to `.agents/skills/` for clients that support the [agentskills.io](https://agentskills.io) standard: **Copilot, Cursor, OpenCode, and Codex**. This eliminates redundant copies when targeting multiple clients.
+By default, APM routes skills to `.agents/skills/` for clients that support the [agentskills.io](https://agentskills.io) standard: **Copilot, Cursor, OpenCode, Codex, and Gemini**. This eliminates redundant copies when targeting multiple clients.
 
 | Client | Skills deploy to | Notes |
 |--------|-----------------|-------|
@@ -316,11 +316,11 @@ By default, APM routes skills to `.agents/skills/` for clients that support the 
 | Cursor | `.agents/skills/` | Converged (was `.cursor/skills/`) |
 | OpenCode | `.agents/skills/` | Converged (was `.opencode/skills/`) |
 | Codex | `.agents/skills/` | Already used `.agents/skills/` |
+| Gemini | `.agents/skills/` | Converged (was `.gemini/skills/`) |
 | Claude | `.claude/skills/` | Unchanged (native routing) |
-| Gemini | `.gemini/skills/` | Unchanged (native routing) |
 | `agent-skills` | `.agents/skills/` | Explicit cross-client target |
 
-With `--target all`, skills deploy to 3 unique directories: `.agents/skills/`, `.claude/skills/`, `.gemini/skills/`.
+With `--target all`, skills deploy to 2 unique directories: `.agents/skills/` and `.claude/skills/`.
 
 ### Legacy per-client routing
 
@@ -358,6 +358,19 @@ Or set in `apm.yml`:
 name: my-project
 target: vscode  # or claude, or all
 ```
+
+### Migrating from legacy paths
+
+When you upgrade APM and run `apm install`, the tool automatically detects legacy per-client skill paths (`.github/skills/`, `.cursor/skills/`, `.opencode/skills/`, `.gemini/skills/`) recorded in your `apm.lock.yaml` and migrates them to `.agents/skills/`:
+
+```
+[i] Detected legacy per-client skill paths in apm.lock.yaml.
+[i] Migrating to the .agents/skills/ convention:
+[*]   .github/skills/foo  -> .agents/skills/foo
+[*]   .cursor/skills/foo  -> .agents/skills/foo  (deduped)
+```
+
+The migration is automatic and idempotent. Files not tracked in the lockfile are never touched. Use `--legacy-skill-paths` (or `APM_LEGACY_SKILL_PATHS=1`) to skip migration and keep per-client paths.
 
 ## Best Practices
 

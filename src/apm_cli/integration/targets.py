@@ -378,7 +378,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         root_dir=".gemini",
         primitives={
             "commands": PrimitiveMapping("commands", ".toml", "gemini_command"),
-            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+                deploy_root=".agents",
+            ),
             "hooks": PrimitiveMapping("hooks", ".json", "gemini_hooks"),
         },
         auto_create=False,

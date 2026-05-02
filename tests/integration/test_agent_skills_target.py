@@ -557,12 +557,12 @@ def _make_multi_target_bundle(
 def test_install_target_all_writes_skills_once_to_agents_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``--target all`` deploys skills to ``.agents/skills/`` for the 4 converged
-    clients, plus ``.claude/skills/`` and ``.gemini/skills/`` natively.
+    """``--target all`` deploys skills to ``.agents/skills/`` for the 5 converged
+    clients, plus ``.claude/skills/`` natively.
 
     Assert that ``.github/skills/``, ``.cursor/skills/``, ``.opencode/skills/``,
-    ``.codex/skills/`` do NOT exist (skills only -- non-skill primitives still
-    deploy to per-client roots).
+    ``.codex/skills/``, ``.gemini/skills/`` do NOT exist (skills only -- non-skill
+    primitives still deploy to per-client roots).
     """
     bundle = _make_multi_target_bundle(tmp_path / "src")
     project = _make_project(tmp_path / "dst")
@@ -577,14 +577,19 @@ def test_install_target_all_writes_skills_once_to_agents_dir(
     )
     assert result.exit_code == 0, f"output={result.output!r}"
 
-    # Skills land in .agents/skills/ (shared by copilot/cursor/opencode/codex)
+    # Skills land in .agents/skills/ (shared by copilot/cursor/opencode/codex/gemini)
     assert (project / ".agents" / "skills" / SKILL_NAME / "SKILL.md").is_file()
-    # Claude and gemini keep their native skill dirs
+    # Claude keeps its native skill dir
     assert (project / ".claude" / "skills" / SKILL_NAME / "SKILL.md").is_file()
-    assert (project / ".gemini" / "skills" / SKILL_NAME / "SKILL.md").is_file()
 
     # Per-client legacy skill dirs must NOT exist for converged targets
-    for legacy in (".github/skills", ".cursor/skills", ".opencode/skills", ".codex/skills"):
+    for legacy in (
+        ".github/skills",
+        ".cursor/skills",
+        ".opencode/skills",
+        ".codex/skills",
+        ".gemini/skills",
+    ):
         legacy_dir = project / legacy / SKILL_NAME
         assert not legacy_dir.exists(), (
             f"legacy skill dir {legacy_dir} should not exist with default convergence"

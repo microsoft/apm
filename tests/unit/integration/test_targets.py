@@ -245,14 +245,14 @@ class TestDefaultSkillRouting:
     """Assert that the 4 documented clients route skills to .agents/ by default."""
 
     def test_default_skill_routing_uses_agents_dir_for_documented_clients(self):
-        """copilot, cursor, opencode, codex all have deploy_root='.agents' on skills."""
+        """copilot, cursor, opencode, codex, gemini all have deploy_root='.agents' on skills."""
         expected = {
             "copilot": ".agents",
             "cursor": ".agents",
             "opencode": ".agents",
             "codex": ".agents",
+            "gemini": ".agents",
             "claude": None,  # not documented as .agents/-aware
-            "gemini": None,  # not documented as .agents/-aware
         }
         for name, want_root in expected.items():
             profile = KNOWN_TARGETS[name]
@@ -279,14 +279,32 @@ class TestDefaultSkillRouting:
                 f"{profile.name}: expected deploy_root=None (legacy), got {skills_pm.deploy_root!r}"
             )
 
-    def test_claude_gemini_skills_unchanged_by_default(self):
-        """Explicit guard: claude and gemini keep their native skill routing."""
-        for name in ("claude", "gemini"):
-            profile = KNOWN_TARGETS[name]
-            skills_pm = profile.primitives["skills"]
-            assert skills_pm.deploy_root is None, (
-                f"{name}: deploy_root should be None (native routing), got {skills_pm.deploy_root!r}"
-            )
+    def test_claude_skills_unchanged_by_default(self):
+        """Explicit guard: claude keeps its native skill routing."""
+        profile = KNOWN_TARGETS["claude"]
+        skills_pm = profile.primitives["skills"]
+        assert skills_pm.deploy_root is None, (
+            f"claude: deploy_root should be None (native routing), got {skills_pm.deploy_root!r}"
+        )
+
+    def test_gemini_skill_routing_uses_agents_dir_by_default(self):
+        """Gemini CLI docs list .agents/skills/ as the preferred alias."""
+        profile = KNOWN_TARGETS["gemini"]
+        skills_pm = profile.primitives["skills"]
+        assert skills_pm.deploy_root == ".agents", (
+            f"gemini: expected deploy_root='.agents', got {skills_pm.deploy_root!r}"
+        )
+
+    def test_gemini_legacy_skill_paths_restores_per_client_routing(self):
+        """With apply_legacy_skill_paths(), gemini deploy_root is reset to None."""
+        from apm_cli.integration.targets import apply_legacy_skill_paths
+
+        profiles = [KNOWN_TARGETS["gemini"]]
+        restored = apply_legacy_skill_paths(profiles)
+        skills_pm = restored[0].primitives["skills"]
+        assert skills_pm.deploy_root is None, (
+            f"gemini: expected deploy_root=None (legacy), got {skills_pm.deploy_root!r}"
+        )
 
     def test_apply_legacy_does_not_mutate_known_targets(self):
         """apply_legacy_skill_paths must not mutate the global KNOWN_TARGETS."""
