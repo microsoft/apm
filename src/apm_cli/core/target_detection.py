@@ -102,6 +102,8 @@ def detect_target(  # noqa: PLR0911
             return "codex", "explicit --target flag"
         elif explicit_target == "gemini":
             return "gemini", "explicit --target flag"
+        elif explicit_target == "agent-skills":
+            return "agent-skills", "explicit --target flag"
         elif explicit_target == "all":
             return "all", "explicit --target flag"
 
@@ -119,6 +121,8 @@ def detect_target(  # noqa: PLR0911
             return "codex", "apm.yml target"
         elif config_target == "gemini":
             return "gemini", "apm.yml target"
+        elif config_target == "agent-skills":
+            return "agent-skills", "apm.yml target"
         elif config_target == "all":
             return "all", "apm.yml target"
 
@@ -444,16 +448,22 @@ def parse_target_field(
             stacklevel=2,
         )
 
-    # ---- "all" is exclusive ----
+    # ---- "all" handling ----
     if "all" in raw_parts:
-        if len(raw_parts) > 1:
+        non_all_tokens = {t for t in raw_parts if t != "all"}
+        if non_all_tokens - EXPLICIT_ONLY_TARGETS:
             raise ValueError(
                 _target_error(
                     "'all' cannot be combined with other targets",
                     source_path,
                 )
             )
-        return "all"
+        if not non_all_tokens:
+            return "all"
+        # "all" + explicit-only tokens (e.g. "all,agent-skills"):
+        # expand "all" to canonical targets and append the explicit-only ones.
+        expanded = sorted(ALL_CANONICAL_TARGETS) + sorted(non_all_tokens)
+        return expanded
 
     # Single-token input is returned as-is (no alias resolution).  This
     # preserves the long-standing CLI contract where ``--target copilot``

@@ -185,6 +185,13 @@ def _resolve_compile_target(target):
         return None  # will trigger detect_target() auto-detection
     if isinstance(target, list):
         target_set = set(target)
+        # Strip agent-skills from the family-resolution set -- it is a
+        # deployment-only target with no compilation output.
+        target_set.discard("agent-skills")
+        if not target_set:
+            # Solo agent-skills in a list -- pass through as a string so
+            # the compiler's no-op path fires.
+            return "agent-skills"
         # Two distinct families overlap on copilot/vscode/agents:
         #   copilot_family   -> requests .github/copilot-instructions.md AND AGENTS.md
         #   agents_md_family -> requests AGENTS.md only (cursor/opencode/codex)
@@ -241,7 +248,7 @@ def _resolve_compile_target(target):
     "-t",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Use 'agent-skills' for cross-client .agents/skills/ deployment. Auto-detects if not specified.",
+    help="Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini (excludes agent-skills); combine with 'agent-skills' for both.",
 )
 @click.option(
     "--dry-run",

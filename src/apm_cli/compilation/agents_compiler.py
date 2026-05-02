@@ -306,7 +306,7 @@ class AgentsCompiler:
             if not results:
                 if logger and config.target == "agent-skills":
                     logger.progress(
-                        "agent-skills: skills-only target -- nothing to compile",
+                        "agent-skills -- no compile outputs, skipping",
                         symbol="info",
                     )
                 return CompilationResult(

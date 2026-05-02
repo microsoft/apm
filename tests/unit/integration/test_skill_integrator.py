@@ -3986,3 +3986,32 @@ class TestAgentSkillsDedupAndSecurity:
             validate_path_segments("../etc", context="skill name")
         with pytest.raises(PathTraversalError):
             validate_path_segments("..", context="skill name")
+
+
+class TestLockfileOwnershipCorruptFile:
+    """S1 regression: corrupt lockfile must return empty set (fail-closed)."""
+
+    def test_get_lockfile_owned_agent_skills_corrupt_lockfile_returns_empty(
+        self, tmp_path: Path
+    ) -> None:
+        """Malformed YAML in apm.lock.yaml returns empty owned set."""
+        from apm_cli.integration.skill_integrator import SkillIntegrator
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "apm.lock.yaml").write_text("{{{{invalid yaml: [", encoding="utf-8")
+
+        result = SkillIntegrator._get_lockfile_owned_agent_skills(project)
+        assert result == set(), f"expected empty set for corrupt lockfile, got {result!r}"
+
+    def test_get_lockfile_owned_agent_skills_missing_lockfile_returns_empty(
+        self, tmp_path: Path
+    ) -> None:
+        """Missing apm.lock.yaml returns empty owned set."""
+        from apm_cli.integration.skill_integrator import SkillIntegrator
+
+        project = tmp_path / "no-lockfile"
+        project.mkdir()
+
+        result = SkillIntegrator._get_lockfile_owned_agent_skills(project)
+        assert result == set(), f"expected empty set for missing lockfile, got {result!r}"

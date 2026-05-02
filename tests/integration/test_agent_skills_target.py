@@ -361,21 +361,11 @@ def test_uninstall_agent_skills_cleans_dir(tmp_path: Path, monkeypatch: pytest.M
 
 
 def test_compile_agent_skills_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``apm compile --target agent-skills`` exits 0 (no-op for skills-only target).
+    """``apm compile --target agent-skills`` exits 0 with a skip message.
 
     ``agent-skills`` is a deployment surface, not a compilation target -- it
     has no AGENTS.md / CLAUDE.md / GEMINI.md output. The compile command
-    must therefore not fail when the user passes it.
-
-    The compiler's own ``agents_compiler`` emits a
-    "agent-skills: skills-only target -- nothing to compile" info message
-    when invoked programmatically with ``config.target == 'agent-skills'``;
-    however, the CLI's ``_resolve_compile_target`` currently collapses an
-    ``agent-skills``-only ``--target`` to the ``vscode`` family (defensive
-    fallback), so the bare skip message does not surface in CLI output
-    today. We assert the user-visible contract -- exit code 0 and no
-    error -- and document the gap so a follow-up patch can wire the skip
-    message through the CLI without breaking this test.
+    emits an info-level skip message and exits cleanly.
     """
     project = _make_project(tmp_path / "dst")
     inst_dir = project / ".apm" / "instructions"
@@ -395,6 +385,46 @@ def test_compile_agent_skills_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     out = (result.output or "").lower()
     # Compile must complete without an explicit error symbol.
     assert "[x]" not in out, f"unexpected error in compile output: {result.output!r}"
+    # The skip message must surface in CLI output.
+    assert "skipping" in out or "no compile outputs" in out, (
+        f"expected skip message for agent-skills compile, got: {result.output!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# I7b -- compile codex,agent-skills compiles codex and skips agent-skills
+# ---------------------------------------------------------------------------
+
+
+def test_compile_codex_agent_skills_only_codex_compiled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``apm compile --target codex,agent-skills`` compiles codex and skips agent-skills.
+
+    When both targets are requested, agent-skills is stripped from the
+    compile-family resolution so codex compilation proceeds normally.
+    """
+    project = _make_project(tmp_path / "dst", with_github=False)
+    (project / ".codex").mkdir()
+    inst_dir = project / ".apm" / "instructions"
+    inst_dir.mkdir(parents=True)
+    (inst_dir / "demo.instructions.md").write_text(
+        "---\napplyTo: '**'\ndescription: demo\n---\n# Demo\nHello.\n",
+        encoding="utf-8",
+    )
+
+    result = _invoke(
+        project,
+        ["compile", "--target", "codex,agent-skills"],
+        monkeypatch,
+    )
+
+    assert result.exit_code == 0, f"output={result.output!r}"
+    out = result.output or ""
+    # Codex compilation produces AGENTS.md
+    assert (project / "AGENTS.md").is_file(), (
+        f"expected AGENTS.md from codex compilation, output={out!r}"
+    )
 
 
 # ---------------------------------------------------------------------------

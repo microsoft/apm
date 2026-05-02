@@ -656,6 +656,48 @@ class TestTargetParamType:
             deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
             assert len(deprecation_warnings) == 0
 
+    # -- B1: detect_target() returns agent-skills for explicit --target ----
+
+    def test_explicit_target_agent_skills(self):
+        """detect_target(explicit_target='agent-skills') returns 'agent-skills'."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / ".github").mkdir()
+            target, reason = detect_target(root, explicit_target="agent-skills")
+            assert target == "agent-skills"
+            assert reason == "explicit --target flag"
+
+    def test_config_target_agent_skills(self):
+        """detect_target(config_target='agent-skills') returns 'agent-skills'."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            target, reason = detect_target(root, config_target="agent-skills")
+            assert target == "agent-skills"
+            assert reason == "apm.yml target"
+
+    # -- B2: 'all,agent-skills' is allowed; 'all,claude' still rejected ----
+
+    def test_all_combined_with_agent_skills_allowed(self):
+        """'all,agent-skills' expands to every canonical target + agent-skills."""
+        from apm_cli.core.target_detection import parse_target_field
+
+        result = parse_target_field("all,agent-skills")
+        assert isinstance(result, list)
+        for t in ALL_CANONICAL_TARGETS:
+            assert t in result, f"expected '{t}' in expansion, got {result}"
+        assert "agent-skills" in result
+
+    def test_all_combined_with_codex_still_rejected(self):
+        """'all,codex' is still rejected (non-explicit-only combo)."""
+        with pytest.raises(click.exceptions.BadParameter, match="cannot be combined"):
+            self.tp.convert("all,codex", None, None)
+
 
 # ---------------------------------------------------------------------------
 # Cowork parser-layer regression tests (2f96dd5 / #926)

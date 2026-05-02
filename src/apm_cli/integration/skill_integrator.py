@@ -360,6 +360,11 @@ def copy_skill_to_target(
         # Dedup: skip if same resolved path already deployed.
         resolved = skill_dir.resolve()
         if resolved in seen_skill_dirs:
+            import logging
+
+            logging.getLogger(__name__).debug(
+                "%s -- already deployed, skipping for %s", skill_dir, target.name
+            )
             continue
         seen_skill_dirs.add(resolved)
 
@@ -737,6 +742,11 @@ class SkillIntegrator(BaseIntegrator):
             # Dedup: skip if same resolved skills root already processed.
             resolved_root = target_skills_root.resolve()
             if resolved_root in seen_skill_dirs:
+                if logger:
+                    logger.progress(
+                        f"{target_skills_root} -- already deployed, skipping for {target.name}",
+                        symbol="info",
+                    )
                 continue
             seen_skill_dirs.add(resolved_root)
 
@@ -1032,12 +1042,6 @@ class SkillIntegrator(BaseIntegrator):
         Returns:
             SkillIntegrationResult with all promoted skills.
         """
-        from apm_cli.security.gate import ignore_symlinks as _ignore_symlinks  # noqa: F401
-        from apm_cli.utils.path_security import (
-            ensure_path_within,  # noqa: F401
-            validate_path_segments,  # noqa: F401
-        )
-
         if targets is None:
             from apm_cli.integration.targets import active_targets
 
@@ -1049,6 +1053,7 @@ class SkillIntegrator(BaseIntegrator):
         total_promoted = 0
         all_deployed: list[Path] = []
         any_created = False
+        seen_skill_dirs: set[Path] = set()
 
         # Convert skill_subset tuple to a set for O(1) lookup
         _name_filter = set(skill_subset) if skill_subset else None
@@ -1061,6 +1066,18 @@ class SkillIntegrator(BaseIntegrator):
             skills_mapping = target.primitives["skills"]
             effective_root = skills_mapping.deploy_root or target.root_dir
             target_skills_root = project_root / effective_root / "skills"
+
+            # Dedup: skip if same resolved skills root already processed.
+            resolved_root = target_skills_root.resolve()
+            if resolved_root in seen_skill_dirs:
+                if logger:
+                    logger.progress(
+                        f"{target_skills_root} -- already deployed, skipping for {target.name}",
+                        symbol="info",
+                    )
+                continue
+            seen_skill_dirs.add(resolved_root)
+
             target_skills_root.mkdir(parents=True, exist_ok=True)
 
             n, deployed = self._promote_sub_skills(
@@ -1391,6 +1408,11 @@ class SkillIntegrator(BaseIntegrator):
             # Dedup: skip if same resolved skills dir already cleaned.
             resolved_skills = skills_dir.resolve()
             if resolved_skills in seen_cleanup_dirs:
+                import logging
+
+                logging.getLogger(__name__).debug(
+                    "%s -- already processed, skipping cleanup for %s", skills_dir, t.name
+                )
                 continue
             seen_cleanup_dirs.add(resolved_skills)
 
@@ -1470,6 +1492,10 @@ class SkillIntegrator(BaseIntegrator):
                             parts = f[len(".agents/skills/") :].split("/")
                             if parts and parts[0]:
                                 owned.add(parts[0])
-        except Exception:
-            pass  # If lockfile is unreadable, skip ownership check
+        except (FileNotFoundError, OSError, KeyError, ValueError, TypeError, AttributeError) as exc:
+            import logging
+
+            logging.getLogger(__name__).debug(
+                "Could not read lockfile for ownership check: %s", exc
+            )
         return owned
