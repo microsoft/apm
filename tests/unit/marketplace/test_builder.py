@@ -979,10 +979,10 @@ class TestGoldenFile:
             assert "tags" in plugin
             assert "source" in plugin
             src = plugin["source"]
-            assert src["type"] == "github"
-            assert "repository" in src
+            assert src.get("source") in ("github", "git-subdir")
+            assert "repo" in src or "url" in src
             assert "ref" in src
-            assert "commit" in src
+            assert "sha" in src
 
     def test_golden_file_no_apm_keys(self) -> None:
         data = json.loads(_GOLDEN_PATH.read_text("utf-8"))

@@ -19,6 +19,7 @@ Design
 
 from __future__ import annotations
 
+import urllib.parse as _up
 from pathlib import Path
 
 from .file_ops import robust_rmtree
@@ -62,7 +63,16 @@ def validate_path_segments(
     """
     reject = {".."} if allow_current_dir else {".", ".."}
     for segment in path_str.replace("\\", "/").split("/"):
-        if segment in reject:
+        # Iteratively percent-decode each segment so multi-encoded traversal
+        # markers (e.g. '%252e%252e' -> '%2e%2e' -> '..') cannot sneak past
+        # the reject-set check. Defends every caller of this guard.
+        decoded = segment
+        for _ in range(8):
+            nxt = _up.unquote(decoded)
+            if nxt == decoded:
+                break
+            decoded = nxt
+        if segment in reject or decoded in reject:
             raise PathTraversalError(
                 f"Invalid {context} '{path_str}': segment '{segment}' is a traversal sequence"
             )

@@ -131,6 +131,19 @@ class TestResolveGithubSource:
         with pytest.raises(ValueError, match="owner/repo"):
             _resolve_github_source({"repo": "just-a-name"})
 
+    def test_repository_key_fallback(self):
+        """Old marketplace format uses 'repository' instead of 'repo'."""
+        assert (
+            _resolve_github_source({"repository": "owner/repo", "ref": "v1.0"}) == "owner/repo#v1.0"
+        )
+
+    def test_repo_key_takes_precedence(self):
+        """When both 'repo' and 'repository' are present, 'repo' wins."""
+        result = _resolve_github_source(
+            {"repo": "owner/new-repo", "repository": "owner/old-repo", "ref": "v1.0"}
+        )
+        assert result == "owner/new-repo#v1.0"
+
 
 class TestResolveUrlSource:
     """Resolve url source type."""
@@ -216,6 +229,18 @@ class TestResolveGitSubdirSource:
     def test_path_traversal_rejected(self):
         with pytest.raises(ValueError, match="traversal sequence"):
             _resolve_git_subdir_source({"repo": "owner/mono", "subdir": "../escape"})
+
+    def test_url_key_fallback(self):
+        """Builder emits 'url' instead of 'repo' for git-subdir sources."""
+        result = _resolve_git_subdir_source({"url": "owner/mono", "path": "pkg", "ref": "v1.0"})
+        assert result == "owner/mono/pkg#v1.0"
+
+    def test_repo_key_takes_precedence_over_url(self):
+        """When both 'repo' and 'url' are present, 'repo' wins."""
+        result = _resolve_git_subdir_source(
+            {"repo": "owner/primary", "url": "owner/fallback", "subdir": "pkg"}
+        )
+        assert result == "owner/primary/pkg"
 
 
 class TestResolveRelativeSource:
@@ -348,6 +373,30 @@ class TestResolvePluginSource:
         with pytest.raises(ValueError, match="npm source type"):
             resolve_plugin_source(p)
 
+    def test_source_discriminator_key(self):
+        """New builder format uses 'source' as discriminator instead of 'type'."""
+        p = MarketplacePlugin(
+            name="test",
+            source={"source": "github", "repo": "owner/repo", "ref": "v1.0"},
+        )
+        assert resolve_plugin_source(p) == "owner/repo#v1.0"
+
+    def test_source_discriminator_git_subdir(self):
+        """New builder format for git-subdir uses 'source' key and 'url' field."""
+        p = MarketplacePlugin(
+            name="test",
+            source={"source": "git-subdir", "url": "owner/mono", "path": "pkg/a", "ref": "main"},
+        )
+        assert resolve_plugin_source(p) == "owner/mono/pkg/a#main"
+
+    def test_old_format_repository_key(self):
+        """Old marketplace format uses 'type' and 'repository' keys."""
+        p = MarketplacePlugin(
+            name="test",
+            source={"type": "github", "repository": "owner/repo", "ref": "v1.0"},
+        )
+        assert resolve_plugin_source(p) == "owner/repo#v1.0"
+
     def test_unknown_source_type_rejected(self):
         p = MarketplacePlugin(
             name="test",
@@ -360,3 +409,49 @@ class TestResolvePluginSource:
         p = MarketplacePlugin(name="test", source=None)
         with pytest.raises(ValueError, match="no source defined"):
             resolve_plugin_source(p)
+
+
+class TestOldFormatIntegration:
+    """Integration tests verifying old-format marketplace entries resolve correctly."""
+
+    def test_old_github_format_full_pipeline(self) -> None:
+        """Old format with type/repository/commit resolves via resolve_plugin_source."""
+        plugin = MarketplacePlugin(
+            name="legacy-plugin",
+            source={
+                "type": "github",
+                "repository": "acme/legacy-tool",
+                "ref": "main",
+                "commit": "abc123",
+            },
+        )
+        result = resolve_plugin_source(plugin, "org", "marketplace", plugin_root="")
+        assert result == "acme/legacy-tool#main"
+
+    def test_old_git_subdir_format_full_pipeline(self) -> None:
+        """Old format with type/url/path resolves via resolve_plugin_source."""
+        plugin = MarketplacePlugin(
+            name="legacy-subdir",
+            source={
+                "type": "git-subdir",
+                "url": "acme/monorepo",
+                "path": "tools/helper",
+                "ref": "v2.0",
+            },
+        )
+        result = resolve_plugin_source(plugin, "org", "marketplace", plugin_root="")
+        assert result == "acme/monorepo/tools/helper#v2.0"
+
+    def test_old_format_url_with_scheme_rejected(self) -> None:
+        """A full URL in the url field is rejected by the scheme guard."""
+        plugin = MarketplacePlugin(
+            name="bad-url",
+            source={
+                "type": "git-subdir",
+                "url": "https://evil.example.com/payload",
+                "path": "x",
+                "ref": "main",
+            },
+        )
+        with pytest.raises(ValueError, match=r"expected 'owner/repo' but got a URL"):
+            resolve_plugin_source(plugin, "org", "marketplace", plugin_root="")

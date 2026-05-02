@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from .adapters.client.claude import ClaudeClientAdapter
 from .adapters.client.codex import CodexClientAdapter
 from .adapters.client.copilot import CopilotClientAdapter
 from .adapters.client.cursor import CursorClientAdapter
@@ -41,6 +42,7 @@ class ClientFactory:
             "cursor": CursorClientAdapter,
             "gemini": GeminiClientAdapter,
             "opencode": OpenCodeClientAdapter,
+            "claude": ClaudeClientAdapter,
             # Add more clients as needed
         }
 

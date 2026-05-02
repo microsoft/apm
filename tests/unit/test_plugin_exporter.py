@@ -601,9 +601,10 @@ class TestExportPluginBundle:
         assert (result.bundle_path / "agents" / "helper.agent.md").exists()
         assert (result.bundle_path / "commands" / "task.md").exists()
         assert (result.bundle_path / "plugin.json").exists()
-        # No APM artifacts in output
+        # No APM source artifacts in output (the bundle now embeds an
+        # enriched apm.lock.yaml with the per-file SHA-256 manifest -- see
+        # issue #1098 -- so apm.lock.yaml IS expected at bundle root.)
         assert not (result.bundle_path / "apm.yml").exists()
-        assert not (result.bundle_path / "apm.lock.yaml").exists()
         assert not (result.bundle_path / ".apm").exists()
         assert not (result.bundle_path / "apm_modules").exists()
 

@@ -228,6 +228,27 @@ class TestInstallCommandAutoBootstrap:
             assert "invalid format" in result.output
 
     @patch("apm_cli.commands.install._validate_package_exists")
+    def test_install_collection_yml_argument_surfaces_migration_message(self, mock_validate):
+        """`apm install owner/repo/.../foo.collection.yml` (CLI arg, not in
+        apm.yml) MUST surface the migration ValueError end-to-end.
+
+        Regression-trap for #1094 rework: the parse-time ValueError from
+        ``DependencyReference.parse()`` flows through
+        ``_resolve_package_references`` -> ``invalid_outcomes`` ->
+        validation summary. If a future refactor swallows this, users
+        would silently see "package not found" instead of the actionable
+        migration text.
+        """
+        with self._chdir_tmp():
+            result = self.runner.invoke(
+                cli, ["install", "owner/repo/collections/writing.collection.yml"]
+            )
+            assert ".collection.yml is no" in result.output  # text wraps in CLI
+            assert "longer supported" in result.output
+            assert "apm.yml" in result.output
+            assert "All packages failed validation" in result.output
+
+    @patch("apm_cli.commands.install._validate_package_exists")
     @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
     @patch("apm_cli.commands.install.APMPackage")
     @patch("apm_cli.commands.install._install_apm_dependencies")
@@ -297,6 +318,36 @@ class TestValidationFailureReasonMessages:
             result = self.runner.invoke(cli, ["install", "owner/repo", "--verbose"])
             assert "not accessible or doesn't exist" in result.output
             assert "run with --verbose for auth details" not in result.output
+
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
+    def test_subdir_with_ref_failure_names_all_probes(self, mock_validate):
+        """Round-4 (devx-ux): when a virtual subdir+ref exhausts all four
+        probes, the failure reason must name them by step so the user
+        knows what was attempted before the failure.
+        """
+        with self._chdir_tmp():
+            Path("apm.yml").write_text("name: test\ndependencies:\n  apm: []\n  mcp: []\n")
+            result = self.runner.invoke(cli, ["install", "owner/repo/skills/foo#v1.2.0"])
+            output = " ".join(result.output.split())
+            assert "all probes failed" in output
+            assert "marker-file" in output
+            assert "Contents API" in output
+            assert "git ls-remote" in output
+            assert "shallow-fetch" in output
+            assert "run with --verbose for the full probe log" in output
+
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
+    def test_subdir_with_ref_failure_verbose_omits_probe_log_hint(self, mock_validate):
+        with self._chdir_tmp():
+            Path("apm.yml").write_text("name: test\ndependencies:\n  apm: []\n  mcp: []\n")
+            result = self.runner.invoke(
+                cli, ["install", "owner/repo/skills/foo#v1.2.0", "--verbose"]
+            )
+            output = " ".join(result.output.split())
+            assert "all probes failed" in output
+            # The "(run with --verbose...)" hint is suppressed once the
+            # user is already in verbose mode.
+            assert "run with --verbose for the full probe log" not in output
 
     @patch(
         "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",

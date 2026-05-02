@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import builtins
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional  # noqa: F401
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..core.command_logger import InstallLogger
@@ -325,3 +325,201 @@ def integrate_local_content(
 # imports/patches in tests and elsewhere that use the old names.
 _integrate_package_primitives = integrate_package_primitives
 _integrate_local_content = integrate_local_content
+
+
+# ---------------------------------------------------------------------------
+# Local bundle integration (issue #1098)
+# ---------------------------------------------------------------------------
+
+
+def integrate_local_bundle(
+    bundle_info: Any,
+    project_root: Path,
+    *,
+    targets: Any,
+    force: bool = False,
+    dry_run: bool = False,
+    diagnostics: DiagnosticCollector | None = None,
+    logger: InstallLogger | None = None,
+    scope: InstallScope | None = None,
+    alias: str | None = None,
+) -> dict:
+    """Integrate a detected local bundle into project / user scope.
+
+    Local bundles are produced by ``apm pack`` and shipped (via shared file,
+    USB, etc.) to environments that cannot reach the source registry.  This
+    orchestrator deploys the bundle's plugin-format files into each active
+    target's deploy root and returns a result dict mirroring
+    ``integrate_local_content()``'s shape so the caller can persist
+    ``local_deployed_files`` / ``local_deployed_file_hashes`` into the
+    project lockfile.
+
+    The bundle is treated as a *synthetic* package -- its slug derives from
+    *alias* (``--as``) when provided, else from ``bundle_info.package_id``.
+
+    Important contract: this function does **NOT** mutate ``apm.yml``.  Local
+    bundles are imperative deploys, not declarative dependencies.
+
+    Args:
+        bundle_info: ``LocalBundleInfo`` describing the verified bundle.
+        project_root: Workspace root (or ``Path.home()`` for ``--global``).
+        targets: Resolved ``TargetProfile`` instances from
+            ``resolve_targets()``.
+        force: When ``True``, overwrite locally-modified files on collision.
+        dry_run: When ``True``, report what would be deployed without
+            writing to disk.
+        diagnostics: Diagnostic collector for structured warnings.
+        logger: Install-flow logger.
+        scope: ``InstallScope`` (project vs user) for downstream consumers.
+        alias: Slug override from ``--as``.
+
+    Returns:
+        Dict with keys ``deployed_files`` (list[str]),
+        ``deployed_file_hashes`` (dict[str, str]), ``skipped`` (int), and
+        per-primitive counters (``skills``, ``agents``, ``commands``, ...).
+    """
+    import hashlib
+    import shutil
+
+    from ..core.scope import InstallScope
+    from ..utils.path_security import (
+        PathTraversalError,
+        ensure_path_within,
+        validate_path_segments,
+    )
+
+    bundle_dir: Path = bundle_info.source_dir
+    pack_files: dict[str, str] = {}
+    if bundle_info.lockfile:
+        pack = bundle_info.lockfile.get("pack") or {}
+        bf = pack.get("bundle_files") or {}
+        if isinstance(bf, dict):
+            pack_files = {str(k): str(v) for k, v in bf.items()}
+
+    if not pack_files:
+        # Fallback: walk bundle and hash everything except apm.lock.yaml
+        # and plugin.json.  Prevents zero-deploy when an older bundle
+        # without bundle_files lands.
+        for fp in bundle_dir.rglob("*"):
+            if not fp.is_file() or fp.is_symlink():
+                continue
+            rel = fp.relative_to(bundle_dir).as_posix()
+            if rel in ("apm.lock.yaml", "plugin.json"):
+                continue
+            pack_files[rel] = hashlib.sha256(fp.read_bytes()).hexdigest()
+
+    deployed_files: list[str] = []
+    deployed_hashes: dict[str, str] = {}
+    skipped = 0
+
+    slug = alias or bundle_info.package_id
+    if logger:
+        logger.verbose_detail(
+            f"Integrating local bundle '{slug}' "
+            f"({len(pack_files)} file(s), targets={[t.name for t in targets]})"
+        )
+
+    # NOTE(M-arch-1): Local bundles intentionally do NOT route through
+    # ``integrate_package_primitives`` -- they are an imperative deploy of
+    # opaque files keyed by ``pack.bundle_files`` rather than a primitive
+    # tree.  Revisit when local-bundle install needs to share collision /
+    # link-resolution logic with the dependency-resolver pipeline.
+    # TODO(#1098-v0.13): unify with integrate_package_primitives if/when
+    # the bundle format grows primitive-typed transforms.
+    for target in targets:
+        # Resolve deploy root for this target.  Cowork targets can return
+        # a dynamically-resolved path; fall back to root_dir under
+        # project_root otherwise.
+        resolved_root = getattr(target, "resolved_deploy_root", None)
+        if resolved_root is not None:
+            deploy_root = Path(resolved_root)
+        else:
+            deploy_root = project_root / target.root_dir
+
+        for rel, expected_hash in sorted(pack_files.items()):
+            # CR1: bundle_files keys come from untrusted lockfile YAML
+            # inside the bundle.  Reject traversal sequences before
+            # constructing any filesystem path, then assert the resolved
+            # destination stays inside ``deploy_root``.
+            try:
+                validate_path_segments(str(rel), context="bundle_files key")
+            except PathTraversalError as exc:
+                if logger is not None:
+                    logger.warning(f"Skipped unsafe bundle entry {rel!r}: {exc}")
+                skipped += 1
+                continue
+            src = bundle_dir / rel
+            if not src.is_file() or src.is_symlink():
+                skipped += 1
+                continue
+            dest = deploy_root / rel
+            try:
+                ensure_path_within(dest, deploy_root)
+            except PathTraversalError as exc:
+                if logger is not None:
+                    logger.warning(f"Skipped unsafe bundle entry {rel!r}: {exc}")
+                skipped += 1
+                continue
+            try:
+                if scope == InstallScope.USER:
+                    # User scope: record absolute paths.
+                    record = dest.as_posix()
+                else:
+                    # Project scope: record paths relative to project_root.
+                    record = (
+                        dest.relative_to(project_root).as_posix()
+                        if dest.is_relative_to(project_root)
+                        else dest.as_posix()
+                    )
+            except ValueError:
+                record = dest.as_posix()
+
+            if dry_run:
+                deployed_files.append(record)
+                deployed_hashes[record] = expected_hash
+                if logger:
+                    logger.verbose_detail(f"[dry-run] would deploy {record}")
+                continue
+
+            # Collision handling: skip if file exists and content differs
+            # and not force.  Idempotent (same content) writes are silent.
+            if dest.exists() and not force:
+                try:
+                    existing_hash = hashlib.sha256(dest.read_bytes()).hexdigest()
+                except OSError:
+                    existing_hash = None
+                if existing_hash and existing_hash != expected_hash:
+                    skipped += 1
+                    msg = (
+                        f"Skipped {record}: file exists with different "
+                        "content. Re-run with --force to overwrite."
+                    )
+                    if diagnostics is not None:
+                        diagnostics.warn(msg)
+                    elif logger is not None:
+                        logger.warning(msg)
+                    continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest, follow_symlinks=False)
+            # IM4: hash the deployed file (post-copy) rather than trusting
+            # the source bundle's expected_hash.  Today the integrator is a
+            # raw copy so the values match, but documenting deployed-file
+            # provenance now keeps the lockfile honest if future transforms
+            # (frontmatter injection, etc.) mutate content during deploy.
+            deployed_files.append(record)
+            deployed_hashes[record] = hashlib.sha256(dest.read_bytes()).hexdigest()
+            if logger:
+                logger.verbose_detail(f"deployed {record}")
+
+    return {
+        "deployed_files": deployed_files,
+        "deployed_file_hashes": deployed_hashes,
+        "skipped": skipped,
+        "skills": 0,
+        "agents": 0,
+        "commands": 0,
+        "hooks": 0,
+        "instructions": 0,
+        "prompts": 0,
+        "sub_skills": 0,
+    }

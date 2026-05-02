@@ -27,7 +27,6 @@ class VirtualPackageType(Enum):
     """Type of virtual package."""
 
     FILE = "file"  # Individual file (*.prompt.md, etc.)
-    COLLECTION = "collection"  # Collection virtual package
     SUBDIRECTORY = "subdirectory"  # Subdirectory package
 
 

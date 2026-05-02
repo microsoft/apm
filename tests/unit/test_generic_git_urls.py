@@ -454,13 +454,14 @@ class TestFQDNVirtualPaths:
         assert dep.is_virtual is True
         assert dep.is_virtual_file() is True
 
-    def test_bitbucket_virtual_collection(self):
-        dep = DependencyReference.parse("bitbucket.org/team/rules/collections/security")
-        assert dep.host == "bitbucket.org"
-        assert dep.repo_url == "team/rules"
-        assert dep.virtual_path == "collections/security"
-        assert dep.is_virtual is True
-        assert dep.is_virtual_collection() is True
+    def test_bitbucket_collection_yml_url_raises(self):
+        """`.collection.yml` URLs raise migration error on generic hosts too."""
+        import pytest
+
+        with pytest.raises(ValueError, match=r"\.collection\.yml is no longer supported"):
+            DependencyReference.parse(
+                "bitbucket.org/team/rules/collections/security.collection.yml"
+            )
 
     def test_self_hosted_virtual_subdirectory(self):
         """Without virtual indicators, all segments are repo path on generic hosts.

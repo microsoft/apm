@@ -5,19 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-
 ## [Unreleased]
+
+### Removed
+
+- **BREAKING: dropped support for `.collection.yml` / `.collection.yaml` virtual packages.** Dependencies whose paths end in `.collection.yml` or `.collection.yaml` now raise a `ValueError` at parse time with a migration message. Convert any such entry to a regular `apm.yml` with a `dependencies:` section under the same subdirectory, then reference the directory itself as a subdirectory virtual package (no extension). The internal `VirtualPackageType.COLLECTION` enum value, the `download_collection_package` codepath, the `is_virtual_collection()` reference helper, and the `META_PACKAGE` package-type label have been removed -- none were persisted to the lockfile, so existing locks are unaffected. (#1097, closes #1094) Thanks @edenfunf for the original PR.
 
 ### Changed
 
+- **Renamed `NOTICE.md` -> `NOTICE`** to follow the Apache / CNCF convention used by upstream third-party-attribution files (e.g. `kubernetes-sigs/kro`, `kubernetes-sigs/headlamp`). The generator (`scripts/generate-notice.py`), `make notice` target, and `NOTICE Drift Check` workflow now operate on the extension-less path. (#1073)
+- **NOTICE: added "Submitted on behalf of a third-party" section** crediting five contributors whose pull requests landed before the `microsoft-github-policy-service` CLA bot recorded a signature on file -- in keeping with the section-7 wording adopted by CNCF NOTICE files. Driven by a new `_third_party_submissions` block in `scripts/notice-metadata.yaml`. (#1073)
 - **BREAKING: `apm pack` now produces a Claude Code plugin directory by default — zero extra flags, schema-validated `plugin.json`, convention dirs auto-discovered.** The legacy APM bundle layout is preserved under `--format apm`. Migration: CI workflows and scripts that consume the legacy bundle must add `--format apm` (the [`microsoft/apm-action`](https://github.com/microsoft/apm-action) wrapper has been updated accordingly). (#1061)
 - **Plugin manifest schema conformance.** The synthesized/written `plugin.json` no longer emits `agents`/`skills`/`commands`/`instructions` keys pointing at the convention directories — these are auto-discovered by Claude Code, and per the [official schema](https://json.schemastore.org/claude-code-plugin.json) those array entries must be `./*.md` paths to *additional* files. The convention dirs themselves are still copied to disk. When stripping such keys from an authored `plugin.json`, `apm pack` now emits a warning so authors can clean up their source. (#1061)
 
+### Fixed
+
+- **`apm install <pkg>@<marketplace>` no longer fails for all marketplace packages.** The install resolver now accepts both legacy and current marketplace key names: `repository`/`repo` for github sources, `url`/`repo` for git-subdir sources, and `type`/`source` as the source-type discriminator. A scheme guard rejects full URLs passed through the `url` fallback. (#1106, closes #1105)
+- **`apm install --update` no longer fails for GHES/generic hosts** that rely on git credential helpers (e.g., `git-credential-manager`) for authentication. The preflight auth probe was blocking credential helpers by setting `GIT_CONFIG_GLOBAL=/dev/null`; it now uses the same relaxed environment as the clone fallback path for non-GitHub/non-ADO hosts. (#1082)
+
 ### Added
 
+- **Claude Code as MCP install target.** `apm install --runtime claude` (and auto-detection when `.claude/` exists or the `claude` binary is on PATH) writes MCP server entries to project-scope `.mcp.json` and user-scope `~/.claude.json` per the [Claude Code MCP schema](https://code.claude.com/docs/en/mcp). Project writes are opt-in (gated on the presence of `.claude/`, mirroring Cursor/OpenCode) and user writes are atomic with `0o600` permissions on first creation so concurrent Claude Code sessions cannot truncate the shared config or leak embedded OAuth state. Stdio entries are emitted with explicit `type: "stdio"` so `claude mcp list` renders them identically to entries installed via `claude mcp add --transport stdio`. Schema fidelity is regression-locked by golden fixtures captured live from the upstream `claude` CLI (see `tests/integration/test_claude_mcp_schema_fidelity.py`). Stale-cleanup defaults conservatively when the install scope is unspecified -- only the project file is touched without an explicit `-g/--global` opt-in. Note: Claude Code's third LOCAL scope (per-project private under `~/.claude.json -> projects.<path>.mcpServers`) is intentionally not implemented, since APM packages target reproducible team installs (PROJECT/USER), not per-user-per-project private state. (#1104, closes #643) -- by @dmartinol
+- **`apm install <local-bundle-path>` deploys a previously packed bundle (directory or `.tar.gz`) air-gapped, with sha256 integrity verification against the bundle's embedded `apm.lock.yaml`.** Honours `--target`, `--global`, `--force`, `--dry-run`, plus a new `--as ALIAS` log/display label flag. Local installs record written paths in the project lockfile (`local_deployed_files` / `local_deployed_file_hashes`) and never mutate `apm.yml`. `apm unpack` is now `[Deprecated]` and points at this entrypoint. (#1098)
+- **`apm pack` now embeds `apm.lock.yaml` inside the bundle** with two new `pack:` fields (`target`, `bundle_files`: a `path -> sha256` manifest) so installs can verify integrity and detect target mismatches before writing any file. (#1098)
+- **`apm compile -t copilot` now emits `.github/copilot-instructions.md` with zero user configuration** -- APM's first Copilot-native compile target. Global instructions in `.apm/instructions/` are assembled into the file VS Code and GitHub Copilot read automatically; switching targets cleans it up. APM dogfoods this target. (#1048)
+- **`apm marketplace add` accepts full HTTPS URLs and nested HOST/group/sub/.../REPO shorthands.** You can now paste a repository URL straight from the browser (e.g., `apm marketplace add https://github.com/acme/plugin-marketplace`) and register marketplaces hosted under nested sub-paths on GitHub Enterprise (`ghes.corp.example.com/org/team/repo`). Path-traversal sequences in the parsed segments are rejected via `validate_path_segments`. Non-GitHub hosts (GitLab, Bitbucket, etc.) are explicitly rejected at registration time with an actionable error -- this avoids forwarding GitHub credentials to unintended hosts and the silent fetch-time 404 that previously resulted; native non-GitHub support is tracked separately. (#1034, closes #1027)
+- Regression tests for `apm compile` placement of narrow `applyTo` patterns: instructions whose matches all live deep inside one subtree are now pinned to the deepest covering directory instead of being hoisted to the project root, across both selective and single-point placement strategies. Also covers the file-walk cache that skips repeated filesystem scans for the same glob. (#871)
 - **`apm pack` marketplace builder hardening.** Local source paths are now emitted relative to `metadata.pluginRoot` (fixes double-prefix bug). New pass-through fields: `author`, `license`, `repository`, `keywords` (alias for `tags`). Curator-wins override semantics for `description`/`version` on remote entries. Security guards reject path traversal and absolute paths post-subtraction. (#1061)
 - **Plugin manifest schema-conformance tests.** `tests/unit/test_plugin_exporter_schema.py` validates every shape of `plugin.json` produced by `apm pack` (synthesized, authored, and authored-with-stale-keys) against the vendored official schema. Companion marketplace conformance lives in `tests/unit/marketplace/test_schema_conformance.py`. (#1061)
 - Slash commands installed from APM packages now surface argument hints in Claude Code -- `apm install` automatically maps prompt `input:` to Claude's `arguments:` front-matter, rewrites `${input:name}` references to `$name`, and auto-generates `argument-hint`. Argument names are validated against an allowlist to prevent YAML injection from third-party packages, and the mapping is reported at install time. (#1039)
+
+### Fixed
+
+- `apm compile --dry-run -t copilot` now faithfully simulates the hand-authored file guard: a `.github/copilot-instructions.md` lacking the APM marker is reported as `skipped=1` (matching the real run) instead of as `generated=1`. Previously dry-run would claim a write that a real run would refuse, giving CI preview gates a false signal. (#1048)
+- `apm compile -t claude,copilot` (and any multi-target list including `copilot`) now correctly generates `.github/copilot-instructions.md`; previously it was silently skipped on the multi-target code path. (#1048)
+- `apm compile` no longer overwrites a hand-authored `.github/copilot-instructions.md`; if the file lacks the APM-generated marker, regeneration is skipped with a warning that names the literal marker line (`<!-- Generated by APM CLI from .apm/ primitives -->`) so users can self-serve recovery. **Migration:** to adopt APM management of an existing file, either delete or rename it and re-run `apm compile`, or prepend the marker line to the top of the file and re-run `apm compile`. (#1048)
+- Generated footer in `.github/copilot-instructions.md` now reads `apm compile` (was `specify apm compile`). (#1048)
+- `apm compile --targets claude` no longer lists `@apm_modules/{owner}/{package}/CLAUDE.md` dependencies for packages that don't have a `CLAUDE.md` file on disk (#1047)
+- **`apm prune` no longer flags directories it put there itself** -- skills installed from a subdirectory path (e.g., `owner/repo/.apm/skills/skill-name`) no longer cause the parent `owner/repo/` clone to appear as an orphan. Fixes spurious removal prompts in multi-skill and monorepo-style setups. The same fix applies to `apm deps list` and `apm compile`. A genuinely orphaned `owner/repo` package is still flagged even when a sibling subdirectory dep shares the same `owner/repo` root. No changes to `apm.yml` or the lockfile are required to benefit from this fix. (#1050)
 
 ## [0.11.0] - 2026-04-29
 
@@ -45,31 +70,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`apm install` works with your existing credential chain (SSO, EMU, GHES tokens).** Validation now uses the same credentials as the actual clone (PAT header-injected, then git credential helper, then SSH for explicit `#ref` pins) -- enterprise users whose env-var PAT has narrower SSO/EMU access than their `gh auth setup-git` / OS keychain are no longer false-rejected by the installer's API probe. Validation logic is now a separate module (`github_downloader_validation.py`), laying groundwork for future credential-provider extensibility. (#941)
 - **`shared/apm.md` single-credential-group runs no longer fail validation** with a spurious `missing APM bundles: apm-default` -- a normalisation step recreates the per-group subdir layout that `actions/download-artifact@v5+` flattens away. (#1051)
 - **`apm pack` works against GitHub Enterprise and other Git hosts** -- honors `GITHUB_HOST` for GHES auth and accepts GitHub / GHES / GitLab / Bitbucket / ADO / SSH URL forms. (#1008)
 - **ADO Entra ID auth no longer silently fails.** Bearer tokens from `az account get-access-token` are plumbed through, errors are typed + actionable (4-case diagnostic), and `apm install --update` pre-flights auth before touching files. (#1015)
+- `apm marketplace add` now uses the `name` field from the fetched `marketplace.json` as the default local alias, falling back to the repo name only when the manifest omits it or declares an invalid value. This restores parity with Claude Code install instructions (e.g. `addyosmani/agent-skills` registers as `addy-agent-skills` as that repo's README documents). Existing marketplace entries are unaffected; use `--name` to override explicitly. (#1032)
 - `GEMINI.md` is now only created when explicitly targeted. (#1019)
 - Windows-friendly: auto-discovery CLI output uses POSIX paths so `apm install` / `apm compile` output is readable on Windows. (#1018)
 - Generated-file footer no longer prints stray `specify` before `apm compile`. (#996)
 - CodeQL `clear-text-storage` false-positive resolved (variable rename). (#1002)
-
-### Maintainer tooling
-
-- **NOTICE.md** added at repo root per CELA template -- one entry per direct dependency with verbatim license text. (#1043)
-- **NOTICE.md is self-maintaining**: a CI drift gate fails with an exact diff + a `make notice` fix command, plus `dependency-review-action` denies GPL/AGPL/SSPL additions on PR. (#1045, closes #1044)
-- `shared/apm.md` ships a `repair_string_array` helper to unblock `apm-prep` on gh-aw's `[a b]` Go-default formatting (paper-cut filed upstream). (#1033)
-- PR-review-panel and triage-panel skip cleanly (gray ⊘) on unmatched labels instead of failing -- no failed check, no quota burn. Bumps `gh-aw` to v0.71.1. (#1030)
-- `shared/apm.md` recompiled against `microsoft/apm-action@v1.5.0` for the new `bundles-file:` matrix restore (used by #982). (#1026)
-- Review-panel: true matrix fan-out per reviewer persona, binary `approve` / `request-changes` aggregation, label-driven merge gate. (#1022)
-- **Dev Container Feature scaffolded** under `devcontainer/` (closes #717) -- `install.sh` + 37 bats unit tests + 6-distro integration matrix. Not yet published to `ghcr.io`; will be announced in the release that publishes the OCI artifact. (#861)
-
-### Security
-
-- `apm audit --ci` and `apm install` now fail-closed when `apm.yml` is malformed YAML or not a mapping -- previously, policy and baseline checks were silently skipped (severity: medium -- policy bypass). **Migration:** repos with latently malformed `apm.yml` will go from CI-pass to CI-fail on upgrade. Validate before upgrading with `python -c "import yaml; yaml.safe_load(open('apm.yml'))"` or run `apm audit --ci` locally. Fix any YAML syntax errors in `apm.yml` (stray tabs, unquoted colons, non-mapping root). (#936)
-
-### Changed
-
-- Replace `black` + `isort` with Ruff for linting and formatting; add deterministic CI lint gate (~3s), configure 10 rule sets with strangler-fig complexity thresholds, and fix a Python 3.10 f-string compatibility bug in `audit_report.py` -- by @sergio-sisternes-epam (#999)
 
 ## [0.10.0] - 2026-04-27
 

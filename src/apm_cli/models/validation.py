@@ -21,7 +21,7 @@ class PackageType(Enum):
     (presence of apm.yml, SKILL.md, hooks/, plugin.json, etc.).
     """
 
-    APM_PACKAGE = "apm_package"  # Has apm.yml + .apm/
+    APM_PACKAGE = "apm_package"  # Has apm.yml (.apm/ optional when deps declared)
     CLAUDE_SKILL = "claude_skill"  # Has SKILL.md, no apm.yml
     HOOK_PACKAGE = "hook_package"  # Has hooks/hooks.json, no apm.yml or SKILL.md
     HYBRID = "hybrid"  # Has both apm.yml and SKILL.md (root)
@@ -232,11 +232,11 @@ def detect_package_type(
     3. ``CLAUDE_SKILL`` -- root ``SKILL.md`` only (no ``apm.yml``).
     4. ``SKILL_BUNDLE`` -- nested ``skills/<x>/SKILL.md`` detected;
        ``apm.yml`` optional; no ``.apm/`` required.
-    5. ``APM_PACKAGE`` -- ``apm.yml`` AND ``.apm/`` directory present.
-    6. ``INVALID`` -- ``apm.yml`` present but no ``.apm/`` and no nested
-       skills (helpful error: author likely needs to add .apm/).
-    7. ``HOOK_PACKAGE`` -- ``hooks/*.json`` only, no other signals.
-    8. ``INVALID`` -- nothing recognisable.
+    5. ``APM_PACKAGE`` -- ``apm.yml`` present. ``.apm/`` is optional: a
+       dep-only ``apm.yml`` (no ``.apm/`` and no nested skills) is a valid
+       curated aggregator that contributes no own primitives (#1094).
+    6. ``HOOK_PACKAGE`` -- ``hooks/*.json`` only, no other signals.
+    7. ``INVALID`` -- nothing recognisable.
 
     Returns:
         A ``(package_type, plugin_json_path)`` tuple.  *plugin_json_path*
@@ -261,27 +261,73 @@ def detect_package_type(
     if evidence.nested_skill_dirs:
         return PackageType.SKILL_BUNDLE, None
 
-    # 5. apm.yml + .apm/ -> APM_PACKAGE
+    # 5. apm.yml present -> APM classification.
+    #    With .apm/ OR declared dependencies, a valid APM_PACKAGE.
+    #    Without either, INVALID (the user committed to "this is an APM
+    #    package" by adding apm.yml; we trust that signal and surface the
+    #    standard "missing .apm/" diagnostic instead of silently falling
+    #    through to a hooks/skill-bundle classification). Dep-only is
+    #    valid as a curated aggregator (#1094).
     if evidence.has_apm_yml:
         apm_dir = package_path / APM_DIR
-        if apm_dir.is_dir():
+        if apm_dir.exists() or _apm_yml_declares_dependencies(package_path / APM_YML_FILENAME):
             return PackageType.APM_PACKAGE, None
-        # 6. apm.yml only (no .apm/, no nested skills) -> INVALID
         return PackageType.INVALID, None
 
-    # 7. hooks/*.json only -> HOOK_PACKAGE
+    # 6. hooks/*.json only -> HOOK_PACKAGE
     if evidence.has_hook_json:
         return PackageType.HOOK_PACKAGE, None
 
-    # 8. Nothing recognisable -> INVALID
+    # 7. Nothing recognisable -> INVALID
     return PackageType.INVALID, None
+
+
+def _apm_yml_declares_dependencies(apm_yml_path: Path) -> bool:
+    """Return True iff ``apm.yml`` declares at least one dependency.
+
+    Used by ``_validate_apm_package_with_yml`` to accept a dep-only
+    ``apm.yml`` (no ``.apm/`` directory) as a valid curated aggregator
+    (#1094). Any non-empty ``apm`` or ``mcp`` list under ``dependencies``
+    OR ``devDependencies`` qualifies. Tolerant of malformed YAML /
+    missing keys: returns False on any parse problem so callers fall
+    back to the legacy "missing .apm/" diagnostic instead of silently
+    accepting a malformed manifest.
+    """
+    try:
+        from ..utils.yaml_io import load_yaml
+
+        data = load_yaml(apm_yml_path) or {}
+    except Exception:
+        return False
+    if not isinstance(data, dict):
+        return False
+
+    def _has_listed_deps(block: object) -> bool:
+        if not isinstance(block, dict):
+            return False
+        # Schema requires `apm` and `mcp` to be lists of strings or dicts
+        # (see APMPackage._parse_dependency_dict). Non-list values, or
+        # lists with no parseable entries, are malformed; treat them as
+        # "no declared dependencies" so the caller falls through to the
+        # legacy "missing .apm/" diagnostic instead of silently accepting
+        # a malformed manifest.
+        for key in ("apm", "mcp"):
+            value = block.get(key)
+            if isinstance(value, list) and any(isinstance(entry, (str, dict)) for entry in value):
+                return True
+        return False
+
+    return _has_listed_deps(data.get("dependencies")) or _has_listed_deps(
+        data.get("devDependencies")
+    )
 
 
 def validate_apm_package(package_path: Path) -> ValidationResult:
     """Validate that a directory contains a valid APM package or Claude Skill.
 
     Supports six package types:
-    - APM_PACKAGE: Has apm.yml and .apm/ directory
+    - APM_PACKAGE: Has apm.yml (with .apm/ for own primitives, or
+      dep-only as a curated dependency aggregator -- #1094)
     - CLAUDE_SKILL: Has SKILL.md but no apm.yml (auto-generates apm.yml)
     - HOOK_PACKAGE: Has hooks/*.json but no apm.yml or SKILL.md
     - MARKETPLACE_PLUGIN: Has plugin.json or .claude-plugin/ (synthesizes apm.yml)
@@ -322,7 +368,8 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
                 result.add_error(
                     f"Not a valid APM package: {package_path.name} has apm.yml but "
                     "is missing the required .apm/ directory. "
-                    "Add .apm/ with primitives (instructions, skills, etc.) "
+                    "Add .apm/ with primitives (instructions, skills, etc.), "
+                    "declare dependencies in apm.yml (curated aggregator), "
                     "or add skills/<name>/SKILL.md for a skill bundle."
                 )
         else:
@@ -693,11 +740,16 @@ def _validate_apm_package_with_yml(
     # Check for .apm directory
     apm_dir = package_path / APM_DIR
     if not apm_dir.exists():
+        # Dep-only packages (apm.yml with dependencies, no .apm/) are valid
+        # curated aggregators (#1094). Only fail if there are no dependencies
+        # either -- that's the original "unfinished package" diagnostic.
+        if _apm_yml_declares_dependencies(apm_yml_path):
+            return result
         result.add_error(
             f"Missing required directory: {APM_DIR}/ -- "
-            "an APM package with apm.yml needs a .apm/ directory containing "
-            "primitives. Alternatively, add a SKILL.md to make this a skill "
-            "bundle or hybrid package."
+            "an APM package with apm.yml needs either a .apm/ directory "
+            "containing primitives, or dependencies declared in apm.yml. "
+            "Alternatively, add a SKILL.md to make this a skill bundle."
         )
         return result
 

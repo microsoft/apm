@@ -32,7 +32,16 @@ TargetType = Literal["vscode", "claude", "cursor", "opencode", "codex", "gemini"
 # Compiler families used inside a multi-target frozenset. Narrower than
 # TargetType because the families are produced by _resolve_compile_target()
 # (in the compile CLI) from CLI-validated target names.
-CompileFamily = Literal["agents", "claude", "gemini"]
+#
+# Family semantics:
+#   "agents"  -> AGENTS.md is generated (any of copilot/vscode/agents/cursor/
+#                opencode/codex was requested)
+#   "vscode"  -> .github/copilot-instructions.md is generated (only when
+#                copilot/vscode/agents was specifically requested -- NOT for
+#                cursor/opencode/codex which use their own native config files)
+#   "claude"  -> CLAUDE.md is generated
+#   "gemini"  -> GEMINI.md is generated
+CompileFamily = Literal["agents", "vscode", "claude", "gemini"]
 
 # Compile target: either a single TargetType string or a frozenset of compiler
 # families ({"agents", "claude", "gemini"}) for multi-target lists.
@@ -209,6 +218,30 @@ def should_compile_gemini_md(target: CompileTargetType) -> bool:
     return target in ("gemini", "all")
 
 
+def should_compile_copilot_instructions_md(target: CompileTargetType) -> bool:
+    """Check if .github/copilot-instructions.md should be compiled.
+
+    Only the Copilot-native targets (copilot/vscode/agents alias) and "all"
+    trigger generation.  cursor, opencode, and codex use their own native
+    configuration files and must NOT receive copilot-instructions.md, even
+    when combined in a multi-target list.
+
+    Args:
+        target: The detected or configured target. May be a string or a
+            frozenset of compiler families for multi-target lists.
+
+    Returns:
+        bool: True if Copilot root instructions should be generated
+    """
+    if isinstance(target, frozenset):
+        # "vscode" family is added to the frozenset by _resolve_compile_target()
+        # ONLY when copilot/vscode/agents was in the original list. Checking
+        # "agents" would over-fire because cursor/opencode/codex also map to
+        # the "agents" family for AGENTS.md generation.
+        return "vscode" in target
+    return target in ("vscode", "all")
+
+
 def get_target_description(target: UserTargetType) -> str:
     """Get a human-readable description of what will be generated for a target.
 
@@ -223,14 +256,14 @@ def get_target_description(target: UserTargetType) -> str:
     # Normalize aliases to internal value for lookup
     normalized = "vscode" if target in ("copilot", "agents") else target
     descriptions = {
-        "vscode": "AGENTS.md + .github/prompts/ + .github/agents/",
+        "vscode": "AGENTS.md + .github/copilot-instructions.md + .github/prompts/ + .github/agents/",
         "claude": "CLAUDE.md + .claude/commands/ + .claude/agents/ + .claude/skills/",
         "cursor": ".cursor/agents/ + .cursor/skills/ + .cursor/rules/",
         "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .opencode/skills/",
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
         "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
-        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .agents/",
-        "minimal": "AGENTS.md only (create a target folder for full integration)",
+        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .agents/",
+        "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }
     return descriptions.get(normalized, "unknown target")
 

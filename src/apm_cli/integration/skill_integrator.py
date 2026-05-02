@@ -1092,7 +1092,7 @@ class SkillIntegrator(BaseIntegrator):
                 target_paths=sub_deployed,
             )
 
-        # Skip virtual FILE and COLLECTION packages - they're individual files, not full packages
+        # Skip virtual FILE packages - they're individual files, not full packages
         # Multiple virtual files from the same repo would collide on skill name
         # BUT: subdirectory packages (like Claude Skills) SHOULD generate skills
         if package_info.dependency_ref and package_info.dependency_ref.is_virtual:

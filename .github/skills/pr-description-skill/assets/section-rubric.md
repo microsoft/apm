@@ -99,10 +99,29 @@
 
 - Acceptance: real CLI output, verbatim. Commands named on the
   line immediately preceding their fenced block. Long transcripts
-  wrapped in `<details>`.
+  wrapped in `<details>`. **Includes the Scenario Evidence
+  subsection** (see below) for any PR that changes behavior.
 - Refuse: invented or stylized output; output excerpts that hide
   failures with `...`; narration of what the command "would print"
   in place of the actual output.
+
+### 9b. Scenario Evidence (subsection of Validation)
+
+- Acceptance: a table with columns `#`, `Scenario (user promise)`,
+  `Principle(s)`, `Test(s) proving it`, `Type`. Each scenario row
+  is in USER words (not implementation words), names at least one
+  APM principle from the taxonomy in
+  `assets/scenario-evidence-rubric.md`, and points at a real test
+  file path (ideally with `::test_name` or line range). Bug-fix
+  PRs include the regression-trap test row tagged with the issue
+  it would have caught.
+- Refuse: empty Principle column; implementation-language
+  scenarios ("`_helper_func` returns early when X"); "added N
+  tests" without naming the user scenarios each proves;
+  cross-module behavior change with NO integration-type row;
+  security scenario proven by mocking the security boundary.
+- Skip clause: only for docs-only / asset-bump-only / pure-refactor
+  PRs. Author MUST state which skip case applies in trade-offs.
 
 ## 10. How to test
 
@@ -130,6 +149,9 @@ validation block.
 ## Final pass -- run before saving
 
 - [ ] All 10 sections present.
+- [ ] **Scenario Evidence table present in Validation** (or skip
+      clause justified in trade-offs per
+      `assets/scenario-evidence-rubric.md`).
 - [ ] Total body length within 150-220 lines (250+ triggers
       tightening).
 - [ ] No `<PLACEHOLDER>`, `TBD`, or `TODO` remains.

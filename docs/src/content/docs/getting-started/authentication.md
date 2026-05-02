@@ -20,6 +20,8 @@ Results are cached per-process — the same `(host, org)` pair is resolved once.
 
 All token-bearing requests use HTTPS. Tokens are never sent over unencrypted connections.
 
+`apm install <package>` validation walks the same chain as the actual install: an authenticated attempt with the resolved token first, then a credential-helper fallback (plain HTTPS where the system credential helper provides the token). This means `apm install` from the CLI never rejects a package the lockfile-driven install would accept -- useful when an env-var PAT has narrower SSO/EMU access than the token your `gh auth setup-git` / OS keychain has cached.
+
 ## Token lookup
 
 | Priority | Variable | Scope | Notes |

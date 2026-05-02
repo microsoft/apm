@@ -413,15 +413,17 @@ class TestFromLockfilePath:
             from_lockfile_path("relative/path.md", tmp_path)
 
     def test_traversal_via_url_encoding_rejected(self, tmp_path: Path) -> None:
-        # URL-encoded ".." (%2e%2e) -- the implementation does NOT decode
-        # URL-encoded sequences so the literal "%2e%2e" segment is not ".."
-        # and is not rejected by validate_path_segments. Document current
-        # behavior: it returns a path (no exception).
-        result = from_lockfile_path("cowork://skills/%2e%2e/etc/passwd", tmp_path)
-        # Current behavior: the literal %2e%2e is treated as a dir name.
-        assert isinstance(result, Path)
-        # NOTE: potential security gap -- URL-encoded traversal sequences
-        # are not decoded/rejected. Reported as implementation observation.
+        # Round 4 panel (supply-chain required): URL-encoded ".." (%2e%2e) and
+        # multi-encoded variants must be rejected by validate_path_segments,
+        # not silently accepted as literal directory names. The guard now
+        # iteratively unquotes each segment so percent-encoded traversal
+        # markers cannot bypass the reject set.
+        from apm_cli.utils.path_security import PathTraversalError
+
+        with pytest.raises(PathTraversalError):
+            from_lockfile_path("cowork://skills/%2e%2e/etc/passwd", tmp_path)
+        with pytest.raises(PathTraversalError):
+            from_lockfile_path("cowork://skills/%252e%252e/etc/passwd", tmp_path)
 
 
 # ---------------------------------------------------------------------------
