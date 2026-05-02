@@ -523,11 +523,16 @@ APM configures MCP servers in the native config format for each supported client
 | GitHub Copilot CLI | `~/.copilot/mcp-config.json` | JSON `mcpServers` object |
 | Codex CLI (project) | `.codex/config.toml` | TOML `mcp_servers` section |
 | Codex CLI (`--global`) | `~/.codex/config.toml` | TOML `mcp_servers` section |
-| Claude | `.claude/settings.json` | JSON `mcpServers` object |
+| Claude Code (project) | `.mcp.json` | JSON `mcpServers` object (opt-in: requires `.claude/`) |
+| Claude Code (`-g`/`--global`) | `~/.claude.json` | JSON `mcpServers` object (atomic write; `0o600` on first create) |
 | Cursor | `.cursor/mcp.json` | JSON `mcpServers` object |
 | Gemini CLI | `.gemini/settings.json` | JSON `mcpServers` object |
 
-**Runtime targeting**: APM detects which runtimes are installed and configures MCP servers for all of them. Use `--runtime <name>` or `--exclude <name>` to control which clients receive configuration.
+**Runtime targeting**: APM detects which runtimes are installed and configures MCP servers for all of them. Use `--runtime <name>` or `--exclude <name>` to control which clients receive configuration. Supported runtime names: `copilot`, `codex`, `vscode`, `cursor`, `opencode`, `gemini`, `claude`.
+
+**Claude Code detection**: APM considers Claude Code available when either the `claude` CLI command is on PATH **or** a `.claude/` directory exists in the resolved project root. Project-scope writes are gated on `.claude/` being present (mirroring Cursor / OpenCode), so `apm install` will not create `.mcp.json` until you opt in by creating the directory.
+
+**Claude Code scopes**: Claude Code itself supports three scopes -- LOCAL (the default for `claude mcp add`, per-project private under `~/.claude.json -> projects.<path>.mcpServers`), PROJECT (`.mcp.json`, VCS-shared), and USER (`~/.claude.json` top-level `mcpServers`, cross-project). APM intentionally targets PROJECT and USER (mapping to `apm install` and `apm install -g/--global`) and does not implement LOCAL: APM packages are designed for reproducible team installs, which aligns with PROJECT (shared via VCS) and USER (private but cross-project), not LOCAL (private to one user, one project).
 
 **Codex CLI**: Project installs write MCP configuration to `.codex/config.toml` only when Codex is an active project target. `--global` installs write to `~/.codex/config.toml`.
 

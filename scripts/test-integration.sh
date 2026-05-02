@@ -413,6 +413,18 @@ run_e2e_tests() {
         exit 1
     fi
 
+    # Run Claude Code MCP schema-fidelity tests -- offline, golden fixtures
+    # captured from the upstream `claude` CLI (see fixtures/README.md)
+    log_info "Running Claude Code MCP schema-fidelity tests..."
+    echo "Command: pytest tests/integration/test_claude_mcp_schema_fidelity.py -v -s --tb=short"
+
+    if pytest tests/integration/test_claude_mcp_schema_fidelity.py -v -s --tb=short; then
+        log_success "Claude Code MCP schema-fidelity tests passed!"
+    else
+        log_error "Claude Code MCP schema-fidelity tests failed!"
+        exit 1
+    fi
+
     # Run local-bundle install E2E tests -- offline, no tokens needed
     log_info "Running local-bundle install E2E tests..."
     echo "Command: pytest tests/integration/test_install_local_bundle_e2e.py -v -s --tb=short"

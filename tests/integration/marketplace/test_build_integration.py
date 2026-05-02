@@ -100,16 +100,16 @@ class TestBuildGoldenFile:
             assert keys[-1] == "source"
 
     def test_source_key_order(self, tmp_path: Path, mock_ref_resolver_golden):
-        """Each source block must follow: type, repository, (path), ref, commit."""
+        """Each source block must follow: source, repo/url, (path), ref, sha."""
         _write_yml(tmp_path, GOLDEN_YML)
         builder = MarketplaceBuilder(tmp_path / "marketplace.yml")
         builder.build()
 
         data = _read_json(tmp_path)
-        # test-generator has subdir -> path must appear between repository and ref
+        # test-generator has subdir -> path must appear between url and ref
         tg = next(p for p in data["plugins"] if p["name"] == "test-generator")
         src_keys = list(tg["source"].keys())
-        assert src_keys == ["type", "repository", "path", "ref", "commit"]
+        assert src_keys == ["source", "url", "path", "ref", "sha"]
 
     def test_no_apm_only_keys_in_output(self, tmp_path: Path, mock_ref_resolver_golden):
         """APM-only fields must not appear in marketplace.json."""
@@ -158,7 +158,7 @@ class TestBuildHappyPath:
 
         data = _read_json(tmp_path)
         for plugin in data["plugins"]:
-            sha = plugin["source"]["commit"]
+            sha = plugin["source"]["sha"]
             assert len(sha) == 40, f"Expected 40-char SHA, got {sha!r}"
             assert all(c in "0123456789abcdef" for c in sha)
 

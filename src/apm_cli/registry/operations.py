@@ -162,6 +162,17 @@ class MCPServerOperations:
                                     if server_id:
                                         installed_ids.add(server_id)
 
+                    elif runtime == "claude":
+                        # Claude Code stores servers under top-level mcpServers in either
+                        # project .mcp.json or user ~/.claude.json -- the adapter normalizes
+                        # both shapes to {"mcpServers": {...}} via get_current_config.
+                        mcp_servers = config.get("mcpServers", {})
+                        for server_name, server_config in mcp_servers.items():  # noqa: B007
+                            if isinstance(server_config, dict):
+                                server_id = server_config.get("id")
+                                if server_id:
+                                    installed_ids.add(server_id)
+
             except Exception:  # noqa: S112
                 # If we can't read a runtime's config, skip it
                 continue

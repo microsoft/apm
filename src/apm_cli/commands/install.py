@@ -793,7 +793,12 @@ def _handle_mcp_install(
     help="Install APM and MCP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json); auto-creates apm.yml; use --allow-insecure for http:// packages)"
 )
 @click.argument("packages", nargs=-1)
-@click.option("--runtime", help="Target specific runtime only (copilot, codex, vscode)")
+@click.option(
+    "--runtime",
+    help=(
+        "Target specific runtime only (copilot, codex, vscode, cursor, opencode, gemini, claude)"
+    ),
+)
 @click.option("--exclude", help="Exclude specific runtime from installation")
 @click.option(
     "--only",

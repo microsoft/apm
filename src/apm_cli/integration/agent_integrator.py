@@ -277,7 +277,7 @@ class AgentIntegrator(BaseIntegrator):
     # Windsurf agent-skill transformer (agent.md -> skills/<name>/SKILL.md)
     # ------------------------------------------------------------------
 
-    def _write_windsurf_agent_skill(self, source: Path, target: Path) -> int:
+    def _write_windsurf_agent_skill(self, source: Path, target: Path) -> int:  # not @staticmethod: needs self.resolve_links()
         """Transform an ``.agent.md`` file to a Windsurf Skill (``SKILL.md``).
 
         Windsurf Skills are the closest equivalent to a specialist persona:

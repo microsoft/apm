@@ -101,9 +101,9 @@ Set `MCP_REGISTRY_URL` (default `https://api.mcp.github.com`) to point all `apm 
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm runtime setup {copilot\|codex\|llm\|gemini}` | Install a runtime | `--version`, `--vanilla` |
+| `apm runtime setup {copilot\|codex\|llm\|gemini\|windsurf}` | Install a runtime | `--version`, `--vanilla` |
 | `apm runtime list` | Show installed runtimes | -- |
-| `apm runtime remove {copilot\|codex\|llm\|gemini}` | Remove a runtime | `-y`, `--yes` |
+| `apm runtime remove {copilot\|codex\|llm\|gemini\|windsurf}` | Remove a runtime | `-y`, `--yes` |
 | `apm runtime status` | Show active runtime | -- |
 
 ## Experimental features

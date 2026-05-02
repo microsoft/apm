@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Set  # noqa: F401, UP035
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
+from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
@@ -100,11 +101,6 @@ class InstructionIntegrator(BaseIntegrator):
         target_paths: list[Path] = []
         total_links_resolved = 0
 
-        # Security: reject paths that escape deploy_dir (package-controlled stem).
-        # Validated against deploy_dir (not project_root) so user-scope targets
-        # whose root resolves outside the workspace still work correctly.
-        from apm_cli.utils.path_security import ensure_path_within
-
         for source_file in instruction_files:
             if needs_rename:
                 stem = source_file.name
@@ -115,6 +111,10 @@ class InstructionIntegrator(BaseIntegrator):
                 target_name = source_file.name
 
             target_path = deploy_dir / target_name
+            # target_name is Path.name (no separators), so traversal via
+            # deploy_dir is impossible.  Validated against deploy_dir (not
+            # project_root) so user-scope targets whose root resolves
+            # outside the workspace still work correctly.
             ensure_path_within(target_path, deploy_dir)
 
             rel_path = portable_relpath(target_path, project_root)
@@ -340,25 +340,27 @@ class InstructionIntegrator(BaseIntegrator):
     def _convert_to_windsurf_rules(content: str) -> str:
         """Convert APM instruction content to Windsurf rules ``.md`` format.
 
-        Parses existing YAML frontmatter, maps ``applyTo`` to Windsurf's
-        ``trigger: glob`` + ``globs`` frontmatter.  Instructions without
-        ``applyTo`` become ``trigger: always_on`` rules.
+        Parses existing YAML frontmatter via ``yaml.safe_load``, maps
+        ``applyTo`` to Windsurf's ``trigger: glob`` + ``globs`` frontmatter.
+        Instructions without ``applyTo`` become ``trigger: always_on`` rules.
 
         Ref: https://docs.windsurf.com/windsurf/cascade/memories
         """
+        import yaml
+
         body = content
         apply_to = ""
 
-        # Parse existing frontmatter
+        # Parse existing frontmatter with yaml.safe_load (consistent with
+        # _write_windsurf_agent_skill and all other frontmatter parsers).
         fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
         if fm_match:
-            fm_block = fm_match.group(1)
             body = content[fm_match.end() :]
-
-            for line in fm_block.splitlines():
-                line_stripped = line.strip()
-                if line_stripped.startswith("applyTo:"):
-                    apply_to = line_stripped[len("applyTo:") :].strip().strip("'\"")
+            try:
+                fm = yaml.safe_load(fm_match.group(1)) or {}
+            except Exception:
+                fm = {}
+            apply_to = str(fm.get("applyTo", "")).strip()
 
         # Build Windsurf rules frontmatter
         parts = ["---"]
