@@ -151,6 +151,38 @@ def install_local_bundle(
             existing_hashes = dict(lockfile.local_deployed_file_hashes)
             existing_hashes.update(deployed_hashes)
             lockfile.local_deployed_file_hashes = existing_hashes
+
+            # Auto-migrate legacy per-client skill paths (#737).
+            # After deploying new .agents/skills/ files, detect and clean up
+            # any legacy paths (e.g. .github/skills/) still recorded in the
+            # lockfile from a previous --legacy-skill-paths install.
+            if not legacy_skill_paths:
+                from ..utils.console import _rich_info, _rich_warning
+                from .skill_path_migration import (
+                    check_collisions as _check_coll,
+                )
+                from .skill_path_migration import (
+                    detect_legacy_skill_deployments as _detect_legacy,
+                )
+                from .skill_path_migration import (
+                    execute_migration as _exec_mig,
+                )
+
+                _plans = _detect_legacy(lockfile, project_root)
+                if _plans:
+                    _colls = _check_coll(_plans, project_root)
+                    if _colls:
+                        _rich_warning(
+                            f"Skill path migration: {len(_colls)} collision(s), skipping"
+                        )
+                    else:
+                        _mig_result = _exec_mig(_plans, lockfile, project_root)
+                        _total = len(_mig_result.deleted) + len(_mig_result.skipped_no_file)
+                        if _total:
+                            _rich_info(
+                                f"Migrated {_total} skill file(s) from legacy paths to .agents/skills/"
+                            )
+
             lockfile.write(lockfile_path)
 
         msg = f"Installed {len(deployed)} file(s) from local bundle"

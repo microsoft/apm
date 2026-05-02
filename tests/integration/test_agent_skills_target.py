@@ -662,3 +662,104 @@ def test_install_legacy_flag_via_env_var(tmp_path: Path, monkeypatch: pytest.Mon
     ):
         deployed = project / client_dir / SKILL_NAME / "SKILL.md"
         assert deployed.is_file(), f"expected skill at {deployed} with APM_LEGACY_SKILL_PATHS=1"
+
+
+# ---------------------------------------------------------------------------
+# Auto-migration integration tests (#737 phase 2)
+# ---------------------------------------------------------------------------
+
+
+def test_auto_migration_removes_legacy_skill_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After a legacy install, a normal re-install auto-migrates skills.
+
+    1. First install with ``--legacy-skill-paths`` + ``--target copilot``
+       → ``.github/skills/…`` populated.
+    2. Second install (default, no legacy flag) → legacy ``.github/skills/``
+       deleted, ``.agents/skills/`` populated, lockfile updated.
+    """
+    bundle = _make_plugin_bundle(tmp_path / "src", pack_target="copilot")
+    project = _make_project(tmp_path / "dst")
+
+    # --- First install: legacy mode ---
+    monkeypatch.setenv("APM_LEGACY_SKILL_PATHS", "1")
+    r1 = _invoke(project, ["install", str(bundle), "--target", "copilot"], monkeypatch)
+    assert r1.exit_code == 0, f"legacy install failed: {r1.output!r}"
+    assert (project / ".github/skills" / SKILL_NAME / "SKILL.md").is_file()
+
+    # --- Second install: converged mode (no legacy flag) ---
+    monkeypatch.delenv("APM_LEGACY_SKILL_PATHS", raising=False)
+    r2 = _invoke(project, ["install", str(bundle), "--target", "copilot"], monkeypatch)
+    assert r2.exit_code == 0, f"migration install failed: {r2.output!r}"
+
+    # New location exists:
+    assert (project / ".agents/skills" / SKILL_NAME / "SKILL.md").is_file()
+    # Old location removed:
+    assert not (project / ".github/skills" / SKILL_NAME / "SKILL.md").exists()
+
+
+def test_auto_migration_updates_lockfile_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Lockfile local_deployed_files should reference .agents/ after migration."""
+    bundle = _make_plugin_bundle(tmp_path / "src", pack_target="copilot")
+    project = _make_project(tmp_path / "dst")
+
+    # Legacy install:
+    monkeypatch.setenv("APM_LEGACY_SKILL_PATHS", "1")
+    _invoke(project, ["install", str(bundle), "--target", "copilot"], monkeypatch)
+
+    # Converged install:
+    monkeypatch.delenv("APM_LEGACY_SKILL_PATHS", raising=False)
+    _invoke(project, ["install", str(bundle), "--target", "copilot"], monkeypatch)
+
+    # Check lockfile -- local bundles use local_deployed_files, not dependencies.
+    lock_path = project / "apm.lock.yaml"
+    assert lock_path.is_file()
+    lock_data = yaml.safe_load(lock_path.read_text())
+    local_files = lock_data.get("local_deployed_files") or []
+    # Should have .agents path, should NOT have .github legacy path:
+    assert any(".agents/skills/" in f for f in local_files), f"local_files={local_files}"
+    assert not any(".github/skills/" in f for f in local_files), f"local_files={local_files}"
+
+
+def test_auto_migration_skipped_with_legacy_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When ``APM_LEGACY_SKILL_PATHS=1`` persists, no migration occurs."""
+    bundle = _make_plugin_bundle(tmp_path / "src", pack_target="copilot")
+    project = _make_project(tmp_path / "dst")
+
+    monkeypatch.setenv("APM_LEGACY_SKILL_PATHS", "1")
+
+    # First install:
+    _invoke(project, ["install", str(bundle), "--target", "copilot"], monkeypatch)
+    assert (project / ".github/skills" / SKILL_NAME / "SKILL.md").is_file()
+
+    # Second install -- still legacy:
+    _invoke(project, ["install", str(bundle), "--target", "copilot"], monkeypatch)
+    assert (project / ".github/skills" / SKILL_NAME / "SKILL.md").is_file()
+
+
+def test_auto_migration_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Running migration twice is a no-op the second time."""
+    bundle = _make_plugin_bundle(tmp_path / "src", pack_target="copilot")
+    project = _make_project(tmp_path / "dst")
+
+    # Legacy install:
+    monkeypatch.setenv("APM_LEGACY_SKILL_PATHS", "1")
+    _invoke(project, ["install", str(bundle), "--target", "copilot"], monkeypatch)
+
+    # First converged install (triggers migration):
+    monkeypatch.delenv("APM_LEGACY_SKILL_PATHS", raising=False)
+    _invoke(project, ["install", str(bundle), "--target", "copilot"], monkeypatch)
+
+    # Second converged install (should be no-op for migration):
+    r3 = _invoke(project, ["install", str(bundle), "--target", "copilot"], monkeypatch)
+    assert r3.exit_code == 0
+    assert (project / ".agents/skills" / SKILL_NAME / "SKILL.md").is_file()
+    # Migration message should NOT appear (nothing to migrate):
+    assert "Migrated" not in (r3.output or "")

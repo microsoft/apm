@@ -451,6 +451,49 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
 
         _cleanup_phase.run(ctx)
 
+        # ------------------------------------------------------------------
+        # Phase: Skill path auto-migration (#737)
+        # After integrate wrote new .agents/skills/ files and cleanup
+        # removed orphans, migrate any legacy per-client skill paths
+        # still recorded in the lockfile (e.g. .github/skills/ ->
+        # .agents/skills/).  Mutates existing_lockfile.deployed_files
+        # in place so the downstream lockfile phase persists the new paths.
+        # Skipped when --legacy-skill-paths is active (opt-out).
+        # ------------------------------------------------------------------
+        if not ctx.legacy_skill_paths and ctx.existing_lockfile:
+            from apm_cli.utils.console import _rich_info, _rich_warning
+
+            from .skill_path_migration import (
+                check_collisions,
+                detect_legacy_skill_deployments,
+                execute_migration,
+            )
+
+            _migration_plans = detect_legacy_skill_deployments(
+                ctx.existing_lockfile, ctx.project_root
+            )
+            if _migration_plans:
+                _collisions = check_collisions(_migration_plans, ctx.project_root)
+                if _collisions:
+                    _rich_warning(
+                        f"Skill path migration: {len(_collisions)} collision(s) detected, skipping auto-migration"
+                    )
+                    for _c in _collisions:
+                        _rich_warning(f"  collision: {_c}")
+                else:
+                    _migration_result = execute_migration(
+                        _migration_plans, ctx.existing_lockfile, ctx.project_root
+                    )
+                    _total = len(_migration_result.deleted) + len(_migration_result.skipped_no_file)
+                    if _total > 0:
+                        _rich_info(
+                            f"Migrated {_total} skill file(s) from legacy per-client paths to .agents/skills/"
+                        )
+                    if _migration_result.failed:
+                        _rich_warning(
+                            f"  {len(_migration_result.failed)} file(s) could not be deleted (will retry next install)"
+                        )
+
         # Generate apm.lock for reproducible installs (T4: lockfile generation)
         from .phases.lockfile import LockfileBuilder
 
