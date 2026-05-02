@@ -35,6 +35,12 @@ dependencies:
     - ../sibling-repo/my-package
 ```
 
+**Local-path anchor rule:** a `local_path` declared INSIDE another local
+package is resolved relative to THAT package's own directory (npm/pip/cargo
+parity). The resolved path must stay inside the consuming project root --
+escaping it (e.g. via too many `..`) is rejected with a red error. Remote
+packages cannot declare `local_path` deps at all.
+
 ### Custom git ports
 
 Non-default git ports are preserved on `https://`, `http://`, and `ssh://` URLs

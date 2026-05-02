@@ -470,3 +470,68 @@ class TestDependencyGraphDataStructures(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ===========================================================================
+# #857 / #940 v2 regression: parent_pkg threading + dual-reject
+# ===========================================================================
+
+
+class TestIsRemoteParentHeuristic(unittest.TestCase):
+    """_is_remote_parent must NOT misclassify _local/<name> as remote (#940)."""
+
+    def setUp(self):
+        from apm_cli.deps.apm_resolver import APMDependencyResolver
+
+        self.resolver = APMDependencyResolver()
+
+    def test_local_underscore_prefix_is_local(self):
+        from apm_cli.models.apm_package import APMPackage
+
+        pkg = APMPackage(name="specialized", version="1.0.0")
+        pkg.source = "_local/specialized"
+        self.assertFalse(self.resolver._is_remote_parent(pkg))
+
+    def test_owner_repo_slash_is_remote(self):
+        from apm_cli.models.apm_package import APMPackage
+
+        pkg = APMPackage(name="thing", version="1.0.0")
+        pkg.source = "microsoft/apm-sample-package"
+        self.assertTrue(self.resolver._is_remote_parent(pkg))
+
+    def test_no_source_is_local(self):
+        from apm_cli.models.apm_package import APMPackage
+
+        pkg = APMPackage(name="root", version="1.0.0")
+        self.assertFalse(self.resolver._is_remote_parent(pkg))
+
+
+class TestSignatureFallback(unittest.TestCase):
+    """_signature_accepts_parent_pkg falls back to False on failure (SR1)."""
+
+    def test_callable_without_introspectable_signature(self):
+        from apm_cli.deps.apm_resolver import APMDependencyResolver
+
+        resolver = APMDependencyResolver()
+        # Built-ins typically raise ValueError on inspect.signature.
+        self.assertFalse(resolver._signature_accepts_parent_pkg(len))
+
+    def test_callback_with_parent_pkg(self):
+        from apm_cli.deps.apm_resolver import APMDependencyResolver
+
+        resolver = APMDependencyResolver()
+
+        def cb(dep_ref, modules_dir, parent_chain="", parent_pkg=None):
+            return None
+
+        self.assertTrue(resolver._signature_accepts_parent_pkg(cb))
+
+    def test_legacy_callback_without_parent_pkg(self):
+        from apm_cli.deps.apm_resolver import APMDependencyResolver
+
+        resolver = APMDependencyResolver()
+
+        def cb(dep_ref, modules_dir, parent_chain=""):
+            return None
+
+        self.assertFalse(resolver._signature_accepts_parent_pkg(cb))

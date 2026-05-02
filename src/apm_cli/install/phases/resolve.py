@@ -114,7 +114,7 @@ def run(ctx: InstallContext) -> None:
     logger = ctx.logger
     verbose = ctx.verbose  # noqa: F841
 
-    def download_callback(dep_ref, modules_dir, parent_chain=""):
+    def download_callback(dep_ref, modules_dir, parent_chain="", parent_pkg=None):
         """Download a package during dependency resolution.
 
         Args:
@@ -122,6 +122,11 @@ def run(ctx: InstallContext) -> None:
             modules_dir: Target apm_modules directory.
             parent_chain: Human-readable breadcrumb (e.g. "root > mid")
                 showing which dependency path led to this transitive dep.
+            parent_pkg: APMPackage that declared *dep_ref*, or None for direct
+                deps from the root project. For local deps we use its
+                ``source_path`` as the anchor for relative paths so a
+                transitive ``../sibling`` resolves against the declaring
+                package's directory rather than the root consumer (#857).
         """
         install_path = dep_ref.get_install_path(modules_dir)
         if install_path.exists():
@@ -140,8 +145,20 @@ def run(ctx: InstallContext) -> None:
                     # so use .add() rather than dict-style assignment.
                     callback_failures.add(dep_ref.get_unique_key())
                     return None
+                # Anchor relative paths on the *declaring* package's source
+                # directory when available (#857). Falls back to project_root
+                # for direct deps and for parents that predate source_path.
+                base_dir = (
+                    parent_pkg.source_path
+                    if parent_pkg is not None and parent_pkg.source_path is not None
+                    else project_root
+                )
                 result_path = _copy_local_package(
-                    dep_ref, install_path, project_root, logger=logger
+                    dep_ref,
+                    install_path,
+                    base_dir,
+                    project_root=project_root,
+                    logger=logger,
                 )
                 if result_path:
                     callback_downloaded[dep_ref.get_unique_key()] = None
@@ -302,6 +319,34 @@ def run(ctx: InstallContext) -> None:
     )
 
     ctx.deps_to_install = deps_to_install
+
+    # ------------------------------------------------------------------
+    # 7.5 Build dep_key -> parent source_path map for transitive locals
+    # ------------------------------------------------------------------
+    # Local deps declared by a transitive parent must be anchored on the
+    # parent's source dir, not on the consumer's project root (#857). We
+    # walk the dependency tree once here and stash the per-dep base_dir
+    # for the integrate phase to consume.
+    dep_base_dirs: builtins.dict[str, Path] = {}
+    try:
+        tree = dependency_graph.dependency_tree
+        for node in tree.nodes.values():
+            parent_node = node.parent
+            if parent_node is None or parent_node.package is None:
+                continue
+            anchor = (
+                parent_node.package.source_path
+                if parent_node.package.source_path is not None
+                else project_root
+            )
+            dep_base_dirs[node.dependency_ref.get_unique_key()] = anchor
+    except (AttributeError, KeyError):
+        # Tree shape may differ across releases; fall back to empty map
+        # (callers default to project_root anchoring, matching legacy).
+        # Narrow set: real bugs (TypeError/NameError) should surface, not
+        # silently degrade to legacy anchoring.
+        dep_base_dirs = {}
+    ctx.dep_base_dirs = dep_base_dirs
 
     # ------------------------------------------------------------------
     # 8. Orphan detection: intended_dep_keys
