@@ -91,7 +91,7 @@ apm install [PACKAGES...] [OPTIONS]
 - `--runtime TEXT` - Target specific runtime only (copilot, codex, gemini, vscode)
 - `--exclude TEXT` - Exclude specific runtime from installation
 - `--only [apm|mcp]` - Install only specific dependency type
-- `--target [copilot|claude|cursor|codex|opencode|gemini|copilot-cowork|all]` - Force deployment to specific target(s). Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Overrides auto-detection
+- `--target [copilot|claude|cursor|codex|opencode|gemini|agent-skills|copilot-cowork|all]` - Force deployment to specific target(s). Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Overrides auto-detection. `agent-skills` deploys to `.agents/skills/` (cross-client). `all` = copilot+claude+cursor+opencode+codex+gemini (excludes agent-skills); combine with `agent-skills` for both.
   - `copilot-cowork` - Microsoft 365 Copilot Cowork skills (user scope only, requires `copilot-cowork` experimental flag)
 - `--update` - Update dependencies to latest Git references  
 - `--force` - Overwrite locally-authored files on collision; bypass security scan blocks
@@ -1015,7 +1015,7 @@ apm deps update [PACKAGES...] [OPTIONS]
 - `--verbose, -v` - Show detailed update information
 - `--force` - Overwrite locally-authored files on collision
 - `-g, --global` - Update user-scope dependencies (`~/.apm/`)
-- `--target, -t` - Force deployment to specific target(s). Accepts comma-separated values (e.g., `-t claude,copilot`). Valid values: copilot, claude, cursor, opencode, gemini, vscode, agents, all
+- `--target, -t` - Force deployment to specific target(s). Accepts comma-separated values (e.g., `-t claude,copilot`). Valid values: copilot, claude, cursor, opencode, codex, gemini, agent-skills, vscode, agents (deprecated), all. `agent-skills` deploys to `.agents/skills/` (cross-client). `all` excludes agent-skills.
 - `--parallel-downloads` - Max concurrent downloads (default: 4)
 
 **Policy enforcement:** `apm deps update` runs the install pipeline and is therefore gated by org `apm-policy.yml`. There is no `--no-policy` flag on this command -- the only escape hatch is `APM_POLICY_DISABLE=1` for the shell session. See [Policy reference](../../enterprise/policy-reference/#install-time-enforcement).
@@ -1689,7 +1689,7 @@ apm compile [OPTIONS]
 
 **Options:**
 - `-o, --output TEXT` - Output file path (for single-file mode)
-- `-t, --target [vscode|agents|claude|codex|opencode|gemini|all]` - Target agent format. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). `agents` is an alias for `vscode`. Auto-detects if not specified.
+- `-t, --target [vscode|agents|claude|codex|opencode|gemini|agent-skills|all]` - Target agent format. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). `agents` is a deprecated alias for `vscode`. `agent-skills` is a no-op for compile (skills-only target). Auto-detects if not specified.
 - `--chatmode TEXT` - Chatmode to prepend to the AGENTS.md file
 - `--dry-run` - Preview compilation without writing files (shows placement decisions)
 - `--no-links` - Skip markdown link resolution
@@ -1736,7 +1736,9 @@ target: [claude, copilot]  # multiple targets -- only these are compiled/install
 | `codex` | AGENTS.md, .agents/skills/, .codex/agents/, .codex/hooks.json | Codex CLI |
 | `opencode` | AGENTS.md, .opencode/agents/, .opencode/commands/, .opencode/skills/ | OpenCode |
 | `gemini` | GEMINI.md, .gemini/commands/, .gemini/skills/ | Gemini CLI |
-| `all` | All of the above | Universal compatibility |
+| `agent-skills` | .agents/skills/ only | Cross-client shared skills |
+| `agents` | *(deprecated)* alias for `vscode` | Use `copilot` or `agent-skills` instead |
+| `all` | All of the above (excludes `agent-skills`) | Universal compatibility |
 
 **Examples:**
 ```bash

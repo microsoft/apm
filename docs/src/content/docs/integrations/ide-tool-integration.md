@@ -227,7 +227,7 @@ APM natively integrates with OpenCode when a `.opencode/` directory exists in yo
 
 **Setup**: Create a `.codex/` directory in your project root, then run `apm install`. APM detects the directory and deploys automatically.
 
-> **Note**: Skills deploy to `.agents/skills/` (the cross-tool agent skills standard directory), not `.codex/skills/`. Agents are transformed from `.agent.md` Markdown to `.toml` format.
+> **Note**: Skills deploy to `.agents/skills/` (the cross-tool agent skills standard directory), not `.codex/skills/`. Agents are transformed from `.agent.md` Markdown to `.toml` format. Use `--target agent-skills` to deploy skills to `.agents/skills/` without also setting up `.codex/` (see [Cross-client deployment](../../guides/skills/#cross-client-deployment-agent-skills)).
 
 #### Gemini CLI (`.gemini/`)
 

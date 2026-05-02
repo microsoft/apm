@@ -310,6 +310,25 @@ APM automatically detects package types:
 
 APM deploys skills to every target directory that already exists: `.github/`, `.claude/`, `.cursor/`, `.opencode/`. For Codex (`.codex/`), skills deploy to `.agents/skills/` instead. If no target directories exist, `.github/` is created as the fallback.
 
+### Cross-client deployment (`agent-skills`)
+
+Use `--target agent-skills` to deploy skills to `.agents/skills/` without tying them to a specific client. This is the [agentskills.io](https://agentskills.io) standard directory that Codex, and other tools read from.
+
+```bash
+# Project-scope deploy
+apm install --target agent-skills
+# Result: .agents/skills/<package-name>/SKILL.md
+
+# User-scope deploy
+apm install -g --target agent-skills
+# Result: ~/.agents/skills/<package-name>/SKILL.md
+
+# Combined with a client target (Codex) -- APM dedups the shared path
+apm install --target codex,agent-skills
+```
+
+`agent-skills` is **not** included in `--target all` because it is a cross-client deploy location, not a single client. Combine explicitly: `--target all,agent-skills`.
+
 Override with:
 ```bash
 apm install skill-name --target claude

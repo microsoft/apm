@@ -437,9 +437,10 @@ class TestTargetParamType:
             assert name in VALID_TARGET_VALUES
 
     def test_valid_target_values_includes_aliases(self):
-        """VALID_TARGET_VALUES contains user-facing aliases."""
+        """VALID_TARGET_VALUES contains user-facing aliases and explicit-only targets."""
         for name in ("copilot", "agents"):
             assert name in VALID_TARGET_VALUES
+        assert "agent-skills" in VALID_TARGET_VALUES
 
     def test_valid_target_values_includes_all(self):
         """VALID_TARGET_VALUES contains 'all'."""
@@ -466,7 +467,8 @@ class TestTargetParamType:
     def test_list_input_collapses_aliases_to_string(self):
         """Multi-element list whose entries all alias to one canonical
         target collapses to that single canonical name (``"vscode"``)."""
-        assert self.tp.convert(["copilot", "agents"], None, None) == "vscode"
+        with pytest.warns(DeprecationWarning, match="--target agents"):
+            assert self.tp.convert(["copilot", "agents"], None, None) == "vscode"
 
     # -- Single target (backward compat: returns string) ------------------
 
@@ -489,7 +491,8 @@ class TestTargetParamType:
         assert self.tp.convert("codex", None, None) == "codex"
 
     def test_single_agents(self):
-        assert self.tp.convert("agents", None, None) == "agents"
+        with pytest.warns(DeprecationWarning, match="--target agents"):
+            assert self.tp.convert("agents", None, None) == "agents"
 
     def test_single_all(self):
         """'all' returns string 'all' for backward compat."""
@@ -543,12 +546,14 @@ class TestTargetParamType:
 
     def test_copilot_agents_deduplicates(self):
         """copilot,agents → 'vscode' (both alias to same canonical)."""
-        result = self.tp.convert("copilot,agents", None, None)
+        with pytest.warns(DeprecationWarning, match="--target agents"):
+            result = self.tp.convert("copilot,agents", None, None)
         assert result == "vscode"
 
     def test_copilot_agents_vscode_deduplicates(self):
         """copilot,agents,vscode → 'vscode' (all alias to same)."""
-        result = self.tp.convert("copilot,agents,vscode", None, None)
+        with pytest.warns(DeprecationWarning, match="--target agents"):
+            result = self.tp.convert("copilot,agents,vscode", None, None)
         assert result == "vscode"
 
     def test_copilot_claude_deduplicates_alias(self):
@@ -605,6 +610,51 @@ class TestTargetParamType:
         """Only commas (no actual values) is rejected."""
         with pytest.raises(click.exceptions.BadParameter, match="must not be empty"):
             self.tp.convert(",,,", None, None)
+
+    # -- agent-skills target + deprecation warning behaviour (#737) -------
+
+    def test_explicit_only_targets_subset_of_known_targets(self):
+        """EXPLICIT_ONLY_TARGETS is a subset of KNOWN_TARGETS keys."""
+        from apm_cli.core.target_detection import EXPLICIT_ONLY_TARGETS
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        assert frozenset(KNOWN_TARGETS) >= EXPLICIT_ONLY_TARGETS
+
+    def test_agents_deprecation_fires_once_not_per_token(self):
+        """parse_target_field('agents,agents') emits exactly one DeprecationWarning."""
+        import warnings
+
+        from apm_cli.core.target_detection import parse_target_field
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            parse_target_field("agents,agents")
+            deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
+            assert len(deprecation_warnings) == 1
+
+    def test_agents_deprecation_fires_for_apm_yml_target(self):
+        """apm.yml target: agents path emits DeprecationWarning."""
+        import warnings
+
+        from apm_cli.core.target_detection import parse_target_field
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            parse_target_field("agents")
+            deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
+            assert len(deprecation_warnings) == 1
+
+    def test_agent_skills_does_not_emit_deprecation(self):
+        """--target agent-skills does not emit DeprecationWarning."""
+        import warnings
+
+        from apm_cli.core.target_detection import parse_target_field
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            parse_target_field("agent-skills")
+            deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
+            assert len(deprecation_warnings) == 0
 
 
 # ---------------------------------------------------------------------------

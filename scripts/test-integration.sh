@@ -438,6 +438,17 @@ run_e2e_tests() {
     else
         log_info "Skipping Azure DevOps E2E tests (ADO_APM_PAT not set)"
     fi
+
+    # Run agent-skills target E2E tests -- offline, no tokens needed
+    log_info "Running agent-skills target E2E tests..."
+    echo "Command: pytest tests/integration/test_agent_skills_target.py -v -s --tb=short"
+
+    if pytest tests/integration/test_agent_skills_target.py -v -s --tb=short; then
+        log_success "Agent-skills target E2E tests passed!"
+    else
+        log_error "Agent-skills target E2E tests failed!"
+        exit 1
+    fi
     
     log_success "All integration test suites completed successfully!"
     

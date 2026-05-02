@@ -832,7 +832,7 @@ def _handle_mcp_install(
     "target",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Overrides auto-detection.",
+    help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Use 'agent-skills' for cross-client .agents/skills/ deployment. Overrides auto-detection.",
 )
 @click.option(
     "--allow-insecure",

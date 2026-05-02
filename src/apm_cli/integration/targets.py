@@ -391,6 +391,26 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         user_supported="partial",
     ),
+    # Agent-skills: cross-client shared skills directory (.agents/skills/).
+    # Skills primitive only -- no agents, hooks, or commands.
+    # Not auto-detected (detect_by_dir=False) because .agents/ is shared by
+    # multiple tools (Codex, etc.). Explicit --target agent-skills only.
+    "agent-skills": TargetProfile(
+        name="agent-skills",
+        root_dir=".agents",
+        primitives={
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+            ),
+        },
+        auto_create=True,
+        detect_by_dir=False,
+        user_supported=True,
+        user_root_dir=".agents",
+        generated_files=(),
+    ),
     # Microsoft 365 Copilot (Cowork) -- experimental, user-scope only.
     # Skills are deployed to <OneDrive>/Documents/Cowork/skills/.
     # The deploy root is resolved dynamically at runtime via
@@ -519,7 +539,13 @@ def active_targets_user_scope(
         for t in raw:
             canonical = "copilot" if t in ("copilot", "vscode", "agents") else t
             if canonical == "all":
-                return [p for p in KNOWN_TARGETS.values() if p.user_supported and _flag_gated(p)]
+                from apm_cli.core.target_detection import EXPLICIT_ONLY_TARGETS
+
+                return [
+                    p
+                    for p in KNOWN_TARGETS.values()
+                    if p.user_supported and _flag_gated(p) and p.name not in EXPLICIT_ONLY_TARGETS
+                ]
             profile = KNOWN_TARGETS.get(canonical)
             if (
                 profile
@@ -587,9 +613,13 @@ def active_targets(
             canonical = "copilot" if t in ("copilot", "vscode", "agents") else t
             if canonical == "all":
                 # Return all targets regardless of flag gating.
+                # Exclude explicit-only targets (agent-skills) -- they must
+                # be requested individually.
                 # The project-scope gate in phases/targets.py and
                 # for_scope() handle user-observable blocking.
-                return list(KNOWN_TARGETS.values())
+                from apm_cli.core.target_detection import EXPLICIT_ONLY_TARGETS
+
+                return [p for p in KNOWN_TARGETS.values() if p.name not in EXPLICIT_ONLY_TARGETS]
             profile = KNOWN_TARGETS.get(canonical)
             if profile and _flag_gated(profile) and profile.name not in seen:
                 seen.add(profile.name)

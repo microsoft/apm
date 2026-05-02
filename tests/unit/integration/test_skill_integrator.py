@@ -3541,7 +3541,14 @@ class TestSyncIntegrationDynamicPrefixes:
         assert not skills_dir.exists()
 
     def test_agents_skills_cleanup_requires_codex_dir(self):
-        """Cross-tool .agents/skills/ only cleaned when .codex/ exists."""
+        """Cross-tool .agents/skills/ only cleaned when .codex/ exists.
+
+        The ownership-respecting cleanup (§5.3) only deletes skills that
+        appear in the lockfile's deployed_files. A lockfile entry is
+        required for the orphan to be considered APM-owned.
+        """
+        import yaml
+
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         codex = KNOWN_TARGETS["codex"]
@@ -3549,6 +3556,21 @@ class TestSyncIntegrationDynamicPrefixes:
         agents_skills = self.project_root / ".agents" / "skills" / "orphan"
         agents_skills.mkdir(parents=True)
         (agents_skills / "SKILL.md").write_text("# Orphan")
+
+        # Create lockfile with orphan listed so ownership check passes.
+        lockfile_data = {
+            "lockfile_version": "1",
+            "dependencies": [
+                {
+                    "repo_url": "owner/orphan-pkg",
+                    "resolved_commit": "abc123",
+                    "deployed_files": [".agents/skills/orphan/SKILL.md"],
+                }
+            ],
+        }
+        (self.project_root / "apm.lock.yaml").write_text(
+            yaml.dump(lockfile_data, default_flow_style=False), encoding="utf-8"
+        )
 
         apm_package = Mock()
         apm_package.get_apm_dependencies.return_value = []
@@ -3876,3 +3898,91 @@ class TestPromoteSubSkillsCowork:
         assert deployed_skill.exists()
         # .apm dir is excluded via shutil.ignore_patterns('.apm')
         assert not (cowork_root / "my-skill" / ".apm").exists()
+
+
+class TestAgentSkillsDedupAndSecurity:
+    """Dedup and security tests for the agent-skills target (#737)."""
+
+    def test_codex_agent_skills_dedup_write_count(self, tmp_path: Path) -> None:
+        """Codex + agent-skills both deploy to .agents/skills/ -- dedup means one write."""
+        import pytest
+
+        from apm_cli.integration.skill_integrator import copy_skill_to_target
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        # Codex requires .codex/ to exist (auto_create=False); create it so codex
+        # is not skipped, otherwise the dedup branch is never exercised.
+        (project_root / ".codex").mkdir()
+
+        source = tmp_path / "src" / "test-skill"
+        source.mkdir(parents=True)
+        (source / "SKILL.md").write_text("# Test Skill")
+
+        pkg_info = _make_package_info(source)
+        codex_profile = KNOWN_TARGETS["codex"]
+        agent_skills_profile = KNOWN_TARGETS["agent-skills"]
+
+        deployed = copy_skill_to_target(
+            pkg_info,
+            source,
+            project_root,
+            targets=[codex_profile, agent_skills_profile],
+        )
+
+        # Both targets resolve skills to .agents/skills/test-skill -- dedup
+        # collapses the two deployments into a single write.
+        assert len(deployed) == 1
+        assert (project_root / ".agents" / "skills" / "test-skill" / "SKILL.md").exists()
+        # Sanity: only the agents/ tree was created, not a separate .codex/skills/.
+        assert not (project_root / ".codex" / "skills" / "test-skill").exists()
+        # Silence unused-import warning if pytest isn't otherwise referenced.
+        _ = pytest
+
+    def test_skill_destination_symlink_rejected(self, tmp_path: Path) -> None:
+        """A pre-existing symlink at the destination triggers PathTraversalError."""
+        import pytest
+
+        from apm_cli.integration.skill_integrator import copy_skill_to_target
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.path_security import PathTraversalError
+
+        project = tmp_path / "project"
+        project.mkdir()
+
+        source = tmp_path / "src" / "evil"
+        source.mkdir(parents=True)
+        (source / "SKILL.md").write_text("# Evil")
+
+        # Plant a symlink at the destination path that the integrator would write to.
+        evil_dest = project / ".agents" / "skills" / "evil"
+        evil_dest.parent.mkdir(parents=True, exist_ok=True)
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        evil_dest.symlink_to(elsewhere)
+
+        pkg_info = _make_package_info(source)
+        profile = KNOWN_TARGETS["agent-skills"]
+        with pytest.raises(PathTraversalError):
+            copy_skill_to_target(pkg_info, source, project, targets=[profile])
+
+    def test_traversal_in_skill_name_rejected_for_agent_skills(self) -> None:
+        """validate_path_segments rejects traversal sequences in skill names.
+
+        ``copy_skill_to_target`` calls ``validate_path_segments(skill_name,
+        context="skill name")`` for every active target, including
+        ``agent-skills``.  This test exercises the underlying guard
+        directly because ``Path.name`` collapses ``"../etc"`` to ``"etc"``
+        before the function ever sees it -- the guard is what protects
+        the call site against any synthetic source whose ``name`` is a
+        traversal sequence.
+        """
+        import pytest
+
+        from apm_cli.utils.path_security import PathTraversalError, validate_path_segments
+
+        with pytest.raises(PathTraversalError):
+            validate_path_segments("../etc", context="skill name")
+        with pytest.raises(PathTraversalError):
+            validate_path_segments("..", context="skill name")

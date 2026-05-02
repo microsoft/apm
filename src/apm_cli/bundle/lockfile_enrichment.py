@@ -13,6 +13,7 @@ _TARGET_PREFIXES = {
     "cursor": [".cursor/"],
     "opencode": [".opencode/"],
     "codex": [".codex/", ".agents/"],
+    "agent-skills": [".agents/"],
     "all": [".github/", ".claude/", ".cursor/", ".opencode/", ".codex/", ".agents/"],
 }
 
@@ -49,6 +50,9 @@ _CROSS_TARGET_MAPS: dict[str, dict[str, str]] = {
     "codex": {
         ".github/skills/": ".agents/skills/",
         ".github/agents/": ".codex/agents/",
+    },
+    "agent-skills": {
+        ".github/skills/": ".agents/skills/",
     },
 }
 
@@ -103,6 +107,10 @@ def _filter_files_by_target(
             for src_prefix, dst_prefix in cross_map.items():
                 if f.startswith(src_prefix):
                     mapped = dst_prefix + f[len(src_prefix) :]
+                    # Containment guard: reject remapped paths that escaped
+                    # the destination prefix (e.g. via traversal segments).
+                    if not mapped.startswith(dst_prefix):
+                        continue
                     if mapped not in direct_set:
                         direct.append(mapped)
                         direct_set.add(mapped)

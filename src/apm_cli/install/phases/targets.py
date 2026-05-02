@@ -39,6 +39,19 @@ def run(ctx: InstallContext) -> None:
     # Resolve effective explicit target: CLI --target wins, then apm.yml
     _explicit = ctx.target_override or config_target or None
 
+    # ------------------------------------------------------------------
+    # Deprecation warning for legacy '--target agents' alias (cli-review §1)
+    # ------------------------------------------------------------------
+    if _explicit:
+        _explicit_tokens = _explicit if isinstance(_explicit, list) else [_explicit]
+        if "agents" in _explicit_tokens:
+            if ctx.logger:
+                ctx.logger.warning(
+                    "'--target agents' is deprecated -- it maps to 'copilot' (.github/), "
+                    "not '.agents/'. Use '--target copilot' or '--target agent-skills' "
+                    "(.agents/skills/). Removal in v1.0."
+                )
+
     # Determine active targets.  When --target or apm.yml target is set
     # the user's choice wins.  Otherwise auto-detect from existing dirs,
     # falling back to copilot when nothing is found.
@@ -152,7 +165,16 @@ def run(ctx: InstallContext) -> None:
         _root = _t.root_dir
         _target_dir = ctx.project_root / _root
         if not _target_dir.exists():
-            _target_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                _target_dir.mkdir(parents=True, exist_ok=True)
+            except PermissionError:
+                if ctx.logger:
+                    _display_root = f"~/{_root}/" if _is_user else f"{_root}/"
+                    ctx.logger.error(
+                        f"Cannot create {_display_root} -- permission denied. "
+                        f"Check directory permissions or use a different --target."
+                    )
+                raise SystemExit(1) from None
             if ctx.logger:
                 ctx.logger.verbose_detail(f"Created {_root}/ ({_t.name} target)")
 

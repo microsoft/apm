@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`--target agent-skills` deploys skills to `.agents/skills/` (cross-client shared directory).** The new target writes `SKILL.md` files to the [agentskills.io](https://agentskills.io) standard location without tying them to a single client. Excluded from `--target all` (explicit opt-in only); combine with `--target all,agent-skills` for both. Deduplicates with Codex when both targets resolve to the same path. User-scope (`-g`) deploys to `~/.agents/skills/`. (closes #737)
+
+### Deprecated
+
+- **`--target agents` is deprecated** -- it maps to `copilot` (`.github/`), not `.agents/`. Use `--target copilot` or `--target agent-skills`. Removal in v1.0. (closes #627, #640, #664)
+
 ### Removed
 
 - **BREAKING: dropped support for `.collection.yml` / `.collection.yaml` virtual packages.** Dependencies whose paths end in `.collection.yml` or `.collection.yaml` now raise a `ValueError` at parse time with a migration message. Convert any such entry to a regular `apm.yml` with a `dependencies:` section under the same subdirectory, then reference the directory itself as a subdirectory virtual package (no extension). The internal `VirtualPackageType.COLLECTION` enum value, the `download_collection_package` codepath, the `is_virtual_collection()` reference helper, and the `META_PACKAGE` package-type label have been removed -- none were persisted to the lockfile, so existing locks are unaffected. (#1097, closes #1094) Thanks @edenfunf for the original PR.

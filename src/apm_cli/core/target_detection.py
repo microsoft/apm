@@ -21,13 +21,16 @@ Detection priority (highest to lowest):
 are accepted as aliases and map to the same internal value.
 """
 
+import warnings
 from pathlib import Path
 from typing import List, Literal, Optional, Tuple, Union  # noqa: F401, UP035
 
 import click
 
 # Valid target values (internal canonical form)
-TargetType = Literal["vscode", "claude", "cursor", "opencode", "codex", "gemini", "all", "minimal"]
+TargetType = Literal[
+    "vscode", "claude", "cursor", "opencode", "codex", "gemini", "agent-skills", "all", "minimal"
+]
 
 # Compiler families used inside a multi-target frozenset. Narrower than
 # TargetType because the families are produced by _resolve_compile_target()
@@ -62,6 +65,7 @@ UserTargetType = Literal[
     "opencode",
     "codex",
     "gemini",
+    "agent-skills",
     "all",
     "minimal",
 ]
@@ -249,6 +253,7 @@ def get_target_description(target: UserTargetType) -> str:
         "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .opencode/skills/",
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
         "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
+        "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
         "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .agents/",
         "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }
@@ -268,6 +273,11 @@ ALL_CANONICAL_TARGETS = frozenset({"vscode", "claude", "cursor", "opencode", "co
 #: ``integration/targets.py``.  They are NOT included in the
 #: ``parse_target_arg("all")`` expansion -- explicit opt-in only.
 EXPERIMENTAL_TARGETS: frozenset[str] = frozenset({"copilot-cowork"})
+
+#: Stable targets excluded from "all" expansion (cross-client deploy
+#: locations). Unlike EXPERIMENTAL_TARGETS, these are GA -- they just do
+#: not represent a single client tool.
+EXPLICIT_ONLY_TARGETS: frozenset[str] = frozenset({"agent-skills"})
 
 #: Alias mapping: user-facing name -> canonical internal name.
 TARGET_ALIASES: dict[str, str] = {
@@ -324,7 +334,11 @@ def normalize_target_list(
 #: All values accepted by the ``--target`` CLI option.
 #: Derived from canonical targets, alias keys, and the ``"all"`` keyword.
 VALID_TARGET_VALUES: frozenset[str] = (
-    ALL_CANONICAL_TARGETS | EXPERIMENTAL_TARGETS | frozenset(TARGET_ALIASES) | frozenset({"all"})
+    ALL_CANONICAL_TARGETS
+    | EXPERIMENTAL_TARGETS
+    | EXPLICIT_ONLY_TARGETS
+    | frozenset(TARGET_ALIASES)
+    | frozenset({"all"})
 )
 
 
@@ -419,6 +433,16 @@ def parse_target_field(
                     source_path,
                 )
             )
+
+    # ---- deprecation warning for legacy "agents" alias (once per call) ----
+    if "agents" in raw_parts:
+        warnings.warn(
+            "'--target agents' is deprecated -- it maps to 'copilot' (.github/), "
+            "not '.agents/'. Use '--target copilot' or '--target agent-skills' "
+            "(.agents/skills/). Removal in v1.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
     # ---- "all" is exclusive ----
     if "all" in raw_parts:

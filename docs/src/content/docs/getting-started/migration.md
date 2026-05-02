@@ -93,3 +93,9 @@ skill collection layout reference.
 - [Dependencies](../../guides/dependencies/) -- managing external packages
 - [Manifest schema](../../reference/manifest-schema/) -- full `apm.yml` reference
 - [CLI commands](../../reference/cli-commands/) -- complete command reference
+
+## Deprecated targets
+
+:::note[Deprecated]
+`--target agents` is deprecated and maps to `copilot` (`.github/`), not `.agents/`. Use `--target copilot` for GitHub Copilot deployment, or `--target agent-skills` for cross-client `.agents/skills/` deployment. Removal in v1.0.
+:::

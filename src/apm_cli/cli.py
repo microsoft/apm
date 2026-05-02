@@ -6,6 +6,7 @@ Thin wiring layer  -- all command logic lives in ``apm_cli.commands.*`` modules.
 import ctypes
 import os
 import sys
+import warnings
 
 import click
 
@@ -51,6 +52,11 @@ from apm_cli.commands.view import view as view_cmd
 def cli(ctx):
     """Main entry point for the APM CLI."""
     ctx.ensure_object(dict)
+
+    # Suppress DeprecationWarning from apm_cli modules so CLI users see
+    # only the logger.warning() in the install phase, not a double print.
+    # Programmatic consumers (tests, library usage) re-enable as needed.
+    warnings.filterwarnings("ignore", category=DeprecationWarning, module="apm_cli")
 
     # Check for updates non-blockingly (only if not already showing version)
     if not ctx.resilient_parsing:

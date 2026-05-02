@@ -241,7 +241,7 @@ def _resolve_compile_target(target):
     "-t",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Auto-detects if not specified.",
+    help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Use 'agent-skills' for cross-client .agents/skills/ deployment. Auto-detects if not specified.",
 )
 @click.option(
     "--dry-run",
