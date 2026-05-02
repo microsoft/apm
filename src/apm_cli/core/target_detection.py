@@ -130,9 +130,7 @@ def detect_target(  # noqa: PLR0911
         ".github/hooks",
         ".github/chatmodes",
     ]
-    github_exists = any(
-        (project_root / marker).exists() for marker in github_copilot_markers
-    )
+    github_exists = any((project_root / marker).exists() for marker in github_copilot_markers)
     claude_exists = (project_root / ".claude").exists()
     cursor_exists = (project_root / ".cursor").is_dir()
     opencode_exists = (project_root / ".opencode").is_dir()

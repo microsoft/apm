@@ -204,7 +204,7 @@ class TestDetectTarget:
 
     def test_auto_detect_neither_folder(self, tmp_path):
         """Auto-detect minimal when neither folder exists."""
-        target, reason = detect_target(
+        target, _reason = detect_target(
             project_root=tmp_path,
             explicit_target=None,
             config_target=None,
