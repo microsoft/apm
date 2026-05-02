@@ -6,7 +6,6 @@ output format specifically optimized for Claude's project memory system.
 """
 
 import builtins
-from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set  # noqa: F401, UP035
@@ -16,6 +15,7 @@ from ..utils.paths import portable_relpath
 from ..version import get_version
 from .constants import BUILD_ID_PLACEHOLDER
 from .constitution import read_constitution
+from .template_builder import render_instructions_block
 
 # CRITICAL: Shadow Click commands to prevent namespace collision
 set = builtins.set
@@ -278,33 +278,23 @@ class ClaudeFormatter:
             sections.append("# Project Standards")
             sections.append("")
 
-            # Group instructions by pattern
-            pattern_groups: builtins.dict[str, builtins.list[Instruction]] = defaultdict(list)
-            for instruction in placement.instructions:
-                if instruction.apply_to:
-                    pattern_groups[instruction.apply_to].append(instruction)
+            def _emit(instruction: Instruction) -> builtins.list[str]:
+                lines: builtins.list[str] = []
+                if placement.source_attribution:
+                    source = placement.source_attribution.get(str(instruction.file_path), "local")
+                    rel_path = portable_relpath(instruction.file_path, self.base_dir)
+                    lines.append(f"<!-- Source: {source} {rel_path} -->")
+                lines.append(instruction.content.strip())
+                lines.append("")
+                return lines
 
-            for pattern, pattern_instructions in sorted(pattern_groups.items()):
-                sections.append(f"## Files matching `{pattern}`")
-                sections.append("")
-
-                for instruction in sorted(
-                    pattern_instructions,
-                    key=lambda i: portable_relpath(i.file_path, self.base_dir),
-                ):
-                    content = instruction.content.strip()
-                    if content:
-                        # Add source attribution comment
-                        if placement.source_attribution:
-                            source = placement.source_attribution.get(
-                                str(instruction.file_path), "local"
-                            )
-                            rel_path = portable_relpath(instruction.file_path, self.base_dir)
-
-                            sections.append(f"<!-- Source: {source} {rel_path} -->")
-
-                        sections.append(content)
-                        sections.append("")
+            sections.extend(
+                render_instructions_block(
+                    placement.instructions,
+                    base_dir=self.base_dir,
+                    emit_instruction=_emit,
+                )
+            )
 
         # Note: CLAUDE.md only contains instructions (Project Standards).
         # Agents/workflows are NOT included - they go to .github/agents/ as separate files.

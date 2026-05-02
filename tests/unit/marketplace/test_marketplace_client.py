@@ -1,14 +1,32 @@
 """Tests for marketplace client -- HTTP mock, caching, TTL, auth, auto-detection, proxy."""
 
 import json
+import re
 import time
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import pytest
 
 from apm_cli.marketplace import client as client_mod
 from apm_cli.marketplace.errors import MarketplaceFetchError
 from apm_cli.marketplace.models import MarketplaceSource
+
+
+def _quoted_hosts(text: str) -> set[str]:
+    """Extract host tokens from `Host '<host>'` patterns in error text.
+
+    Each token is normalised through ``urllib.parse.urlparse`` so callers
+    compare on parsed hostnames (set equality), not raw substrings -- which
+    is what CodeQL's ``py/incomplete-url-substring-sanitization`` rule
+    requires (see ``.github/instructions/tests.instructions.md``).
+    """
+    hosts: set[str] = set()
+    for m in re.finditer(r"Host '([^']+)'", text, re.IGNORECASE):
+        parsed = urlparse(f"https://{m.group(1)}")
+        if parsed.hostname:
+            hosts.add(parsed.hostname)
+    return hosts
 
 
 @pytest.fixture(autouse=True)
@@ -494,7 +512,7 @@ class TestFetchFileHostKindGuard:
 
         # No HTTP request should have been issued (no credential leakage).
         mock_get.assert_not_called()
-        assert "gitlab.com" in str(excinfo.value)
+        assert _quoted_hosts(str(excinfo.value)) == {"gitlab.com"}
         assert "not a supported marketplace source" in str(excinfo.value)
 
     def test_github_host_passes_guard(self):

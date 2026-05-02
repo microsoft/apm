@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm compile` no longer silently drops instructions without an `applyTo` pattern from generated `AGENTS.md` and `CLAUDE.md`; globals now render under a `## Global Instructions` section, matching the optimizer's existing `(global)` placement (#1088, closes #1072)
+- `apm install` no longer masks local-bundle install failures with `UnboundLocalError`. (#PR_NUMBER)
 - **`apm install <pkg>@<marketplace>` no longer fails for all marketplace packages.** The install resolver now accepts both legacy and current marketplace key names: `repository`/`repo` for github sources, `url`/`repo` for git-subdir sources, and `type`/`source` as the source-type discriminator. A scheme guard rejects full URLs passed through the `url` fallback. (#1106, closes #1105)
 - **`apm install --update` no longer fails for GHES/generic hosts** that rely on git credential helpers (e.g., `git-credential-manager`) for authentication. The preflight auth probe was blocking credential helpers by setting `GIT_CONFIG_GLOBAL=/dev/null`; it now uses the same relaxed environment as the clone fallback path for non-GitHub/non-ADO hosts. (#1082)
 - `apm compile --dry-run -t copilot` now faithfully simulates the hand-authored file guard: a `.github/copilot-instructions.md` lacking the APM marker is reported as `skipped=1` (matching the real run) instead of as `generated=1`. Previously dry-run would claim a write that a real run would refuse, giving CI preview gates a false signal. (#1048)
@@ -93,37 +95,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Microsoft 365 Copilot Cowork** target works end-to-end: `apm install --target cowork --global` deploys skills to OneDrive (behind `apm experimental enable cowork`). (#926)
 - **[Experimental] `apm marketplace` authoring CLI**: maintainers can scaffold, build, validate, and publish Anthropic-compliant marketplaces from the CLI (`init` -> `package add` -> `build` -> `publish`). (#790)
 - README "Coming from `npx skills add`?" 30-second migration table for users arriving from the agentskills.io ecosystem. (#980)
-
-### Changed
-
-- [Experimental] `apm marketplace plugin` renamed to `apm marketplace package` (npm/pip/cargo familiarity); `--help` grouped into Consumer / Authoring sections. (#722)
-
-### Fixed
-
-- Docs site auto-deploys again after bot-cut releases (now triggered on tag push). (#981)
-
-### Documentation
-
-- Clarify `NullCommandLogger` partial interface and visible-output semantics in docstring (#918)
-
-### Maintainer tooling
-
-- `pr-description-skill` ships an evals suite so PR-description quality regressions are caught in CI without an LLM API key. (#985)
-- `pr-description-skill` mermaid guidance hardened with `assets/mermaid-conventions.md` (diagram-type-by-intent + GitHub-renderer gotchas `mmdc` misses). (#984)
-- Cowork tests mock `sys.platform` so the macOS auto-detection paths don't false-fail on Windows CI. (#989)
-
-### Added
-
 - `NullCommandLogger` class (`src/apm_cli/core/null_logger.py`) -- null-object pattern for logger injection, eliminating 32 conditional logger forks in `MCPIntegrator`. (#918)
 - Thread-safety infrastructure: `_get_console()` double-checked locking singleton, marketplace registry cache `threading.Lock`. (#918)
 - 40 characterisation tests for `MCPIntegrator` methods (`install()`, `remove_stale()`, `collect_transitive()`). (#918)
 - `_build_children_index()` helper in uninstall engine for O(n) reverse-dependency lookups. (#918)
 - Performance benchmarks and scaling guards for complexity audit refactors (`tests/benchmarks/test_audit_benchmarks.py`, `test_scaling_guards.py`): 16 benchmark tests covering dependency parsing, children index, primitive discovery, registry cache, console singleton, and NullCommandLogger; 3 scaling-ratio guards run in the default test suite to catch O(n^2) regressions. (#918)
-- Expanded performance benchmark suite with P0 and P1 hot-path coverage: `compute_package_hash`, `get_all_dependencies`, `is_semantically_equivalent`, `flatten_dependencies`, `to_yaml`, `compute_deployed_hashes`, `optimize_instruction_placement`, `_rewrite_markdown_links`, `partition_managed_files`, LockFile round-trip, and `register_contexts` -- 52 new benchmark tests plus 2 additional scaling guards (#918)
-- Iteration 2 benchmark coverage: `_match_double_star` recursive glob matcher, `ContentScanner.scan_text` and `strip_dangerous` security scanning, `build_dependency_tree` BFS resolver, `_parse_ls_remote_output` and `_sort_remote_refs` git ref parsing, `analyze_directory_structure` compiler analysis, and `collect_transitive` MCP integration -- 77 new benchmark tests plus 1 additional scaling guard (#918)
+- Expanded performance benchmark suite with P0 and P1 hot-path coverage: `compute_package_hash`, `get_all_dependencies`, `is_semantically_equivalent`, `flatten_dependencies`, `to_yaml`, `compute_deployed_hashes`, `optimize_instruction_placement`, `_rewrite_markdown_links`, `partition_managed_files`, LockFile round-trip, and `register_contexts` -- 52 new benchmark tests plus 2 additional scaling guards. (#918)
+- Iteration 2 benchmark coverage: `_match_double_star` recursive glob matcher, `ContentScanner.scan_text` and `strip_dangerous` security scanning, `build_dependency_tree` BFS resolver, `_parse_ls_remote_output` and `_sort_remote_refs` git ref parsing, `analyze_directory_structure` compiler analysis, and `collect_transitive` MCP integration -- 77 new benchmark tests plus 1 additional scaling guard. (#918)
 
 ### Changed
 
+- [Experimental] `apm marketplace plugin` renamed to `apm marketplace package` (npm/pip/cargo familiarity); `--help` grouped into Consumer / Authoring sections. (#722)
 - `MCPIntegrator` logger handling: methods default to `NullCommandLogger` instead of `None`, removing 32 `if logger:` / `elif logger:` conditional forks (net -91 production lines). (#918)
 - Install pipeline lockfile reads reduced from 2x to 1x by caching early lockfile on `InstallContext`. (#918)
 - `APMPackage.from_apm_yml()`: deduplicated dependency parsing via `_parse_dependency_dict()` classmethod. (#918)
@@ -133,15 +115,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `_get_console()`: returns thread-safe singleton instead of creating new `Console()` per call. (#918)
 - Marketplace registry cache: `_load()`, `_save()`, `_invalidate_cache()` protected with `threading.Lock`. (#918)
 - Complexity audit -- decomposed god functions in `reference.py`, `audit.py`, `deps/cli.py`, and `script_runner.py` into focused single-responsibility helpers (largest: `audit()` 290 lines split into thin dispatcher + `_audit_ci_gate` + `_audit_content_scan` with shared `_AuditConfig` dataclass). (#918)
-- Decomposed `github_downloader.py` into three modules: `git_remote_ops.py` (ref parsing), `download_strategies.py` (backend downloads), and a slimmed orchestrator (#918)
-- Decomposed `install()` god function (555 lines) into focused helpers with `InstallContext` parameter bundle (#918)
+- Decomposed `github_downloader.py` into three modules: `git_remote_ops.py` (ref parsing), `download_strategies.py` (backend downloads), and a slimmed orchestrator. (#918)
+- Decomposed `install()` god function (555 lines) into focused helpers with `InstallContext` parameter bundle. (#918)
 
 ### Fixed
 
+- Docs site auto-deploys again after bot-cut releases (now triggered on tag push). (#981)
 - Bare `except:` clauses in `formatters.py` (5) and `script_formatters.py` (2) now catch `Exception` instead of `BaseException`, allowing `KeyboardInterrupt` and `SystemExit` to propagate correctly. (#918)
 - Silent auth fallback in `discovery.py:_get_token_for_host()` now logs `logger.debug()` when the token manager fails, making credential resolution failures visible with `--verbose`. (#918)
 - Silent `except Exception: pass` handlers in `agents_compiler.py` (3) now emit `_logger.debug()` traces for config loading and constitution injection failures. (#918)
 - Double `iterdir()` walk in `script_runner.py:_resolve_prompt_file()` collapsed to a single pass. (#918)
+
+### Documentation
+
+- Clarify `NullCommandLogger` partial interface and visible-output semantics in docstring. (#918)
+
+### Maintainer tooling
+
+- `pr-description-skill` ships an evals suite so PR-description quality regressions are caught in CI without an LLM API key. (#985)
+- `pr-description-skill` mermaid guidance hardened with `assets/mermaid-conventions.md` (diagram-type-by-intent + GitHub-renderer gotchas `mmdc` misses). (#984)
+- Cowork tests mock `sys.platform` so the macOS auto-detection paths don't false-fail on Windows CI. (#989)
 
 ## [0.9.4] - 2026-04-27
 

@@ -61,7 +61,11 @@ def _make_plugin_bundle(
     for rel, content in files.items():
         p = bundle / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
+        # write_bytes (not write_text) keeps newlines as `\n` on Windows.
+        # Otherwise Path.write_text translates `\n` -> `\r\n` and the
+        # on-disk bytes diverge from the in-memory `content` whose
+        # sha256 we record below, causing verify_bundle_integrity to fail.
+        p.write_bytes(content.encode("utf-8"))
         bundle_files[rel] = _sha256(content)
 
     if include_lockfile:

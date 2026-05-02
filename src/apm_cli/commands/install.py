@@ -1038,6 +1038,19 @@ def install(  # noqa: PLR0913
         is_partial = bool(packages)
         logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=is_partial)
 
+        # W2-pkg-rollback (#827): snapshot bytes captured BEFORE
+        # _validate_and_add_packages_to_apm_yml mutates apm.yml. Initialised
+        # to None here -- BEFORE any branch that might raise (e.g. the local
+        # bundle early-exit path below) -- so the `except` handlers at the
+        # bottom of this function can always reference both names without
+        # UnboundLocalError. The bug this prevents: an exception raised in
+        # the local-bundle branch (e.g. a click.Abort from integrity-verify
+        # failure on Windows) would otherwise be masked by an
+        # UnboundLocalError inside the handler that calls
+        # _maybe_rollback_manifest(_snapshot_manifest_path, ...).
+        _manifest_snapshot: bytes | None = None
+        _snapshot_manifest_path: Path | None = None
+
         # Resolve --legacy-skill-paths: CLI flag wins, then env var fallback.
         if not legacy_skill_paths:
             from ..integration.targets import should_use_legacy_skill_paths
@@ -1131,11 +1144,9 @@ def install(  # noqa: PLR0913
 
         # W2-pkg-rollback (#827): snapshot bytes captured BEFORE
         # _validate_and_add_packages_to_apm_yml mutates apm.yml.
-        # Initialised to None here so exception handlers always have it.
-        _manifest_snapshot: bytes | None = None
-        # manifest_path is set later (scope-dependent); keep a stable ref
-        # so exception handlers can use it without NameError.
-        _snapshot_manifest_path: Path | None = None
+        # NOTE: variables are initialised at the top of the try block
+        # (above the local-bundle early-exit) so exception handlers can
+        # always reference them without UnboundLocalError.
 
         # ----------------------------------------------------------------
         # --mcp branch (W3): when --mcp is set, route to the dedicated
