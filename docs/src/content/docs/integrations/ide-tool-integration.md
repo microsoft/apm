@@ -524,7 +524,7 @@ APM configures MCP servers in the native config format for each supported client
 | Codex CLI (project) | `.codex/config.toml` | TOML `mcp_servers` section |
 | Codex CLI (`--global`) | `~/.codex/config.toml` | TOML `mcp_servers` section |
 | Claude Code (project) | `.mcp.json` | JSON `mcpServers` object (opt-in: requires `.claude/`) |
-| Claude Code (`--user`) | `~/.claude.json` | JSON `mcpServers` object (atomic write; `0o600` on first create) |
+| Claude Code (`-g`/`--global`) | `~/.claude.json` | JSON `mcpServers` object (atomic write; `0o600` on first create) |
 | Cursor | `.cursor/mcp.json` | JSON `mcpServers` object |
 | Gemini CLI | `.gemini/settings.json` | JSON `mcpServers` object |
 

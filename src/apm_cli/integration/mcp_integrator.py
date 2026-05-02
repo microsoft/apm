@@ -490,7 +490,7 @@ class MCPIntegrator:
         if "claude" in target_runtimes and scope is None:
             logger.progress(
                 "Claude Code stale cleanup: scope unspecified -- defaulting to "
-                "project .mcp.json only; pass --user to also clean ~/.claude.json"
+                "project .mcp.json only; pass -g/--global to also clean ~/.claude.json"
             )
 
         # Build an expanded set that includes both the full reference and the
@@ -671,6 +671,8 @@ class MCPIntegrator:
 
                     config = _json.loads(claude_mcp.read_text(encoding="utf-8"))
                     servers = config.get("mcpServers", {})
+                    if not isinstance(servers, dict):
+                        servers = {}
                     removed = [n for n in expanded_stale if n in servers]
                     for name in removed:
                         del servers[name]
@@ -696,6 +698,8 @@ class MCPIntegrator:
                     config = _json.loads(claude_user.read_text(encoding="utf-8"))
                     if isinstance(config, dict):
                         servers = config.get("mcpServers", {})
+                        if not isinstance(servers, dict):
+                            servers = {}
                         removed = [n for n in expanded_stale if n in servers]
                         for name in removed:
                             del servers[name]

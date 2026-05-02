@@ -13,12 +13,10 @@ on a multi-user host.
 See https://code.claude.com/docs/en/mcp
 """
 
-import contextlib
 import json
-import os
-import tempfile
 from pathlib import Path
 
+from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_error, _rich_success, _rich_warning
 from .copilot import CopilotClientAdapter
 
@@ -134,7 +132,11 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         path = self._project_mcp_path()
         try:
             if path.is_file():
-                data = json.loads(path.read_text(encoding="utf-8"))
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    _rich_warning(f"Existing {path} is not valid JSON; rewriting from scratch")
+                    data = {}
                 if not isinstance(data, dict):
                     data = {}
             else:
@@ -145,45 +147,23 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         except OSError:
             return False
 
-    def _atomic_write_user_json(self, path: Path, payload: str) -> None:
-        """Write *payload* to *path* atomically.
-
-        New files are created with mode 0o600 so they cannot leak any OAuth
-        state Claude Code stores alongside ``mcpServers``. Existing files
-        keep their pre-existing mode (we do not downgrade nor upgrade perms).
-        """
-        existed = path.is_file()
-        directory = path.parent
-        directory.mkdir(parents=True, exist_ok=True)
-        fd, tmp_path = tempfile.mkstemp(prefix=".claude.json.", dir=str(directory))
-        tmp = Path(tmp_path)
-        try:
-            try:
-                if not existed:
-                    os.fchmod(fd, 0o600)
-            except OSError:
-                pass
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(payload)
-            os.replace(tmp, path)
-        except Exception:
-            if tmp.exists():
-                with contextlib.suppress(OSError):
-                    tmp.unlink()
-            raise
-
     def _merge_user_mcp(self, config_updates) -> bool:
         path = self._user_claude_json_path()
         try:
             if path.is_file():
-                data = json.loads(path.read_text(encoding="utf-8"))
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    _rich_warning(f"Existing {path} is not valid JSON; rewriting from scratch")
+                    data = {}
                 if not isinstance(data, dict):
                     data = {}
             else:
                 data = {}
             self._merge_and_normalize_updates(data, config_updates)
             payload = json.dumps(data, indent=2) + "\n"
-            self._atomic_write_user_json(path, payload)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_text(path, payload, new_file_mode=0o600)
             return True
         except OSError:
             return False
@@ -225,7 +205,10 @@ class ClaudeClientAdapter(CopilotClientAdapter):
                 config_key = server_url
 
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
-            self.update_config({config_key: server_config})
+            ok = self.update_config({config_key: server_config})
+            if not ok:
+                _rich_error(f"Failed to write MCP config for '{config_key}' to Claude Code")
+                return False
 
             _rich_success(f"Successfully configured MCP server '{config_key}' for Claude Code")
             return True

@@ -99,6 +99,14 @@ class TestClaudeClientAdapterProject(unittest.TestCase):
         self.assertIn("keep", data["mcpServers"])
         self.assertIn("new", data["mcpServers"])
 
+    def test_update_config_tolerates_malformed_project_mcp_json(self):
+        """Corrupted .mcp.json must not abort install; treat as empty + rewrite."""
+        self.mcp_path.write_text("{not valid json", encoding="utf-8")
+        ok = self.adapter.update_config({"srv": {"command": "x"}})
+        self.assertTrue(ok)
+        data = json.loads(self.mcp_path.read_text(encoding="utf-8"))
+        self.assertIn("srv", data["mcpServers"])
+
 
 class TestClaudeClientAdapterUser(unittest.TestCase):
     """User scope: ``~/.claude.json`` top-level ``mcpServers``."""
@@ -128,6 +136,8 @@ class TestClaudeClientAdapterUser(unittest.TestCase):
 
     def test_new_user_claude_json_created_with_0600_perms(self):
         """New ~/.claude.json must be created with 0o600 to avoid leaking OAuth state."""
+        if os.name != "posix":
+            self.skipTest("POSIX permission bits not observable on Windows")
         self.assertFalse(self.claude_json.exists())
         ok = self.adapter.update_config({"srv": {"command": "x"}})
         self.assertTrue(ok)
@@ -136,8 +146,29 @@ class TestClaudeClientAdapterUser(unittest.TestCase):
 
     def test_user_scope_write_is_atomic_no_temp_left_behind(self):
         self.adapter.update_config({"srv": {"command": "x"}})
-        leftovers = list(self.home.glob(".claude.json.*"))
+        leftovers = list(self.home.glob(".claude.json.*")) + list(self.home.glob("apm-atomic-*"))
         self.assertEqual(leftovers, [])
+
+    def test_update_config_tolerates_malformed_user_claude_json(self):
+        """Corrupted ~/.claude.json must not abort install; treat as empty + rewrite."""
+        self.claude_json.write_text("{not valid json", encoding="utf-8")
+        ok = self.adapter.update_config({"srv": {"command": "x"}})
+        self.assertTrue(ok)
+        data = json.loads(self.claude_json.read_text(encoding="utf-8"))
+        self.assertIn("srv", data["mcpServers"])
+
+    def test_configure_mcp_server_returns_false_when_update_fails(self):
+        """If update_config returns False, configure_mcp_server must surface the failure."""
+        from unittest.mock import MagicMock
+
+        self.adapter.registry_client = MagicMock()
+        self.adapter.registry_client.find_server_by_reference.return_value = {
+            "name": "srv",
+            "packages": [{"registry_name": "npm", "name": "x", "version": "1.0.0"}],
+        }
+        with patch.object(self.adapter, "update_config", return_value=False):
+            ok = self.adapter.configure_mcp_server("srv")
+        self.assertFalse(ok)
 
 
 @pytest.mark.parametrize(
