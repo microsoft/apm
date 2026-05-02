@@ -1328,3 +1328,69 @@ class TestWindsurfAgentSkillIntegration:
         skills_dir = self.project_root / ".windsurf" / "skills"
         assert (skills_dir / "reviewer" / "SKILL.md").exists()
         assert (skills_dir / "architect" / "SKILL.md").exists()
+
+
+class TestWindsurfAgentSkillDiagnostics:
+    """Diagnostics emitted when agent frontmatter contains unsupported fields."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.root = Path(self.temp_dir)
+
+    def teardown_method(self):
+        import shutil
+
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_warns_on_dropped_tools_and_model(self):
+        """DiagnosticCollector records a warning when tools/model are dropped."""
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
+
+        source = self.root / "smart.agent.md"
+        source.write_text(
+            "---\n"
+            "name: smart-agent\n"
+            "description: An agent with unsupported fields\n"
+            "tools:\n"
+            "  - foo\n"
+            "  - bar\n"
+            "model: gpt-4o\n"
+            "---\n\n"
+            "# Smart Agent Body\n"
+        )
+        target = self.root / "smart-agent" / "SKILL.md"
+
+        diagnostics = DiagnosticCollector()
+        AgentIntegrator()._write_windsurf_agent_skill(source, target, diagnostics=diagnostics)
+
+        # Exactly one warning expected
+        by_cat = diagnostics.by_category()
+        warnings = by_cat.get(CATEGORY_WARNING, [])
+        assert len(warnings) == 1
+        assert "tools" in warnings[0].message
+        assert "model" in warnings[0].message
+
+        # SKILL.md must NOT contain the dropped fields
+        content = target.read_text()
+        # Split into frontmatter vs body to check frontmatter only
+        parts = content.split("---")
+        # parts[0] is empty, parts[1] is frontmatter, parts[2+] is body
+        fm_block = parts[1] if len(parts) >= 3 else ""
+        assert "tools:" not in fm_block
+        assert "model:" not in fm_block
+
+    def test_no_warning_without_tools_or_model(self):
+        """No diagnostic when frontmatter has only name + description."""
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
+
+        source = self.root / "clean.agent.md"
+        source.write_text(
+            "---\nname: clean-agent\ndescription: A clean agent\n---\n\n# Clean Agent\n"
+        )
+        target = self.root / "clean-agent" / "SKILL.md"
+
+        diagnostics = DiagnosticCollector()
+        AgentIntegrator()._write_windsurf_agent_skill(source, target, diagnostics=diagnostics)
+
+        warnings = diagnostics.by_category().get(CATEGORY_WARNING, [])
+        assert len(warnings) == 0
