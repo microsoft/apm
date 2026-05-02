@@ -207,12 +207,8 @@ def integrate_package_primitives(
                 elif _prim_name == "instructions":
                     _label = "instruction(s)"
                 elif _prim_name == "hooks":
-                    if _target.name == "claude":
-                        _deploy_dir = ".claude/settings.json"
-                    elif _target.name == "cursor":
-                        _deploy_dir = ".cursor/hooks.json"
-                    elif _target.name == "codex":
-                        _deploy_dir = ".codex/hooks.json"
+                    if _target.hooks_config_display:
+                        _deploy_dir = _target.hooks_config_display
                     _label = "hook(s)"
                 else:
                     _label = _prim_name
