@@ -200,6 +200,7 @@ class InstallContext:
     only_packages: builtins.list | None = None
     manifest_snapshot: bytes | None = None
     snapshot_manifest_path: Optional["Path"] = None
+    legacy_skill_paths: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -945,6 +946,17 @@ def _handle_mcp_install(
     help="Skip org policy enforcement for this invocation. Does NOT bypass apm audit --ci.",
 )
 @click.option(
+    "--legacy-skill-paths",
+    "legacy_skill_paths",
+    is_flag=True,
+    default=False,
+    help=(
+        "Restore per-client skill paths (e.g. .cursor/skills/) instead of the "
+        "default .agents/skills/ convergence. Temporary compatibility flag, "
+        "removal in v1.0."
+    ),
+)
+@click.option(
     "--as",
     "alias",
     default=None,
@@ -985,6 +997,7 @@ def install(  # noqa: PLR0913
     registry_url,
     skill_names,
     no_policy,
+    legacy_skill_paths,
     alias,
 ):
     """Install APM and MCP dependencies from apm.yml (like npm install).
@@ -1020,6 +1033,12 @@ def install(  # noqa: PLR0913
         is_partial = bool(packages)
         logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=is_partial)
 
+        # Resolve --legacy-skill-paths: CLI flag wins, then env var fallback.
+        if not legacy_skill_paths:
+            from ..integration.targets import should_use_legacy_skill_paths
+
+            legacy_skill_paths = should_use_legacy_skill_paths()
+
         # ----------------------------------------------------------------
         # Local-bundle early-exit (issue #1098).  When the sole positional
         # argument is a filesystem path that detect_local_bundle() recognises
@@ -1043,6 +1062,7 @@ def install(  # noqa: PLR0913
                     verbose=verbose,
                     alias=alias,
                     logger=logger,
+                    legacy_skill_paths=legacy_skill_paths,
                     # Rejected-flag context for consolidated UsageError:
                     rejected_flags={
                         "--update": update,
@@ -1315,6 +1335,7 @@ def install(  # noqa: PLR0913
             only_packages=builtins.list(validated_packages) if packages else None,
             manifest_snapshot=_manifest_snapshot,
             snapshot_manifest_path=_snapshot_manifest_path,
+            legacy_skill_paths=legacy_skill_paths,
         )
 
         apm_count, mcp_count, apm_diagnostics = _install_apm_packages(
@@ -1510,6 +1531,7 @@ def _install_apm_packages(ctx, outcome):
                 protocol_pref=ctx.protocol_pref,
                 allow_protocol_fallback=ctx.allow_protocol_fallback,
                 no_policy=ctx.no_policy,
+                legacy_skill_paths=ctx.legacy_skill_paths,
             )
             apm_count = install_result.installed_count
             prompt_count = install_result.prompts_integrated  # noqa: F841
@@ -1721,7 +1743,7 @@ from apm_cli.install.services import (  # noqa: E402
 #
 # The real implementation lives in ``apm_cli.install.pipeline`` (F2).
 # ---------------------------------------------------------------------------
-def _install_apm_dependencies(
+def _install_apm_dependencies(  # noqa: PLR0913
     apm_package: "APMPackage",
     update_refs: bool = False,
     verbose: bool = False,
@@ -1740,6 +1762,7 @@ def _install_apm_dependencies(
     no_policy: bool = False,
     skill_subset: "builtins.tuple | None" = None,
     skill_subset_from_cli: bool = False,
+    legacy_skill_paths: bool = False,
 ):
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.
@@ -1774,5 +1797,6 @@ def _install_apm_dependencies(
         no_policy=no_policy,
         skill_subset=skill_subset,
         skill_subset_from_cli=skill_subset_from_cli,
+        legacy_skill_paths=legacy_skill_paths,
     )
     return InstallService().run(request)

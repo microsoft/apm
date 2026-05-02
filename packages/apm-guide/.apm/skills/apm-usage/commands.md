@@ -10,7 +10,7 @@
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm install [PKGS...]` | Install APM and MCP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json)) | `--update` refresh refs, `--force` overwrite, `--dry-run`, `--verbose`, `--only [apm\|mcp]`, `--target` (comma-separated; use `copilot-cowork` with `--global` after `apm experimental enable copilot-cowork`), `--dev`, `-g` global, `--trust-transitive-mcp`, `--parallel-downloads N`, `--allow-insecure`, `--allow-insecure-host HOSTNAME`, `--skill NAME` install named skill(s) from SKILL_BUNDLE (repeatable; persisted in apm.yml; `'*'` resets to all), `--mcp NAME` add MCP entry, `--transport`, `--url`, `--env KEY=VAL`, `--header KEY=VAL`, `--mcp-version`, `--registry URL` custom MCP registry |
+| `apm install [PKGS...]` | Install APM and MCP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json)) | `--update` refresh refs, `--force` overwrite, `--dry-run`, `--verbose`, `--only [apm\|mcp]`, `--target` (comma-separated; use `copilot-cowork` with `--global` after `apm experimental enable copilot-cowork`), `--dev`, `-g` global, `--trust-transitive-mcp`, `--parallel-downloads N`, `--allow-insecure`, `--allow-insecure-host HOSTNAME`, `--skill NAME` install named skill(s) from SKILL_BUNDLE (repeatable; persisted in apm.yml; `'*'` resets to all), `--legacy-skill-paths` restore per-client skill dirs, `--mcp NAME` add MCP entry, `--transport`, `--url`, `--env KEY=VAL`, `--header KEY=VAL`, `--mcp-version`, `--registry URL` custom MCP registry |
 | `apm uninstall PKGS...` | Remove packages | `--dry-run`, `-g` global |
 | `apm prune` | Remove orphaned packages | `--dry-run` |
 | `apm deps list` | List installed packages | `-g` global, `--all` both scopes, `--insecure` |
@@ -123,6 +123,10 @@ Use `apm experimental enable copilot-cowork` to turn on Microsoft 365 Copilot Co
 Use `--target agent-skills` to deploy skills to `.agents/skills/` -- the cross-tool standard directory. This is useful when multiple clients (Codex, future tools) read from `.agents/skills/`. Unlike `--target all`, `agent-skills` must be requested explicitly: `apm install --target agent-skills` or `apm install --target all,agent-skills` for both. `apm compile --target agent-skills` is a no-op (skills-only target).
 
 > **Note:** `--target agents` is **deprecated** -- it maps to `copilot` (`.github/`), not `.agents/`. Use `--target copilot` or `--target agent-skills` instead.
+
+### Skill routing convergence
+
+By default, Copilot, Cursor, OpenCode, and Codex all deploy skills to `.agents/skills/` (the agentskills.io standard). Claude and Gemini retain their native per-client routing. Use `--legacy-skill-paths` (or `APM_LEGACY_SKILL_PATHS=1`) to restore the previous per-client layout (`.github/skills/`, `.cursor/skills/`, etc.).
 
 Experimental flags MUST NOT gate security-critical behaviour (content scanning, path validation, lockfile integrity, token handling, MCP trust, collision detection). Flags are ergonomic/UX toggles only.
 

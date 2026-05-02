@@ -159,20 +159,11 @@ def test_install_agent_skills_deploys_to_agents_dir(
 def test_install_codex_agent_skills_dedup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``--target codex,agent-skills`` integrates both targets cleanly.
 
-    Through the dependency-driven install pipeline ``codex`` and
-    ``agent-skills`` both resolve to ``.agents/skills/`` (codex skills
-    use ``deploy_root='.agents'``) and ``SkillIntegrator`` dedups by
-    resolved path emitting an "already deployed, skipping" message.
-
-    The local-bundle install path tested here is intentionally simpler
-    and per-target -- it copies bundle files into each
-    ``target.root_dir`` independently -- so on disk we end up with a
-    copy under ``.codex/skills/...`` (codex's static root) and one
-    under ``.agents/skills/...`` (agent-skills root). The
-    integrator-level dedup is covered by unit tests of
-    ``SkillIntegrator``; this test asserts the local-bundle round-trip
-    succeeds for the multi-target selection without errors and that
-    the agent-skills target slot is populated alongside codex.
+    Both codex and agent-skills resolve skills to ``.agents/skills/``
+    (codex skills use ``deploy_root='.agents'``).  The local-bundle
+    handler respects ``deploy_root`` so skills land in ``.agents/``
+    regardless of which target initiated the copy.  On disk only one
+    copy under ``.agents/skills/...`` is created.
     """
     bundle = _make_plugin_bundle(tmp_path / "src", pack_target="codex,agent-skills")
     project = _make_project(tmp_path / "dst", with_github=False)
@@ -185,8 +176,10 @@ def test_install_codex_agent_skills_dedup(tmp_path: Path, monkeypatch: pytest.Mo
     )
 
     assert result.exit_code == 0, f"output={result.output!r}"
-    assert (project / ".codex" / "skills" / SKILL_NAME / "SKILL.md").is_file()
+    # Both codex and agent-skills converge to .agents/skills/
     assert (project / ".agents" / "skills" / SKILL_NAME / "SKILL.md").is_file()
+    # .codex/skills/ should NOT have a separate copy (converged routing)
+    assert not (project / ".codex" / "skills" / SKILL_NAME / "SKILL.md").is_file()
 
 
 # ---------------------------------------------------------------------------
@@ -512,3 +505,155 @@ def test_uninstall_preserves_foreign_skill_in_agents_dir(
     assert foreign_md.is_file(), (
         f"foreign skill at {foreign_md} must be preserved across sync, sync output={sync.output!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# I10 -- --target all writes skills once to .agents/skills/ (convergence)
+# ---------------------------------------------------------------------------
+
+
+def _make_multi_target_bundle(
+    tmp_path: Path,
+    *,
+    pack_target: str = "all",
+    skill_name: str = SKILL_NAME,
+    skill_body: str = SKILL_BODY,
+) -> Path:
+    """Build a bundle targeting ``all`` with a single skill."""
+    bundle = tmp_path / "bundle"
+    bundle.mkdir(parents=True, exist_ok=True)
+
+    (bundle / "plugin.json").write_text(
+        json.dumps({"id": "multi-target", "name": "Multi Target Plugin"}), encoding="utf-8"
+    )
+
+    rel = f"skills/{skill_name}/SKILL.md"
+    skill_path = bundle / rel
+    skill_path.parent.mkdir(parents=True, exist_ok=True)
+    skill_path.write_text(skill_body, encoding="utf-8")
+
+    bundle_files = {rel: _sha256(skill_body)}
+    lock_data = {
+        "pack": {
+            "format": "plugin",
+            "target": pack_target,
+            "bundle_files": bundle_files,
+        },
+        "dependencies": [
+            {
+                "repo_url": "owner/multi-target",
+                "resolved_commit": "aaa111",
+                "deployed_files": [rel],
+                "deployed_file_hashes": bundle_files,
+            }
+        ],
+    }
+    (bundle / "apm.lock.yaml").write_text(
+        yaml.dump(lock_data, default_flow_style=False), encoding="utf-8"
+    )
+    return bundle
+
+
+def test_install_target_all_writes_skills_once_to_agents_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--target all`` deploys skills to ``.agents/skills/`` for the 4 converged
+    clients, plus ``.claude/skills/`` and ``.gemini/skills/`` natively.
+
+    Assert that ``.github/skills/``, ``.cursor/skills/``, ``.opencode/skills/``,
+    ``.codex/skills/`` do NOT exist (skills only -- non-skill primitives still
+    deploy to per-client roots).
+    """
+    bundle = _make_multi_target_bundle(tmp_path / "src")
+    project = _make_project(tmp_path / "dst")
+    # Create dirs so auto-detect finds all targets
+    for d in (".claude", ".cursor", ".opencode", ".codex", ".gemini"):
+        (project / d).mkdir()
+
+    result = _invoke(
+        project,
+        ["install", str(bundle), "--target", "all"],
+        monkeypatch,
+    )
+    assert result.exit_code == 0, f"output={result.output!r}"
+
+    # Skills land in .agents/skills/ (shared by copilot/cursor/opencode/codex)
+    assert (project / ".agents" / "skills" / SKILL_NAME / "SKILL.md").is_file()
+    # Claude and gemini keep their native skill dirs
+    assert (project / ".claude" / "skills" / SKILL_NAME / "SKILL.md").is_file()
+    assert (project / ".gemini" / "skills" / SKILL_NAME / "SKILL.md").is_file()
+
+    # Per-client legacy skill dirs must NOT exist for converged targets
+    for legacy in (".github/skills", ".cursor/skills", ".opencode/skills", ".codex/skills"):
+        legacy_dir = project / legacy / SKILL_NAME
+        assert not legacy_dir.exists(), (
+            f"legacy skill dir {legacy_dir} should not exist with default convergence"
+        )
+
+
+# ---------------------------------------------------------------------------
+# I11 -- --legacy-skill-paths writes per-client skill dirs
+# ---------------------------------------------------------------------------
+
+
+def test_install_target_all_legacy_paths_writes_per_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With ``--legacy-skill-paths``, all 6 per-client skill dirs are populated."""
+    bundle = _make_multi_target_bundle(tmp_path / "src")
+    project = _make_project(tmp_path / "dst")
+    for d in (".claude", ".cursor", ".opencode", ".codex", ".gemini"):
+        (project / d).mkdir()
+
+    result = _invoke(
+        project,
+        ["install", str(bundle), "--target", "all", "--legacy-skill-paths"],
+        monkeypatch,
+    )
+    assert result.exit_code == 0, f"output={result.output!r}"
+
+    # All 6 per-client skill dirs should have the skill
+    for client_dir in (
+        ".github/skills",
+        ".claude/skills",
+        ".cursor/skills",
+        ".opencode/skills",
+        ".codex/skills",
+        ".gemini/skills",
+    ):
+        deployed = project / client_dir / SKILL_NAME / "SKILL.md"
+        assert deployed.is_file(), f"expected skill at {deployed} with --legacy-skill-paths"
+
+
+# ---------------------------------------------------------------------------
+# I12 -- APM_LEGACY_SKILL_PATHS env var produces same behavior as flag
+# ---------------------------------------------------------------------------
+
+
+def test_install_legacy_flag_via_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``APM_LEGACY_SKILL_PATHS=1`` env var restores per-client routing."""
+    bundle = _make_multi_target_bundle(tmp_path / "src")
+    project = _make_project(tmp_path / "dst")
+    for d in (".claude", ".cursor", ".opencode", ".codex", ".gemini"):
+        (project / d).mkdir()
+
+    monkeypatch.setenv("APM_LEGACY_SKILL_PATHS", "1")
+
+    result = _invoke(
+        project,
+        ["install", str(bundle), "--target", "all"],
+        monkeypatch,
+    )
+    assert result.exit_code == 0, f"output={result.output!r}"
+
+    # With env var set, per-client skill dirs should be populated
+    for client_dir in (
+        ".github/skills",
+        ".claude/skills",
+        ".cursor/skills",
+        ".opencode/skills",
+        ".codex/skills",
+        ".gemini/skills",
+    ):
+        deployed = project / client_dir / SKILL_NAME / "SKILL.md"
+        assert deployed.is_file(), f"expected skill at {deployed} with APM_LEGACY_SKILL_PATHS=1"

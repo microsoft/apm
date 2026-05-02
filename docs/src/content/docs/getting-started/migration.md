@@ -99,3 +99,13 @@ skill collection layout reference.
 :::note[Deprecated]
 `--target agents` is deprecated and maps to `copilot` (`.github/`), not `.agents/`. Use `--target copilot` for GitHub Copilot deployment, or `--target agent-skills` for cross-client `.agents/skills/` deployment. Removal in v1.0.
 :::
+
+## Skill routing convergence
+
+:::caution[Behavior change]
+Skills for **Copilot, Cursor, OpenCode, and Codex** now deploy to `.agents/skills/` by default instead of per-client directories (`.github/skills/`, `.cursor/skills/`, etc.). This matches the `.agents/` discovery path documented by all four clients and eliminates redundant copies when targeting multiple clients.
+
+**Claude and Gemini are unchanged** — their skills continue to deploy to `.claude/skills/` and `.gemini/skills/` respectively.
+
+To restore the previous per-client layout, pass `--legacy-skill-paths` to any command, or set the `APM_LEGACY_SKILL_PATHS=1` environment variable.
+:::

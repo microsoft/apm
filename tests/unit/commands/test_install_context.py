@@ -61,6 +61,7 @@ class TestInstallContextFields:
         "no_policy",
         "install_mode",
         "packages",
+        "legacy_skill_paths",
         # optional (default=None)
         "only_packages",
         "manifest_snapshot",

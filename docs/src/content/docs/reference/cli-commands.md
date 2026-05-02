@@ -117,6 +117,7 @@ apm install [PACKAGES...] [OPTIONS]
   - Equivalent env var: `APM_POLICY_DISABLE=1` (applies to the entire shell session). Note: `apm deps update` runs the install pipeline and is gated by policy but does not currently expose a `--no-policy` flag -- use `APM_POLICY_DISABLE=1` as the only escape hatch there.
 - `--skill NAME` - Install only named skill(s) from a `SKILL_BUNDLE` package. Repeatable. The selection is **persisted** in `apm.yml` (as a `skills:` list in dict-form entries) and in `apm.lock.yaml` (as `skill_subset`), so subsequent bare `apm install` commands are deterministic. Use `--skill '*'` to reset and install all skills from the bundle.
 - `--as ALIAS` - Override the log/display label used when reporting a local-bundle install. Only valid when `PACKAGES` is a single local-bundle path (directory or `.tar.gz`); rejected on registry installs. Falls back to `plugin.json["id"]`, then to the bundle directory name when omitted. Note: this label affects log output only -- the lockfile records `local_deployed_files` (paths) and does not currently namespace by alias.
+- `--legacy-skill-paths` - Restore per-client skill directories (`.github/skills/`, `.cursor/skills/`, etc.) instead of the converged `.agents/skills/` routing. Equivalent env var: `APM_LEGACY_SKILL_PATHS=1`.
 
 **Transport env vars:**
 

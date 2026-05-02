@@ -285,7 +285,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
             ),
             "prompts": PrimitiveMapping("prompts", ".prompt.md", "github_prompt"),
             "agents": PrimitiveMapping("agents", ".agent.md", "github_agent"),
-            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+                deploy_root=".agents",
+            ),
             "hooks": PrimitiveMapping("hooks", ".json", "github_hooks"),
         },
         auto_create=True,
@@ -326,7 +331,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         primitives={
             "instructions": PrimitiveMapping("rules", ".mdc", "cursor_rules"),
             "agents": PrimitiveMapping("agents", ".md", "cursor_agent"),
-            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+                deploy_root=".agents",
+            ),
             "hooks": PrimitiveMapping("hooks", ".json", "cursor_hooks"),
         },
         auto_create=False,
@@ -343,7 +353,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         primitives={
             "agents": PrimitiveMapping("agents", ".md", "opencode_agent"),
             "commands": PrimitiveMapping("commands", ".md", "opencode_command"),
-            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+                deploy_root=".agents",
+            ),
         },
         auto_create=False,
         detect_by_dir=True,
@@ -433,6 +448,46 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         requires_flag="copilot_cowork",
     ),
 }
+
+
+def apply_legacy_skill_paths(profiles: list[TargetProfile]) -> list[TargetProfile]:
+    """Reset ``deploy_root`` on every ``skills`` primitive to ``None``.
+
+    When ``--legacy-skill-paths`` (or ``APM_LEGACY_SKILL_PATHS=1``) is
+    active, this restores pre-convergence per-client routing so skills
+    land in ``.github/skills/``, ``.cursor/skills/``, etc. instead of
+    the default ``.agents/skills/``.
+
+    Returns a NEW list of (possibly replaced) profiles — the global
+    ``KNOWN_TARGETS`` dict is never mutated.
+    """
+    from dataclasses import replace
+
+    result: list[TargetProfile] = []
+    for profile in profiles:
+        skills_pm = profile.primitives.get("skills")
+        if skills_pm and skills_pm.deploy_root is not None:
+            new_pm = PrimitiveMapping(
+                subdir=skills_pm.subdir,
+                extension=skills_pm.extension,
+                format_id=skills_pm.format_id,
+                deploy_root=None,
+            )
+            new_primitives = {**profile.primitives, "skills": new_pm}
+            profile = replace(profile, primitives=new_primitives)
+        result.append(profile)
+    return result
+
+
+def should_use_legacy_skill_paths() -> bool:
+    """Return ``True`` when the ``APM_LEGACY_SKILL_PATHS`` env var is set.
+
+    Recognised truthy values: ``1``, ``true``, ``yes`` (case-insensitive).
+    """
+    import os
+
+    val = os.environ.get("APM_LEGACY_SKILL_PATHS", "").strip().lower()
+    return val in ("1", "true", "yes")
 
 
 def _resolve_copilot_cowork_root() -> Path | None:  # noqa: F821

@@ -306,9 +306,30 @@ APM automatically detects package types:
 | `hooks/*.json` only | Hook Package | Hook handlers only |
 | Both files | Hybrid Package | Best of both worlds |
 
-## Target Detection
+## Skill Deployment Routing
 
-APM deploys skills to every target directory that already exists: `.github/`, `.claude/`, `.cursor/`, `.opencode/`. For Codex (`.codex/`), skills deploy to `.agents/skills/` instead. If no target directories exist, `.github/` is created as the fallback.
+By default, APM routes skills to `.agents/skills/` for clients that support the [agentskills.io](https://agentskills.io) standard: **Copilot, Cursor, OpenCode, and Codex**. This eliminates redundant copies when targeting multiple clients.
+
+| Client | Skills deploy to | Notes |
+|--------|-----------------|-------|
+| Copilot | `.agents/skills/` | Converged (was `.github/skills/`) |
+| Cursor | `.agents/skills/` | Converged (was `.cursor/skills/`) |
+| OpenCode | `.agents/skills/` | Converged (was `.opencode/skills/`) |
+| Codex | `.agents/skills/` | Already used `.agents/skills/` |
+| Claude | `.claude/skills/` | Unchanged (native routing) |
+| Gemini | `.gemini/skills/` | Unchanged (native routing) |
+| `agent-skills` | `.agents/skills/` | Explicit cross-client target |
+
+With `--target all`, skills deploy to 3 unique directories: `.agents/skills/`, `.claude/skills/`, `.gemini/skills/`.
+
+### Legacy per-client routing
+
+To restore the previous behavior where each client gets its own skill directory, pass `--legacy-skill-paths` or set the `APM_LEGACY_SKILL_PATHS=1` environment variable:
+
+```bash
+apm install --target all --legacy-skill-paths
+# Skills deploy to .github/skills/, .claude/skills/, .cursor/skills/, etc.
+```
 
 ### Cross-client deployment (`agent-skills`)
 
@@ -322,9 +343,6 @@ apm install --target agent-skills
 # User-scope deploy
 apm install -g --target agent-skills
 # Result: ~/.agents/skills/<package-name>/SKILL.md
-
-# Combined with a client target (Codex) -- APM dedups the shared path
-apm install --target codex,agent-skills
 ```
 
 `agent-skills` is **not** included in `--target all` because it is a cross-client deploy location, not a single client. Combine explicitly: `--target all,agent-skills`.

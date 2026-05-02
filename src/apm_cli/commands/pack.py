@@ -106,6 +106,17 @@ Exit codes:
     default=None,
     help="Marketplace: override output path (default: .claude-plugin/marketplace.json).",
 )
+@click.option(
+    "--legacy-skill-paths",
+    "legacy_skill_paths",
+    is_flag=True,
+    default=False,
+    help=(
+        "Restore per-client skill paths (e.g. .cursor/skills/) instead of the "
+        "default .agents/skills/ convergence. Temporary compatibility flag, "
+        "removal in v1.0."
+    ),
+)
 @click.pass_context
 def pack_cmd(
     ctx,
@@ -119,6 +130,7 @@ def pack_cmd(
     offline,
     include_prerelease,
     marketplace_output,
+    legacy_skill_paths,
 ):
     """Pack APM artifacts: bundle and/or marketplace.json."""
     logger = CommandLogger("pack", verbose=verbose, dry_run=dry_run)

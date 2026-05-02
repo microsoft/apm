@@ -29,6 +29,7 @@ def install_local_bundle(
     verbose: bool,
     alias: str | None,
     logger,
+    legacy_skill_paths: bool = False,
     rejected_flags: dict[str, object],
 ) -> None:
     """Deploy a local bundle into project / user scope.
@@ -99,6 +100,12 @@ def install_local_bundle(
                 "Pass --target to select one explicitly."
             )
             return
+
+        # Apply --legacy-skill-paths override to resolved targets.
+        if legacy_skill_paths:
+            from ..integration.targets import apply_legacy_skill_paths
+
+            targets = apply_legacy_skill_paths(targets)
 
         warning = check_target_mismatch(
             bundle_targets=bundle_info.pack_targets,

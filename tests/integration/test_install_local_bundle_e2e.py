@@ -186,8 +186,8 @@ class TestInstallLocalBundleE2E:
         )
 
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
-        # copilot project-scope root_dir is ".github"
-        assert (project / ".github" / "skills" / "coding" / "SKILL.md").is_file()
+        # copilot project-scope root_dir is ".github"; skills route to ".agents"
+        assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
         assert (project / ".github" / "agents" / "reviewer.md").is_file()
         assert (project / ".github" / "instructions" / "style.md").is_file()
 
@@ -204,7 +204,7 @@ class TestInstallLocalBundleE2E:
         )
 
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
-        assert (project / ".github" / "skills" / "coding" / "SKILL.md").is_file()
+        assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
         assert (project / ".github" / "agents" / "reviewer.md").is_file()
 
     def test_install_local_bundle_multi_target(
@@ -219,8 +219,8 @@ class TestInstallLocalBundleE2E:
         )
 
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
-        # copilot root_dir = ".github" ; claude root_dir = ".claude"
-        assert (project / ".github" / "skills" / "coding" / "SKILL.md").is_file()
+        # copilot routes skills to ".agents" ; claude root_dir = ".claude"
+        assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
         assert (project / ".claude" / "skills" / "coding" / "SKILL.md").is_file()
         assert (project / ".github" / "agents" / "reviewer.md").is_file()
         assert (project / ".claude" / "agents" / "reviewer.md").is_file()
@@ -231,7 +231,8 @@ class TestInstallLocalBundleE2E:
         """Install without --target -> auto-detects from project.
 
         With no detector dirs present, ``resolve_targets`` falls back to
-        the universal copilot default, so files land under ``.github/``.
+        the universal copilot default. Skills route to ``.agents/`` while
+        other primitives land under ``.github/``.
         """
         bundle = _make_plugin_bundle(tmp_path / "src")
         project = _make_project(tmp_path / "dst")
@@ -239,7 +240,7 @@ class TestInstallLocalBundleE2E:
         result = _invoke_install(project, str(bundle), monkeypatch=monkeypatch)
 
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
-        assert (project / ".github" / "skills" / "coding" / "SKILL.md").is_file()
+        assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
 
     def test_pack_install_round_trip_fidelity(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -263,7 +264,10 @@ class TestInstallLocalBundleE2E:
 
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
         for rel, expected_content in files.items():
-            deployed = project / ".github" / rel
+            # copilot routes ``skills/`` to ``.agents/``; other primitives
+            # stay under ``.github/``.
+            root = ".agents" if rel.startswith("skills/") else ".github"
+            deployed = project / root / rel
             assert deployed.is_file(), f"missing {deployed}"
             assert deployed.read_text(encoding="utf-8") == expected_content
 
@@ -295,7 +299,7 @@ class TestInstallLocalBundleCollision:
         project = _make_project(tmp_path / "dst")
 
         # Pre-create the destination file with identical content.
-        dest = project / ".github" / "skills" / "coding" / "SKILL.md"
+        dest = project / ".agents" / "skills" / "coding" / "SKILL.md"
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(bundle_content, encoding="utf-8")
 
@@ -318,7 +322,7 @@ class TestInstallLocalBundleCollision:
         )
         project = _make_project(tmp_path / "dst")
 
-        dest = project / ".github" / "skills" / "coding" / "SKILL.md"
+        dest = project / ".agents" / "skills" / "coding" / "SKILL.md"
         dest.parent.mkdir(parents=True, exist_ok=True)
         local_content = "# Locally modified\nDo not overwrite me.\n"
         dest.write_text(local_content, encoding="utf-8")
@@ -341,7 +345,7 @@ class TestInstallLocalBundleCollision:
         )
         project = _make_project(tmp_path / "dst")
 
-        dest = project / ".github" / "skills" / "coding" / "SKILL.md"
+        dest = project / ".agents" / "skills" / "coding" / "SKILL.md"
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text("# Locally modified\n", encoding="utf-8")
 
@@ -374,7 +378,7 @@ class TestInstallLocalBundleCollision:
         )
         project = _make_project(tmp_path / "dst")
 
-        dest = project / ".github" / "skills" / "coding" / "SKILL.md"
+        dest = project / ".agents" / "skills" / "coding" / "SKILL.md"
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(bundle_content, encoding="utf-8")
         before_bytes = dest.read_bytes()
@@ -420,11 +424,12 @@ class TestInstallLocalBundleDryRun:
         )
 
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
-        # No deployed files anywhere under .github/
-        github_root = project / ".github"
-        if github_root.exists():
-            files = [p for p in github_root.rglob("*") if p.is_file()]
-            assert files == [], f"dry-run wrote files: {files}"
+        # No deployed files anywhere under .github/ or .agents/
+        for root_name in (".github", ".agents"):
+            root = project / root_name
+            if root.exists():
+                files = [p for p in root.rglob("*") if p.is_file()]
+                assert files == [], f"dry-run wrote files: {files}"
         # Lockfile must not be created on dry-run.
         assert not (project / "apm.lock.yaml").exists()
 
@@ -564,7 +569,7 @@ class TestLocalInstallAirGap:
             )
             assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
             # Files actually deployed (so we know the install ran end-to-end).
-            assert (project / ".github" / "skills" / "coding" / "SKILL.md").is_file()
+            assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
         finally:
             for p in patches:
                 p.stop()

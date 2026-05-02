@@ -432,9 +432,18 @@ def integrate_local_bundle(
         # project_root otherwise.
         resolved_root = getattr(target, "resolved_deploy_root", None)
         if resolved_root is not None:
-            deploy_root = Path(resolved_root)
+            default_deploy_root = Path(resolved_root)
         else:
-            deploy_root = project_root / target.root_dir
+            default_deploy_root = project_root / target.root_dir
+
+        # Build a primitive→deploy_root lookup so bundle entries that fall
+        # under a primitive with an explicit ``deploy_root`` (e.g.
+        # skills→.agents) are routed to the converged directory rather
+        # than the per-client ``target.root_dir``.
+        _primitive_roots: dict[str, Path] = {}
+        for prim_name, prim_mapping in (target.primitives or {}).items():
+            if getattr(prim_mapping, "deploy_root", None) and resolved_root is None:
+                _primitive_roots[prim_name] = project_root / prim_mapping.deploy_root
 
         for rel, expected_hash in sorted(pack_files.items()):
             # CR1: bundle_files keys come from untrusted lockfile YAML
@@ -452,6 +461,15 @@ def integrate_local_bundle(
             if not src.is_file() or src.is_symlink():
                 skipped += 1
                 continue
+
+            # Route the file to the correct deploy root.  If the first
+            # path segment matches a primitive with an explicit
+            # ``deploy_root`` (e.g. ``skills/`` → ``.agents/``), use
+            # the converged directory.  Otherwise fall back to the
+            # target's default root.
+            _first_seg = rel.split("/", 1)[0] if "/" in rel else ""
+            deploy_root = _primitive_roots.get(_first_seg, default_deploy_root)
+
             dest = deploy_root / rel
             try:
                 ensure_path_within(dest, deploy_root)

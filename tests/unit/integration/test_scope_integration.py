@@ -369,8 +369,9 @@ class TestSkillScopeDeployment:
         )
 
         assert result.skill_created
-        assert (self.project_root / ".copilot" / "skills" / "my-skill" / "SKILL.md").exists()
+        assert (self.project_root / ".agents" / "skills" / "my-skill" / "SKILL.md").exists()
         assert not (self.project_root / ".github" / "skills").exists()
+        assert not (self.project_root / ".copilot" / "skills").exists()
 
 
 # -- auto_create guard -------------------------------------------------------

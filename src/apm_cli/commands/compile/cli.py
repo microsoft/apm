@@ -287,6 +287,17 @@ def _resolve_compile_target(target):
     is_flag=True,
     help="Remove orphaned AGENTS.md files that are no longer generated",
 )
+@click.option(
+    "--legacy-skill-paths",
+    "legacy_skill_paths",
+    is_flag=True,
+    default=False,
+    help=(
+        "Restore per-client skill paths (e.g. .cursor/skills/) instead of the "
+        "default .agents/skills/ convergence. Temporary compatibility flag, "
+        "removal in v1.0."
+    ),
+)
 @click.pass_context
 def compile(
     ctx,
@@ -302,6 +313,7 @@ def compile(
     verbose,
     local_only,
     clean,
+    legacy_skill_paths,
 ):
     """Compile APM context into distributed AGENTS.md files.
 

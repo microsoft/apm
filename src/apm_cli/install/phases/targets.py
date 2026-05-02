@@ -188,6 +188,17 @@ def run(ctx: InstallContext) -> None:
     )
 
     # ------------------------------------------------------------------
+    # Legacy skill paths opt-out (convergence §3)
+    # When --legacy-skill-paths is set (or APM_LEGACY_SKILL_PATHS env),
+    # reset deploy_root on skills primitives so they fall back to the
+    # per-client root_dir instead of the converged .agents/ directory.
+    # ------------------------------------------------------------------
+    if ctx.legacy_skill_paths:
+        from apm_cli.integration.targets import apply_legacy_skill_paths
+
+        _targets = apply_legacy_skill_paths(_targets)
+
+    # ------------------------------------------------------------------
     # Initialize integrators
     # ------------------------------------------------------------------
     ctx.targets = _targets

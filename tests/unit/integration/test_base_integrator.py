@@ -284,9 +284,9 @@ class TestPartitionManagedFiles:
         assert ".opencode/agents/foo.md" in result["agents_opencode"]
 
     def test_skills_cross_target_bucket(self):
-        mf = {".github/skills/my-skill/skill.md"}
+        mf = {".agents/skills/my-skill/skill.md"}
         result = BaseIntegrator.partition_managed_files(mf)
-        assert ".github/skills/my-skill/skill.md" in result["skills"]
+        assert ".agents/skills/my-skill/skill.md" in result["skills"]
 
     def test_hooks_cross_target_bucket(self):
         mf = {".github/hooks/pre-tool-use.sh"}
@@ -317,13 +317,13 @@ class TestPartitionManagedFiles:
         mf = {
             ".github/prompts/foo.prompt.md",
             ".claude/rules/bar.mdc",
-            ".github/skills/my-skill/skill.md",
+            ".agents/skills/my-skill/skill.md",
             ".github/hooks/pre-run.sh",
         }
         result = BaseIntegrator.partition_managed_files(mf)
         assert ".github/prompts/foo.prompt.md" in result["prompts"]
         assert ".claude/rules/bar.mdc" in result["rules_claude"]
-        assert ".github/skills/my-skill/skill.md" in result["skills"]
+        assert ".agents/skills/my-skill/skill.md" in result["skills"]
         assert ".github/hooks/pre-run.sh" in result["hooks"]
 
     def test_github_instructions_bucket(self):
