@@ -1,58 +1,58 @@
 {
-  "last_updated": "2026-05-01T03:36:59Z",
-  "last_run_tasks": ["task4", "task7"],
+  "last_updated": "2026-05-02T03:35:56Z",
+  "last_run_tasks": ["task3", "task7"],
   "validated_commands": {
-    "test": "python3 -m uv run pytest tests/unit tests/test_console.py -q --ignore=tests/unit/test_audit_report.py",
-    "test_full": "python3 -m uv run pytest tests/unit tests/test_console.py -q",
-    "format": "uv run --extra dev ruff check src/ tests/ --fix && uv run --extra dev ruff format src/ tests/",
-    "install_dev": "pip install uv --break-system-packages && python3 -m uv sync --extra dev",
-    "notes": "uv is not on PATH in CI; use 'python3 -m uv'. Do NOT use --cov: PyYAML global state corruption. Rich outputs ANSI codes even with NO_COLOR=1; strip with regex. Pre-existing failures: test_audit_report.py (SyntaxError f-string py3.12 backslash), test_deps_update_command.py (Group.cli AttributeError) - ~21 failures total, not caused by our changes."
+    "test": ".venv/bin/pytest tests/unit/ -q --ignore=tests/unit/test_audit_report.py --ignore=tests/unit/test_deps_update_command.py --ignore=tests/unit/marketplace/ --ignore=tests/unit/test_plugin_exporter_schema.py",
+    "test_view": ".venv/bin/pytest tests/unit/test_view_command.py -q",
+    "format": ".venv/bin/ruff check src/ tests/ --fix && .venv/bin/ruff format src/ tests/",
+    "lint_check": ".venv/bin/ruff check src/ tests/ && .venv/bin/ruff format --check src/ tests/",
+    "install_dev": "python3 -m uv sync --extra dev --no-build-isolation",
+    "notes": "uv not on PATH; use python3 -m uv or .venv/bin/ directly. rpds-py build fails with python3 -m uv run ruff (PyPy3.10 compat issue). Use .venv/bin/ruff instead. Excludes: test_audit_report.py (SyntaxError), test_deps_update_command.py (AttributeError), marketplace/ and test_plugin_exporter_schema.py (rpds ModuleNotFoundError). Baseline: ~5972 passed, 106 failed (pre-existing)."
   },
   "coverage_baseline": {
-    "total": "61%+",
-    "run_date": "2026-04-30",
-    "test_count": 6729,
-    "passing": 6729,
-    "pre_existing_failures": 21,
-    "notes": "6708 passing (pre-existing) + 21 new tests from uninstall-engine PR. Pre-existing failures are test_audit_report.py and test_deps_update_command.py."
+    "total": "~66%+ view.py",
+    "run_date": "2026-05-02",
+    "test_count_view": 41,
+    "notes": "view command: 34->41 tests (+7 error/display paths). baseline 5972 passing (106 pre-existing fails)."
   },
-  "monthly_activity_issue": "open-2026-05",
-  "monthly_activity_issue_number": null,
-  "monthly_activity_issue_note": "Created new issue '[Test Improver] Monthly Activity 2026-05' in run 2026-05-01. Number unknown (created via safeoutputs). Closed old 2026-04 issue #1060.",
-  "ansi_note": "Rich outputs ANSI codes (italic, bold) even with NO_COLOR=1. Use regex r'\\x1b\\[[0-9;]*[A-Za-z]' to strip before text assertions. Fixed in test_policy_status.py (PR #1029).",
+  "monthly_activity_issue_note": "Issue #1087 was closed by maintainer (danielmeppiel) on 2026-05-01 with 'not_planned'. Create new monthly issue each run.",
+  "ansi_note": "Rich outputs ANSI codes (italic, bold) even with NO_COLOR=1. Use regex r'\\x1b\\[[0-9;]*[A-Za-z]' to strip before text assertions.",
   "lockfile_format_note": "Lockfile is apm.lock.yaml (LOCKFILE_NAME constant).",
   "testing_backlog": [
     {"id": "install-command", "file": "src/apm_cli/commands/install.py", "coverage": "43%", "priority": "high", "notes": "Large complex file ~2804 lines. Core install logic. High risk. Deferred."},
     {"id": "compile-cli-full", "file": "src/apm_cli/commands/compile/cli.py", "coverage": "38%", "priority": "medium", "notes": "Main command logic still sparse."},
-    {"id": "view-command", "file": "src/apm_cli/commands/view.py", "coverage": "66%", "priority": "medium", "notes": "View command has missing paths."},
-    {"id": "deps-cli", "file": "src/apm_cli/commands/deps/cli.py", "coverage": "71%", "priority": "medium", "notes": "update() orchestration complex."}
+    {"id": "deps-cli", "file": "src/apm_cli/commands/deps/cli.py", "coverage": "71%", "priority": "medium", "notes": "update() orchestration complex."},
+    {"id": "view-command", "file": "src/apm_cli/commands/view.py", "coverage": "66%+", "priority": "low", "notes": "34->41 tests in PR #TBD (test-assist/view-error-handling-tests). Error paths now covered."}
   ],
-  "backlog_cursor": "view-command",
+  "backlog_cursor": "deps-cli",
   "completed_work": [
+    {
+      "run": "2026-05-02T03:35:56Z",
+      "tasks": ["task3", "task7"],
+      "pr_branch": "test-assist/view-error-handling-tests",
+      "description": "Task3: +7 tests for view command error paths (marketplace errors, display variations). Task7: new 2026-05 monthly issue created (prev #1087 closed by maintainer)."
+    },
     {
       "run": "2026-05-01T03:36:59Z",
       "tasks": ["task4", "task7"],
-      "description": "Task4: PR #1059 CI all green. PR #1029 CI passing. No fixes needed. Task7: Closed 2026-04 issue #1060. Created new 2026-05 monthly issue."
+      "description": "Task4: verified PR #1059 and #1029 CI passing. Task7: closed 2026-04 issue #1060, created 2026-05 issue #1087."
     },
     {
       "run": "2026-04-30T03:36:52Z",
       "tasks": ["task4", "task3", "task7"],
-      "pr_status": "pr_created",
-      "branch": "test-assist/uninstall-engine-helpers",
-      "description": "Task4: verified PR #1029 CI passing. Task3: 21 new tests for uninstall/engine.py helpers. Task7: Created monthly activity issue for 2026-04."
+      "pr_number": 1059,
+      "description": "Task3: 21 new tests for uninstall/engine.py helpers. Task4: verified #1029 CI passing."
     },
     {
       "run": "2026-04-29T03:36:23Z",
       "tasks": ["task3", "task7"],
-      "pr_status": "pr_created",
-      "branch": "test-assist/fix-policy-status-ansi-v3",
       "pr_number": 1029,
-      "description": "Fixed 7 pre-existing test failures in test_policy_status.py. Added _strip_ansi() helper. 6675 tests pass."
+      "description": "Fixed 7 pre-existing failures in test_policy_status.py. 6675 tests pass."
     },
     {
       "run": "2026-04-19T01:11:37Z",
       "tasks": ["task1", "task2", "task7"],
-      "description": "Task1: commands validated. Task2: backlog identified."
+      "description": "Commands validated. Backlog identified."
     }
   ]
 }
