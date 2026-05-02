@@ -95,8 +95,8 @@
         },
         "evidence": {
           "type": "object",
-          "description": "Optional irrefutable evidence backing this finding -- a real test that exists (passed/failed) or a real test that should exist but does not (missing). When present, the apm-ceo synthesizer treats this as LOAD-BEARING: a passed test proves the asserted user promise holds; a failed test proves it does not; a missing test on a critical-promise surface proves the regression-trap gap. The CEO does not arbitrate against a passed/failed outcome except by naming a specific reason (test was wrong, environment issue, flakiness with run-count). REQUIRED on every test-coverage-expert finding (the persona's contract); STRONGLY ENCOURAGED on any finding from any other persona that points at a test (e.g. supply-chain-security citing a test proving an exploit, devx-ux citing a test proving an error wording).",
-          "required": ["outcome"],
+          "description": "Optional irrefutable evidence backing this finding -- a real test that exists (passed/failed) or a real test that should exist but does not (missing). When present, the apm-ceo synthesizer treats this as LOAD-BEARING: a passed test proves the asserted user promise holds AT THE STATED TIER; a failed test proves it does not; a missing test on a critical-promise surface proves the regression-trap gap. Tier matters: a `unit` passed does NOT certify the promise at integration-with-fixtures or e2e tier, and a critical user-promise surface (CLI command, install pipeline, lockfile, auth, hooks, marketplace, cross-module integration -- see test-coverage-expert tier-floor matrix) requires `integration-with-fixtures` or `e2e` to fully certify. The CEO does not arbitrate against a passed/failed outcome except by naming a specific reason (test was wrong, tier was below the surface floor, environment issue, flakiness with run-count). REQUIRED on every test-coverage-expert finding (the persona's contract); STRONGLY ENCOURAGED on any finding from any other persona that points at a test (e.g. supply-chain-security citing a test proving an exploit, devx-ux citing a test proving an error wording).",
+          "required": ["outcome", "tier"],
           "additionalProperties": false,
           "properties": {
             "test_file": {
@@ -110,7 +110,16 @@
             "outcome": {
               "type": "string",
               "enum": ["passed", "failed", "missing", "manual", "unknown"],
-              "description": "passed: the test exists in the diff or in main and proves the user promise on this PR's commit. failed: the test exists and does NOT pass on this PR's commit (CEO weighs heavily; this is the load-bearing case for blocking). missing: no test exists at the expected location; the persona has probed via view/grep and confirmed absence. manual: only manual verification; counts as no automated guardrail. unknown: outcome was not verifiable in this run; persona MUST explain why in the rationale."
+              "description": "passed: the test exists in the diff or in main and proves the user promise AT THE STATED TIER on this PR's commit. failed: the test exists and does NOT pass on this PR's commit (CEO weighs heavily; this is the load-bearing case for blocking). missing: no test exists at the expected location AT THE REQUIRED TIER for the surface; the persona has probed via view/grep and confirmed absence. Use `outcome=missing` with the floor tier when only sub-floor evidence exists for a critical surface (e.g. unit tests exist but the install-pipeline surface needs integration-with-fixtures). manual: only manual verification; counts as no automated guardrail. unknown: outcome was not verifiable in this run; persona MUST explain why in the rationale."
+            },
+            "tier": {
+              "type": "string",
+              "enum": ["unit", "integration-with-fixtures", "e2e", "manual-only", "static"],
+              "description": "Tier of evidence. unit: function-level test with mocks at the boundary; cheap, fast, narrow. integration-with-fixtures: real I/O against real fixtures (real files, real subprocess, real network when tagged), no mocked surface for the asserted contract. e2e: full CLI invocation end-to-end, real artifacts, real exit codes. manual-only: only a manual procedure; no automated guardrail. static: lint / type-check / schema validation only. The CEO weights tier against the SURFACE FLOOR named in the test-coverage-expert tier-floor matrix: a `unit` passed evidence on a critical-promise surface (CLI / install / lockfile / auth / hooks / marketplace / cross-module) does NOT silence an opinion-finding from another panelist asking for `integration-with-fixtures` coverage. Required on every evidence block."
+            },
+            "run_evidence": {
+              "type": "string",
+              "description": "Optional. For `outcome=passed` at `tier=integration-with-fixtures` or `e2e` on a critical-promise surface, the persona SHOULD have actually run the test (not just read it) and recorded the pytest invocation + pass/fail line + duration here. Verbatim, under 240 chars. Reading code is not running code (S7 DETERMINISTIC TOOL BRIDGE: facts-that-must-be-true do not survive as LLM assertions)."
             },
             "assertion_excerpt": {
               "type": "string",

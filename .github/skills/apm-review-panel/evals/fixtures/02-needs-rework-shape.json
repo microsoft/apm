@@ -134,6 +134,7 @@
             "test_file": "tests/unit/deps/test_resolver.py",
             "test_name": "test_resolver_rejects_path_traversal_in_dep_name",
             "outcome": "missing",
+            "tier": "unit",
             "assertion_excerpt": "with pytest.raises(ValueError): resolver.resolve(Dep(name='../../../etc/passwd', source='gh:...'))",
             "proves": "User-controlled dep.name cannot escape the install directory via traversal payloads.",
             "principles": [
@@ -153,6 +154,7 @@
             "test_file": "tests/integration/test_install_pipeline.py",
             "test_name": "test_install_pipeline_resolver_to_downloader_e2e",
             "outcome": "missing",
+            "tier": "integration-with-fixtures",
             "assertion_excerpt": "result = install(manifest_path, scope=USER); assert (target_dir / 'expected.md').exists()",
             "proves": "The new Resolver -> Downloader boundary actually delivers files to disk for a real apm.yml.",
             "principles": [
