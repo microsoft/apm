@@ -458,7 +458,16 @@ class MCPIntegrator:
             return
 
         # Determine which runtimes to clean, mirroring install-time logic.
-        all_runtimes = {"vscode", "copilot", "codex", "cursor", "opencode", "gemini", "claude", "windsurf"}
+        all_runtimes = {
+            "vscode",
+            "copilot",
+            "codex",
+            "cursor",
+            "opencode",
+            "gemini",
+            "claude",
+            "windsurf",
+        }
         if runtime:  # noqa: SIM108
             target_runtimes = {runtime}
         else:
@@ -841,7 +850,17 @@ class MCPIntegrator:
             mcp_compatible = [
                 rt
                 for rt in detected_runtimes
-                if rt in ["vscode", "copilot", "codex", "cursor", "opencode", "gemini", "claude", "windsurf"]
+                if rt
+                in [
+                    "vscode",
+                    "copilot",
+                    "codex",
+                    "cursor",
+                    "opencode",
+                    "gemini",
+                    "claude",
+                    "windsurf",
+                ]
             ]
             return [rt for rt in mcp_compatible if shutil.which(rt)]
 

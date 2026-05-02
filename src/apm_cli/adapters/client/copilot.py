@@ -38,6 +38,8 @@ class CopilotClientAdapter(MCPClientAdapter):
 
     supports_user_scope: bool = True
     _client_label: str = "Copilot CLI"
+    target_name: str = "copilot"
+    mcp_servers_key: str = "mcpServers"
 
     def __init__(
         self,

@@ -51,7 +51,16 @@ def agents_alias_was_detected() -> bool:
 
 # Valid target values (internal canonical form)
 TargetType = Literal[
-    "vscode", "claude", "cursor", "opencode", "codex", "gemini", "windsurf", "agent-skills", "all", "minimal"
+    "vscode",
+    "claude",
+    "cursor",
+    "opencode",
+    "codex",
+    "gemini",
+    "windsurf",
+    "agent-skills",
+    "all",
+    "minimal",
 ]
 
 # Compiler families used inside a multi-target frozenset. Narrower than

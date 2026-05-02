@@ -25,6 +25,8 @@ class WindsurfClientAdapter(CopilotClientAdapter):
 
     supports_user_scope: bool = True
     _client_label: str = "Windsurf"
+    target_name: str = "windsurf"
+    mcp_servers_key: str = "mcpServers"
 
     # ------------------------------------------------------------------ #
     # Config path

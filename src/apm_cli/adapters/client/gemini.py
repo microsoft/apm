@@ -44,6 +44,8 @@ class GeminiClientAdapter(CopilotClientAdapter):
     """
 
     supports_user_scope: bool = True
+    target_name: str = "gemini"
+    mcp_servers_key: str = "mcpServers"
 
     def get_config_path(self):
         """Return the path to ``.gemini/settings.json`` in the repository root."""
