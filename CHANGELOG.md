@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm compile` no longer silently drops instructions without an `applyTo` pattern from generated `AGENTS.md` and `CLAUDE.md`; globals now render under a `## Global Instructions` section, matching the optimizer's existing `(global)` placement (#1088, closes #1072)
 - `apm install` no longer masks local-bundle install failures with `UnboundLocalError`. (#PR_NUMBER)
 - **`apm install <pkg>@<marketplace>` no longer fails for all marketplace packages.** The install resolver now accepts both legacy and current marketplace key names: `repository`/`repo` for github sources, `url`/`repo` for git-subdir sources, and `type`/`source` as the source-type discriminator. A scheme guard rejects full URLs passed through the `url` fallback. (#1106, closes #1105)
 - **`apm install --update` no longer fails for GHES/generic hosts** that rely on git credential helpers (e.g., `git-credential-manager`) for authentication. The preflight auth probe was blocking credential helpers by setting `GIT_CONFIG_GLOBAL=/dev/null`; it now uses the same relaxed environment as the clone fallback path for non-GitHub/non-ADO hosts. (#1082)
