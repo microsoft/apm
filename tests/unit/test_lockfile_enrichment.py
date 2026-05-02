@@ -419,3 +419,100 @@ class TestEnrichLockfileListTarget:
             parsed_list["dependencies"][0]["deployed_files"]
             == parsed_str["dependencies"][0]["deployed_files"]
         )
+
+
+class TestWindsurfTargetParity:
+    """Regression: --target windsurf must filter and cross-map correctly.
+
+    Before the targets-registry refactor, ``_TARGET_PREFIXES`` and
+    ``_CROSS_TARGET_MAPS`` both omitted ``"windsurf"``, so
+    ``apm pack --target windsurf`` silently dropped every ``.windsurf/``
+    file from the bundle lockfile.
+    """
+
+    def _lockfile_with(self, files: list[str]) -> LockFile:
+        lf = LockFile()
+        lf.add_dependency(
+            LockedDependency(
+                repo_url="owner/repo",
+                resolved_commit="abc123",
+                version="1.0.0",
+                deployed_files=files,
+            )
+        )
+        return lf
+
+    def test_windsurf_target_includes_windsurf_prefix(self):
+        lf = self._lockfile_with(
+            [
+                ".windsurf/skills/x/SKILL.md",
+                ".unrelated/foo",
+            ]
+        )
+        result = enrich_lockfile_for_pack(lf, fmt="apm", target="windsurf")
+        deployed = yaml.safe_load(result)["dependencies"][0]["deployed_files"]
+        assert ".windsurf/skills/x/SKILL.md" in deployed
+        assert ".unrelated/foo" not in deployed
+
+    def test_windsurf_cross_map_skills_from_github(self):
+        """``.github/skills/`` files are remapped under ``.windsurf/skills/``."""
+        lf = self._lockfile_with([".github/skills/x/SKILL.md"])
+        result = enrich_lockfile_for_pack(lf, fmt="apm", target="windsurf")
+        deployed = yaml.safe_load(result)["dependencies"][0]["deployed_files"]
+        assert ".windsurf/skills/x/SKILL.md" in deployed
+
+    def test_windsurf_cross_map_agents_collapse_to_skills(self):
+        """``.github/agents/`` is intentionally remapped to ``.windsurf/skills/``
+        because windsurf has no native agent surface (lossy conversion).
+        """
+        lf = self._lockfile_with([".github/agents/a.md"])
+        result = enrich_lockfile_for_pack(lf, fmt="apm", target="windsurf")
+        deployed = yaml.safe_load(result)["dependencies"][0]["deployed_files"]
+        assert ".windsurf/skills/a.md" in deployed
+
+    def test_target_all_includes_windsurf_files(self):
+        """``--target all`` must include ``.windsurf/`` files (was missing pre-refactor)."""
+        lf = self._lockfile_with(
+            [
+                ".windsurf/skills/x/SKILL.md",
+                ".github/agents/a.md",
+                ".gemini/extensions/GEMINI.md",
+            ]
+        )
+        result = enrich_lockfile_for_pack(lf, fmt="apm", target="all")
+        deployed = yaml.safe_load(result)["dependencies"][0]["deployed_files"]
+        assert ".windsurf/skills/x/SKILL.md" in deployed
+        assert ".github/agents/a.md" in deployed
+        # Gemini was also missing from the legacy "all" list -- registry derivation fixes that
+        assert ".gemini/extensions/GEMINI.md" in deployed
+
+    def test_multi_target_windsurf_plus_claude(self):
+        lf = self._lockfile_with(
+            [
+                ".windsurf/skills/x/SKILL.md",
+                ".claude/commands/c.md",
+                ".cursor/rules/r.md",
+            ]
+        )
+        result = enrich_lockfile_for_pack(lf, fmt="apm", target=["windsurf", "claude"])
+        deployed = yaml.safe_load(result)["dependencies"][0]["deployed_files"]
+        assert ".windsurf/skills/x/SKILL.md" in deployed
+        assert ".claude/commands/c.md" in deployed
+        assert ".cursor/rules/r.md" not in deployed
+
+    def test_existing_targets_unchanged(self):
+        """Regression: every legacy single-target prefix still works."""
+        cases = [
+            ("copilot", ".github/agents/a.md"),
+            ("claude", ".claude/commands/c.md"),
+            ("cursor", ".cursor/rules/r.md"),
+            ("opencode", ".opencode/agents/a.md"),
+            ("codex", ".codex/agents/a.md"),
+            ("agent-skills", ".agents/skills/x/SKILL.md"),
+        ]
+        for target, path in cases:
+            lf = self._lockfile_with([path, ".unrelated/foo"])
+            result = enrich_lockfile_for_pack(lf, fmt="apm", target=target)
+            deployed = yaml.safe_load(result)["dependencies"][0]["deployed_files"]
+            assert path in deployed, f"{target}: {path} dropped after refactor"
+            assert ".unrelated/foo" not in deployed, f"{target}: leaked unrelated file"

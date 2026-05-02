@@ -517,7 +517,7 @@ def parse_target_field(
     # preserves the long-standing CLI contract where ``--target copilot``
     # yields ``"copilot"`` rather than the canonical ``"vscode"``; every
     # downstream consumer (active_targets, agents_compiler,
-    # _CROSS_TARGET_MAPS, _TARGET_PREFIXES) already accepts both alias
+    # _CROSS_TARGET_MAPS, _get_target_prefixes) already accepts both alias
     # spellings, so resolving here would be a visible behaviour change
     # with zero functional benefit and would break the CLI test suite
     # (~10 ``test_single_*`` cases).  This is the one asymmetry #820's
