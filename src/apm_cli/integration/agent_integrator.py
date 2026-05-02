@@ -153,7 +153,9 @@ class AgentIntegrator(BaseIntegrator):
                 self._write_codex_agent(source_file, target_path)
                 links_resolved = 0
             elif mapping.format_id == "windsurf_agent_skill":
-                links_resolved = self._write_windsurf_agent_skill(source_file, target_path)
+                links_resolved = self._write_windsurf_agent_skill(
+                    source_file, target_path, diagnostics=diagnostics
+                )
             else:
                 links_resolved = self.copy_agent(source_file, target_path)
             total_links_resolved += links_resolved
@@ -277,7 +279,9 @@ class AgentIntegrator(BaseIntegrator):
     # Windsurf agent-skill transformer (agent.md -> skills/<name>/SKILL.md)
     # ------------------------------------------------------------------
 
-    def _write_windsurf_agent_skill(self, source: Path, target: Path) -> int:  # not @staticmethod: needs self.resolve_links()
+    def _write_windsurf_agent_skill(
+        self, source: Path, target: Path, diagnostics=None
+    ) -> int:  # not @staticmethod: needs self.resolve_links()
         """Transform an ``.agent.md`` file to a Windsurf Skill (``SKILL.md``).
 
         Windsurf Skills are the closest equivalent to a specialist persona:
@@ -287,7 +291,8 @@ class AgentIntegrator(BaseIntegrator):
 
         The conversion:
         - Keeps ``name`` (or derives from filename) and ``description``.
-        - Strips agent-specific keys (``model``, ``tools``).
+        - Strips agent-specific keys (``model``, ``tools``) and emits a
+          diagnostic warning when those fields are dropped.
         - Preserves the markdown body verbatim.
         """
         content = source.read_text(encoding="utf-8")
@@ -310,6 +315,15 @@ class AgentIntegrator(BaseIntegrator):
         else:
             body = content
             fm = {}
+
+        dropped = [k for k in ("tools", "model") if fm.get(k)]
+        if dropped and diagnostics is not None:
+            diagnostics.warn(
+                f"Windsurf skill conversion dropped frontmatter field(s) "
+                f"{', '.join(dropped)} from {source.name}",
+                detail="Windsurf Skills do not support agent-only fields; "
+                "only name, description, and body are preserved.",
+            )
 
         name = fm.get("name", stem)
         description = fm.get("description", "")
