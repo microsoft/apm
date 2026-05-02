@@ -22,6 +22,7 @@ import yaml
 try:
     from apm_cli.bundle.local_bundle import (
         LocalBundleInfo,
+        _looks_like_legacy_apm_bundle,
         check_target_mismatch,
         detect_local_bundle,
         read_bundle_plugin_json,
@@ -190,6 +191,102 @@ class TestDetectLocalBundle:
         assert result is None
         # No new apm-local-bundle-* directory left behind.
         assert after - before == set()
+
+
+# ---------------------------------------------------------------------------
+# Legacy apm-format detection tests
+# ---------------------------------------------------------------------------
+
+
+def _make_legacy_apm_bundle(
+    tmp_path: Path,
+    *,
+    pkg_name: str = "test-pkg",
+    pkg_version: str = "0.1.0",
+    files: dict[str, str] | None = None,
+) -> Path:
+    """Create a minimal legacy apm-format bundle (apm.lock.yaml, NO plugin.json).
+
+    Mirrors what ``apm pack --format apm --archive`` produces: a directory
+    containing deployed files and an ``apm.lock.yaml``, but no ``plugin.json``.
+    """
+    bundle = tmp_path / f"{pkg_name}-{pkg_version}"
+    bundle.mkdir(parents=True, exist_ok=True)
+
+    if files is None:
+        files = {".github/copilot-instructions.md": "# Copilot instructions\n"}
+
+    for rel, content in files.items():
+        p = bundle / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+
+    lock_data: dict = {
+        "pack": {
+            "format": "apm",
+            "target": "copilot",
+        },
+        "dependencies": [
+            {
+                "repo_url": "owner/test-pkg",
+                "resolved_commit": "abc123",
+                "deployed_files": list(files.keys()),
+            }
+        ],
+    }
+    (bundle / "apm.lock.yaml").write_text(
+        yaml.dump(lock_data, default_flow_style=False), encoding="utf-8"
+    )
+    return bundle
+
+
+def _make_legacy_tarball(tmp_path: Path, bundle_dir: Path) -> Path:
+    """Archive a legacy bundle directory into .tar.gz."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    archive_path = tmp_path / "legacy-bundle.tar.gz"
+    with tarfile.open(archive_path, "w:gz") as tar:
+        tar.add(bundle_dir, arcname=bundle_dir.name)
+    return archive_path
+
+
+class TestLegacyApmFormatDetection:
+    """detect_local_bundle returns None for legacy --format apm bundles
+    (they have apm.lock.yaml but no plugin.json)."""
+
+    def test_detect_returns_none_for_legacy_directory(self, tmp_path: Path) -> None:
+        bundle = _make_legacy_apm_bundle(tmp_path)
+        result = detect_local_bundle(bundle)
+        assert result is None
+
+    def test_detect_returns_none_for_legacy_tarball(self, tmp_path: Path) -> None:
+        bundle = _make_legacy_apm_bundle(tmp_path)
+        tarball = _make_legacy_tarball(tmp_path / "archives", bundle)
+        result = detect_local_bundle(tarball)
+        assert result is None
+
+    def test_looks_like_legacy_apm_bundle_true_for_legacy_tarball(self, tmp_path: Path) -> None:
+        bundle = _make_legacy_apm_bundle(tmp_path)
+        tarball = _make_legacy_tarball(tmp_path / "archives", bundle)
+        assert _looks_like_legacy_apm_bundle(tarball) is True
+
+    def test_looks_like_legacy_apm_bundle_false_for_plugin_tarball(self, tmp_path: Path) -> None:
+        bundle = _make_plugin_bundle(tmp_path)
+        tarball = _make_plugin_tarball(tmp_path / "archives", bundle)
+        assert _looks_like_legacy_apm_bundle(tarball) is False
+
+    def test_looks_like_legacy_apm_bundle_false_for_junk_tarball(self, tmp_path: Path) -> None:
+        junk = tmp_path / "junk"
+        junk.mkdir()
+        (junk / "random.txt").write_text("not a bundle", encoding="utf-8")
+        archive = tmp_path / "junk.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            tar.add(junk, arcname="junk")
+        assert _looks_like_legacy_apm_bundle(archive) is False
+
+    def test_looks_like_legacy_apm_bundle_false_for_non_archive(self, tmp_path: Path) -> None:
+        plain = tmp_path / "not-archive.txt"
+        plain.write_text("hello", encoding="utf-8")
+        assert _looks_like_legacy_apm_bundle(plain) is False
 
 
 # ---------------------------------------------------------------------------

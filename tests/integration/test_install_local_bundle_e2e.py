@@ -568,3 +568,85 @@ class TestLocalInstallAirGap:
         finally:
             for p in patches:
                 p.stop()
+
+
+# ---------------------------------------------------------------------------
+# Legacy --format apm tarball rejection
+# ---------------------------------------------------------------------------
+
+
+class TestInstallLegacyApmFormatBundle:
+    """``apm install <legacy-bundle>`` must reject legacy --format apm tarballs
+    with an actionable error pointing at ``apm unpack`` or ``--format plugin``."""
+
+    def test_legacy_apm_tarball_rejected_with_actionable_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A tarball produced by ``apm pack --format apm --archive`` has
+        ``apm.lock.yaml`` at the root but no ``plugin.json``.  The install
+        command must reject it with a message that names the legacy format
+        and suggests either repacking or using ``apm unpack``."""
+        # Build a legacy apm-format bundle directory
+        bundle = tmp_path / "test-pkg-0.1.0"
+        bundle.mkdir(parents=True)
+
+        files = {
+            ".github/copilot-instructions.md": "# Copilot instructions\n",
+            ".github/skills/coding/SKILL.md": "# Coding skill\n",
+        }
+        for rel, content in files.items():
+            p = bundle / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+
+        lock_data = {
+            "pack": {"format": "apm", "target": "copilot"},
+            "dependencies": [
+                {
+                    "repo_url": "owner/test-pkg",
+                    "resolved_commit": "abc123",
+                    "deployed_files": list(files.keys()),
+                }
+            ],
+        }
+        (bundle / "apm.lock.yaml").write_text(
+            yaml.dump(lock_data, default_flow_style=False), encoding="utf-8"
+        )
+
+        # Archive (same as ``apm pack --format apm --archive``)
+        archive = tmp_path / "test-pkg-0.1.0.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            tar.add(bundle, arcname=bundle.name)
+
+        project = _make_project(tmp_path / "dst")
+        result = _invoke_install(
+            project, str(archive), "--target", "copilot", monkeypatch=monkeypatch
+        )
+
+        assert result.exit_code != 0, f"Expected failure, got exit 0: {result.output!r}"
+        # The error must mention the legacy format
+        assert "--format apm" in result.output or "legacy format" in result.output
+        # The error must offer actionable guidance
+        assert "apm unpack" in result.output or "--format plugin" in result.output
+        # No files should be deployed
+        assert not (project / ".github" / "copilot-instructions.md").exists()
+
+    def test_legacy_apm_directory_falls_through_to_resolver(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A legacy directory (no plugin.json, not a tarball) is not caught
+        by the tarball guard and falls through to the dependency-resolver
+        pipeline.  This is expected: directories without plugin.json are
+        treated as local-path deps, not bundles."""
+        bundle = tmp_path / "test-pkg-0.1.0"
+        bundle.mkdir(parents=True)
+        (bundle / "apm.lock.yaml").write_text("pack:\n  format: apm\n", encoding="utf-8")
+
+        project = _make_project(tmp_path / "dst")
+        # This will fail in the resolver (not a valid local dep) but
+        # must NOT hit the "legacy format" error path -- that's tarball-only.
+        result = _invoke_install(
+            project, str(bundle), "--target", "copilot", monkeypatch=monkeypatch
+        )
+        # Should NOT contain the legacy-tarball error message
+        assert "--format apm" not in result.output

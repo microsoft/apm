@@ -415,6 +415,50 @@ class TestPathExistsButNotBundle:
         assert result.exit_code != 0
         assert "not a valid APM bundle" in result.output
 
+    def test_legacy_apm_format_tarball_raises_actionable_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A tarball packed with --format apm (has apm.lock.yaml, no
+        plugin.json) must produce a specific error guiding the user to
+        repack with --format plugin or use apm unpack."""
+        # Build a legacy apm-format bundle (mirrors packer.py fmt="apm" output)
+        bundle = tmp_path / "test-pkg-0.1.0"
+        bundle.mkdir(parents=True)
+        (bundle / ".github" / "copilot-instructions.md").mkdir(parents=True, exist_ok=True)
+        inst_file = bundle / ".github" / "copilot-instructions.md"
+        # Fix: copilot-instructions.md is a file, not a directory
+        import shutil
+
+        shutil.rmtree(inst_file, ignore_errors=True)
+        inst_file.parent.mkdir(parents=True, exist_ok=True)
+        inst_file.write_text("# Instructions\n", encoding="utf-8")
+
+        lock_data = {
+            "pack": {"format": "apm", "target": "copilot"},
+            "dependencies": [
+                {
+                    "repo_url": "owner/test-pkg",
+                    "resolved_commit": "abc123",
+                    "deployed_files": [".github/copilot-instructions.md"],
+                }
+            ],
+        }
+        (bundle / "apm.lock.yaml").write_text(
+            yaml.dump(lock_data, default_flow_style=False), encoding="utf-8"
+        )
+
+        # Archive it (no plugin.json!)
+        archive = tmp_path / "legacy.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            tar.add(bundle, arcname=bundle.name)
+
+        project = _make_project(tmp_path / "dst")
+        result = _invoke(project, monkeypatch, str(archive))
+        assert result.exit_code != 0
+        # Must mention the legacy format and offer actionable guidance
+        assert "--format apm" in result.output or "legacy format" in result.output
+        assert "apm unpack" in result.output or "--format plugin" in result.output
+
 
 # ---------------------------------------------------------------------------
 # IM8: --as on a registry install is rejected

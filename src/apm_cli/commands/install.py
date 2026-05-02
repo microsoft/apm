@@ -1072,6 +1072,18 @@ def install(  # noqa: PLR0913
             # install that goes through the dependency-resolver pipeline.
             _suffix = _probe.name.lower()
             if _probe.is_file() and (_suffix.endswith(".tar.gz") or _suffix.endswith(".tgz")):
+                # Distinguish legacy --format apm bundles (apm.lock.yaml
+                # present, plugin.json absent) from arbitrary tarballs so
+                # the error message guides the user to the right next step.
+                from ..bundle.local_bundle import _looks_like_legacy_apm_bundle
+
+                if _looks_like_legacy_apm_bundle(_probe):
+                    raise click.UsageError(
+                        f"'{packages[0]}' was packed with '--format apm' (legacy format). "
+                        "'apm install <bundle>' requires the plugin format. "
+                        "Repack with 'apm pack --format plugin --archive', "
+                        "or use 'apm unpack' to deploy the legacy bundle."
+                    )
                 raise click.UsageError(
                     f"'{packages[0]}' is not a valid APM bundle archive "
                     "(no plugin.json found at the bundle root). "

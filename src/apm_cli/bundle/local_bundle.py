@@ -136,6 +136,38 @@ def _looks_like_archive(path: Path) -> bool:
     return name.endswith(".tar.gz") or name.endswith(".tgz")
 
 
+def _looks_like_legacy_apm_bundle(path: Path) -> bool:
+    """Return ``True`` when *path* is a tarball packed with ``--format apm``.
+
+    Legacy bundles contain ``apm.lock.yaml`` at the bundle root but NO
+    ``plugin.json``.  This helper extracts the tarball to a temp directory,
+    checks for the signal, and cleans up.  Returns ``False`` on any I/O
+    error (caller should fall through to the generic error message).
+    """
+    if not (path.is_file() and _looks_like_archive(path)):
+        return False
+    tmp = Path(tempfile.mkdtemp(prefix="apm-legacy-probe-"))
+    try:
+        with tarfile.open(path, "r:gz") as tar:
+            for member in tar.getmembers():
+                if member.issym() or member.islnk():
+                    return False
+            if sys.version_info >= (3, 12):
+                tar.extractall(tmp, filter="data")
+            else:
+                tar.extractall(tmp)  # noqa: S202
+        # Locate the inner directory (apm pack uses arcname=<bundle-name>)
+        root = tmp
+        children = [p for p in tmp.iterdir() if p.is_dir()]
+        if len(children) == 1:
+            root = children[0]
+        return (root / "apm.lock.yaml").is_file() and not (root / "plugin.json").is_file()
+    except (tarfile.TarError, OSError):
+        return False
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def _find_extracted_root(extract_dir: Path) -> Path | None:
     """Find the bundle root inside an extracted tarball.
 
