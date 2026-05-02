@@ -257,7 +257,7 @@ local_path_form = ("./" / "../" / "/" / "~/" / ".\\" / "..\\" / "~\\") path
 | `host` | OPTIONAL | FQDN (e.g. `gitlab.com`) | Git host. Defaults to `github.com`. |
 | `port` | OPTIONAL | `1`–`65535` | Non-default port on `ssh://`, `https://`, `http://` clone URLs. Not expressible in SCP shorthand. |
 | `owner/repo` | REQUIRED | 2+ path segments of `[a-zA-Z0-9._-]+` | Repository path. GitHub uses exactly 2 segments (`owner/repo`). Non-GitHub hosts MAY use nested groups (e.g. `gitlab.com/group/sub/repo`). |
-| `virtual_path` | OPTIONAL | Path segments after repo | Subdirectory, file, or collection within the repo. See §4.1.3. |
+| `virtual_path` | OPTIONAL | Path segments after repo | Subdirectory or file within the repo. See §4.1.3. |
 | `ref` | OPTIONAL | Branch, tag, or commit SHA | Git reference. Commit SHAs matched by `^[a-f0-9]{7,40}$`. Semver tags matched by `^v?\d+\.\d+\.\d+`. |
 
 **Examples:**
@@ -303,7 +303,7 @@ REQUIRED when the shorthand is ambiguous (e.g. nested-group repos with virtual p
 | Field | Type | Required | Pattern / Constraint | Description |
 |---|---|---|---|---|
 | `git` | `string` | REQUIRED (remote) | HTTPS URL, SSH URL, or FQDN shorthand | Clone URL of the repository. Required for remote dependencies. |
-| `path` | `string` | OPTIONAL / REQUIRED (local) | Relative path within the repo, or local filesystem path | When `git` is present: subdirectory, file, or collection (virtual package). When `git` is absent: local filesystem path (must start with `./`, `../`, `/`, or `~/`). |
+| `path` | `string` | OPTIONAL / REQUIRED (local) | Relative path within the repo, or local filesystem path | When `git` is present: subdirectory or file (virtual package). When `git` is absent: local filesystem path (must start with `./`, `../`, `/`, or `~/`). |
 | `ref` | `string` | OPTIONAL | Branch, tag, or commit SHA | Git reference to checkout. |
 | `alias` | `string` | OPTIONAL | `^[a-zA-Z0-9._-]+$` | Local alias. |
 
@@ -324,15 +324,16 @@ Local path dependency (development only):
 
 #### 4.1.3. Virtual Packages
 
-A dependency MAY target a subdirectory, file, or collection within a repository rather than the whole repo. Conforming resolvers MUST classify virtual packages using the following rules, evaluated in order:
+A dependency MAY target a subdirectory or a file within a repository rather than the whole repo. Conforming resolvers MUST classify virtual packages using the following rules, evaluated in order:
 
 | Kind | Detection rule | Example |
 |---|---|---|
 | **File** | `virtual_path` ends in `.prompt.md`, `.instructions.md`, `.agent.md`, or `.chatmode.md` | `owner/repo/prompts/review.prompt.md` |
-| **Collection (manifest)** | `virtual_path` ends with `.collection.yml` or `.collection.yaml` | `owner/repo/collections/security.collection.yml` |
-| **Subdirectory** | `virtual_path` does not match any file or collection extension above | `owner/repo/skills/security` |
+| **Subdirectory** | `virtual_path` does not match any file extension above | `owner/repo/skills/security` |
 
-Classification is by extension only -- never by path segment. A path like `owner/repo/collections/security` (no extension) is **Subdirectory**, not Collection: the actual on-disk shape (APM package, skill bundle, plugin, or legacy collection) is resolved at fetch time by probing for `apm.yml` first and falling back to a sibling `security.collection.yml` for the legacy form.
+Classification is by extension only -- never by path segment. A path like `owner/repo/collections/security` (no extension) is **Subdirectory**: the actual on-disk shape (APM package with `apm.yml`, skill bundle, or plugin) is resolved at fetch time by probing for `apm.yml` first.
+
+> **Removed (#1094):** the legacy `.collection.yml` / `.collection.yaml` virtual-package form is no longer supported. Convert any such reference to an `apm.yml` with a `dependencies:` section, then reference the resulting subdirectory as a regular subdirectory virtual package.
 
 #### 4.1.4. Canonical Normalisation
 

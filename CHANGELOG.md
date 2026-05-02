@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **BREAKING: dropped support for `.collection.yml` / `.collection.yaml` virtual packages.** Dependencies whose paths end in `.collection.yml` or `.collection.yaml` now raise a `ValueError` at parse time with a migration message. Convert any such entry to a regular `apm.yml` with a `dependencies:` section under the same subdirectory, then reference the directory itself as a subdirectory virtual package (no extension). The internal `VirtualPackageType.COLLECTION` enum value, the `download_collection_package` codepath, the `is_virtual_collection()` reference helper, and the `META_PACKAGE` package-type label have been removed -- none were persisted to the lockfile, so existing locks are unaffected. (#1097, closes #1094) Thanks @edenfunf for the original PR.
+
 ### Changed
 
 - **Renamed `NOTICE.md` -> `NOTICE`** to follow the Apache / CNCF convention used by upstream third-party-attribution files (e.g. `kubernetes-sigs/kro`, `kubernetes-sigs/headlamp`). The generator (`scripts/generate-notice.py`), `make notice` target, and `NOTICE Drift Check` workflow now operate on the extension-less path. (#1073)

@@ -1720,22 +1720,6 @@ class TestVirtualFilePackageYamlGeneration:
         ]
         return dep_ref
 
-    def _make_collection_dep_ref(self, virtual_path):
-        """Helper: build a minimal DependencyReference for a virtual collection."""
-        from apm_cli.models.apm_package import DependencyReference
-
-        dep_ref = Mock(spec=DependencyReference)
-        dep_ref.is_virtual = True
-        dep_ref.virtual_path = virtual_path
-        dep_ref.reference = "main"
-        dep_ref.repo_url = "github/my-org"
-        dep_ref.get_virtual_package_name.return_value = "my-org-my-collection"
-        dep_ref.to_github_url.return_value = (
-            f"https://github.com/github/my-org/blob/main/{virtual_path}"
-        )
-        dep_ref.is_virtual_collection.return_value = True
-        return dep_ref
-
     def test_yaml_with_colon_in_description(self, tmp_path):
         """apm.yml must be valid when the agent description contains a colon."""
         import yaml
@@ -1807,76 +1791,6 @@ class TestVirtualFilePackageYamlGeneration:
         content = (target_path / "apm.yml").read_text(encoding="utf-8")
         parsed = yaml.safe_load(content)
         assert parsed["description"] == "A simple agent without special chars"
-
-    def test_collection_yaml_with_colon_in_description(self, tmp_path):
-        """apm.yml for collection packages must be valid when description contains a colon."""
-        import yaml
-
-        # A minimal .collection.yml whose description contains ":"
-        collection_manifest = (
-            b"id: my-collection\n"
-            b"name: My Collection\n"
-            b"description: 'A collection for tasks: feature development, debugging.'\n"
-            b"items:\n"
-            b"  - path: agents/my-agent.agent.md\n"
-            b"    kind: agent\n"
-        )
-        agent_file = b"---\nname: My Agent\n---\n## Body\n"
-
-        dep_ref = self._make_collection_dep_ref("collections/my-collection")
-        target_path = tmp_path / "pkg"
-
-        downloader = GitHubPackageDownloader()
-
-        def _fake_download(dep_ref_arg, path, ref):
-            if "collection" in path:
-                return collection_manifest
-            return agent_file
-
-        with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
-            with patch.object(downloader, "download_raw_file", side_effect=_fake_download):
-                downloader.download_collection_package(dep_ref, target_path)
-
-        content = (target_path / "apm.yml").read_text(encoding="utf-8")
-        parsed = yaml.safe_load(content)  # must not raise
-
-        assert parsed["description"] == "A collection for tasks: feature development, debugging."
-
-    def test_collection_yaml_with_colon_in_tags(self, tmp_path):
-        """apm.yml for collection packages must be valid when tags contain a colon."""
-        import yaml
-
-        collection_manifest = (
-            b"id: tagged-collection\n"
-            b"name: Tagged\n"
-            b"description: Normal description\n"
-            b"tags:\n"
-            b"  - 'scope: engineering'\n"
-            b"  - plain-tag\n"
-            b"items:\n"
-            b"  - path: agents/my-agent.agent.md\n"
-            b"    kind: agent\n"
-        )
-        agent_file = b"---\nname: My Agent\n---\n## Body\n"
-
-        dep_ref = self._make_collection_dep_ref("collections/tagged-collection")
-        target_path = tmp_path / "pkg"
-
-        downloader = GitHubPackageDownloader()
-
-        def _fake_download(dep_ref_arg, path, ref):
-            if "collection" in path:
-                return collection_manifest
-            return agent_file
-
-        with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
-            with patch.object(downloader, "download_raw_file", side_effect=_fake_download):
-                downloader.download_collection_package(dep_ref, target_path)
-
-        content = (target_path / "apm.yml").read_text(encoding="utf-8")
-        parsed = yaml.safe_load(content)
-
-        assert parsed["tags"] == ["scope: engineering", "plain-tag"]
 
 
 class TestRefExistsViaLsRemote:

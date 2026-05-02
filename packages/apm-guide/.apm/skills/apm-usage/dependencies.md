@@ -116,10 +116,11 @@ Virtual packages reference a subset of a repository.
 | Type | Detection rule | Example |
 |------|---------------|---------|
 | File | Ends in `.prompt.md`, `.instructions.md`, `.agent.md`, `.chatmode.md` | `owner/repo/prompts/review.prompt.md` |
-| Collection (manifest) | Ends with `.collection.yml` or `.collection.yaml` | `owner/repo/collections/security.collection.yml` |
-| Subdirectory | Does not match a file or collection extension above | `owner/repo/skills/security` |
+| Subdirectory | Does not match a file extension above | `owner/repo/skills/security` |
 
-Classification is by extension only. A path like `owner/repo/collections/security` (no extension) is a Subdirectory; the actual shape -- APM package, meta-package (`apm.yml` declaring deps with no `.apm/`), skill bundle, plugin, or legacy collection -- is resolved at fetch time. APM probes for `apm.yml` first and falls back to a sibling `security.collection.yml` for the legacy form.
+Classification is by extension only. A path like `owner/repo/collections/security` (no extension) is a Subdirectory; the actual shape -- APM package (incl. dep-only `apm.yml` with no `.apm/`), skill bundle, or plugin -- is resolved at fetch time by probing for `apm.yml`.
+
+> **Removed (#1094):** the legacy `.collection.yml` / `.collection.yaml` virtual-package form is no longer supported. Convert any `.collection.yml` to an `apm.yml` with a `dependencies:` section, then reference the resulting subdirectory as a regular subdirectory virtual package.
 
 ## Canonical storage rules
 

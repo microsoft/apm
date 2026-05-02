@@ -452,12 +452,10 @@ class TestADOVirtualPackagePaths:
 
     def test_github_virtual_package_uses_2_level_path(self):
         """Verify GitHub virtual packages install to 2-level path."""
-        dep = DependencyReference.parse(
-            "owner/test-repo/collections/project-planning.collection.yml"
-        )
+        dep = DependencyReference.parse("owner/test-repo/collections/project-planning")
 
         assert dep.is_virtual is True
-        assert dep.is_virtual_collection() is True
+        assert dep.is_virtual_subdirectory() is True
 
         # Simulate install path logic from cli.py for virtual packages
         repo_parts = dep.repo_url.split("/")
@@ -476,12 +474,12 @@ class TestADOVirtualPackagePaths:
     def test_ado_virtual_collection_uses_3_level_path(self):
         """Verify ADO virtual collections install to 3-level path."""
         dep = DependencyReference.parse(
-            "dev.azure.com/myorg/myproject/myrepo/collections/my-collection.collection.yml"
+            "dev.azure.com/myorg/myproject/myrepo/collections/my-collection"
         )
 
         assert dep.is_azure_devops() is True
         assert dep.is_virtual is True
-        assert dep.is_virtual_collection() is True
+        assert dep.is_virtual_subdirectory() is True
         assert dep.repo_url == "myorg/myproject/myrepo"
 
         # Simulate install path logic from cli.py for virtual packages
@@ -526,15 +524,14 @@ class TestADOVirtualPackagePaths:
     def test_ado_collection_with_git_segment(self):
         """Verify ADO collections with _git segment work correctly."""
         dep = DependencyReference.parse(
-            "dev.azure.com/myorg/myproject/_git/copilot-instructions/collections/"
-            "csharp-ddd.collection.yml"
+            "dev.azure.com/myorg/myproject/_git/copilot-instructions/collections/csharp-ddd"
         )
 
         assert dep.is_azure_devops() is True
         assert dep.is_virtual is True
-        assert dep.is_virtual_collection() is True
+        assert dep.is_virtual_subdirectory() is True
         assert dep.repo_url == "myorg/myproject/copilot-instructions"
-        assert dep.virtual_path == "collections/csharp-ddd.collection.yml"
+        assert dep.virtual_path == "collections/csharp-ddd"
 
         # Verify correct install path
         repo_parts = dep.repo_url.split("/")
@@ -561,12 +558,12 @@ class TestADOVirtualPackagePaths:
         assert dep.repo_url == "myorg/myproject/collections"
         assert dep.virtual_path == "my-collection"
 
-        # This causes is_virtual_collection() to return False
-        # because virtual_path doesn't contain 'collections/'
-        assert dep.is_virtual_collection() is False
+        # The shape no longer matches the SUBDIRECTORY heuristic
+        # (virtual_path is `my-collection`, no extension) so it is treated
+        # as a subdirectory virtual ref under repo `myorg/myproject/collections`
+        # -- the install will fail downstream with a 'repo not found' error.
+        assert dep.is_virtual_subdirectory() is True
         assert dep.is_virtual_file() is False
-
-        # This is why the user gets "Unknown virtual package type" error
 
 
 class TestADOPruneCommand:

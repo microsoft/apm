@@ -37,7 +37,7 @@ class DependencyReference:
     reference: str | None = None  # e.g., "main", "v1.0.0", "abc123"
     alias: str | None = None  # Optional alias for the dependency
     virtual_path: str | None = None  # Path for virtual packages (e.g., "prompts/file.prompt.md")
-    is_virtual: bool = False  # True if this is a virtual package (individual file or collection)
+    is_virtual: bool = False  # True if this is a virtual package (individual file or subdirectory)
 
     # Azure DevOps specific fields (ADO uses org/project/repo structure)
     ado_organization: str | None = None  # e.g., "dmeppiel-org"
@@ -65,12 +65,11 @@ class DependencyReference:
         ".agent.md",
     )
 
-    # Explicit collection-manifest extensions. A virtual_path that ends in one
-    # of these is unambiguously a `.collection.yml` reference. Paths that
-    # merely contain a `collections/` segment are NOT classified here -- they
-    # are SUBDIRECTORY references whose actual shape is resolved at fetch
-    # time, with `.collection.yml` as a documented fallback (see #1094).
-    VIRTUAL_COLLECTION_EXTENSIONS = (
+    # Removed collection-manifest extensions. URLs ending in one of these are
+    # rejected at parse time with a migration message; the legacy
+    # `.collection.yml` curated-aggregator format is replaced by `apm.yml`
+    # with a `dependencies` section (#1094).
+    REMOVED_COLLECTION_EXTENSIONS = (
         ".collection.yml",
         ".collection.yaml",
     )
@@ -89,43 +88,34 @@ class DependencyReference:
     def virtual_type(self) -> "VirtualPackageType | None":
         """Return the type of virtual package, or None if not virtual.
 
-        Classification is by extension only -- never by path segment. A path
-        like ``collections/foo`` is SUBDIRECTORY, NOT COLLECTION; the actual
-        shape is resolved at fetch time by probing for ``apm.yml`` first and
-        falling back to ``foo.collection.yml`` (see #1094). COLLECTION is
-        reserved for URLs that explicitly name a ``.collection.yml`` file.
+        Classification is by extension only -- never by path segment.
+        ``.prompt.md``/``.instructions.md``/``.chatmode.md``/``.agent.md``
+        is FILE; everything else is SUBDIRECTORY (resolved at fetch time
+        by probing for ``apm.yml``, ``SKILL.md``, ``plugin.json``, etc).
+        Paths like ``collections/foo`` (no extension) are SUBDIRECTORY.
         """
         if not self.is_virtual or not self.virtual_path:
             return None
         if any(self.virtual_path.endswith(ext) for ext in self.VIRTUAL_FILE_EXTENSIONS):
             return VirtualPackageType.FILE
-        if any(self.virtual_path.endswith(ext) for ext in self.VIRTUAL_COLLECTION_EXTENSIONS):
-            return VirtualPackageType.COLLECTION
         return VirtualPackageType.SUBDIRECTORY
 
     def is_virtual_file(self) -> bool:
         """Check if this is a virtual file package (individual file)."""
         return self.virtual_type == VirtualPackageType.FILE
 
-    def is_virtual_collection(self) -> bool:
-        """Check if this is a virtual collection package."""
-        return self.virtual_type == VirtualPackageType.COLLECTION
-
     def is_virtual_subdirectory(self) -> bool:
         """Check if this is a virtual subdirectory package (e.g., Claude Skill).
 
         A subdirectory package is a virtual package whose ``virtual_path``
-        does not end in a recognized FILE or COLLECTION extension. The
-        actual on-disk shape is resolved at fetch time -- ``apm.yml``,
-        ``SKILL.md``, ``plugin.json``, or a sibling ``.collection.yml``
-        (legacy fallback for ``/collections/`` paths, see #1094).
+        does not end in a recognized FILE extension. The actual on-disk
+        shape is resolved at fetch time -- ``apm.yml``, ``SKILL.md``,
+        ``plugin.json``, etc.
 
         Examples:
             - ComposioHQ/awesome-claude-skills/brand-guidelines -> True
             - owner/repo/prompts/file.prompt.md -> False (is_virtual_file)
             - owner/repo/collections/name -> True (resolved at fetch time)
-            - owner/repo/collections/name.collection.yml -> False
-              (is_virtual_collection)
         """
         return self.virtual_type == VirtualPackageType.SUBDIRECTORY
 
@@ -135,7 +125,6 @@ class DependencyReference:
         For virtual packages, we create a sanitized name from the path:
         - owner/repo/prompts/code-review.prompt.md -> repo-code-review
         - owner/repo/collections/project-planning -> repo-project-planning
-        - owner/repo/collections/project-planning.collection.yml -> repo-project-planning
         """
         if not self.is_virtual or not self.virtual_path:
             return self.repo_url.split("/")[-1]  # Return repo name as fallback
@@ -147,10 +136,9 @@ class DependencyReference:
         # Get the basename without extension
         path_parts = self.virtual_path.split("/")
         last = path_parts[-1]
-        # Strip any recognised virtual extension (file, collection, or none).
-        # Same naming rule applies regardless of resolved shape: the directory
-        # name (or file basename) is the user-visible package name.
-        for ext in self.VIRTUAL_COLLECTION_EXTENSIONS + self.VIRTUAL_FILE_EXTENSIONS:
+        # Strip any recognised virtual file extension. The directory name
+        # (or file basename) is the user-visible package name.
+        for ext in self.VIRTUAL_FILE_EXTENSIONS:
             if last.endswith(ext):
                 last = last[: -len(ext)]
                 break
@@ -645,12 +633,22 @@ class DependencyReference:
             # Security: reject path traversal in virtual path
             validate_path_segments(virtual_path, context="virtual path")
 
-            # Accept any path ending in a recognised virtual extension
-            # (file or collection-manifest). Reject other dotted final
-            # segments so typos like `prompts/file.txt` fail fast instead
-            # of silently mis-classifying as a subdirectory.
-            recognised_exts = cls.VIRTUAL_FILE_EXTENSIONS + cls.VIRTUAL_COLLECTION_EXTENSIONS
-            if any(virtual_path.endswith(ext) for ext in recognised_exts):
+            # Reject removed `.collection.yml` extensions with a clear
+            # migration message (#1094). Curated dependency aggregators
+            # are now expressed as `apm.yml` with a `dependencies` block.
+            if any(virtual_path.endswith(ext) for ext in cls.REMOVED_COLLECTION_EXTENSIONS):
+                raise ValueError(
+                    f".collection.yml is no longer supported. "
+                    f"Convert '{virtual_path}' to an apm.yml with a "
+                    f"'dependencies' section. "
+                    f"See: https://microsoft.github.io/apm/guides/dependencies/"
+                )
+
+            # Accept any path ending in a recognised virtual file
+            # extension. Reject other dotted final segments so typos like
+            # `prompts/file.txt` fail fast instead of silently
+            # mis-classifying as a subdirectory.
+            if any(virtual_path.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
                 pass
             else:
                 last_segment = virtual_path.split("/")[-1]
@@ -1030,8 +1028,8 @@ class DependencyReference:
         - user/repo@alias
         - user/repo#ref@alias
         - user/repo/path/to/file.prompt.md (virtual file package)
-        - user/repo/collections/name.collection.yml (virtual collection package)
         - user/repo/skills/foo (virtual subdirectory package)
+        - user/repo/collections/foo (virtual subdirectory package)
         - https://gitlab.com/owner/repo.git (generic HTTPS git URL)
         - git@gitlab.com:owner/repo.git (SSH git URL)
         - ssh://git@gitlab.com/owner/repo.git (SSH protocol URL)

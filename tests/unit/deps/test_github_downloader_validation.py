@@ -694,45 +694,16 @@ class TestRound4EmptyRefAndEmptyVpathGates:
 
 
 class TestSubdirectoryProbeOrder:
-    """``apm.yml`` is probed before ``.collection.yml`` for SUBDIRECTORY paths.
+    """``apm.yml`` is probed first for SUBDIRECTORY paths.
 
     The legacy ``/collections/`` path heuristic is removed: a path like
     ``collections/foo`` is now classified SUBDIRECTORY and resolved at fetch
-    time. ``apm.yml`` must win over the ``.collection.yml`` fallback so a
-    fixed-but-mis-routed ``collections/foo/apm.yml`` is recognised as an
-    APM package, not as a missing collection manifest (#1094).
+    time. ``apm.yml`` is the supported way to express a curated dependency
+    aggregator (#1094); the ``.collection.yml`` form was removed.
     """
 
-    def test_explicit_collection_yml_url_probes_path_directly(self) -> None:
-        """Explicit `.collection.yml` URLs probe the file directly, no double extension.
-
-        Regression: an earlier implementation appended `.collection.yml` to
-        every COLLECTION-typed vpath, producing
-        ``foo.collection.yml.collection.yml`` for explicit-extension URLs.
-        After the extension-only classification (#1094), COLLECTION refs
-        already carry the extension in vpath -- the probe must use vpath
-        directly.
-        """
-        downloader = GitHubPackageDownloader()
-        # Construct an explicit-extension COLLECTION ref via parser so the
-        # test exercises the full classification cascade.
-        from apm_cli.models.apm_package import DependencyReference
-
-        dep_ref = DependencyReference.parse("owner/repo/collections/foo.collection.yml#main")
-        assert dep_ref.is_virtual_collection() is True
-
-        with patch.object(downloader, "download_raw_file") as raw:
-            raw.return_value = b"id: foo\nname: foo\ndescription: x\nitems: []\n"
-            ok = gdv.validate_virtual_package_exists(downloader, dep_ref)
-
-        assert ok is True
-        attempted = [call.args[1] for call in raw.call_args_list]
-        assert "collections/foo.collection.yml" in attempted
-        # No double extension.
-        assert "collections/foo.collection.yml.collection.yml" not in attempted
-
     def test_apm_yml_at_collections_path_short_circuits_collection_probe(self) -> None:
-        """`<vpath>/apm.yml` hits first; `.collection.yml` never probed."""
+        """`<vpath>/apm.yml` hits first; subdirectory probe stops there."""
         downloader = GitHubPackageDownloader()
         dep_ref = _make_subdir_dep(vpath="collections/writing", ref="main")
 
@@ -746,126 +717,5 @@ class TestSubdirectoryProbeOrder:
             ok = gdv.validate_virtual_package_exists(downloader, dep_ref)
 
         assert ok is True
-        # Only one HTTP probe should have happened: the apm.yml hit short
-        # circuits the rest of the probe order. Defensively verify the
-        # collection probes were never reached.
         attempted_paths = [call.args[1] for call in raw.call_args_list]
         assert "collections/writing/apm.yml" in attempted_paths
-        assert "collections/writing.collection.yml" not in attempted_paths
-        assert "collections/writing.collection.yaml" not in attempted_paths
-
-    def test_collection_yml_fallback_when_no_apm_yml(self) -> None:
-        """Legacy `<vpath>.collection.yml` fallback validates when apm.yml absent."""
-        downloader = GitHubPackageDownloader()
-        dep_ref = _make_subdir_dep(vpath="collections/legacy", ref="main")
-
-        def fake_download(_dr, path, _ref):
-            if path == "collections/legacy.collection.yml":
-                return b"description: legacy collection\nitems: []\n"
-            raise RuntimeError("404")
-
-        with (
-            patch.object(downloader, "download_raw_file", side_effect=fake_download),
-            patch.object(gdv, "_directory_exists_at_ref", return_value=False),
-            patch.object(gdv, "_ref_exists_via_ls_remote", return_value=(False, None)),
-        ):
-            ok = gdv.validate_virtual_package_exists(downloader, dep_ref)
-
-        assert ok is True
-
-    def test_collection_yaml_fallback_when_no_apm_yml(self) -> None:
-        """The `.collection.yaml` extension is also recognised as a fallback."""
-        downloader = GitHubPackageDownloader()
-        dep_ref = _make_subdir_dep(vpath="collections/legacy", ref="main")
-
-        def fake_download(_dr, path, _ref):
-            if path == "collections/legacy.collection.yaml":
-                return b"description: legacy collection\nitems: []\n"
-            raise RuntimeError("404")
-
-        with (
-            patch.object(downloader, "download_raw_file", side_effect=fake_download),
-            patch.object(gdv, "_directory_exists_at_ref", return_value=False),
-            patch.object(gdv, "_ref_exists_via_ls_remote", return_value=(False, None)),
-        ):
-            ok = gdv.validate_virtual_package_exists(downloader, dep_ref)
-
-        assert ok is True
-
-
-class TestLegacyCollectionFallbackDispatch:
-    """`_is_legacy_collection_fallback` decides routing for SUBDIRECTORY paths."""
-
-    def test_apm_yml_present_means_not_a_legacy_collection(self) -> None:
-        """When `<vpath>/apm.yml` exists, the dispatcher must NOT redirect to
-        the collection downloader (apm.yml takes priority)."""
-        downloader = GitHubPackageDownloader()
-        dep_ref = _make_subdir_dep(vpath="collections/writing", ref="main")
-
-        def fake_download(_dr, path, _ref):
-            if path == "collections/writing/apm.yml":
-                return b"name: writing\nversion: 1.0.0\n"
-            raise RuntimeError("404")
-
-        with patch.object(downloader, "download_raw_file", side_effect=fake_download):
-            assert downloader._is_legacy_collection_fallback(dep_ref) is False
-
-    def test_only_collection_yml_means_legacy_collection(self) -> None:
-        """No `<vpath>/apm.yml` but `<vpath>.collection.yml` exists -> legacy collection."""
-        downloader = GitHubPackageDownloader()
-        dep_ref = _make_subdir_dep(vpath="collections/writing", ref="main")
-
-        def fake_download(_dr, path, _ref):
-            if path == "collections/writing.collection.yml":
-                return b"description: legacy\nitems: []\n"
-            raise RuntimeError("404")
-
-        with patch.object(downloader, "download_raw_file", side_effect=fake_download):
-            assert downloader._is_legacy_collection_fallback(dep_ref) is True
-
-    def test_neither_present_under_collections_path_no_fallback(self) -> None:
-        """A `collections/<x>` path with no apm.yml and no .collection.yml
-        means no legacy collection (caller falls through to the regular
-        subdirectory clone path)."""
-        downloader = GitHubPackageDownloader()
-        dep_ref = _make_subdir_dep(vpath="collections/whatever", ref="main")
-
-        with patch.object(downloader, "download_raw_file", side_effect=RuntimeError("404")):
-            assert downloader._is_legacy_collection_fallback(dep_ref) is False
-
-    def test_only_runs_for_subdirectory_refs(self) -> None:
-        """Explicit COLLECTION refs route directly; the helper short-circuits."""
-        downloader = GitHubPackageDownloader()
-        dep_ref = DependencyReference(
-            repo_url="owner/repo",
-            virtual_path="collections/writing.collection.yml",
-            is_virtual=True,
-            reference="main",
-        )
-        # No download_raw_file call should happen at all.
-        with patch.object(downloader, "download_raw_file") as raw:
-            assert downloader._is_legacy_collection_fallback(dep_ref) is False
-        raw.assert_not_called()
-
-    def test_path_outside_collections_short_circuits_without_http(self) -> None:
-        """Perf hint: SUBDIRECTORY refs without a `collections/` segment
-        return immediately without any HTTP probe.
-
-        This optimisation prevents skill installs (e.g. ``skills/my-skill``)
-        from paying 2-3 wasted HTTP probes per install for a legacy
-        collection fallback they could never trigger.
-        """
-        downloader = GitHubPackageDownloader()
-        dep_ref = _make_subdir_dep(vpath="skills/my-skill", ref="main")
-        with patch.object(downloader, "download_raw_file") as raw:
-            assert downloader._is_legacy_collection_fallback(dep_ref) is False
-        raw.assert_not_called()
-
-    def test_collections_prefix_path_runs_probes(self) -> None:
-        """A path STARTING with `collections/` triggers the probes."""
-        downloader = GitHubPackageDownloader()
-        dep_ref = _make_subdir_dep(vpath="collections/foo", ref="main")
-        with patch.object(downloader, "download_raw_file", side_effect=RuntimeError("404")) as raw:
-            assert downloader._is_legacy_collection_fallback(dep_ref) is False
-        # apm.yml probe + 2 collection probes = 3 calls total.
-        assert raw.call_count == 3
