@@ -76,7 +76,9 @@ def _resolve_github_source(source: dict) -> str:
     ref = source.get("ref", "")
     path = source.get("path", "").strip("/")
     if not repo or "/" not in repo:
-        raise ValueError(f"Invalid github source: 'repo' field must be 'owner/repo', got '{repo}'")
+        raise ValueError(
+            f"Invalid github source: 'repo' (or 'repository') field must be 'owner/repo', got '{repo}'"
+        )
     if path:
         try:
             validate_path_segments(path, context="github source path")
@@ -116,10 +118,18 @@ def _resolve_url_source(source: dict) -> str:
 def _resolve_git_subdir_source(source: dict) -> str:
     """Resolve a ``git-subdir`` source type to ``owner/repo[/subdir][#ref]``."""
     repo = source.get("repo", "") or source.get("url", "")
+    # Reject full URLs -- the url fallback accepts owner/repo strings only
+    if "://" in repo:
+        raise ValueError(
+            f"Invalid git-subdir source: expected 'owner/repo' but got a URL '{repo}'. "
+            f"Use source type 'url' for full URL references."
+        )
     ref = source.get("ref", "")
     subdir = (source.get("subdir", "") or source.get("path", "")).strip("/")
     if not repo or "/" not in repo:
-        raise ValueError(f"Invalid git-subdir source: 'repo' must be 'owner/repo', got '{repo}'")
+        raise ValueError(
+            f"Invalid git-subdir source: 'repo' (or 'url') must be 'owner/repo', got '{repo}'"
+        )
     if subdir:
         try:
             validate_path_segments(subdir, context="git-subdir source path")

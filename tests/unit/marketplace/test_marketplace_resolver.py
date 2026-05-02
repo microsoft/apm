@@ -409,3 +409,49 @@ class TestResolvePluginSource:
         p = MarketplacePlugin(name="test", source=None)
         with pytest.raises(ValueError, match="no source defined"):
             resolve_plugin_source(p)
+
+
+class TestOldFormatIntegration:
+    """Integration tests verifying old-format marketplace entries resolve correctly."""
+
+    def test_old_github_format_full_pipeline(self) -> None:
+        """Old format with type/repository/commit resolves via resolve_plugin_source."""
+        plugin = MarketplacePlugin(
+            name="legacy-plugin",
+            source={
+                "type": "github",
+                "repository": "acme/legacy-tool",
+                "ref": "main",
+                "commit": "abc123",
+            },
+        )
+        result = resolve_plugin_source(plugin, "org", "marketplace", plugin_root="")
+        assert result == "acme/legacy-tool#main"
+
+    def test_old_git_subdir_format_full_pipeline(self) -> None:
+        """Old format with type/url/path resolves via resolve_plugin_source."""
+        plugin = MarketplacePlugin(
+            name="legacy-subdir",
+            source={
+                "type": "git-subdir",
+                "url": "acme/monorepo",
+                "path": "tools/helper",
+                "ref": "v2.0",
+            },
+        )
+        result = resolve_plugin_source(plugin, "org", "marketplace", plugin_root="")
+        assert result == "acme/monorepo/tools/helper#v2.0"
+
+    def test_old_format_url_with_scheme_rejected(self) -> None:
+        """A full URL in the url field is rejected by the scheme guard."""
+        plugin = MarketplacePlugin(
+            name="bad-url",
+            source={
+                "type": "git-subdir",
+                "url": "https://evil.example.com/payload",
+                "path": "x",
+                "ref": "main",
+            },
+        )
+        with pytest.raises(ValueError, match=r"expected 'owner/repo' but got a URL"):
+            resolve_plugin_source(plugin, "org", "marketplace", plugin_root="")
