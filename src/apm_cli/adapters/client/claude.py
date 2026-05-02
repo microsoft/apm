@@ -10,6 +10,12 @@ write so the shared Claude Code config is not silently truncated by a
 concurrent writer and cannot leak any embedded OAuth state to other users
 on a multi-user host.
 
+Local scope (Claude Code's third scope -- the default for ``claude mcp add``,
+storing per-project private config under ``~/.claude.json -> projects.<abs_path>
+.mcpServers``) is intentionally NOT supported: APM packages are designed for
+reproducible team installs, which aligns with PROJECT (VCS-shared) and USER
+(cross-project), not LOCAL (per-project private to one user).
+
 See https://code.claude.com/docs/en/mcp
 """
 
@@ -36,10 +42,16 @@ class ClaudeClientAdapter(CopilotClientAdapter):
 
     @staticmethod
     def _normalize_mcp_entry_for_claude_code(entry: dict) -> dict:
-        """Drop Copilot-CLI-only fields that Claude Code does not use for stdio.
+        """Normalize a server entry to Claude Code's on-disk shape.
 
-        Remote servers keep ``type``/``url`` (and related keys) per Claude Code
-        docs.  See https://code.claude.com/docs/en/mcp
+        For remote servers, keep ``type``/``url``/``headers`` per Claude
+        Code docs.  For stdio servers, drop Copilot-CLI-only fields
+        (``type: "local"``, default ``tools``, empty ``id``) and emit
+        an explicit ``type: "stdio"`` so ``claude mcp list`` renders
+        the entry the same way it would if installed via
+        ``claude mcp add --transport stdio``.
+
+        See https://code.claude.com/docs/en/mcp
         """
         if not isinstance(entry, dict):
             return entry
@@ -55,8 +67,8 @@ class ClaudeClientAdapter(CopilotClientAdapter):
                 out.pop("tools", None)
             return out
 
-        if out.get("type") == "local":
-            out.pop("type", None)
+        if out.get("type") in (None, "local", "stdio"):
+            out["type"] = "stdio"
         if out.get("tools") == ["*"]:
             out.pop("tools", None)
         if out.get("id") in ("", None):

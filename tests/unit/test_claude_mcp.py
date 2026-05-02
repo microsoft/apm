@@ -63,14 +63,26 @@ class TestClaudeClientAdapterProject(unittest.TestCase):
             self.assertFalse((Path(tmp) / ".mcp.json").exists())
 
     def test_update_config_normalizes_stdio_entry(self):
+        """Stdio entries: drop Copilot-only ``tools``/``id``; rewrite
+        Copilot's ``type: "local"`` to Claude Code's canonical
+        ``type: "stdio"`` so ``claude mcp list`` renders identically
+        to entries installed via ``claude mcp add --transport stdio``."""
         self.adapter.update_config(
             {"srv": {"command": "node", "type": "local", "tools": ["*"], "id": ""}}
         )
         data = json.loads(self.mcp_path.read_text(encoding="utf-8"))
         srv = data["mcpServers"]["srv"]
-        self.assertNotIn("type", srv)
+        self.assertEqual(srv["type"], "stdio")
         self.assertNotIn("tools", srv)
         self.assertNotIn("id", srv)
+
+    def test_update_config_sets_explicit_stdio_type_when_missing(self):
+        """An entry with ``command`` but no ``type`` (e.g. older
+        registry data) must be rewritten with explicit
+        ``type: "stdio"`` to match the canonical Claude Code shape."""
+        self.adapter.update_config({"srv": {"command": "node", "args": ["s.js"]}})
+        data = json.loads(self.mcp_path.read_text(encoding="utf-8"))
+        self.assertEqual(data["mcpServers"]["srv"]["type"], "stdio")
 
     def test_update_config_preserves_remote_type_url(self):
         self.adapter.update_config({"remote": {"type": "http", "url": "https://example.com/mcp"}})
