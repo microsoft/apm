@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "u-http": {
+      "type": "http",
+      "url": "https://example.invalid/mcp"
+    },
+    "u-stdio": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "stdio-pkg",
+        "--foo"
+      ],
+      "env": {
+        "BAZ": "qux"
+      }
+    }
+  }
+}

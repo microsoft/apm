@@ -458,7 +458,7 @@ class MCPIntegrator:
             return
 
         # Determine which runtimes to clean, mirroring install-time logic.
-        all_runtimes = {"vscode", "copilot", "codex", "cursor", "opencode", "gemini"}
+        all_runtimes = {"vscode", "copilot", "codex", "cursor", "opencode", "gemini", "claude"}
         if runtime:  # noqa: SIM108
             target_runtimes = {runtime}
         else:
@@ -480,6 +480,18 @@ class MCPIntegrator:
                 except ValueError:
                     pass
             target_runtimes = supported
+
+        # Claude Code: when scope is unspecified, fail safely toward the project
+        # config only -- never touch ~/.claude.json on the user's behalf without
+        # an explicit USER scope, since that file is shared across all Claude
+        # Code projects on the host.
+        clean_claude_project = "claude" in target_runtimes and scope is not InstallScope.USER
+        clean_claude_user = "claude" in target_runtimes and scope is InstallScope.USER
+        if "claude" in target_runtimes and scope is None:
+            logger.progress(
+                "Claude Code stale cleanup: scope unspecified -- defaulting to "
+                "project .mcp.json only; pass -g/--global to also clean ~/.claude.json"
+            )
 
         # Build an expanded set that includes both the full reference and the
         # last-segment short name so we match config keys in every runtime.
@@ -650,6 +662,61 @@ class MCPIntegrator:
                         exc_info=True,
                     )
 
+        # Clean Claude Code project .mcp.json (only if .claude/ directory exists)
+        if clean_claude_project:
+            claude_mcp = project_root_path / ".mcp.json"
+            if claude_mcp.exists() and (project_root_path / ".claude").is_dir():
+                try:
+                    import json as _json
+
+                    config = _json.loads(claude_mcp.read_text(encoding="utf-8"))
+                    servers = config.get("mcpServers", {})
+                    if not isinstance(servers, dict):
+                        servers = {}
+                    removed = [n for n in expanded_stale if n in servers]
+                    for name in removed:
+                        del servers[name]
+                    if removed:
+                        claude_mcp.write_text(
+                            _json.dumps(config, indent=2) + "\n", encoding="utf-8"
+                        )
+                        for name in removed:
+                            logger.progress(f"Removed stale MCP server '{name}' from .mcp.json")
+                except Exception:
+                    _log.debug(
+                        "Failed to clean stale MCP servers from .mcp.json",
+                        exc_info=True,
+                    )
+
+        # Clean Claude Code user ~/.claude.json (USER scope only)
+        if clean_claude_user:
+            claude_user = Path.home() / ".claude.json"
+            if claude_user.exists():
+                try:
+                    import json as _json
+
+                    config = _json.loads(claude_user.read_text(encoding="utf-8"))
+                    if isinstance(config, dict):
+                        servers = config.get("mcpServers", {})
+                        if not isinstance(servers, dict):
+                            servers = {}
+                        removed = [n for n in expanded_stale if n in servers]
+                        for name in removed:
+                            del servers[name]
+                        if removed:
+                            claude_user.write_text(
+                                _json.dumps(config, indent=2) + "\n", encoding="utf-8"
+                            )
+                            for name in removed:
+                                logger.progress(
+                                    f"Removed stale MCP server '{name}' from ~/.claude.json"
+                                )
+                except Exception:
+                    _log.debug(
+                        "Failed to clean stale MCP servers from ~/.claude.json",
+                        exc_info=True,
+                    )
+
     # ------------------------------------------------------------------
     # Lockfile persistence
     # ------------------------------------------------------------------
@@ -708,6 +775,8 @@ class MCPIntegrator:
                 detected.add("codex")
             if re.search(r"\bgemini\b", command):
                 detected.add("gemini")
+            if re.search(r"\bclaude\b", command):
+                detected.add("claude")
             if re.search(r"\bllm\b", command):
                 detected.add("llm")
 
@@ -745,7 +814,7 @@ class MCPIntegrator:
             mcp_compatible = [
                 rt
                 for rt in detected_runtimes
-                if rt in ["vscode", "copilot", "codex", "cursor", "opencode", "gemini"]
+                if rt in ["vscode", "copilot", "codex", "cursor", "opencode", "gemini", "claude"]
             ]
             return [rt for rt in mcp_compatible if shutil.which(rt)]
 
@@ -817,7 +886,7 @@ class MCPIntegrator:
         except ValueError as e:
             logger.warning(f"Runtime {runtime} not supported: {e}")
             logger.progress(
-                "Supported runtimes: vscode, copilot, codex, cursor, opencode, gemini, llm"
+                "Supported runtimes: vscode, copilot, codex, cursor, opencode, gemini, claude, llm"
             )
             return False
         except Exception as e:
@@ -828,6 +897,43 @@ class MCPIntegrator:
     # ------------------------------------------------------------------
     # Main orchestrator
     # ------------------------------------------------------------------
+
+    _PROJECT_SCOPED_RUNTIMES: tuple[str, ...] = ("codex", "claude")
+
+    @staticmethod
+    def _gate_project_scoped_runtimes(
+        target_runtimes: list[str],
+        *,
+        user_scope: bool,
+        project_root,
+        apm_config: dict | None,
+        explicit_target: str | None,
+    ) -> list[str]:
+        """Drop project-scoped runtimes that are not active project targets.
+
+        Codex and Claude Code both write project-scoped MCP config files
+        (``.codex/config.toml`` and ``.mcp.json``) whose creation should be
+        opt-in.  When auto-detection brought one of them in but the project's
+        own targets do not include it, we silently strip it -- mirroring the
+        Cursor/OpenCode/Gemini directory-presence convention.
+        """
+        if user_scope:
+            return target_runtimes
+        gated = [rt for rt in MCPIntegrator._PROJECT_SCOPED_RUNTIMES if rt in target_runtimes]
+        if not gated:
+            return target_runtimes
+
+        from apm_cli.integration.targets import active_targets
+
+        root = project_root or Path.cwd()
+        config_target = explicit_target or (apm_config.get("target") if apm_config else None)
+        active = {t.name for t in active_targets(root, config_target)}
+        out = list(target_runtimes)
+        for rt in gated:
+            if rt not in active:
+                _log.debug("%s gated out: active_targets=%s", rt.capitalize(), sorted(active))
+                out = [r for r in out if r != rt]
+        return out
 
     @staticmethod
     def install(
@@ -948,7 +1054,15 @@ class MCPIntegrator:
                 manager = RuntimeManager()
                 installed_runtimes = []
 
-                for runtime_name in ["copilot", "codex", "vscode", "cursor", "opencode", "gemini"]:
+                for runtime_name in [
+                    "copilot",
+                    "codex",
+                    "vscode",
+                    "cursor",
+                    "opencode",
+                    "gemini",
+                    "claude",
+                ]:
                     try:
                         if runtime_name == "vscode":
                             if _is_vscode_available(project_root=project_root_path):
@@ -967,6 +1081,18 @@ class MCPIntegrator:
                         elif runtime_name == "gemini":
                             # Gemini CLI is opt-in: only target when .gemini/ exists
                             if (Path.cwd() / ".gemini").is_dir():
+                                ClientFactory.create_client(runtime_name)
+                                installed_runtimes.append(runtime_name)
+                        elif runtime_name == "claude":
+                            # Claude Code is opt-in: target when .claude/ exists
+                            # in the project (project-scope writes) OR when the
+                            # `claude` binary is on PATH (user-scope writes).
+                            # The PATH check is the gate that prevents the
+                            # adapter from writing to ~/.claude.json on hosts
+                            # where Claude Code was never installed.
+                            if (project_root_path / ".claude").is_dir() or (
+                                shutil.which("claude") is not None
+                            ):
                                 ClientFactory.create_client(runtime_name)
                                 installed_runtimes.append(runtime_name)
                         else:  # noqa: PLR5501
@@ -991,6 +1117,9 @@ class MCPIntegrator:
                 # Gemini CLI is directory-presence based
                 if (Path.cwd() / ".gemini").is_dir():
                     installed_runtimes.append("gemini")
+                # Claude Code: directory-presence OR binary-on-PATH
+                if (project_root_path / ".claude").is_dir() or (shutil.which("claude") is not None):
+                    installed_runtimes.append("claude")
 
             # Step 2: Get runtimes referenced in apm.yml scripts
             script_runtimes = MCPIntegrator._detect_runtimes(
@@ -1054,15 +1183,15 @@ class MCPIntegrator:
 
         # Codex MCP is project-scoped: only configure it when Codex is an
         # active project target (silent skip, same as Cursor/OpenCode/Gemini).
-        if not user_scope and "codex" in target_runtimes:
-            from apm_cli.integration.targets import active_targets
-
-            root = project_root or Path.cwd()
-            config_target = explicit_target or (apm_config.get("target") if apm_config else None)
-            active = {t.name for t in active_targets(root, config_target)}
-            if "codex" not in active:
-                _log.debug("Codex gated out: active_targets=%s", sorted(active))
-                target_runtimes = [r for r in target_runtimes if r != "codex"]
+        # Claude Code is gated identically: a host-wide `claude` binary should
+        # not opt every APM project into `.mcp.json` writes.
+        target_runtimes = MCPIntegrator._gate_project_scoped_runtimes(
+            target_runtimes,
+            user_scope=user_scope,
+            project_root=project_root,
+            apm_config=apm_config,
+            explicit_target=explicit_target,
+        )
 
         # Explicit runtime/exclusion/gating can leave nothing to configure.
         if not target_runtimes:

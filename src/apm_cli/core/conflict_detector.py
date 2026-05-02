@@ -125,6 +125,8 @@ class MCPConflictDetector:
             return servers
         elif "vscode" in adapter_class_name:
             return existing_config.get("servers", {})
+        elif "claude" in adapter_class_name:
+            return existing_config.get("mcpServers", {})
 
         return {}
 
