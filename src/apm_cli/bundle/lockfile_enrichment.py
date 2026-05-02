@@ -1,5 +1,6 @@
 """Lockfile enrichment for pack-time metadata."""
 
+import posixpath
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple, Union  # noqa: F401, UP035
 
@@ -13,6 +14,7 @@ _TARGET_PREFIXES = {
     "cursor": [".cursor/"],
     "opencode": [".opencode/"],
     "codex": [".codex/", ".agents/"],
+    "agent-skills": [".agents/"],
     "all": [".github/", ".claude/", ".cursor/", ".opencode/", ".codex/", ".agents/"],
 }
 
@@ -49,6 +51,9 @@ _CROSS_TARGET_MAPS: dict[str, dict[str, str]] = {
     "codex": {
         ".github/skills/": ".agents/skills/",
         ".github/agents/": ".codex/agents/",
+    },
+    "agent-skills": {
+        ".github/skills/": ".agents/skills/",
     },
 }
 
@@ -103,6 +108,18 @@ def _filter_files_by_target(
             for src_prefix, dst_prefix in cross_map.items():
                 if f.startswith(src_prefix):
                     mapped = dst_prefix + f[len(src_prefix) :]
+                    # Containment guard: normalise the remapped path and
+                    # reject any result that escapes the destination prefix
+                    # via traversal segments (e.g. "../../etc/passwd").
+                    normalised = posixpath.normpath(mapped)
+                    if ".." in normalised.split("/"):
+                        continue
+                    if not normalised.startswith(dst_prefix.rstrip("/")):
+                        continue
+                    # Preserve trailing slash (directory marker in lockfiles)
+                    if mapped.endswith("/") and not normalised.endswith("/"):
+                        normalised += "/"
+                    mapped = normalised
                     if mapped not in direct_set:
                         direct.append(mapped)
                         direct_set.add(mapped)
@@ -116,6 +133,8 @@ def enrich_lockfile_for_pack(
     lockfile: LockFile,
     fmt: str,
     target: str | list[str],
+    *,
+    bundle_files: dict[str, str] | None = None,
 ) -> str:
     """Create an enriched copy of the lockfile YAML with a ``pack:`` section.
 
@@ -132,6 +151,11 @@ def enrich_lockfile_for_pack(
         target: Effective target used for packing (e.g. ``"copilot"``, ``"claude"``,
             ``"all"``).  May also be a list of target strings for multi-target
             packing.  The internal alias ``"vscode"`` is also accepted.
+        bundle_files: Optional mapping of bundle-relative path -> sha256 hex
+            digest, embedded under ``pack.bundle_files``.  Used for plugin
+            bundles whose flat layout differs from the project-relative
+            ``deployed_files`` paths and so requires a separate manifest
+            for integrity verification at install time (see issue #1098).
 
     Returns:
         A YAML string with the ``pack:`` block followed by the original
@@ -189,6 +213,12 @@ def enrich_lockfile_for_pack(
                     used_src_prefixes.add(src_prefix)
                     break
         pack_meta["mapped_from"] = sorted(used_src_prefixes)
+
+    if bundle_files:
+        # Bundle-relative path -> sha256 hex digest. Used by
+        # ``verify_bundle_integrity()`` at install time. Sorted for
+        # deterministic YAML output.
+        pack_meta["bundle_files"] = dict(sorted(bundle_files.items()))
 
     from ..utils.yaml_io import yaml_to_str
 

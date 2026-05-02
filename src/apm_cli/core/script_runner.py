@@ -783,8 +783,8 @@ class ScriptRunner:
 
         Virtual packages have format:
         - owner/repo/path/to/file.prompt.md (virtual file)
-        - owner/repo/collections/name (virtual collection)
         - owner/repo/skills/name (virtual subdirectory/skill)
+        - owner/repo/collections/name (virtual subdirectory)
 
         Args:
             name: Name to check
@@ -807,10 +807,9 @@ class ScriptRunner:
     def _auto_install_virtual_package(self, package_ref: str) -> bool:
         """Auto-install a virtual package.
 
-        Handles three types of virtual packages:
+        Handles two types of virtual packages:
         - Virtual files: owner/repo/prompts/file.prompt.md
-        - Virtual collections: owner/repo/collections/name
-        - Virtual subdirectories (skills): owner/repo/skills/name
+        - Virtual subdirectories (skills, collections): owner/repo/skills/name
 
         Args:
             package_ref: Virtual package reference
@@ -845,9 +844,7 @@ class ScriptRunner:
 
             print(f"   Downloading from {dep_ref.to_github_url()}")
 
-            if dep_ref.is_virtual_collection():
-                package_info = downloader.download_virtual_collection_package(dep_ref, target_path)
-            elif dep_ref.is_virtual_subdirectory():
+            if dep_ref.is_virtual_subdirectory():
                 package_info = downloader.download_subdirectory_package(dep_ref, target_path)
             else:
                 package_info = downloader.download_virtual_file_package(dep_ref, target_path)

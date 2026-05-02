@@ -21,13 +21,38 @@ Detection priority (highest to lowest):
 are accepted as aliases and map to the same internal value.
 """
 
+import warnings
 from pathlib import Path
 from typing import List, Literal, Optional, Tuple, Union  # noqa: F401, UP035
 
 import click
 
+
+class AgentsTargetDeprecationWarning(DeprecationWarning):
+    """Raised when the legacy ``--target agents`` alias is used.
+
+    Scoped subclass so that :mod:`apm_cli.cli` can suppress *only* this
+    deprecation (keeping all other ``DeprecationWarning`` s visible).
+    """
+
+
+# Module-level flag: set by :func:`parse_target_field` when the raw input
+# contains the ``"agents"`` token, BEFORE alias resolution collapses it.
+# Consumed by downstream phases (e.g. ``phases/targets.py``) that need to
+# emit a formatted logger warning.  Single-threaded CLI; reset at the top
+# of each :func:`parse_target_field` call.
+_agents_alias_detected: bool = False
+
+
+def agents_alias_was_detected() -> bool:
+    """Return *True* if the most recent ``parse_target_field()`` saw ``'agents'``."""
+    return _agents_alias_detected
+
+
 # Valid target values (internal canonical form)
-TargetType = Literal["vscode", "claude", "cursor", "opencode", "codex", "gemini", "all", "minimal"]
+TargetType = Literal[
+    "vscode", "claude", "cursor", "opencode", "codex", "gemini", "agent-skills", "all", "minimal"
+]
 
 # Compiler families used inside a multi-target frozenset. Narrower than
 # TargetType because the families are produced by _resolve_compile_target()
@@ -62,6 +87,7 @@ UserTargetType = Literal[
     "opencode",
     "codex",
     "gemini",
+    "agent-skills",
     "all",
     "minimal",
 ]
@@ -98,6 +124,8 @@ def detect_target(  # noqa: PLR0911
             return "codex", "explicit --target flag"
         elif explicit_target == "gemini":
             return "gemini", "explicit --target flag"
+        elif explicit_target == "agent-skills":
+            return "agent-skills", "explicit --target flag"
         elif explicit_target == "all":
             return "all", "explicit --target flag"
 
@@ -115,6 +143,8 @@ def detect_target(  # noqa: PLR0911
             return "codex", "apm.yml target"
         elif config_target == "gemini":
             return "gemini", "apm.yml target"
+        elif config_target == "agent-skills":
+            return "agent-skills", "apm.yml target"
         elif config_target == "all":
             return "all", "apm.yml target"
 
@@ -249,6 +279,7 @@ def get_target_description(target: UserTargetType) -> str:
         "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .opencode/skills/",
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
         "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
+        "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
         "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .agents/",
         "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }
@@ -268,6 +299,11 @@ ALL_CANONICAL_TARGETS = frozenset({"vscode", "claude", "cursor", "opencode", "co
 #: ``integration/targets.py``.  They are NOT included in the
 #: ``parse_target_arg("all")`` expansion -- explicit opt-in only.
 EXPERIMENTAL_TARGETS: frozenset[str] = frozenset({"copilot-cowork"})
+
+#: Stable targets excluded from "all" expansion (cross-client deploy
+#: locations). Unlike EXPERIMENTAL_TARGETS, these are GA -- they just do
+#: not represent a single client tool.
+EXPLICIT_ONLY_TARGETS: frozenset[str] = frozenset({"agent-skills"})
 
 #: Alias mapping: user-facing name -> canonical internal name.
 TARGET_ALIASES: dict[str, str] = {
@@ -324,7 +360,11 @@ def normalize_target_list(
 #: All values accepted by the ``--target`` CLI option.
 #: Derived from canonical targets, alias keys, and the ``"all"`` keyword.
 VALID_TARGET_VALUES: frozenset[str] = (
-    ALL_CANONICAL_TARGETS | EXPERIMENTAL_TARGETS | frozenset(TARGET_ALIASES) | frozenset({"all"})
+    ALL_CANONICAL_TARGETS
+    | EXPERIMENTAL_TARGETS
+    | EXPLICIT_ONLY_TARGETS
+    | frozenset(TARGET_ALIASES)
+    | frozenset({"all"})
 )
 
 
@@ -380,6 +420,9 @@ def parse_target_field(
     if value is None:
         return None
 
+    global _agents_alias_detected
+    _agents_alias_detected = False
+
     # ---- collect raw tokens ----
     if isinstance(value, str):
         # Empty / whitespace-only / comma-only strings are user error -- a
@@ -420,16 +463,33 @@ def parse_target_field(
                 )
             )
 
-    # ---- "all" is exclusive ----
+    # ---- deprecation warning for legacy "agents" alias (once per call) ----
+    if "agents" in raw_parts:
+        _agents_alias_detected = True
+        warnings.warn(
+            "'--target agents' is deprecated -- it maps to 'copilot' (.github/), "
+            "not '.agents/'. Use '--target copilot' or '--target agent-skills' "
+            "(.agents/skills/). Removal in v1.0.",
+            AgentsTargetDeprecationWarning,
+            stacklevel=2,
+        )
+
+    # ---- "all" handling ----
     if "all" in raw_parts:
-        if len(raw_parts) > 1:
+        non_all_tokens = {t for t in raw_parts if t != "all"}
+        if non_all_tokens - EXPLICIT_ONLY_TARGETS:
             raise ValueError(
                 _target_error(
                     "'all' cannot be combined with other targets",
                     source_path,
                 )
             )
-        return "all"
+        if not non_all_tokens:
+            return "all"
+        # "all" + explicit-only tokens (e.g. "all,agent-skills"):
+        # expand "all" to canonical targets and append the explicit-only ones.
+        expanded = sorted(ALL_CANONICAL_TARGETS) + sorted(non_all_tokens)
+        return expanded
 
     # Single-token input is returned as-is (no alias resolution).  This
     # preserves the long-standing CLI contract where ``--target copilot``

@@ -455,7 +455,7 @@ class TestADOVirtualPackagePaths:
         dep = DependencyReference.parse("owner/test-repo/collections/project-planning")
 
         assert dep.is_virtual is True
-        assert dep.is_virtual_collection() is True
+        assert dep.is_virtual_subdirectory() is True
 
         # Simulate install path logic from cli.py for virtual packages
         repo_parts = dep.repo_url.split("/")
@@ -479,7 +479,7 @@ class TestADOVirtualPackagePaths:
 
         assert dep.is_azure_devops() is True
         assert dep.is_virtual is True
-        assert dep.is_virtual_collection() is True
+        assert dep.is_virtual_subdirectory() is True
         assert dep.repo_url == "myorg/myproject/myrepo"
 
         # Simulate install path logic from cli.py for virtual packages
@@ -529,7 +529,7 @@ class TestADOVirtualPackagePaths:
 
         assert dep.is_azure_devops() is True
         assert dep.is_virtual is True
-        assert dep.is_virtual_collection() is True
+        assert dep.is_virtual_subdirectory() is True
         assert dep.repo_url == "myorg/myproject/copilot-instructions"
         assert dep.virtual_path == "collections/csharp-ddd"
 
@@ -558,12 +558,12 @@ class TestADOVirtualPackagePaths:
         assert dep.repo_url == "myorg/myproject/collections"
         assert dep.virtual_path == "my-collection"
 
-        # This causes is_virtual_collection() to return False
-        # because virtual_path doesn't contain 'collections/'
-        assert dep.is_virtual_collection() is False
+        # The shape no longer matches the SUBDIRECTORY heuristic
+        # (virtual_path is `my-collection`, no extension) so it is treated
+        # as a subdirectory virtual ref under repo `myorg/myproject/collections`
+        # -- the install will fail downstream with a 'repo not found' error.
+        assert dep.is_virtual_subdirectory() is True
         assert dep.is_virtual_file() is False
-
-        # This is why the user gets "Unknown virtual package type" error
 
 
 class TestADOPruneCommand:

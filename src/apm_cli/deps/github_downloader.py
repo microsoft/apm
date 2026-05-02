@@ -70,25 +70,6 @@ _PROTOCOL_FALLBACK_DOCS_URL = (
 )
 
 
-def normalize_collection_path(virtual_path: str) -> str:
-    """Normalize a collection virtual path by stripping any existing extension.
-
-    This allows users to specify collection dependencies with or without the extension:
-      - owner/repo/collections/name (without extension)
-      - owner/repo/collections/name.collection.yml (with extension)
-
-    Args:
-        virtual_path: The virtual path from the dependency reference
-
-    Returns:
-        str: The normalized path without .collection.yml/.collection.yaml suffix
-    """
-    for ext in (".collection.yml", ".collection.yaml"):
-        if virtual_path.endswith(ext):
-            return virtual_path[: -len(ext)]
-    return virtual_path
-
-
 def _debug(message: str) -> None:
     """Print debug message if APM_DEBUG environment variable is set."""
     if os.environ.get("APM_DEBUG"):
@@ -1421,169 +1402,6 @@ class GitHubPackageDownloader:
             dependency_ref=dep_ref,  # Store for canonical dependency string
         )
 
-    def download_collection_package(
-        self,
-        dep_ref: DependencyReference,
-        target_path: Path,
-        progress_task_id=None,
-        progress_obj=None,
-    ) -> PackageInfo:
-        """Download a collection as a virtual APM package.
-
-        Downloads the collection manifest, then fetches all referenced files and
-        organizes them into the appropriate .apm/ subdirectories.
-
-        Args:
-            dep_ref: Dependency reference with virtual_path pointing to collection
-            target_path: Local path where virtual package should be created
-            progress_task_id: Rich Progress task ID for progress updates
-            progress_obj: Rich Progress object for progress updates
-
-        Returns:
-            PackageInfo: Information about the created virtual package
-
-        Raises:
-            ValueError: If the dependency is not a valid collection package
-            RuntimeError: If download fails
-        """
-        if not dep_ref.is_virtual or not dep_ref.virtual_path:
-            raise ValueError("Dependency must be a virtual collection package")
-
-        if not dep_ref.is_virtual_collection():
-            raise ValueError(f"Path '{dep_ref.virtual_path}' is not a valid collection path")
-
-        # Determine the ref to use
-        ref = dep_ref.reference or "main"
-
-        # Update progress - starting
-        if progress_obj and progress_task_id is not None:
-            progress_obj.update(progress_task_id, completed=10, total=100)
-
-        # Normalize virtual_path by stripping .collection.yml/.yaml suffix if already present
-        # This allows users to specify either:
-        #   - owner/repo/collections/name (without extension)
-        #   - owner/repo/collections/name.collection.yml (with extension)
-        virtual_path_base = normalize_collection_path(dep_ref.virtual_path)
-
-        # Extract collection name from normalized path (e.g., "collections/project-planning" -> "project-planning")
-        collection_name = virtual_path_base.split("/")[-1]
-
-        # Build collection manifest path - try .yml first, then .yaml as fallback
-        collection_manifest_path = f"{virtual_path_base}.collection.yml"
-
-        # Download the collection manifest
-        try:
-            manifest_content = self.download_raw_file(dep_ref, collection_manifest_path, ref)
-        except RuntimeError as e:
-            # Try .yaml extension as fallback
-            if ".collection.yml" in str(e):
-                collection_manifest_path = f"{virtual_path_base}.collection.yaml"
-                try:
-                    manifest_content = self.download_raw_file(
-                        dep_ref, collection_manifest_path, ref
-                    )
-                except RuntimeError:
-                    raise RuntimeError(  # noqa: B904
-                        f"Collection manifest not found: {virtual_path_base}.collection.yml (also tried .yaml)"
-                    )
-            else:
-                raise RuntimeError(f"Failed to download collection manifest: {e}")  # noqa: B904
-
-        # Parse the collection manifest
-        from .collection_parser import parse_collection_yml
-
-        try:
-            manifest = parse_collection_yml(manifest_content)
-        except (ValueError, Exception) as e:
-            raise RuntimeError(f"Invalid collection manifest '{collection_name}': {e}")  # noqa: B904
-
-        # Create target directory structure
-        target_path.mkdir(parents=True, exist_ok=True)
-
-        # Download all items from the collection
-        downloaded_count = 0
-        failed_items = []
-        total_items = len(manifest.items)
-
-        for idx, item in enumerate(manifest.items):
-            # Update progress for each item
-            if progress_obj and progress_task_id is not None:
-                progress_percent = 20 + int((idx / total_items) * 70)  # 20% to 90%
-                progress_obj.update(progress_task_id, completed=progress_percent, total=100)
-
-            try:
-                # Download the file
-                item_content = self.download_raw_file(dep_ref, item.path, ref)
-
-                # Determine subdirectory based on item kind
-                subdir = item.subdirectory
-
-                # Create the subdirectory
-                apm_subdir = target_path / ".apm" / subdir
-                apm_subdir.mkdir(parents=True, exist_ok=True)
-
-                # Write the file
-                filename = item.path.split("/")[-1]
-                file_path = apm_subdir / filename
-                file_path.write_bytes(item_content)
-
-                downloaded_count += 1
-
-            except RuntimeError as e:
-                # Log the failure but continue with other items
-                failed_items.append(f"{item.path} ({e})")
-                continue
-
-        # Check if we downloaded at least some items
-        if downloaded_count == 0:
-            error_msg = f"Failed to download any items from collection '{collection_name}'"
-            if failed_items:
-                error_msg += f". Failures:\n  - " + "\n  - ".join(failed_items)  # noqa: F541
-            raise RuntimeError(error_msg)
-
-        # Generate apm.yml with collection metadata
-        package_name = dep_ref.get_virtual_package_name()
-
-        apm_yml_data = {
-            "name": package_name,
-            "version": "1.0.0",
-            "description": manifest.description,
-            "author": dep_ref.repo_url.split("/")[0],
-        }
-        if manifest.tags:
-            apm_yml_data["tags"] = list(manifest.tags)
-        apm_yml_content = yaml_to_str(apm_yml_data)
-
-        apm_yml_path = target_path / "apm.yml"
-        apm_yml_path.write_text(apm_yml_content, encoding="utf-8")
-
-        # Create APMPackage object
-        package = APMPackage(
-            name=package_name,
-            version="1.0.0",
-            description=manifest.description,
-            author=dep_ref.repo_url.split("/")[0],
-            source=dep_ref.to_github_url(),
-            package_path=target_path,
-        )
-
-        # Log warnings for failed items if any
-        if failed_items:
-            import warnings
-
-            warnings.warn(  # noqa: B028
-                f"Collection '{collection_name}' installed with {downloaded_count}/{manifest.item_count} items. "
-                f"Failed items: {len(failed_items)}"
-            )
-
-        # Return PackageInfo
-        return PackageInfo(
-            package=package,
-            install_path=target_path,
-            installed_at=datetime.now().isoformat(),
-            dependency_ref=dep_ref,  # Store for canonical dependency string
-        )
-
     def _try_sparse_checkout(
         self,
         dep_ref: DependencyReference,
@@ -2087,27 +1905,20 @@ class GitHubPackageDownloader:
                 return self.download_virtual_file_package(
                     dep_ref, target_path, progress_task_id, progress_obj
                 )
-            elif dep_ref.is_virtual_collection():
-                return self.download_collection_package(
-                    dep_ref, target_path, progress_task_id, progress_obj
+            # SUBDIRECTORY (the only other virtual type after #1094 dropped
+            # the `.collection.yml` form): includes Artifactory modes.
+            if dep_ref.is_artifactory():
+                proxy_info = (dep_ref.host, dep_ref.artifactory_prefix, "https")
+                return self._download_subdirectory_from_artifactory(
+                    dep_ref, target_path, proxy_info, progress_task_id, progress_obj
                 )
-            elif dep_ref.is_virtual_subdirectory():
-                # Mode 1: explicit Artifactory FQDN from lockfile
-                if dep_ref.is_artifactory():
-                    proxy_info = (dep_ref.host, dep_ref.artifactory_prefix, "https")
-                    return self._download_subdirectory_from_artifactory(
-                        dep_ref, target_path, proxy_info, progress_task_id, progress_obj
-                    )
-                # Mode 2: transparent proxy via env var (art_proxy computed above)
-                if self._is_artifactory_only() and art_proxy:
-                    return self._download_subdirectory_from_artifactory(
-                        dep_ref, target_path, art_proxy, progress_task_id, progress_obj
-                    )
-                return self.download_subdirectory_package(
-                    dep_ref, target_path, progress_task_id, progress_obj
+            if self._is_artifactory_only() and art_proxy:
+                return self._download_subdirectory_from_artifactory(
+                    dep_ref, target_path, art_proxy, progress_task_id, progress_obj
                 )
-            else:
-                raise ValueError(f"Unknown virtual package type for {dep_ref.virtual_path}")
+            return self.download_subdirectory_package(
+                dep_ref, target_path, progress_task_id, progress_obj
+            )
 
         # Artifactory download path (Mode 1: explicit FQDN, Mode 2: transparent proxy)
         use_artifactory = dep_ref.is_artifactory()

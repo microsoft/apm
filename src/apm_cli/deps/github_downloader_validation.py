@@ -155,13 +155,13 @@ def validate_virtual_package_exists(
 
     _log(f'  [i] Validating virtual package at ref "{ref}": {dep_ref.repo_url}/{vpath}')
 
-    if dep_ref.is_virtual_collection():
-        return _probe(f"{vpath}.collection.yml")
-
     if dep_ref.is_virtual_file():
         return _probe(vpath)
 
     if dep_ref.is_virtual_subdirectory():
+        # Probe order: apm.yml first (a `collections/<name>/apm.yml` is the
+        # supported way to express a curated dependency aggregator -- see
+        # microsoft/apm#1094), then the standard primitive markers.
         marker_paths = [
             f"{vpath}/apm.yml",
             f"{vpath}/SKILL.md",

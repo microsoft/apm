@@ -413,6 +413,29 @@ run_e2e_tests() {
         exit 1
     fi
 
+    # Run Claude Code MCP schema-fidelity tests -- offline, golden fixtures
+    # captured from the upstream `claude` CLI (see fixtures/README.md)
+    log_info "Running Claude Code MCP schema-fidelity tests..."
+    echo "Command: pytest tests/integration/test_claude_mcp_schema_fidelity.py -v -s --tb=short"
+
+    if pytest tests/integration/test_claude_mcp_schema_fidelity.py -v -s --tb=short; then
+        log_success "Claude Code MCP schema-fidelity tests passed!"
+    else
+        log_error "Claude Code MCP schema-fidelity tests failed!"
+        exit 1
+    fi
+
+    # Run local-bundle install E2E tests -- offline, no tokens needed
+    log_info "Running local-bundle install E2E tests..."
+    echo "Command: pytest tests/integration/test_install_local_bundle_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_install_local_bundle_e2e.py -v -s --tb=short; then
+        log_success "Local-bundle install E2E tests passed!"
+    else
+        log_error "Local-bundle install E2E tests failed!"
+        exit 1
+    fi
+
     # Run Azure DevOps E2E tests (requires ADO_APM_PAT)
     if [[ -n "${ADO_APM_PAT:-}" ]]; then
         log_info "Running Azure DevOps E2E tests..."
@@ -426,6 +449,17 @@ run_e2e_tests() {
         fi
     else
         log_info "Skipping Azure DevOps E2E tests (ADO_APM_PAT not set)"
+    fi
+
+    # Run agent-skills target E2E tests -- offline, no tokens needed
+    log_info "Running agent-skills target E2E tests..."
+    echo "Command: pytest tests/integration/test_agent_skills_target.py -v -s --tb=short"
+
+    if pytest tests/integration/test_agent_skills_target.py -v -s --tb=short; then
+        log_success "Agent-skills target E2E tests passed!"
+    else
+        log_error "Agent-skills target E2E tests failed!"
+        exit 1
     fi
     
     log_success "All integration test suites completed successfully!"

@@ -228,6 +228,27 @@ class TestInstallCommandAutoBootstrap:
             assert "invalid format" in result.output
 
     @patch("apm_cli.commands.install._validate_package_exists")
+    def test_install_collection_yml_argument_surfaces_migration_message(self, mock_validate):
+        """`apm install owner/repo/.../foo.collection.yml` (CLI arg, not in
+        apm.yml) MUST surface the migration ValueError end-to-end.
+
+        Regression-trap for #1094 rework: the parse-time ValueError from
+        ``DependencyReference.parse()`` flows through
+        ``_resolve_package_references`` -> ``invalid_outcomes`` ->
+        validation summary. If a future refactor swallows this, users
+        would silently see "package not found" instead of the actionable
+        migration text.
+        """
+        with self._chdir_tmp():
+            result = self.runner.invoke(
+                cli, ["install", "owner/repo/collections/writing.collection.yml"]
+            )
+            assert ".collection.yml is no" in result.output  # text wraps in CLI
+            assert "longer supported" in result.output
+            assert "apm.yml" in result.output
+            assert "All packages failed validation" in result.output
+
+    @patch("apm_cli.commands.install._validate_package_exists")
     @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
     @patch("apm_cli.commands.install.APMPackage")
     @patch("apm_cli.commands.install._install_apm_dependencies")

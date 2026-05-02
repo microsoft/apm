@@ -1,5 +1,6 @@
 """Unit tests for apm_cli.bundle.lockfile_enrichment."""
 
+import pytest
 import yaml
 
 from apm_cli.bundle.lockfile_enrichment import enrich_lockfile_for_pack
@@ -245,6 +246,74 @@ class TestFilterFilesByTarget:
                 assert f.startswith(".claude/skills/")
         # Either way, the original .github/ path should not sneak through
         assert ".github/skills/../../etc/passwd" not in filtered
+
+    # -- agent-skills target (#737) ---------------------------------------
+
+    def test_filter_files_agent_skills_target(self):
+        """agent-skills returns .agents/skills entries directly and remaps
+        .github/skills/ -> .agents/skills/.  Other prefixes (.github/agents/)
+        are NOT included -- agent-skills is skills-only."""
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        files = [
+            ".agents/skills/x/SKILL.md",
+            ".github/agents/a.md",
+            ".github/skills/y/SKILL.md",
+        ]
+        filtered, mappings = _filter_files_by_target(files, "agent-skills")
+
+        # Direct match on the .agents/ prefix.
+        assert ".agents/skills/x/SKILL.md" in filtered
+        # Cross-target remap from .github/skills/ -> .agents/skills/.
+        assert ".agents/skills/y/SKILL.md" in filtered
+        assert mappings[".agents/skills/y/SKILL.md"] == ".github/skills/y/SKILL.md"
+        # .github/agents/ is NOT remapped -- agent-skills has no agents primitive.
+        assert ".github/agents/a.md" not in filtered
+        assert ".agents/agents/a.md" not in filtered
+        # Every surviving entry lives under the agent-skills prefix.
+        for f in filtered:
+            assert f.startswith(".agents/")
+
+    def test_filter_files_agent_skills_remap_escape_rejected(self):
+        """A crafted .github/skills/ path with traversal cannot escape the
+        .agents/ prefix when remapped for the agent-skills target."""
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        files = [".github/skills/../../etc/passwd"]
+        filtered, mappings = _filter_files_by_target(files, "agent-skills")  # noqa: RUF059
+
+        # Original .github/ path must never appear directly.
+        assert ".github/skills/../../etc/passwd" not in filtered
+        # The containment guard must reject traversal -- either the entry is
+        # dropped entirely or every surviving path is well-formed.
+        for f in filtered:
+            assert f.startswith(".agents/")
+            assert ".." not in f.split("/"), (
+                f"traversal segment leaked through containment guard: {f}"
+            )
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            ".github/skills/x/../../etc/passwd",
+            ".github/skills/../foo/SKILL.md",
+            ".github/skills/x/./../../y/SKILL.md",
+        ],
+        ids=["double-dot-escape", "parent-traverse", "dot-mixed-traverse"],
+    )
+    def test_filter_files_agent_skills_traversal_payloads_rejected(self, payload: str):
+        """Parametrized traversal payloads must be rejected or normalised safely."""
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        filtered, _mappings = _filter_files_by_target([payload], "agent-skills")
+
+        # Either the entry was rejected entirely …
+        if not filtered:
+            return
+        # … or every surviving path is well-formed (no '..' segments).
+        for f in filtered:
+            parts = f.split("/")
+            assert ".." not in parts, f"traversal segment leaked for payload {payload!r}: {f}"
 
 
 class TestFilterFilesByTargetList:

@@ -285,7 +285,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
             ),
             "prompts": PrimitiveMapping("prompts", ".prompt.md", "github_prompt"),
             "agents": PrimitiveMapping("agents", ".agent.md", "github_agent"),
-            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+                deploy_root=".agents",
+            ),
             "hooks": PrimitiveMapping("hooks", ".json", "github_hooks"),
         },
         auto_create=True,
@@ -338,7 +343,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
             # diagnostics.warn() at install time -- see
             # command_integrator.
             "commands": PrimitiveMapping("commands", ".md", "claude_command"),
-            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+                deploy_root=".agents",
+            ),
             "hooks": PrimitiveMapping("hooks", ".json", "cursor_hooks"),
         },
         auto_create=False,
@@ -355,7 +365,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         primitives={
             "agents": PrimitiveMapping("agents", ".md", "opencode_agent"),
             "commands": PrimitiveMapping("commands", ".md", "opencode_command"),
-            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+                deploy_root=".agents",
+            ),
         },
         auto_create=False,
         detect_by_dir=True,
@@ -375,7 +390,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         root_dir=".gemini",
         primitives={
             "commands": PrimitiveMapping("commands", ".toml", "gemini_command"),
-            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+                deploy_root=".agents",
+            ),
             "hooks": PrimitiveMapping("hooks", ".json", "gemini_hooks"),
         },
         auto_create=False,
@@ -403,6 +423,26 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         user_supported="partial",
     ),
+    # Agent-skills: cross-client shared skills directory (.agents/skills/).
+    # Skills primitive only -- no agents, hooks, or commands.
+    # Not auto-detected (detect_by_dir=False) because .agents/ is shared by
+    # multiple tools (Codex, etc.). Explicit --target agent-skills only.
+    "agent-skills": TargetProfile(
+        name="agent-skills",
+        root_dir=".agents",
+        primitives={
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+            ),
+        },
+        auto_create=True,
+        detect_by_dir=False,
+        user_supported=True,
+        user_root_dir=".agents",
+        generated_files=(),
+    ),
     # Microsoft 365 Copilot (Cowork) -- experimental, user-scope only.
     # Skills are deployed to <OneDrive>/Documents/Cowork/skills/.
     # The deploy root is resolved dynamically at runtime via
@@ -425,6 +465,46 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         requires_flag="copilot_cowork",
     ),
 }
+
+
+def apply_legacy_skill_paths(profiles: list[TargetProfile]) -> list[TargetProfile]:
+    """Reset ``deploy_root`` on every ``skills`` primitive to ``None``.
+
+    When ``--legacy-skill-paths`` (or ``APM_LEGACY_SKILL_PATHS=1``) is
+    active, this restores pre-convergence per-client routing so skills
+    land in ``.github/skills/``, ``.cursor/skills/``, etc. instead of
+    the default ``.agents/skills/``.
+
+    Returns a NEW list of (possibly replaced) profiles — the global
+    ``KNOWN_TARGETS`` dict is never mutated.
+    """
+    from dataclasses import replace
+
+    result: list[TargetProfile] = []
+    for profile in profiles:
+        skills_pm = profile.primitives.get("skills")
+        if skills_pm and skills_pm.deploy_root is not None:
+            new_pm = PrimitiveMapping(
+                subdir=skills_pm.subdir,
+                extension=skills_pm.extension,
+                format_id=skills_pm.format_id,
+                deploy_root=None,
+            )
+            new_primitives = {**profile.primitives, "skills": new_pm}
+            profile = replace(profile, primitives=new_primitives)
+        result.append(profile)
+    return result
+
+
+def should_use_legacy_skill_paths() -> bool:
+    """Return ``True`` when the ``APM_LEGACY_SKILL_PATHS`` env var is set.
+
+    Recognised truthy values: ``1``, ``true``, ``yes`` (case-insensitive).
+    """
+    import os
+
+    val = os.environ.get("APM_LEGACY_SKILL_PATHS", "").strip().lower()
+    return val in ("1", "true", "yes")
 
 
 def _resolve_copilot_cowork_root() -> Path | None:  # noqa: F821
@@ -531,7 +611,13 @@ def active_targets_user_scope(
         for t in raw:
             canonical = "copilot" if t in ("copilot", "vscode", "agents") else t
             if canonical == "all":
-                return [p for p in KNOWN_TARGETS.values() if p.user_supported and _flag_gated(p)]
+                from apm_cli.core.target_detection import EXPLICIT_ONLY_TARGETS
+
+                return [
+                    p
+                    for p in KNOWN_TARGETS.values()
+                    if p.user_supported and _flag_gated(p) and p.name not in EXPLICIT_ONLY_TARGETS
+                ]
             profile = KNOWN_TARGETS.get(canonical)
             if (
                 profile
@@ -599,9 +685,13 @@ def active_targets(
             canonical = "copilot" if t in ("copilot", "vscode", "agents") else t
             if canonical == "all":
                 # Return all targets regardless of flag gating.
+                # Exclude explicit-only targets (agent-skills) -- they must
+                # be requested individually.
                 # The project-scope gate in phases/targets.py and
                 # for_scope() handle user-observable blocking.
-                return list(KNOWN_TARGETS.values())
+                from apm_cli.core.target_detection import EXPLICIT_ONLY_TARGETS
+
+                return [p for p in KNOWN_TARGETS.values() if p.name not in EXPLICIT_ONLY_TARGETS]
             profile = KNOWN_TARGETS.get(canonical)
             if profile and _flag_gated(profile) and profile.name not in seen:
                 seen.add(profile.name)

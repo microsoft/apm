@@ -1,10 +1,13 @@
 """Plugin exporter -- transforms APM packages into plugin-native directories.
 
 Produces a standalone plugin directory that Copilot CLI, Claude Code, or other
-plugin hosts can consume directly.  The output contains no APM-specific files
-(no ``apm.yml``, ``apm_modules/``, ``.apm/``, or ``apm.lock.yaml``).
+plugin hosts can consume directly.  The output contains plugin-spec artefacts
+(``agents/``, ``skills/``, ``commands/``, ``plugin.json``) plus an embedded
+``apm.lock.yaml`` carrying provenance metadata + a per-file SHA-256 manifest
+under ``pack.bundle_files`` (issue #1098).
 """
 
+import hashlib
 import json
 import os  # noqa: F401
 import re
@@ -617,6 +620,29 @@ def export_plugin_bundle(
     (bundle_dir / "plugin.json").write_text(
         json.dumps(plugin_json, indent=2, sort_keys=False), encoding="utf-8"
     )
+
+    # 14b. Write enriched lockfile with bundle_files manifest (issue #1098).
+    # Walk the bundle and hash every file (excluding the lockfile itself,
+    # which we are about to write) so install-time integrity verification can
+    # detect tampering without needing the original deployed_files map.
+    if lockfile is not None:
+        from .lockfile_enrichment import enrich_lockfile_for_pack
+
+        bundle_files: dict[str, str] = {}
+        for fp in bundle_dir.rglob("*"):
+            if not fp.is_file() or fp.is_symlink():
+                continue
+            rel = fp.relative_to(bundle_dir).as_posix()
+            if rel == "apm.lock.yaml":
+                continue
+            bundle_files[rel] = hashlib.sha256(fp.read_bytes()).hexdigest()
+        enriched_yaml = enrich_lockfile_for_pack(
+            lockfile,
+            "plugin",
+            target or "copilot",
+            bundle_files=bundle_files,
+        )
+        (bundle_dir / "apm.lock.yaml").write_text(enriched_yaml, encoding="utf-8")
 
     result = PackResult(bundle_path=bundle_dir, files=output_files)
 

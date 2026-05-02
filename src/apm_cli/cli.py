@@ -6,6 +6,7 @@ Thin wiring layer  -- all command logic lives in ``apm_cli.commands.*`` modules.
 import ctypes
 import os
 import sys
+import warnings
 
 import click
 
@@ -51,6 +52,14 @@ from apm_cli.commands.view import view as view_cmd
 def cli(ctx):
     """Main entry point for the APM CLI."""
     ctx.ensure_object(dict)
+
+    # Suppress only the agents-target deprecation warning so CLI users see
+    # the formatted logger.warning() in the install phase, not a double print.
+    # Scoped to AgentsTargetDeprecationWarning to avoid masking future
+    # DeprecationWarnings from apm_cli modules.
+    from apm_cli.core.target_detection import AgentsTargetDeprecationWarning
+
+    warnings.filterwarnings("ignore", category=AgentsTargetDeprecationWarning)
 
     # Check for updates non-blockingly (only if not already showing version)
     if not ctx.resilient_parsing:

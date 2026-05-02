@@ -108,7 +108,7 @@ class TestPluginHeroScenarios:
         # 5. Assert scattered files
         assert (project_root / ".github" / "prompts" / "test-command.prompt.md").exists()
         assert (project_root / ".github" / "agents" / "test-agent.agent.md").exists()
-        assert (project_root / ".github" / "skills" / "test-skill" / "SKILL.md").exists()
+        assert (project_root / ".agents" / "skills" / "test-skill" / "SKILL.md").exists()
 
     # ---- Test 2: No false orphans after install -------------------------
 
@@ -438,8 +438,8 @@ class TestPluginNetworkE2E:
         # Lock file created
         assert (temp_project / "apm.lock.yaml").exists(), "apm.lock.yaml should be created"
 
-        # Skills scattered to .github/skills/
-        skills_dir = temp_project / ".github" / "skills"
+        # Skills scattered to .agents/skills/ (cross-tool agent-skills standard)
+        skills_dir = temp_project / ".agents" / "skills"
         if skills_dir.exists():
             skill_dirs = [d for d in skills_dir.iterdir() if d.is_dir()]
             assert len(skill_dirs) > 0, "At least one skill should be scattered"

@@ -73,7 +73,7 @@ class TestCanonicalDependencyString:
         )
 
     def test_virtual_collection_package(self):
-        """Virtual collection includes full path."""
+        """Virtual collection (subdirectory) includes full path."""
         dep = DependencyReference.parse("owner/test-repo/collections/azure-cloud-development")
         assert (
             dep.get_canonical_dependency_string()
@@ -136,21 +136,17 @@ class TestGetInstallPath:
         expected = apm_modules / "owner" / "test-repo-code-review"
         assert dep.get_install_path(apm_modules) == expected
 
-    def test_virtual_collection_package(self):
-        """Virtual collection: apm_modules/owner/<virtual-package-name>."""
+    def test_collections_path_subdirectory_uses_natural_layout(self):
+        """`/collections/<name>` is SUBDIRECTORY (#1094).
+
+        SUBDIRECTORY install paths mirror the repo path so an actual
+        `collections/<name>/apm.yml` package lives at the natural location
+        under apm_modules/. The legacy flattened layout (used by the
+        removed `.collection.yml` form) is gone.
+        """
         dep = DependencyReference.parse("owner/test-repo/collections/azure-cloud-development")
         apm_modules = Path("/project/apm_modules")
-
-        # Virtual package name: test-repo-azure-cloud-development
-        expected = apm_modules / "owner" / "test-repo-azure-cloud-development"
-        assert dep.get_install_path(apm_modules) == expected
-
-    def test_virtual_collection_with_reference(self):
-        """Reference does not affect virtual package install path."""
-        dep = DependencyReference.parse("owner/test-repo/collections/testing#main")
-        apm_modules = Path("/project/apm_modules")
-
-        expected = apm_modules / "owner" / "test-repo-testing"
+        expected = apm_modules / "owner" / "test-repo" / "collections" / "azure-cloud-development"
         assert dep.get_install_path(apm_modules) == expected
 
     def test_ado_regular_package(self):
@@ -171,15 +167,14 @@ class TestGetInstallPath:
         expected = apm_modules / "myorg" / "myproject" / "myrepo-test"
         assert dep.get_install_path(apm_modules) == expected
 
-    def test_ado_virtual_collection(self):
-        """ADO virtual collection: apm_modules/org/project/<virtual-package-name>."""
+    def test_ado_virtual_collection_subdirectory(self):
+        """ADO `/collections/<name>` is SUBDIRECTORY: natural-layout install path."""
         dep = DependencyReference.parse(
             "dev.azure.com/myorg/myproject/myrepo/collections/my-collection"
         )
         apm_modules = Path("/project/apm_modules")
 
-        # Virtual package name: myrepo-my-collection
-        expected = apm_modules / "myorg" / "myproject" / "myrepo-my-collection"
+        expected = apm_modules / "myorg" / "myproject" / "myrepo" / "collections" / "my-collection"
         assert dep.get_install_path(apm_modules) == expected
 
     def test_relative_apm_modules_path(self):
@@ -194,10 +189,16 @@ class TestInstallPathConsistency:
     """Test that get_install_path is consistent with virtual package naming."""
 
     def test_consistency_with_get_virtual_package_name(self):
-        """Install path uses same package name as get_virtual_package_name."""
+        """Install path's last segment equals get_virtual_package_name() for
+        flattened-layout virtual refs (FILE).
+
+        SUBDIRECTORY refs use a natural-layout install path that mirrors
+        the repo structure, so the last-segment invariant does not hold
+        for them; that case is covered separately by
+        ``test_collections_path_subdirectory_uses_natural_layout``.
+        """
         test_cases = [
             "owner/test-repo/prompts/code-review.prompt.md",
-            "owner/test-repo/collections/azure-cloud-development",
             "owner/repo/agents/security.agent.md",
             "user/pkg/instructions/coding.instructions.md",
         ]
@@ -241,21 +242,20 @@ class TestInstallPathConsistency:
 class TestUninstallScenarios:
     """Test scenarios that were broken before the fix."""
 
-    def test_uninstall_virtual_collection_finds_correct_path(self):
-        """Uninstalling virtual collection should find owner/virtual-pkg-name, not owner/repo/collections/name."""
+    def test_uninstall_virtual_collection_subdirectory_path(self):
+        """`/collections/<name>` is SUBDIRECTORY: natural-layout install path.
+
+        Uninstall logic for SUBDIRECTORY collections targets the natural
+        path under apm_modules/, mirroring the repo structure.
+        """
         dep_str = "owner/test-repo/collections/azure-cloud-development"
         dep = DependencyReference.parse(dep_str)
 
         apm_modules = Path("apm_modules")
         install_path = dep.get_install_path(apm_modules)
 
-        # Should be owner/test-repo-azure-cloud-development
-        # NOT owner/test-repo/collections/azure-cloud-development
-        assert install_path == apm_modules / "owner" / "test-repo-azure-cloud-development"
-
-        # The wrong path (from raw path segments) would be:
-        wrong_path = apm_modules / "owner" / "test-repo" / "collections" / "azure-cloud-development"
-        assert install_path != wrong_path
+        expected = apm_modules / "owner" / "test-repo" / "collections" / "azure-cloud-development"
+        assert install_path == expected
 
     def test_uninstall_virtual_file_finds_correct_path(self):
         """Uninstalling virtual file should find owner/virtual-pkg-name."""

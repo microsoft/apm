@@ -139,3 +139,8 @@ class InstallContext:
     # Cowork integration state
     # ------------------------------------------------------------------
     cowork_nonsupported_warned: bool = False  # integrate (once-per-run guard)
+
+    # ------------------------------------------------------------------
+    # Legacy skill paths opt-out (convergence §3)
+    # ------------------------------------------------------------------
+    legacy_skill_paths: bool = False  # --legacy-skill-paths flag or APM_LEGACY_SKILL_PATHS env

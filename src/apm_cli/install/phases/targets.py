@@ -39,6 +39,22 @@ def run(ctx: InstallContext) -> None:
     # Resolve effective explicit target: CLI --target wins, then apm.yml
     _explicit = ctx.target_override or config_target or None
 
+    # ------------------------------------------------------------------
+    # Deprecation warning for legacy '--target agents' alias (cli-review §1)
+    # Driven by the raw-token flag set in parse_target_field() so that
+    # multi-token inputs like "--target copilot,agents" still surface the
+    # warning even after alias resolution collapses "agents" away.
+    # ------------------------------------------------------------------
+    from apm_cli.core.target_detection import agents_alias_was_detected
+
+    if agents_alias_was_detected():
+        if ctx.logger:
+            ctx.logger.warning(
+                "'--target agents' is deprecated -- it maps to 'copilot' (.github/), "
+                "not '.agents/'. Use '--target copilot' or '--target agent-skills' "
+                "(.agents/skills/). Removal in v1.0."
+            )
+
     # Determine active targets.  When --target or apm.yml target is set
     # the user's choice wins.  Otherwise auto-detect from existing dirs,
     # falling back to copilot when nothing is found.
@@ -152,7 +168,16 @@ def run(ctx: InstallContext) -> None:
         _root = _t.root_dir
         _target_dir = ctx.project_root / _root
         if not _target_dir.exists():
-            _target_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                _target_dir.mkdir(parents=True, exist_ok=True)
+            except PermissionError:
+                if ctx.logger:
+                    _display_root = f"~/{_root}/" if _is_user else f"{_root}/"
+                    ctx.logger.error(
+                        f"Cannot create {_display_root} -- permission denied. "
+                        f"Check directory permissions or use a different --target."
+                    )
+                raise SystemExit(1) from None
             if ctx.logger:
                 ctx.logger.verbose_detail(f"Created {_root}/ ({_t.name} target)")
 
@@ -164,6 +189,17 @@ def run(ctx: InstallContext) -> None:
         explicit_target=_explicit,
         config_target=config_target,
     )
+
+    # ------------------------------------------------------------------
+    # Legacy skill paths opt-out (convergence §3)
+    # When --legacy-skill-paths is set (or APM_LEGACY_SKILL_PATHS env),
+    # reset deploy_root on skills primitives so they fall back to the
+    # per-client root_dir instead of the converged .agents/ directory.
+    # ------------------------------------------------------------------
+    if ctx.legacy_skill_paths:
+        from apm_cli.integration.targets import apply_legacy_skill_paths
+
+        _targets = apply_legacy_skill_paths(_targets)
 
     # ------------------------------------------------------------------
     # Initialize integrators
