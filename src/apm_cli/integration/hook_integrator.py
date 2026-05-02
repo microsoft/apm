@@ -52,6 +52,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
+from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
 _log = logging.getLogger(__name__)
@@ -597,6 +598,7 @@ class HookIntegrator(BaseIntegrator):
             # Copy referenced scripts (individual file tracking)
             for source_file, target_rel in scripts:
                 target_script = project_root / target_rel
+                ensure_path_within(target_script, project_root)
                 if self.check_collision(
                     target_script, target_rel, managed_files, force, diagnostics=diagnostics
                 ):
@@ -777,6 +779,7 @@ class HookIntegrator(BaseIntegrator):
             # Copy referenced scripts
             for source_file, target_rel in scripts:
                 target_script = project_root / target_rel
+                ensure_path_within(target_script, project_root)
                 if self.check_collision(
                     target_script,
                     target_rel,
