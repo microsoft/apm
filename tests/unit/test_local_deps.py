@@ -482,6 +482,26 @@ class TestCopyLocalPackage:
         assert (result / "apm.yml").exists()
         assert (result / ".apm" / "instructions" / "test.instructions.md").exists()
 
+    def test_copy_local_package_logger_none_does_not_raise(self, tmp_path):
+        """PR #1111 review C1: _copy_local_package must tolerate logger=None.
+
+        ``run_install_pipeline(logger=None)`` is a public, documented entry
+        point; the helper must not AttributeError when reached without an
+        explicit InstallLogger threaded through.
+        """
+        from apm_cli.commands.install import _copy_local_package
+
+        # Trigger the failure branch (missing path) -- this branch calls
+        # ``logger.error(...)``. Before the fix it would AttributeError on
+        # ``None.error``; now it gracefully falls back to NullCommandLogger.
+        dep_ref = DependencyReference.parse("./does-not-exist")
+        install_path = tmp_path / "apm_modules" / "_local" / "does-not-exist"
+
+        result = _copy_local_package(
+            dep_ref, install_path, tmp_path, project_root=tmp_path, logger=None
+        )
+        assert result is None  # missing path fails as expected, no AttributeError
+
     def test_copy_local_package_with_skill_md(self, tmp_path):
         from apm_cli.commands.install import _copy_local_package
 

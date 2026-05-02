@@ -130,6 +130,19 @@ def _copy_local_package(dep_ref, install_path, base_dir, *, project_root, logger
     # docstring); not consumed in the current copy path.
     _ = project_root
 
+    # PR #1111 review C1: ``ctx.logger`` is allowed to be None
+    # (``run_install_pipeline(logger=None)`` is a public, documented entry
+    # point). Without this guard the unconditional ``logger.error(...)``
+    # calls below would AttributeError for any local dep when a caller
+    # does not thread an InstallLogger through. Defaulting to the rich-
+    # console-backed ``NullCommandLogger`` keeps the error visible to the
+    # user while preserving the documented "logger is required" contract
+    # for callers that DO thread one in (their logger wins).
+    if logger is None:
+        from apm_cli.core.null_logger import NullCommandLogger
+
+        logger = NullCommandLogger()
+
     local = Path(dep_ref.local_path).expanduser()
     # Anchor on the *declaring* package's directory (#857). For direct deps
     # from the root, ``base_dir`` IS ``project_root`` so behavior is

@@ -75,6 +75,15 @@ class APMDependencyResolver:
         self._downloaded_packages: set[str] = (
             set()
         )  # Track what we downloaded during this resolution
+        # Tracks ``dep_ref.get_unique_key()`` values rejected by the
+        # remote-parent local_path guard (#940 / PR #1111 review C2). The
+        # resolve phase folds this into ``ctx.callback_failures`` so the
+        # integrate phase skips them with the same "already failed during
+        # resolution" path used for download failures -- otherwise the
+        # rejected dep would still sit in the dependency tree and get
+        # copied later via ``_copy_local_package``, defeating the
+        # fail-closed posture this guard is meant to enforce.
+        self._rejected_remote_local_keys: set[str] = set()
 
     @staticmethod
     def _signature_accepts_parent_pkg(callback) -> bool:
@@ -487,6 +496,12 @@ class APMDependencyResolver:
                     )
             except Exception:
                 _logger.debug("Could not emit remote-parent rejection notice", exc_info=True)
+            # Mark the dep as failed at resolve time so the integrate phase
+            # skips it (PR #1111 review C2). Without this, the dep would
+            # remain in the dep tree -> ``deps_to_install`` -> the integrate
+            # loop would still call ``_copy_local_package`` and copy the
+            # very path we just refused.
+            self._rejected_remote_local_keys.add(dep_ref.get_unique_key())
             return None
 
         # Get the canonical install path for this dependency
