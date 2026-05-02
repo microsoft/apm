@@ -334,7 +334,9 @@ class AgentIntegrator(BaseIntegrator):
         fm_data: dict = {"name": name}
         if description:
             fm_data["description"] = description
-        fm_yaml = yaml.safe_dump(fm_data, default_flow_style=False, allow_unicode=True).rstrip("\n")
+        fm_yaml = yaml.safe_dump(  # yaml-io-exempt: serializes to string, not file handle
+            fm_data, default_flow_style=False, allow_unicode=True
+        ).rstrip("\n")
 
         result = f"---\n{fm_yaml}\n---\n" + body
         result, links_resolved = self.resolve_links(result, source, target)
