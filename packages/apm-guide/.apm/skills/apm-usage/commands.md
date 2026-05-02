@@ -126,7 +126,7 @@ Use `--target agent-skills` to deploy skills to `.agents/skills/` -- the cross-t
 
 ### Skill routing convergence
 
-By default, Copilot, Cursor, OpenCode, Codex, and Gemini all deploy skills to `.agents/skills/` (the agentskills.io standard). Claude retains its native per-client routing (`.claude/skills/`). Use `--legacy-skill-paths` (or `APM_LEGACY_SKILL_PATHS=1`) to restore the previous per-client layout (`.github/skills/`, `.cursor/skills/`, `.gemini/skills/`, etc.). Legacy per-client skill paths recorded in `apm.lock.yaml` are auto-migrated to `.agents/skills/` on the next `apm install`.
+By default, Copilot, Cursor, OpenCode, Codex, and Gemini all deploy skills to `.agents/skills/` (the agentskills.io standard). Claude is the only exception and retains its native per-client routing (`.claude/skills/`). Use `--legacy-skill-paths` (or `APM_LEGACY_SKILL_PATHS=1`) to restore the previous per-client layout (`.github/skills/`, `.cursor/skills/`, `.gemini/skills/`, etc.). Legacy per-client skill paths recorded in `apm.lock.yaml` are auto-migrated to `.agents/skills/` on the next `apm install`; foreign / hand-authored skills outside the lockfile are never touched.
 
 Experimental flags MUST NOT gate security-critical behaviour (content scanning, path validation, lockfile integrity, token handling, MCP trust, collision detection). Flags are ergonomic/UX toggles only.
 

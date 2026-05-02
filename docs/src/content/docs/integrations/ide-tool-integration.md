@@ -66,7 +66,7 @@ VS Code implements core primitives for GitHub Copilot that APM integrates with:
 - **Agents**: AI personas and workflows with `.agent.md` files in `.github/agents/` (legacy: `.chatmode.md` in `.github/chatmodes/`)
 - **Instructions Files**: Modular instructions with `copilot-instructions.md` and `.instructions.md` files
 - **Prompt Files**: Reusable task templates with `.prompt.md` files in `.github/prompts/`
-- **Skills**: Structured capabilities with `SKILL.md` in `.github/skills/`
+- **Skills**: Structured capabilities with `SKILL.md` deployed to `.agents/skills/` (the converged cross-client default; per-client `.github/skills/` available via `--legacy-skill-paths` or `APM_LEGACY_SKILL_PATHS=1`)
 
 > **Note**: APM supports both the new `.agent.md` format and legacy `.chatmode.md` format. VS Code provides Quick Fix actions to migrate from `.chatmode.md` to `.agent.md`.
 
@@ -197,7 +197,7 @@ APM natively integrates with OpenCode when a `.opencode/` directory exists in yo
 |---|---|---|
 | Agents (`.agent.md`) | `.opencode/agents/*.md` | Markdown with YAML frontmatter |
 | Prompts (`.prompt.md`) | `.opencode/commands/*.md` | Converted to command format |
-| Skills (`SKILL.md`) | `.opencode/skills/{name}/SKILL.md` | Identical (agentskills.io standard) |
+| Skills (`SKILL.md`) | `.agents/skills/{name}/SKILL.md` | Identical (agentskills.io standard; converged from `.opencode/skills/`) |
 | MCP servers | `opencode.json` | `mcp` key with `command` array, `environment` |
 | Instructions | Via `AGENTS.md` | Read natively by OpenCode |
 
@@ -211,7 +211,7 @@ APM natively integrates with OpenCode when a `.opencode/` directory exists in yo
 |----------|---------|
 | `.cursor/rules/*.mdc` | Instructions converted to Cursor rules format |
 | `.cursor/agents/*.md` | Sub-agents from installed packages |
-| `.cursor/skills/{name}/SKILL.md` | Skills from installed packages |
+| `.agents/skills/{name}/SKILL.md` | Skills from installed packages (converged from `.cursor/skills/`) |
 | `.cursor/hooks.json` (hooks key) | Hooks from installed packages (merged into config) |
 | `.cursor/hooks/{pkg}/` | Referenced hook scripts |
 | `.cursor/mcp.json` | MCP server configurations |
@@ -234,7 +234,7 @@ APM natively integrates with OpenCode when a `.opencode/` directory exists in yo
 | APM Primitive | Gemini Destination | Format |
 |---|---|---|
 | Commands (`.prompt.md`) | `.gemini/commands/*.toml` | Converted from Markdown to TOML |
-| Skills (`SKILL.md`) | `.gemini/skills/{name}/` | Verbatim copy |
+| Skills (`SKILL.md`) | `.agents/skills/{name}/` | Verbatim copy (converged from `.gemini/skills/`) |
 | Hooks (`.json`) | `.gemini/settings.json` | Merged into `hooks` key |
 | MCP servers | `.gemini/settings.json` | Merged into `mcpServers` key |
 | Instructions | Via `GEMINI.md` | Compile-only (`apm compile --target gemini`) |
@@ -308,25 +308,25 @@ Review $feature_name with priority $priority.
 
 ### Automatic Skills Integration
 
-APM automatically integrates skills from installed packages into `.github/skills/`:
+By default, APM deploys skills from installed packages to `.agents/skills/` (the converged cross-client directory shared by Copilot, Cursor, OpenCode, Codex, and Gemini). Claude is the exception and continues to receive its own copy under `.claude/skills/`. Pass `--legacy-skill-paths` (or set `APM_LEGACY_SKILL_PATHS=1`) to restore per-client routing.
 
 ```bash
 # Install a package with skills
 apm install ComposioHQ/awesome-claude-skills/mcp-builder
 
-# Result:
-# .github/skills/mcp-builder/SKILL.md -- Skill available for agents
-# .github/skills/mcp-builder/...      -- Full skill folder copied
+# Result (default routing):
+# .agents/skills/mcp-builder/SKILL.md -- Skill available for agents
+# .agents/skills/mcp-builder/...      -- Full skill folder copied
 ```
 
 **Skill Folder Naming**: Uses the source folder name directly (e.g., `mcp-builder`, `design-guidelines`), not flattened paths.
 
 **How skill integration works:**
 1. `apm install` checks if the package contains a `SKILL.md` file
-2. If `SKILL.md` exists: copies the entire skill folder to `.github/skills/{folder-name}/` (primary location)
-3. If a `.claude/` directory exists: also copies to `.claude/skills/{folder-name}/` for Claude compatibility
-4. Sub-skills inside `.apm/skills/` are promoted to top-level `.github/skills/` entries
-5. `apm uninstall` removes the skill folder from both locations
+2. If `SKILL.md` exists: copies the entire skill folder to the resolved skills root (`.agents/skills/{folder-name}/` by default, per-client paths under `--legacy-skill-paths`)
+3. If a `.claude/` directory exists: also copies to `.claude/skills/{folder-name}/` (Claude is excluded from the convergence)
+4. Sub-skills inside `.apm/skills/` are promoted to top-level entries under the same skills root
+5. `apm uninstall` removes the skill folder from every location recorded in `apm.lock.yaml`; foreign / hand-authored skills outside the lockfile are never touched
 
 ### Automatic Hook Integration
 
@@ -420,7 +420,7 @@ apm install github/awesome-copilot/skills/review-and-refactor
 
 ### Claude Desktop Integration
 
-Skills installed to `.github/skills/` are the primary location; when a `.claude/` directory exists, APM also copies skills to `.claude/skills/` for compatibility. Each skill folder contains a `SKILL.md` that defines the skill's capabilities and any supporting files.
+Skills installed by APM deploy to `.agents/skills/` by default (the converged cross-client directory); Claude additionally receives its own copy under `.claude/skills/`. Each skill folder contains a `SKILL.md` that defines the skill's capabilities and any supporting files. Pass `--legacy-skill-paths` (or set `APM_LEGACY_SKILL_PATHS=1`) to restore per-client routing.
 
 Claude Desktop can use `CLAUDE.md` as its project instructions file. Optionally run `apm compile --target claude` to generate `CLAUDE.md` with `@import` syntax for organized instruction loading.
 
@@ -458,7 +458,7 @@ APM natively integrates with Cursor when a `.cursor/` directory exists in your p
 |---|---|---|
 | Instructions (`.instructions.md`) | `.cursor/rules/*.mdc` | Converted: `applyTo:` → `globs:` frontmatter |
 | Agents (`.agent.md`) | `.cursor/agents/*.md` | Markdown with YAML frontmatter |
-| Skills (`SKILL.md`) | `.cursor/skills/{name}/SKILL.md` | Identical (agentskills.io standard) |
+| Skills (`SKILL.md`) | `.agents/skills/{name}/SKILL.md` | Identical (agentskills.io standard; converged from `.cursor/skills/`) |
 | Hooks (`.json`) | `.cursor/hooks.json` + `.cursor/hooks/{pkg}/` | Merged JSON config |
 | MCP servers | `.cursor/mcp.json` | Standard `mcpServers` JSON |
 

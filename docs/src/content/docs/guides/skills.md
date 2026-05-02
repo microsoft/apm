@@ -51,10 +51,10 @@ APM copies skills to every detected target directory:
 | **No SKILL.md and no primitives** | No skill folder created |
 
 **Target Detection:**
-- Recognized directories: `.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.codex/`
-- Codex skills deploy to `.agents/skills/` (agent skills standard directory), not `.codex/skills/`
+- Recognized directories: `.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.codex/`, `.gemini/`
+- By default, skills for Copilot, Cursor, OpenCode, Codex, and Gemini deploy to the converged `.agents/skills/` directory; Claude deploys to `.claude/skills/` (the only exception)
 - If none exist, `.github/` is created as the fallback
-- Override with `--target`
+- Override with `--target`; pass `--legacy-skill-paths` (or set `APM_LEGACY_SKILL_PATHS=1`) to restore per-client skill directories
 
 ### Skill Folder Naming
 
@@ -65,10 +65,12 @@ Skill names are validated per the [agentskills.io](https://agentskills.io/) spec
 - Cannot start/end with hyphen
 
 ```
-.github/skills/
+.agents/skills/
 ├── mcp-builder/           # From ComposioHQ/awesome-claude-skills/mcp-builder
 └── apm-sample-package/    # From microsoft/apm-sample-package
 ```
+
+(Per-client paths like `.github/skills/`, `.cursor/skills/`, etc. apply when `--legacy-skill-paths` is set; Claude always uses `.claude/skills/`.)
 
 ### Step 3: Primitive Integration
 APM also integrates prompts and commands from the package (using their original filenames).
@@ -251,7 +253,7 @@ my-package/
             └── SKILL.md  # Sub-skill B
 ```
 
-On install, APM promotes each sub-skill to a top-level `.github/skills/` entry alongside the parent — see [Sub-skill Promotion](#sub-skill-promotion) below.
+On install, APM promotes each sub-skill to a top-level `.agents/skills/` entry alongside the parent (or `.claude/skills/` for Claude; or per-client directories under `--legacy-skill-paths`) — see [Sub-skill Promotion](#sub-skill-promotion) below.
 
 ### Option 5: Maintainer-only Skill (Dev-only)
 
@@ -274,7 +276,7 @@ devDependencies:
 
 ### Sub-skill Promotion
 
-When a package contains sub-skills in `.apm/skills/*/` subdirectories, APM promotes each to a top-level entry under `.github/skills/`. This ensures Copilot can discover them independently, since it only scans direct children of `.github/skills/`.
+When a package contains sub-skills in `.apm/skills/*/` subdirectories, APM promotes each to a top-level entry in the deployed skills directory (`.agents/skills/` for converged clients, `.claude/skills/` for Claude). This ensures clients can discover sub-skills independently, since they only scan direct children of the skills root.
 
 ```
 # Installed package with sub-skills:
@@ -285,15 +287,15 @@ apm_modules/org/repo/my-package/
         └── azure-naming/
             └── SKILL.md
 
-# Result after install:
-.github/skills/
+# Result after install (default routing):
+.agents/skills/
 ├── my-package/              # Parent skill
 │   └── SKILL.md
 └── azure-naming/            # Promoted sub-skill
     └── SKILL.md
 ```
 
-The same promotion applies to the project's own `.apm/skills/` directory. When you run `apm install`, skills in your local `.apm/skills/*/` are deployed to `.github/skills/` (and other detected targets) alongside dependency skills. Local skills take priority on collision. The root `SKILL.md` is not treated as a local skill -- it describes the project itself.
+The same promotion applies to the project's own `.apm/skills/` directory. When you run `apm install`, skills in your local `.apm/skills/*/` are deployed to the resolved skills root alongside dependency skills. Local skills take priority on collision. The root `SKILL.md` is not treated as a local skill -- it describes the project itself.
 
 ## Package Detection
 

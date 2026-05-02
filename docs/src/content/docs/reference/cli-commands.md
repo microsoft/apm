@@ -93,6 +93,7 @@ apm install [PACKAGES...] [OPTIONS]
 - `--only [apm|mcp]` - Install only specific dependency type
 - `--target [copilot|claude|cursor|codex|opencode|gemini|agent-skills|copilot-cowork|all]` - Force deployment to specific target(s). Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Overrides auto-detection. `agent-skills` deploys to `.agents/skills/` (cross-client). `all` = copilot+claude+cursor+opencode+codex+gemini (excludes agent-skills); combine with `agent-skills` for both.
   - `copilot-cowork` - Microsoft 365 Copilot Cowork skills (user scope only, requires `copilot-cowork` experimental flag)
+  - `vscode`, `agents` - Deprecated aliases for `copilot` (`.github/`). Still accepted by the parser; prefer `copilot` for GitHub Copilot deployment, or `agent-skills` for cross-client `.agents/skills/` deployment. Removal in v1.0.
 - `--update` - Update dependencies to latest Git references  
 - `--force` - Overwrite locally-authored files on collision; bypass security scan blocks
 - `--dry-run` - Show what would be installed without installing
@@ -1690,7 +1691,7 @@ apm compile [OPTIONS]
 
 **Options:**
 - `-o, --output TEXT` - Output file path (for single-file mode)
-- `-t, --target [vscode|agents|claude|codex|opencode|gemini|agent-skills|all]` - Target agent format. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). `agents` is a deprecated alias for `vscode`. `agent-skills` is a no-op for compile (skills-only target). Auto-detects if not specified.
+- `-t, --target [copilot|claude|cursor|codex|opencode|gemini|agent-skills|all]` - Target agent format. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). `vscode` and `agents` are accepted as deprecated aliases for `copilot` (removal in v1.0). `agent-skills` is a no-op for compile (skills-only target). Auto-detects if not specified.
 - `--chatmode TEXT` - Chatmode to prepend to the AGENTS.md file
 - `--dry-run` - Preview compilation without writing files (shows placement decisions)
 - `--no-links` - Skip markdown link resolution
