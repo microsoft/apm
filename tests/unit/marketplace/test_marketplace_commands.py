@@ -1,7 +1,9 @@
 """Tests for marketplace CLI commands using CliRunner."""
 
 import json  # noqa: F401
+import re
 from unittest.mock import MagicMock, patch  # noqa: F401
+from urllib.parse import urlparse
 
 import pytest
 from click.testing import CliRunner
@@ -11,6 +13,22 @@ from apm_cli.marketplace.models import (
     MarketplacePlugin,
     MarketplaceSource,
 )
+
+
+def _quoted_hosts(text: str) -> set[str]:
+    """Extract host tokens from `Host '<host>'` patterns in error text.
+
+    Each token is normalised through ``urllib.parse.urlparse`` so callers
+    compare on parsed hostnames (set equality), not raw substrings -- which
+    is what CodeQL's ``py/incomplete-url-substring-sanitization`` rule
+    requires (see ``.github/instructions/tests.instructions.md``).
+    """
+    hosts: set[str] = set()
+    for m in re.finditer(r"Host '([^']+)'", text, re.IGNORECASE):
+        parsed = urlparse(f"https://{m.group(1)}")
+        if parsed.hostname:
+            hosts.add(parsed.hostname)
+    return hosts
 
 
 @pytest.fixture
@@ -297,7 +315,7 @@ class TestMarketplaceAdd:
             marketplace, ["add", "https://gitlab.com/acme/team/plugin-marketplace"]
         )
         assert result.exit_code != 0
-        assert "gitlab.com" in result.output
+        assert _quoted_hosts(result.output) == {"gitlab.com"}
         assert "not supported" in result.output.lower()
 
     def test_add_rejects_non_github_host_shorthand(self, runner):
@@ -305,7 +323,7 @@ class TestMarketplaceAdd:
 
         result = runner.invoke(marketplace, ["add", "gitlab.com/acme/team/plugin-marketplace"])
         assert result.exit_code != 0
-        assert "gitlab.com" in result.output
+        assert _quoted_hosts(result.output) == {"gitlab.com"}
         assert "not supported" in result.output.lower()
 
     def test_add_rejects_http_url(self, runner):
@@ -399,7 +417,7 @@ class TestMarketplaceAdd:
         # leak", etc.) must NOT appear in the default error path.
         first_line = next((line for line in result.output.splitlines() if line.strip()), "").lower()
         assert "not supported" in first_line
-        assert "gitlab.com" in first_line
+        assert _quoted_hosts(first_line) == {"gitlab.com"}
         assert "credential" not in result.output.lower()
         assert "leak" not in result.output.lower()
 
