@@ -74,6 +74,46 @@ class TestAPMDependenciesIntegration:
         return config
 
     @pytest.mark.integration
+    def test_dep_only_project_installs_dependencies_without_dot_apm(self):
+        """Regression-trap for #1094: a dep-only `apm.yml` (no `.apm/` on the
+        ROOT project) must resolve, download, and integrate transitive
+        dependencies end-to-end without requiring a `.gitkeep` placeholder.
+
+        Before the fix, ``_validate_apm_package_with_yml`` rejected this
+        shape and the install pipeline never even reached the resolver.
+        After the fix, the root project is classified APM_PACKAGE on the
+        strength of its declared deps alone.
+        """
+        # Create dep-only apm.yml with NO .apm/ directory on the root.
+        self.create_apm_yml(dependencies=["microsoft/apm-sample-package"])
+        assert not (self.test_dir / ".apm").exists(), (
+            "precondition: root project must be dep-only (no .apm/)"
+        )
+
+        # Load via the same entry point the install pipeline uses; this
+        # would have raised "missing .apm/ directory" before the fix.
+        project_package = APMPackage.from_apm_yml(self.apm_yml_path)
+        dependencies = project_package.get_apm_dependencies()
+        assert len(dependencies) == 1
+        assert dependencies[0].repo_url == "microsoft/apm-sample-package"
+
+        # Real download proves the install pipeline wires up correctly
+        # for a dep-only root.
+        downloader = GitHubPackageDownloader()
+        apm_modules_dir = self.test_dir / "apm_modules"
+        apm_modules_dir.mkdir()
+        package_dir = apm_modules_dir / "microsoft" / "apm-sample-package"
+        result = downloader.download_package(str(dependencies[0]), package_dir)
+
+        assert package_dir.exists()
+        assert (package_dir / "apm.yml").exists()
+        assert (package_dir / ".apm").exists()
+        assert result.package.name == "apm-sample-package"
+        # Root remains dep-only after install -- we did NOT create .apm/
+        # as a side effect.
+        assert not (self.test_dir / ".apm").exists()
+
+    @pytest.mark.integration
     def test_single_dependency_installation_sample_package(self):
         """Test installation of single dependency: apm-sample-package."""
         # Create project with single dependency
