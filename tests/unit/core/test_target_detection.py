@@ -1,5 +1,7 @@
 """Tests for target detection module."""
 
+import contextlib
+
 import click
 import pytest
 
@@ -621,27 +623,37 @@ class TestTargetParamType:
         assert frozenset(KNOWN_TARGETS) >= EXPLICIT_ONLY_TARGETS
 
     def test_agents_deprecation_fires_once_not_per_token(self):
-        """parse_target_field('agents,agents') emits exactly one DeprecationWarning."""
+        """parse_target_field('agents,agents') emits exactly one AgentsTargetDeprecationWarning."""
         import warnings
 
-        from apm_cli.core.target_detection import parse_target_field
+        from apm_cli.core.target_detection import (
+            AgentsTargetDeprecationWarning,
+            parse_target_field,
+        )
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             parse_target_field("agents,agents")
-            deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
+            deprecation_warnings = [
+                x for x in w if issubclass(x.category, AgentsTargetDeprecationWarning)
+            ]
             assert len(deprecation_warnings) == 1
 
     def test_agents_deprecation_fires_for_apm_yml_target(self):
-        """apm.yml target: agents path emits DeprecationWarning."""
+        """apm.yml target: agents path emits AgentsTargetDeprecationWarning."""
         import warnings
 
-        from apm_cli.core.target_detection import parse_target_field
+        from apm_cli.core.target_detection import (
+            AgentsTargetDeprecationWarning,
+            parse_target_field,
+        )
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             parse_target_field("agents")
-            deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
+            deprecation_warnings = [
+                x for x in w if issubclass(x.category, AgentsTargetDeprecationWarning)
+            ]
             assert len(deprecation_warnings) == 1
 
     def test_agent_skills_does_not_emit_deprecation(self):
@@ -655,6 +667,57 @@ class TestTargetParamType:
             parse_target_field("agent-skills")
             deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
             assert len(deprecation_warnings) == 0
+
+    # -- F5: agents_alias_was_detected() tracks raw tokens across shapes ----
+
+    @pytest.mark.parametrize(
+        "raw_input",
+        [
+            "agents",
+            "copilot,agents",
+            "agents,claude",
+            "all,agents",
+        ],
+        ids=["solo-agents", "copilot-comma-agents", "agents-comma-claude", "all-comma-agents"],
+    )
+    def test_agents_alias_detected_across_invocation_shapes(self, raw_input: str):
+        """agents_alias_was_detected() returns True for all shapes containing 'agents'.
+
+        Note: ``all,agents`` is rejected by parse_target_field (agents is a
+        canonical alias, not an explicit-only target), but the flag is set
+        *before* the ``all`` validation fires.
+        """
+        import warnings
+
+        from apm_cli.core.target_detection import (
+            agents_alias_was_detected,
+            parse_target_field,
+        )
+
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            with contextlib.suppress(ValueError):
+                parse_target_field(raw_input)
+                # "all,agents" raises; flag should still be set
+
+        assert agents_alias_was_detected(), (
+            f"agents_alias_was_detected() should be True for input {raw_input!r}"
+        )
+
+    def test_agents_alias_not_detected_for_copilot(self):
+        """agents_alias_was_detected() returns False when 'agents' is absent."""
+        import warnings
+
+        from apm_cli.core.target_detection import (
+            agents_alias_was_detected,
+            parse_target_field,
+        )
+
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            parse_target_field("copilot")
+
+        assert not agents_alias_was_detected()
 
     # -- B1: detect_target() returns agent-skills for explicit --target ----
 

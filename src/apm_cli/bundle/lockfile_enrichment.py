@@ -1,5 +1,6 @@
 """Lockfile enrichment for pack-time metadata."""
 
+import posixpath
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple, Union  # noqa: F401, UP035
 
@@ -107,10 +108,18 @@ def _filter_files_by_target(
             for src_prefix, dst_prefix in cross_map.items():
                 if f.startswith(src_prefix):
                     mapped = dst_prefix + f[len(src_prefix) :]
-                    # Containment guard: reject remapped paths that escaped
-                    # the destination prefix (e.g. via traversal segments).
-                    if not mapped.startswith(dst_prefix):
+                    # Containment guard: normalise the remapped path and
+                    # reject any result that escapes the destination prefix
+                    # via traversal segments (e.g. "../../etc/passwd").
+                    normalised = posixpath.normpath(mapped)
+                    if ".." in normalised.split("/"):
                         continue
+                    if not normalised.startswith(dst_prefix.rstrip("/")):
+                        continue
+                    # Preserve trailing slash (directory marker in lockfiles)
+                    if mapped.endswith("/") and not normalised.endswith("/"):
+                        normalised += "/"
+                    mapped = normalised
                     if mapped not in direct_set:
                         direct.append(mapped)
                         direct_set.add(mapped)

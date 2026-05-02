@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import pytest
+
 from apm_cli.integration.skill_integrator import (
     SkillIntegrationResult,
     SkillIntegrator,
@@ -4078,3 +4080,62 @@ class TestLockfileOwnershipCorruptFile:
 
         result = SkillIntegrator._get_lockfile_owned_agent_skills(project)
         assert result == set(), f"expected empty set for missing lockfile, got {result!r}"
+
+
+class TestCopySkillToTargetSymlinkContainment:
+    """F3: ensure copy_skill_to_target rejects symlink-redirected roots."""
+
+    def test_symlink_root_redirect_rejected(self, tmp_path: Path) -> None:
+        """If .agents is a symlink pointing outside the project, deploy must fail."""
+        import os
+
+        from apm_cli.utils.path_security import PathTraversalError
+
+        project = tmp_path / "project"
+        project.mkdir()
+
+        # Create a skill source with SKILL.md (required by copy_skill_to_target)
+        source = project / "apm_modules" / "test-skill"
+        source.mkdir(parents=True)
+        (source / "SKILL.md").write_text("---\nname: test-skill\n---\nBody")
+
+        # Create an outside directory and symlink .agents to it
+        outside = tmp_path / "outside-root"
+        outside.mkdir()
+        agents_link = project / ".agents"
+        os.symlink(str(outside), str(agents_link))
+
+        # Build a minimal TargetProfile that routes skills to .agents/
+        from apm_cli.integration.targets import PrimitiveMapping, TargetProfile
+
+        target = TargetProfile(
+            name="agent-skills",
+            root_dir=".agents",
+            auto_create=True,
+            primitives={
+                "skills": PrimitiveMapping(
+                    "skills",
+                    "/SKILL.md",
+                    "skill_standard",
+                ),
+            },
+        )
+
+        # Build a mock package_info that passes should_install_skill()
+        mock_info = Mock()
+        mock_info.package.content_type = "skill"
+
+        # Patch get_effective_type so should_install_skill returns True
+        from apm_cli.models.apm_package import PackageContentType
+
+        with patch(
+            "apm_cli.integration.skill_integrator.get_effective_type",
+            return_value=PackageContentType.SKILL,
+        ):
+            with pytest.raises(PathTraversalError):
+                copy_skill_to_target(
+                    source_path=source,
+                    target_base=project,
+                    package_info=mock_info,
+                    targets=[target],
+                )

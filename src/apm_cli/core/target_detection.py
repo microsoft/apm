@@ -27,6 +27,28 @@ from typing import List, Literal, Optional, Tuple, Union  # noqa: F401, UP035
 
 import click
 
+
+class AgentsTargetDeprecationWarning(DeprecationWarning):
+    """Raised when the legacy ``--target agents`` alias is used.
+
+    Scoped subclass so that :mod:`apm_cli.cli` can suppress *only* this
+    deprecation (keeping all other ``DeprecationWarning`` s visible).
+    """
+
+
+# Module-level flag: set by :func:`parse_target_field` when the raw input
+# contains the ``"agents"`` token, BEFORE alias resolution collapses it.
+# Consumed by downstream phases (e.g. ``phases/targets.py``) that need to
+# emit a formatted logger warning.  Single-threaded CLI; reset at the top
+# of each :func:`parse_target_field` call.
+_agents_alias_detected: bool = False
+
+
+def agents_alias_was_detected() -> bool:
+    """Return *True* if the most recent ``parse_target_field()`` saw ``'agents'``."""
+    return _agents_alias_detected
+
+
 # Valid target values (internal canonical form)
 TargetType = Literal[
     "vscode", "claude", "cursor", "opencode", "codex", "gemini", "agent-skills", "all", "minimal"
@@ -398,6 +420,9 @@ def parse_target_field(
     if value is None:
         return None
 
+    global _agents_alias_detected
+    _agents_alias_detected = False
+
     # ---- collect raw tokens ----
     if isinstance(value, str):
         # Empty / whitespace-only / comma-only strings are user error -- a
@@ -440,11 +465,12 @@ def parse_target_field(
 
     # ---- deprecation warning for legacy "agents" alias (once per call) ----
     if "agents" in raw_parts:
+        _agents_alias_detected = True
         warnings.warn(
             "'--target agents' is deprecated -- it maps to 'copilot' (.github/), "
             "not '.agents/'. Use '--target copilot' or '--target agent-skills' "
             "(.agents/skills/). Removal in v1.0.",
-            DeprecationWarning,
+            AgentsTargetDeprecationWarning,
             stacklevel=2,
         )
 

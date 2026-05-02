@@ -41,16 +41,19 @@ def run(ctx: InstallContext) -> None:
 
     # ------------------------------------------------------------------
     # Deprecation warning for legacy '--target agents' alias (cli-review §1)
+    # Driven by the raw-token flag set in parse_target_field() so that
+    # multi-token inputs like "--target copilot,agents" still surface the
+    # warning even after alias resolution collapses "agents" away.
     # ------------------------------------------------------------------
-    if _explicit:
-        _explicit_tokens = _explicit if isinstance(_explicit, list) else [_explicit]
-        if "agents" in _explicit_tokens:
-            if ctx.logger:
-                ctx.logger.warning(
-                    "'--target agents' is deprecated -- it maps to 'copilot' (.github/), "
-                    "not '.agents/'. Use '--target copilot' or '--target agent-skills' "
-                    "(.agents/skills/). Removal in v1.0."
-                )
+    from apm_cli.core.target_detection import agents_alias_was_detected
+
+    if agents_alias_was_detected():
+        if ctx.logger:
+            ctx.logger.warning(
+                "'--target agents' is deprecated -- it maps to 'copilot' (.github/), "
+                "not '.agents/'. Use '--target copilot' or '--target agent-skills' "
+                "(.agents/skills/). Removal in v1.0."
+            )
 
     # Determine active targets.  When --target or apm.yml target is set
     # the user's choice wins.  Otherwise auto-detect from existing dirs,

@@ -1,5 +1,6 @@
 """Unit tests for apm_cli.bundle.lockfile_enrichment."""
 
+import pytest
 import yaml
 
 from apm_cli.bundle.lockfile_enrichment import enrich_lockfile_for_pack
@@ -283,11 +284,36 @@ class TestFilterFilesByTarget:
 
         # Original .github/ path must never appear directly.
         assert ".github/skills/../../etc/passwd" not in filtered
-        # Anything that did survive must remain under the .agents/ prefix --
-        # the containment guard in _filter_files_by_target rejects remapped
-        # destinations that escape via traversal segments.
+        # The containment guard must reject traversal -- either the entry is
+        # dropped entirely or every surviving path is well-formed.
         for f in filtered:
             assert f.startswith(".agents/")
+            assert ".." not in f.split("/"), (
+                f"traversal segment leaked through containment guard: {f}"
+            )
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            ".github/skills/x/../../etc/passwd",
+            ".github/skills/../foo/SKILL.md",
+            ".github/skills/x/./../../y/SKILL.md",
+        ],
+        ids=["double-dot-escape", "parent-traverse", "dot-mixed-traverse"],
+    )
+    def test_filter_files_agent_skills_traversal_payloads_rejected(self, payload: str):
+        """Parametrized traversal payloads must be rejected or normalised safely."""
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        filtered, _mappings = _filter_files_by_target([payload], "agent-skills")
+
+        # Either the entry was rejected entirely …
+        if not filtered:
+            return
+        # … or every surviving path is well-formed (no '..' segments).
+        for f in filtered:
+            parts = f.split("/")
+            assert ".." not in parts, f"traversal segment leaked for payload {payload!r}: {f}"
 
 
 class TestFilterFilesByTargetList:

@@ -53,10 +53,13 @@ def cli(ctx):
     """Main entry point for the APM CLI."""
     ctx.ensure_object(dict)
 
-    # Suppress DeprecationWarning from apm_cli modules so CLI users see
-    # only the logger.warning() in the install phase, not a double print.
-    # Programmatic consumers (tests, library usage) re-enable as needed.
-    warnings.filterwarnings("ignore", category=DeprecationWarning, module="apm_cli")
+    # Suppress only the agents-target deprecation warning so CLI users see
+    # the formatted logger.warning() in the install phase, not a double print.
+    # Scoped to AgentsTargetDeprecationWarning to avoid masking future
+    # DeprecationWarnings from apm_cli modules.
+    from apm_cli.core.target_detection import AgentsTargetDeprecationWarning
+
+    warnings.filterwarnings("ignore", category=AgentsTargetDeprecationWarning)
 
     # Check for updates non-blockingly (only if not already showing version)
     if not ctx.resilient_parsing:
