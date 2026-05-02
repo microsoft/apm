@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`apm install <pkg>@<marketplace>` no longer fails for all marketplace packages** due to a `source.repo` vs `source.repository` key-name mismatch in the install resolver. The resolver now accepts both key names with a backward-compatible fallback. ([#1105](https://github.com/microsoft/apm/issues/1105))
+- **`apm install <pkg>@<marketplace>` no longer fails for all marketplace packages** due to a `source.repo` vs `source.repository` key-name mismatch in the install resolver. The resolver now accepts both key names with a backward-compatible fallback. (#1106, closes #1105)
 - **`apm install --update` no longer fails for GHES/generic hosts** that rely on git credential helpers (e.g., `git-credential-manager`) for authentication. The preflight auth probe was blocking credential helpers by setting `GIT_CONFIG_GLOBAL=/dev/null`; it now uses the same relaxed environment as the clone fallback path for non-GitHub/non-ADO hosts. (#1082)
 
 ### Added
