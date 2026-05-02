@@ -116,6 +116,7 @@ apm install [PACKAGES...] [OPTIONS]
 - `--no-policy` -- Skip org policy enforcement for this invocation. Loudly logged. Does NOT bypass `apm audit --ci`. Available on `apm install`, `apm install <pkg>`, and `apm install --mcp <name>`.
   - Equivalent env var: `APM_POLICY_DISABLE=1` (applies to the entire shell session). Note: `apm deps update` runs the install pipeline and is gated by policy but does not currently expose a `--no-policy` flag -- use `APM_POLICY_DISABLE=1` as the only escape hatch there.
 - `--skill NAME` - Install only named skill(s) from a `SKILL_BUNDLE` package. Repeatable. The selection is **persisted** in `apm.yml` (as a `skills:` list in dict-form entries) and in `apm.lock.yaml` (as `skill_subset`), so subsequent bare `apm install` commands are deterministic. Use `--skill '*'` to reset and install all skills from the bundle.
+- `--as ALIAS` - Override the log/display label used when reporting a local-bundle install. Only valid when `PACKAGES` is a single local-bundle path (directory or `.tar.gz`); rejected on registry installs. Falls back to `plugin.json["id"]`, then to the bundle directory name when omitted. Note: this label affects log output only -- the lockfile records `local_deployed_files` (paths) and does not currently namespace by alias.
 
 **Transport env vars:**
 
@@ -220,6 +221,13 @@ apm install --dev owner/test-helpers
 # Install from a local path (copies to apm_modules/_local/)
 apm install ./packages/my-shared-skills
 apm install /home/user/repos/my-ai-package
+
+# Deploy a local APM bundle (directory or .tar.gz produced by `apm pack`).
+# Bundles are an imperative, air-gapped deploy: no apm.yml mutation,
+# no network, no policy / MCP / dependency-resolver involvement.
+apm install ./build/my-bundle
+apm install ./my-bundle.tar.gz
+apm install ./my-bundle --as custom-name   # override the log/display label
 
 # Install to user scope (available across all projects)
 apm install -g microsoft/apm-sample-package
@@ -658,6 +666,12 @@ dependencies:
 ```
 
 ### `apm unpack` - Extract a bundle
+
+> **Deprecated (since 0.12).** Prefer `apm install <bundle-path>` for deploying
+> local bundles -- it shares the same air-gapped path with no network I/O,
+> integrates with target resolution, and records deployed files in the
+> project lockfile (`local_deployed_files`). `apm unpack` remains available
+> for raw archive extraction without integration semantics.
 
 Extract an APM bundle into the current project with optional completeness verification.
 

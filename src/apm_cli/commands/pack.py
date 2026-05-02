@@ -212,7 +212,13 @@ def _render_marketplace_result(logger, report, dry_run, extra_warnings=None):
     )
 
 
-@click.command(name="unpack", help="Extract an APM bundle into the current project")
+@click.command(
+    name="unpack",
+    help=(
+        "[Deprecated] Extract an APM bundle into the current project. "
+        "Use 'apm install <bundle-path>' instead -- this command will be removed in v0.14."
+    ),
+)
 @click.argument("bundle_path", type=click.Path(exists=True))
 @click.option(
     "-o",
@@ -236,6 +242,10 @@ def _render_marketplace_result(logger, report, dry_run, extra_warnings=None):
 def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
     """Extract an APM bundle into the project."""
     logger = CommandLogger("unpack", verbose=verbose, dry_run=dry_run)
+    logger.warning(
+        "'apm unpack' is deprecated and will be removed in v0.14. "
+        "Use 'apm install <bundle-path>' instead.",
+    )
     try:
         logger.start(f"Unpacking {bundle_path} -> {output}")
 

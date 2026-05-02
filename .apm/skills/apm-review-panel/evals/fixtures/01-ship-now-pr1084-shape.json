@@ -1,0 +1,113 @@
+{
+  "scenario": "ship_now",
+  "description": "PR #1084 shape: surgical bug-fix from external contributor, all panelists APPROVE with at most polish-level nits. CEO recommends ship_now.",
+  "panelists": [
+    {
+      "persona": "python-architect",
+      "active": true,
+      "summary": "Surgical 7-line change in pipeline.py; well-scoped, no architectural debt.",
+      "findings": [
+        {"severity": "nit", "summary": "Hoist env-var tuple to module-level constant", "rationale": "Tuple represents the named concept 'credential-helper-blocking env vars' and may be referenced as auth handling evolves.", "file": "src/apm_cli/install/pipeline.py", "line": 90}
+      ],
+      "extras": {
+        "diagrams": {
+          "class_diagram": "classDiagram\n    class _preflight_auth_check:::touched {\n        <<Pure>>\n        +probe(host) bool\n    }\n    class Dep {\n        +name: str\n        +source: str\n        +is_azure_devops() bool\n    }\n    class AuthResolver {\n        <<Strategy>>\n        +resolve(host) Token\n    }\n    _preflight_auth_check ..> Dep : reads\n    _preflight_auth_check ..> AuthResolver : delegates\n    classDef touched fill:#fef3c7,stroke:#d97706",
+          "component": "flowchart TD\n    A[apm install --update] --> B[_preflight_auth_check]\n    B --> C{is_generic = not GitHub and not ADO}\n    C -->|github.com or ADO| D[probe_env: locked down]\n    C -->|GHES, GitLab, Bitbucket| E[probe_env: pop credential-blocking vars]\n    D --> F[git ls-remote probe]\n    E --> F",
+          "sequence": "sequenceDiagram\n    participant U as User\n    participant CLI as apm install --update\n    participant PF as _preflight_auth_check\n    participant Helper as git-credential-manager\n    U->>CLI: install GHES dep\n    CLI->>PF: probe(host=ghes.corp.example.com)\n    PF->>PF: is_generic=yes; pop blocking env vars\n    PF->>Helper: ls-remote with relaxed env\n    Helper-->>PF: token\n    PF-->>CLI: probe ok\n    CLI-->>U: install proceeds"
+        }
+      }
+    },
+    {
+      "persona": "cli-logging-expert",
+      "active": true,
+      "summary": "No new CLI strings, no encoding regression; failure-path UX preserved.",
+      "findings": [
+        {"severity": "nit", "summary": "verbose param accepted but unused (pre-existing)", "rationale": "Out of scope for this PR; worth a follow-up to surface redacted probe URL on failure.", "file": "src/apm_cli/install/pipeline.py", "line": 47}
+      ]
+    },
+    {
+      "persona": "devx-ux-expert",
+      "active": true,
+      "summary": "Pure behavioral fix that restores symmetry between install and install --update. CHANGELOG entry meets failure-mode-is-the-product bar.",
+      "findings": []
+    },
+    {
+      "persona": "supply-chain-security-expert",
+      "active": true,
+      "summary": "insteadOf-redirect not exploitable (probe is read-only ls-remote); host classification not spoofable; no token leak introduced.",
+      "findings": [
+        {"severity": "nit", "summary": "Document that generic-host preflight intentionally trusts ~/.gitconfig", "rationale": "Pre-existing local-trust assumption; one-line comment helps future readers not weaken it accidentally.", "file": "src/apm_cli/install/pipeline.py", "line": 90}
+      ]
+    },
+    {
+      "persona": "oss-growth-hacker",
+      "active": true,
+      "summary": "First external bug-fix on the GHES + credential-helper surface. Mine for a release-notes story beat.",
+      "findings": [
+        {"severity": "recommended", "summary": "Frame next release notes around 'credential-helper support for enterprise git hosts'", "rationale": "Converts a bug-fix into a positioning signal for the exact audience this unblocks.", "file": "CHANGELOG.md", "line": 17},
+        {"severity": "nit", "summary": "Capture this as a docs FAQ entry for the symptom", "rationale": "Searchable symptom should land in a troubleshooting page so future GHES adopters self-serve.", "file": "src/apm_cli/install/pipeline.py", "line": 90}
+      ],
+      "extras": {
+        "growth_strategy_note": "PR #1084 confirms enterprise-private-git is a real adoption surface and contributor-funnel beachhead."
+      }
+    },
+    {
+      "persona": "auth-expert",
+      "active": true,
+      "summary": "GHES correctly classified as generic; symmetry with clone path confirmed; AuthResolver invariant intact; bearer-header injection preserved.",
+      "findings": [
+        {"severity": "recommended", "summary": "Add regression test asserting GHES hostnames classify as generic", "rationale": "The fix's value depends on is_github_hostname returning False for non-*.ghe.com enterprise hosts; lock this contract in.", "file": "tests/unit/install/test_pipeline_auth_preflight.py", "line": 147},
+        {"severity": "nit", "summary": "Could reuse dep.is_azure_devops() for ADO detection", "rationale": "Keeps host classification co-located with the dep model.", "file": "src/apm_cli/install/pipeline.py", "line": 90}
+      ]
+    },
+    {
+      "persona": "doc-writer",
+      "active": false,
+      "summary": "No user-facing documentation surface touched (only CHANGELOG entry, which is already accurate).",
+      "inactive_reason": "PR touches only src/apm_cli/install/pipeline.py, tests/unit/install/test_pipeline_auth_preflight.py, and CHANGELOG.md (entry verified accurate against the diff).",
+      "findings": []
+    },
+    {
+      "persona": "test-coverage-expert",
+      "active": true,
+      "summary": "All four critical surfaces touched (install pipeline, auth preflight, host classification, env-var handling) have regression-trap tests in this PR; ship.",
+      "findings": [
+        {
+          "severity": "recommended",
+          "summary": "Add a parametrized test exercising each of the three credential-helper env vars individually",
+          "rationale": "The current tests assert all three are popped together; a future refactor that pops two of three would still pass the existing assertion. One parametrized test per env var locks in the contract.",
+          "file": "tests/unit/install/test_pipeline_auth_preflight.py",
+          "line": 147,
+          "suggestion": "@pytest.mark.parametrize('env_var', ['GIT_TERMINAL_PROMPT', 'GCM_INTERACTIVE', 'GIT_ASKPASS'])",
+          "evidence": {
+            "test_file": "tests/unit/install/test_pipeline_auth_preflight.py",
+            "test_name": "test_install_update_does_not_disable_credential_helpers_on_generic_host",
+            "outcome": "passed",
+            "assertion_excerpt": "assert os.environ.get('GIT_TERMINAL_PROMPT') is None",
+            "proves": "On non-GitHub non-ADO hosts, install --update does not block the user's system credential helpers.",
+            "principles": ["multi-harness-support", "vendor-neutral", "devx"]
+          }
+        }
+      ]
+    }
+  ],
+  "ceo": {
+    "headline": "Surgical bug-fix that unblocks GHES, GitLab, and Bitbucket users on apm install --update -- exactly the enterprise audience APM needs to win on credibility.",
+    "arbitration": "All seven active panelists converge: this is a 101+/1- behavioral fix that restores symmetry between `install` and `install --update` for non-GitHub, non-ADO hosts. The fix is well-scoped, well-tested (4 new unit tests covering all three env vars + ADO retention + auth-failure still raising), and the CHANGELOG entry names the failure mode in one sentence. Auth Expert verified the AuthResolver invariant is intact and bearer-header injection is preserved; Supply Chain confirmed the relaxed env on generic hosts opens no new exploit surface (probe is read-only `ls-remote`).\n\nThe most actionable signal across the panel is the Auth Expert's recommended regression test on `is_github_hostname` -- it locks in the host-classification contract this fix depends on, so a future change to that function cannot silently re-introduce #1082.",
+    "dissent_notes": "",
+    "principle_alignment": {
+      "multi_harness_multi_host": "Restores GHES, GitLab, and Bitbucket as fully-supported dependency hosts.",
+      "pragmatic_as_npm": "npm never blocks system credential helpers for registry auth; APM now matches that expectation outside its managed token path."
+    },
+    "growth_amplification": "First external bug-fix landing the enterprise-private-git path from a real GHES user (@tillig). Worth amplifying in the next release notes as 'credential-helper support for enterprise git hosts (GHES / GitLab / Bitbucket)' and crediting the contributor.",
+    "recommended_followups": [
+      {"from_persona": "auth-expert", "summary": "Add regression test for is_github_hostname('ghes.corp.example.com') == False", "why": "Locks in the host-classification contract this fix depends on; cheapest insurance against a silent re-regression of #1082."},
+      {"from_persona": "oss-growth-hacker", "summary": "Frame the next release-notes line around 'credential-helper support for enterprise git hosts'", "why": "Converts a bug-fix into a positioning signal for the exact audience this unblocks. Credit @tillig as the first external bug-fix on this surface."},
+      {"from_persona": "python-architect", "summary": "Hoist the env-var tuple to a module-level constant when a third call site appears", "why": "Pure hygiene; defer until R3 EXTRACT actually triggers (>=3 call sites)."}
+    ],
+    "ship_recommendation": {
+      "stance": "ship_now",
+      "prose": "Merge as-is. The 3 follow-ups above are non-blocking and the highest-signal one (Auth Expert's regression test) is a 5-line PR that any maintainer can land in a follow-up."
+    }
+  }
+}
