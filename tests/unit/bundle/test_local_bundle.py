@@ -168,6 +168,29 @@ class TestDetectLocalBundle:
         assert "copilot" in result.pack_targets
         assert "claude" in result.pack_targets
 
+    def test_detect_cleans_temp_dir_on_malicious_archive(self, tmp_path: Path) -> None:
+        """Reject paths must not leak temp dirs (review #1099 finding)."""
+        import tarfile as _tar
+        import tempfile as _tmp
+
+        # Build a tarball whose first member has a `..` segment so the
+        # pre-extraction validator returns None on the early-exit path.
+        bad = tmp_path / "evil.tar.gz"
+        with _tar.open(bad, "w:gz") as tf:
+            data = b"x"
+            info = _tar.TarInfo(name="../escape")
+            info.size = len(data)
+            import io as _io
+
+            tf.addfile(info, _io.BytesIO(data))
+
+        before = {p.name for p in Path(_tmp.gettempdir()).glob("apm-local-bundle-*")}
+        result = detect_local_bundle(bad)
+        after = {p.name for p in Path(_tmp.gettempdir()).glob("apm-local-bundle-*")}
+        assert result is None
+        # No new apm-local-bundle-* directory left behind.
+        assert after - before == set()
+
 
 # ---------------------------------------------------------------------------
 # Integrity verification tests

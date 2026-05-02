@@ -26,11 +26,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import sys
 import tarfile
 import tempfile
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 import yaml
@@ -179,11 +180,26 @@ def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
         try:
             with tarfile.open(path, "r:gz") as tar:
                 # Reject member symlinks/hardlinks and absolute / parent paths
-                # for safety (analogous to the pack-side filter).
+                # for safety (analogous to the pack-side filter).  Using
+                # ``validate_path_segments`` normalises backslashes and
+                # percent-decoding, and ``PureWindowsPath`` catches drive-letter
+                # absolute forms (e.g. ``C:/foo``) that ``startswith('/')`` misses.
                 for member in tar.getmembers():
                     if member.issym() or member.islnk():
+                        shutil.rmtree(temp_dir, ignore_errors=True)
                         return None
-                    if member.name.startswith("/") or ".." in Path(member.name).parts:
+                    name = member.name
+                    if (
+                        name.startswith("/")
+                        or PureWindowsPath(name).drive
+                        or PureWindowsPath(name).is_absolute()
+                    ):
+                        shutil.rmtree(temp_dir, ignore_errors=True)
+                        return None
+                    try:
+                        validate_path_segments(name, context="tar member")
+                    except PathTraversalError:
+                        shutil.rmtree(temp_dir, ignore_errors=True)
                         return None
                 # tarfile.extractall(filter="data") requires Python 3.12+.
                 # The repo declares requires-python = ">=3.10", so on 3.10/3.11
@@ -195,9 +211,11 @@ def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
                 else:
                     tar.extractall(temp_dir)  # noqa: S202 -- validated above
         except (tarfile.TarError, OSError):
+            shutil.rmtree(temp_dir, ignore_errors=True)
             return None
         bundle_root = _find_extracted_root(temp_dir)
         if bundle_root is None:
+            shutil.rmtree(temp_dir, ignore_errors=True)
             return None
         return _build_info(bundle_root, is_archive=True, temp_dir=temp_dir)
 

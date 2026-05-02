@@ -950,9 +950,9 @@ def _handle_mcp_install(
     default=None,
     metavar="ALIAS",
     help=(
-        "Override the package slug when installing a local bundle "
-        "(directory or .tar.gz produced by 'apm pack'). Ignored for "
-        "registry installs."
+        "Override the log/display label when installing a local bundle "
+        "(directory or .tar.gz produced by 'apm pack'). Only valid for "
+        "local-bundle installs; passing --as without a local bundle path is rejected."
     ),
 )
 @click.pass_context
@@ -1008,7 +1008,7 @@ def install(  # noqa: PLR0913
         apm install --mcp fetch -- npx -y @mcp/server-fetch    # MCP stdio
         apm install ./build/my-bundle           # Deploy a local bundle (directory)
         apm install ./my-bundle.tar.gz          # Deploy a local bundle (archive)
-        apm install ./bundle --as custom-name   # Deploy local bundle with custom slug
+        apm install ./bundle --as custom-name   # Local bundle with custom log label
     """
     # C1 #856: defaults BEFORE try so the finally clause never sees an
     # UnboundLocalError if InstallLogger(...) raises during construction.
