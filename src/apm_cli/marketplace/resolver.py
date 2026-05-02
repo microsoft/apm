@@ -72,7 +72,7 @@ def _resolve_github_source(source: dict) -> str:
 
     Accepts ``path`` field (Copilot CLI format) as a virtual subdirectory.
     """
-    repo = source.get("repo", "")
+    repo = source.get("repo", "") or source.get("repository", "")
     ref = source.get("ref", "")
     path = source.get("path", "").strip("/")
     if not repo or "/" not in repo:
@@ -115,7 +115,7 @@ def _resolve_url_source(source: dict) -> str:
 
 def _resolve_git_subdir_source(source: dict) -> str:
     """Resolve a ``git-subdir`` source type to ``owner/repo[/subdir][#ref]``."""
-    repo = source.get("repo", "")
+    repo = source.get("repo", "") or source.get("url", "")
     ref = source.get("ref", "")
     subdir = (source.get("subdir", "") or source.get("path", "")).strip("/")
     if not repo or "/" not in repo:
@@ -207,7 +207,7 @@ def resolve_plugin_source(
             f"Plugin '{plugin.name}' has unrecognized source format: {type(source).__name__}"
         )
 
-    source_type = source.get("type", "")
+    source_type = source.get("type", "") or source.get("source", "")
 
     if source_type == "github":
         return _resolve_github_source(source)
