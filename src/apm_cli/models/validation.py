@@ -368,7 +368,8 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
                 result.add_error(
                     f"Not a valid APM package: {package_path.name} has apm.yml but "
                     "is missing the required .apm/ directory. "
-                    "Add .apm/ with primitives (instructions, skills, etc.) "
+                    "Add .apm/ with primitives (instructions, skills, etc.), "
+                    "declare dependencies in apm.yml (curated aggregator), "
                     "or add skills/<name>/SKILL.md for a skill bundle."
                 )
         else:
