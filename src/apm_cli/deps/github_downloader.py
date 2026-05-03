@@ -2032,6 +2032,74 @@ class GitHubPackageDownloader:
             _rmtree(target_path)
             target_path.mkdir(parents=True, exist_ok=True)
 
+        # WS3 (#1116): persistent cross-run cache fast path for whole-repo
+        # deps.  When a cached checkout exists for the resolved SHA, copy
+        # files directly into target_path and skip the network clone.
+        _persistent_cache = self.persistent_git_cache
+        if _persistent_cache is not None:
+            try:
+                cache_host = dep_ref.host or default_host()
+                cache_owner = dep_ref.repo_url.split("/")[0] if "/" in dep_ref.repo_url else ""
+                cache_repo = (
+                    dep_ref.repo_url.split("/")[1] if "/" in dep_ref.repo_url else dep_ref.repo_url
+                )
+                _canonical_url = f"https://{cache_host}/{cache_owner}/{cache_repo}"
+                _cached = _persistent_cache.get_checkout(
+                    _canonical_url,
+                    resolved_ref.resolved_commit or resolved_ref.ref_name,
+                    locked_sha=resolved_ref.resolved_commit,
+                )
+                from ..utils.file_ops import robust_copy2, robust_copytree
+
+                for item in _cached.iterdir():
+                    if item.name == ".git":
+                        continue
+                    src = _cached / item.name
+                    dst = target_path / item.name
+                    if src.is_dir():
+                        robust_copytree(src, dst)
+                    else:
+                        robust_copy2(src, dst)
+
+                # Validate, then return without cloning.
+                validation_result = validate_apm_package(target_path)
+                if validation_result.is_valid and validation_result.package:
+                    package = validation_result.package
+                    package.source = dep_ref.to_github_url()
+                    package.resolved_commit = resolved_ref.resolved_commit
+                    if (
+                        validation_result.package_type == PackageType.MARKETPLACE_PLUGIN
+                        and package.version == "0.0.0"
+                        and resolved_ref.resolved_commit
+                    ):
+                        short_sha = resolved_ref.resolved_commit[:7]
+                        package.version = short_sha
+                        apm_yml_path = target_path / "apm.yml"
+                        if apm_yml_path.exists():
+                            from ..utils.yaml_io import dump_yaml, load_yaml
+
+                            _data = load_yaml(apm_yml_path) or {}
+                            _data["version"] = short_sha
+                            dump_yaml(_data, apm_yml_path)
+                    return PackageInfo(
+                        package=package,
+                        install_path=target_path,
+                        resolved_reference=resolved_ref,
+                        installed_at=datetime.now().isoformat(),
+                        dependency_ref=dep_ref,
+                        package_type=validation_result.package_type,
+                    )
+                # Validation failed against cached copy: fall through to a
+                # fresh clone (cache may be stale or repo structure changed).
+                if target_path.exists() and any(target_path.iterdir()):
+                    _rmtree(target_path)
+                    target_path.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                # Any cache failure -> fall back to network clone.
+                if target_path.exists() and any(target_path.iterdir()):
+                    _rmtree(target_path)
+                    target_path.mkdir(parents=True, exist_ok=True)
+
         # Store progress reporter so we can disable it after clone
         progress_reporter = None
         package_display_name = (
