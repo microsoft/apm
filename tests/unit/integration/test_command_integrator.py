@@ -34,7 +34,7 @@ def _make_package(project_root, prompts):
     prompts_dir = pkg_dir / ".apm" / "prompts"
     prompts_dir.mkdir(parents=True)
     for name, content in prompts.items():
-        (prompts_dir / name).write_text(content)
+        (prompts_dir / name).write_text(content, encoding="utf-8")
 
     mock_info = MagicMock()
     mock_info.install_path = pkg_dir
