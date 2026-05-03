@@ -266,6 +266,10 @@ The `--check-refs` flag will verify that source refs are reachable over the netw
 
 For full option details, see [CLI Commands](../../reference/cli-commands/).
 
+:::tip[See also]
+For field-level `marketplace.json` requirements, see the [Marketplace Schema](../../reference/marketplace-schema/).
+:::
+
 ## Security
 
 ### Version immutability
