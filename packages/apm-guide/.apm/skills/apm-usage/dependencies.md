@@ -35,6 +35,15 @@ dependencies:
     - ../sibling-repo/my-package
 ```
 
+**Local-path anchor rule:** a `local_path` declared INSIDE another local
+package is resolved relative to THAT package's own directory (npm/pip/cargo
+parity). Sibling layouts that resolve outside the consuming project root
+(e.g. `../sibling-pkg` from a local dep at the project edge) are
+supported -- the consuming developer authored the manifest chain and
+already trusts the layout. The actual security boundary is upstream:
+**remote-cloned packages cannot declare `local_path` deps at all**, since
+they have no business reaching into the consumer's filesystem.
+
 ### Custom git ports
 
 Non-default git ports are preserved on `https://`, `http://`, and `ssh://` URLs

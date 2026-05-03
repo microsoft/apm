@@ -420,6 +420,77 @@ class TestDetectTargetOpencode:
         assert should_compile_claude_md("opencode") is False
 
 
+class TestDetectTargetWindsurf:
+    """Tests for auto-detection and explicit windsurf target."""
+
+    def test_explicit_target_windsurf(self, tmp_path):
+        """Explicit --target windsurf always wins."""
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target="windsurf",
+        )
+        assert target == "windsurf"
+        assert reason == "explicit --target flag"
+
+    def test_config_target_windsurf(self, tmp_path):
+        """Config target windsurf is used when no explicit target."""
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target="windsurf",
+        )
+        assert target == "windsurf"
+        assert reason == "apm.yml target"
+
+    def test_auto_detect_windsurf_only(self, tmp_path):
+        """Auto-detect windsurf when only .windsurf/ exists."""
+        (tmp_path / ".windsurf").mkdir()
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target=None,
+        )
+        assert target == "windsurf"
+        assert ".windsurf/" in reason
+
+    def test_auto_detect_windsurf_plus_github(self, tmp_path):
+        """Auto-detect all when .windsurf/ and .github/ exist."""
+        (tmp_path / ".github").mkdir()
+        (tmp_path / ".windsurf").mkdir()
+        target, _ = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target=None,
+        )
+        assert target == "all"
+
+    def test_windsurf_compile_agents_md(self):
+        """Windsurf target should compile AGENTS.md (reads it natively)."""
+        assert should_compile_agents_md("windsurf") is True
+
+    def test_windsurf_no_compile_claude_md(self):
+        """Windsurf target should NOT compile CLAUDE.md."""
+        assert should_compile_claude_md("windsurf") is False
+
+    def test_windsurf_no_compile_gemini_md(self):
+        """Windsurf target should NOT compile GEMINI.md."""
+        assert should_compile_gemini_md("windsurf") is False
+
+    def test_windsurf_description(self):
+        """Description for windsurf target."""
+        desc = get_target_description("windsurf")
+        assert "AGENTS.md" in desc
+        assert ".windsurf/" in desc
+
+    def test_windsurf_in_all_canonical_targets(self):
+        """Windsurf must appear in ALL_CANONICAL_TARGETS."""
+        assert "windsurf" in ALL_CANONICAL_TARGETS
+
+    def test_windsurf_in_valid_target_values(self):
+        """Windsurf must be accepted by the --target parser."""
+        assert "windsurf" in VALID_TARGET_VALUES
+
+
 # ---------------------------------------------------------------------------
 # TargetParamType tests
 # ---------------------------------------------------------------------------

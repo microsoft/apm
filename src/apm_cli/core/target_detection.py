@@ -51,7 +51,16 @@ def agents_alias_was_detected() -> bool:
 
 # Valid target values (internal canonical form)
 TargetType = Literal[
-    "vscode", "claude", "cursor", "opencode", "codex", "gemini", "agent-skills", "all", "minimal"
+    "vscode",
+    "claude",
+    "cursor",
+    "opencode",
+    "codex",
+    "gemini",
+    "windsurf",
+    "agent-skills",
+    "all",
+    "minimal",
 ]
 
 # Compiler families used inside a multi-target frozenset. Narrower than
@@ -87,6 +96,7 @@ UserTargetType = Literal[
     "opencode",
     "codex",
     "gemini",
+    "windsurf",
     "agent-skills",
     "all",
     "minimal",
@@ -124,6 +134,8 @@ def detect_target(  # noqa: PLR0911
             return "codex", "explicit --target flag"
         elif explicit_target == "gemini":
             return "gemini", "explicit --target flag"
+        elif explicit_target == "windsurf":
+            return "windsurf", "explicit --target flag"
         elif explicit_target == "agent-skills":
             return "agent-skills", "explicit --target flag"
         elif explicit_target == "all":
@@ -143,6 +155,8 @@ def detect_target(  # noqa: PLR0911
             return "codex", "apm.yml target"
         elif config_target == "gemini":
             return "gemini", "apm.yml target"
+        elif config_target == "windsurf":
+            return "windsurf", "apm.yml target"
         elif config_target == "agent-skills":
             return "agent-skills", "apm.yml target"
         elif config_target == "all":
@@ -155,6 +169,7 @@ def detect_target(  # noqa: PLR0911
     opencode_exists = (project_root / ".opencode").is_dir()
     codex_exists = (project_root / ".codex").is_dir()
     gemini_exists = (project_root / ".gemini").is_dir()
+    windsurf_exists = (project_root / ".windsurf").is_dir()
     detected = []
     if github_exists:
         detected.append(".github/")
@@ -168,6 +183,8 @@ def detect_target(  # noqa: PLR0911
         detected.append(".codex/")
     if gemini_exists:
         detected.append(".gemini/")
+    if windsurf_exists:
+        detected.append(".windsurf/")
 
     if len(detected) >= 2:
         return "all", f"detected {' and '.join(detected)} folders"
@@ -183,6 +200,8 @@ def detect_target(  # noqa: PLR0911
         return "codex", "detected .codex/ folder"
     elif gemini_exists:
         return "gemini", "detected .gemini/ folder"
+    elif windsurf_exists:
+        return "windsurf", "detected .windsurf/ folder"
     else:
         return "minimal", REASON_NO_TARGET_FOLDER
 
@@ -202,7 +221,7 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
     """
     if isinstance(target, frozenset):
         return "agents" in target or "gemini" in target
-    return target in ("vscode", "opencode", "codex", "gemini", "all", "minimal")
+    return target in ("vscode", "opencode", "codex", "gemini", "windsurf", "all", "minimal")
 
 
 def should_compile_claude_md(target: CompileTargetType) -> bool:
@@ -279,8 +298,9 @@ def get_target_description(target: UserTargetType) -> str:
         "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .opencode/skills/",
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
         "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
+        "windsurf": "AGENTS.md + .windsurf/rules/ + .windsurf/skills/ + .windsurf/workflows/ + .windsurf/hooks.json",
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
-        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .agents/",
+        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .agents/",
         "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }
     return descriptions.get(normalized, "unknown target")
@@ -292,7 +312,9 @@ def get_target_description(target: UserTargetType) -> str:
 
 #: The complete set of real (non-pseudo) canonical targets.
 #: "minimal" is intentionally excluded -- it is a fallback pseudo-target.
-ALL_CANONICAL_TARGETS = frozenset({"vscode", "claude", "cursor", "opencode", "codex", "gemini"})
+ALL_CANONICAL_TARGETS = frozenset(
+    {"vscode", "claude", "cursor", "opencode", "codex", "gemini", "windsurf"}
+)
 
 #: Targets that the parser must accept but that are gated at runtime by
 #: ``is_enabled()`` in ``core/experimental.py`` and ``_flag_gated()`` in
@@ -495,7 +517,7 @@ def parse_target_field(
     # preserves the long-standing CLI contract where ``--target copilot``
     # yields ``"copilot"`` rather than the canonical ``"vscode"``; every
     # downstream consumer (active_targets, agents_compiler,
-    # _CROSS_TARGET_MAPS, _TARGET_PREFIXES) already accepts both alias
+    # _CROSS_TARGET_MAPS, _get_target_prefixes) already accepts both alias
     # spellings, so resolving here would be a visible behaviour change
     # with zero functional benefit and would break the CLI test suite
     # (~10 ``test_single_*`` cases).  This is the one asymmetry #820's

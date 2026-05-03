@@ -434,6 +434,47 @@ APM maintains synchronization between packages and Claude primitives:
 - **Update**: Refreshes rules, agents, commands, and skills when package version changes
 - **Virtual Packages**: Individual files and skills (e.g., `github/awesome-copilot/skills/review-and-refactor`) are tracked via `apm.lock.yaml` and removed correctly on uninstall
 
+## Windsurf Integration
+
+APM integrates with Windsurf/Cascade by deploying primitives into the workspace `.windsurf/` directory.
+
+> **Auto-Detection**: Windsurf integration is enabled only when a `.windsurf/` folder ALREADY exists in your project. Unlike VS Code or Claude, `apm install` will NOT create the folder for you. To opt in, either run `mkdir .windsurf` first, pass an explicit target (`apm install --target windsurf`), or set `target: windsurf` in `apm.yml`.
+
+### Native Windsurf Primitives
+
+When you run `apm install` (with `.windsurf/` present or `--target windsurf`), APM deploys package primitives to Windsurf's native locations:
+
+| APM Primitive | Windsurf Destination | Format |
+|---|---|---|
+| Instructions (`.instructions.md`) | `.windsurf/rules/*.md` | Windsurf rules markdown with `trigger`/`globs` frontmatter |
+| Agents (`.agent.md`) | `.windsurf/skills/<name>/SKILL.md` | Converted to a Windsurf Skill (lossy, see below) |
+| Skills (`SKILL.md`) | `.windsurf/skills/<name>/SKILL.md` | Standard `SKILL.md` format |
+| Commands (`.prompt.md`) | `.windsurf/workflows/*.md` | Windsurf workflow markdown |
+| Hooks | `.windsurf/hooks.json` | Hook definitions merged into a single file |
+
+Reference: [Windsurf memories and rules](https://docs.windsurf.com/windsurf/cascade/memories).
+
+### Lossy Agent to Skill Conversion
+
+Windsurf has no native equivalent of an `.agent.md` persona, so APM converts each agent into a Windsurf Skill (`SKILL.md`). The conversion is deliberately lossy:
+
+- **Preserved**: `name`, `description`, and the full markdown body (verbatim).
+- **Dropped**: `tools` and `model` frontmatter keys -- Windsurf Skills do not support them.
+
+APM prints a warning when a dropped field is detected, so the loss is never silent. If your agent depends on a specific tool list or model pin, prefer a target that supports those keys natively (Copilot, Claude).
+
+### MCP Configuration
+
+Windsurf reads MCP server definitions from a USER-SCOPE file at `~/.codeium/windsurf/mcp_config.json`. The schema is the standard `mcpServers` JSON used by GitHub Copilot CLI. The workspace `.windsurf/` directory does NOT contain MCP config -- there is nothing to commit per project.
+
+Reference: [Windsurf MCP integration](https://docs.windsurf.com/windsurf/cascade/mcp).
+
+### User-Scope Installation Limitations
+
+Windsurf has partial user-scope support. `apm install -g --target windsurf` deploys agents, skills, commands, and hooks under `~/.codeium/windsurf/`, but **instructions (rules) are skipped** at user scope -- Windsurf does not expose a user-level rules directory in the same shape as the workspace one. Keep instruction packages workspace-local.
+
+See [Global Installation](../../guides/dependencies/#global-user-scope-installation) for cross-target user-scope coverage.
+
 ## Other IDE Support
 
 ### IDEs with GitHub Copilot
@@ -650,7 +691,6 @@ dependencies:
 The following IDE integrations are planned for future releases:
 
 - **JetBrains IDE support**: Native integration with IntelliJ, PyCharm, WebStorm, and other JetBrains IDEs
-- **Windsurf support**: Integration with the Windsurf AI coding environment
 - **Cursor deeper integration**: Enhanced Cursor support including rule versioning and conflict resolution
 
 ## Related Resources

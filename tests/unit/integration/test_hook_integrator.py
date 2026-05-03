@@ -3170,3 +3170,100 @@ class TestIssue1007Fixes:
         assert len(entries) == 1, (
             f"Entry count must remain constant across re-installs; got {len(entries)}"
         )
+
+
+# ==================================================================
+# Windsurf hook path rewriting
+# ==================================================================
+
+
+class TestWindsurfHookPathRewriting:
+    """Tests for windsurf target branch in _rewrite_command_for_target."""
+
+    def test_rewrite_plugin_root_for_windsurf(self, tmp_path: Path) -> None:
+        """${CLAUDE_PLUGIN_ROOT}/scripts/foo.sh rewrites to .windsurf/hooks/<pkg>/..."""
+        pkg_dir = tmp_path / "pkg"
+        scripts_dir = pkg_dir / "scripts"
+        scripts_dir.mkdir(parents=True)
+        (scripts_dir / "foo.sh").write_bytes(b"#!/bin/bash\necho hello")
+
+        integrator = HookIntegrator()
+        cmd, scripts = integrator._rewrite_command_for_target(
+            "bash ${CLAUDE_PLUGIN_ROOT}/scripts/foo.sh",
+            pkg_dir,
+            "my-hooks",
+            "windsurf",
+        )
+
+        assert "${CLAUDE_PLUGIN_ROOT}" not in cmd
+        expected_rel = ".windsurf/hooks/my-hooks/scripts/foo.sh"
+        assert expected_rel in cmd
+        assert len(scripts) == 1
+        assert scripts[0][1] == expected_rel
+
+    def test_rewrite_relative_path_for_windsurf(self, tmp_path: Path) -> None:
+        """./scripts/bar.sh rewrites to .windsurf/hooks/<pkg>/..."""
+        pkg_dir = tmp_path / "pkg"
+        scripts_dir = pkg_dir / "scripts"
+        scripts_dir.mkdir(parents=True)
+        (scripts_dir / "bar.sh").write_bytes(b"#!/bin/bash\necho bar")
+
+        integrator = HookIntegrator()
+        cmd, scripts = integrator._rewrite_command_for_target(
+            "./scripts/bar.sh",
+            pkg_dir,
+            "test-pkg",
+            "windsurf",
+        )
+
+        assert "./" not in cmd
+        expected_rel = ".windsurf/hooks/test-pkg/scripts/bar.sh"
+        assert expected_rel in cmd
+        assert len(scripts) == 1
+
+    def test_system_command_unchanged_for_windsurf(self, tmp_path: Path) -> None:
+        """System commands pass through unmodified for windsurf target."""
+        pkg_dir = tmp_path / "pkg"
+        pkg_dir.mkdir(parents=True)
+
+        integrator = HookIntegrator()
+        cmd, scripts = integrator._rewrite_command_for_target(
+            "npx prettier --check .",
+            pkg_dir,
+            "my-pkg",
+            "windsurf",
+        )
+
+        assert cmd == "npx prettier --check ."
+        assert len(scripts) == 0
+
+
+class TestWindsurfPathTraversalGuard:
+    """Regression: ensure_path_within guard on script copy prevents traversal.
+
+    This test targets the ``ensure_path_within(target_script, project_root)``
+    guard that the security specialist is adding around the ``shutil.copy2``
+    calls in ``integrate_package_hooks`` / ``_integrate_merged_hooks``.
+    """
+
+    def test_copy_rejects_traversal_target_rel(self, tmp_path: Path) -> None:
+        """PathTraversalError raised when target_rel escapes project root."""
+        from apm_cli.utils.path_security import PathTraversalError
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        (project_root / ".windsurf").mkdir()
+
+        pkg_dir = tmp_path / "pkg"
+        scripts_dir = pkg_dir / "scripts"
+        scripts_dir.mkdir(parents=True)
+        (scripts_dir / "evil.sh").write_bytes(b"#!/bin/bash\necho pwned")
+
+        # The rewrite stage already filters traversal (defence layer 1).
+        # ensure_path_within is defence-in-depth (layer 2) on the copy loop.
+        # We directly test that ensure_path_within rejects traversal.
+        with pytest.raises(PathTraversalError):
+            from apm_cli.utils.path_security import ensure_path_within
+
+            target_script = project_root / ".." / ".." / "etc" / "passwd"
+            ensure_path_within(target_script, project_root)

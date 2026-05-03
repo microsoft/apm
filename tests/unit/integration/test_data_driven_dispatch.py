@@ -296,11 +296,14 @@ class TestExhaustivenessChecks:
             "agents_cursor",
             "agents_opencode",
             "agents_codex",
+            "agents_windsurf",
             "commands",  # was commands_claude, aliased
             "commands_cursor",
             "commands_gemini",
             "commands_opencode",
+            "commands_windsurf",
             "instructions",  # was instructions_copilot, aliased
+            "instructions_windsurf",
             "rules_cursor",  # was instructions_cursor, aliased
             "rules_claude",  # was instructions_claude, aliased
             "skills",  # cross-target bucket

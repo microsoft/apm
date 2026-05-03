@@ -46,6 +46,7 @@ _KNOWN_TARGETS = (  # noqa: RUF005
     "codex",
     "agent-skills",
     "gemini",
+    "windsurf",
     "all",
     "minimal",
 ) + _VSCODE_TARGET_ALIASES

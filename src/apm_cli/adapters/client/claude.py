@@ -39,6 +39,8 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     """
 
     supports_user_scope: bool = True
+    target_name: str = "claude"
+    mcp_servers_key: str = "mcpServers"
 
     @staticmethod
     def _normalize_mcp_entry_for_claude_code(entry: dict) -> dict:

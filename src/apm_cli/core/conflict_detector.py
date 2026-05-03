@@ -90,45 +90,35 @@ class MCPConflictDetector:
     def get_existing_server_configs(self) -> dict[str, Any]:
         """Extract all existing server configurations.
 
+        Reads the adapter's MCP servers using ``adapter.mcp_servers_key`` so
+        every adapter class is handled uniformly.  Codex carries an extra
+        TOML-flat-key fallback because its config can spell entries as
+        ``mcp_servers.<name>`` at the top level instead of nested under a
+        ``mcp_servers`` table.
+
         Returns:
             Dictionary of existing server configurations keyed by server name.
         """
-        # Get fresh config each time
         existing_config = self.adapter.get_current_config()
+        key = self.adapter.mcp_servers_key
+        if not key:
+            return {}
 
-        # Determine runtime type from adapter class name or type
-        adapter_class_name = getattr(self.adapter, "__class__", type(self.adapter)).__name__.lower()
+        servers: dict[str, Any] = dict(existing_config.get(key, {}) or {})
 
-        if "copilot" in adapter_class_name:
-            return existing_config.get("mcpServers", {})
-        elif "codex" in adapter_class_name:
-            # Extract mcp_servers section from TOML config, handling both nested and flat formats
-            servers = {}
+        if key == "mcp_servers":
+            # Codex TOML quirk: handle ``mcp_servers."name"`` flat keys in
+            # addition to the nested table.
+            for raw_key, value in existing_config.items():
+                if not raw_key.startswith("mcp_servers."):
+                    continue
+                server_name = raw_key[len("mcp_servers.") :]
+                if server_name.startswith('"') and server_name.endswith('"'):
+                    server_name = server_name[1:-1]
+                if isinstance(value, dict) and ("command" in value or "args" in value):
+                    servers[server_name] = value
 
-            # Direct mcp_servers section
-            if "mcp_servers" in existing_config:
-                servers.update(existing_config["mcp_servers"])
-
-            # Handle TOML-style nested keys like 'mcp_servers.github' and 'mcp_servers."quoted-name"'
-            for key, value in existing_config.items():
-                if key.startswith("mcp_servers."):
-                    # Extract server name from key
-                    server_name = key[len("mcp_servers.") :]
-                    # Remove quotes if present
-                    if server_name.startswith('"') and server_name.endswith('"'):
-                        server_name = server_name[1:-1]
-
-                    # Only add if it looks like server config (has command or args)
-                    if isinstance(value, dict) and ("command" in value or "args" in value):
-                        servers[server_name] = value
-
-            return servers
-        elif "vscode" in adapter_class_name:
-            return existing_config.get("servers", {})
-        elif "claude" in adapter_class_name:
-            return existing_config.get("mcpServers", {})
-
-        return {}
+        return servers
 
     def get_conflict_summary(self, server_reference: str) -> dict[str, Any]:
         """Get detailed information about a conflict.

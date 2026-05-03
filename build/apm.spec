@@ -129,6 +129,7 @@ hiddenimports = [
     'apm_cli.adapters.client',
     'apm_cli.adapters.client.base',
     'apm_cli.adapters.client.vscode',
+    'apm_cli.adapters.client.windsurf',
     'apm_cli.adapters.package_manager',
     'apm_cli.compilation',  # Add compilation module
     'apm_cli.compilation.agents_compiler',

@@ -458,7 +458,11 @@ class MCPIntegrator:
             return
 
         # Determine which runtimes to clean, mirroring install-time logic.
-        all_runtimes = {"vscode", "copilot", "codex", "cursor", "opencode", "gemini", "claude"}
+        # Derived from ClientFactory so adding a new MCP-capable target
+        # extends cleanup automatically (no parallel list to maintain).
+        from apm_cli.factory import ClientFactory
+
+        all_runtimes = ClientFactory.supported_clients()
         if runtime:  # noqa: SIM108
             target_runtimes = {runtime}
         else:
@@ -632,6 +636,31 @@ class MCPIntegrator:
                         exc_info=True,
                     )
 
+        # Clean ~/.codeium/windsurf/mcp_config.json
+        if "windsurf" in target_runtimes:
+            windsurf_mcp = Path.home() / ".codeium" / "windsurf" / "mcp_config.json"
+            if windsurf_mcp.exists():
+                try:
+                    import json as _json
+
+                    config = _json.loads(windsurf_mcp.read_text(encoding="utf-8"))
+                    servers = config.get("mcpServers", {})
+                    removed = [n for n in expanded_stale if n in servers]
+                    for name in removed:
+                        del servers[name]
+                    if removed:
+                        windsurf_mcp.write_text(_json.dumps(config, indent=2), encoding="utf-8")
+                        for name in removed:
+                            _rich_success(
+                                f"Removed stale MCP server '{name}' from Windsurf config",
+                                symbol="check",
+                            )
+                except Exception:
+                    _log.debug(
+                        "Failed to clean stale MCP servers from Windsurf config",
+                        exc_info=True,
+                    )
+
         # Clean .gemini/settings.json (only if .gemini/ directory exists)
         if "gemini" in target_runtimes:
             gemini_cfg = Path.cwd() / ".gemini" / "settings.json"
@@ -779,6 +808,8 @@ class MCPIntegrator:
                 detected.add("claude")
             if re.search(r"\bllm\b", command):
                 detected.add("llm")
+            if re.search(r"\bwindsurf\b", command):
+                detected.add("windsurf")
 
         return builtins.list(detected)
 
@@ -811,10 +842,11 @@ class MCPIntegrator:
                 return available
 
         except ImportError:
+            # Derived from ClientFactory; see _MCP_CLIENT_REGISTRY.
+            from apm_cli.factory import ClientFactory
+
             mcp_compatible = [
-                rt
-                for rt in detected_runtimes
-                if rt in ["vscode", "copilot", "codex", "cursor", "opencode", "gemini", "claude"]
+                rt for rt in detected_runtimes if rt in ClientFactory.supported_clients()
             ]
             return [rt for rt in mcp_compatible if shutil.which(rt)]
 
@@ -886,7 +918,7 @@ class MCPIntegrator:
         except ValueError as e:
             logger.warning(f"Runtime {runtime} not supported: {e}")
             logger.progress(
-                "Supported runtimes: vscode, copilot, codex, cursor, opencode, gemini, claude, llm"
+                "Supported runtimes: vscode, copilot, codex, cursor, opencode, gemini, claude, windsurf, llm"
             )
             return False
         except Exception as e:
@@ -1061,6 +1093,7 @@ class MCPIntegrator:
                     "cursor",
                     "opencode",
                     "gemini",
+                    "windsurf",
                     "claude",
                 ]:
                     try:
@@ -1081,6 +1114,11 @@ class MCPIntegrator:
                         elif runtime_name == "gemini":
                             # Gemini CLI is opt-in: only target when .gemini/ exists
                             if (Path.cwd() / ".gemini").is_dir():
+                                ClientFactory.create_client(runtime_name)
+                                installed_runtimes.append(runtime_name)
+                        elif runtime_name == "windsurf":
+                            # Windsurf is opt-in: only target when .windsurf/ exists
+                            if (project_root_path / ".windsurf").is_dir():
                                 ClientFactory.create_client(runtime_name)
                                 installed_runtimes.append(runtime_name)
                         elif runtime_name == "claude":
@@ -1117,6 +1155,9 @@ class MCPIntegrator:
                 # Gemini CLI is directory-presence based
                 if (Path.cwd() / ".gemini").is_dir():
                     installed_runtimes.append("gemini")
+                # Windsurf is directory-presence based
+                if (project_root_path / ".windsurf").is_dir():
+                    installed_runtimes.append("windsurf")
                 # Claude Code: directory-presence OR binary-on-PATH
                 if (project_root_path / ".claude").is_dir() or (shutil.which("claude") is not None):
                     installed_runtimes.append("claude")

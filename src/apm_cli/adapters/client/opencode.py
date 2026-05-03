@@ -41,6 +41,8 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
     """
 
     supports_user_scope: bool = False
+    target_name: str = "opencode"
+    mcp_servers_key: str = "mcpServers"
 
     def get_config_path(self):
         """Return the path to ``opencode.json`` in the repository root."""

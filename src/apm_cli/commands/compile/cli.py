@@ -175,64 +175,80 @@ def _resolve_compile_target(target):
     collapsing to ``"all"`` (which would incorrectly generate files
     for every family).
 
+    Family resolution reads ``TargetProfile.compile_family`` from
+    ``KNOWN_TARGETS`` so adding a new compile-eligible target only
+    requires populating that field.  The CLI alias ``"vscode"`` is
+    treated as ``"copilot"`` for this purpose.
+
     Args:
         target: A single target string, a list of target strings, or ``None``.
 
     Returns:
         A single string, a ``frozenset`` of compiler families, or ``None``.
     """
+    from ...integration.targets import KNOWN_TARGETS
+
     if target is None:
         return None  # will trigger detect_target() auto-detection
     if isinstance(target, list):
         target_set = set(target)
-        # Strip agent-skills from the family-resolution set -- it is a
-        # deployment-only target with no compilation output.
-        target_set.discard("agent-skills")
+        # Strip targets with no compile output (compile_family is None);
+        # they would silently fall through the family resolution otherwise.
+        # ``vscode`` is a CLI alias for ``copilot`` and shares its profile.
+        skip = {name for name, profile in KNOWN_TARGETS.items() if profile.compile_family is None}
+        target_set -= skip
         if not target_set:
-            # Solo agent-skills in a list -- pass through as a string so
-            # the compiler's no-op path fires.
-            return "agent-skills"
-        # Two distinct families overlap on copilot/vscode/agents:
-        #   copilot_family   -> requests .github/copilot-instructions.md AND AGENTS.md
-        #   agents_md_family -> requests AGENTS.md only (cursor/opencode/codex)
-        # Splitting these prevents the over-fire bug where -t cursor,claude or
-        # -t cursor,opencode,codex used to incorrectly emit copilot-instructions.md.
-        copilot_family = {"copilot", "vscode", "agents"}
-        agents_md_family = {"cursor", "opencode", "codex"}
-        has_copilot = bool(target_set & copilot_family)
-        has_agents_md_only = bool(target_set & agents_md_family)
-        has_claude = "claude" in target_set
-        has_gemini = "gemini" in target_set
-        families = set()
-        if has_copilot:
-            families.add("vscode")  # gates copilot-instructions.md
-            families.add("agents")  # also gates AGENTS.md
-        elif has_agents_md_only:
-            families.add("agents")  # AGENTS.md only -- no copilot-instructions
-        if has_claude:
-            families.add("claude")
-        if has_gemini:
-            families.add("gemini")
+            # Solo agent-skills (or another no-compile target) in a list --
+            # pass through as a string so the compiler's no-op path fires.
+            for sentinel in target:
+                if sentinel in skip:
+                    return sentinel
+            return None
+
+        # The "vscode" family handles copilot AND emits AGENTS.md as a
+        # bonus; the "agents" family emits AGENTS.md only.  When both
+        # appear in a multi-target compile we still need both family
+        # tokens so the agents compiler routes correctly.
+        def _family_of(name: str) -> str | None:
+            if name == "vscode":
+                return "vscode"
+            profile = KNOWN_TARGETS.get(name)
+            return profile.compile_family if profile else None
+
+        families: set[str] = set()
+        for name in target_set:
+            family = _family_of(name)
+            if family is None:
+                continue
+            families.add(family)
+            if family == "vscode":
+                # copilot also emits AGENTS.md; mirror legacy behavior.
+                families.add("agents")
+
         if len(families) >= 2:
-            # Single-target copilot collapses {"vscode","agents"} to bare "vscode"
-            # for routing parity with single-string -t copilot.
+            # Single-target copilot collapses {"vscode","agents"} to bare
+            # "vscode" for routing parity with single-string -t copilot.
             if families == {"vscode", "agents"}:
                 return "vscode"
             return frozenset(families)
-        elif has_claude:
+        if "claude" in families:
             return "claude"
-        elif has_gemini:
+        if "gemini" in families:
             return "gemini"
-        elif has_copilot:
+        if "vscode" in families:
             return "vscode"
-        else:
-            # cursor/opencode/codex only -- preserve the bare target name so
-            # single-element list routing matches single-string semantics
-            # (-t cursor and -t cursor both end up as "cursor").
-            for bare in ("cursor", "opencode", "codex"):
-                if bare in target_set:
-                    return bare
-            return "vscode"  # defensive fallback (unreachable)
+        # Bare agents-family target: preserve the original target name so
+        # single-element list routing matches single-string semantics
+        # (-t cursor and -t [cursor] both end up as "cursor").  Iterate
+        # KNOWN_TARGETS in insertion order so priority ties (e.g.
+        # ["opencode","codex"]) resolve deterministically to the
+        # earliest-registered target.  Adding a new agents-family
+        # target (e.g. zed, cline) costs zero edits here -- it inherits
+        # whatever priority position it occupies in the registry.
+        for name, profile in KNOWN_TARGETS.items():
+            if profile.compile_family == "agents" and name in target_set:
+                return name
+        return "vscode"  # defensive fallback (unreachable)
     return target  # single string pass-through
 
 
@@ -248,7 +264,7 @@ def _resolve_compile_target(target):
     "-t",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini (excludes agent-skills); combine with 'agent-skills' for both.",
+    help="Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with 'agent-skills' for both.",
 )
 @click.option(
     "--dry-run",

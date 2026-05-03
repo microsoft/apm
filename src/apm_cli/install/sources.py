@@ -156,7 +156,19 @@ class LocalDependencySource(DependencySource):
                     )
                 return None
 
-        result_path = _copy_local_package(dep_ref, install_path, ctx.project_root, logger=logger)
+        # Determine the anchor for relative ``local_path`` (#857). For direct
+        # deps from the root project this is project_root. For transitive
+        # deps declared inside another local package, it is the parent
+        # package's source directory -- captured during resolve via
+        # ``ctx.dep_base_dirs``.
+        base_dir = getattr(ctx, "dep_base_dirs", {}).get(dep_key) or ctx.project_root
+        result_path = _copy_local_package(
+            dep_ref,
+            install_path,
+            base_dir,
+            project_root=ctx.project_root,
+            logger=logger,
+        )
         if not result_path:
             diagnostics.error(
                 f"Failed to copy local package: {dep_ref.local_path}",
@@ -167,10 +179,27 @@ class LocalDependencySource(DependencySource):
         if logger:
             logger.download_complete(dep_ref.local_path, ref_suffix="local")
 
-        # Build minimal PackageInfo for integration
+        # Build minimal PackageInfo for integration. Anchor source_path on
+        # the *original* user source directory (not the apm_modules copy) so
+        # any transitive ``../sibling`` dep declared inside this package
+        # resolves against where the developer wrote the path (#857).
         local_apm_yml = install_path / "apm.yml"
         if local_apm_yml.exists():
-            local_pkg = APMPackage.from_apm_yml(local_apm_yml)
+            original_src = Path(dep_ref.local_path).expanduser()
+            if not original_src.is_absolute():
+                # For TRANSITIVE local deps the relative path is anchored on
+                # the parent package's directory (base_dir above), not on
+                # the consumer's project root. Reusing base_dir here keeps
+                # the source_path stamped on the loaded APMPackage in lock-
+                # step with where _copy_local_package actually copied from.
+                original_src = (base_dir / original_src).resolve()
+            else:
+                original_src = original_src.resolve()
+            local_pkg = APMPackage.from_apm_yml(local_apm_yml, source_path=original_src)
+            # TODO(#940): post-construction mutation of .source has the same
+            # cache-poisoning shape as the bug fixed in this PR. Today the
+            # cache key is (apm.yml, source_path) so mutating .source is
+            # safe, but keep this in mind when reworking the source field.
             if not local_pkg.source:
                 local_pkg.source = dep_ref.local_path
         else:
@@ -297,10 +326,14 @@ class CachedDependencySource(DependencySource):
                 deltas=deltas,
             )
 
-        # Load package from apm.yml
+        # Load package from apm.yml. Anchor source_path on the clone location
+        # so transitive ``local_path`` deps inside this remote package resolve
+        # from there (#857).
         apm_yml_path = install_path / APM_YML_FILENAME
         if apm_yml_path.exists():
-            cached_package = APMPackage.from_apm_yml(apm_yml_path)
+            cached_package = APMPackage.from_apm_yml(apm_yml_path, source_path=install_path)
+            # TODO(#940): see note in _materialize_local for the same caveat
+            # about post-construction mutation of .source.
             if not cached_package.source:
                 cached_package.source = dep_ref.repo_url
         else:

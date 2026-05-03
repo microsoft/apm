@@ -5,18 +5,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Tuple, Union  # noqa: F401, UP035
 
 from ..deps.lockfile import LockFile
-
-# Authoritative mapping of target names to deployed-file path prefixes.
-_TARGET_PREFIXES = {
-    "copilot": [".github/"],
-    "vscode": [".github/"],
-    "claude": [".claude/"],
-    "cursor": [".cursor/"],
-    "opencode": [".opencode/"],
-    "codex": [".codex/", ".agents/"],
-    "agent-skills": [".agents/"],
-    "all": [".github/", ".claude/", ".cursor/", ".opencode/", ".codex/", ".agents/"],
-}
+from ..integration.targets import KNOWN_TARGETS
 
 # Cross-target path equivalences for skills/ and agents/ directories.
 # Only these two directory types are semantically identical across targets;
@@ -27,6 +16,10 @@ _TARGET_PREFIXES = {
 # maps FROM .claude/ for the common case of Claude-first projects packing
 # for Copilot.  Cursor/opencode sources are niche; if someone publishes
 # skills exclusively under .cursor/, they must pack with --target cursor.
+#
+# Windsurf converts agents -> skills (lossy: AGENTS.md format is collapsed
+# into the windsurf skill envelope), so .github/agents/ maps to
+# .windsurf/skills/.
 _CROSS_TARGET_MAPS: dict[str, dict[str, str]] = {
     "claude": {
         ".github/skills/": ".claude/skills/",
@@ -52,10 +45,60 @@ _CROSS_TARGET_MAPS: dict[str, dict[str, str]] = {
         ".github/skills/": ".agents/skills/",
         ".github/agents/": ".codex/agents/",
     },
+    "windsurf": {
+        ".github/skills/": ".windsurf/skills/",
+        ".github/agents/": ".windsurf/skills/",
+    },
     "agent-skills": {
         ".github/skills/": ".agents/skills/",
     },
 }
+
+
+def _all_target_prefixes() -> list[str]:
+    """Union of pack prefixes for every real (deployable) target.
+
+    A target is considered deployable when ``detect_by_dir`` or
+    ``auto_create`` is True; ``copilot-cowork`` (both False) is excluded
+    because it is an opt-in pseudo-target.
+
+    Order is stable: KNOWN_TARGETS insertion order, with deduplication
+    preserving first occurrence.  This keeps downstream YAML deterministic.
+    """
+    prefixes: list[str] = []
+    seen: set[str] = set()
+    for profile in KNOWN_TARGETS.values():
+        if not (profile.detect_by_dir or profile.auto_create):
+            continue
+        for prefix in profile.effective_pack_prefixes:
+            if prefix not in seen:
+                seen.add(prefix)
+                prefixes.append(prefix)
+    return prefixes
+
+
+def _get_target_prefixes(target: str) -> list[str]:
+    """Resolve pack-prefixes for a single target name.
+
+    Reads from ``KNOWN_TARGETS[target].effective_pack_prefixes``.  Special
+    cases:
+
+    * ``"all"`` -- union of every deployable target's prefixes (see
+      :func:`_all_target_prefixes`).
+    * ``"vscode"`` -- treated as an alias for ``"copilot"`` (both deploy
+      to ``.github/``); kept for backward compatibility because
+      ``vscode`` is a valid MCP-only adapter target_name.
+    * Unknown targets -- fall back to the union, matching the previous
+      behavior of falling through to the all-targets default.
+    """
+    if target == "all":
+        return _all_target_prefixes()
+    if target == "vscode":
+        return list(KNOWN_TARGETS["copilot"].effective_pack_prefixes)
+    profile = KNOWN_TARGETS.get(target)
+    if profile is None:
+        return _all_target_prefixes()
+    return list(profile.effective_pack_prefixes)
 
 
 def _filter_files_by_target(
@@ -81,7 +124,7 @@ def _filter_files_by_target(
         prefixes: list[str] = []
         seen_prefixes: set = set()
         for t in target:
-            for p in _TARGET_PREFIXES.get(t, []):
+            for p in _get_target_prefixes(t):
                 if p not in seen_prefixes:
                     seen_prefixes.add(p)
                     prefixes.append(p)
@@ -94,7 +137,7 @@ def _filter_files_by_target(
         for t in target:
             cross_map.update(_CROSS_TARGET_MAPS.get(t, {}))
     else:
-        prefixes = _TARGET_PREFIXES.get(target, _TARGET_PREFIXES["all"])
+        prefixes = _get_target_prefixes(target)
         cross_map = _CROSS_TARGET_MAPS.get(target, {})
 
     direct = [f for f in deployed_files if any(f.startswith(p) for p in prefixes)]

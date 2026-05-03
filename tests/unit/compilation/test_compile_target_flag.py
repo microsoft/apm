@@ -1518,7 +1518,7 @@ class TestResolveCompileTarget:
         assert _resolve_compile_target(["copilot"]) == "vscode"
 
     def test_list_agents_md_only_family_preserves_bare_target(self):
-        """cursor/opencode/codex must NOT collapse to 'vscode' (which would
+        """cursor/opencode/codex/windsurf must NOT collapse to 'vscode' (which would
         wrongly route copilot-instructions.md). Single-element lists keep the
         bare target name; multi-element lists pick the first present."""
         from apm_cli.commands.compile.cli import _resolve_compile_target
@@ -1526,10 +1526,26 @@ class TestResolveCompileTarget:
         assert _resolve_compile_target(["cursor"]) == "cursor"
         assert _resolve_compile_target(["opencode"]) == "opencode"
         assert _resolve_compile_target(["codex"]) == "codex"
+        assert _resolve_compile_target(["windsurf"]) == "windsurf"
         # Multi-element AGENTS.md-only list collapses to a representative bare
         # target (cursor wins by deterministic ordering).
         assert _resolve_compile_target(["cursor", "opencode"]) == "cursor"
         assert _resolve_compile_target(["opencode", "codex"]) == "opencode"
+        assert _resolve_compile_target(["codex", "windsurf"]) == "codex"
+
+    def test_windsurf_routes_via_agents_family(self):
+        """Regression: windsurf must route through the 'agents' compile_family
+        the same way cursor/opencode/codex do.  Before the registry-driven
+        refactor, windsurf was missing from agents_md_family and would have
+        silently collapsed to the 'vscode' fallback (emitting copilot-
+        instructions.md by mistake)."""
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+
+        # Combined with claude/gemini -> frozenset of families
+        assert _resolve_compile_target(["windsurf", "claude"]) == frozenset({"agents", "claude"})
+        assert _resolve_compile_target(["windsurf", "gemini"]) == frozenset({"agents", "gemini"})
+        # Combined with copilot/vscode -> 'vscode' wins (which already includes agents)
+        assert _resolve_compile_target(["windsurf", "copilot"]) == "vscode"
 
     def test_list_cursor_and_claude_returns_agents_claude_set(self):
         from apm_cli.commands.compile.cli import _resolve_compile_target
