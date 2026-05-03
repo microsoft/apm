@@ -631,6 +631,7 @@ class InstallLogger(CommandLogger):
         mcp_count: int,
         errors: int = 0,
         stale_cleaned: int = 0,
+        elapsed_seconds: float | None = None,
     ):
         """Log final install summary.
 
@@ -641,6 +642,10 @@ class InstallLogger(CommandLogger):
             stale_cleaned: Total stale + orphan files removed during
                 this install. Reported as a parenthetical so existing
                 callers and assertion patterns continue to work.
+            elapsed_seconds: Wall-clock duration of the install command.
+                When provided, appended as `` in {x:.1f}s`` before the
+                terminating period so the user can see how long the
+                whole command took (F5, microsoft/apm#1116).
         """
         parts = []
         if apm_count > 0:
@@ -655,14 +660,38 @@ class InstallLogger(CommandLogger):
             file_noun = "file" if stale_cleaned == 1 else "files"
             cleanup_suffix = f" ({stale_cleaned} stale {file_noun} cleaned)"
 
+        timing_suffix = ""
+        if elapsed_seconds is not None:
+            timing_suffix = f" in {elapsed_seconds:.1f}s"
+
         if parts:
             summary = " and ".join(parts)
             if errors > 0:
                 _rich_warning(
-                    f"Installed {summary}{cleanup_suffix} with {errors} error(s).",
+                    f"Installed {summary}{cleanup_suffix}{timing_suffix} with {errors} error(s).",
                     symbol="warning",
                 )
             else:
-                _rich_success(f"Installed {summary}{cleanup_suffix}.", symbol="sparkles")
+                _rich_success(
+                    f"Installed {summary}{cleanup_suffix}{timing_suffix}.",
+                    symbol="sparkles",
+                )
         elif errors > 0:
-            _rich_error(f"Installation failed with {errors} error(s).", symbol="error")
+            _rich_error(
+                f"Installation failed with {errors} error(s){timing_suffix}.",
+                symbol="error",
+            )
+
+    def install_interrupted(self, elapsed_seconds: float):
+        """Log a minimal elapsed-time line when the normal summary did
+        not render (errors, KeyboardInterrupt, click.UsageError).
+
+        Emitted from the outer ``finally`` in ``commands.install.install``
+        so users always see how long the failed/interrupted command ran
+        (F5, microsoft/apm#1116). Best-effort: callers swallow any
+        exception so a render failure cannot mask the original error.
+        """
+        _rich_warning(
+            f"Install interrupted after {elapsed_seconds:.1f}s.",
+            symbol="warning",
+        )
