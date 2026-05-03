@@ -86,6 +86,24 @@ class CommandLogger:
         """Log progress during an operation."""
         _rich_info(message, symbol=symbol)
 
+    def mcp_lookup_heartbeat(self, count: int):
+        """Emit a single batch heartbeat before MCP registry validation
+        (F4, microsoft/apm#1116).
+
+        Surfaces a static ``[>] Looking up N MCP server(s) in
+        registry...`` line so the user sees the install moving forward
+        during the (sometimes multi-second) registry round trip. Static
+        line, not a transient progress bar, so it survives in CI logs
+        and ``2>&1 | tee`` pipelines.
+
+        Skipped silently when ``count <= 0`` to avoid noisy zero-batch
+        output on installs with no registry MCP deps.
+        """
+        if count <= 0:
+            return
+        noun = "server" if count == 1 else "servers"
+        _rich_info(f"Looking up {count} MCP {noun} in registry...", symbol="running")
+
     def info(self, message: str, symbol: str = "info"):
         """Log static advisory / informational context.
 
