@@ -19,11 +19,14 @@ This is the first phase of the install pipeline.  It covers:
 from __future__ import annotations
 
 import builtins
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
+
+_logger = logging.getLogger(__name__)
 
 
 def run(ctx: InstallContext) -> None:
@@ -114,7 +117,7 @@ def run(ctx: InstallContext) -> None:
     logger = ctx.logger
     verbose = ctx.verbose  # noqa: F841
 
-    def download_callback(dep_ref, modules_dir, parent_chain=""):
+    def download_callback(dep_ref, modules_dir, parent_chain="", parent_pkg=None):
         """Download a package during dependency resolution.
 
         Args:
@@ -122,6 +125,11 @@ def run(ctx: InstallContext) -> None:
             modules_dir: Target apm_modules directory.
             parent_chain: Human-readable breadcrumb (e.g. "root > mid")
                 showing which dependency path led to this transitive dep.
+            parent_pkg: APMPackage that declared *dep_ref*, or None for direct
+                deps from the root project. For local deps we use its
+                ``source_path`` as the anchor for relative paths so a
+                transitive ``../sibling`` resolves against the declaring
+                package's directory rather than the root consumer (#857).
         """
         install_path = dep_ref.get_install_path(modules_dir)
         if install_path.exists():
@@ -140,8 +148,20 @@ def run(ctx: InstallContext) -> None:
                     # so use .add() rather than dict-style assignment.
                     callback_failures.add(dep_ref.get_unique_key())
                     return None
+                # Anchor relative paths on the *declaring* package's source
+                # directory when available (#857). Falls back to project_root
+                # for direct deps and for parents that predate source_path.
+                base_dir = (
+                    parent_pkg.source_path
+                    if parent_pkg is not None and parent_pkg.source_path is not None
+                    else project_root
+                )
                 result_path = _copy_local_package(
-                    dep_ref, install_path, project_root, logger=logger
+                    dep_ref,
+                    install_path,
+                    base_dir,
+                    project_root=project_root,
+                    logger=logger,
                 )
                 if result_path:
                     callback_downloaded[dep_ref.get_unique_key()] = None
@@ -208,6 +228,14 @@ def run(ctx: InstallContext) -> None:
 
     dependency_graph = resolver.resolve_dependencies(ctx.apm_dir)
     ctx.dependency_graph = dependency_graph
+
+    # Fold remote-parent local_path rejections into ``callback_failures`` so
+    # the integrate phase skips them via the same gate used for download
+    # failures (PR #1111 review C2). The resolver has already emitted the
+    # red ERROR notice; here we just propagate the dep_key.
+    rejected_remote_local = getattr(resolver, "_rejected_remote_local_keys", set())
+    if rejected_remote_local:
+        callback_failures.update(rejected_remote_local)
 
     # Verbose: show resolved tree summary
     if ctx.logger:
@@ -302,6 +330,67 @@ def run(ctx: InstallContext) -> None:
     )
 
     ctx.deps_to_install = deps_to_install
+
+    # ------------------------------------------------------------------
+    # 7.5 Build dep_key -> parent source_path map for transitive locals
+    # ------------------------------------------------------------------
+    # Local deps declared by a transitive parent must be anchored on the
+    # parent's source dir, not on the consumer's project root (#857). We
+    # walk the dependency tree once here and stash the per-dep base_dir
+    # for the integrate phase to consume.
+    #
+    # Keying caveat (PR #1111 review C3): the map is keyed by
+    # ``dep_ref.get_unique_key()``, which for local deps is the raw
+    # ``local_path`` string. Two different parents that both declare the
+    # same relative ``local_path`` (e.g. both write ``../base``) collapse
+    # to the same key. In the current architecture this collision is
+    # latent: the BFS walk in ``APMDependencyResolver`` already dedupes
+    # by ``get_unique_key()`` so only one node ever exists for that key,
+    # and ``DependencyReference.get_install_path`` shares the same
+    # ``apm_modules/_local/<basename>`` slot regardless of the parent.
+    # That means today the "second parent wins" question never actually
+    # fires -- the second occurrence is dropped at queue-time. We still
+    # detect divergent-anchor writes here and warn loudly, both because
+    # silent first-wins behaviour would mask a real bug if BFS dedup ever
+    # changes, and because the warning gives the user a path to diagnose
+    # surprising layouts (e.g. ``../base`` from two parents resolving to
+    # different absolute directories).
+    dep_base_dirs: builtins.dict[str, Path] = {}
+    try:
+        tree = dependency_graph.dependency_tree
+        for node in tree.nodes.values():
+            parent_node = node.parent
+            if parent_node is None or parent_node.package is None:
+                continue
+            anchor = (
+                parent_node.package.source_path
+                if parent_node.package.source_path is not None
+                else project_root
+            )
+            key = node.dependency_ref.get_unique_key()
+            existing = dep_base_dirs.get(key)
+            if existing is not None and existing != anchor:
+                # Divergent anchors for the same dep key. Keep the first
+                # (deterministic) and surface the conflict so the user can
+                # rename one of the colliding refs or use absolute paths.
+                _logger.warning(
+                    "Local dep %r is referenced from two parents with "
+                    "different anchors (%s vs %s). Using the first; "
+                    "rename one of the local_path values or use absolute "
+                    "paths to disambiguate.",
+                    key,
+                    existing,
+                    anchor,
+                )
+                continue
+            dep_base_dirs[key] = anchor
+    except (AttributeError, KeyError):
+        # Tree shape may differ across releases; fall back to empty map
+        # (callers default to project_root anchoring, matching legacy).
+        # Narrow set: real bugs (TypeError/NameError) should surface, not
+        # silently degrade to legacy anchoring.
+        dep_base_dirs = {}
+    ctx.dep_base_dirs = dep_base_dirs
 
     # ------------------------------------------------------------------
     # 8. Orphan detection: intended_dep_keys

@@ -65,7 +65,11 @@ def _make_bundle(
     for rel, content in files.items():
         p = bundle / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
+        # write_bytes (not write_text) keeps newlines as `\n` on Windows.
+        # Otherwise Path.write_text translates `\n` -> `\r\n` and the
+        # on-disk bytes diverge from the in-memory `content` whose
+        # sha256 we record below, causing verify_bundle_integrity to fail.
+        p.write_bytes(content.encode("utf-8"))
         bundle_files[rel] = _sha256(content)
 
     if include_lockfile:
@@ -309,6 +313,44 @@ class TestAllowedFlagsWithLocalBundle:
         assert result.exit_code != 2, (
             f"Allowed flag {flag_args} produced UsageError. output={result.output!r}"
         )
+
+
+class TestExceptionHandlerScopeRegression:
+    """Regression: exception handlers must not raise UnboundLocalError when
+    the local-bundle early-exit branch (or any code before the snapshot var
+    init) raises. The bug masked real errors as
+    'UnboundLocalError: _snapshot_manifest_path' on Windows CI -- and would
+    mask any other early-branch exception on every platform."""
+
+    def test_local_bundle_raise_does_not_unbound_local_error(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        bundle = _make_bundle(tmp_path / "src")
+        project = _make_project(tmp_path / "dst")
+
+        # Force the local-bundle handler to raise a generic Exception, which
+        # will be caught by `except Exception as e` in commands/install.py.
+        # If `_snapshot_manifest_path` is not initialised before the branch
+        # that calls install_local_bundle, the handler raises
+        # UnboundLocalError instead of cleanly logging the original error.
+        def _boom(**kwargs):
+            raise RuntimeError("simulated handler failure")
+
+        monkeypatch.setattr("apm_cli.install.local_bundle_handler.install_local_bundle", _boom)
+
+        result = _invoke(project, monkeypatch, str(bundle))
+
+        # Exception was caught and reported -- not propagated as
+        # UnboundLocalError. catch_exceptions=False is set in _invoke, so a
+        # genuine UnboundLocalError would surface as result.exception.
+        if result.exception is not None:
+            assert not isinstance(result.exception, UnboundLocalError), (
+                "exception handler raised UnboundLocalError instead of "
+                "handling the original error: "
+                f"{result.exception!r}\noutput={result.output!r}"
+            )
 
 
 # ---------------------------------------------------------------------------

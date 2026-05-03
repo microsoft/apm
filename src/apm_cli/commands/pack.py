@@ -65,7 +65,7 @@ Exit codes:
     "-t",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Auto-detects if not specified.",
+    help="Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with 'agent-skills' for both.",
 )
 @click.option(
     "--archive",
@@ -106,6 +106,17 @@ Exit codes:
     default=None,
     help="Marketplace: override output path (default: .claude-plugin/marketplace.json).",
 )
+@click.option(
+    "--legacy-skill-paths",
+    "legacy_skill_paths",
+    is_flag=True,
+    default=False,
+    help=(
+        "Deploy skill files to per-client paths (e.g. .cursor/skills/) instead of "
+        "the shared .agents/skills/ directory. Compatibility flag for projects that "
+        "need per-client skill layouts."
+    ),
+)
 @click.pass_context
 def pack_cmd(
     ctx,
@@ -119,6 +130,7 @@ def pack_cmd(
     offline,
     include_prerelease,
     marketplace_output,
+    legacy_skill_paths,
 ):
     """Pack APM artifacts: bundle and/or marketplace.json."""
     logger = CommandLogger("pack", verbose=verbose, dry_run=dry_run)

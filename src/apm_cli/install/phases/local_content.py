@@ -30,8 +30,9 @@ _copy_local_package
 
 from pathlib import Path
 
-from apm_cli.utils.console import _rich_error
-from apm_cli.utils.path_security import safe_rmtree
+from apm_cli.utils.path_security import (
+    safe_rmtree,
+)
 
 # ---------------------------------------------------------------------------
 # Root primitive detection helpers
@@ -83,32 +84,77 @@ def _has_local_apm_content(project_root):
 # ---------------------------------------------------------------------------
 
 
-def _copy_local_package(dep_ref, install_path, project_root, logger=None):
+def _copy_local_package(dep_ref, install_path, base_dir, *, project_root, logger):
     """Copy a local package to apm_modules/.
 
     Args:
-        dep_ref: DependencyReference with is_local=True
-        install_path: Target path under apm_modules/
-        project_root: Project root for resolving relative paths
-        logger: Optional CommandLogger for structured output
+        dep_ref: DependencyReference with is_local=True.
+        install_path: Target path under apm_modules/.
+        base_dir: Directory used to resolve a relative ``dep_ref.local_path``.
+            For direct deps from the root project this is the project root;
+            for transitive deps it is the source directory of the package
+            whose apm.yml declared *dep_ref* (#857). Must NOT be confused
+            with ``project_root`` -- the anchoring base and the security
+            containment boundary are deliberately distinct concerns.
+        project_root: Project root, threaded through for symmetry with the
+            anchoring story but NOT used as a hard containment boundary
+            here. The actual untrusted-source boundary lives upstream in
+            :mod:`apm_cli.deps.apm_resolver` (``_try_load_dependency_package``
+            dual-rejects any local_path declared by a remote parent before
+            this function ever runs). Enforcing project-root containment
+            *here* would also block legitimate sibling layouts -- e.g.
+            ``apm install ../pkg-a`` from a monorepo workspace -- which
+            users explicitly opt into. Kept on the signature so callers
+            keep the security model in mind and so a future tightening
+            (e.g. opt-in strict mode) has a hook.
+        logger: Required CommandLogger for structured output. Callers must
+            thread one in; we no longer fall back to a bare console helper
+            (#940 SR4) because doing so masked logger threading bugs in
+            transitive call stacks.
 
     Returns:
-        install_path on success, None on failure
+        install_path on success, None on failure.
+
+    Notes:
+        We deliberately do NOT call ``validate_path_segments`` on
+        ``dep_ref.local_path``: that helper rejects ``..`` segments, which
+        would break the legitimate ``../sibling`` pattern this PR enables.
+        The untrusted-source boundary is the resolver-level dual-reject
+        of remote-parent local_paths; everything reaching this function
+        comes from a parent the user already trusts (their own manifest,
+        a CLI arg, or another local package they explicitly added).
     """
     import shutil
 
+    # project_root retained on signature for future strict-mode hook (see
+    # docstring); not consumed in the current copy path.
+    _ = project_root
+
+    # PR #1111 review C1: ``ctx.logger`` is allowed to be None
+    # (``run_install_pipeline(logger=None)`` is a public, documented entry
+    # point). Without this guard the unconditional ``logger.error(...)``
+    # calls below would AttributeError for any local dep when a caller
+    # does not thread an InstallLogger through. Defaulting to the rich-
+    # console-backed ``NullCommandLogger`` keeps the error visible to the
+    # user while preserving the documented "logger is required" contract
+    # for callers that DO thread one in (their logger wins).
+    if logger is None:
+        from apm_cli.core.null_logger import NullCommandLogger
+
+        logger = NullCommandLogger()
+
     local = Path(dep_ref.local_path).expanduser()
+    # Anchor on the *declaring* package's directory (#857). For direct deps
+    # from the root, ``base_dir`` IS ``project_root`` so behavior is
+    # unchanged. For transitive deps, ``base_dir`` is the parent package's
+    # source dir. Absolute paths bypass anchoring.
     if not local.is_absolute():  # noqa: SIM108
-        local = (project_root / local).resolve()
+        local = (base_dir / local).resolve()
     else:
         local = local.resolve()
 
     if not local.is_dir():
-        msg = f"Local package path does not exist: {dep_ref.local_path}"
-        if logger:
-            logger.error(msg)
-        else:
-            _rich_error(msg)
+        logger.error(f"Local package path does not exist: {dep_ref.local_path}")
         return None
     from apm_cli.utils.helpers import find_plugin_json
 
@@ -117,14 +163,10 @@ def _copy_local_package(dep_ref, install_path, project_root, logger=None):
         and not (local / "SKILL.md").exists()
         and find_plugin_json(local) is None
     ):
-        msg = (
-            f"Local package is not a valid APM package "
+        logger.error(
+            "Local package is not a valid APM package "
             f"(no apm.yml, SKILL.md, or plugin.json): {dep_ref.local_path}"
         )
-        if logger:
-            logger.error(msg)
-        else:
-            _rich_error(msg)
         return None
 
     # Ensure parent exists and clean target (always re-copy for local deps)
@@ -135,5 +177,15 @@ def _copy_local_package(dep_ref, install_path, project_root, logger=None):
         apm_modules_dir = install_path.parent.parent  # _local/<name> -> apm_modules
         safe_rmtree(install_path, apm_modules_dir)
 
+    # SECURITY: symlinks=True preserves in-package symlinks rather than
+    # dereferencing them. This is INTENTIONAL: a package author who ships a
+    # symlink owns the consequences. The link is inert in apm_modules; any
+    # consumer tool that follows it is responsible for its own sandboxing.
+    # SECURITY: TOCTOU window between local.resolve() above and copytree
+    # here. An attacker with write access to the source tree could swap the
+    # directory for a symlink in this gap; but such an attacker can already
+    # modify deployed files directly, so the mitigation cost (atomic dir
+    # operations) outweighs the marginal risk. Future hardening should land
+    # at this site.
     shutil.copytree(local, install_path, dirs_exist_ok=False, symlinks=True)
     return install_path

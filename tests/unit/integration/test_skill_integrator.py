@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import pytest
+
 from apm_cli.integration.skill_integrator import (
     SkillIntegrationResult,
     SkillIntegrator,
@@ -23,6 +25,34 @@ from apm_cli.models.apm_package import (
     PackageType,
     ResolvedReference,
 )
+
+
+def _setup_agents_orphan_cleanup(project_root: Path, skill_names: list[str]) -> None:
+    """Set up state required for ``.agents/skills/`` orphan cleanup to run.
+
+    Cleanup of the cross-tool ``.agents/skills/`` dir requires:
+    1. The owning target directory (e.g. ``.github/``) to exist as a trigger.
+    2. The orphaned skills to appear in the lockfile's ``deployed_files`` so
+       they pass the ownership check (foreign skills are otherwise skipped).
+    """
+    import yaml
+
+    (project_root / ".github").mkdir(exist_ok=True)
+    deps = [
+        {
+            "repo_url": f"owner/{name}",
+            "resolved_commit": "abc123",
+            "deployed_files": [f".agents/skills/{name}/SKILL.md"],
+        }
+        for name in skill_names
+    ]
+    (project_root / "apm.lock.yaml").write_text(
+        yaml.dump(
+            {"lockfile_version": "1", "dependencies": deps},
+            default_flow_style=False,
+        ),
+        encoding="utf-8",
+    )
 
 
 class TestToHyphenCase:
@@ -111,7 +141,7 @@ class TestSkillIntegrator:
         Uses the install folder name for simplicity and consistency.
         """
         skill_name = package_info.install_path.name
-        return self.project_root / ".github" / "skills" / skill_name
+        return self.project_root / ".agents" / "skills" / skill_name
 
     # ========== should_integrate tests ==========
 
@@ -388,7 +418,7 @@ class TestSkillIntegrator:
         assert result.skill_skipped is True
         assert result.skill_path is None
         # No skill directory should be created
-        skill_dir = self.project_root / ".github" / "skills" / "awesome-copilot"
+        skill_dir = self.project_root / ".agents" / "skills" / "awesome-copilot"
         assert not skill_dir.exists()
 
     def test_integrate_package_skill_processes_virtual_subdirectory_packages(self):
@@ -470,7 +500,7 @@ class TestSkillIntegrator:
         assert result2.skill_skipped is True
 
         # No skill directories should exist
-        skills_dir = self.project_root / ".github" / "skills"
+        skills_dir = self.project_root / ".agents" / "skills"
         assert not skills_dir.exists()
 
     def test_integrate_package_skill_skips_when_unchanged(self):
@@ -528,9 +558,10 @@ metadata:
         """
         # Simulate an installed skill from a subdirectory package
         skill_name = "mcp-builder"
-        skill_dir = self.project_root / ".github" / "skills" / skill_name
+        skill_dir = self.project_root / ".agents" / "skills" / skill_name
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text("---\nname: mcp-builder\n---\n# MCP Builder Skill\n")
+        _setup_agents_orphan_cleanup(self.project_root, [skill_name])
 
         # Now simulate that this package was uninstalled (not in dependencies)
         apm_package = Mock()
@@ -546,7 +577,7 @@ metadata:
         """Test that sync keeps skills for still-installed subdirectory packages."""
         # Simulate an installed skill from a subdirectory package
         skill_name = "mcp-builder"
-        skill_dir = self.project_root / ".github" / "skills" / skill_name
+        skill_dir = self.project_root / ".agents" / "skills" / skill_name
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text("---\nname: mcp-builder\n---\n# MCP Builder Skill\n")
 
@@ -1211,7 +1242,7 @@ Use when building MCP servers or tools.
     def test_copy_skill_updates_existing_skill(self):
         """Test that existing skill is updated on reinstall (overwrite)."""
         # Create target skill directory first
-        skill_dir = self.project_root / ".github" / "skills" / "my-skill"
+        skill_dir = self.project_root / ".agents" / "skills" / "my-skill"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text("---\nname: my-skill\n---\n# OLD CONTENT")
         (skill_dir / "old-file.txt").write_text("This should be removed")
@@ -1258,7 +1289,7 @@ Use when building MCP servers or tools.
         assert paths == []
 
         # No skill directory should be created
-        assert not (self.project_root / ".github" / "skills" / "instructions-only").exists()
+        assert not (self.project_root / ".agents" / "skills" / "instructions-only").exists()
 
     # ========== Test T6: Package type routing ==========
 
@@ -1315,8 +1346,8 @@ Use when building MCP servers or tools.
         github_path = paths[0] if paths else None
 
         assert github_path is not None
-        assert (self.project_root / ".github" / "skills").exists()
-        assert (self.project_root / ".github" / "skills" / "my-skill" / "SKILL.md").exists()
+        assert (self.project_root / ".agents" / "skills").exists()
+        assert (self.project_root / ".agents" / "skills" / "my-skill" / "SKILL.md").exists()
 
     # ========== Test T6: APM metadata is added for orphan detection ==========
 
@@ -1433,7 +1464,7 @@ Use this skill for comprehensive guidance.
         assert result.skill_created is True
         assert result.skill_path is not None
 
-        skill_dir = self.project_root / ".github" / "skills" / "complete-skill"
+        skill_dir = self.project_root / ".agents" / "skills" / "complete-skill"
 
         # Verify all subdirectories are copied
         assert (skill_dir / "SKILL.md").exists()
@@ -1459,7 +1490,7 @@ Use this skill for comprehensive guidance.
         assert result.skill_created is True
 
         # Skill should be installed with normalized name
-        normalized_skill_dir = self.project_root / ".github" / "skills" / "my-upper-case-skill"
+        normalized_skill_dir = self.project_root / ".agents" / "skills" / "my-upper-case-skill"
         assert normalized_skill_dir.exists()
         assert (normalized_skill_dir / "SKILL.md").exists()
 
@@ -1514,7 +1545,7 @@ Use this skill for comprehensive guidance.
 
         # Install first package -- no existing skill, no warning expected.
         self.integrator.integrate_package_skill(pkg_a, self.project_root)
-        assert (self.project_root / ".github" / "skills" / "humanizer" / "SKILL.md").exists()
+        assert (self.project_root / ".agents" / "skills" / "humanizer" / "SKILL.md").exists()
 
         # --- Second package: virtual skill inside a dotfiles repo ---
         # Also ends in "humanizer" so it would deploy to the same skills/humanizer dir.
@@ -1557,7 +1588,7 @@ Use this skill for comprehensive guidance.
         assert any("humanizer" in d.message for d in groups[CATEGORY_OVERWRITE])
 
         # The skill directory should still be updated (overwrite proceeds after warning).
-        content = (self.project_root / ".github" / "skills" / "humanizer" / "SKILL.md").read_text()
+        content = (self.project_root / ".agents" / "skills" / "humanizer" / "SKILL.md").read_text()
         assert "Humanizer v2" in content
 
     def test_native_skill_self_reinstall_no_diagnostic(self):
@@ -1608,7 +1639,7 @@ Use this skill for comprehensive guidance.
                 repo_url="brandonwise/humanizer",
                 resolved_commit="abc123",
                 deployed_files=[
-                    ".github/skills/humanizer/",
+                    ".agents/skills/humanizer/",
                     ".claude/skills/humanizer/",
                 ],
             )
@@ -1617,7 +1648,7 @@ Use this skill for comprehensive guidance.
         lockfile_path.write_text(lockfile.to_yaml())
 
         # Deploy the existing skill directory so there is something to overwrite.
-        existing = self.project_root / ".github" / "skills" / "humanizer"
+        existing = self.project_root / ".agents" / "skills" / "humanizer"
         existing.mkdir(parents=True)
         (existing / "SKILL.md").write_text("---\nname: humanizer\n---\n# Original\n")
 
@@ -1730,12 +1761,12 @@ Use this skill for comprehensive guidance.
             LockedDependency(
                 repo_url="brandonwise/humanizer",
                 resolved_commit="abc123",
-                deployed_files=[".github/skills/humanizer/"],
+                deployed_files=[".agents/skills/humanizer/"],
             )
         )
         get_lockfile_path(self.project_root).write_text(lockfile.to_yaml())
 
-        existing = self.project_root / ".github" / "skills" / "humanizer"
+        existing = self.project_root / ".agents" / "skills" / "humanizer"
         existing.mkdir(parents=True)
         (existing / "SKILL.md").write_text("---\nname: humanizer\n---\n# Original\n")
 
@@ -1767,7 +1798,7 @@ Use this skill for comprehensive guidance.
 
         from apm_cli.utils.diagnostics import CATEGORY_OVERWRITE, DiagnosticCollector
 
-        existing = self.project_root / ".github" / "skills" / "humanizer"
+        existing = self.project_root / ".agents" / "skills" / "humanizer"
         existing.mkdir(parents=True)
         (existing / "SKILL.md").write_text("---\nname: humanizer\n---\n# Original\n")
 
@@ -1882,7 +1913,7 @@ class TestClaudeSkillsCompatibilityCopy:
 
         # Should create in .github/skills/
         assert result.skill_created is True
-        github_skill = self.project_root / ".github" / "skills" / "my-skill" / "SKILL.md"
+        github_skill = self.project_root / ".agents" / "skills" / "my-skill" / "SKILL.md"
         assert github_skill.exists()
 
         # Should NOT create .claude/ folder
@@ -1935,7 +1966,7 @@ class TestClaudeSkillsCompatibilityCopy:
 
         # Should create in .github/skills/
         assert result.skill_created is True
-        github_skill_dir = self.project_root / ".github" / "skills" / "my-skill"
+        github_skill_dir = self.project_root / ".agents" / "skills" / "my-skill"
         assert github_skill_dir.exists()
         assert (github_skill_dir / "SKILL.md").exists()
         assert (github_skill_dir / "references" / "guide.md").exists()
@@ -1982,7 +2013,7 @@ Detailed instructions here.
 
         self.integrator.integrate_package_skill(package_info, self.project_root)
 
-        github_skill_dir = self.project_root / ".github" / "skills" / "complete-skill"
+        github_skill_dir = self.project_root / ".agents" / "skills" / "complete-skill"
         claude_skill_dir = self.project_root / ".claude" / "skills" / "complete-skill"
 
         # Compare all files
@@ -2035,7 +2066,7 @@ Detailed instructions here.
 
         # Verify both locations have v1 content
         github_content_v1 = (
-            self.project_root / ".github" / "skills" / "my-skill" / "SKILL.md"
+            self.project_root / ".agents" / "skills" / "my-skill" / "SKILL.md"
         ).read_text()
         claude_content_v1 = (
             self.project_root / ".claude" / "skills" / "my-skill" / "SKILL.md"
@@ -2059,7 +2090,7 @@ Detailed instructions here.
 
         # Verify both locations have v2 content
         github_content_v2 = (
-            self.project_root / ".github" / "skills" / "my-skill" / "SKILL.md"
+            self.project_root / ".agents" / "skills" / "my-skill" / "SKILL.md"
         ).read_text()
         claude_content_v2 = (
             self.project_root / ".claude" / "skills" / "my-skill" / "SKILL.md"
@@ -2085,7 +2116,7 @@ Detailed instructions here.
             self.integrator.integrate_package_skill(package_info, self.project_root)
 
         # .github/skills/ should have all skills
-        github_skills = self.project_root / ".github" / "skills"
+        github_skills = self.project_root / ".agents" / "skills"
         assert github_skills.exists()
         assert (github_skills / "skill-0").exists()
         assert (github_skills / "skill-1").exists()
@@ -2113,7 +2144,7 @@ Detailed instructions here.
         assert len(paths) >= 2
         github_path = paths[0]
         claude_path = paths[1]
-        assert github_path == self.project_root / ".github" / "skills" / "my-skill"
+        assert github_path == self.project_root / ".agents" / "skills" / "my-skill"
         assert claude_path == self.project_root / ".claude" / "skills" / "my-skill"
 
     def test_copy_skill_to_target_returns_none_claude_when_no_claude_dir(self):
@@ -2137,13 +2168,14 @@ Detailed instructions here.
     def test_sync_removes_orphans_from_both_locations(self):
         """Test that sync_integration removes orphaned skills from both locations."""
         # Create skill directories in both locations (no metadata needed)
-        github_skill = self.project_root / ".github" / "skills" / "orphan-skill"
+        github_skill = self.project_root / ".agents" / "skills" / "orphan-skill"
         github_skill.mkdir(parents=True)
         (github_skill / "SKILL.md").write_text("# Orphan Skill\n")
 
         claude_skill = self.project_root / ".claude" / "skills" / "orphan-skill"
         claude_skill.mkdir(parents=True)
         (claude_skill / "SKILL.md").write_text("# Orphan Skill\n")
+        _setup_agents_orphan_cleanup(self.project_root, ["orphan-skill"])
 
         # Mock apm_package with no dependencies (orphan)
         apm_package = Mock()
@@ -2161,7 +2193,7 @@ Detailed instructions here.
         # Create skill directories in both locations (no metadata needed)
         skill_name = "installed-skill"
 
-        github_skill = self.project_root / ".github" / "skills" / skill_name
+        github_skill = self.project_root / ".agents" / "skills" / skill_name
         github_skill.mkdir(parents=True)
         (github_skill / "SKILL.md").write_text("# Installed Skill\n")
 
@@ -2187,9 +2219,10 @@ Detailed instructions here.
     def test_sync_only_cleans_claude_skills_when_claude_exists(self):
         """Test that sync only cleans .claude/skills/ when .claude/ directory exists."""
         # Only .github/ exists, not .claude/
-        github_skill = self.project_root / ".github" / "skills" / "orphan-skill"
+        github_skill = self.project_root / ".agents" / "skills" / "orphan-skill"
         github_skill.mkdir(parents=True)
         (github_skill / "SKILL.md").write_text("# Orphan Skill\n")
+        _setup_agents_orphan_cleanup(self.project_root, ["orphan-skill"])
 
         apm_package = Mock()
         apm_package.get_apm_dependencies.return_value = []
@@ -2226,7 +2259,7 @@ Detailed instructions here.
 
         # Both copies must be identical to the source
         github_content = (
-            self.project_root / ".github" / "skills" / "my-skill" / "SKILL.md"
+            self.project_root / ".agents" / "skills" / "my-skill" / "SKILL.md"
         ).read_text()
         assert github_content == original_content
 
@@ -2244,7 +2277,7 @@ Detailed instructions here.
         Any directory not matching an installed package name is removed.
         """
         # Create a skill dir not matching any installed package
-        unknown_skill = self.project_root / ".github" / "skills" / "unknown-skill"
+        unknown_skill = self.project_root / ".agents" / "skills" / "unknown-skill"
         unknown_skill.mkdir(parents=True)
         (unknown_skill / "SKILL.md").write_text("---\nname: unknown\n---\n# Custom Skill\n")
 
@@ -2253,6 +2286,7 @@ Detailed instructions here.
         claude_unknown = self.project_root / ".claude" / "skills" / "my-workflow"
         claude_unknown.mkdir(parents=True)
         (claude_unknown / "SKILL.md").write_text("---\nname: my-workflow\n---\n# Workflow\n")
+        _setup_agents_orphan_cleanup(self.project_root, ["unknown-skill"])
 
         # Run sync with no dependencies
         apm_package = Mock()
@@ -2272,9 +2306,10 @@ Detailed instructions here.
         name is removed, regardless of its contents.
         """
         # Create a skill directory without SKILL.md
-        empty_skill = self.project_root / ".github" / "skills" / "empty-skill"
+        empty_skill = self.project_root / ".agents" / "skills" / "empty-skill"
         empty_skill.mkdir(parents=True)
         (empty_skill / "README.md").write_text("# Some file")
+        _setup_agents_orphan_cleanup(self.project_root, ["empty-skill"])
 
         apm_package = Mock()
         apm_package.get_apm_dependencies.return_value = []
@@ -2292,7 +2327,7 @@ Detailed instructions here.
         Malformed SKILL.md has no effect on orphan detection.
         """
         # Create a skill with malformed frontmatter
-        malformed_skill = self.project_root / ".github" / "skills" / "malformed"
+        malformed_skill = self.project_root / ".agents" / "skills" / "malformed"
         malformed_skill.mkdir(parents=True)
         (malformed_skill / "SKILL.md").write_text("""---
 invalid yaml: [this is broken
@@ -2300,6 +2335,7 @@ invalid yaml: [this is broken
 ---
 # Content
 """)
+        _setup_agents_orphan_cleanup(self.project_root, ["malformed"])
 
         apm_package = Mock()
         apm_package.get_apm_dependencies.return_value = []
@@ -2316,9 +2352,10 @@ invalid yaml: [this is broken
         assert not (self.project_root / ".claude").exists()
 
         # Create an orphan skill in .github/skills/
-        orphan_skill = self.project_root / ".github" / "skills" / "orphan"
+        orphan_skill = self.project_root / ".agents" / "skills" / "orphan"
         orphan_skill.mkdir(parents=True)
         (orphan_skill / "SKILL.md").write_text("# Orphan Skill\n")
+        _setup_agents_orphan_cleanup(self.project_root, ["orphan"])
 
         apm_package = Mock()
         apm_package.get_apm_dependencies.return_value = []
@@ -2336,7 +2373,7 @@ invalid yaml: [this is broken
         (self.project_root / ".claude").mkdir()
 
         # Create orphan in .github/skills/
-        github_orphan = self.project_root / ".github" / "skills" / "orphan-a"
+        github_orphan = self.project_root / ".agents" / "skills" / "orphan-a"
         github_orphan.mkdir(parents=True)
         (github_orphan / "SKILL.md").write_text("# Orphan A\n")
 
@@ -2344,6 +2381,7 @@ invalid yaml: [this is broken
         claude_orphan = self.project_root / ".claude" / "skills" / "orphan-b"
         claude_orphan.mkdir(parents=True)
         (claude_orphan / "SKILL.md").write_text("# Orphan B\n")
+        _setup_agents_orphan_cleanup(self.project_root, ["orphan-a"])
 
         apm_package = Mock()
         apm_package.get_apm_dependencies.return_value = []
@@ -2426,13 +2464,13 @@ class TestSubSkillPromotion:
         self.integrator.integrate_package_skill(pkg_info, self.project_root)
 
         # Parent skill exists
-        assert (self.project_root / ".github" / "skills" / "modernisation" / "SKILL.md").exists()
+        assert (self.project_root / ".agents" / "skills" / "modernisation" / "SKILL.md").exists()
         # .apm/ excluded from parent copy to avoid redundant storage
-        assert not (self.project_root / ".github" / "skills" / "modernisation" / ".apm").exists()
+        assert not (self.project_root / ".agents" / "skills" / "modernisation" / ".apm").exists()
         # Sub-skill promoted to top level
-        assert (self.project_root / ".github" / "skills" / "azure-naming" / "SKILL.md").exists()
+        assert (self.project_root / ".agents" / "skills" / "azure-naming" / "SKILL.md").exists()
         content = (
-            self.project_root / ".github" / "skills" / "azure-naming" / "SKILL.md"
+            self.project_root / ".agents" / "skills" / "azure-naming" / "SKILL.md"
         ).read_text()
         assert "azure-naming" in content
 
@@ -2446,7 +2484,7 @@ class TestSubSkillPromotion:
         self.integrator.integrate_package_skill(pkg_info, self.project_root)
 
         for sub in ["skill-a", "skill-b", "skill-c"]:
-            assert (self.project_root / ".github" / "skills" / sub / "SKILL.md").exists()
+            assert (self.project_root / ".agents" / "skills" / sub / "SKILL.md").exists()
 
     def test_sub_skill_without_skill_md_not_promoted(self):
         """Directories under .apm/skills/ without SKILL.md should be ignored."""
@@ -2458,13 +2496,13 @@ class TestSubSkillPromotion:
         pkg_info = self._create_package_info(name="pkg", install_path=package_dir)
         self.integrator.integrate_package_skill(pkg_info, self.project_root)
 
-        assert (self.project_root / ".github" / "skills" / "valid-sub" / "SKILL.md").exists()
-        assert not (self.project_root / ".github" / "skills" / "no-skill-md").exists()
+        assert (self.project_root / ".agents" / "skills" / "valid-sub" / "SKILL.md").exists()
+        assert not (self.project_root / ".agents" / "skills" / "no-skill-md").exists()
 
     def test_sub_skill_name_collision_overwrites_with_warning(self):
         """If a promoted sub-skill name clashes with an existing skill, it overwrites and warns."""
         # Pre-existing skill at top level
-        existing = self.project_root / ".github" / "skills" / "azure-naming"
+        existing = self.project_root / ".agents" / "skills" / "azure-naming"
         existing.mkdir(parents=True)
         (existing / "SKILL.md").write_text("# Old content")
 
@@ -2483,7 +2521,7 @@ class TestSubSkillPromotion:
 
         # Should be overwritten with sub-skill content
         content = (
-            self.project_root / ".github" / "skills" / "azure-naming" / "SKILL.md"
+            self.project_root / ".agents" / "skills" / "azure-naming" / "SKILL.md"
         ).read_text()
         assert "Sub-skill azure-naming" in content
         assert "Old content" not in content
@@ -2499,7 +2537,7 @@ class TestSubSkillPromotion:
 
         self.integrator.integrate_package_skill(pkg_info, self.project_root)
 
-        assert (self.project_root / ".github" / "skills" / "azure-naming" / "SKILL.md").exists()
+        assert (self.project_root / ".agents" / "skills" / "azure-naming" / "SKILL.md").exists()
         assert (self.project_root / ".claude" / "skills" / "azure-naming" / "SKILL.md").exists()
 
     def test_sub_skill_name_normalization(self):
@@ -2518,8 +2556,8 @@ class TestSubSkillPromotion:
         self.integrator.integrate_package_skill(pkg_info, self.project_root)
 
         # Should be normalized to lowercase-hyphenated
-        assert not (self.project_root / ".github" / "skills" / "My_Azure_Skill").exists()
-        assert (self.project_root / ".github" / "skills" / "my-azure-skill" / "SKILL.md").exists()
+        assert not (self.project_root / ".agents" / "skills" / "My_Azure_Skill").exists()
+        assert (self.project_root / ".agents" / "skills" / "my-azure-skill" / "SKILL.md").exists()
 
     def test_package_without_sub_skills_unchanged(self):
         """Packages without .apm/skills/ subdirectory should work as before."""
@@ -2531,8 +2569,8 @@ class TestSubSkillPromotion:
         result = self.integrator.integrate_package_skill(pkg_info, self.project_root)
 
         assert result.skill_created is True
-        assert (self.project_root / ".github" / "skills" / "simple-skill" / "SKILL.md").exists()
-        skills = list((self.project_root / ".github" / "skills").iterdir())
+        assert (self.project_root / ".agents" / "skills" / "simple-skill" / "SKILL.md").exists()
+        skills = list((self.project_root / ".agents" / "skills").iterdir())
         assert len(skills) == 1
 
     def test_sync_integration_preserves_promoted_sub_skills(self):
@@ -2549,7 +2587,7 @@ class TestSubSkillPromotion:
 
         # Create the promoted skills in .github/skills/
         for name in ["modernisation", "azure-naming"]:
-            d = self.project_root / ".github" / "skills" / name
+            d = self.project_root / ".agents" / "skills" / name
             d.mkdir(parents=True)
             (d / "SKILL.md").write_text(f"# {name}")
 
@@ -2562,8 +2600,8 @@ class TestSubSkillPromotion:
 
         # Neither should be removed
         assert result["files_removed"] == 0
-        assert (self.project_root / ".github" / "skills" / "modernisation").exists()
-        assert (self.project_root / ".github" / "skills" / "azure-naming").exists()
+        assert (self.project_root / ".agents" / "skills" / "modernisation").exists()
+        assert (self.project_root / ".agents" / "skills" / "azure-naming").exists()
 
 
 class TestSubSkillPromotionForNonSkillPackages:
@@ -2630,7 +2668,7 @@ class TestSubSkillPromotionForNonSkillPackages:
         assert result.skill_skipped is True
         # But sub-skills should be promoted
         assert result.sub_skills_promoted == 1
-        assert (self.project_root / ".github" / "skills" / "style-checker" / "SKILL.md").exists()
+        assert (self.project_root / ".agents" / "skills" / "style-checker" / "SKILL.md").exists()
 
     def test_multiple_sub_skills_promoted_from_instructions_package(self):
         """All sub-skills should be promoted from INSTRUCTIONS-type packages."""
@@ -2642,8 +2680,8 @@ class TestSubSkillPromotionForNonSkillPackages:
         result = self.integrator.integrate_package_skill(pkg_info, self.project_root)
 
         assert result.sub_skills_promoted == 2
-        assert (self.project_root / ".github" / "skills" / "skill-a" / "SKILL.md").exists()
-        assert (self.project_root / ".github" / "skills" / "skill-b" / "SKILL.md").exists()
+        assert (self.project_root / ".agents" / "skills" / "skill-a" / "SKILL.md").exists()
+        assert (self.project_root / ".agents" / "skills" / "skill-b" / "SKILL.md").exists()
 
     def test_no_sub_skills_returns_zero(self):
         """Packages without .apm/skills/ should return sub_skills_promoted=0."""
@@ -2653,7 +2691,7 @@ class TestSubSkillPromotionForNonSkillPackages:
         result = self.integrator.integrate_package_skill(pkg_info, self.project_root)
 
         assert result.sub_skills_promoted == 0
-        assert not (self.project_root / ".github" / "skills").exists()
+        assert not (self.project_root / ".agents" / "skills").exists()
 
     def test_sub_skills_promoted_to_claude_when_claude_exists(self):
         """Sub-skills from INSTRUCTIONS packages should also go to .claude/skills/ if both dirs exist."""
@@ -2667,15 +2705,16 @@ class TestSubSkillPromotionForNonSkillPackages:
         result = self.integrator.integrate_package_skill(pkg_info, self.project_root)
 
         assert result.sub_skills_promoted == 1
-        assert (self.project_root / ".github" / "skills" / "style-checker" / "SKILL.md").exists()
+        assert (self.project_root / ".agents" / "skills" / "style-checker" / "SKILL.md").exists()
         assert (self.project_root / ".claude" / "skills" / "style-checker" / "SKILL.md").exists()
 
     def test_sync_removes_orphaned_promoted_sub_skills(self):
         """When a package is uninstalled, its promoted sub-skills should be cleaned up."""
         # Create the promoted sub-skill as if it had been installed
-        style_checker = self.project_root / ".github" / "skills" / "style-checker"
+        style_checker = self.project_root / ".agents" / "skills" / "style-checker"
         style_checker.mkdir(parents=True)
         (style_checker / "SKILL.md").write_text("# style-checker")
+        _setup_agents_orphan_cleanup(self.project_root, ["style-checker"])
 
         # Simulate an empty apm.yml (package was uninstalled)
         apm_package = Mock()
@@ -2698,7 +2737,7 @@ class TestSubSkillPromotionForNonSkillPackages:
         (sub_dir / "SKILL.md").write_text("# style-checker")
 
         # Create the promoted sub-skill in .github/skills/
-        style_checker = self.project_root / ".github" / "skills" / "style-checker"
+        style_checker = self.project_root / ".agents" / "skills" / "style-checker"
         style_checker.mkdir(parents=True)
         (style_checker / "SKILL.md").write_text("# style-checker")
 
@@ -2773,7 +2812,7 @@ class TestSubSkillContentSkipAndCollisionProtection:
 
         # First install
         self.integrator.integrate_package_skill(pkg_info, self.project_root)
-        target = self.project_root / ".github" / "skills" / "my-skill" / "SKILL.md"
+        target = self.project_root / ".agents" / "skills" / "my-skill" / "SKILL.md"
         assert target.exists()
 
         # Second install — content identical; copytree/rmtree should NOT be called
@@ -2796,7 +2835,7 @@ class TestSubSkillContentSkipAndCollisionProtection:
         self.integrator.integrate_package_skill(pkg_info, self.project_root)
 
         # Modify the deployed skill to simulate drift
-        target = self.project_root / ".github" / "skills" / "my-skill" / "SKILL.md"
+        target = self.project_root / ".agents" / "skills" / "my-skill" / "SKILL.md"
         target.write_text("# Modified by user")
 
         # Second install — content differs
@@ -2810,7 +2849,7 @@ class TestSubSkillContentSkipAndCollisionProtection:
     def test_user_authored_skill_skipped_without_force(self):
         """User-authored skills (not in managed_files) should be skipped without --force."""
         # Create a user-authored skill at the target path
-        user_skill = self.project_root / ".github" / "skills" / "my-skill"
+        user_skill = self.project_root / ".agents" / "skills" / "my-skill"
         user_skill.mkdir(parents=True)
         (user_skill / "SKILL.md").write_text("# User authored skill")
 
@@ -2847,7 +2886,7 @@ class TestSubSkillContentSkipAndCollisionProtection:
 
     def test_user_authored_skill_overwritten_with_force(self):
         """User-authored skills should be overwritten when force=True."""
-        user_skill = self.project_root / ".github" / "skills" / "my-skill"
+        user_skill = self.project_root / ".agents" / "skills" / "my-skill"
         user_skill.mkdir(parents=True)
         (user_skill / "SKILL.md").write_text("# User authored skill")
 
@@ -2871,7 +2910,7 @@ class TestSubSkillContentSkipAndCollisionProtection:
     def test_cross_package_overwrite_records_diagnostic(self):
         """Cross-package overwrites should record a diagnostic, not print inline."""
         # Pre-existing managed skill from a different package
-        existing = self.project_root / ".github" / "skills" / "shared-skill"
+        existing = self.project_root / ".agents" / "skills" / "shared-skill"
         existing.mkdir(parents=True)
         (existing / "SKILL.md").write_text("# From other-pkg")
 
@@ -2879,7 +2918,7 @@ class TestSubSkillContentSkipAndCollisionProtection:
         pkg_info = self._create_package_info(name="my-pkg", install_path=package_dir)
 
         # Managed files includes this skill → it's APM-managed
-        managed_files = {".github/skills/shared-skill"}
+        managed_files = {".agents/skills/shared-skill"}
 
         from apm_cli.utils.diagnostics import CATEGORY_OVERWRITE, DiagnosticCollector
 
@@ -2912,11 +2951,11 @@ class TestSubSkillContentSkipAndCollisionProtection:
         self.integrator.integrate_package_skill(pkg_info, self.project_root)
 
         # Modify deployed content to force a non-identical state
-        target = self.project_root / ".github" / "skills" / "my-sub" / "SKILL.md"
+        target = self.project_root / ".agents" / "skills" / "my-sub" / "SKILL.md"
         target.write_text("# Drifted content")
 
         # Create mock lockfile that records ownership by my-pkg
-        managed_files = {".github/skills/my-sub"}
+        managed_files = {".agents/skills/my-sub"}
         from apm_cli.utils.diagnostics import DiagnosticCollector
 
         diag = DiagnosticCollector()
@@ -3033,7 +3072,7 @@ class TestCursorSkillIntegration:
 
         # .github/skills/ should be created
         assert result.skill_created is True
-        assert (self.project_root / ".github" / "skills" / "my-skill" / "SKILL.md").exists()
+        assert (self.project_root / ".agents" / "skills" / "my-skill" / "SKILL.md").exists()
 
         # .cursor/ should NOT be created
         assert not (self.project_root / ".cursor").exists()
@@ -3046,7 +3085,7 @@ class TestCursorSkillIntegration:
         pkg_info = self._create_package_info(name="my-pkg", install_path=package_dir)
         self.integrator.integrate_package_skill(pkg_info, self.project_root)
 
-        assert (self.project_root / ".github" / "skills" / "sub-a" / "SKILL.md").exists()
+        assert (self.project_root / ".agents" / "skills" / "sub-a" / "SKILL.md").exists()
         assert not (self.project_root / ".cursor").exists()
 
     # ========== Test: Basic deployment to .cursor/skills/ ==========
@@ -3064,14 +3103,14 @@ class TestCursorSkillIntegration:
 
         assert result.skill_created is True
 
-        cursor_skill = self.project_root / ".cursor" / "skills" / "my-skill" / "SKILL.md"
+        cursor_skill = self.project_root / ".agents" / "skills" / "my-skill" / "SKILL.md"
         assert cursor_skill.exists()
         assert "# My Skill" in cursor_skill.read_text()
 
     def test_cursor_skill_dir_auto_created(self):
         """The .cursor/skills/ directory is auto-created when .cursor/ exists."""
         (self.project_root / ".cursor").mkdir()
-        assert not (self.project_root / ".cursor" / "skills").exists()
+        assert not (self.project_root / ".agents" / "skills").exists()
 
         skill_source = self.apm_modules / "owner" / "auto-skill"
         skill_source.mkdir(parents=True)
@@ -3080,7 +3119,7 @@ class TestCursorSkillIntegration:
         package_info = self._create_package_info(name="auto-skill", install_path=skill_source)
         self.integrator.integrate_package_skill(package_info, self.project_root)
 
-        assert (self.project_root / ".cursor" / "skills").is_dir()
+        assert (self.project_root / ".agents" / "skills").is_dir()
 
     # ========== Test: Full directory structure copied ==========
 
@@ -3102,7 +3141,7 @@ class TestCursorSkillIntegration:
         package_info = self._create_package_info(name="full-skill", install_path=skill_source)
         self.integrator.integrate_package_skill(package_info, self.project_root)
 
-        cursor_dir = self.project_root / ".cursor" / "skills" / "full-skill"
+        cursor_dir = self.project_root / ".agents" / "skills" / "full-skill"
         assert (cursor_dir / "SKILL.md").exists()
         assert (cursor_dir / "scripts" / "run.sh").exists()
         assert (cursor_dir / "references" / "api.md").exists()
@@ -3127,8 +3166,8 @@ class TestCursorSkillIntegration:
 
         # Sub-skills promoted in both targets
         for sub in ["azure-naming", "cloud-patterns"]:
-            assert (self.project_root / ".github" / "skills" / sub / "SKILL.md").exists()
-            assert (self.project_root / ".cursor" / "skills" / sub / "SKILL.md").exists()
+            assert (self.project_root / ".agents" / "skills" / sub / "SKILL.md").exists()
+            assert (self.project_root / ".agents" / "skills" / sub / "SKILL.md").exists()
 
     def test_sub_skill_content_correct_in_cursor(self):
         """Promoted sub-skill content in .cursor/skills/ matches source."""
@@ -3139,7 +3178,7 @@ class TestCursorSkillIntegration:
         self.integrator.integrate_package_skill(pkg_info, self.project_root)
 
         cursor_content = (
-            self.project_root / ".cursor" / "skills" / "my-sub" / "SKILL.md"
+            self.project_root / ".agents" / "skills" / "my-sub" / "SKILL.md"
         ).read_text()
         assert "my-sub" in cursor_content
         assert "Sub-skill my-sub" in cursor_content
@@ -3162,9 +3201,9 @@ class TestCursorSkillIntegration:
         assert result.skill_created is True
 
         # All three targets exist
-        assert (self.project_root / ".github" / "skills" / "triple-skill" / "SKILL.md").exists()
+        assert (self.project_root / ".agents" / "skills" / "triple-skill" / "SKILL.md").exists()
         assert (self.project_root / ".claude" / "skills" / "triple-skill" / "SKILL.md").exists()
-        assert (self.project_root / ".cursor" / "skills" / "triple-skill" / "SKILL.md").exists()
+        assert (self.project_root / ".agents" / "skills" / "triple-skill" / "SKILL.md").exists()
 
     def test_multi_target_target_paths_includes_cursor(self):
         """result.target_paths should include .cursor/skills/ path for manifest tracking."""
@@ -3180,9 +3219,9 @@ class TestCursorSkillIntegration:
         result = self.integrator.integrate_package_skill(package_info, self.project_root)
 
         posix_paths = [tp.relative_to(self.project_root).as_posix() for tp in result.target_paths]
-        assert ".github/skills/tracked-skill" in posix_paths
+        assert ".agents/skills/tracked-skill" in posix_paths
         assert ".claude/skills/tracked-skill" in posix_paths
-        assert ".cursor/skills/tracked-skill" in posix_paths
+        assert ".agents/skills/tracked-skill" in posix_paths
 
     def test_copy_skill_to_target_deploys_to_cursor(self):
         """copy_skill_to_target() copies to .cursor/skills/ when .cursor/ exists."""
@@ -3195,15 +3234,16 @@ class TestCursorSkillIntegration:
         package_info = self._create_package_info(name="fn-skill", install_path=skill_source)
         copy_skill_to_target(package_info, skill_source, self.project_root)
 
-        assert (self.project_root / ".cursor" / "skills" / "fn-skill" / "SKILL.md").exists()
+        assert (self.project_root / ".agents" / "skills" / "fn-skill" / "SKILL.md").exists()
 
     # ========== Test: Sync cleanup for .cursor/skills/ ==========
 
     def test_sync_removes_orphans_from_cursor(self):
         """sync_integration removes orphaned skills from .cursor/skills/."""
-        cursor_orphan = self.project_root / ".cursor" / "skills" / "orphan-skill"
+        cursor_orphan = self.project_root / ".agents" / "skills" / "orphan-skill"
         cursor_orphan.mkdir(parents=True)
         (cursor_orphan / "SKILL.md").write_text("# Orphan\n")
+        _setup_agents_orphan_cleanup(self.project_root, ["orphan-skill"])
 
         apm_package = Mock()
         apm_package.get_apm_dependencies.return_value = []
@@ -3214,28 +3254,39 @@ class TestCursorSkillIntegration:
         assert not cursor_orphan.exists()
 
     def test_sync_removes_orphans_from_all_three_targets(self):
-        """sync_integration removes orphans from .github/, .claude/, and .cursor/ skills."""
-        for prefix in [".github", ".claude", ".cursor"]:
-            orphan = self.project_root / prefix / "skills" / "orphan"
-            orphan.mkdir(parents=True)
-            (orphan / "SKILL.md").write_text("# Orphan\n")
+        """sync_integration removes orphans from converged .agents/ and .claude/ skills.
+
+        Copilot, cursor, opencode and codex all converge on .agents/skills/
+        (deduped to a single cleanup pass). Claude remains independent at
+        .claude/skills/. So a single orphan in .agents/ plus a separate
+        orphan in .claude/ produces 2 removals.
+        """
+        agents_orphan = self.project_root / ".agents" / "skills" / "orphan"
+        agents_orphan.mkdir(parents=True)
+        (agents_orphan / "SKILL.md").write_text("# Orphan\n")
+        claude_orphan = self.project_root / ".claude" / "skills" / "orphan"
+        claude_orphan.mkdir(parents=True)
+        (claude_orphan / "SKILL.md").write_text("# Orphan\n")
+        _setup_agents_orphan_cleanup(self.project_root, ["orphan"])
 
         apm_package = Mock()
         apm_package.get_apm_dependencies.return_value = []
 
         result = self.integrator.sync_integration(apm_package, self.project_root)
 
-        assert result["files_removed"] == 3
-        for prefix in [".github", ".claude", ".cursor"]:
-            assert not (self.project_root / prefix / "skills" / "orphan").exists()
+        assert result["files_removed"] == 2
+        assert not agents_orphan.exists()
+        assert not claude_orphan.exists()
 
     def test_sync_keeps_installed_skills_in_cursor(self):
         """sync_integration preserves installed skills in .cursor/skills/."""
         skill_name = "installed-skill"
-        for prefix in [".github", ".cursor"]:
-            d = self.project_root / prefix / "skills" / skill_name
-            d.mkdir(parents=True)
-            (d / "SKILL.md").write_text("# Installed\n")
+        # Both copilot and cursor converge on .agents/skills/; trigger via .github/.
+        (self.project_root / ".github").mkdir()
+        (self.project_root / ".cursor").mkdir()
+        d = self.project_root / ".agents" / "skills" / skill_name
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text("# Installed\n")
 
         dep_ref = DependencyReference.parse("owner/installed-skill")
         apm_package = Mock()
@@ -3244,15 +3295,15 @@ class TestCursorSkillIntegration:
         result = self.integrator.sync_integration(apm_package, self.project_root)
 
         assert result["files_removed"] == 0
-        assert (self.project_root / ".cursor" / "skills" / skill_name).exists()
+        assert (self.project_root / ".agents" / "skills" / skill_name).exists()
 
     def test_sync_manifest_based_removes_cursor_paths(self):
         """sync_integration with managed_files removes .cursor/skills/ entries."""
-        cursor_skill = self.project_root / ".cursor" / "skills" / "old-skill"
+        cursor_skill = self.project_root / ".agents" / "skills" / "old-skill"
         cursor_skill.mkdir(parents=True)
         (cursor_skill / "SKILL.md").write_text("# Old\n")
 
-        managed_files = {".cursor/skills/old-skill"}
+        managed_files = {".agents/skills/old-skill"}
         result = self.integrator.sync_integration(
             None, self.project_root, managed_files=managed_files
         )
@@ -3262,9 +3313,10 @@ class TestCursorSkillIntegration:
 
     def test_sync_no_cursor_cleanup_when_cursor_missing(self):
         """sync_integration should not error when .cursor/ doesn't exist."""
-        github_orphan = self.project_root / ".github" / "skills" / "orphan"
+        github_orphan = self.project_root / ".agents" / "skills" / "orphan"
         github_orphan.mkdir(parents=True)
         (github_orphan / "SKILL.md").write_text("# Orphan\n")
+        _setup_agents_orphan_cleanup(self.project_root, ["orphan"])
 
         apm_package = Mock()
         apm_package.get_apm_dependencies.return_value = []
@@ -3290,7 +3342,7 @@ class TestCursorSkillIntegration:
         self.integrator.integrate_package_skill(package_info, self.project_root)
 
         cursor_content = (
-            self.project_root / ".cursor" / "skills" / "my-skill" / "SKILL.md"
+            self.project_root / ".agents" / "skills" / "my-skill" / "SKILL.md"
         ).read_text()
         assert cursor_content == original_content
 
@@ -3308,8 +3360,8 @@ class TestCursorSkillIntegration:
         package_info = self._create_package_info(name="compare-skill", install_path=skill_source)
         self.integrator.integrate_package_skill(package_info, self.project_root)
 
-        github_dir = self.project_root / ".github" / "skills" / "compare-skill"
-        cursor_dir = self.project_root / ".cursor" / "skills" / "compare-skill"
+        github_dir = self.project_root / ".agents" / "skills" / "compare-skill"
+        cursor_dir = self.project_root / ".agents" / "skills" / "compare-skill"
 
         github_files = set(f.relative_to(github_dir) for f in github_dir.rglob("*") if f.is_file())
         cursor_files = set(f.relative_to(cursor_dir) for f in cursor_dir.rglob("*") if f.is_file())
@@ -3335,7 +3387,7 @@ class TestCursorSkillIntegration:
 
         assert (
             "# Version 1"
-            in (self.project_root / ".cursor" / "skills" / "my-skill" / "SKILL.md").read_text()
+            in (self.project_root / ".agents" / "skills" / "my-skill" / "SKILL.md").read_text()
         )
 
         # Update source
@@ -3346,7 +3398,7 @@ class TestCursorSkillIntegration:
         self.integrator.integrate_package_skill(package_info_v2, self.project_root)
 
         cursor_content = (
-            self.project_root / ".cursor" / "skills" / "my-skill" / "SKILL.md"
+            self.project_root / ".agents" / "skills" / "my-skill" / "SKILL.md"
         ).read_text()
         assert "# Version 2" in cursor_content
         assert "# Version 1" not in cursor_content
@@ -3388,7 +3440,7 @@ class TestCodexSkillDeployRoot:
         assert not (self.root / ".codex" / "skills").exists()
 
     def test_other_targets_still_deploy_to_own_root(self):
-        """Copilot skills still deploy to .github/skills/."""
+        """Copilot skills now also converge on .agents/skills/ via deploy_root."""
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         (self.root / ".github").mkdir()
@@ -3406,8 +3458,8 @@ class TestCodexSkillDeployRoot:
         deployed = copy_skill_to_target(pi, skill_dir, self.root, targets=targets)
 
         assert len(deployed) == 1
-        assert ".github" in str(deployed[0])
-        assert (self.root / ".github" / "skills" / "my-skill" / "SKILL.md").exists()
+        assert ".agents" in str(deployed[0])
+        assert (self.root / ".agents" / "skills" / "my-skill" / "SKILL.md").exists()
 
 
 class TestSyncIntegrationDynamicPrefixes:
@@ -3434,11 +3486,11 @@ class TestSyncIntegrationDynamicPrefixes:
         copilot = KNOWN_TARGETS["copilot"]
         resolved = dc_replace(copilot, root_dir=".copilot")
 
-        skills_dir = self.project_root / ".copilot" / "skills" / "my-skill"
+        skills_dir = self.project_root / ".agents" / "skills" / "my-skill"
         skills_dir.mkdir(parents=True)
         (skills_dir / "SKILL.md").write_text("# Skill")
 
-        managed = {".copilot/skills/my-skill"}
+        managed = {".agents/skills/my-skill"}
         apm_package = Mock()
         result = self.integrator.sync_integration(
             apm_package,
@@ -3451,7 +3503,13 @@ class TestSyncIntegrationDynamicPrefixes:
         assert not skills_dir.exists()
 
     def test_manifest_removal_with_config_opencode(self):
-        """Manifest-based removal handles .config/opencode/skills/ paths."""
+        """Manifest-based removal handles converged .agents/skills/ paths.
+
+        With skill convergence, opencode (project + user scope) deploys
+        skills to .agents/skills/ via ``deploy_root``, regardless of
+        whether root_dir is .opencode/ or .config/opencode/. The manifest
+        removal must therefore key off the converged prefix.
+        """
         from dataclasses import replace as dc_replace
 
         from apm_cli.integration.targets import KNOWN_TARGETS
@@ -3459,11 +3517,11 @@ class TestSyncIntegrationDynamicPrefixes:
         opencode = KNOWN_TARGETS["opencode"]
         resolved = dc_replace(opencode, root_dir=".config/opencode")
 
-        skills_dir = self.project_root / ".config" / "opencode" / "skills" / "test-skill"
+        skills_dir = self.project_root / ".agents" / "skills" / "test-skill"
         skills_dir.mkdir(parents=True)
         (skills_dir / "SKILL.md").write_text("# Skill")
 
-        managed = {".config/opencode/skills/test-skill"}
+        managed = {".agents/skills/test-skill"}
         apm_package = Mock()
         result = self.integrator.sync_integration(
             apm_package,
@@ -3481,13 +3539,13 @@ class TestSyncIntegrationDynamicPrefixes:
 
         copilot = KNOWN_TARGETS["copilot"]
 
-        skills_dir = self.project_root / ".github" / "skills"
+        skills_dir = self.project_root / ".agents" / "skills"
         (skills_dir / "managed-skill").mkdir(parents=True)
         (skills_dir / "managed-skill" / "SKILL.md").write_text("# Managed")
         (skills_dir / "user-skill").mkdir(parents=True)
         (skills_dir / "user-skill" / "SKILL.md").write_text("# User")
 
-        managed = {".github/skills/managed-skill"}
+        managed = {".agents/skills/managed-skill"}
         apm_package = Mock()
         result = self.integrator.sync_integration(
             apm_package,
@@ -3502,11 +3560,11 @@ class TestSyncIntegrationDynamicPrefixes:
 
     def test_backward_compat_no_targets_uses_known_targets(self):
         """Without targets param, falls back to KNOWN_TARGETS (project scope)."""
-        skills_dir = self.project_root / ".github" / "skills" / "orphan-skill"
+        skills_dir = self.project_root / ".agents" / "skills" / "orphan-skill"
         skills_dir.mkdir(parents=True)
         (skills_dir / "SKILL.md").write_text("# Orphan")
 
-        managed = {".github/skills/orphan-skill"}
+        managed = {".agents/skills/orphan-skill"}
         apm_package = Mock()
         result = self.integrator.sync_integration(
             apm_package,
@@ -3523,9 +3581,10 @@ class TestSyncIntegrationDynamicPrefixes:
         copilot = KNOWN_TARGETS["copilot"]
 
         # Create a skill dir that's NOT in installed deps (orphan)
-        skills_dir = self.project_root / ".github" / "skills" / "orphan"
+        skills_dir = self.project_root / ".agents" / "skills" / "orphan"
         skills_dir.mkdir(parents=True)
         (skills_dir / "SKILL.md").write_text("# Orphan")
+        _setup_agents_orphan_cleanup(self.project_root, ["orphan"])
 
         apm_package = Mock()
         apm_package.get_apm_dependencies.return_value = []
@@ -3541,7 +3600,14 @@ class TestSyncIntegrationDynamicPrefixes:
         assert not skills_dir.exists()
 
     def test_agents_skills_cleanup_requires_codex_dir(self):
-        """Cross-tool .agents/skills/ only cleaned when .codex/ exists."""
+        """Cross-tool .agents/skills/ only cleaned when .codex/ exists.
+
+        The ownership-respecting cleanup (§5.3) only deletes skills that
+        appear in the lockfile's deployed_files. A lockfile entry is
+        required for the orphan to be considered APM-owned.
+        """
+        import yaml
+
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         codex = KNOWN_TARGETS["codex"]
@@ -3549,6 +3615,21 @@ class TestSyncIntegrationDynamicPrefixes:
         agents_skills = self.project_root / ".agents" / "skills" / "orphan"
         agents_skills.mkdir(parents=True)
         (agents_skills / "SKILL.md").write_text("# Orphan")
+
+        # Create lockfile with orphan listed so ownership check passes.
+        lockfile_data = {
+            "lockfile_version": "1",
+            "dependencies": [
+                {
+                    "repo_url": "owner/orphan-pkg",
+                    "resolved_commit": "abc123",
+                    "deployed_files": [".agents/skills/orphan/SKILL.md"],
+                }
+            ],
+        }
+        (self.project_root / "apm.lock.yaml").write_text(
+            yaml.dump(lockfile_data, default_flow_style=False), encoding="utf-8"
+        )
 
         apm_package = Mock()
         apm_package.get_apm_dependencies.return_value = []
@@ -3594,7 +3675,13 @@ class TestUninstallPhase2SkillTargets:
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_copy_skill_to_target_respects_resolved_targets(self):
-        """copy_skill_to_target deploys to resolved root_dir from targets."""
+        """copy_skill_to_target uses converged .agents/skills/ via deploy_root.
+
+        With skill convergence, copilot's skills mapping has
+        ``deploy_root=".agents"`` which overrides root_dir for skill
+        placement. User-scope re-integration (root_dir=".copilot") still
+        deploys skills to the converged ``.agents/skills/`` directory.
+        """
         from dataclasses import replace as dc_replace
 
         from apm_cli.integration.targets import KNOWN_TARGETS
@@ -3622,9 +3709,9 @@ class TestUninstallPhase2SkillTargets:
         )
 
         assert len(deployed) == 1
-        assert ".copilot" in str(deployed[0])
-        assert (self.project_root / ".copilot" / "skills" / "my-skill" / "SKILL.md").exists()
-        assert not (self.project_root / ".github" / "skills").exists()
+        assert ".agents" in str(deployed[0])
+        assert (self.project_root / ".agents" / "skills" / "my-skill" / "SKILL.md").exists()
+        assert not (self.project_root / ".copilot" / "skills").exists()
 
     def test_copy_skill_to_target_auto_create_guard(self):
         """copy_skill_to_target skips auto_create=False targets with no dir."""
@@ -3652,7 +3739,7 @@ class TestUninstallPhase2SkillTargets:
         )
 
         assert len(deployed) == 0
-        assert not (self.project_root / ".opencode" / "skills").exists()
+        assert not (self.project_root / ".agents" / "skills").exists()
 
     def test_copy_skill_to_target_fallback_without_targets(self):
         """copy_skill_to_target falls back to active_targets when no targets given."""
@@ -3674,7 +3761,7 @@ class TestUninstallPhase2SkillTargets:
         )
 
         assert len(deployed) == 1
-        assert (self.project_root / ".github" / "skills" / "my-skill" / "SKILL.md").exists()
+        assert (self.project_root / ".agents" / "skills" / "my-skill" / "SKILL.md").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -3876,3 +3963,179 @@ class TestPromoteSubSkillsCowork:
         assert deployed_skill.exists()
         # .apm dir is excluded via shutil.ignore_patterns('.apm')
         assert not (cowork_root / "my-skill" / ".apm").exists()
+
+
+class TestAgentSkillsDedupAndSecurity:
+    """Dedup and security tests for the agent-skills target (#737)."""
+
+    def test_codex_agent_skills_dedup_write_count(self, tmp_path: Path) -> None:
+        """Codex + agent-skills both deploy to .agents/skills/ -- dedup means one write."""
+        import pytest
+
+        from apm_cli.integration.skill_integrator import copy_skill_to_target
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        # Codex requires .codex/ to exist (auto_create=False); create it so codex
+        # is not skipped, otherwise the dedup branch is never exercised.
+        (project_root / ".codex").mkdir()
+
+        source = tmp_path / "src" / "test-skill"
+        source.mkdir(parents=True)
+        (source / "SKILL.md").write_text("# Test Skill")
+
+        pkg_info = _make_package_info(source)
+        codex_profile = KNOWN_TARGETS["codex"]
+        agent_skills_profile = KNOWN_TARGETS["agent-skills"]
+
+        deployed = copy_skill_to_target(
+            pkg_info,
+            source,
+            project_root,
+            targets=[codex_profile, agent_skills_profile],
+        )
+
+        # Both targets resolve skills to .agents/skills/test-skill -- dedup
+        # collapses the two deployments into a single write.
+        assert len(deployed) == 1
+        assert (project_root / ".agents" / "skills" / "test-skill" / "SKILL.md").exists()
+        # Sanity: only the agents/ tree was created, not a separate .codex/skills/.
+        assert not (project_root / ".codex" / "skills" / "test-skill").exists()
+        # Silence unused-import warning if pytest isn't otherwise referenced.
+        _ = pytest
+
+    def test_skill_destination_symlink_rejected(self, tmp_path: Path) -> None:
+        """A pre-existing symlink at the destination triggers PathTraversalError."""
+        import pytest
+
+        from apm_cli.integration.skill_integrator import copy_skill_to_target
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.path_security import PathTraversalError
+
+        project = tmp_path / "project"
+        project.mkdir()
+
+        source = tmp_path / "src" / "evil"
+        source.mkdir(parents=True)
+        (source / "SKILL.md").write_text("# Evil")
+
+        # Plant a symlink at the destination path that the integrator would write to.
+        evil_dest = project / ".agents" / "skills" / "evil"
+        evil_dest.parent.mkdir(parents=True, exist_ok=True)
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        evil_dest.symlink_to(elsewhere)
+
+        pkg_info = _make_package_info(source)
+        profile = KNOWN_TARGETS["agent-skills"]
+        with pytest.raises(PathTraversalError):
+            copy_skill_to_target(pkg_info, source, project, targets=[profile])
+
+    def test_traversal_in_skill_name_rejected_for_agent_skills(self) -> None:
+        """validate_path_segments rejects traversal sequences in skill names.
+
+        ``copy_skill_to_target`` calls ``validate_path_segments(skill_name,
+        context="skill name")`` for every active target, including
+        ``agent-skills``.  This test exercises the underlying guard
+        directly because ``Path.name`` collapses ``"../etc"`` to ``"etc"``
+        before the function ever sees it -- the guard is what protects
+        the call site against any synthetic source whose ``name`` is a
+        traversal sequence.
+        """
+        import pytest
+
+        from apm_cli.utils.path_security import PathTraversalError, validate_path_segments
+
+        with pytest.raises(PathTraversalError):
+            validate_path_segments("../etc", context="skill name")
+        with pytest.raises(PathTraversalError):
+            validate_path_segments("..", context="skill name")
+
+
+class TestLockfileOwnershipCorruptFile:
+    """S1 regression: corrupt lockfile must return empty set (fail-closed)."""
+
+    def test_get_lockfile_owned_agent_skills_corrupt_lockfile_returns_empty(
+        self, tmp_path: Path
+    ) -> None:
+        """Malformed YAML in apm.lock.yaml returns empty owned set."""
+        from apm_cli.integration.skill_integrator import SkillIntegrator
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "apm.lock.yaml").write_text("{{{{invalid yaml: [", encoding="utf-8")
+
+        result = SkillIntegrator._get_lockfile_owned_agent_skills(project)
+        assert result == set(), f"expected empty set for corrupt lockfile, got {result!r}"
+
+    def test_get_lockfile_owned_agent_skills_missing_lockfile_returns_empty(
+        self, tmp_path: Path
+    ) -> None:
+        """Missing apm.lock.yaml returns empty owned set."""
+        from apm_cli.integration.skill_integrator import SkillIntegrator
+
+        project = tmp_path / "no-lockfile"
+        project.mkdir()
+
+        result = SkillIntegrator._get_lockfile_owned_agent_skills(project)
+        assert result == set(), f"expected empty set for missing lockfile, got {result!r}"
+
+
+class TestCopySkillToTargetSymlinkContainment:
+    """F3: ensure copy_skill_to_target rejects symlink-redirected roots."""
+
+    def test_symlink_root_redirect_rejected(self, tmp_path: Path) -> None:
+        """If .agents is a symlink pointing outside the project, deploy must fail."""
+        import os
+
+        from apm_cli.utils.path_security import PathTraversalError
+
+        project = tmp_path / "project"
+        project.mkdir()
+
+        # Create a skill source with SKILL.md (required by copy_skill_to_target)
+        source = project / "apm_modules" / "test-skill"
+        source.mkdir(parents=True)
+        (source / "SKILL.md").write_text("---\nname: test-skill\n---\nBody")
+
+        # Create an outside directory and symlink .agents to it
+        outside = tmp_path / "outside-root"
+        outside.mkdir()
+        agents_link = project / ".agents"
+        os.symlink(str(outside), str(agents_link))
+
+        # Build a minimal TargetProfile that routes skills to .agents/
+        from apm_cli.integration.targets import PrimitiveMapping, TargetProfile
+
+        target = TargetProfile(
+            name="agent-skills",
+            root_dir=".agents",
+            auto_create=True,
+            primitives={
+                "skills": PrimitiveMapping(
+                    "skills",
+                    "/SKILL.md",
+                    "skill_standard",
+                ),
+            },
+        )
+
+        # Build a mock package_info that passes should_install_skill()
+        mock_info = Mock()
+        mock_info.package.content_type = "skill"
+
+        # Patch get_effective_type so should_install_skill returns True
+        from apm_cli.models.apm_package import PackageContentType
+
+        with patch(
+            "apm_cli.integration.skill_integrator.get_effective_type",
+            return_value=PackageContentType.SKILL,
+        ):
+            with pytest.raises(PathTraversalError):
+                copy_skill_to_target(
+                    source_path=source,
+                    target_base=project,
+                    package_info=mock_info,
+                    targets=[target],
+                )

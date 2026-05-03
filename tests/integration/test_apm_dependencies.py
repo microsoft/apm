@@ -74,6 +74,81 @@ class TestAPMDependenciesIntegration:
         return config
 
     @pytest.mark.integration
+    def test_apm_yml_without_deps_or_apm_dir_rejects_as_invalid(self):
+        """Regression-trap for #1094 BOUNDARY: apm.yml with NO deps and NO
+        `.apm/` must be rejected with an actionable diagnostic, not
+        silently accepted as a valid dep-only aggregator.
+
+        This is the negative fence of the dep-only rework. The cascade
+        classifies this shape as INVALID and the validator surfaces the
+        original "missing .apm/" guidance, now extended to mention the
+        dep-only and skill-bundle escape hatches.
+
+        If a future refactor over-relaxes ``_apm_yml_declares_dependencies``
+        (e.g., starts returning True for empty deps) the cascade would
+        silently classify garbage as APM_PACKAGE and the install pipeline
+        would no-op without an error -- this test catches that regression
+        through the same ``validate_apm_package`` entry point the install
+        pipeline uses.
+        """
+        from apm_cli.models.validation import PackageType, validate_apm_package
+
+        apm_yml = self.test_dir / "apm.yml"
+        apm_yml.write_text(
+            "name: empty-project\nversion: 1.0.0\ndescription: Project with no deps and no .apm/\n"
+        )
+        assert not (self.test_dir / ".apm").exists(), "precondition: no .apm/ directory"
+
+        result = validate_apm_package(self.test_dir)
+        assert result.is_valid is False
+        assert result.package_type == PackageType.INVALID
+        # Actionable diagnostic: must name the .apm/ requirement AND the
+        # dep-only escape hatch (so users discover the #1094 fix).
+        joined = " ".join(result.errors).lower()
+        assert ".apm" in joined
+        assert "declare dependencies" in joined  # dep-only escape hatch surfaced
+
+    @pytest.mark.integration
+    def test_dep_only_project_installs_dependencies_without_dot_apm(self):
+        """Regression-trap for #1094: a dep-only `apm.yml` (no `.apm/` on the
+        ROOT project) must resolve, download, and integrate transitive
+        dependencies end-to-end without requiring a `.gitkeep` placeholder.
+
+        Before the fix, ``_validate_apm_package_with_yml`` rejected this
+        shape and the install pipeline never even reached the resolver.
+        After the fix, the root project is classified APM_PACKAGE on the
+        strength of its declared deps alone.
+        """
+        # Create dep-only apm.yml with NO .apm/ directory on the root.
+        self.create_apm_yml(dependencies=["microsoft/apm-sample-package"])
+        assert not (self.test_dir / ".apm").exists(), (
+            "precondition: root project must be dep-only (no .apm/)"
+        )
+
+        # Load via the same entry point the install pipeline uses; this
+        # would have raised "missing .apm/ directory" before the fix.
+        project_package = APMPackage.from_apm_yml(self.apm_yml_path)
+        dependencies = project_package.get_apm_dependencies()
+        assert len(dependencies) == 1
+        assert dependencies[0].repo_url == "microsoft/apm-sample-package"
+
+        # Real download proves the install pipeline wires up correctly
+        # for a dep-only root.
+        downloader = GitHubPackageDownloader()
+        apm_modules_dir = self.test_dir / "apm_modules"
+        apm_modules_dir.mkdir()
+        package_dir = apm_modules_dir / "microsoft" / "apm-sample-package"
+        result = downloader.download_package(str(dependencies[0]), package_dir)
+
+        assert package_dir.exists()
+        assert (package_dir / "apm.yml").exists()
+        assert (package_dir / ".apm").exists()
+        assert result.package.name == "apm-sample-package"
+        # Root remains dep-only after install -- we did NOT create .apm/
+        # as a side effect.
+        assert not (self.test_dir / ".apm").exists()
+
+    @pytest.mark.integration
     def test_single_dependency_installation_sample_package(self):
         """Test installation of single dependency: apm-sample-package."""
         # Create project with single dependency

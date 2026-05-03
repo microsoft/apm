@@ -731,16 +731,16 @@ class TestSkillSync:
 
     def test_sync_removes_managed_skill_dirs(self, tmp_path: Path):
         """Only skill directories in managed_files are removed."""
-        github_skills = tmp_path / ".github" / "skills"
-        github_skills.mkdir(parents=True)
-        managed_skill = github_skills / "code-review"
+        agents_skills = tmp_path / ".agents" / "skills"
+        agents_skills.mkdir(parents=True)
+        managed_skill = agents_skills / "code-review"
         managed_skill.mkdir()
         (managed_skill / "SKILL.md").write_text("managed")
-        user_skill = github_skills / "my-custom-skill"
+        user_skill = agents_skills / "my-custom-skill"
         user_skill.mkdir()
         (user_skill / "SKILL.md").write_text("user authored")
 
-        managed = {".github/skills/code-review/"}
+        managed = {".agents/skills/code-review/"}
         stats = SkillIntegrator().sync_integration(None, tmp_path, managed_files=managed)
 
         assert stats["files_removed"] == 1
@@ -1115,7 +1115,7 @@ class TestSyncPreservesUserFiles:
 
     def test_skill_sync_preserves_user_dirs(self, tmp_path: Path):
         """User-authored skill directories survive sync."""
-        skills_dir = tmp_path / ".github" / "skills"
+        skills_dir = tmp_path / ".agents" / "skills"
         skills_dir.mkdir(parents=True)
         managed_skill = skills_dir / "pkg-skill"
         managed_skill.mkdir()
@@ -1124,7 +1124,7 @@ class TestSyncPreservesUserFiles:
         user_skill.mkdir()
         (user_skill / "SKILL.md").write_text("user skill")
 
-        managed = {".github/skills/pkg-skill/"}
+        managed = {".agents/skills/pkg-skill/"}
         SkillIntegrator().sync_integration(None, tmp_path, managed_files=managed)
 
         assert not managed_skill.exists()

@@ -83,6 +83,7 @@
             "test_file": "tests/unit/install/test_pipeline_auth_preflight.py",
             "test_name": "test_install_update_does_not_disable_credential_helpers_on_generic_host",
             "outcome": "passed",
+            "tier": "unit",
             "assertion_excerpt": "assert os.environ.get('GIT_TERMINAL_PROMPT') is None",
             "proves": "On non-GitHub non-ADO hosts, install --update does not block the user's system credential helpers.",
             "principles": ["multi-harness-support", "vendor-neutral", "devx"]

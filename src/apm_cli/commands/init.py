@@ -185,6 +185,14 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, verbose):
             for step in next_steps:
                 click.echo(f"  * {step}")
 
+        # Codex tip: suggest agent-skills target when .codex/ exists
+        if Path(".codex").is_dir():
+            logger.progress(
+                "Tip: Use '--target agent-skills' to also deploy skills to "
+                ".agents/skills/ for other clients.",
+                symbol="info",
+            )
+
         # Footer with links
         try:
             console = _get_console()

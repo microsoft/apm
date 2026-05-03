@@ -219,9 +219,29 @@ class TestUninstallPreservesOtherPackageSkills:
         skill_int.integrate_package_skill(pkg_a, project_root)
         skill_int.integrate_package_skill(pkg_b, project_root)
 
-        skills_dir = project_root / ".github" / "skills"
+        skills_dir = project_root / ".agents" / "skills"
         assert (skills_dir / "skill-a").is_dir()
         assert (skills_dir / "skill-b").is_dir()
+
+        # Write a lockfile so the .agents/ ownership check (which guards
+        # against deleting foreign skills placed by other tools) recognises
+        # both skill dirs as APM-owned and allows orphan cleanup.
+        from apm_cli.deps.lockfile import LockedDependency, LockFile, get_lockfile_path
+
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="https://github.com/owner/skill-a",
+                deployed_files=[".agents/skills/skill-a/SKILL.md"],
+            )
+        )
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="https://github.com/owner/skill-b",
+                deployed_files=[".agents/skills/skill-b/SKILL.md"],
+            )
+        )
+        lockfile.write(get_lockfile_path(project_root))
 
         # Build an APMPackage that only lists skill-b as a remaining dependency.
         # sync_integration derives expected names from get_apm_dependencies().

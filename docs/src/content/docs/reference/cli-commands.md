@@ -88,11 +88,13 @@ apm install [PACKAGES...] [OPTIONS]
 - `PACKAGES` - Optional APM packages to add and install. Accepts shorthand (`owner/repo`), HTTPS URLs, SSH URLs, FQDN shorthand (`host/owner/repo`), local filesystem paths (`./path`, `../path`, `/absolute/path`, `~/path`), or marketplace references (`NAME@MARKETPLACE[#ref]`). All forms are normalized to canonical format in `apm.yml`.
 
 **Options:**
-- `--runtime TEXT` - Target specific runtime only (copilot, codex, gemini, vscode)
+- `--runtime TEXT` - Target specific runtime only (copilot, codex, vscode, cursor, opencode, gemini, claude,windsurf)
 - `--exclude TEXT` - Exclude specific runtime from installation
 - `--only [apm|mcp]` - Install only specific dependency type
-- `--target [copilot|claude|cursor|codex|opencode|gemini|copilot-cowork|all]` - Force deployment to specific target(s). Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Overrides auto-detection
+- `--target [copilot|claude|cursor|codex|opencode|gemini|windsurf|agent-skills|copilot-cowork|all]` - Force deployment to specific target(s). Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Overrides auto-detection. `agent-skills` deploys to `.agents/skills/` (cross-client). `all` = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with `agent-skills` for both.
+  - `windsurf` - Windsurf/Cascade (`.windsurf/rules/`, `.windsurf/skills/`, `.windsurf/workflows/`, `.windsurf/hooks.json`)
   - `copilot-cowork` - Microsoft 365 Copilot Cowork skills (user scope only, requires `copilot-cowork` experimental flag)
+  - `vscode`, `agents` - Deprecated aliases for `copilot` (`.github/`). Still accepted by the parser; prefer `copilot` for GitHub Copilot deployment, or `agent-skills` for cross-client `.agents/skills/` deployment. Removal in v1.0.
 - `--update` - Update dependencies to latest Git references  
 - `--force` - Overwrite locally-authored files on collision; bypass security scan blocks
 - `--dry-run` - Show what would be installed without installing
@@ -117,6 +119,7 @@ apm install [PACKAGES...] [OPTIONS]
   - Equivalent env var: `APM_POLICY_DISABLE=1` (applies to the entire shell session). Note: `apm deps update` runs the install pipeline and is gated by policy but does not currently expose a `--no-policy` flag -- use `APM_POLICY_DISABLE=1` as the only escape hatch there.
 - `--skill NAME` - Install only named skill(s) from a `SKILL_BUNDLE` package. Repeatable. The selection is **persisted** in `apm.yml` (as a `skills:` list in dict-form entries) and in `apm.lock.yaml` (as `skill_subset`), so subsequent bare `apm install` commands are deterministic. Use `--skill '*'` to reset and install all skills from the bundle.
 - `--as ALIAS` - Override the log/display label used when reporting a local-bundle install. Only valid when `PACKAGES` is a single local-bundle path (directory or `.tar.gz`); rejected on registry installs. Falls back to `plugin.json["id"]`, then to the bundle directory name when omitted. Note: this label affects log output only -- the lockfile records `local_deployed_files` (paths) and does not currently namespace by alias.
+- `--legacy-skill-paths` - Restore per-client skill directories (`.github/skills/`, `.cursor/skills/`, etc.) instead of the converged `.agents/skills/` routing. Equivalent env var: `APM_LEGACY_SKILL_PATHS=1`.
 
 **Transport env vars:**
 
@@ -592,7 +595,7 @@ apm pack [OPTIONS]
 
 **Options:**
 - `-o, --output PATH` - Bundle output directory (default: `./build`). Does not affect `marketplace.json` path.
-- `-t, --target [copilot|vscode|claude|cursor|codex|opencode|gemini|all]` - Filter bundle files by target. Accepts comma-separated values (e.g., `-t claude,copilot`). Auto-detects from `apm.yml` if omitted. `vscode` is an alias for `copilot`. No-op for marketplace output.
+- `-t, --target [copilot|vscode|claude|cursor|codex|opencode|gemini|windsurf|all]` - Filter bundle files by target. Accepts comma-separated values (e.g., `-t claude,copilot`). Auto-detects from `apm.yml` if omitted. `vscode` is an alias for `copilot`. No-op for marketplace output.
 - `--archive` - Produce a `.tar.gz` archive instead of a directory. Bundle only.
 - `--format [plugin|apm]` - Bundle format (default: `plugin`). `plugin` emits a Claude Code plugin directory with a schema-conformant `plugin.json` ([official schema](https://json.schemastore.org/claude-code-plugin.json)). `apm` produces the legacy APM bundle layout (consumed by `microsoft/apm-action@v1` restore mode and other bundle-aware tooling). No-op for marketplace output.
 - `--force` - On collision (plugin format), last writer wins instead of first. Bundle only.
@@ -1015,7 +1018,7 @@ apm deps update [PACKAGES...] [OPTIONS]
 - `--verbose, -v` - Show detailed update information
 - `--force` - Overwrite locally-authored files on collision
 - `-g, --global` - Update user-scope dependencies (`~/.apm/`)
-- `--target, -t` - Force deployment to specific target(s). Accepts comma-separated values (e.g., `-t claude,copilot`). Valid values: copilot, claude, cursor, opencode, gemini, vscode, agents, all
+- `--target, -t` - Force deployment to specific target(s). Accepts comma-separated values (e.g., `-t claude,copilot`). Valid values: copilot, claude, cursor, opencode, codex, gemini, windsurf, agent-skills, vscode, agents (deprecated), all. `agent-skills` deploys to `.agents/skills/` (cross-client). `all` excludes agent-skills.
 - `--parallel-downloads` - Max concurrent downloads (default: 4)
 
 **Policy enforcement:** `apm deps update` runs the install pipeline and is therefore gated by org `apm-policy.yml`. There is no `--no-policy` flag on this command -- the only escape hatch is `APM_POLICY_DISABLE=1` for the shell session. See [Policy reference](../../enterprise/policy-reference/#install-time-enforcement).
@@ -1723,7 +1726,7 @@ apm compile [OPTIONS]
 
 **Options:**
 - `-o, --output TEXT` - Output file path (for single-file mode)
-- `-t, --target [vscode|agents|claude|codex|opencode|gemini|all]` - Target agent format. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). `agents` is an alias for `vscode`. Auto-detects if not specified.
+- `-t, --target [copilot|claude|cursor|codex|opencode|gemini|windsurf|agent-skills|all]` - Target agent format. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). `vscode` and `agents` are accepted as deprecated aliases for `copilot` (removal in v1.0). `agent-skills` is a no-op for compile (skills-only target). Auto-detects if not specified.
 - `--chatmode TEXT` - Chatmode to prepend to the AGENTS.md file
 - `--dry-run` - Preview compilation without writing files (shows placement decisions)
 - `--no-links` - Skip markdown link resolution
@@ -1745,6 +1748,7 @@ When `--target` is not specified, APM auto-detects based on existing project str
 | `.claude/` exists only | `claude` | CLAUDE.md + .claude/ |
 | `.codex/` exists | `codex` | AGENTS.md + .codex/ + .agents/ |
 | `.gemini/` exists | `gemini` | GEMINI.md + .gemini/ |
+| `.windsurf/` exists | `windsurf` | AGENTS.md + .windsurf/ |
 | Both folders exist | `all` | All outputs |
 | Neither folder exists | `minimal` | AGENTS.md only |
 
@@ -1770,7 +1774,10 @@ target: [claude, copilot]  # multiple targets -- only these are compiled/install
 | `codex` | AGENTS.md, .agents/skills/, .codex/agents/, .codex/hooks.json | Codex CLI |
 | `opencode` | AGENTS.md, .opencode/agents/, .opencode/commands/, .opencode/skills/ | OpenCode |
 | `gemini` | GEMINI.md, .gemini/commands/, .gemini/skills/ | Gemini CLI |
-| `all` | All of the above | Universal compatibility |
+| `windsurf` | AGENTS.md, .windsurf/rules/, .windsurf/skills/, .windsurf/workflows/ | Windsurf/Cascade |
+| `agent-skills` | .agents/skills/ only | Cross-client shared skills |
+| `agents` | *(deprecated)* alias for `vscode` | Use `copilot` or `agent-skills` instead |
+| `all` | All of the above (excludes `agent-skills`) | Universal compatibility |
 
 **Examples:**
 ```bash
@@ -1871,6 +1878,7 @@ Command-line options always override `apm.yml` settings. Priority order:
   - Markers: `<!-- SPEC-KIT CONSTITUTION: BEGIN -->` / `<!-- SPEC-KIT CONSTITUTION: END -->`
   - Second line includes `hash: <sha256_12>` for drift detection
   - Entire raw file content in between (Phase 0: no summarization)
+- **(Optional) Global Instructions Section** - Instructions without an `applyTo` pattern are emitted under a single `## Global Instructions` heading (applies to every file)
 - **Pattern-based Sections** - Content grouped by exact `applyTo` patterns from instruction context files (e.g., "Files matching `**/*.py`")
 - **Footer** - Regeneration instructions
 

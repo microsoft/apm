@@ -296,10 +296,13 @@ class TestExhaustivenessChecks:
             "agents_cursor",
             "agents_opencode",
             "agents_codex",
+            "agents_windsurf",
             "commands",  # was commands_claude, aliased
             "commands_gemini",
             "commands_opencode",
+            "commands_windsurf",
             "instructions",  # was instructions_copilot, aliased
+            "instructions_windsurf",
             "rules_cursor",  # was instructions_cursor, aliased
             "rules_claude",  # was instructions_claude, aliased
             "skills",  # cross-target bucket
@@ -604,11 +607,11 @@ class TestScopeResolvedPartition:
         resolved = replace(copilot, root_dir=".copilot")
         managed = {
             ".copilot/agents/my-agent.md",
-            ".copilot/skills/my-skill/SKILL.md",
+            ".agents/skills/my-skill/SKILL.md",
         }
         buckets = BaseIntegrator.partition_managed_files(managed, targets=[resolved])
         assert ".copilot/agents/my-agent.md" in buckets.get("agents_github", set())
-        assert ".copilot/skills/my-skill/SKILL.md" in buckets.get("skills", set())
+        assert ".agents/skills/my-skill/SKILL.md" in buckets.get("skills", set())
 
     def test_partition_with_opencode_user_scope(self):
         """Partition routes .config/opencode/ paths correctly."""
@@ -619,12 +622,12 @@ class TestScopeResolvedPartition:
         managed = {
             ".config/opencode/agents/reviewer.md",
             ".config/opencode/commands/test.md",
-            ".config/opencode/skills/my-skill/SKILL.md",
+            ".agents/skills/my-skill/SKILL.md",
         }
         buckets = BaseIntegrator.partition_managed_files(managed, targets=[resolved])
         assert ".config/opencode/agents/reviewer.md" in buckets.get("agents_opencode", set())
         assert ".config/opencode/commands/test.md" in buckets.get("commands_opencode", set())
-        assert ".config/opencode/skills/my-skill/SKILL.md" in buckets.get("skills", set())
+        assert ".agents/skills/my-skill/SKILL.md" in buckets.get("skills", set())
 
     def test_partition_backward_compat_no_targets(self):
         """Without targets param, uses KNOWN_TARGETS (existing behavior)."""

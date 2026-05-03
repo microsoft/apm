@@ -196,7 +196,7 @@ Instructions provide coding standards, conventions, and guidelines that apply to
 
 **Frontmatter:**
 - `description` (required) - Clear explanation of the standards
-- `applyTo` (required) - Glob pattern for file targeting (e.g., `"**/*.py"`)
+- `applyTo` (optional) - Glob pattern for file targeting (e.g., `"**/*.py"`). When omitted, the instruction is treated as global and rendered under a `## Global Instructions` section in the compiled `AGENTS.md`/`CLAUDE.md` (applies to every file).
 - `author` (optional) - Creator information
 - `version` (optional) - Version string
 
@@ -279,7 +279,7 @@ The APM CLI automatically discovers and parses all primitive files in your proje
 All primitives are automatically validated during discovery:
 
 - **Agents**: Must have description and content (supports both `.agent.md` and `.chatmode.md`)
-- **Instructions**: Must have description, applyTo pattern, and content
+- **Instructions**: Must have description and content. `applyTo` is optional -- omitting it makes the instruction apply globally (a warning is emitted at compile time so authors are aware of the implicit scope).
 
 Invalid files are skipped with warning messages, allowing valid primitives to continue loading.
 

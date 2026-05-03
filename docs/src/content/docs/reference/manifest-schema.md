@@ -113,8 +113,8 @@ marketplace:   <MarketplaceConfig>           # OPTIONAL; marketplace authoring
 |---|---|
 | **Type** | `string \| list<string>` |
 | **Required** | OPTIONAL |
-| **Default** | Auto-detect: `vscode` if `.github/` exists, `claude` if `.claude/` exists, `codex` if `.codex/` exists, `all` if multiple target folders exist, `minimal` if none |
-| **Allowed values** | `vscode` · `agents` · `copilot` · `claude` · `cursor` · `opencode` · `codex` · `all` |
+| **Default** | Auto-detect: `vscode` if `.github/` exists, `claude` if `.claude/` exists, `codex` if `.codex/` exists, `windsurf` if `.windsurf/` exists, `all` if multiple target folders exist, `minimal` if none |
+| **Allowed values** | `vscode` · `agents` · `copilot` · `claude` · `cursor` · `opencode` · `codex` · `gemini` · `windsurf` · `all` |
 
 Controls which output targets are generated during compilation and installation. Accepts a single string or a list of strings. When unset, a conforming resolver SHOULD auto-detect based on folder presence. Unknown values MUST raise a parse error pointing at the offending token. Auto-detection applies only when `target:` is unset.
 
@@ -137,6 +137,8 @@ When a list is specified, only those targets are compiled, installed, and packed
 | `cursor` | Emits to `.cursor/rules/`, `.cursor/agents/`, `.cursor/skills/` |
 | `opencode` | Emits to `.opencode/agents/`, `.opencode/commands/`, `.opencode/skills/` |
 | `codex` | Emits `AGENTS.md` and deploys skills to `.agents/skills/`, agents to `.codex/agents/` |
+| `gemini` | Emits `GEMINI.md` and deploys to `.gemini/commands/`, `.gemini/skills/`, `.gemini/settings.json` |
+| `windsurf` | Emits `AGENTS.md` and deploys to `.windsurf/rules/`, `.windsurf/skills/`, `.windsurf/workflows/`, `.windsurf/hooks.json` |
 | `all` | All targets. Cannot be combined with other values in a list. |
 | `minimal` | AGENTS.md only at project root. **Auto-detected only** -- this value MUST NOT be set explicitly in manifests; it is an internal fallback when no target folder is detected. |
 
@@ -257,7 +259,7 @@ local_path_form = ("./" / "../" / "/" / "~/" / ".\\" / "..\\" / "~\\") path
 | `host` | OPTIONAL | FQDN (e.g. `gitlab.com`) | Git host. Defaults to `github.com`. |
 | `port` | OPTIONAL | `1`–`65535` | Non-default port on `ssh://`, `https://`, `http://` clone URLs. Not expressible in SCP shorthand. |
 | `owner/repo` | REQUIRED | 2+ path segments of `[a-zA-Z0-9._-]+` | Repository path. GitHub uses exactly 2 segments (`owner/repo`). Non-GitHub hosts MAY use nested groups (e.g. `gitlab.com/group/sub/repo`). |
-| `virtual_path` | OPTIONAL | Path segments after repo | Subdirectory, file, or collection within the repo. See §4.1.3. |
+| `virtual_path` | OPTIONAL | Path segments after repo | Subdirectory or file within the repo. See §4.1.3. |
 | `ref` | OPTIONAL | Branch, tag, or commit SHA | Git reference. Commit SHAs matched by `^[a-f0-9]{7,40}$`. Semver tags matched by `^v?\d+\.\d+\.\d+`. |
 
 **Examples:**
@@ -303,7 +305,7 @@ REQUIRED when the shorthand is ambiguous (e.g. nested-group repos with virtual p
 | Field | Type | Required | Pattern / Constraint | Description |
 |---|---|---|---|---|
 | `git` | `string` | REQUIRED (remote) | HTTPS URL, SSH URL, or FQDN shorthand | Clone URL of the repository. Required for remote dependencies. |
-| `path` | `string` | OPTIONAL / REQUIRED (local) | Relative path within the repo, or local filesystem path | When `git` is present: subdirectory, file, or collection (virtual package). When `git` is absent: local filesystem path (must start with `./`, `../`, `/`, or `~/`). |
+| `path` | `string` | OPTIONAL / REQUIRED (local) | Relative path within the repo, or local filesystem path | When `git` is present: subdirectory or file (virtual package). When `git` is absent: local filesystem path (must start with `./`, `../`, `/`, or `~/`). |
 | `ref` | `string` | OPTIONAL | Branch, tag, or commit SHA | Git reference to checkout. |
 | `alias` | `string` | OPTIONAL | `^[a-zA-Z0-9._-]+$` | Local alias. |
 
@@ -324,14 +326,16 @@ Local path dependency (development only):
 
 #### 4.1.3. Virtual Packages
 
-A dependency MAY target a subdirectory, file, or collection within a repository rather than the whole repo. Conforming resolvers MUST classify virtual packages using the following rules, evaluated in order:
+A dependency MAY target a subdirectory or a file within a repository rather than the whole repo. Conforming resolvers MUST classify virtual packages using the following rules, evaluated in order:
 
 | Kind | Detection rule | Example |
 |---|---|---|
 | **File** | `virtual_path` ends in `.prompt.md`, `.instructions.md`, `.agent.md`, or `.chatmode.md` | `owner/repo/prompts/review.prompt.md` |
-| **Collection (dir)** | `virtual_path` contains `/collections/` (no collection extension) | `owner/repo/collections/security` |
-| **Collection (manifest)** | `virtual_path` contains `/collections/` and ends with `.collection.yml` or `.collection.yaml` | `owner/repo/collections/security.collection.yml` |
-| **Subdirectory** | `virtual_path` does not match any file, collection, or extension rule above | `owner/repo/skills/security` |
+| **Subdirectory** | `virtual_path` does not match any file extension above | `owner/repo/skills/security` |
+
+Classification is by extension only -- never by path segment. A path like `owner/repo/collections/security` (no extension) is **Subdirectory**: the actual on-disk shape (APM package with `apm.yml`, skill bundle, or plugin) is resolved at fetch time by probing for `apm.yml` first.
+
+> **Removed (#1094):** the legacy `.collection.yml` / `.collection.yaml` virtual-package form is no longer supported. Convert any such reference to an `apm.yml` with a `dependencies:` section, then reference the resulting subdirectory as a regular subdirectory virtual package.
 
 #### 4.1.4. Canonical Normalisation
 
@@ -476,7 +480,7 @@ The `compilation` key is OPTIONAL. It controls `apm compile` behaviour. All fiel
 
 | Field | Type | Default | Constraint | Description |
 |---|---|---|---|---|
-| `target` | `enum<string>` | `all` | `vscode` · `agents` · `claude` · `codex` · `all` | Output target (same values as §3.6). Defaults to `all` when set explicitly in compilation config. |
+| `target` | `enum<string>` | `all` | `vscode` · `agents` · `claude` · `codex` · `gemini` · `windsurf` · `all` | Output target (same values as §3.6). Defaults to `all` when set explicitly in compilation config. |
 | `strategy` | `enum<string>` | `distributed` | `distributed` · `single-file` | `distributed` generates per-directory AGENTS.md files. `single-file` generates one monolithic file. |
 | `single_file` | `bool` | `false` | | Legacy alias. When `true`, overrides `strategy` to `single-file`. |
 | `output` | `string` | `AGENTS.md` | File path | Custom output path for the compiled file. |
@@ -527,7 +531,7 @@ dependencies:                              # YAML list (not a map)
     is_virtual:      <bool>                # True for virtual (file/subdirectory) packages
     depth:           <int>                 # 1 = direct, 2+ = transitive
     resolved_by:     <string>              # Parent dependency (transitive only)
-    package_type:    <string>              # Package type (e.g. "apm_package", "marketplace_plugin")
+    package_type:    <string>              # Package type (e.g. "apm_package", "marketplace_plugin", "meta_package")
     content_hash:    <string>              # SHA-256 of package file tree (e.g. "sha256:a1b2c3...")
     is_dev:          <bool>                # True for devDependencies
     deployed_files:  <list<string>>        # Workspace-relative paths of installed files

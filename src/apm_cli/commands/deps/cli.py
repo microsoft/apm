@@ -701,7 +701,7 @@ def clean(dry_run: bool, yes: bool):
     "-t",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated for multiple, e.g. claude,copilot). Use 'all' for every target. Overrides auto-detection.",
+    help="Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini (excludes agent-skills); combine with 'agent-skills' for both.",
 )
 @click.option(
     "--parallel-downloads",
@@ -718,7 +718,18 @@ def clean(dry_run: bool, yes: bool):
     default=False,
     help="Update user-scope dependencies (~/.apm/)",
 )
-def update(packages, verbose, force, target, parallel_downloads, global_):
+@click.option(
+    "--legacy-skill-paths",
+    "legacy_skill_paths",
+    is_flag=True,
+    default=False,
+    help=(
+        "Deploy skill files to per-client paths (e.g. .cursor/skills/) instead of "
+        "the shared .agents/skills/ directory. Compatibility flag for projects that "
+        "need per-client skill layouts."
+    ),
+)
+def update(packages, verbose, force, target, parallel_downloads, global_, legacy_skill_paths):
     """Update APM dependencies to latest git refs.
 
     Re-resolves git references (branches/tags) to their current SHAs,
@@ -821,6 +832,12 @@ def update(packages, verbose, force, target, parallel_downloads, global_):
         noun = f"{len(packages)} package(s)"
     else:
         noun = f"all {len(all_deps)} dependencies"
+    # Resolve --legacy-skill-paths: CLI flag wins, then env var fallback.
+    if not legacy_skill_paths:
+        from ...integration.targets import should_use_legacy_skill_paths
+
+        legacy_skill_paths = should_use_legacy_skill_paths()
+
     logger.start(f"Updating {noun}...")
 
     try:
@@ -835,6 +852,7 @@ def update(packages, verbose, force, target, parallel_downloads, global_):
             auth_resolver=auth_resolver,
             target=target,
             scope=scope,
+            legacy_skill_paths=legacy_skill_paths,
         )
     except Exception as e:
         logger.error(f"Update failed: {e}")

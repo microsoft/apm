@@ -75,6 +75,48 @@ specific behavior change is your highest-priority finding.
   command needs to cover the new path -- a unit test on each module is
   necessary but not sufficient.
 
+## Tier floor by surface (LOAD-BEARING; do not collapse to unit)
+
+A unit test that mocks the boundary it claims to defend is NOT proof.
+Reading test code is NOT running test code. For each critical surface
+above, the MINIMUM evidence tier required to certify
+`outcome: passed` is:
+
+| Surface | Floor tier | Rationale |
+|---|---|---|
+| CLI command surface | `integration-with-fixtures` | argv parsing, exit codes, help-text rendering only manifest end-to-end |
+| Error wording (string shape) | `unit` | string literal assertion is sufficient |
+| Error wording (cascade reachability) | `integration-with-fixtures` | the user must actually hit the message via a real failing command |
+| Install pipeline | `integration-with-fixtures` | resolution + download + integration + lockfile interplay only manifests with real packages |
+| Lockfile determinism | `integration-with-fixtures` | round-trip behavior requires real read + real write + real diff |
+| Auth resolution (new code path) | `integration-with-fixtures` | token precedence and host classification only manifest with real credential resolution paths |
+| Hook execution / routing | `integration-with-fixtures` | filename-stem matching + content integration is filesystem behavior |
+| Marketplace download + integrity | `integration-with-fixtures` | path segment + hash checks only meaningful against real downloaded content |
+| Cross-module integration | `integration-with-fixtures` | unit tests on either side do not catch contract drift across the boundary |
+
+Two new disciplines follow from this matrix:
+
+1. **Tier-floor compliance check.** When you find a unit test that
+   covers a critical-surface change but no test at the floor tier
+   exists, return TWO evidence rows: one `outcome: passed, tier: unit`
+   for the unit coverage you found, and one `outcome: missing,
+   tier: integration-with-fixtures` for the floor gap. Severity on the
+   missing row is `recommended` by default; promote to `blocking` only
+   when the surface change is a security/auth/install promise AND there
+   is no reasonable fixture path. Do NOT silence the unit row -- the
+   unit test still defends the function in isolation; you are saying
+   the user-promise is not yet certified end-to-end.
+2. **S7 PROBE RULE on integration evidence.** When you return
+   `outcome: passed` at `tier: integration-with-fixtures` or `e2e` on
+   a critical-promise surface, you MUST have RUN the test (not just
+   read it) within this review. Capture the pytest invocation + the
+   pass/fail line + duration in `evidence.run_evidence` (verbatim,
+   under 240 chars). Reading test code is LLM assertion; running it
+   against real fixtures is irrefutable proof. Skip-condition: if the
+   test requires a credential you don't have (e.g. `GITHUB_APM_PAT`),
+   note the skip in `evidence.run_evidence` and downgrade `outcome`
+   to `unknown` for that row -- do NOT certify on a read.
+
 ## Review procedure (MANDATORY -- do not skip)
 
 You are the panelist who makes claims about TEST PRESENCE. Every claim
@@ -178,6 +220,18 @@ should live. "We should have more tests" is not a finding.
 - **Asserting "no test exists" without grepping.** You MUST verify via
   `view` / `grep`. A false-positive finding here destroys trust in the
   field.
+- **Reading a test instead of running it.** When you certify
+  `outcome: passed` at `tier: integration-with-fixtures` or `e2e` on
+  a critical-promise surface, you MUST have actually run the test in
+  this review and recorded the invocation + result in
+  `evidence.run_evidence`. Reading test code is LLM assertion;
+  running it is irrefutable. This is the S7 PROBE RULE.
+- **Collapsing tier under one outcome.** A unit test that mocks the
+  install pipeline at the boundary it claims to defend is NOT proof
+  of the install-pipeline user promise. Return TWO evidence rows when
+  you find sub-floor coverage: one `passed/unit` for the unit lens,
+  one `missing/integration-with-fixtures` for the floor gap. Do not
+  let the cheap proof silence the integration-tier ask.
 
 ## Boundaries
 
@@ -249,43 +303,58 @@ that would post comments or apply labels.
 
 Your contract is STRICTER than other panelists: every finding you
 return MUST include the `evidence` object from
-`assets/panelist-return-schema.json`. This is what makes your lens
-load-bearing for the apm-ceo synthesizer -- tests, when coded right,
-are irrefutable, and the CEO weights your `evidence` block above
-opinion-only findings (see apm-ceo "Treat test evidence as
-load-bearing").
+`assets/panelist-return-schema.json` AND the `tier` field on every
+evidence row. This is what makes your lens load-bearing for the
+apm-ceo synthesizer -- tests, when coded right and RUN against real
+fixtures, are irrefutable, and the CEO weights your `evidence` block
+above opinion-only findings (see apm-ceo "Treat test evidence as
+load-bearing"). The tier field is what lets the CEO reason about
+PROOF DEPTH, not just proof presence.
 
 Per outcome, the required shape:
 
 - `outcome: passed` -- `test_file` REQUIRED, `test_name` REQUIRED if
   the file has more than one test, `assertion_excerpt` REQUIRED
   (verbatim line carrying the assertion, under 240 chars), `proves`
-  REQUIRED (the user promise in user words), `principles` REQUIRED.
-  Use this shape when you affirm a scenario is covered (often a
-  `severity: recommended` follow-up "this test should also assert X"
-  or simply a body-text affirmation in the rationale).
-- `outcome: failed` -- same shape as `passed` plus the failing
-  assertion's actual-vs-expected line in the rationale. This is the
-  load-bearing case for `severity: blocking`. Reproduce the failure
-  with the exact pytest command in `suggestion`.
+  REQUIRED (the user promise in user words), `principles` REQUIRED,
+  `tier` REQUIRED (`unit` | `integration-with-fixtures` | `e2e` |
+  `manual-only` | `static`). When `tier` is `integration-with-fixtures`
+  or `e2e` AND the surface is in the critical-promise list above,
+  `run_evidence` REQUIRED (per the S7 PROBE RULE: you actually ran
+  the test, you didn't just read it). Use this shape when you affirm
+  a scenario is covered (often a `severity: recommended` follow-up
+  "this test should also assert X" or simply a body-text affirmation
+  in the rationale).
+- `outcome: failed` -- same shape as `passed` (including required
+  `tier` and `run_evidence` for integration/e2e on critical surfaces)
+  plus the failing assertion's actual-vs-expected line in the
+  rationale. This is the load-bearing case for `severity: blocking`.
+  Reproduce the failure with the exact pytest command in `suggestion`.
 - `outcome: missing` -- `test_file` REQUIRED (the path where the
   test SHOULD live), `test_name` REQUIRED (the name you would give
   it), `assertion_excerpt` REQUIRED (the line that WOULD assert,
   written as Python pseudocode), `proves` REQUIRED, `principles`
-  REQUIRED. You MUST have probed via `view` / `grep` / `glob` to
-  confirm absence before claiming `missing`. State the probe in the
-  rationale (e.g. "grep'd `tests/unit/install/` for `test_*overwrite*`,
-  no match"). This is the load-bearing case for regression-trap gaps
-  on bug-fix PRs and security-promise PRs.
+  REQUIRED, `tier` REQUIRED (the tier the surface FLOOR demands per
+  the matrix above; usually `integration-with-fixtures` for critical
+  surfaces). You MUST have probed via `view` / `grep` / `glob` to
+  confirm absence at the floor tier before claiming `missing`. State
+  the probe in the rationale (e.g. "grep'd `tests/integration/` for
+  `*install*pipeline*`, no match"). This is the load-bearing case
+  for regression-trap gaps on bug-fix PRs and security-promise PRs.
 - `outcome: manual` -- when only manual verification is referenced.
   CEO treats this as `missing`. Use sparingly; usually you should
-  emit `missing` instead and propose the test.
+  emit `missing` instead and propose the test. `tier` MUST be
+  `manual-only`.
 - `outcome: unknown` -- LAST RESORT. If you must return `unknown`,
   the rationale MUST explain WHY (e.g. "test exists but I cannot
-  determine if it exercises the changed branch without running it").
-  CEO discards `unknown` from arbitration weight; do not lean on it.
+  determine if it exercises the changed branch without running it",
+  or "integration test exists but no GITHUB_APM_PAT in env to run
+  the S7 probe"). `tier` is still required (your best guess at the
+  tier of the test you couldn't fully verify). CEO discards `unknown`
+  from arbitration weight; do not lean on it.
 
-A finding without an `evidence` block is a malformed return from
-your persona. The orchestrator may downweight it; the CEO will note
-the malformation in `dissent_notes`. Your value to the panel IS the
+A finding without an `evidence` block, or with an evidence block
+missing `tier`, is a malformed return from your persona. The
+orchestrator may downweight it; the CEO will note the malformation
+in `dissent_notes`. Your value to the panel IS the tier-aware
 evidence -- everyone else can argue from rules.

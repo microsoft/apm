@@ -120,7 +120,7 @@ class TestGeminiCommandIntegration:
 
 @pytest.mark.integration
 class TestGeminiSkillIntegration:
-    """Skills: package dir -> .gemini/skills/{name}/SKILL.md (verbatim copy)"""
+    """Skills: package dir -> .agents/skills/{name}/SKILL.md (converged via deploy_root)"""
 
     def setup_method(self):
         self.tmp = tempfile.mkdtemp()
@@ -143,7 +143,7 @@ class TestGeminiSkillIntegration:
         result = SkillIntegrator().integrate_package_skill(info, self.root, targets=[target])
 
         assert result.skill_created
-        skill_md = self.root / ".gemini" / "skills" / "my-skill" / "SKILL.md"
+        skill_md = self.root / ".agents" / "skills" / "my-skill" / "SKILL.md"
         assert skill_md.exists()
         assert skill_md.read_text() == skill_content
 
@@ -438,13 +438,13 @@ class TestGeminiUninstallCleanup:
         assert not (commands_dir / "review.toml").exists()
 
     def test_uninstall_cleans_skills(self):
-        """Sync removes deployed skills from .gemini/skills/."""
-        skills_dir = self.root / ".gemini" / "skills" / "style-checker"
+        """Sync removes deployed skills from .agents/skills/ (converged path)."""
+        skills_dir = self.root / ".agents" / "skills" / "style-checker"
         skills_dir.mkdir(parents=True)
         (skills_dir / "SKILL.md").write_text("# Skill\nCheck style.")
 
         managed_files = {
-            ".gemini/skills/style-checker",
+            ".agents/skills/style-checker",
         }
 
         integrator = SkillIntegrator()
@@ -454,13 +454,13 @@ class TestGeminiUninstallCleanup:
         assert not skills_dir.exists()
 
     def test_uninstall_transitive_dep_cleans_skill(self):
-        """Transitive dep skill is cleaned from .gemini/skills/ on uninstall."""
-        skill_dir = self.root / ".gemini" / "skills" / "review-and-refactor"
+        """Transitive dep skill is cleaned from .agents/skills/ on uninstall."""
+        skill_dir = self.root / ".agents" / "skills" / "review-and-refactor"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text("# Transitive skill")
 
         managed_files = {
-            ".gemini/skills/review-and-refactor",
+            ".agents/skills/review-and-refactor",
         }
 
         integrator = SkillIntegrator()

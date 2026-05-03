@@ -79,7 +79,12 @@ def _make_plugin_bundle(
     for rel, content in files.items():
         p = bundle / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
+        # write_bytes (not write_text) to avoid CRLF translation on Windows;
+        # bundle hashes are computed byte-for-byte and must match the on-disk
+        # file exactly. With write_text on Windows, "\n" -> "\r\n" silently,
+        # making sha256 of the in-memory string disagree with sha256 of the
+        # file on disk.
+        p.write_bytes(content.encode("utf-8"))
         bundle_files[rel] = _sha256(content)
 
     if include_lockfile:

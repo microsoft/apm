@@ -207,12 +207,8 @@ def integrate_package_primitives(
                 elif _prim_name == "instructions":
                     _label = "instruction(s)"
                 elif _prim_name == "hooks":
-                    if _target.name == "claude":
-                        _deploy_dir = ".claude/settings.json"
-                    elif _target.name == "cursor":
-                        _deploy_dir = ".cursor/hooks.json"
-                    elif _target.name == "codex":
-                        _deploy_dir = ".codex/hooks.json"
+                    if _target.hooks_config_display:
+                        _deploy_dir = _target.hooks_config_display
                     _label = "hook(s)"
                 else:
                     _label = _prim_name
@@ -381,6 +377,8 @@ def integrate_local_bundle(
     import hashlib
     import shutil
 
+    from apm_cli.utils.content_hash import compute_file_hash
+
     from ..core.scope import InstallScope
     from ..utils.path_security import (
         PathTraversalError,
@@ -432,9 +430,18 @@ def integrate_local_bundle(
         # project_root otherwise.
         resolved_root = getattr(target, "resolved_deploy_root", None)
         if resolved_root is not None:
-            deploy_root = Path(resolved_root)
+            default_deploy_root = Path(resolved_root)
         else:
-            deploy_root = project_root / target.root_dir
+            default_deploy_root = project_root / target.root_dir
+
+        # Build a primitive→deploy_root lookup so bundle entries that fall
+        # under a primitive with an explicit ``deploy_root`` (e.g.
+        # skills→.agents) are routed to the converged directory rather
+        # than the per-client ``target.root_dir``.
+        _primitive_roots: dict[str, Path] = {}
+        for prim_name, prim_mapping in (target.primitives or {}).items():
+            if getattr(prim_mapping, "deploy_root", None) and resolved_root is None:
+                _primitive_roots[prim_name] = project_root / prim_mapping.deploy_root
 
         for rel, expected_hash in sorted(pack_files.items()):
             # CR1: bundle_files keys come from untrusted lockfile YAML
@@ -452,6 +459,15 @@ def integrate_local_bundle(
             if not src.is_file() or src.is_symlink():
                 skipped += 1
                 continue
+
+            # Route the file to the correct deploy root.  If the first
+            # path segment matches a primitive with an explicit
+            # ``deploy_root`` (e.g. ``skills/`` → ``.agents/``), use
+            # the converged directory.  Otherwise fall back to the
+            # target's default root.
+            _first_seg = rel.split("/", 1)[0] if "/" in rel else ""
+            deploy_root = _primitive_roots.get(_first_seg, default_deploy_root)
+
             dest = deploy_root / rel
             try:
                 ensure_path_within(dest, deploy_root)
@@ -476,7 +492,13 @@ def integrate_local_bundle(
 
             if dry_run:
                 deployed_files.append(record)
-                deployed_hashes[record] = expected_hash
+                # Normalize to "sha256:<hex>" so the dry-run lockfile preview
+                # matches the format written by ``compute_file_hash`` on the
+                # real deploy path.  ``expected_hash`` here is bare hex from
+                # ``pack.bundle_files``; without the prefix, downstream
+                # exact-match comparisons (e.g. ``cleanup.py`` provenance
+                # check) treat the file as user-edited and skip cleanup.
+                deployed_hashes[record] = f"sha256:{expected_hash}"
                 if logger:
                     logger.verbose_detail(f"[dry-run] would deploy {record}")
                 continue
@@ -507,7 +529,12 @@ def integrate_local_bundle(
             # provenance now keeps the lockfile honest if future transforms
             # (frontmatter injection, etc.) mutate content during deploy.
             deployed_files.append(record)
-            deployed_hashes[record] = hashlib.sha256(dest.read_bytes()).hexdigest()
+            # Use ``compute_file_hash`` so the recorded value carries the
+            # canonical ``sha256:<hex>`` prefix.  Matches the format written
+            # by the regular install pipeline (``compute_deployed_hashes``)
+            # so subsequent stale-cleanup provenance checks compare equal
+            # instead of mis-classifying these files as user-edited.
+            deployed_hashes[record] = compute_file_hash(dest)
             if logger:
                 logger.verbose_detail(f"deployed {record}")
 

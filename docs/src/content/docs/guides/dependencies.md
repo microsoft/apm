@@ -298,6 +298,21 @@ dependencies:
 - Local packages are validated the same as remote packages (must have `apm.yml` or `SKILL.md`)
 - `apm compile` works identically regardless of dependency source
 - Transitive dependencies are resolved recursively (local packages can depend on remote packages)
+- **Anchor rule:** a `local_path` declared **inside another local package** is resolved relative to **that package's own directory**, not the consumer's project root. This matches npm/pip/cargo workspace behaviour and is what makes mono-repos with sibling helper packages portable across consumers. Sibling layouts that resolve **outside** the consuming project root (e.g. `../sibling-pkg` from a local dep at the project edge) are supported -- the consuming developer authored the manifest chain and trusts the layout. The security boundary lives upstream: see the next bullet.
+
+  ```yaml
+  # apm.yml at /repo/apm.yml
+  dependencies:
+    apm:
+      - ./packages/specialized
+
+  # apm.yml at /repo/packages/specialized/apm.yml
+  dependencies:
+    apm:
+      - ../base   # resolves to /repo/packages/base, NOT /repo/base
+  ```
+
+- **Remote packages may not declare local dependencies.** A package fetched from `owner/repo` cannot depend on a `local_path` -- such an entry would reach into the consumer's filesystem in unpredictable ways. Both relative and absolute local paths are rejected at `ERROR` severity. Authors of remote packages must publish their dependencies (or vendor them via subdirectory packages).
 
 **Re-install behavior:** Local deps are always re-copied on `apm install` since there is no commit SHA to cache against. This ensures you always get the latest local changes.
 

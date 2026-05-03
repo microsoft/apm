@@ -39,7 +39,7 @@ class Instruction:
     name: str
     file_path: Path
     description: str
-    apply_to: str  # Glob pattern for file targeting (required for instructions)
+    apply_to: str  # Glob pattern for file targeting (optional; empty means global)
     content: str
     author: str | None = None
     version: str | None = None

@@ -93,3 +93,55 @@ skill collection layout reference.
 - [Dependencies](../../guides/dependencies/) -- managing external packages
 - [Manifest schema](../../reference/manifest-schema/) -- full `apm.yml` reference
 - [CLI commands](../../reference/cli-commands/) -- complete command reference
+
+## Deprecated targets
+
+:::note[Deprecated]
+`--target agents` is deprecated and maps to `copilot` (`.github/`), not `.agents/`. Use `--target copilot` for GitHub Copilot deployment, or `--target agent-skills` for cross-client `.agents/skills/` deployment. Removal in v1.0.
+:::
+
+## Skill routing convergence
+
+:::caution[Behavior change]
+Skills for **Copilot, Cursor, OpenCode, Codex, and Gemini** now deploy to `.agents/skills/` by default instead of per-client directories (`.github/skills/`, `.cursor/skills/`, `.gemini/skills/`, etc.). This matches the `.agents/` discovery path documented by all five clients and eliminates redundant copies when targeting multiple clients.
+
+**Claude is unchanged** — its skills continue to deploy to `.claude/skills/`.
+
+To restore the previous per-client layout, pass `--legacy-skill-paths` to any command, or set the `APM_LEGACY_SKILL_PATHS=1` environment variable.
+:::
+
+### Auto-migration of legacy lockfile state
+
+When you upgrade APM and run `apm install`, the tool automatically detects legacy per-client skill paths (`.github/skills/`, `.cursor/skills/`, `.opencode/skills/`, `.gemini/skills/`) recorded in your `apm.lock.yaml` and migrates them to `.agents/skills/`.
+
+**What happens:**
+- Old per-client skill files are deleted after the new `.agents/skills/` files are written
+- The lockfile is updated to reflect the new paths
+- The migration is idempotent — running `apm install` again is a no-op
+- Foreign / hand-authored skills outside the lockfile are never touched
+
+**What does NOT migrate:**
+- `.claude/skills/` — Claude is not part of the convergence
+- `.codex/skills/` — Codex was already on `.agents/skills/` before this change
+- Any file not tracked in `apm.lock.yaml`
+
+**If a collision is detected** (e.g., a foreign file already exists at the destination `.agents/skills/` path with different content), the migration aborts entirely with a clear error. Use `--legacy-skill-paths` to skip migration and keep per-client paths.
+
+### CI / automation
+
+The first `apm install` after upgrading to this version will migrate legacy
+per-client skill paths to `.agents/skills/` and update `apm.lock.yaml`. In
+CI pipelines, this means the working tree will show:
+
+- Deletions under `.github/skills/`, `.cursor/skills/`, `.opencode/skills/`,
+  and/or `.gemini/skills/`
+- Additions under `.agents/skills/`
+- An updated `apm.lock.yaml`
+
+To handle this in CI, either:
+
+- Commit the migrated lockfile and `.agents/skills/` directory, then update
+  your CI to expect the new layout, OR
+- Set `APM_LEGACY_SKILL_PATHS=1` in your CI environment to defer the
+  migration until you are ready to update the lockfile in a controlled
+  commit.

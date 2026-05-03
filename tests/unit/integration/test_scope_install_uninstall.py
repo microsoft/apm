@@ -752,7 +752,7 @@ class TestSkillInstallUninstallCycle:
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_copilot_project_scope(self):
-        """Skill deploys to .github/skills/ at project scope."""
+        """Skill deploys to .agents/skills/ at project scope (convergence)."""
         target = KNOWN_TARGETS["copilot"].for_scope(user_scope=False)
         pkg_info = _make_pkg(
             self.project_root,
@@ -770,7 +770,7 @@ class TestSkillInstallUninstallCycle:
         assert len(result.target_paths) >= 1
 
         deployed = _posix_relpaths(self.project_root, result.target_paths)
-        assert any(p.startswith(".github/skills/") for p in deployed)
+        assert any(p.startswith(".agents/skills/") for p in deployed)
 
         for p in deployed:
             assert (self.project_root / p).exists()
@@ -788,7 +788,7 @@ class TestSkillInstallUninstallCycle:
             assert not (self.project_root / p).exists()
 
     def test_copilot_user_scope(self):
-        """Skill deploys to .copilot/skills/ at user scope."""
+        """Skill deploys to .agents/skills/ at user scope (convergence)."""
         target = KNOWN_TARGETS["copilot"].for_scope(user_scope=True)
         assert target is not None
 
@@ -807,10 +807,11 @@ class TestSkillInstallUninstallCycle:
         assert len(result.target_paths) >= 1
 
         deployed = _posix_relpaths(self.project_root, result.target_paths)
-        assert any(p.startswith(".copilot/skills/") for p in deployed)
+        assert any(p.startswith(".agents/skills/") for p in deployed)
 
-        # .github/ must NOT be touched
+        # .github/ and .copilot/ must NOT be touched (skills converged on .agents/)
         assert not (self.project_root / ".github").exists()
+        assert not (self.project_root / ".copilot").exists()
 
         for p in deployed:
             assert (self.project_root / p).exists()
@@ -828,7 +829,7 @@ class TestSkillInstallUninstallCycle:
             assert not (self.project_root / p).exists()
 
     def test_opencode_user_scope(self):
-        """Skill deploys to .config/opencode/skills/ at user scope."""
+        """Skill deploys to .agents/skills/ at user scope (convergence)."""
         target = KNOWN_TARGETS["opencode"].for_scope(user_scope=True)
         assert target is not None
 
@@ -850,9 +851,9 @@ class TestSkillInstallUninstallCycle:
         assert len(result.target_paths) >= 1
 
         deployed = _posix_relpaths(self.project_root, result.target_paths)
-        assert any(p.startswith(".config/opencode/skills/") for p in deployed)
+        assert any(p.startswith(".agents/skills/") for p in deployed)
 
-        # .opencode/ must NOT be touched
+        # .opencode/ and .config/opencode/ must NOT be touched
         assert not (self.project_root / ".opencode").exists()
 
         for p in deployed:

@@ -1,8 +1,10 @@
 """APM dependency resolution engine with recursive resolution and conflict detection."""
 
+import inspect
+import logging
 from collections import deque
 from pathlib import Path
-from typing import List, Optional, Protocol, Set, Tuple, runtime_checkable  # noqa: F401, UP035
+from typing import List, Optional, Protocol, Set, Tuple  # noqa: F401, UP035
 
 from ..models.apm_package import APMPackage, DependencyReference
 from .dependency_graph import (
@@ -14,19 +16,28 @@ from .dependency_graph import (
     FlatDependencyMap,
 )
 
+_logger = logging.getLogger(__name__)
+
 
 # Type alias for the download callback.
-# Takes (dep_ref, apm_modules_dir, parent_chain) and returns the install path
-# if successful.  ``parent_chain`` is a human-readable breadcrumb string like
-# "root-pkg > mid-pkg > this-pkg" showing the full dependency path including
-# the current node, or just the node's display name for direct (depth-1) deps.
-@runtime_checkable
+# Takes (dep_ref, apm_modules_dir, parent_chain, parent_pkg) and returns the
+# install path if successful. ``parent_chain`` is a human-readable breadcrumb
+# string like "root-pkg > mid-pkg > this-pkg" showing the full dependency
+# path including the current node, or just the node's display name for
+# direct (depth-1) deps. ``parent_pkg`` is the APMPackage that declared this
+# dependency (None for direct deps from the root); callers use its
+# ``source_path`` to anchor relative ``local_path`` resolution (#857).
+#
+# Note: NOT @runtime_checkable -- we use signature inspection
+# (``_signature_accepts_parent_pkg``) to detect legacy callbacks, never
+# isinstance, so the runtime-checkable overhead would be dead weight.
 class DownloadCallback(Protocol):
     def __call__(
         self,
         dep_ref: "DependencyReference",
         apm_modules_dir: Path,
         parent_chain: str = "",
+        parent_pkg: Optional["APMPackage"] = None,
     ) -> Path | None: ...
 
 
@@ -52,9 +63,49 @@ class APMDependencyResolver:
         self._apm_modules_dir: Path | None = apm_modules_dir
         self._project_root: Path | None = None
         self._download_callback = download_callback
+        # Whether ``download_callback`` accepts ``parent_pkg`` (added in #857).
+        # Detected once via signature inspection so legacy callbacks that
+        # predate the field still work without raising a silent TypeError
+        # that would mask the dependency.
+        self._callback_accepts_parent_pkg: bool = (
+            self._signature_accepts_parent_pkg(download_callback)
+            if download_callback is not None
+            else False
+        )
         self._downloaded_packages: set[str] = (
             set()
         )  # Track what we downloaded during this resolution
+        # Tracks ``dep_ref.get_unique_key()`` values rejected by the
+        # remote-parent local_path guard (#940 / PR #1111 review C2). The
+        # resolve phase folds this into ``ctx.callback_failures`` so the
+        # integrate phase skips them with the same "already failed during
+        # resolution" path used for download failures -- otherwise the
+        # rejected dep would still sit in the dependency tree and get
+        # copied later via ``_copy_local_package``, defeating the
+        # fail-closed posture this guard is meant to enforce.
+        self._rejected_remote_local_keys: set[str] = set()
+
+    @staticmethod
+    def _signature_accepts_parent_pkg(callback) -> bool:
+        """Return True if ``callback`` declares a ``parent_pkg`` parameter
+        (or accepts ``**kwargs``).
+
+        Falls back to False if the signature can't be introspected (e.g. C
+        extensions, builtins). The conservative fallback is correct: if we
+        don't know the callback's shape, assume the legacy 3-arg form so
+        the resolver won't pass an extra positional/keyword that triggers
+        TypeError and silently drops the dependency (#940 SR1).
+        """
+        try:
+            sig = inspect.signature(callback)
+        except (TypeError, ValueError):
+            return False
+        for param in sig.parameters.values():
+            if param.kind is inspect.Parameter.VAR_KEYWORD:
+                return True
+            if param.name == "parent_pkg":
+                return True
+        return False
 
     def resolve_dependencies(self, project_root: Path) -> DependencyGraph:
         """
@@ -85,7 +136,7 @@ class APMDependencyResolver:
             )
 
         try:
-            root_package = APMPackage.from_apm_yml(apm_yml_path)
+            root_package = APMPackage.from_apm_yml(apm_yml_path, source_path=project_root.resolve())
         except (ValueError, FileNotFoundError) as e:
             # Create error graph
             empty_package = APMPackage(name="error", version="0.0.0", package_path=project_root)
@@ -131,9 +182,15 @@ class APMDependencyResolver:
         Returns:
             DependencyTree: Hierarchical dependency tree
         """
-        # Load root package
+        # Load root package. Anchor source_path on the project root so direct
+        # dep relative paths resolve from there (#857).
         try:
-            root_package = APMPackage.from_apm_yml(root_apm_yml)
+            root_package = APMPackage.from_apm_yml(
+                root_apm_yml,
+                source_path=self._project_root.resolve()
+                if self._project_root is not None
+                else root_apm_yml.parent.resolve(),
+            )
         except (ValueError, FileNotFoundError) as e:  # noqa: F841
             # Return empty tree with error
             empty_package = APMPackage(name="error", version="0.0.0")
@@ -220,7 +277,9 @@ class APMDependencyResolver:
                 parent_chain = node.get_ancestor_chain()
 
                 loaded_package = self._try_load_dependency_package(
-                    dep_ref, parent_chain=parent_chain
+                    dep_ref,
+                    parent_chain=parent_chain,
+                    parent_pkg=parent_node.package if parent_node else None,
                 )
                 if loaded_package:
                     # Update the node with the actual loaded package
@@ -235,10 +294,17 @@ class APMDependencyResolver:
                         if sub_dep.get_unique_key() not in queued_keys:
                             processing_queue.append((sub_dep, depth + 1, node, is_dev))
                             queued_keys.add(sub_dep.get_unique_key())
-            except (ValueError, FileNotFoundError) as e:  # noqa: F841
-                # Could not load dependency package - this is expected for remote dependencies
-                # The node already has a placeholder package, so continue with that
-                pass
+            except (ValueError, FileNotFoundError) as e:
+                # Could not load dependency package -- expected for remote deps
+                # whose apm.yml lives at the resolved repo. Surface via stdlib
+                # debug logger so --verbose users can diagnose silent skips
+                # (#940 SR2). The node already has a placeholder package, so
+                # subsequent integration phases keep working.
+                _logger.debug(
+                    "Could not load transitive apm.yml for %s: %s",
+                    dep_ref.get_display_name(),
+                    e,
+                )
 
         return tree
 
@@ -365,7 +431,10 @@ class APMDependencyResolver:
         return True
 
     def _try_load_dependency_package(
-        self, dep_ref: DependencyReference, parent_chain: str = ""
+        self,
+        dep_ref: DependencyReference,
+        parent_chain: str = "",
+        parent_pkg: APMPackage | None = None,
     ) -> APMPackage | None:
         """
         Try to load a dependency package from apm_modules/.
@@ -376,10 +445,16 @@ class APMDependencyResolver:
         the package first.
 
         Args:
-            dep_ref: Reference to the dependency to load
+            dep_ref: Reference to the dependency to load.
             parent_chain: Human-readable breadcrumb of the dependency path
                 that led here (e.g. "root-pkg > mid-pkg").  Forwarded to the
                 download callback for contextual error messages.
+            parent_pkg: APMPackage that declared *dep_ref*, or None if this is
+                a direct dep from the root project. Used to (a) anchor relative
+                ``local_path`` resolution to the declaring package's source
+                directory (#857) and (b) reject ``local_path`` deps declared
+                inside REMOTE packages -- a remote package can't reasonably
+                refer to a path on the consumer's filesystem (#940).
 
         Returns:
             APMPackage: Loaded package if found, None otherwise
@@ -391,25 +466,91 @@ class APMDependencyResolver:
         if self._apm_modules_dir is None:
             return None
 
+        # Reject local_path deps declared by remote packages BEFORE asking the
+        # download callback to materialize them. A remote package referencing
+        # a local path on the consumer's filesystem is a path-confusion vector
+        # whether the path is relative (resolves against the parent's
+        # apm_modules clone) or absolute (presumes filesystem layout). Both
+        # branches reject at ERROR severity so the operator sees red, not the
+        # yellow of an advisory warning (#940 F3).
+        if dep_ref.is_local and dep_ref.local_path and self._is_remote_parent(parent_pkg):
+            local_str = str(dep_ref.local_path)
+            try:
+                from apm_cli.utils.console import _rich_error
+
+                if Path(local_str).expanduser().is_absolute():
+                    _rich_error(
+                        f"Refusing to install local_path dependency '{local_str}' "
+                        f"declared by remote package '{parent_pkg.name if parent_pkg else '?'}': "
+                        "absolute paths inside remote packages are a security risk. "
+                        "Publish the dependency as a standalone package and reference "
+                        "it via owner/repo or marketplace handle."
+                    )
+                else:
+                    _rich_error(
+                        f"Refusing to install local_path dependency '{local_str}' "
+                        f"declared by remote package '{parent_pkg.name if parent_pkg else '?'}': "
+                        "remote packages cannot reference paths on the consumer "
+                        "filesystem. Publish the dependency as a standalone package "
+                        "and reference it via owner/repo or marketplace handle."
+                    )
+            except Exception:
+                _logger.debug("Could not emit remote-parent rejection notice", exc_info=True)
+            # Mark the dep as failed at resolve time so the integrate phase
+            # skips it (PR #1111 review C2). Without this, the dep would
+            # remain in the dep tree -> ``deps_to_install`` -> the integrate
+            # loop would still call ``_copy_local_package`` and copy the
+            # very path we just refused.
+            self._rejected_remote_local_keys.add(dep_ref.get_unique_key())
+            return None
+
         # Get the canonical install path for this dependency
         install_path = dep_ref.get_install_path(self._apm_modules_dir)
 
         # If package doesn't exist locally, try to download it
         if not install_path.exists():
             if self._download_callback is not None:
-                unique_key = dep_ref.get_unique_key()
-                # Avoid re-downloading the same package in a single resolution
+                unique_key = self._download_dedup_key(dep_ref, parent_pkg)
+                # Avoid re-downloading the same logical (dep_ref, anchor) pair
+                # in a single resolution. The anchor is part of the key so that
+                # two parents with different ``source_path`` values can each
+                # fetch / copy the same dep into their own slot if needed.
                 if unique_key not in self._downloaded_packages:
                     try:
-                        downloaded_path = self._download_callback(
-                            dep_ref, self._apm_modules_dir, parent_chain
-                        )
+                        if self._callback_accepts_parent_pkg:
+                            downloaded_path = self._download_callback(
+                                dep_ref,
+                                self._apm_modules_dir,
+                                parent_chain,
+                                parent_pkg=parent_pkg,
+                            )
+                        else:
+                            downloaded_path = self._download_callback(
+                                dep_ref, self._apm_modules_dir, parent_chain
+                            )
                         if downloaded_path and downloaded_path.exists():
                             self._downloaded_packages.add(unique_key)
                             install_path = downloaded_path
-                    except Exception:
-                        # Download failed - continue without this dependency's sub-deps
-                        pass
+                    except Exception as exc:
+                        # Surface the failure at default verbosity AND log a
+                        # traceback at debug. Previously this branch silently
+                        # swallowed any error, masking transient network /
+                        # auth failures behind a generic "package not found"
+                        # downstream message (#940 F2 + SR5).
+                        try:
+                            from apm_cli.utils.console import _rich_warning
+
+                            _rich_warning(
+                                f"Failed to download dependency "
+                                f"'{dep_ref.get_display_name()}': {exc}"
+                            )
+                        except Exception:
+                            _logger.debug("Could not emit download-failure warning", exc_info=True)
+                        _logger.debug(
+                            "Download callback raised for %s",
+                            dep_ref.get_display_name(),
+                            exc_info=True,
+                        )
 
             # Still doesn't exist after download attempt
             if not install_path.exists():
@@ -428,14 +569,22 @@ class APMDependencyResolver:
                     version="1.0.0",
                     source=dep_ref.repo_url,
                     package_path=install_path,
+                    source_path=self._compute_dep_source_path(dep_ref, parent_pkg, install_path),
                 )
             # No manifest found
             return None
 
-        # Load and return the package
+        # Load and return the package, anchoring relative ``local_path`` deps
+        # on the declaring package's source dir (#857). For local deps this
+        # is the *original* user source; for remote deps it is the clone in
+        # apm_modules.
+        dep_source_path = self._compute_dep_source_path(dep_ref, parent_pkg, install_path)
         try:
-            package = APMPackage.from_apm_yml(apm_yml_path)
-            # Ensure source is set for tracking
+            package = APMPackage.from_apm_yml(apm_yml_path, source_path=dep_source_path)
+            # Ensure source is set for tracking. TODO(#940): the cache key
+            # already considers source_path; this post-construction mutation
+            # of ``source`` (a separate field) is safe today but has the same
+            # shape as the bug we just fixed -- review when refactoring.
             if not package.source:
                 package.source = dep_ref.repo_url
             return package
@@ -443,6 +592,84 @@ class APMDependencyResolver:
             # Package has invalid apm.yml - log warning but continue
             # In production, we might want to surface this to the user
             return None
+
+    @staticmethod
+    def _is_remote_parent(parent_pkg: APMPackage | None) -> bool:
+        """Return True if *parent_pkg* is a REMOTE package (i.e. fetched via
+        git URL or pinned by ref/path).
+
+        Used to gate ``local_path`` deps: only the root project and other
+        local packages may legitimately declare them. Remote packages
+        declaring a local_path is a path-confusion vector.
+
+        SECURITY NOTE: this is a heuristic on the ``source`` field. A
+        sufficiently adversarial remote could spoof a local-looking source.
+        The downstream containment check via ``ensure_path_within`` is the
+        actual security boundary; this gate just produces the user-facing
+        error early.
+        """
+        if parent_pkg is None or not parent_pkg.source:
+            return False
+        src = str(parent_pkg.source)
+        # Local deps get ``source = "_local/<name>"`` (see DependencyReference
+        # construction for is_local=True). Treat that prefix as definitively
+        # local even though it contains a slash.
+        if src.startswith("_local/"):
+            return False
+        # Remote sources look like URLs or owner/repo refs. Local sources
+        # are filesystem paths the user typed in their apm.yml.
+        return (
+            src.startswith(("http://", "https://", "git@", "ssh://", "git+"))
+            or "://" in src
+            or (src.count("/") >= 1 and not src.startswith((".", "/", "~")))
+        )
+
+    @staticmethod
+    def _compute_dep_source_path(
+        dep_ref: DependencyReference,
+        parent_pkg: APMPackage | None,
+        install_path: Path,
+    ) -> Path:
+        """Return the source-path anchor for a dependency.
+
+        For LOCAL deps we return the *original* user source directory so that
+        transitive ``../sibling`` references inside its apm.yml resolve as a
+        developer reading the file expects (#857). For REMOTE deps we return
+        the clone location under apm_modules.
+        """
+        if dep_ref.is_local and dep_ref.local_path:
+            local = Path(dep_ref.local_path).expanduser()
+            if not local.is_absolute() and parent_pkg is not None and parent_pkg.source_path:
+                return (parent_pkg.source_path / local).resolve()
+            return local.resolve()
+        return install_path.resolve()
+
+    @staticmethod
+    def _download_dedup_key(dep_ref: DependencyReference, parent_pkg: APMPackage | None) -> str:
+        """Dedup key for the download cache.
+
+        Includes the parent's source_path so two parents anchoring the same
+        local dep at different absolute locations don't collide on the first
+        one's resolved path. For non-local deps, the parent anchor doesn't
+        affect resolution, so the bare unique key suffices.
+        """
+        base = dep_ref.get_unique_key()
+        if dep_ref.is_local and parent_pkg is not None and parent_pkg.source_path:
+            return f"{base}@{parent_pkg.source_path}"
+        return base
+
+    @staticmethod
+    def _effective_base_dir(parent_pkg: APMPackage | None, project_root: Path) -> Path:
+        """Return the directory used to anchor relative ``local_path`` deps.
+
+        For direct (root-declared) deps, this is the project root. For
+        transitive deps, it is the declaring package's source_path so a
+        ``../sibling`` written inside the original package directory means
+        what the author meant (#857).
+        """
+        if parent_pkg is not None and parent_pkg.source_path is not None:
+            return parent_pkg.source_path
+        return project_root
 
     def _create_resolution_summary(self, graph: DependencyGraph) -> str:
         """

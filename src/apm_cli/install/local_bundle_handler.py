@@ -29,6 +29,7 @@ def install_local_bundle(
     verbose: bool,
     alias: str | None,
     logger,
+    legacy_skill_paths: bool = False,
     rejected_flags: dict[str, object],
 ) -> None:
     """Deploy a local bundle into project / user scope.
@@ -100,6 +101,12 @@ def install_local_bundle(
             )
             return
 
+        # Apply --legacy-skill-paths override to resolved targets.
+        if legacy_skill_paths:
+            from ..integration.targets import apply_legacy_skill_paths
+
+            targets = apply_legacy_skill_paths(targets)
+
         warning = check_target_mismatch(
             bundle_targets=bundle_info.pack_targets,
             install_targets=[t.name for t in targets],
@@ -144,6 +151,64 @@ def install_local_bundle(
             existing_hashes = dict(lockfile.local_deployed_file_hashes)
             existing_hashes.update(deployed_hashes)
             lockfile.local_deployed_file_hashes = existing_hashes
+
+            # Auto-migrate legacy per-client skill paths (#737).
+            # After deploying new .agents/skills/ files, detect and clean up
+            # any legacy paths (e.g. .github/skills/) still recorded in the
+            # lockfile from a previous --legacy-skill-paths install.
+            if not legacy_skill_paths:
+                from ..utils.console import _rich_error, _rich_info
+                from .skill_path_migration import (
+                    COLLISION_DETAIL_TEMPLATE,
+                    COLLISION_HEADER_TEMPLATE,
+                    COLLISION_HINT,
+                    MIGRATION_SUMMARY_TEMPLATE,
+                )
+                from .skill_path_migration import (
+                    check_collisions as _check_coll,
+                )
+                from .skill_path_migration import (
+                    detect_legacy_skill_deployments as _detect_legacy,
+                )
+                from .skill_path_migration import (
+                    execute_migration as _exec_mig,
+                )
+
+                _plans = _detect_legacy(lockfile, project_root)
+                if _plans:
+                    _colls = _check_coll(_plans, project_root)
+                    if _colls:
+                        # H2: collision is an error.
+                        _rich_error(
+                            COLLISION_HEADER_TEMPLATE.format(count=len(_colls)),
+                            symbol="error",
+                        )
+                        # M2: enumerate each collision (parity with pipeline).
+                        for _plan in _plans:
+                            for _cd in _colls:
+                                if _plan.dst_path in _cd:
+                                    _rich_error(
+                                        COLLISION_DETAIL_TEMPLATE.format(
+                                            dst_path=_plan.dst_path,
+                                            src_path=_plan.src_path,
+                                            dep_name=_plan.dep_name,
+                                        ),
+                                        symbol="error",
+                                    )
+                                    break
+                        _rich_info(COLLISION_HINT, symbol="info")
+                    else:
+                        _mig_result = _exec_mig(_plans, lockfile, project_root)
+                        _total = len(_mig_result.deleted) + len(_mig_result.skipped_no_file)
+                        if _total:
+                            _rich_info(
+                                MIGRATION_SUMMARY_TEMPLATE.format(count=_total),
+                                symbol="info",
+                            )
+                        if getattr(logger, "verbose", False) and _mig_result.deleted:
+                            for _dp in _mig_result.deleted:
+                                _rich_info(f"  removed {_dp}", symbol="info")
+
             lockfile.write(lockfile_path)
 
         msg = f"Installed {len(deployed)} file(s) from local bundle"

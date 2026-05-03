@@ -438,7 +438,7 @@ class TestPluginIntegration:
         assert (project_root / ".github" / "agents" / "test-agent.agent.md").exists()
 
         assert skill_result.skill_created or skill_result.skill_skipped
-        assert (project_root / ".github" / "skills" / "test-skill" / "SKILL.md").exists()
+        assert (project_root / ".agents" / "skills" / "test-skill" / "SKILL.md").exists()
 
         # Claude/Copilot-compatible locations produced during install path
         assert claude_agent_result.files_integrated == 1

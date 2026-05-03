@@ -413,6 +413,18 @@ run_e2e_tests() {
         exit 1
     fi
 
+    # Run Claude Code MCP schema-fidelity tests -- offline, golden fixtures
+    # captured from the upstream `claude` CLI (see fixtures/README.md)
+    log_info "Running Claude Code MCP schema-fidelity tests..."
+    echo "Command: pytest tests/integration/test_claude_mcp_schema_fidelity.py -v -s --tb=short"
+
+    if pytest tests/integration/test_claude_mcp_schema_fidelity.py -v -s --tb=short; then
+        log_success "Claude Code MCP schema-fidelity tests passed!"
+    else
+        log_error "Claude Code MCP schema-fidelity tests failed!"
+        exit 1
+    fi
+
     # Run local-bundle install E2E tests -- offline, no tokens needed
     log_info "Running local-bundle install E2E tests..."
     echo "Command: pytest tests/integration/test_install_local_bundle_e2e.py -v -s --tb=short"
@@ -438,7 +450,54 @@ run_e2e_tests() {
     else
         log_info "Skipping Azure DevOps E2E tests (ADO_APM_PAT not set)"
     fi
-    
+
+    # Run agent-skills target E2E tests -- offline, no tokens needed
+    log_info "Running agent-skills target E2E tests..."
+    echo "Command: pytest tests/integration/test_agent_skills_target.py -v -s --tb=short"
+
+    if pytest tests/integration/test_agent_skills_target.py -v -s --tb=short; then
+        log_success "Agent-skills target E2E tests passed!"
+    else
+        log_error "Agent-skills target E2E tests failed!"
+        exit 1
+    fi
+
+    # Run unified pack format E2E tests -- offline, no tokens needed
+    # Guards the 0.12.0 default flip from --format apm to --format plugin.
+    log_info "Running unified pack format E2E tests..."
+    echo "Command: pytest tests/integration/test_pack_unified.py -v -s --tb=short"
+
+    if pytest tests/integration/test_pack_unified.py -v -s --tb=short; then
+        log_success "Unified pack format E2E tests passed!"
+    else
+        log_error "Unified pack format E2E tests failed!"
+        exit 1
+    fi
+
+    # Run Copilot compile target E2E tests -- offline, no tokens needed
+    # Guards .github/copilot-instructions.md generation + idempotent cleanup.
+    log_info "Running Copilot compile target E2E tests..."
+    echo "Command: pytest tests/integration/test_compile_copilot_root_instructions.py -v -s --tb=short"
+
+    if pytest tests/integration/test_compile_copilot_root_instructions.py -v -s --tb=short; then
+        log_success "Copilot compile target E2E tests passed!"
+    else
+        log_error "Copilot compile target E2E tests failed!"
+        exit 1
+    fi
+
+    # Run transitive local-path chain E2E tests -- offline, no tokens needed
+    # Guards local_path anchoring across multi-level local dependency chains.
+    log_info "Running transitive local-path chain E2E tests..."
+    echo "Command: pytest tests/integration/test_transitive_chain_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_transitive_chain_e2e.py -v -s --tb=short; then
+        log_success "Transitive local-path chain E2E tests passed!"
+    else
+        log_error "Transitive local-path chain E2E tests failed!"
+        exit 1
+    fi
+
     log_success "All integration test suites completed successfully!"
     
 
