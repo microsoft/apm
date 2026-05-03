@@ -238,8 +238,13 @@ class GitCache:
 
         subprocess_env = env or os.environ.copy()
         try:
+            # Full bare clone (no --filter): we extract file contents at
+            # checkout time, so all blobs must be present locally.  A
+            # partial clone would leave the working tree empty after
+            # `git clone --local --shared` + `git checkout`, because the
+            # alternates pointer would resolve trees but not blobs.
             subprocess.run(
-                [git_exe, "clone", "--bare", "--filter=blob:none", url, str(staged)],
+                [git_exe, "clone", "--bare", url, str(staged)],
                 capture_output=True,
                 text=True,
                 timeout=300,

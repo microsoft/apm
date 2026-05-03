@@ -109,6 +109,52 @@ class TestGitCacheGetCheckout:
         assert mock_run.call_count >= 2
 
 
+class TestGitCacheBlobsPresent:
+    """Regression: cache must contain file blobs, not just trees.
+
+    A previous iteration used ``--filter=blob:none`` for the bare clone,
+    which left the checkout working tree empty after ``git clone --local
+    --shared`` + ``git checkout``.  Subdirectory extraction then found
+    empty directories and validation failed with "no SKILL.md found".
+    """
+
+    def test_bare_clone_does_not_use_blob_filter(self, tmp_path: Path) -> None:
+        """The bare clone command must not strip blobs.
+
+        Inspect the actual command issued to git clone --bare and assert
+        no ``--filter`` argument is present.  Catching this at the
+        command-construction layer avoids a slow real-network test while
+        still preventing regression of the empty-checkout bug.
+        """
+        from unittest.mock import MagicMock as MM
+        from unittest.mock import patch as p
+
+        cache = GitCache(tmp_path)
+        url = "https://github.com/owner/repo"
+        sha = "a" * 40
+
+        captured: list[list[str]] = []
+
+        def _fake_run(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            captured.append(list(cmd))
+            return MM(returncode=0, stdout="", stderr="")
+
+        from contextlib import suppress
+
+        with p("subprocess.run", side_effect=_fake_run):
+            with suppress(RuntimeError):
+                cache._ensure_bare_repo(url, "shard1", sha)
+
+        clone_cmds = [c for c in captured if "clone" in c and "--bare" in c]
+        assert clone_cmds, "Expected at least one bare clone command"
+        for cmd in clone_cmds:
+            assert not any(arg.startswith("--filter") for arg in cmd), (
+                f"Bare clone must not use --filter (would strip blobs and "
+                f"break checkout extraction). Got: {cmd}"
+            )
+
+
 class TestGitCacheStats:
     """Test cache statistics."""
 
