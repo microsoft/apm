@@ -107,6 +107,15 @@ def run(ctx: InstallContext) -> None:
     callback_downloaded: builtins.dict = {}
     transitive_failures: builtins.list = []
     callback_failures: builtins.set = builtins.set()
+    # F7 (#1116): the resolver may dispatch ``download_callback`` calls
+    # across a worker pool. CPython's GIL makes individual dict/set/list
+    # mutations atomic, but logging emission and the read+update on
+    # ``callback_downloaded`` (e.g. duplicate-key races) are not. A single
+    # narrow lock around the result-recording sites is sufficient and
+    # cheap; the heavy I/O work runs OUTSIDE the lock.
+    import threading as _threading
+
+    callback_lock = _threading.Lock()
 
     # ------------------------------------------------------------------
     # 5. Download callback for transitive resolution
@@ -138,12 +147,12 @@ def run(ctx: InstallContext) -> None:
             return install_path
         # F1 (#1116): surface a heartbeat BEFORE the network/copy work so
         # users see the install advancing past silent transitive lookups.
-        # Emitted from the main thread (this callback already runs there
-        # in the current sequential BFS; F7's parallel BFS will keep
-        # heartbeat emission on the main thread for deterministic
-        # ordering).
+        # Under F7's parallel BFS this callback may run on a worker
+        # thread, so serialise the emission via ``callback_lock`` to
+        # keep heartbeat lines from interleaving with each other.
         if logger:
-            logger.resolving_heartbeat(dep_ref.get_display_name())
+            with callback_lock:
+                logger.resolving_heartbeat(dep_ref.get_display_name())
         try:
             # Handle local packages: copy instead of git clone
             if dep_ref.is_local and dep_ref.local_path:
@@ -156,7 +165,8 @@ def run(ctx: InstallContext) -> None:
                     # absolute paths are unambiguous; reject relative refs.
                     # Note: callback_failures is a set (see line ~105),
                     # so use .add() rather than dict-style assignment.
-                    callback_failures.add(dep_ref.get_unique_key())
+                    with callback_lock:
+                        callback_failures.add(dep_ref.get_unique_key())
                     return None
                 # Anchor relative paths on the *declaring* package's source
                 # directory when available (#857). Falls back to project_root
@@ -174,7 +184,8 @@ def run(ctx: InstallContext) -> None:
                     logger=logger,
                 )
                 if result_path:
-                    callback_downloaded[dep_ref.get_unique_key()] = None
+                    with callback_lock:
+                        callback_downloaded[dep_ref.get_unique_key()] = None
                     return result_path
                 return None
 
@@ -204,7 +215,9 @@ def run(ctx: InstallContext) -> None:
             resolved_sha = None
             if result and hasattr(result, "resolved_reference") and result.resolved_reference:
                 resolved_sha = result.resolved_reference.resolved_commit
-            callback_downloaded[dep_ref.get_unique_key()] = resolved_sha
+            callback_downloaded_value = resolved_sha
+            with callback_lock:
+                callback_downloaded[dep_ref.get_unique_key()] = callback_downloaded_value
             return install_path
         except Exception as e:
             dep_display = dep_ref.get_display_name()
@@ -221,11 +234,15 @@ def run(ctx: InstallContext) -> None:
 
             # Verbose: inline detail via logger (single output path).
             # Deferred diagnostics below cover the non-logger case.
-            if logger:
-                logger.verbose_detail(f"  {fail_msg}")
-            # Collect for deferred diagnostics summary (always, even non-verbose)
-            callback_failures.add(dep_key)
-            transitive_failures.append((dep_display, fail_msg))
+            # F7 (#1116): single critical section for both the logger
+            # emission and the result-recording so concurrent failures
+            # don't interleave their lines.
+            with callback_lock:
+                if logger:
+                    logger.verbose_detail(f"  {fail_msg}")
+                # Collect for deferred diagnostics summary (always, even non-verbose)
+                callback_failures.add(dep_key)
+                transitive_failures.append((dep_display, fail_msg))
             return None
 
     # ------------------------------------------------------------------
