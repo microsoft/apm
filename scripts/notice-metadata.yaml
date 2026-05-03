@@ -114,6 +114,12 @@ components:
     upstream: https://github.com/ewels/rich-click
     spdx: MIT
     copyright_snippet: Copyright (c) 2022 Phil Ewels
+  - name: filelock
+    pyproject_name: filelock
+    upstream: https://github.com/tox-dev/filelock
+    spdx: Unlicense
+    copyright_snippet: Released into the public domain via The Unlicense (no copyright claimed by upstream).
+    notes: Used for cross-process file-based locks in the persistent install cache.
   - name: watchdog
     pyproject_name: watchdog
     upstream: https://github.com/gorakhargosh/watchdog
