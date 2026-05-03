@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional  # noqa: F401, UP035
 
 from apm_cli.utils.console import _rich_error, _rich_success
+from apm_cli.utils.short_sha import format_short_sha
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
@@ -308,13 +309,8 @@ class CachedDependencySource(DependencySource):
 
         display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
         _ref = dep_ref.reference or ""
-        _sha = ""
-        if (
-            dep_locked_chk
-            and dep_locked_chk.resolved_commit
-            and dep_locked_chk.resolved_commit != "cached"
-        ):
-            _sha = dep_locked_chk.resolved_commit[:8]
+        # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
+        _sha = format_short_sha(dep_locked_chk.resolved_commit) if dep_locked_chk else ""
         if logger:
             logger.download_complete(
                 display_name, ref=_ref, sha=_sha, cached=not self.fetched_this_run
@@ -512,7 +508,8 @@ class FreshDependencySource(DependencySource):
                 _sha = ""
                 if resolved:
                     _ref = resolved.ref_name if resolved.ref_name else ""
-                    _sha = resolved.resolved_commit[:8] if resolved.resolved_commit else ""
+                    # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
+                    _sha = format_short_sha(resolved.resolved_commit)
                 logger.download_complete(display_name, ref=_ref, sha=_sha)
                 if ctx.auth_resolver:
                     try:
@@ -530,7 +527,7 @@ class FreshDependencySource(DependencySource):
                 _ref_suffix = ""
                 if resolved:
                     _r = resolved.ref_name if resolved.ref_name else ""
-                    _s = resolved.resolved_commit[:8] if resolved.resolved_commit else ""
+                    _s = format_short_sha(resolved.resolved_commit)
                     if _r and _s:
                         _ref_suffix = f" #{_r} @{_s}"
                     elif _r:

@@ -23,6 +23,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.utils.short_sha import format_short_sha
+
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
 
@@ -67,7 +69,7 @@ def run(ctx: InstallContext) -> None:
                 )
             if ctx.logger.verbose:
                 for locked_dep in existing_lockfile.get_all_dependencies():
-                    _sha = locked_dep.resolved_commit[:8] if locked_dep.resolved_commit else ""
+                    _sha = format_short_sha(locked_dep.resolved_commit)
                     _ref = (
                         locked_dep.resolved_ref
                         if hasattr(locked_dep, "resolved_ref") and locked_dep.resolved_ref
