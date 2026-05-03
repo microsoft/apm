@@ -273,10 +273,18 @@ class CachedDependencySource(DependencySource):
         dep_key: str,
         resolved_ref: Any,
         dep_locked_chk: Any,
+        fetched_this_run: bool = False,
     ):
         super().__init__(ctx, dep_ref, install_path, dep_key)
         self.resolved_ref = resolved_ref
         self.dep_locked_chk = dep_locked_chk
+        # F2 (#1116): when the resolver callback fetched this package
+        # earlier in the SAME install run, we still hit the cached
+        # source path (skip_download=True), but the install line should
+        # NOT say "(cached)" -- bytes were just downloaded. The integrate
+        # phase passes True here when the dep_key is in
+        # ctx.callback_downloaded.
+        self.fetched_this_run = fetched_this_run
 
     def acquire(self) -> Materialization | None:
         from apm_cli.constants import APM_YML_FILENAME
@@ -308,7 +316,9 @@ class CachedDependencySource(DependencySource):
         ):
             _sha = dep_locked_chk.resolved_commit[:8]
         if logger:
-            logger.download_complete(display_name, ref=_ref, sha=_sha, cached=True)
+            logger.download_complete(
+                display_name, ref=_ref, sha=_sha, cached=not self.fetched_this_run
+            )
 
         deltas: dict[str, int] = {"installed": 1}
         if not dep_ref.reference:
@@ -626,6 +636,7 @@ def make_dependency_source(
     dep_locked_chk: Any = None,
     ref_changed: bool = False,
     skip_download: bool = False,
+    fetched_this_run: bool = False,
     progress: Any = None,
 ) -> DependencySource:
     """Factory: pick the right ``DependencySource`` for *dep_ref*.
@@ -633,6 +644,11 @@ def make_dependency_source(
     Caller is responsible for resolving the download strategy (cached vs
     fresh) before invoking the factory; the resolved-ref and
     locked-checksum data flow into the appropriate source.
+
+    ``fetched_this_run`` (F2): when ``skip_download=True`` AND the
+    package was actually downloaded earlier in this run by the resolver
+    callback, set this to ``True`` so the cached source emits the
+    download-complete line WITHOUT the misleading ``(cached)`` suffix.
     """
     if dep_ref.is_local and dep_ref.local_path:
         return LocalDependencySource(ctx, dep_ref, install_path, dep_key)
@@ -644,6 +660,7 @@ def make_dependency_source(
             dep_key,
             resolved_ref,
             dep_locked_chk,
+            fetched_this_run=fetched_this_run,
         )
     return FreshDependencySource(
         ctx,

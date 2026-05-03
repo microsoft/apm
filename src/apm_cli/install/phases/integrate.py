@@ -432,6 +432,12 @@ def run(ctx: InstallContext) -> None:
                 resolved_ref, skip_download, dep_locked_chk, ref_changed = (
                     _resolve_download_strategy(ctx, dep_ref, install_path)
                 )
+                # F2 (#1116): when the resolver callback already
+                # downloaded this package during the parallel resolve
+                # phase, ``skip_download`` will be True but the bytes
+                # arrived in this run. Tell the cached source so it
+                # does not falsely tag the line ``(cached)``.
+                _fetched_now = dep_key in ctx.callback_downloaded
                 source = make_dependency_source(
                     ctx,
                     dep_ref,
@@ -441,6 +447,7 @@ def run(ctx: InstallContext) -> None:
                     dep_locked_chk=dep_locked_chk,
                     ref_changed=ref_changed,
                     skip_download=skip_download,
+                    fetched_this_run=_fetched_now,
                     progress=progress,
                 )
 
