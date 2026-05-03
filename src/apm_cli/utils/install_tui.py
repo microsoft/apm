@@ -136,17 +136,38 @@ class InstallTui:
         self._lock = threading.Lock()
         self._live: Any | None = None
         self._timer: threading.Timer | None = None
+        # Sentinel to close a TOCTOU race between __exit__ on the main
+        # thread and the deferred-start callback on the Timer thread:
+        # if the timer is past cancel() but has not yet assigned _live,
+        # _defer_start checks _shutdown after constructing Live and
+        # before .start() so the region is never left running unowned.
+        self._shutdown: bool = False
 
     # -- Context-manager lifecycle ----------------------------------------
+    #
+    # NOTE: This controller supports MULTIPLE enter/exit cycles on the
+    # same instance. ``__exit__`` only tears down the Live region and
+    # the deferred-show timer; ``_aggregate``, ``_labels``, and
+    # ``_key_to_label`` survive so a follow-on ``__enter__`` can resume
+    # rendering. The install pipeline relies on this: it wraps resolve
+    # and the post-resolve body in two separate ``with`` blocks so an
+    # early-exit "nothing to do" path can cleanly tear the Live region
+    # down without losing phase state.
 
     def __enter__(self) -> InstallTui:
         if self._enabled:
+            with self._lock:
+                self._shutdown = False
             self._timer = threading.Timer(_DEFER_SHOW_S, self._defer_start)
             self._timer.daemon = True
             self._timer.start()
         return self
 
     def __exit__(self, *exc: Any) -> bool:
+        # Set shutdown sentinel BEFORE cancel() so the Timer thread can
+        # observe it and bail out even if it raced past the cancel.
+        with self._lock:
+            self._shutdown = True
         # ALWAYS cancel the deferred-start timer first; if cancel()
         # returns True the timer has not fired and we never built a
         # Live, so there is nothing to stop.
@@ -209,14 +230,15 @@ class InstallTui:
     def _defer_start(self) -> None:
         """Timer callback: open the Live region after the defer window."""
         try:
-            if self._live is not None:
-                return
+            with self._lock:
+                if self._shutdown or self._live is not None:
+                    return
             from rich.console import Group
             from rich.live import Live
 
             if self._aggregate is None:
                 self._aggregate = self._build_aggregate()
-            self._live = Live(
+            live = Live(
                 Group(self._aggregate, self._labels_renderable()),
                 console=self.console,
                 refresh_per_second=_REFRESH_HZ,
@@ -224,6 +246,14 @@ class InstallTui:
                 redirect_stdout=False,
                 redirect_stderr=False,
             )
+            # Re-check shutdown sentinel under the lock just before
+            # publishing the Live reference and starting it. If __exit__
+            # set _shutdown after our first check (race window), bail
+            # out before .start() so the region is never left orphaned.
+            with self._lock:
+                if self._shutdown:
+                    return
+                self._live = live
             self._live.start(refresh=True)
         except Exception:
             # Defensive: a Live failure must NEVER take the install

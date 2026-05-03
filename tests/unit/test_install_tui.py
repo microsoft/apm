@@ -255,3 +255,51 @@ class TestStartPhase:
         tui.start_phase("download", total=10)
         assert tui._task_id is None
         assert tui._aggregate is None
+
+
+class TestConcurrentAccess:
+    """Defends the controller's RLock against parallel BFS workers.
+
+    The install pipeline spawns ThreadPoolExecutor workers that all
+    call ``task_started``/``task_completed`` against a single shared
+    ``InstallTui``. A regression that narrowed or removed the lock
+    would only manifest under concurrency; this test pins the
+    contract.
+    """
+
+    def test_parallel_lifecycle_no_corruption(self, _isolate_env: pytest.MonkeyPatch) -> None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        _isolate_env.setenv("APM_PROGRESS", "always")
+        tui = InstallTui()
+        tui.start_phase("download", total=32)
+
+        def _one(idx: int) -> None:
+            key = f"k{idx}"
+            tui.task_started(key, f"fetch dep-{idx}")
+            tui.task_completed(key)
+
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            list(ex.map(_one, range(32)))
+
+        # All labels consumed -- no leak, no double-count, no missed
+        # removal under contention.
+        assert tui._labels == []
+        assert tui._key_to_label == {}
+
+    def test_shutdown_sentinel_blocks_late_timer(self, _isolate_env: pytest.MonkeyPatch) -> None:
+        """__exit__ must prevent _defer_start from publishing Live.
+
+        Reproduces the TOCTOU race: the timer callback runs after
+        __exit__ has set _shutdown but before .start() would fire.
+        """
+        _isolate_env.setenv("APM_PROGRESS", "always")
+        tui = InstallTui()
+        # Simulate __exit__ setting the sentinel before _defer_start
+        # gets a chance to assign _live.
+        with tui._lock:
+            tui._shutdown = True
+        tui._defer_start()
+        # The deferred-start callback must have observed the sentinel
+        # and bailed out without leaving an unowned Live region.
+        assert tui._live is None

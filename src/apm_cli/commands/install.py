@@ -1036,6 +1036,11 @@ def install(  # noqa: PLR0913
         apm install ./build/my-bundle           # Deploy a local bundle (directory)
         apm install ./my-bundle.tar.gz          # Deploy a local bundle (archive)
         apm install ./bundle --as custom-name   # Local bundle with custom log label
+
+    Environment variables:
+        APM_PROGRESS    Animated install UI: auto (default; TTY only,
+                        off in CI), always (force on -- never set in CI),
+                        never (disable; also implied for non-TTY stdout).
     """
     # C1 #856: defaults BEFORE try so the finally clause never sees an
     # UnboundLocalError if InstallLogger(...) raises during construction.
