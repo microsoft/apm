@@ -849,15 +849,15 @@ def run_dependency_policy_checks(
 
     # -- Dependency checks (1-6) -----------------------------------
     dependency_checks = (
-        _check_dependency_allowlist(deps_list, policy.dependencies),
-        _check_dependency_denylist(deps_list, policy.dependencies),
-        _check_required_packages(deps_list, policy.dependencies),
-        _check_required_packages_deployed(deps_list, lockfile, policy.dependencies),
-        _check_required_package_version(deps_list, lockfile, policy.dependencies),
-        _check_transitive_depth(lockfile, policy.dependencies),
+        lambda: _check_dependency_allowlist(deps_list, policy.dependencies),
+        lambda: _check_dependency_denylist(deps_list, policy.dependencies),
+        lambda: _check_required_packages(deps_list, policy.dependencies),
+        lambda: _check_required_packages_deployed(deps_list, lockfile, policy.dependencies),
+        lambda: _check_required_package_version(deps_list, lockfile, policy.dependencies),
+        lambda: _check_transitive_depth(lockfile, policy.dependencies),
     )
-    for check in dependency_checks:
-        if _run(check):
+    for build_check in dependency_checks:
+        if _run(build_check()):
             return result
 
     # -- MCP checks (7-10) ----------------------------------------
@@ -866,13 +866,13 @@ def run_dependency_policy_checks(
     # run MCP checks so they report "no X configured" for completeness.
     if mcp_deps is not None:
         mcp_checks = (
-            _check_mcp_allowlist(mcp_list, policy.mcp),
-            _check_mcp_denylist(mcp_list, policy.mcp),
-            _check_mcp_transport(mcp_list, policy.mcp),
-            _check_mcp_self_defined(mcp_list, policy.mcp),
+            lambda: _check_mcp_allowlist(mcp_list, policy.mcp),
+            lambda: _check_mcp_denylist(mcp_list, policy.mcp),
+            lambda: _check_mcp_transport(mcp_list, policy.mcp),
+            lambda: _check_mcp_self_defined(mcp_list, policy.mcp),
         )
-        for check in mcp_checks:
-            if _run(check):
+        for build_check in mcp_checks:
+            if _run(build_check()):
                 return result
 
     # -- Target / compilation checks (11-13) -----------------------

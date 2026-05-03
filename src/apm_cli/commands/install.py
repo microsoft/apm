@@ -1906,14 +1906,14 @@ def _post_install_summary(
 class _InstallApmDependenciesOptions:
     force: bool = False
     parallel_downloads: int = 4
-    logger: "InstallLogger" = None
-    scope: Any = None
-    auth_resolver: "AuthResolver" = None
-    target: str = None
+    logger: Optional["InstallLogger"] = None
+    scope: Any | None = None
+    auth_resolver: Optional["AuthResolver"] = None
+    target: str | None = None
     allow_insecure: bool = False
     allow_insecure_hosts: tuple[str, ...] = ()
     marketplace_provenance: dict | None = None
-    protocol_pref: Any = None
+    protocol_pref: Any | None = None
     allow_protocol_fallback: bool | None = None
     no_policy: bool = False
     skill_subset: tuple | None = None
