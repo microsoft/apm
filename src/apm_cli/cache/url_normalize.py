@@ -95,8 +95,14 @@ def normalize_repo_url(url: str) -> str:
     if path.endswith(".git"):
         path = path[:-4]
 
-    # Lowercase path (GitHub, GitLab, Bitbucket treat paths case-insensitively)
-    path = path.lower()
+    # Lowercase path ONLY for hosts known to treat paths case-insensitively
+    # (GitHub, GitLab.com, Bitbucket.org). Self-hosted Gitea and some
+    # GitLab/ADO installs are case-sensitive on path components, where
+    # collapsing case would risk cache-shard collisions across distinct
+    # repositories.
+    _CASE_INSENSITIVE_HOSTS = {"github.com", "gitlab.com", "bitbucket.org"}
+    if hostname in _CASE_INSENSITIVE_HOSTS:
+        path = path.lower()
 
     # Strip trailing slash from path
     path = path.rstrip("/")

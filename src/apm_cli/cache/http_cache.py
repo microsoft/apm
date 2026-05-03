@@ -6,10 +6,17 @@ support for:
   staleness)
 - ``ETag`` / ``If-None-Match`` conditional revalidation
 - LRU eviction when cache exceeds size limit
-- Atomic writes (stage-rename pattern)
+- Atomic writes (stage-rename pattern via locking.atomic_land)
+- sha256 body integrity verification on read (poisoning defense)
 
 Used primarily for MCP registry lookups where repeated GETs for the
 same server metadata can be served from cache.
+
+Auth scoping: callers wishing to avoid leaking responses across
+auth identities MUST NOT call :meth:`store` for responses fetched
+with an ``Authorization`` header. The registry-client wrapper
+enforces this by bypassing the cache entirely on authenticated
+requests; storing per-identity responses is out of scope.
 """
 
 from __future__ import annotations
@@ -24,7 +31,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .locking import cleanup_incomplete
+from ..utils.path_security import ensure_path_within
+from .locking import atomic_land, cleanup_incomplete, shard_lock, stage_path
 from .paths import get_http_path
 
 _log = logging.getLogger(__name__)
@@ -66,9 +74,10 @@ class HttpCache:
     def get(self, url: str, headers: dict[str, str] | None = None) -> CacheEntry | None:
         """Look up a cached response for *url*.
 
-        Returns the entry only if it has not expired. Callers should
-        use :meth:`conditional_headers` to build revalidation requests
-        for expired entries.
+        Returns the entry only if it has not expired AND the cached
+        body's sha256 matches the digest recorded at write time. A
+        digest mismatch indicates either silent bit-rot or on-disk
+        tampering; the entry is treated as a miss (fail-closed).
 
         Args:
             url: The request URL.
@@ -76,8 +85,8 @@ class HttpCache:
                 future Vary support).
 
         Returns:
-            :class:`CacheEntry` if a valid (non-expired) entry exists,
-            otherwise ``None``.
+            :class:`CacheEntry` if a valid (non-expired, integrity-
+            verified) entry exists, otherwise ``None``.
         """
         entry_path = self._entry_path(url)
         meta_path = entry_path / "meta.json"
@@ -93,6 +102,24 @@ class HttpCache:
                 return None  # Expired -- caller should revalidate
 
             body = body_path.read_bytes()
+
+            # Integrity verification: every read recomputes sha256 and
+            # compares to the digest recorded at write time. A mismatch
+            # means the body has been tampered with or corrupted on
+            # disk; evict and return None so the caller fetches fresh.
+            recorded = meta.get("body_sha256")
+            if recorded:
+                actual = hashlib.sha256(body).hexdigest()
+                if actual != recorded:
+                    _log.warning(
+                        "[!] HTTP cache integrity mismatch for %s -- evicting",
+                        url,
+                    )
+                    from ..utils.file_ops import robust_rmtree
+
+                    robust_rmtree(entry_path, ignore_errors=True)
+                    return None
+
             return CacheEntry(
                 body=body,
                 etag=meta.get("etag"),
@@ -157,8 +184,10 @@ class HttpCache:
         content_type = headers.get("Content-Type") or headers.get("content-type")
 
         entry_path = self._entry_path(url)
-        entry_path.mkdir(parents=True, exist_ok=True)
-        os.chmod(str(entry_path), 0o700)
+        # Containment guard: even though entry_path comes from a
+        # sha256 hex prefix, defend at the boundary so a future
+        # change to _entry_path cannot accidentally escape.
+        ensure_path_within(entry_path, self._cache_dir)
 
         meta = {
             "url": url,
@@ -167,19 +196,42 @@ class HttpCache:
             "content_type": content_type,
             "status_code": status_code,
             "stored_at": time.time(),
+            "body_sha256": hashlib.sha256(body).hexdigest(),
         }
 
-        # Write atomically (meta then body)
-        meta_path = entry_path / "meta.json"
-        body_path = entry_path / "body"
-
+        # Atomic stage-rename: write meta + body into a staging
+        # directory, then os.replace into the final entry path under
+        # the shard lock. This satisfies the docstring contract that
+        # store() is atomic, so a crash between meta and body writes
+        # cannot leave a half-written entry that get() would then
+        # serve.
+        staged = stage_path(entry_path)
+        ensure_path_within(staged, self._cache_dir)
         try:
-            meta_path.write_text(json.dumps(meta), encoding="utf-8")
-            body_path.write_bytes(body)
-            # Update mtime for LRU tracking
-            os.utime(str(entry_path), None)
+            staged.mkdir(parents=True, exist_ok=True)
+            os.chmod(str(staged), 0o700)
+            (staged / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+            (staged / "body").write_bytes(body)
         except OSError as exc:
-            _log.debug("Failed to write HTTP cache entry for %s: %s", url, exc)
+            _log.debug("Failed to stage HTTP cache entry for %s: %s", url, exc)
+            from ..utils.file_ops import robust_rmtree
+
+            robust_rmtree(staged, ignore_errors=True)
+            return
+
+        lock = shard_lock(entry_path)
+        # Best-effort eviction of any pre-existing entry so atomic_land
+        # can rename the staged dir into place. atomic_land handles the
+        # race with concurrent writers; a loser's bytes are discarded.
+        if entry_path.is_dir():
+            from ..utils.file_ops import robust_rmtree
+
+            with contextlib.suppress(OSError):
+                robust_rmtree(entry_path, ignore_errors=True)
+        atomic_land(staged, entry_path, lock)
+        # Update mtime for LRU tracking
+        with contextlib.suppress(OSError):
+            os.utime(str(entry_path), None)
 
         # Enforce size cap
         self._enforce_size_cap()
@@ -241,9 +293,20 @@ class HttpCache:
         return {"entry_count": count, "total_size_bytes": total_size}
 
     def _entry_path(self, url: str) -> Path:
-        """Derive the cache entry directory path for a URL."""
+        """Derive the cache entry directory path for a URL.
+
+        Uses sha256 of the URL (truncated to 16 hex chars) as the
+        directory name. Containment is asserted at the call sites in
+        :meth:`store` to defend against a future change to this
+        derivation that could escape the cache root.
+        """
         url_hash = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
-        return self._cache_dir / url_hash
+        entry = self._cache_dir / url_hash
+        # Defense-in-depth: the hex-only basename cannot contain
+        # separators, but assert containment at the boundary so a
+        # future change is caught immediately.
+        ensure_path_within(entry, self._cache_dir)
+        return entry
 
     def _parse_ttl(self, headers: dict[str, str]) -> float:
         """Parse TTL from response headers, capped at MAX_HTTP_CACHE_TTL_SECONDS."""

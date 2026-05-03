@@ -13,6 +13,8 @@ Stripped variables (ambient git state):
 - GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE
 - GIT_OBJECT_DIRECTORY, GIT_ALTERNATE_OBJECT_DIRECTORIES
 - GIT_COMMON_DIR, GIT_NAMESPACE, GIT_INDEX_VERSION
+- GIT_CEILING_DIRECTORIES, GIT_DISCOVERY_ACROSS_FILESYSTEM
+- GIT_REPLACE_REF_BASE, GIT_GRAFTS_FILE, GIT_SHALLOW_FILE
 """
 
 from __future__ import annotations
@@ -25,7 +27,9 @@ _git_executable: str | None = None
 _git_resolved: bool = False
 
 # Variables that represent ambient git state -- strip these to avoid
-# biasing APM's git operations when invoked from within another repo.
+# biasing APM's git operations when invoked from within another repo
+# or when the calling environment uses git's discovery / replacement
+# / grafts overrides.
 _STRIP_GIT_VARS: frozenset[str] = frozenset(
     {
         "GIT_DIR",
@@ -36,6 +40,11 @@ _STRIP_GIT_VARS: frozenset[str] = frozenset(
         "GIT_COMMON_DIR",
         "GIT_NAMESPACE",
         "GIT_INDEX_VERSION",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_GRAFTS_FILE",
+        "GIT_SHALLOW_FILE",
     }
 )
 

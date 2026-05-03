@@ -216,6 +216,27 @@ class GitHubPackageDownloader:
         # Set by the install pipeline; None disables persistent caching.
         self.persistent_git_cache = None
 
+    def _git_env_dict(self) -> dict[str, str]:
+        """Return a sanitized git env dict for cache-layer subprocess calls.
+
+        Combines the auth-aware ``self.git_env`` (which already strips
+        prompts and forces empty system config) with the ambient-state
+        sanitization performed by ``git_subprocess_env``. Required for
+        every ``GitCache.get_checkout`` call so that private repos
+        receive credentials AND the subprocess never inherits a stray
+        ``GIT_DIR`` / ``GIT_CEILING_DIRECTORIES`` that would bias the
+        cache fetch / integrity verification.
+        """
+        from ..utils.git_env import git_subprocess_env
+
+        env: dict[str, str] = git_subprocess_env()
+        # self.git_env carries auth tokens + safety flags; let it win
+        # over ambient os.environ where keys overlap.
+        for key, value in self.git_env.items():
+            if isinstance(value, str):
+                env[key] = value
+        return env
+
     def _setup_git_environment(self) -> dict[str, Any]:
         """Set up Git environment with authentication using centralized token manager.
 
@@ -1535,7 +1556,9 @@ class GitHubPackageDownloader:
         if _persistent_cache is not None:
             _canonical_url = f"https://{cache_host}/{cache_owner}/{cache_repo}"
             try:
-                _persistent_checkout = _persistent_cache.get_checkout(_canonical_url, ref)
+                _persistent_checkout = _persistent_cache.get_checkout(
+                    _canonical_url, ref, env=self._git_env_dict()
+                )
             except Exception:
                 # Cache miss or failure -- fall through to normal clone path.
                 _persistent_checkout = None
@@ -2048,6 +2071,7 @@ class GitHubPackageDownloader:
                     _canonical_url,
                     resolved_ref.resolved_commit or resolved_ref.ref_name,
                     locked_sha=resolved_ref.resolved_commit,
+                    env=self._git_env_dict(),
                 )
                 from ..utils.file_ops import robust_copy2, robust_copytree
 

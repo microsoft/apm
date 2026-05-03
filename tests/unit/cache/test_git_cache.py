@@ -198,3 +198,64 @@ class TestGitCachePrune:
         assert pruned == 1
         assert not old_checkout.exists()
         assert new_checkout.exists()
+
+
+class TestGitCacheEnvForwarding:
+    """Verify the env dict reaches every git subprocess invocation.
+
+    Regression-trap for a class of bugs where the cache layer drops
+    the auth-aware env on the floor and silently falls back to an
+    unauthenticated default (which would defeat private-repo access
+    AND cause silent cache misses on Windows / NixOS where ``git`` is
+    not on the bare PATH that ``subprocess`` sees).
+    """
+
+    @patch("subprocess.run")
+    def test_env_forwarded_to_ls_remote(self, mock_run: MagicMock, tmp_path: Path) -> None:
+        cache = GitCache(tmp_path)
+        sentinel = {"APM_TEST_TOKEN": "sentinel-value", "PATH": "/usr/bin:/bin"}
+        sha = "d" * 40
+        mock_run.return_value = MagicMock(returncode=0, stdout=f"{sha}\trefs/heads/main\n")
+        cache._resolve_sha("https://github.com/owner/repo", "main", env=sentinel)
+        # Assert env was passed through verbatim
+        call_kwargs = mock_run.call_args.kwargs
+        assert call_kwargs.get("env") is sentinel
+
+    @patch("subprocess.run")
+    def test_env_forwarded_to_get_checkout_miss(self, mock_run: MagicMock, tmp_path: Path) -> None:
+        """Cache miss path: bare clone + checkout must both receive env."""
+        cache = GitCache(tmp_path)
+        sha = "e" * 40
+        sentinel = {"APM_TEST_TOKEN": "miss-path-value", "PATH": "/usr/bin:/bin"}
+
+        # Stub subprocess.run so it ALWAYS succeeds; cache layer will
+        # call clone, fetch, checkout in some order.
+        def _run_stub(*args, **kwargs):
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = _run_stub
+
+        # Lay down a bare-repo marker so _ensure_bare_repo skips clone
+        # (we want to focus this test on the checkout path's env-forward)
+        from apm_cli.cache.url_normalize import cache_shard_key
+
+        shard = cache_shard_key("https://github.com/owner/repo")
+        bare_dir = tmp_path / "git" / "db_v1" / shard
+        bare_dir.mkdir(parents=True)
+        (bare_dir / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+
+        import contextlib
+
+        # We don't care if the checkout fails to materialise on
+        # disk -- this test only verifies env propagation.
+        with contextlib.suppress(Exception):
+            cache.get_checkout(
+                "https://github.com/owner/repo", "main", locked_sha=sha, env=sentinel
+            )
+
+        # Every subprocess call should carry the sentinel env
+        assert mock_run.called
+        for call in mock_run.call_args_list:
+            assert call.kwargs.get("env") is sentinel, (
+                f"env not forwarded to: {call.args[0] if call.args else call.kwargs.get('args')}"
+            )

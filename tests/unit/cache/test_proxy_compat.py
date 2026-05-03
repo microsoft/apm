@@ -56,7 +56,12 @@ class TestInsteadOfRewrite:
     @patch("subprocess.run")
     def test_second_install_hits_cache(self, mock_run: MagicMock, tmp_path: Path) -> None:
         """After a successful cache population, a second call with the same
-        URL and locked SHA should NOT invoke any git subprocess (cache HIT)."""
+        URL and locked SHA should NOT invoke any git subprocess (cache HIT).
+
+        Integrity verification reads ``.git/HEAD`` directly from disk
+        (no subprocess), so a true cache hit yields zero subprocess
+        calls -- the strongest possible proof of "no work".
+        """
         sha = "a" * 40
         url = "https://github.com/owner/repo"
 
@@ -66,20 +71,18 @@ class TestInsteadOfRewrite:
 
         shard = cache_shard_key(url)
 
-        # Pre-populate the checkout to simulate first install success
+        # Pre-populate the checkout to simulate first install success.
+        # The integrity verifier reads ``.git/HEAD`` directly, so we
+        # must lay down a HEAD file containing the expected SHA.
         checkout_dir = tmp_path / "git" / "checkouts_v1" / shard / sha
         checkout_dir.mkdir(parents=True)
-        (checkout_dir / ".git").mkdir()
+        git_dir = checkout_dir / ".git"
+        git_dir.mkdir()
+        (git_dir / "HEAD").write_text(f"{sha}\n", encoding="utf-8")
 
-        # Mock rev-parse to return correct SHA (integrity passes)
-        mock_run.return_value = MagicMock(returncode=0, stdout=f"{sha}\n")
-
-        # Second install -- should hit cache
+        # Second install -- should hit cache with ZERO subprocess calls
         result = cache.get_checkout(url, "main", locked_sha=sha)
         assert result == checkout_dir
 
-        # Only rev-parse should have been called (integrity check), NOT clone/fetch
-        calls = mock_run.call_args_list
-        assert len(calls) == 1
-        cmd = calls[0][0][0] if calls[0][0] else calls[0][1].get("args", [])
-        assert "rev-parse" in cmd
+        # No clone, no fetch, no rev-parse -- pure file-system hit
+        assert mock_run.call_args_list == []

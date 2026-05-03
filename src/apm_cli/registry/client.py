@@ -147,7 +147,16 @@ class SimpleRegistryClient:
 
             cache_key = f"{url}?{urlencode(sorted(params.items()))}"
 
-        if self._http_cache is None:
+        # Auth bypass: when the request would carry an Authorization
+        # header (either on the session or per-request), skip the
+        # cache entirely. Caching authenticated responses risks
+        # cross-identity body leakage when a different caller hits
+        # the same URL with different credentials -- and scoping the
+        # cache by hashed token would just recreate the underlying
+        # auth-store responsibility. Bypass is the simple safe
+        # default; the MCP registry path is anonymous in practice.
+        session_auth = bool(self.session.headers.get("Authorization"))
+        if session_auth or self._http_cache is None:
             kwargs0: dict[str, Any] = {"timeout": self._timeout}
             if params:
                 kwargs0["params"] = params

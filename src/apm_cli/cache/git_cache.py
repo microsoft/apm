@@ -31,6 +31,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from ..utils.path_security import ensure_path_within
 from .integrity import verify_checkout_sha
 from .locking import atomic_land, cleanup_incomplete, shard_lock, stage_path
 from .paths import get_git_checkouts_path, get_git_db_path
@@ -154,14 +155,14 @@ class GitCache:
         Raises:
             RuntimeError: If resolution fails.
         """
-        from ..utils.git_env import get_git_executable
+        from ..utils.git_env import get_git_executable, git_subprocess_env
 
         git_exe = get_git_executable()
         cmd = [git_exe, "ls-remote", url]
         if ref:
             cmd.append(ref)
 
-        subprocess_env = env or os.environ.copy()
+        subprocess_env = env if env is not None else git_subprocess_env()
         try:
             result = subprocess.run(
                 cmd,
@@ -217,54 +218,67 @@ class GitCache:
 
         Returns the path to the bare repo directory.
         """
-        from ..utils.git_env import get_git_executable
+        from ..utils.git_env import get_git_executable, git_subprocess_env
 
         bare_dir = self._db_root / shard_key
+        # Containment guard: defends against pathological shard_key
+        # values bypassing the cache root.
+        ensure_path_within(bare_dir, self._db_root)
         lock = shard_lock(bare_dir)
 
-        if bare_dir.is_dir():
-            # Repo exists -- check if we have the required SHA
-            if self._bare_has_sha(bare_dir, sha, env=env):
+        # Acquire the shard lock BEFORE the existence probe so that two
+        # concurrent processes hitting a cold shard cannot both perform
+        # a full network clone (one would lose the atomic_land race
+        # later, but only after wasting bandwidth + wall time).
+        with lock:
+            if bare_dir.is_dir():
+                # Repo exists -- check if we have the required SHA
+                if self._bare_has_sha(bare_dir, sha, env=env):
+                    return bare_dir
+                # Need to fetch the SHA (lock already held; call the
+                # inner helper that does NOT re-acquire).
+                self._fetch_into_bare_locked(bare_dir, url, sha, env=env)
                 return bare_dir
-            # Need to fetch the SHA
-            self._fetch_into_bare(bare_dir, url, sha, env=env)
+
+            # Cold miss: clone bare repo
+            git_exe = get_git_executable()
+            staged = stage_path(bare_dir)
+            ensure_path_within(staged, self._db_root)
+            staged.mkdir(parents=True, exist_ok=True)
+            os.chmod(str(staged), 0o700)
+
+            subprocess_env = env if env is not None else git_subprocess_env()
+            try:
+                # Full bare clone (no --filter): we extract file contents at
+                # checkout time, so all blobs must be present locally.  A
+                # partial clone would leave the working tree empty after
+                # `git clone --local --shared` + `git checkout`, because the
+                # alternates pointer would resolve trees but not blobs.
+                subprocess.run(
+                    [git_exe, "clone", "--bare", url, str(staged)],
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                    env=subprocess_env,
+                    check=True,
+                )
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+                # Clean up staged on failure
+                from ..utils.file_ops import robust_rmtree
+
+                robust_rmtree(staged, ignore_errors=True)
+                raise RuntimeError(f"Failed to clone {_sanitize_url(url)}: {exc}") from exc
+
+            # Atomic land (lock is already held; pass it through so the
+            # rename completes under the same critical section).
+            if not atomic_land(staged, bare_dir, lock):
+                # Another process won between our staging and rename
+                # (possible only on lock-acquisition timeout fallthrough);
+                # verify it has our SHA.
+                if not self._bare_has_sha(bare_dir, sha, env=env):
+                    self._fetch_into_bare_locked(bare_dir, url, sha, env=env)
+
             return bare_dir
-
-        # Cold miss: clone bare repo
-        git_exe = get_git_executable()
-        staged = stage_path(bare_dir)
-        staged.mkdir(parents=True, exist_ok=True)
-        os.chmod(str(staged), 0o700)
-
-        subprocess_env = env or os.environ.copy()
-        try:
-            # Full bare clone (no --filter): we extract file contents at
-            # checkout time, so all blobs must be present locally.  A
-            # partial clone would leave the working tree empty after
-            # `git clone --local --shared` + `git checkout`, because the
-            # alternates pointer would resolve trees but not blobs.
-            subprocess.run(
-                [git_exe, "clone", "--bare", url, str(staged)],
-                capture_output=True,
-                text=True,
-                timeout=300,
-                env=subprocess_env,
-                check=True,
-            )
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
-            # Clean up staged on failure
-            from ..utils.file_ops import robust_rmtree
-
-            robust_rmtree(staged, ignore_errors=True)
-            raise RuntimeError(f"Failed to clone {_sanitize_url(url)}: {exc}") from exc
-
-        # Atomic land
-        if not atomic_land(staged, bare_dir, lock):
-            # Another process won -- verify it has our SHA
-            if not self._bare_has_sha(bare_dir, sha, env=env):
-                self._fetch_into_bare(bare_dir, url, sha, env=env)
-
-        return bare_dir
 
     def _create_checkout(
         self,
@@ -279,21 +293,26 @@ class GitCache:
         Uses ``git clone --local --shared`` from the bare repo for
         efficiency (no network, hardlinks objects).
         """
-        from ..utils.git_env import get_git_executable
+        from ..utils.git_env import get_git_executable, git_subprocess_env
 
         bare_dir = self._db_root / shard_key
         checkout_parent = self._checkouts_root / shard_key
+        # Containment guards: the shard_key + sha components are
+        # derived from sha256 / hex but defend at the boundary anyway.
+        ensure_path_within(checkout_parent, self._checkouts_root)
         checkout_parent.mkdir(parents=True, exist_ok=True)
         os.chmod(str(checkout_parent), 0o700)
 
         final_dir = checkout_parent / sha
+        ensure_path_within(final_dir, self._checkouts_root)
         lock = shard_lock(final_dir)
         staged = stage_path(final_dir)
+        ensure_path_within(staged, self._checkouts_root)
         staged.mkdir(parents=True, exist_ok=True)
         os.chmod(str(staged), 0o700)
 
         git_exe = get_git_executable()
-        subprocess_env = env or os.environ.copy()
+        subprocess_env = env if env is not None else git_subprocess_env()
 
         try:
             # Clone from local bare repo (fast, no network)
@@ -343,10 +362,13 @@ class GitCache:
 
     def _bare_has_sha(self, bare_dir: Path, sha: str, *, env: dict[str, str] | None = None) -> bool:
         """Check if the bare repo contains the specified commit."""
-        subprocess_env = env or os.environ.copy()
+        from ..utils.git_env import get_git_executable, git_subprocess_env
+
+        git_exe = get_git_executable()
+        subprocess_env = env if env is not None else git_subprocess_env()
         try:
             result = subprocess.run(
-                ["git", "-C", str(bare_dir), "cat-file", "-t", sha],
+                [git_exe, "-C", str(bare_dir), "cat-file", "-t", sha],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -364,36 +386,45 @@ class GitCache:
         *,
         env: dict[str, str] | None = None,
     ) -> None:
-        """Fetch a specific SHA into an existing bare repo."""
-        from ..utils.git_env import get_git_executable
-
-        git_exe = get_git_executable()
-        subprocess_env = env or os.environ.copy()
+        """Fetch a specific SHA into an existing bare repo (acquires lock)."""
         lock = shard_lock(bare_dir)
-
         with lock:
-            # Re-check under lock
             if self._bare_has_sha(bare_dir, sha, env=env):
                 return
-            try:
-                subprocess.run(
-                    [git_exe, "-C", str(bare_dir), "fetch", url, sha],
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                    env=subprocess_env,
-                    check=True,
-                )
-            except subprocess.CalledProcessError:
-                # Some servers don't allow fetching by SHA -- fetch all refs
-                subprocess.run(
-                    [git_exe, "-C", str(bare_dir), "fetch", "--all"],
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                    env=subprocess_env,
-                    check=True,
-                )
+            self._fetch_into_bare_locked(bare_dir, url, sha, env=env)
+
+    def _fetch_into_bare_locked(
+        self,
+        bare_dir: Path,
+        url: str,
+        sha: str,
+        *,
+        env: dict[str, str] | None = None,
+    ) -> None:
+        """Fetch a specific SHA into a bare repo. Caller MUST hold the shard lock."""
+        from ..utils.git_env import get_git_executable, git_subprocess_env
+
+        git_exe = get_git_executable()
+        subprocess_env = env if env is not None else git_subprocess_env()
+        try:
+            subprocess.run(
+                [git_exe, "-C", str(bare_dir), "fetch", url, sha],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                env=subprocess_env,
+                check=True,
+            )
+        except subprocess.CalledProcessError:
+            # Some servers don't allow fetching by SHA -- fetch all refs
+            subprocess.run(
+                [git_exe, "-C", str(bare_dir), "fetch", "--all"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                env=subprocess_env,
+                check=True,
+            )
 
     def _evict_checkout(self, checkout_dir: Path) -> None:
         """Safely remove a corrupt checkout shard."""
