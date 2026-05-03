@@ -22,10 +22,12 @@ from .dependency_graph import (
 _logger = logging.getLogger(__name__)
 
 
-# F7 (#1116): default worker pool size for parallel BFS resolution.
-# Override via ``APM_RESOLVE_PARALLEL`` (env) or ``max_parallel`` ctor
-# arg. ``max_parallel=1`` short-circuits to the legacy sequential path
-# byte-for-byte.
+# Default worker pool size for the level-batched BFS download phase.
+# Parallel resolution is the CENTRAL execution model (uv-inspired);
+# the ``APM_RESOLVE_PARALLEL`` env var exists solely as a diagnostic /
+# parity-testing knob (e.g. ``APM_RESOLVE_PARALLEL=1 apm install`` to
+# reproduce legacy sequential ordering for diff-debugging).  It is NOT
+# a user-facing feature toggle.
 _DEFAULT_RESOLVE_PARALLEL = 4
 
 
@@ -69,11 +71,13 @@ class APMDependencyResolver:
                              will be determined from project_root during resolution.
             download_callback: Optional callback to download missing packages. If provided,
                                the resolver will attempt to fetch uninstalled transitive deps.
-            max_parallel: F7 (#1116) -- max worker threads for the
-                level-batched BFS download phase. ``None`` resolves
-                from the ``APM_RESOLVE_PARALLEL`` env var, falling back
-                to ``_DEFAULT_RESOLVE_PARALLEL`` (4). Set to ``1`` to
-                preserve the exact legacy sequential behaviour.
+            max_parallel: Max worker threads for the level-batched
+                parallel BFS download phase (the default execution
+                model). ``None`` resolves from the
+                ``APM_RESOLVE_PARALLEL`` env var, falling back to
+                ``_DEFAULT_RESOLVE_PARALLEL`` (4). Set to ``1`` ONLY
+                for parity-testing against the legacy sequential path
+                -- this is a diagnostic knob, not a user toggle.
         """
         self.max_depth = max_depth
         self._apm_modules_dir: Path | None = apm_modules_dir
@@ -100,21 +104,26 @@ class APMDependencyResolver:
         # copied later via ``_copy_local_package``, defeating the
         # fail-closed posture this guard is meant to enforce.
         self._rejected_remote_local_keys: set[str] = set()
-        # F7 (#1116): protects mutations of ``_downloaded_packages`` and
-        # ``_rejected_remote_local_keys`` when the BFS dispatches
-        # ``_try_load_dependency_package`` calls onto a worker pool.
-        # ``max_parallel=1`` still acquires the lock -- the overhead is
-        # negligible and the symmetry simplifies reasoning.
+        # Protects mutations of ``_downloaded_packages`` and
+        # ``_rejected_remote_local_keys`` when the parallel BFS
+        # dispatches ``_try_load_dependency_package`` calls onto a
+        # worker pool. The ``max_parallel=1`` parity path still
+        # acquires the lock -- the overhead is negligible and the
+        # symmetry simplifies reasoning.
         self._download_lock = threading.Lock()
         self._max_parallel = self._resolve_max_parallel(max_parallel)
 
     @staticmethod
     def _resolve_max_parallel(explicit: int | None) -> int:
-        """Compute effective worker count for level-batched BFS (F7).
+        """Compute effective worker count for level-batched parallel BFS.
+
+        Parallel is the default and central execution model.  The
+        override exists for parity testing (``APM_RESOLVE_PARALLEL=1``)
+        and CI diagnostics, not as a user-facing knob.
 
         Order of precedence:
         1. Explicit ``max_parallel`` ctor arg.
-        2. ``APM_RESOLVE_PARALLEL`` env var.
+        2. ``APM_RESOLVE_PARALLEL`` env var (diagnostic/parity knob).
         3. ``_DEFAULT_RESOLVE_PARALLEL``.
 
         Always coerced to ``>= 1`` so the executor never gets a zero
@@ -268,17 +277,20 @@ class APMDependencyResolver:
                 queued_keys.add(key)
             # If already queued as prod, prod wins — skip
 
-        # Process dependencies breadth-first.
+        # Process dependencies breadth-first with level-batched parallelism.
         #
-        # F7 (#1116): the BFS now processes one *level* at a time, so the
-        # potentially I/O-bound ``_try_load_dependency_package`` calls
-        # for siblings at the same depth can fan out across a worker
+        # Parallel BFS is the CENTRAL resolution strategy (uv-inspired).
+        # Each level fans out potentially I/O-bound
+        # ``_try_load_dependency_package`` calls across a bounded worker
         # pool. All tree mutations -- ``tree.add_node``,
         # ``parent_node.children.append``, ``processing_queue.append``,
         # ``queued_keys`` writes -- still happen on the main thread, in
         # deterministic submission order, so parallelism never affects
-        # the resolved tree shape. ``max_parallel=1`` skips the executor
-        # entirely and keeps the legacy sequential path byte-for-byte.
+        # the resolved tree shape.
+        #
+        # The ``max_parallel == 1`` branch exists SOLELY as a parity-
+        # testing escape hatch (verifies sequential-identical output);
+        # it is not a user-facing toggle.
         while processing_queue:
             # --- Drain one level ---
             current_depth = processing_queue[0][1]
@@ -350,7 +362,9 @@ class APMDependencyResolver:
                     ]
                 ] = []
             elif self._max_parallel == 1 or len(work_items) == 1:
-                # Sequential parity path -- byte-identical to legacy.
+                # Parity-testing path: byte-identical to legacy sequential
+                # output so ``APM_RESOLVE_PARALLEL=1`` can be used to
+                # diff-debug ordering issues.  NOT a feature flag.
                 results = [self._load_work_item(it) for it in work_items]
             else:
                 workers = min(self._max_parallel, len(work_items))
@@ -517,7 +531,7 @@ class APMDependencyResolver:
         return True
 
     def _load_work_item(self, item):
-        """F7 (#1116): worker payload for the level-batched BFS.
+        """Worker payload for the level-batched parallel BFS.
 
         Pure I/O wrapper around ``_try_load_dependency_package`` that
         returns ``(item, loaded_package_or_None, exception_or_None)``
