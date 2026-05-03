@@ -166,6 +166,39 @@ def integrate_package_primitives(
         if logger:
             logger.tree_item(msg)
 
+    def _format_target_collapse(paths: list[str], verbose: bool) -> tuple[str, list[str]]:
+        """Apply the 1/2/3+ multi-target collapse rule.
+
+        Returns a tuple ``(suffix, expansion_lines)``:
+
+        * ``suffix`` -- the text appended after ``-> `` on the aggregate line.
+        * ``expansion_lines`` -- extra ``  |     -> <path>`` lines emitted
+          AFTER the aggregate line when ``verbose`` is True. Empty list when
+          collapsed.
+
+        The rule:
+          1 target  -> ``<path1>``
+          2 targets -> ``<path1>, <path2>``
+          3+        -> ``N targets`` (verbose forces full enumeration)
+        """
+        deduped: list[str] = []
+        seen: set = builtins.set()
+        for p in paths:
+            if p not in seen:
+                seen.add(p)
+                deduped.append(p)
+        if verbose and len(deduped) >= 2:
+            return "", [f"  |     -> {p}" for p in deduped]
+        if len(deduped) == 0:
+            return "", []
+        if len(deduped) == 1:
+            return deduped[0], []
+        if len(deduped) == 2:
+            return f"{deduped[0]}, {deduped[1]}", []
+        return f"{len(deduped)} targets", []
+
+    _verbose = bool(getattr(ctx, "verbose", False)) if ctx is not None else False
+
     _INTEGRATOR_KWARGS = {
         "prompts": prompt_integrator,
         "agents": agent_integrator,
@@ -175,13 +208,22 @@ def integrate_package_primitives(
         "skills": skill_integrator,
     }
 
-    for _target in targets:
-        for _prim_name, _mapping in _target.primitives.items():
-            _entry = _dispatch.get(_prim_name)
-            if not _entry or _entry.multi_target:
-                continue  # skills handled below
+    # Aggregate per-primitive across targets so we emit ONE line per kind
+    # (per the 1/2/3+ collapse rule), not one per target.
+    # Structure: { prim_name: {"files": int, "label": str, "paths": [str]} }
+    _per_kind: dict[str, dict[str, Any]] = {}
 
-            _integrator = _INTEGRATOR_KWARGS[_prim_name]
+    for _prim_name, _entry in _dispatch.items():
+        if _entry.multi_target:
+            continue  # skills handled separately
+        _integrator = _INTEGRATOR_KWARGS[_prim_name]
+        _agg_files = 0
+        _agg_paths: list[str] = []
+        _label = _prim_name
+        for _target in targets:
+            _mapping = _target.primitives.get(_prim_name)
+            if _mapping is None:
+                continue
             _int_result = getattr(_integrator, _entry.integrate_method)(
                 _target,
                 package_info,
@@ -190,34 +232,53 @@ def integrate_package_primitives(
                 managed_files=managed_files,
                 diagnostics=diagnostics,
             )
-
-            if _int_result.files_integrated > 0:
-                result[_entry.counter_key] += _int_result.files_integrated
-                _effective_root = _mapping.deploy_root or _target.root_dir
-                _deploy_dir = (
-                    f"{_effective_root}/{_mapping.subdir}/"
-                    if _mapping.subdir
-                    else f"{_effective_root}/"
-                )
-                if _prim_name == "instructions" and _mapping.format_id in (
-                    "cursor_rules",
-                    "claude_rules",
-                ):
-                    _label = "rule(s)"
-                elif _prim_name == "instructions":
-                    _label = "instruction(s)"
-                elif _prim_name == "hooks":
-                    if _target.hooks_config_display:
-                        _deploy_dir = _target.hooks_config_display
-                    _label = "hook(s)"
-                else:
-                    _label = _prim_name
-                _log_integration(
-                    f"  |-- {_int_result.files_integrated} {_label} integrated -> {_deploy_dir}"
-                )
             result["links_resolved"] += _int_result.links_resolved
             for tp in _int_result.target_paths:
                 deployed.append(_deployed_path_entry(tp, project_root, targets))
+            if _int_result.files_integrated <= 0:
+                continue
+            _agg_files += _int_result.files_integrated
+            result[_entry.counter_key] += _int_result.files_integrated
+            _effective_root = _mapping.deploy_root or _target.root_dir
+            _deploy_dir = (
+                f"{_effective_root}/{_mapping.subdir}/"
+                if _mapping.subdir
+                else f"{_effective_root}/"
+            )
+            if _prim_name == "instructions" and _mapping.format_id in (
+                "cursor_rules",
+                "claude_rules",
+            ):
+                _label = "rule(s)"
+            elif _prim_name == "instructions":
+                _label = "instruction(s)"
+            elif _prim_name == "hooks":
+                if _target.hooks_config_display:
+                    _deploy_dir = _target.hooks_config_display
+                _label = "hook(s)"
+            else:
+                _label = _prim_name
+            _agg_paths.append(_deploy_dir)
+
+        if _agg_files > 0:
+            _per_kind[_prim_name] = {
+                "files": _agg_files,
+                "label": _label,
+                "paths": _agg_paths,
+            }
+
+    # Emit aggregated per-kind lines in dispatch order so output is stable.
+    for _prim_name in _dispatch:
+        if _prim_name not in _per_kind:
+            continue
+        _info = _per_kind[_prim_name]
+        _suffix, _expansion = _format_target_collapse(_info["paths"], _verbose)
+        if _expansion:
+            _log_integration(f"  |-- {_info['files']} {_info['label']} integrated:")
+            for line in _expansion:
+                _log_integration(line)
+        else:
+            _log_integration(f"  |-- {_info['files']} {_info['label']} integrated -> {_suffix}")
 
     skill_result = skill_integrator.integrate_package_skill(
         package_info,
@@ -237,18 +298,39 @@ def integrate_package_primitives(
         except ValueError:
             # Dynamic-root target (copilot-cowork) -- path is outside project tree.
             _skill_target_dirs.add("copilot-cowork")
-    _skill_targets = sorted(_skill_target_dirs)
-    _skill_target_str = ", ".join(f"{d}/skills/" for d in _skill_targets) or "skills/"
+    _skill_target_paths = [f"{d}/skills/" for d in sorted(_skill_target_dirs)]
+    if not _skill_target_paths:
+        _skill_target_paths = ["skills/"]
+    _skill_suffix, _skill_expansion = _format_target_collapse(_skill_target_paths, _verbose)
     if skill_result.skill_created:
         result["skills"] += 1
-        _log_integration(f"  |-- Skill integrated -> {_skill_target_str}")
+        if _skill_expansion:
+            _log_integration("  |-- Skill integrated:")
+            for line in _skill_expansion:
+                _log_integration(line)
+        else:
+            _log_integration(f"  |-- Skill integrated -> {_skill_suffix}")
     if skill_result.sub_skills_promoted > 0:
         result["sub_skills"] += skill_result.sub_skills_promoted
-        _log_integration(
-            f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_target_str}"
-        )
+        if _skill_expansion:
+            _log_integration(f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated:")
+            for line in _skill_expansion:
+                _log_integration(line)
+        else:
+            _log_integration(
+                f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_suffix}"
+            )
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))
+
+    # A3: warm-cache visibility. If nothing was integrated for any kind AND
+    # no skill was created, emit one annotation so the user knows the dep
+    # was evaluated (the [+] header above already carries the SHA).
+    _total_integrated = sum(_info["files"] for _info in _per_kind.values())
+    _total_integrated += int(skill_result.skill_created)
+    _total_integrated += int(skill_result.sub_skills_promoted)
+    if _total_integrated == 0:
+        _log_integration("  |-- (files unchanged)")
 
     return result
 

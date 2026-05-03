@@ -1172,6 +1172,75 @@ class GitHubPackageDownloader:
             ref_name=ref_name,
         )
 
+    def _resolve_commit_sha_for_ref(self, dep_ref: DependencyReference, ref: str) -> str | None:
+        """Resolve a Git ref to its 40-char commit SHA via the cheap GitHub commits API.
+
+        Uses ``GET /repos/{owner}/{repo}/commits/{ref}`` with
+        ``Accept: application/vnd.github.sha`` which returns just the SHA in the
+        response body (no JSON parsing, no extra payload).
+
+        For Artifactory or Azure DevOps hosts, returns ``None`` -- no equivalent
+        cheap lookup is wired and the caller falls back to ``ref`` only.
+
+        Returns:
+            40-char commit SHA on success, ``None`` on any failure (404, network,
+            non-GitHub host, or unexpected body shape). Failures are swallowed
+            so callers can still record the ref name.
+        """
+        # Skip non-GitHub hosts -- Artifactory and Azure DevOps have no
+        # equivalent cheap commit-resolve endpoint we want to depend on here.
+        try:
+            if dep_ref.is_artifactory() or dep_ref.is_azure_devops():
+                return None
+        except Exception:
+            return None
+
+        host = dep_ref.host or default_host()
+
+        # If the user already passed a 40-char hex SHA, treat it as resolved.
+        if re.match(r"^[a-f0-9]{40}$", ref.lower() or ""):
+            return ref.lower()
+
+        try:
+            owner, repo = dep_ref.repo_url.split("/", 1)
+        except ValueError:
+            return None
+
+        # Build commits API URL -- mirrors the Contents API host shape.
+        if host == "github.com":
+            api_url = f"https://api.github.com/repos/{owner}/{repo}/commits/{ref}"
+        elif host.lower().endswith(".ghe.com"):
+            api_url = f"https://api.{host}/repos/{owner}/{repo}/commits/{ref}"
+        else:
+            api_url = f"https://{host}/api/v3/repos/{owner}/{repo}/commits/{ref}"
+
+        # Resolve auth using the same path the file download uses.
+        org = None
+        parts = dep_ref.repo_url.split("/")
+        if parts:
+            org = parts[0]
+        try:
+            file_ctx = self.auth_resolver.resolve(host, org, port=dep_ref.port)
+            token = file_ctx.token
+        except Exception:
+            token = None
+
+        headers: dict[str, str] = {"Accept": "application/vnd.github.sha"}
+        if token:
+            headers["Authorization"] = f"token {token}"
+
+        try:
+            response = self._resilient_get(api_url, headers=headers, timeout=10)
+            if response.status_code != 200:
+                return None
+            body = (response.text or "").strip()
+            if re.match(r"^[a-f0-9]{40}$", body.lower()):
+                return body.lower()
+            return None
+        except Exception:
+            # Network errors, retries exhausted, etc -- never fail the install.
+            return None
+
     def download_raw_file(
         self, dep_ref: DependencyReference, file_path: str, ref: str = "main", verbose_callback=None
     ) -> bytes:
@@ -1340,6 +1409,15 @@ class GitHubPackageDownloader:
         # Determine the ref to use
         ref = dep_ref.reference or "main"
 
+        # Resolve the commit SHA cheaply BEFORE the file download. This is one
+        # short HTTP call (Accept: application/vnd.github.sha returns just the
+        # 40-char SHA in the body) and the result is propagated into PackageInfo
+        # so the lockfile and per-dep header can render the SHA suffix instead
+        # of just the ref name. On non-GitHub hosts or any failure this returns
+        # None and we fall back to ref-name only -- the install never fails on
+        # SHA resolution.
+        resolved_commit = self._resolve_commit_sha_for_ref(dep_ref, ref)
+
         # Update progress - downloading
         if progress_obj and progress_task_id is not None:
             progress_obj.update(progress_task_id, completed=50, total=100)
@@ -1425,12 +1503,29 @@ class GitHubPackageDownloader:
             package_path=target_path,
         )
 
+        # Build the resolved reference. On non-GitHub hosts or SHA-resolve
+        # failure the resolved_commit stays None and the suffix renders as
+        # "#ref" only -- matching the existing subdirectory behavior in
+        # _try_sparse_checkout / _download_subdirectory.
+        ref_type = (
+            GitReferenceType.COMMIT
+            if re.match(r"^[a-f0-9]{40}$", ref.lower())
+            else GitReferenceType.BRANCH
+        )
+        resolved_ref = ResolvedReference(
+            original_ref=str(dep_ref.reference) if dep_ref.reference else ref,
+            ref_name=ref,
+            ref_type=ref_type,
+            resolved_commit=resolved_commit,
+        )
+
         # Return PackageInfo
         return PackageInfo(
             package=package,
             install_path=target_path,
             installed_at=datetime.now().isoformat(),
             dependency_ref=dep_ref,  # Store for canonical dependency string
+            resolved_reference=resolved_ref,
         )
 
     def _try_sparse_checkout(
