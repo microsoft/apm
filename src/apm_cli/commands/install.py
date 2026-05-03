@@ -198,6 +198,7 @@ class InstallContext:
     no_policy: bool
     install_mode: Any  # InstallMode
     packages: tuple  # Original Click packages
+    refresh: bool = False
     only_packages: builtins.list | None = None
     manifest_snapshot: bytes | None = None
     snapshot_manifest_path: Optional["Path"] = None
@@ -952,6 +953,12 @@ def _handle_mcp_install(
     help="Skip org policy enforcement for this invocation. Does NOT bypass apm audit --ci.",
 )
 @click.option(
+    "--refresh",
+    is_flag=True,
+    default=False,
+    help="Bypass the persistent cache and re-fetch all dependencies from upstream.",
+)
+@click.option(
     "--legacy-skill-paths",
     "legacy_skill_paths",
     is_flag=True,
@@ -1003,6 +1010,7 @@ def install(  # noqa: PLR0913
     registry_url,
     skill_names,
     no_policy,
+    refresh,
     legacy_skill_paths,
     alias,
 ):
@@ -1355,6 +1363,7 @@ def install(  # noqa: PLR0913
             no_policy=no_policy,
             install_mode=InstallMode(only) if only else InstallMode.ALL,
             packages=packages,
+            refresh=refresh,
             only_packages=builtins.list(validated_packages) if packages else None,
             manifest_snapshot=_manifest_snapshot,
             snapshot_manifest_path=_snapshot_manifest_path,

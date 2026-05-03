@@ -211,6 +211,11 @@ class GitHubPackageDownloader:
         # starts; None means no dedup (each subdir dep clones independently).
         self.shared_clone_cache = None
 
+        # WS3 (#1116): persistent cross-run git cache.  When set, the
+        # download flow checks the on-disk cache before any network clone.
+        # Set by the install pipeline; None disables persistent caching.
+        self.persistent_git_cache = None
+
     def _setup_git_environment(self) -> dict[str, Any]:
         """Set up Git environment with authentication using centralized token manager.
 
@@ -1523,6 +1528,18 @@ class GitHubPackageDownloader:
         cache_owner = dep_ref.repo_url.split("/")[0] if "/" in dep_ref.repo_url else ""
         cache_repo = dep_ref.repo_url.split("/")[1] if "/" in dep_ref.repo_url else dep_ref.repo_url
 
+        # WS3 (#1116): try persistent cross-run cache first.
+        # Build a canonical URL for cache key derivation.
+        _persistent_cache = self.persistent_git_cache
+        _persistent_checkout: Path | None = None
+        if _persistent_cache is not None:
+            _canonical_url = f"https://{cache_host}/{cache_owner}/{cache_repo}"
+            try:
+                _persistent_checkout = _persistent_cache.get_checkout(_canonical_url, ref)
+            except Exception:
+                # Cache miss or failure -- fall through to normal clone path.
+                _persistent_checkout = None
+
         # Use mkdtemp + explicit cleanup so we control when rmtree runs.
         # tempfile.TemporaryDirectory().__exit__ calls shutil.rmtree without our
         # retry logic, which raises WinError 32 when git processes still hold
@@ -1532,7 +1549,10 @@ class GitHubPackageDownloader:
         temp_dir = None
         shared_clone_path: Path | None = None
         try:
-            if use_shared:
+            if _persistent_checkout is not None:
+                # WS3: persistent cache hit -- use the cached checkout directly.
+                temp_clone_path = _persistent_checkout
+            elif use_shared:
                 # Try shared clone path.  clone_fn encapsulates the full
                 # sparse-checkout -> fallback-clone logic.
                 def _shared_clone_fn(clone_target: Path) -> None:

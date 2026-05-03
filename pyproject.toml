@@ -36,6 +36,7 @@ dependencies = [
     "watchdog>=3.0.0",
     "GitPython>=3.1.0",
     "ruamel.yaml>=0.18.0",
+    "filelock>=3.12",
 ]
 
 [project.optional-dependencies]

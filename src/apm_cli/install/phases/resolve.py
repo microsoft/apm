@@ -107,6 +107,24 @@ def run(ctx: InstallContext) -> None:
     shared_cache = SharedCloneCache()
     downloader.shared_clone_cache = shared_cache
 
+    # WS3 (#1116): attach persistent cross-run git cache unless disabled
+    # via APM_NO_CACHE environment variable.
+    import os as _os
+
+    if not _os.environ.get("APM_NO_CACHE"):
+        from apm_cli.cache.paths import get_cache_root
+
+        try:
+            from apm_cli.cache.git_cache import GitCache
+
+            _cache_root = get_cache_root()
+            downloader.persistent_git_cache = GitCache(
+                _cache_root,
+                refresh=getattr(ctx, "refresh", False),
+            )
+        except (OSError, ValueError):
+            pass  # Cache unavailable (permissions, missing dir) -- degrade gracefully
+
     # ------------------------------------------------------------------
     # 4. Tracking variables (phase-local except where noted)
     # ------------------------------------------------------------------

@@ -188,6 +188,7 @@ class TestDownloaderSharedCloneIntegration:
         cache = SharedCloneCache(base_dir=tmp_path / "cache")
         (tmp_path / "cache").mkdir()
         downloader.shared_clone_cache = cache
+        downloader.persistent_git_cache = None
 
         clone_call_count = {"n": 0}
 
