@@ -211,6 +211,7 @@ APM natively integrates with OpenCode when a `.opencode/` directory exists in yo
 |----------|---------|
 | `.cursor/rules/*.mdc` | Instructions converted to Cursor rules format |
 | `.cursor/agents/*.md` | Sub-agents from installed packages |
+| `.cursor/commands/*.md` | Slash commands from installed packages (from `.prompt.md` files). Files are deployed when `.cursor/` exists. Frontmatter is normalized to the common Claude-compatible subset (`description`, `allowed-tools`, `model`, `argument-hint`, `input`); Cursor-specific keys (`author`, `mcp`, `parameters`, ...) are dropped with an install-time warning per file. **Lifecycle note:** Cursor 1.6+ only. Cursor is de-emphasizing commands in favor of rules and skills -- monitor [Cursor release notes](https://cursor.com/changelog) for changes to this surface. |
 | `.agents/skills/{name}/SKILL.md` | Skills from installed packages (converged from `.cursor/skills/`) |
 | `.cursor/hooks.json` (hooks key) | Hooks from installed packages (merged into config) |
 | `.cursor/hooks/{pkg}/` | Referenced hook scripts |

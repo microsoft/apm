@@ -298,6 +298,7 @@ class TestExhaustivenessChecks:
             "agents_codex",
             "agents_windsurf",
             "commands",  # was commands_claude, aliased
+            "commands_cursor",
             "commands_gemini",
             "commands_opencode",
             "commands_windsurf",
