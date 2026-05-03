@@ -278,17 +278,33 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     )
 
     # ------------------------------------------------------------------
+    # Workstream B (#1116): one Live region per major phase boundary.
+    # When the controller is disabled (CI, dumb terminal,
+    # ``APM_PROGRESS=never``) every method is a no-op so the surrounding
+    # phases stay valid without per-call gating.
+    # ------------------------------------------------------------------
+    from apm_cli.utils.install_tui import InstallTui
+
+    ctx.tui = InstallTui()
+
+    # ------------------------------------------------------------------
     # Phase 1: Resolve dependencies
     # ------------------------------------------------------------------
     from .phases import resolve as _resolve_phase
 
-    _run_phase("resolve", _resolve_phase, ctx)
+    ctx.tui.__enter__()
+    try:
+        ctx.tui.start_phase("resolve", total=len(all_apm_deps) or 1)
+        _run_phase("resolve", _resolve_phase, ctx)
+    finally:
+        ctx.tui.__exit__()
 
     if not ctx.deps_to_install and not ctx.root_has_local_primitives:
         if logger:
             logger.nothing_to_install()
         return InstallResult()
 
+    ctx.tui.__enter__()
     try:
         # --------------------------------------------------------------
         # Phase 1.5: Policy enforcement gate (#827)
@@ -441,6 +457,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         # --------------------------------------------------------------
         from .phases import download as _download_phase
 
+        ctx.tui.start_phase("download", total=len(ctx.deps_to_install) or 1)
         _run_phase("download", _download_phase, ctx)
 
         # --------------------------------------------------------------
@@ -454,6 +471,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
 
         from .phases import integrate as _integrate_phase
 
+        ctx.tui.start_phase("integrate", total=len(ctx.deps_to_install) or 1)
         _run_phase("integrate", _integrate_phase, ctx)
 
         # Fail-loud: if any direct dependency failed validation or
@@ -594,3 +612,5 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         raise
     except Exception as e:
         raise RuntimeError(f"Failed to resolve APM dependencies: {e}")  # noqa: B904
+    finally:
+        ctx.tui.__exit__()

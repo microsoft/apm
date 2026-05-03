@@ -453,7 +453,7 @@ class FreshDependencySource(DependencySource):
         resolved_ref: Any,
         dep_locked_chk: Any,
         ref_changed: bool,
-        progress: Any,
+        progress: Any = None,
     ):
         super().__init__(ctx, dep_ref, install_path, dep_key)
         self.resolved_ref = resolved_ref
@@ -482,10 +482,19 @@ class FreshDependencySource(DependencySource):
             display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
             short_name = display_name.split("/")[-1] if "/" in display_name else display_name
 
-            task_id = progress.add_task(
-                description=f"Fetching {short_name}",
-                total=None,
-            )
+            # Workstream B (#1116): per-dep progress is owned by the
+            # shared InstallTui ``ctx.tui``; legacy local Progress is
+            # only wired when integrate is invoked outside the install
+            # pipeline (no callers do this today, but the parameter is
+            # kept for back-compat).
+            task_id = None
+            if progress is not None:
+                task_id = progress.add_task(
+                    description=f"Fetching {short_name}",
+                    total=None,
+                )
+            if ctx.tui is not None:
+                ctx.tui.task_started(dep_key, f"fetch {short_name}")
 
             download_ref = build_download_ref(
                 dep_ref,
@@ -505,8 +514,11 @@ class FreshDependencySource(DependencySource):
                 )
 
             # CRITICAL: hide progress BEFORE printing success to avoid overlap
-            progress.update(task_id, visible=False)
-            progress.refresh()
+            if progress is not None and task_id is not None:
+                progress.update(task_id, visible=False)
+                progress.refresh()
+            if ctx.tui is not None:
+                ctx.tui.task_completed(dep_key)
 
             deltas: dict[str, int] = {"installed": 1}
 

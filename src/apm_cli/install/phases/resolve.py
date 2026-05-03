@@ -177,9 +177,18 @@ def run(ctx: InstallContext) -> None:
         # Under F7's parallel BFS this callback may run on a worker
         # thread, so serialise the emission via ``callback_lock`` to
         # keep heartbeat lines from interleaving with each other.
+        # Workstream B (#1116): when the shared InstallTui is painting
+        # the Live region, the static heartbeat line would interleave
+        # with the spinner -- route the heartbeat to the TUI's
+        # task_started instead and skip the static line.
         if logger:
             with callback_lock:
-                logger.resolving_heartbeat(dep_ref.get_display_name())
+                _display = dep_ref.get_display_name()
+                _tui = getattr(ctx, "tui", None)
+                if _tui is not None:
+                    _tui.task_started(dep_ref.get_unique_key(), f"resolve {_display}")
+                if _tui is None or not _tui.is_animating():
+                    logger.resolving_heartbeat(_display)
         try:
             # Handle local packages: copy instead of git clone
             if dep_ref.is_local and dep_ref.local_path:
