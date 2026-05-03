@@ -206,6 +206,11 @@ class GitHubPackageDownloader:
         # Delegate backend-specific download logic to the download delegate.
         self._strategies = DownloadDelegate(host=self)
 
+        # WS2a (#1116): per-run shared clone cache for subdirectory dep
+        # deduplication.  Set by the install pipeline before resolution
+        # starts; None means no dedup (each subdir dep clones independently).
+        self.shared_clone_cache = None
+
     def _setup_git_environment(self) -> dict[str, Any]:
         """Set up Git environment with authentication using centralized token manager.
 
@@ -1508,6 +1513,16 @@ class GitHubPackageDownloader:
         if progress_obj and progress_task_id is not None:
             progress_obj.update(progress_task_id, completed=10, total=100)
 
+        # WS2a (#1116): attempt shared clone dedup when a per-run cache
+        # is available.  Two subdir deps from the same (host, owner, repo, ref)
+        # share one clone; different refs always get independent clones.
+        shared_cache = self.shared_clone_cache
+        use_shared = shared_cache is not None
+        # Determine cache key components from the dep_ref.
+        cache_host = dep_ref.host or default_host()
+        cache_owner = dep_ref.repo_url.split("/")[0] if "/" in dep_ref.repo_url else ""
+        cache_repo = dep_ref.repo_url.split("/")[1] if "/" in dep_ref.repo_url else dep_ref.repo_url
+
         # Use mkdtemp + explicit cleanup so we control when rmtree runs.
         # tempfile.TemporaryDirectory().__exit__ calls shutil.rmtree without our
         # retry logic, which raises WinError 32 when git processes still hold
@@ -1515,71 +1530,117 @@ class GitHubPackageDownloader:
         from ..config import get_apm_temp_dir
 
         temp_dir = None
+        shared_clone_path: Path | None = None
         try:
-            temp_dir = tempfile.mkdtemp(dir=get_apm_temp_dir())
-            # Sparse checkout always targets "repo/".  If it fails we clone into
-            # "repo_clone/" so we never have to rmtree a directory that may still
-            # have live git handles from the failed subprocess.
-            sparse_clone_path = Path(temp_dir) / "repo"
-            temp_clone_path = sparse_clone_path
-
-            # Update progress - cloning
-            if progress_obj and progress_task_id is not None:
-                progress_obj.update(progress_task_id, completed=20, total=100)
-
-            # Phase 4 (#171): Try sparse-checkout first (git 2.25+), fall back to full clone
-            sparse_ok = self._try_sparse_checkout(dep_ref, sparse_clone_path, subdir_path, ref)
-
-            if not sparse_ok:
-                # Full clone into a fresh subdirectory so we don't have to touch
-                # the (possibly locked) sparse-checkout directory at all.
-                temp_clone_path = Path(temp_dir) / "repo_clone"
-
-                package_display_name = subdir_path.split("/")[-1]
-                progress_reporter = (
-                    GitProgressReporter(progress_task_id, progress_obj, package_display_name)
-                    if progress_task_id and progress_obj
-                    else None
-                )
-
-                # Detect if ref is a commit SHA (can't be used with --branch in shallow clones)
-                is_commit_sha = ref and re.match(r"^[a-f0-9]{7,40}$", ref) is not None
-
-                clone_kwargs = {
-                    "dep_ref": dep_ref,
-                }
-                if is_commit_sha:
-                    # For commit SHAs, clone without checkout then checkout the specific commit.
-                    # Shallow clone doesn't support fetching by arbitrary SHA.
-                    clone_kwargs["no_checkout"] = True
-                else:
-                    clone_kwargs["depth"] = 1
-                    if ref:
-                        clone_kwargs["branch"] = ref
+            if use_shared:
+                # Try shared clone path.  clone_fn encapsulates the full
+                # sparse-checkout -> fallback-clone logic.
+                def _shared_clone_fn(clone_target: Path) -> None:
+                    sparse_path = clone_target
+                    sparse_ok = self._try_sparse_checkout(dep_ref, sparse_path, subdir_path, ref)
+                    if sparse_ok:
+                        return
+                    # Sparse failed -- full clone into same target
+                    # (shared cache doesn't care about the sparse/full distinction)
+                    full_path = clone_target.parent / "repo_clone"
+                    is_commit_sha = ref and re.match(r"^[a-f0-9]{7,40}$", ref) is not None
+                    clone_kwargs = {"dep_ref": dep_ref}
+                    if is_commit_sha:
+                        clone_kwargs["no_checkout"] = True
+                    else:
+                        clone_kwargs["depth"] = 1
+                        if ref:
+                            clone_kwargs["branch"] = ref
+                    self._clone_with_fallback(dep_ref.repo_url, full_path, **clone_kwargs)
+                    if is_commit_sha:
+                        repo_obj = None
+                        try:
+                            repo_obj = Repo(full_path)
+                            repo_obj.git.checkout(ref)
+                        except Exception as e:
+                            raise RuntimeError(f"Failed to checkout commit {ref}: {e}") from e
+                        finally:
+                            _close_repo(repo_obj)
+                    # Move full clone into expected position (rename is atomic
+                    # on same filesystem).  If sparse path already exists from
+                    # the failed attempt, remove it first.
+                    if sparse_path.exists():
+                        _rmtree(sparse_path)
+                    full_path.rename(sparse_path)
 
                 try:
-                    self._clone_with_fallback(
-                        dep_ref.repo_url,
-                        temp_clone_path,
-                        progress_reporter=progress_reporter,
-                        **clone_kwargs,
+                    shared_clone_path = shared_cache.get_or_clone(
+                        cache_host, cache_owner, cache_repo, ref, _shared_clone_fn
                     )
                 except Exception as e:
                     raise RuntimeError(f"Failed to clone repository: {e}") from e
+                temp_clone_path = shared_clone_path
+            else:
+                # Legacy per-dep clone path (no shared cache).
+                temp_dir = tempfile.mkdtemp(dir=get_apm_temp_dir())
+                # Sparse checkout always targets "repo/".  If it fails we clone into
+                # "repo_clone/" so we never have to rmtree a directory that may still
+                # have live git handles from the failed subprocess.
+                sparse_clone_path = Path(temp_dir) / "repo"
+                temp_clone_path = sparse_clone_path
 
-                if is_commit_sha:
-                    repo_obj = None
+                # Update progress - cloning
+                if progress_obj and progress_task_id is not None:
+                    progress_obj.update(progress_task_id, completed=20, total=100)
+
+                # Phase 4 (#171): Try sparse-checkout first (git 2.25+), fall back to full clone
+                sparse_ok = self._try_sparse_checkout(dep_ref, sparse_clone_path, subdir_path, ref)
+
+                if not sparse_ok:
+                    # Full clone into a fresh subdirectory so we don't have to touch
+                    # the (possibly locked) sparse-checkout directory at all.
+                    temp_clone_path = Path(temp_dir) / "repo_clone"
+
+                    package_display_name = subdir_path.split("/")[-1]
+                    progress_reporter = (
+                        GitProgressReporter(progress_task_id, progress_obj, package_display_name)
+                        if progress_task_id and progress_obj
+                        else None
+                    )
+
+                    # Detect if ref is a commit SHA (can't be used with --branch in shallow clones)
+                    is_commit_sha = ref and re.match(r"^[a-f0-9]{7,40}$", ref) is not None
+
+                    clone_kwargs = {
+                        "dep_ref": dep_ref,
+                    }
+                    if is_commit_sha:
+                        # For commit SHAs, clone without checkout then checkout the specific commit.
+                        # Shallow clone doesn't support fetching by arbitrary SHA.
+                        clone_kwargs["no_checkout"] = True
+                    else:
+                        clone_kwargs["depth"] = 1
+                        if ref:
+                            clone_kwargs["branch"] = ref
+
                     try:
-                        repo_obj = Repo(temp_clone_path)
-                        repo_obj.git.checkout(ref)
+                        self._clone_with_fallback(
+                            dep_ref.repo_url,
+                            temp_clone_path,
+                            progress_reporter=progress_reporter,
+                            **clone_kwargs,
+                        )
                     except Exception as e:
-                        raise RuntimeError(f"Failed to checkout commit {ref}: {e}") from e
-                    finally:
-                        _close_repo(repo_obj)
+                        raise RuntimeError(f"Failed to clone repository: {e}") from e
 
-                # Disable progress reporter after clone
-                if progress_reporter:
-                    progress_reporter.disabled = True
+                    if is_commit_sha:
+                        repo_obj = None
+                        try:
+                            repo_obj = Repo(temp_clone_path)
+                            repo_obj.git.checkout(ref)
+                        except Exception as e:
+                            raise RuntimeError(f"Failed to checkout commit {ref}: {e}") from e
+                        finally:
+                            _close_repo(repo_obj)
+
+                    # Disable progress reporter after clone
+                    if progress_reporter:
+                        progress_reporter.disabled = True
 
             # Update progress - extracting subdirectory
             if progress_obj and progress_task_id is not None:

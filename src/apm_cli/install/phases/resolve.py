@@ -98,6 +98,15 @@ def run(ctx: InstallContext) -> None:
     )
     ctx.downloader = downloader
 
+    # WS2a (#1116): attach a per-run shared clone cache so subdirectory
+    # deps from the same upstream repo+ref share a single git clone.
+    # The cache is cleaned up in the resolve phase's finally-equivalent
+    # (after resolution completes, whether success or failure).
+    from apm_cli.deps.shared_clone_cache import SharedCloneCache
+
+    shared_cache = SharedCloneCache()
+    downloader.shared_clone_cache = shared_cache
+
     # ------------------------------------------------------------------
     # 4. Tracking variables (phase-local except where noted)
     # ------------------------------------------------------------------
@@ -430,3 +439,8 @@ def run(ctx: InstallContext) -> None:
     ctx.callback_downloaded = callback_downloaded
     ctx.callback_failures = callback_failures
     ctx.transitive_failures = transitive_failures
+
+    # WS2a (#1116): release shared clone temp dirs now that all subdir
+    # deps have extracted their subpaths.  Safe to call even if no
+    # subdir deps were processed (no-op in that case).
+    shared_cache.cleanup()
