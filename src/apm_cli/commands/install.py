@@ -758,7 +758,7 @@ def _validate_and_add_packages_to_apm_yml(
 # ---------------------------------------------------------------------------
 
 
-def _handle_mcp_install(
+def _handle_mcp_install(  # noqa: PLR0913
     *,
     mcp_name,
     transport,
@@ -1902,34 +1902,48 @@ def _post_install_summary(
 # directly to avoid relying on transitive aliasing.
 
 
+@dataclasses.dataclass(frozen=True)
+class _InstallApmDependenciesOptions:
+    force: bool = False
+    parallel_downloads: int = 4
+    logger: "InstallLogger" = None
+    scope: Any = None
+    auth_resolver: "AuthResolver" = None
+    target: str = None
+    allow_insecure: bool = False
+    allow_insecure_hosts: tuple[str, ...] = ()
+    marketplace_provenance: dict | None = None
+    protocol_pref: Any = None
+    allow_protocol_fallback: bool | None = None
+    no_policy: bool = False
+    skill_subset: tuple | None = None
+    skill_subset_from_cli: bool = False
+    legacy_skill_paths: bool = False
+    frozen: bool = False
+    plan_callback: Any = None
+
+    @classmethod
+    def from_kwargs(cls, kwargs: dict[str, Any]) -> "_InstallApmDependenciesOptions":
+        known = {field.name for field in dataclasses.fields(cls)}
+        unknown = set(kwargs) - known
+        if unknown:
+            unknown_list = ", ".join(sorted(unknown))
+            raise TypeError(f"unexpected install option(s): {unknown_list}")
+        return cls(**kwargs)
+
+
 # ---------------------------------------------------------------------------
 # Pipeline entry point -- thin re-export preserving the patch path
 # ``apm_cli.commands.install._install_apm_dependencies`` used by tests.
 #
 # The real implementation lives in ``apm_cli.install.pipeline`` (F2).
 # ---------------------------------------------------------------------------
-def _install_apm_dependencies(  # noqa: PLR0913
+def _install_apm_dependencies(
     apm_package: "APMPackage",
     update_refs: bool = False,
     verbose: bool = False,
-    only_packages: "builtins.list | None" = None,
-    force: bool = False,
-    parallel_downloads: int = 4,
-    logger: "InstallLogger" = None,
-    scope=None,
-    auth_resolver: "AuthResolver" = None,
-    target: str | None = None,
-    allow_insecure: bool = False,
-    allow_insecure_hosts=(),
-    marketplace_provenance: dict = None,
-    protocol_pref=None,
-    allow_protocol_fallback: "bool | None" = None,
-    no_policy: bool = False,
-    skill_subset: "builtins.tuple | None" = None,
-    skill_subset_from_cli: bool = False,
-    legacy_skill_paths: bool = False,
-    frozen: bool = False,
-    plan_callback=None,
+    only_packages: "builtins.list" = None,  # noqa: RUF013
+    **kwargs,
 ):
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.
@@ -1945,27 +1959,28 @@ def _install_apm_dependencies(  # noqa: PLR0913
     from apm_cli.install.request import InstallRequest
     from apm_cli.install.service import InstallService
 
+    options = _InstallApmDependenciesOptions.from_kwargs(kwargs)
     request = InstallRequest(
         apm_package=apm_package,
         update_refs=update_refs,
         verbose=verbose,
         only_packages=only_packages,
-        force=force,
-        parallel_downloads=parallel_downloads,
-        logger=logger,
-        scope=scope,
-        auth_resolver=auth_resolver,
-        target=target,
-        allow_insecure=allow_insecure,
-        allow_insecure_hosts=allow_insecure_hosts,
-        marketplace_provenance=marketplace_provenance,
-        protocol_pref=protocol_pref,
-        allow_protocol_fallback=allow_protocol_fallback,
-        no_policy=no_policy,
-        skill_subset=skill_subset,
-        skill_subset_from_cli=skill_subset_from_cli,
-        legacy_skill_paths=legacy_skill_paths,
-        frozen=frozen,
-        plan_callback=plan_callback,
+        force=options.force,
+        parallel_downloads=options.parallel_downloads,
+        logger=options.logger,
+        scope=options.scope,
+        auth_resolver=options.auth_resolver,
+        target=options.target,
+        allow_insecure=options.allow_insecure,
+        allow_insecure_hosts=options.allow_insecure_hosts,
+        marketplace_provenance=options.marketplace_provenance,
+        protocol_pref=options.protocol_pref,
+        allow_protocol_fallback=options.allow_protocol_fallback,
+        no_policy=options.no_policy,
+        skill_subset=options.skill_subset,
+        skill_subset_from_cli=options.skill_subset_from_cli,
+        legacy_skill_paths=options.legacy_skill_paths,
+        frozen=options.frozen,
+        plan_callback=options.plan_callback,
     )
     return InstallService().run(request)

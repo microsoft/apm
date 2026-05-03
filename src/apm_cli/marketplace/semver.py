@@ -202,18 +202,15 @@ def _satisfies_single(version: SemVer, spec: str) -> bool:
         return version >= base and version.major == base.major and version.minor == base.minor
 
     # Comparison operators
-    if spec.startswith(">="):
-        base = parse_semver(spec[2:])
-        return base is not None and version >= base
-    if spec.startswith(">") and not spec.startswith(">="):
-        base = parse_semver(spec[1:])
-        return base is not None and version > base
-    if spec.startswith("<="):
-        base = parse_semver(spec[2:])
-        return base is not None and version <= base
-    if spec.startswith("<") and not spec.startswith("<="):
-        base = parse_semver(spec[1:])
-        return base is not None and version < base
+    for operator, comparator in (
+        (">=", lambda candidate, base: candidate >= base),
+        (">", lambda candidate, base: candidate > base),
+        ("<=", lambda candidate, base: candidate <= base),
+        ("<", lambda candidate, base: candidate < base),
+    ):
+        if spec.startswith(operator):
+            base = parse_semver(spec[len(operator) :])
+            return base is not None and comparator(version, base)
 
     # Wildcard: 1.2.x or 1.2.*
     wildcard_match = re.match(r"^(\d+)\.(\d+)\.[xX*]$", spec)

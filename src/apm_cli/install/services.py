@@ -96,7 +96,7 @@ def _deployed_path_entry(
         )
 
 
-def integrate_package_primitives(
+def integrate_package_primitives(  # noqa: PLR0913
     package_info: Any,
     project_root: Path,
     *,

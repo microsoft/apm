@@ -24,7 +24,7 @@ MCP_REQUIRED_FLAGS: tuple[tuple[str, str], ...] = (
 )
 
 
-def validate_mcp_conflicts(
+def validate_mcp_conflicts(  # noqa: PLR0913
     *,
     mcp_name: str | None,
     packages: Sequence[str],

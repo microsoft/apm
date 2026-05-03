@@ -848,32 +848,32 @@ def run_dependency_policy_checks(
         return fail_fast and not check.passed
 
     # -- Dependency checks (1-6) -----------------------------------
-    if _run(_check_dependency_allowlist(deps_list, policy.dependencies)):
-        return result
-    if _run(_check_dependency_denylist(deps_list, policy.dependencies)):
-        return result
-    if _run(_check_required_packages(deps_list, policy.dependencies)):
-        return result
-    if _run(_check_required_packages_deployed(deps_list, lockfile, policy.dependencies)):
-        return result
-    if _run(_check_required_package_version(deps_list, lockfile, policy.dependencies)):
-        return result
-    if _run(_check_transitive_depth(lockfile, policy.dependencies)):
-        return result
+    dependency_checks = (
+        _check_dependency_allowlist(deps_list, policy.dependencies),
+        _check_dependency_denylist(deps_list, policy.dependencies),
+        _check_required_packages(deps_list, policy.dependencies),
+        _check_required_packages_deployed(deps_list, lockfile, policy.dependencies),
+        _check_required_package_version(deps_list, lockfile, policy.dependencies),
+        _check_transitive_depth(lockfile, policy.dependencies),
+    )
+    for check in dependency_checks:
+        if _run(check):
+            return result
 
     # -- MCP checks (7-10) ----------------------------------------
     # When mcp_deps is None (not provided), skip MCP checks entirely.
     # When mcp_deps is an empty list (provided but no MCP deps), still
     # run MCP checks so they report "no X configured" for completeness.
     if mcp_deps is not None:
-        if _run(_check_mcp_allowlist(mcp_list, policy.mcp)):
-            return result
-        if _run(_check_mcp_denylist(mcp_list, policy.mcp)):
-            return result
-        if _run(_check_mcp_transport(mcp_list, policy.mcp)):
-            return result
-        if _run(_check_mcp_self_defined(mcp_list, policy.mcp)):
-            return result
+        mcp_checks = (
+            _check_mcp_allowlist(mcp_list, policy.mcp),
+            _check_mcp_denylist(mcp_list, policy.mcp),
+            _check_mcp_transport(mcp_list, policy.mcp),
+            _check_mcp_self_defined(mcp_list, policy.mcp),
+        )
+        for check in mcp_checks:
+            if _run(check):
+                return result
 
     # -- Target / compilation checks (11-13) -----------------------
     # Skipped when effective_target is None -- those run in a separate
