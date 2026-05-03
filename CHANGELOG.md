@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-05-03
+
 ### Added
 
 - **`--target agent-skills` deploys skills to `.agents/skills/` (cross-client shared directory).** The new target writes `SKILL.md` files to the [agentskills.io](https://agentskills.io) standard location without tying them to a single client. Excluded from `--target all` (explicit opt-in only); combine with `--target all,agent-skills` for both. Deduplicates with Codex when both targets resolve to the same path. User-scope (`-g`) deploys to `~/.agents/skills/`. (closes #737)
@@ -43,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`apm install` now anchors transitive `local_path` deps on the declaring package's directory (npm/pip/cargo parity).** Sibling/monorepo layouts (e.g. `../base` declared inside `packages/specialized/apm.yml`) now resolve relative to the declaring package, not the consumer's project root. **Security tightening:** remote-cloned packages can no longer declare `local_path` deps -- both relative and absolute paths are rejected at `ERROR` severity at resolve time. (#1111, closes #857) Thanks @JahanzaibTayyab.
 - `apm compile` no longer silently drops instructions without an `applyTo` pattern from generated `AGENTS.md` and `CLAUDE.md`; globals now render under a `## Global Instructions` section, matching the optimizer's existing `(global)` placement (#1088, closes #1072)
-- `apm install` no longer masks local-bundle install failures with `UnboundLocalError`. (#PR_NUMBER)
+- `apm install` no longer masks local-bundle install failures with `UnboundLocalError`. (#1108)
 - **`apm install <pkg>@<marketplace>` no longer fails for all marketplace packages.** The install resolver now accepts both legacy and current marketplace key names: `repository`/`repo` for github sources, `url`/`repo` for git-subdir sources, and `type`/`source` as the source-type discriminator. A scheme guard rejects full URLs passed through the `url` fallback. (#1106, closes #1105)
 - **`apm install --update` no longer fails for GHES/generic hosts** that rely on git credential helpers (e.g., `git-credential-manager`) for authentication. The preflight auth probe was blocking credential helpers by setting `GIT_CONFIG_GLOBAL=/dev/null`; it now uses the same relaxed environment as the clone fallback path for non-GitHub/non-ADO hosts. (#1082)
 - `apm compile --dry-run -t copilot` now faithfully simulates the hand-authored file guard: a `.github/copilot-instructions.md` lacking the APM marker is reported as `skipped=1` (matching the real run) instead of as `generated=1`. Previously dry-run would claim a write that a real run would refuse, giving CI preview gates a false signal. (#1048)
