@@ -203,6 +203,9 @@ def run(ctx: InstallContext) -> None:
                     # so use .add() rather than dict-style assignment.
                     with callback_lock:
                         callback_failures.add(dep_ref.get_unique_key())
+                    _tui = getattr(ctx, "tui", None)
+                    if _tui is not None:
+                        _tui.task_failed(dep_ref.get_unique_key())
                     return None
                 # Anchor relative paths on the *declaring* package's source
                 # directory when available (#857). Falls back to project_root
@@ -222,7 +225,13 @@ def run(ctx: InstallContext) -> None:
                 if result_path:
                     with callback_lock:
                         callback_downloaded[dep_ref.get_unique_key()] = None
+                    _tui = getattr(ctx, "tui", None)
+                    if _tui is not None:
+                        _tui.task_completed(dep_ref.get_unique_key())
                     return result_path
+                _tui = getattr(ctx, "tui", None)
+                if _tui is not None:
+                    _tui.task_failed(dep_ref.get_unique_key())
                 return None
 
             # T5: Use locked commit if available (reproducible installs)
@@ -254,6 +263,9 @@ def run(ctx: InstallContext) -> None:
             callback_downloaded_value = resolved_sha
             with callback_lock:
                 callback_downloaded[dep_ref.get_unique_key()] = callback_downloaded_value
+            _tui = getattr(ctx, "tui", None)
+            if _tui is not None:
+                _tui.task_completed(dep_ref.get_unique_key())
             return install_path
         except Exception as e:
             dep_display = dep_ref.get_display_name()
@@ -279,6 +291,9 @@ def run(ctx: InstallContext) -> None:
                 # Collect for deferred diagnostics summary (always, even non-verbose)
                 callback_failures.add(dep_key)
                 transitive_failures.append((dep_display, fail_msg))
+            _tui = getattr(ctx, "tui", None)
+            if _tui is not None:
+                _tui.task_failed(dep_key)
             return None
 
     # ------------------------------------------------------------------

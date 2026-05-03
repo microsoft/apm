@@ -165,20 +165,38 @@ class InstallTui:
     # -- Internal: build & start the Live region --------------------------
 
     def _build_aggregate(self) -> Any:
-        """Lazily construct the Rich ``Progress`` primitive."""
+        """Lazily construct the Rich ``Progress`` primitive.
+
+        Uses a custom ASCII bar column instead of Rich's default ``BarColumn``
+        because the latter renders Unicode block-drawing glyphs (U+2501 etc)
+        that violate the cp1252 ASCII-only output contract.
+        """
         from rich.progress import (
-            BarColumn,
             Progress,
+            ProgressColumn,
             SpinnerColumn,
             TaskProgressColumn,
             TextColumn,
             TimeElapsedColumn,
         )
+        from rich.text import Text
+
+        class _AsciiBarColumn(ProgressColumn):
+            """ASCII-only progress bar: ``[####........]``."""
+
+            def __init__(self, bar_width: int = 28) -> None:
+                super().__init__()
+                self._bar_width = bar_width
+
+            def render(self, task: Any) -> Any:
+                pct = task.percentage if task.total else 0.0
+                filled = round(self._bar_width * (pct / 100.0))
+                filled = max(0, min(self._bar_width, filled))
+                bar = "#" * filled + "." * (self._bar_width - filled)
+                return Text(f"[{bar}]")
 
         return Progress(
-            TextColumn("[ "),
-            BarColumn(bar_width=28),
-            TextColumn(" ]"),
+            _AsciiBarColumn(bar_width=28),
             TaskProgressColumn(),
             TextColumn("{task.fields[phase]}"),
             SpinnerColumn(spinner_name="line"),  # ASCII: | / - \
@@ -263,6 +281,11 @@ class InstallTui:
             with contextlib.suppress(Exception):
                 self._aggregate.remove_task(self._task_id)
             self._task_id = None
+        # Clear stale labels from prior phase so the active-set list does
+        # not bleed across phase boundaries.
+        with self._lock:
+            self._key_to_label.clear()
+            self._labels = []
         self._task_id = self._aggregate.add_task(
             "", total=(total if total and total > 0 else 1), phase=name
         )
