@@ -26,7 +26,7 @@ Common motivations:
 The pack/distribute workflow fits between install and consumption:
 
 ```
-apm install  ->  apm pack  ->  upload artifact  ->  download  ->  apm unpack (or tar xzf)
+apm install  ->  apm pack  ->  upload artifact  ->  download  ->  apm install <bundle-path>  (or tar xzf)
 ```
 
 The left side (install, pack) runs where APM is available. The right side (download, unpack) runs anywhere — a CI job, a dev container, a colleague's laptop. The bundle is the boundary.
@@ -100,23 +100,23 @@ The enriched lockfile inside the bundle uses the remapped paths, so the bundle i
 
 ### Targeting mental model
 
-**Choose your target when you pack. Unpack delivers exactly what was packed.**
+**Choose your target when you pack. Install delivers exactly what was packed.**
 
 A bundle is a deployable snapshot, not a retargetable source artifact. Target selection happens at pack time because that is when the full context is available -- which file types are remappable (skills, agents) and which are target-specific (commands, instructions, hooks).
 
-`apm unpack` does not remap paths. If the bundle was packed for Claude, the files land under `.claude/`. If you need a different target, re-pack from source with the desired `--target` flag, or use `--target all` to include all platforms.
+`apm install <bundle-path>` does not remap paths. If the bundle was packed for Claude, the files land under `.claude/`. If you need a different target, re-pack from source with the desired `--target` flag, or use `--target all` to include all platforms.
 
-When unpacking, APM reads the bundle's `pack:` metadata and shows the target it was packed for. If the bundle target does not match the project's detected target, a warning is displayed:
+When installing a local bundle, APM reads the bundle's `pack:` metadata and shows the target it was packed for. If the bundle target does not match the project's detected target, a warning is displayed:
 
 ```
-$ apm unpack team-skills.tar.gz
-[*] Unpacking team-skills.tar.gz -> .
+$ apm install team-skills.tar.gz
+[*] Installing team-skills.tar.gz -> .
 [i] Bundle target: claude (1 dep(s), 3 file(s))
 [!] Bundle target 'claude' differs from project target 'copilot'
-[+] Unpacked 3 file(s) (verified)
+[+] Installed 3 file(s) (verified)
 ```
 
-This is informational -- the files still extract. The warning helps users understand why their tool may not see the unpacked files and suggests the correct workflow.
+This is informational -- the files still deploy. The warning helps users understand why their tool may not see the installed files and suggests the correct workflow.
 
 ## Plugin format vs APM format
 
@@ -280,22 +280,34 @@ dependencies:
 
 The `pack:` section records the bundle `format`, the effective `target` filter, and a `packed_at` UTC timestamp. Plugin-format output has no `apm.lock.yaml` -- consumers verify by re-running the upstream pack instead.
 
-## `apm unpack`
+## `apm install <bundle-path>`
 
-Extracts an APM bundle (produced with `--format apm`) into a project directory. Accepts both `.tar.gz` archives and unpacked bundle directories. Plugin-format output is consumed directly by Claude Code and other plugin hosts and does not need `apm unpack`.
+Deploys an APM bundle (directory or `.tar.gz` archive) produced by `apm pack --format apm` into a project directory without touching the network or the dependency resolver -- mirroring the `pip install ./wheel` / `cargo install --path` mental model.
 
 ```bash
-# Extract and verify
-apm unpack ./build/my-project-1.0.0.tar.gz
+# Install a bundle directory
+apm install ./build/my-project-1.0.0/
 
-# Extract to a specific directory
-apm unpack ./build/my-project-1.0.0.tar.gz -o ./
+# Install a .tar.gz archive
+apm install ./build/my-project-1.0.0.tar.gz
 
-# Skip integrity check
-apm unpack --skip-verify ./build/my-project-1.0.0.tar.gz
+# Override log label (does not affect lockfile)
+apm install ./build/my-project-1.0.0.tar.gz --as my-label
 
 # Preview without writing
-apm unpack ./build/my-project-1.0.0.tar.gz --dry-run
+apm install ./build/my-project-1.0.0.tar.gz --dry-run
+```
+
+APM detects that the argument is a local path when it exists on disk and contains a `plugin.json` at the bundle root. Integrity is verified against the `pack.bundle_files` sha256 manifest embedded in `apm.lock.yaml` inside the bundle before any file is written. Deployed paths are recorded in the project's `apm.lock.yaml` under `local_deployed_files`.
+
+Plugin-format output is consumed directly by Claude Code and other plugin hosts; `apm install <bundle-path>` handles both formats.
+
+## `apm unpack` (deprecated since 0.12)
+
+> **Deprecated.** Use `apm install <bundle-path>` instead. `apm unpack` remains available for one release cycle (removal planned for v0.13).
+
+```bash
+apm unpack ./build/my-project-1.0.0.tar.gz
 ```
 
 ### Options
@@ -312,7 +324,7 @@ apm unpack ./build/my-project-1.0.0.tar.gz --dry-run
 - **Additive-only**: `unpack` writes files listed in the bundle's lockfile. It never deletes existing files in the target directory.
 - **Overwrite on conflict**: if a file already exists at the target path, the bundle file wins.
 - **Verification**: by default, `unpack` checks that every path in the bundle's `deployed_files` manifest exists in the bundle before extracting. Pass `--skip-verify` to skip this check for partial bundles.
-- **Lockfile not copied**: the bundle's enriched `apm.lock.yaml` is metadata for verification only — it is not written to the output directory.
+- **Lockfile not copied**: the bundle's enriched `apm.lock.yaml` is metadata for verification only -- it is not written to the output directory.
 
 ## Consumption scenarios
 
