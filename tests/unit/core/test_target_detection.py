@@ -124,8 +124,8 @@ class TestDetectTarget:
         assert target == "all"
         assert reason == "apm.yml target"
 
-    def test_auto_detect_github_only(self, tmp_path):
-        """Auto-detect vscode when only .github/ exists."""
+    def test_auto_detect_github_only_returns_minimal(self, tmp_path):
+        """Auto-detect minimal when only .github/ exists (ambiguous)."""
         (tmp_path / ".github").mkdir()
 
         target, reason = detect_target(
@@ -134,8 +134,8 @@ class TestDetectTarget:
             config_target=None,
         )
 
-        assert target == "vscode"
-        assert "detected .github/ folder" in reason
+        assert target == "minimal"
+        assert "ambiguous" in reason
 
     def test_auto_detect_claude_only(self, tmp_path):
         """Auto-detect claude when only .claude/ exists."""
@@ -174,6 +174,63 @@ class TestDetectTarget:
 
         assert target == "minimal"
         assert "no target folder found" in reason
+
+
+class TestDetectTargetAmbiguousGithub:
+    """Tests for .github/-only auto-detection returning minimal (ambiguous)."""
+
+    def test_github_only_returns_minimal(self, tmp_path):
+        """Only .github/ present — too ambiguous to assume Copilot."""
+        (tmp_path / ".github").mkdir()
+        target, reason = detect_target(project_root=tmp_path)
+        assert target == "minimal"
+        assert "ambiguous" in reason
+
+    def test_github_only_reason_mentions_set_target(self, tmp_path):
+        """Reason message should guide user to set target explicitly."""
+        (tmp_path / ".github").mkdir()
+        _, reason = detect_target(project_root=tmp_path)
+        assert "apm.yml" in reason or "--target" in reason
+
+    def test_github_only_explicit_copilot_wins(self, tmp_path):
+        """Explicit --target copilot overrides ambiguous .github/ detection."""
+        (tmp_path / ".github").mkdir()
+        target, reason = detect_target(
+            project_root=tmp_path, explicit_target="copilot"
+        )
+        assert target == "vscode"
+        assert "explicit" in reason
+
+    def test_github_only_config_copilot_wins(self, tmp_path):
+        """Config target: copilot overrides ambiguous .github/ detection."""
+        (tmp_path / ".github").mkdir()
+        target, reason = detect_target(
+            project_root=tmp_path, config_target="copilot"
+        )
+        assert target == "vscode"
+        assert "apm.yml" in reason
+
+    def test_github_plus_claude_returns_all(self, tmp_path):
+        """Multiple folders (.github/ + .claude/) still returns all."""
+        (tmp_path / ".github").mkdir()
+        (tmp_path / ".claude").mkdir()
+        target, reason = detect_target(project_root=tmp_path)
+        assert target == "all"
+        assert ".github/" in reason and ".claude/" in reason
+
+    def test_github_plus_cursor_returns_all(self, tmp_path):
+        """Multiple folders (.github/ + .cursor/) still returns all."""
+        (tmp_path / ".github").mkdir()
+        (tmp_path / ".cursor").mkdir()
+        target, _ = detect_target(project_root=tmp_path)
+        assert target == "all"
+
+    def test_reason_ambiguous_constant_defined(self):
+        """REASON_AMBIGUOUS_GITHUB is importable and non-empty."""
+        from apm_cli.core.target_detection import REASON_AMBIGUOUS_GITHUB
+
+        assert REASON_AMBIGUOUS_GITHUB
+        assert "ambiguous" in REASON_AMBIGUOUS_GITHUB
 
 
 class TestShouldCompileAgentsMd:

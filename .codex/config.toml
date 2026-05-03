@@ -1,0 +1,25 @@
+[mcp_servers.github-mcp-server]
+command = "docker"
+args = [ "run", "-i", "--rm", "-e", "GITHUB_DYNAMIC_TOOLSETS", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "-e", "GITHUB_TOOLSETS", "ghcr.io/github/github-mcp-server",]
+id = "ab12cd34-5678-90ef-1234-567890abcdef"
+
+[mcp_servers.notion-mcp-server]
+command = "npx"
+args = [ "-y", "@notionhq/notion-mcp-server@1.8.1", "--transport", "stdio", "--port", "3000", "secret_notion_token_67890",]
+id = "8b9c1d20-2345-6789-abcd-ef0123456789"
+
+[mcp_servers.test-docker-server]
+command = "docker"
+args = [ "run", "-i", "--rm", "example/test-server", "--verbose", "--config", "-e", "TEST_TOKEN", "/app/config.json",]
+id = "test-docker-with-pkg-args"
+
+[mcp_servers.github-mcp-server.env]
+GITHUB_PERSONAL_ACCESS_TOKEN = "ghp_token_123"
+GITHUB_TOOLSETS = "context"
+GITHUB_DYNAMIC_TOOLSETS = "1"
+
+[mcp_servers.notion-mcp-server.env]
+NOTION_TOKEN = "secret_notion_token_67890"
+
+[mcp_servers.test-docker-server.env]
+TEST_TOKEN = "test_token_value"

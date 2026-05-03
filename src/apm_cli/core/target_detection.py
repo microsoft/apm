@@ -8,7 +8,8 @@ Detection priority (highest to lowest):
 1. Explicit --target flag (always wins)
 2. apm.yml target setting (top-level field)
 3. Auto-detect from existing folders:
-   - .github/ only -> copilot (internal: "vscode")
+   - .github/ only -> minimal (ambiguous; .github/ is too common for CI
+     to reliably infer Copilot — user should set target explicitly)
    - .claude/ only -> claude
    - .cursor/ only -> cursor
    - .opencode/ only -> opencode
@@ -85,6 +86,12 @@ CompileTargetType = Union[TargetType, frozenset[CompileFamily]]  # noqa: UP007
 # present. Exported as a constant so consumers can compare with equality
 # instead of substring matching.
 REASON_NO_TARGET_FOLDER = "no target folder found"
+
+# Detection reason returned by detect_target() when only .github/ exists but
+# no explicit or config target is set.  .github/ is too common (CI workflows,
+# issue templates, CODEOWNERS) to reliably infer Copilot usage — treat it as
+# ambiguous and ask the user to declare their target explicitly.
+REASON_AMBIGUOUS_GITHUB = "ambiguous .github/ — set target in apm.yml or use --target"
 
 # User-facing target values (includes aliases accepted by CLI)
 UserTargetType = Literal[
@@ -189,7 +196,10 @@ def detect_target(  # noqa: PLR0911
     if len(detected) >= 2:
         return "all", f"detected {' and '.join(detected)} folders"
     elif github_exists:
-        return "vscode", "detected .github/ folder"
+        # .github/ alone is too ambiguous to infer Copilot — most repos have
+        # it for CI workflows, issue templates, CODEOWNERS, etc.  Return
+        # minimal so the user is prompted to set target explicitly.
+        return "minimal", REASON_AMBIGUOUS_GITHUB
     elif claude_exists:
         return "claude", "detected .claude/ folder"
     elif cursor_exists:
