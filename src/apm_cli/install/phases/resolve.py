@@ -136,6 +136,14 @@ def run(ctx: InstallContext) -> None:
         install_path = dep_ref.get_install_path(modules_dir)
         if install_path.exists():
             return install_path
+        # F1 (#1116): surface a heartbeat BEFORE the network/copy work so
+        # users see the install advancing past silent transitive lookups.
+        # Emitted from the main thread (this callback already runs there
+        # in the current sequential BFS; F7's parallel BFS will keep
+        # heartbeat emission on the main thread for deterministic
+        # ordering).
+        if logger:
+            logger.resolving_heartbeat(dep_ref.get_display_name())
         try:
             # Handle local packages: copy instead of git clone
             if dep_ref.is_local and dep_ref.local_path:

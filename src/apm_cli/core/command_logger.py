@@ -260,6 +260,24 @@ class InstallLogger(CommandLogger):
         elif self.verbose:
             _rich_info(f"  Downloading: {dep_name}", symbol="download")
 
+    def resolving_heartbeat(self, dep_name: str):
+        """Emit a per-dependency progress heartbeat during BFS resolve.
+
+        Surfaces an immediate ``[>] Resolving <name>...`` line so the
+        user sees the install moving forward instead of staring at
+        silence while transitive lookups happen behind the scenes
+        (F1, microsoft/apm#1116). The line is static (not a Rich
+        transient progress bar) so it survives in CI logs and behind
+        ``2>&1 | tee`` pipelines, which the duck critique flagged as
+        the must-survive surface.
+
+        Called from the MAIN thread by the resolver/download callback
+        BEFORE network work begins; F7's parallel BFS keeps emission
+        on the main thread so output ordering is deterministic even
+        when downloads are dispatched to a worker pool.
+        """
+        _rich_info(f"Resolving {dep_name}...", symbol="running")
+
     def download_complete(
         self,
         dep_name: str,
