@@ -310,7 +310,15 @@ class CachedDependencySource(DependencySource):
         display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
         _ref = dep_ref.reference or ""
         # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
+        # Prefer the lockfile-recorded SHA when present; otherwise fall
+        # back to the SHA captured by the parallel resolver callback in
+        # this same install run (cold-path case where no lockfile exists
+        # yet, but the resolver already learned the resolved commit).
         _sha = format_short_sha(dep_locked_chk.resolved_commit) if dep_locked_chk else ""
+        if not _sha:
+            _callback_sha = ctx.callback_downloaded.get(dep_key)
+            if _callback_sha:
+                _sha = format_short_sha(_callback_sha)
         if logger:
             logger.download_complete(
                 display_name, ref=_ref, sha=_sha, cached=not self.fetched_this_run

@@ -48,10 +48,9 @@ def run(ctx: InstallContext) -> InstallResult:
         _install_mod._rich_success(f"Installed {ctx.installed_count} APM dependencies")
 
     if ctx.unpinned_count:
-        noun = "dependency has" if ctx.unpinned_count == 1 else "dependencies have"
+        noun = "dep is" if ctx.unpinned_count == 1 else "deps are"
         ctx.diagnostics.info(
-            f"{ctx.unpinned_count} {noun} no pinned version "
-            f"-- pin with #tag or #sha to prevent drift"
+            f"{ctx.unpinned_count} {noun} unpinned -- add #tag or #sha to prevent drift"
         )
 
     return InstallResult(

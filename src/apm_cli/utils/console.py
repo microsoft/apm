@@ -26,7 +26,7 @@ except ImportError:
 try:
     from colorama import Fore, Style, init
 
-    init(autoreset=True)
+    init(autoreset=False)
     COLORAMA_AVAILABLE = True
 except ImportError:
     COLORAMA_AVAILABLE = False
