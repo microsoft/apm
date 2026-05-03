@@ -377,6 +377,8 @@ def integrate_local_bundle(
     import hashlib
     import shutil
 
+    from apm_cli.utils.content_hash import compute_file_hash
+
     from ..core.scope import InstallScope
     from ..utils.path_security import (
         PathTraversalError,
@@ -490,7 +492,13 @@ def integrate_local_bundle(
 
             if dry_run:
                 deployed_files.append(record)
-                deployed_hashes[record] = expected_hash
+                # Normalize to "sha256:<hex>" so the dry-run lockfile preview
+                # matches the format written by ``compute_file_hash`` on the
+                # real deploy path.  ``expected_hash`` here is bare hex from
+                # ``pack.bundle_files``; without the prefix, downstream
+                # exact-match comparisons (e.g. ``cleanup.py`` provenance
+                # check) treat the file as user-edited and skip cleanup.
+                deployed_hashes[record] = f"sha256:{expected_hash}"
                 if logger:
                     logger.verbose_detail(f"[dry-run] would deploy {record}")
                 continue
@@ -521,7 +529,12 @@ def integrate_local_bundle(
             # provenance now keeps the lockfile honest if future transforms
             # (frontmatter injection, etc.) mutate content during deploy.
             deployed_files.append(record)
-            deployed_hashes[record] = hashlib.sha256(dest.read_bytes()).hexdigest()
+            # Use ``compute_file_hash`` so the recorded value carries the
+            # canonical ``sha256:<hex>`` prefix.  Matches the format written
+            # by the regular install pipeline (``compute_deployed_hashes``)
+            # so subsequent stale-cleanup provenance checks compare equal
+            # instead of mis-classifying these files as user-edited.
+            deployed_hashes[record] = compute_file_hash(dest)
             if logger:
                 logger.verbose_detail(f"deployed {record}")
 

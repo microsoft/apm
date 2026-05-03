@@ -491,15 +491,124 @@ class TestApmYmlSideEffects:
         # Every recorded path must have a matching hash entry.
         assert set(deployed_files) == set(deployed_hashes.keys())
 
-        # Each recorded path's hash must match the on-disk file's actual SHA-256.
+        # Each recorded path's hash must match the on-disk file's actual
+        # SHA-256, written in the canonical ``sha256:<hex>`` form so it
+        # compares equal against ``compute_file_hash`` output (regression
+        # guard: prior to 0.12.0 the local-bundle path wrote bare hex,
+        # which mis-classified files as "user-edited" in stale-cleanup).
         for record_path, expected_hash in deployed_hashes.items():
             # Records may be absolute or project-relative; resolve both.
             candidate = Path(record_path)
             if not candidate.is_absolute():
                 candidate = project / candidate
             assert candidate.is_file(), f"missing deployed file: {candidate}"
-            actual_hash = hashlib.sha256(candidate.read_bytes()).hexdigest()
+            assert expected_hash.startswith("sha256:"), (
+                f"hash for {record_path!r} must use canonical 'sha256:<hex>' "
+                f"form, got {expected_hash!r}"
+            )
+            actual_hash = "sha256:" + hashlib.sha256(candidate.read_bytes()).hexdigest()
             assert actual_hash == expected_hash, f"hash mismatch for {candidate}"
+
+
+# ---------------------------------------------------------------------------
+# E2E: Hash-format consistency across install flows (regression for 0.12.0)
+# ---------------------------------------------------------------------------
+
+
+class TestLocalBundleHashFormatCrossFlow:
+    """Pin the hash format contract that ties ``apm install <bundle>`` to
+    the stale-cleanup provenance check.
+
+    Prior to the 0.12.0 fix, ``integrate_local_bundle`` wrote bare
+    ``<hex>`` into ``local_deployed_file_hashes`` while
+    ``compute_file_hash`` (used by ``cleanup.py``) emitted the canonical
+    ``sha256:<hex>``.  An exact-match comparison in
+    ``remove_stale_deployed_files`` then mis-classified every
+    bundle-deployed file as "user-edited" and refused to remove stale
+    entries on subsequent installs.
+    """
+
+    def test_local_bundle_hash_matches_compute_file_hash_format(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Hash recorded by local-bundle install must equal compute_file_hash output."""
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        bundle = _make_plugin_bundle(tmp_path / "src")
+        project = _make_project(tmp_path / "dst")
+
+        result = _invoke_install(
+            project, str(bundle), "--target", "copilot", monkeypatch=monkeypatch
+        )
+        assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
+
+        data = yaml.safe_load((project / "apm.lock.yaml").read_text(encoding="utf-8"))
+        deployed_hashes = data.get("local_deployed_file_hashes") or {}
+        assert deployed_hashes, "local_deployed_file_hashes is empty"
+
+        for record_path, recorded in deployed_hashes.items():
+            candidate = Path(record_path)
+            if not candidate.is_absolute():
+                candidate = project / candidate
+            # Equality with compute_file_hash is the contract: this is the
+            # exact comparison cleanup.py uses for stale-file provenance.
+            assert recorded == compute_file_hash(candidate), (
+                f"hash format drift for {record_path!r}: "
+                f"recorded={recorded!r} vs compute_file_hash={compute_file_hash(candidate)!r}. "
+                "Stale-cleanup provenance check would mis-classify this file as user-edited."
+            )
+
+    def test_recorded_hash_compares_equal_in_cleanup_provenance_check(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Hashes recorded by local-bundle install must NOT trip the
+        ``cleanup.remove_stale_deployed_files`` "user-edited" guard
+        when the deployed file is unchanged.
+
+        This drives the actual code path that the regression broke:
+        ``cleanup.py`` reads ``recorded_hashes`` from the lockfile (set
+        by ``integrate_local_bundle``), recomputes via
+        ``compute_file_hash``, and compares.  Prior to 0.12.0 the
+        comparison always failed (bare hex vs ``sha256:<hex>``), so
+        every bundle-deployed file was permanently classified as
+        user-edited and stale-cleanup was a no-op.
+        """
+        from apm_cli.integration.cleanup import remove_stale_deployed_files
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        bundle = _make_plugin_bundle(tmp_path / "src")
+        project = _make_project(tmp_path / "dst")
+        result = _invoke_install(
+            project, str(bundle), "--target", "copilot", monkeypatch=monkeypatch
+        )
+        assert result.exit_code == 0, f"install failed: {result.output}"
+
+        data = yaml.safe_load((project / "apm.lock.yaml").read_text(encoding="utf-8"))
+        deployed_files = list(data.get("local_deployed_files") or [])
+        deployed_hashes = dict(data.get("local_deployed_file_hashes") or {})
+        assert deployed_files and deployed_hashes
+
+        # Pretend every file is now stale and ask cleanup to remove them.
+        # The provenance gate should pass (file is unchanged), so cleanup
+        # actually deletes them -- not skip them as "user-edited".
+        diagnostics = DiagnosticCollector()
+        cleanup_result = remove_stale_deployed_files(
+            deployed_files,
+            project,
+            dep_key="<local-bundle-test>",
+            targets=None,
+            diagnostics=diagnostics,
+            recorded_hashes=deployed_hashes,
+        )
+
+        assert not cleanup_result.skipped_user_edit, (
+            "cleanup mis-classified bundle-deployed files as user-edited: "
+            f"{cleanup_result.skipped_user_edit}. "
+            "Likely a hash-format regression between integrate_local_bundle "
+            "(write side) and compute_file_hash (read side in cleanup.py)."
+        )
+        # Every file passed the provenance check and was deleted.
+        assert set(cleanup_result.deleted) == set(deployed_files)
 
 
 # ---------------------------------------------------------------------------
