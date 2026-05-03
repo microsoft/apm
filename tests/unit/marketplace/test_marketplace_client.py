@@ -639,7 +639,7 @@ class TestFetchRaw:
         # No HTTP request must be issued -- proves credentials cannot leak.
         mock_get.assert_not_called()
         msg = str(excinfo.value)
-        assert "gitlab.com" in msg
+        assert _quoted_hosts(msg) == {"gitlab.com"}
         assert "not a supported plugin source" in msg
         # Coordinates remain in the message so audit's per-plugin line is actionable.
         assert "acme/forge/apm.yml@v1" in msg
