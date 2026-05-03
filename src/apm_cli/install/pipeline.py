@@ -22,7 +22,9 @@ Design notes
 from __future__ import annotations
 
 import builtins
+import contextlib
 import sys
+import time
 from typing import TYPE_CHECKING, List, Optional  # noqa: F401, UP035
 
 from ..models.results import InstallResult
@@ -42,6 +44,33 @@ if TYPE_CHECKING:
 set = builtins.set
 list = builtins.list
 dict = builtins.dict
+
+
+def _run_phase(name: str, phase, ctx):
+    """Invoke ``phase.run(ctx)`` with verbose-only timing (F6, #1116).
+
+    Returns whatever ``phase.run(ctx)`` returns (most phases return
+    ``None``; ``finalize`` returns the :class:`InstallResult`).
+
+    Best-effort: any failure to render the timing line is swallowed so
+    it cannot mask the phase's own exception. The phase exception
+    propagates after the timing attempt.
+
+    Verbose mode shows ``[i] Phase: <name> -> 1.234s`` so users (and
+    CI logs) can locate the phase responsible for a slow install
+    without instrumenting individual sources.
+    """
+    logger = getattr(ctx, "logger", None)
+    verbose = bool(getattr(ctx, "verbose", False))
+    if not verbose or logger is None:
+        return phase.run(ctx)
+    started = time.perf_counter()
+    try:
+        return phase.run(ctx)
+    finally:
+        elapsed = time.perf_counter() - started
+        with contextlib.suppress(Exception):
+            logger.verbose_detail(f"Phase: {name} -> {elapsed:.3f}s")
 
 
 def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
@@ -253,7 +282,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     # ------------------------------------------------------------------
     from .phases import resolve as _resolve_phase
 
-    _resolve_phase.run(ctx)
+    _run_phase("resolve", _resolve_phase, ctx)
 
     if not ctx.deps_to_install and not ctx.root_has_local_primitives:
         if logger:
@@ -276,7 +305,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         from .phases.policy_gate import PolicyViolationError
 
         try:
-            _policy_gate_phase.run(ctx)
+            _run_phase("policy_gate", _policy_gate_phase, ctx)
         except PolicyViolationError:
             raise  # re-raise through the outer except -> RuntimeError wrapper
 
@@ -285,7 +314,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         # --------------------------------------------------------------
         from .phases import targets as _targets_phase
 
-        _targets_phase.run(ctx)
+        _run_phase("targets", _targets_phase, ctx)
 
         # --------------------------------------------------------------
         # Phase 2.5: Post-targets target-aware policy check (#827)
@@ -298,7 +327,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         from .phases import policy_target_check as _policy_target_check_phase
 
         try:
-            _policy_target_check_phase.run(ctx)
+            _run_phase("policy_target_check", _policy_target_check_phase, ctx)
         except PolicyViolationError:
             raise  # re-raise through the outer except -> RuntimeError wrapper
 
@@ -412,7 +441,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         # --------------------------------------------------------------
         from .phases import download as _download_phase
 
-        _download_phase.run(ctx)
+        _run_phase("download", _download_phase, ctx)
 
         # --------------------------------------------------------------
         # Phase 5: Sequential integration loop + root primitives
@@ -425,7 +454,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
 
         from .phases import integrate as _integrate_phase
 
-        _integrate_phase.run(ctx)
+        _run_phase("integrate", _integrate_phase, ctx)
 
         # Fail-loud: if any direct dependency failed validation or
         # download, render the diagnostic summary and raise so the
@@ -449,7 +478,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         # ------------------------------------------------------------------
         from .phases import cleanup as _cleanup_phase
 
-        _cleanup_phase.run(ctx)
+        _run_phase("cleanup", _cleanup_phase, ctx)
 
         # ------------------------------------------------------------------
         # Phase: Skill path auto-migration (#737)
@@ -530,12 +559,12 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         # ------------------------------------------------------------------
         from .phases import post_deps_local as _post_deps_local_phase
 
-        _post_deps_local_phase.run(ctx)
+        _run_phase("post_deps_local", _post_deps_local_phase, ctx)
 
         # Emit verbose integration stats + bare-success fallback + return result
         from .phases import finalize as _finalize_phase
 
-        return _finalize_phase.run(ctx)
+        return _run_phase("finalize", _finalize_phase, ctx)
 
     except AuthenticationError:
         # #1015: surface auth failures cleanly to the user. Same
