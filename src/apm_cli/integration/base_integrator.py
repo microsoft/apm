@@ -518,13 +518,28 @@ class BaseIntegrator:
             for f in sorted(d.glob(pattern)):
                 if f.is_symlink():
                     continue
+                # Hardlink containment: a hardlink is a second directory
+                # entry pointing at an inode that may live anywhere on
+                # the filesystem.  Path.resolve() returns the hardlink's
+                # own path (inside the package root), so the
+                # is_relative_to check below cannot catch it.  Reject
+                # any file with link-count > 1 to prevent a malicious
+                # package shipping a hardlink to (e.g.) /etc/passwd
+                # from being read or copied via integration.  False
+                # positives are vanishingly rare for ``.prompt.md``-style
+                # source files which should always be plain regular files.
+                try:
+                    if f.stat().st_nlink > 1:
+                        continue
+                except OSError:
+                    continue
                 resolved = f.resolve()
-                # Containment guard: skip files whose resolved path
-                # escapes the package root.  Hardlinks are not symlinks
-                # so the is_symlink() check above does not catch them.
-                # See path_security.ensure_path_within for the canonical
-                # predicate; we inline the check here to stay loop-fast
-                # and avoid raising on every malicious entry.
+                # Defense-in-depth containment guard: skip files whose
+                # resolved path escapes the package root.  Belt-and-
+                # suspenders against any future regression in the
+                # is_symlink() check above.  See path_security.ensure_path_within
+                # for the canonical predicate; we inline the check here to stay
+                # loop-fast and avoid raising on every malicious entry.
                 try:
                     pkg_resolved = package_path.resolve()
                     if not resolved.is_relative_to(pkg_resolved):

@@ -1488,7 +1488,7 @@ class TestCursorCommandPanelFindings:
 
         warnings = diag.by_category().get("warning", [])
         assert any(
-            "frontmatter keys not written" in w.message
+            "frontmatter keys not supported" in w.message
             and "author" in w.message
             and "mcp" in w.message
             and "parameters" in w.message
@@ -1570,3 +1570,133 @@ class TestCursorCommandPanelFindings:
             "Skipped .cursor/commands/" in i.message and "create a .cursor/" in i.message
             for i in info_items
         ), f"expected skip note, got: {[i.message for i in info_items]}"
+
+    def test_passthrough_notice_suppressed_on_clean_install(self, temp_project):
+        """Happy path: prompts use only the cross-tool subset -> NO passthrough notice.
+
+        Regression for cli-logging-expert + devx-ux-expert convergent
+        finding: the one-shot 'Cursor command files keep Claude-compatible
+        frontmatter ...' info message was firing on every Cursor install,
+        even when no frontmatter keys were dropped.  It must be suppressed
+        when the batch had zero dropped keys.
+        """
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        pkg_info = _make_package(
+            temp_project,
+            {
+                "review.prompt.md": (
+                    '---\ndescription: Review\nallowed-tools: ["bash"]\n---\nReview the code.\n'
+                ),
+            },
+        )
+        diag = DiagnosticCollector()
+        CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["cursor"],
+            pkg_info,
+            temp_project,
+            diagnostics=diag,
+        )
+        info_items = diag.by_category().get("info", [])
+        assert not any("cross-tool compatibility" in i.message for i in info_items), (
+            "passthrough notice must not fire when no frontmatter keys "
+            f"were dropped; got: {[i.message for i in info_items]}"
+        )
+
+    def test_passthrough_notice_emitted_when_any_file_drops_keys(self, temp_project):
+        """When at least one file in the batch drops keys, the one-shot notice fires once."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        pkg_info = _make_package(
+            temp_project,
+            {
+                "clean.prompt.md": ("---\ndescription: Clean\n---\nClean.\n"),
+                "lossy.prompt.md": ("---\ndescription: Lossy\nauthor: alice\n---\nLossy.\n"),
+            },
+        )
+        diag = DiagnosticCollector()
+        CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["cursor"],
+            pkg_info,
+            temp_project,
+            diagnostics=diag,
+        )
+        info_items = diag.by_category().get("info", [])
+        cross_tool_notices = [i for i in info_items if "cross-tool compatibility" in i.message]
+        assert len(cross_tool_notices) == 1, (
+            f"expected exactly one passthrough notice, got: "
+            f"{[i.message for i in cross_tool_notices]}"
+        )
+
+    def test_dropped_keys_warn_uses_user_facing_wording(self, temp_project):
+        """Regression: warn must not mention 'shared command transformer'.
+
+        That phrase is internal implementation jargon; package authors
+        have no mental model for it.  The warn must use target-name
+        framing and a concrete supported-keys list.
+        """
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        pkg_info = _make_package(
+            temp_project,
+            {
+                "x.prompt.md": ("---\ndescription: X\nauthor: alice\n---\nbody\n"),
+            },
+        )
+        diag = DiagnosticCollector()
+        CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["cursor"],
+            pkg_info,
+            temp_project,
+            diagnostics=diag,
+        )
+        warnings = diag.by_category().get("warning", [])
+        msgs = [w.message for w in warnings]
+        assert msgs, "expected at least one dropped-keys warning"
+        assert all("shared command transformer" not in m for m in msgs), (
+            f"warn still uses internal jargon: {msgs}"
+        )
+        assert any("not supported for cursor commands" in m and "author" in m for m in msgs), (
+            f"expected target-aware wording, got: {msgs}"
+        )
+
+    def test_critical_security_finding_blocks_write(self, temp_project):
+        """Defense-in-depth: a critical post-transform finding must skip the write.
+
+        Mirrors the pre-install BLOCK gate for the source files.  A
+        package whose compiled command contains a critical hidden char
+        (U+E041 tag char) must NOT be written to .cursor/commands/.
+        The skip is also surfaced in result.files_skipped.
+        """
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        pkg_info = _make_package(
+            temp_project,
+            {
+                "evil.prompt.md": ("---\ndescription: Evil\n---\nHidden tag\U000e0041char.\n"),
+            },
+        )
+        diag = DiagnosticCollector()
+        result = CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["cursor"],
+            pkg_info,
+            temp_project,
+            diagnostics=diag,
+        )
+
+        # File was NOT written -- defense-in-depth skip kicked in.
+        assert not (temp_project / ".cursor" / "commands" / "evil.md").exists(), (
+            "critical post-transform finding must skip the write"
+        )
+        assert result.files_integrated == 0
+        assert result.files_skipped == 1
+
+        # Critical security diagnostic was surfaced so the user sees why.
+        sec_items = diag.by_category().get("security", [])
+        assert any(i.severity == "critical" for i in sec_items), (
+            f"expected critical security diagnostic, got: {[(i.severity, i.message) for i in sec_items]}"
+        )

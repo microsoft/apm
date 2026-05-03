@@ -245,7 +245,7 @@ across targets.
 |--------|--------------------|-------|
 | **Claude Code** | `.claude/commands/*.md` | Deployed when `.claude/` exists. |
 | **Cursor** | `.cursor/commands/*.md` | Deployed when `.cursor/` exists. Cursor 1.6+ only; Cursor is de-emphasizing commands in favor of rules/skills -- monitor [Cursor release notes](https://cursor.com/changelog) for changes. The shared command transformer keeps the Claude-compatible frontmatter subset (`description`, `allowed-tools`, `model`, `argument-hint`, `input`); Cursor-specific keys (`author`, `mcp`, `parameters`, ...) are dropped with an install-time warning per file. |
-| **OpenCode** | `.opencode/command/*.md` | Deployed when `.opencode/` exists. |
+| **OpenCode** | `.opencode/commands/*.md` | Deployed when `.opencode/` exists. |
 | **Gemini CLI** | `.gemini/commands/*.toml` | Deployed when `.gemini/` exists. |
 
 ## MCP server trust model

@@ -10,6 +10,8 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.primitives.discovery import discover_primitives  # noqa: F401
 
@@ -508,7 +510,7 @@ class TestFindFilesByGlob:
         try:
             link.symlink_to(real_file)
         except OSError:
-            pytest.skip("symlinks are not supported in this test environment")  # noqa: F821
+            pytest.skip("symlinks are not supported in this test environment")
         results = BaseIntegrator.find_files_by_glob(self.root, "*.prompt.md")
         names = {f.name for f in results}
         assert "link.prompt.md" not in names
@@ -542,6 +544,49 @@ class TestFindFilesByGlob:
         results = BaseIntegrator.find_files_by_glob(self.root, "*.prompt.md")
         names = [f.name for f in results]
         assert names == sorted(names)
+
+    def test_hardlink_escaping_package_root_is_excluded(self):
+        """Hardlink whose resolved path escapes the package root must be skipped.
+
+        is_symlink() returns False for hardlinks, so the symlink
+        filter does not catch them.  The is_relative_to containment
+        guard at base_integrator.py:530 is the only line of defense
+        for this attack -- a malicious package shipping a hardlink to
+        an attacker-controlled file outside the install dir would
+        otherwise be deployed.
+        """
+        import os
+
+        # Outside file -- the would-be exfiltration target.
+        outside_dir = Path(tempfile.mkdtemp())
+        try:
+            outside_file = outside_dir / "outside.prompt.md"
+            outside_file.write_text("EXTERNAL")
+
+            # Legitimate file inside package root.
+            inside_file = self.root / "inside.prompt.md"
+            inside_file.write_text("OK")
+
+            # Hardlink inside the package root pointing at the outside file.
+            hardlink = self.root / "evil.prompt.md"
+            try:
+                os.link(outside_file, hardlink)
+            except (OSError, NotImplementedError):
+                pytest.skip("hardlinks not supported on this filesystem")
+
+            results = BaseIntegrator.find_files_by_glob(self.root, "*.prompt.md")
+            names = {f.name for f in results}
+
+            # Inside file always allowed.
+            assert "inside.prompt.md" in names
+            # Hardlink whose resolved path escapes the package root MUST
+            # be excluded by the containment guard.
+            assert "evil.prompt.md" not in names, (
+                "Hardlink escaping package root was not filtered -- "
+                "containment guard regression on a secure-by-default surface."
+            )
+        finally:
+            shutil.rmtree(outside_dir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
