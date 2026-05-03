@@ -292,6 +292,17 @@ class GitCache:
 
         Uses ``git clone --local --shared`` from the bare repo for
         efficiency (no network, hardlinks objects).
+
+        Concurrency / write-deduplication
+        ---------------------------------
+        Acquires the shard lock BEFORE staging any work. On lock entry
+        we re-probe the final shard and short-circuit if another
+        process populated it while we were waiting on the lock.  This
+        collapses N racing installs of the same SHA from N concurrent
+        ``git clone`` operations to ~1: only the lock winner pays the
+        clone cost; all losers see a populated shard the moment they
+        get the lock and return immediately. Critical for CI matrix
+        builds where multiple jobs hit the same uncached repo.
         """
         from ..utils.git_env import get_git_executable, git_subprocess_env
 
@@ -306,59 +317,76 @@ class GitCache:
         final_dir = checkout_parent / sha
         ensure_path_within(final_dir, self._checkouts_root)
         lock = shard_lock(final_dir)
-        staged = stage_path(final_dir)
-        ensure_path_within(staged, self._checkouts_root)
-        staged.mkdir(parents=True, exist_ok=True)
-        os.chmod(str(staged), 0o700)
 
-        git_exe = get_git_executable()
-        subprocess_env = env if env is not None else git_subprocess_env()
+        # Acquire the lock BEFORE doing any work so that a concurrent
+        # install of the same shard does not duplicate the clone work.
+        # The lock winner clones; every other process re-probes after
+        # the lock and short-circuits.
+        with lock:
+            # Write-dedup re-probe: another process may have populated
+            # this shard while we were waiting. Verify integrity to
+            # rule out a poisoned half-write (atomic_land guards
+            # against that, but we re-check defensively).
+            if final_dir.is_dir() and verify_checkout_sha(final_dir, sha):
+                _log.debug("Write-dedup HIT under lock: %s @ %s", url, sha[:12])
+                return final_dir
 
-        try:
-            # Clone from local bare repo (fast, no network)
-            subprocess.run(
-                [
-                    git_exe,
-                    "clone",
-                    "--local",
-                    "--shared",
-                    "--no-checkout",
-                    str(bare_dir),
-                    str(staged),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=60,
-                env=subprocess_env,
-                check=True,
-            )
-            # Checkout the specific SHA
-            subprocess.run(
-                [git_exe, "-C", str(staged), "checkout", sha],
-                capture_output=True,
-                text=True,
-                timeout=60,
-                env=subprocess_env,
-                check=True,
-            )
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
-            from ..utils.file_ops import robust_rmtree
+            staged = stage_path(final_dir)
+            ensure_path_within(staged, self._checkouts_root)
+            staged.mkdir(parents=True, exist_ok=True)
+            os.chmod(str(staged), 0o700)
 
-            robust_rmtree(staged, ignore_errors=True)
-            raise RuntimeError(
-                f"Failed to create checkout for {_sanitize_url(url)} @ {sha[:12]}: {exc}"
-            ) from exc
+            git_exe = get_git_executable()
+            subprocess_env = env if env is not None else git_subprocess_env()
 
-        # Atomic land
-        if not atomic_land(staged, final_dir, lock):
-            # Another process won the race -- verify integrity of their copy
-            if not verify_checkout_sha(final_dir, sha):
-                self._evict_checkout(final_dir)
-                raise RuntimeError(
-                    f"Race condition: concurrent checkout failed integrity "
-                    f"for {_sanitize_url(url)} @ {sha[:12]}"
+            try:
+                # Clone from local bare repo (fast, no network)
+                subprocess.run(
+                    [
+                        git_exe,
+                        "clone",
+                        "--local",
+                        "--shared",
+                        "--no-checkout",
+                        str(bare_dir),
+                        str(staged),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    env=subprocess_env,
+                    check=True,
                 )
-        return final_dir
+                # Checkout the specific SHA
+                subprocess.run(
+                    [git_exe, "-C", str(staged), "checkout", sha],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    env=subprocess_env,
+                    check=True,
+                )
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+                from ..utils.file_ops import robust_rmtree
+
+                robust_rmtree(staged, ignore_errors=True)
+                raise RuntimeError(
+                    f"Failed to create checkout for {_sanitize_url(url)} @ {sha[:12]}: {exc}"
+                ) from exc
+
+            # We hold the shard lock, so atomic_land's re-acquire is a
+            # reentrant no-op (filelock supports same-process recursion).
+            if not atomic_land(staged, final_dir, lock):
+                # Another process landed first between our re-probe and
+                # the rename (only possible if our lock dropped, which
+                # it didn't); verify integrity defensively.
+                if not verify_checkout_sha(final_dir, sha):
+                    self._evict_checkout(final_dir)
+                    raise RuntimeError(
+                        f"Race condition: concurrent checkout failed integrity "
+                        f"for {_sanitize_url(url)} @ {sha[:12]}"
+                    )
+            return final_dir
 
     def _bare_has_sha(self, bare_dir: Path, sha: str, *, env: dict[str, str] | None = None) -> bool:
         """Check if the bare repo contains the specified commit."""

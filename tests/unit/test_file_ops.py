@@ -426,8 +426,14 @@ class TestRobustCopy2:
                 raise exc
             return original_copy2(*args, **kwargs)
 
+        # Patch the reflink-aware wrapper so the test exercises the
+        # retry loop regardless of whether the host filesystem
+        # supports clones.
+        def flaky_reflink_copy(*args, **kwargs):
+            return flaky_copy2(*args, **kwargs)
+
         with (
-            patch("apm_cli.utils.file_ops.shutil.copy2", side_effect=flaky_copy2),
+            patch("apm_cli.utils.file_ops._reflink_copy_file", side_effect=flaky_reflink_copy),
             patch("apm_cli.utils.file_ops.time.sleep"),
         ):
             result = robust_copy2(src, dst)  # noqa: F841
@@ -503,3 +509,98 @@ class TestRmtreeIntegration:
         with patch("apm_cli.utils.file_ops.shutil.rmtree", side_effect=PermissionError("denied")):
             # Should not raise
             _rmtree(str(tmp_path / "nonexistent-apm-test-dir"))
+
+
+# ---------------------------------------------------------------------------
+# Reflink integration in robust_copy2 / robust_copytree
+# ---------------------------------------------------------------------------
+
+
+class TestReflinkIntegration:
+    """robust_copy2 / robust_copytree must transparently use reflinks.
+
+    The contract: when the underlying filesystem supports clones,
+    callers see no behavioural change beyond reduced wall time.
+    When clones are unsupported the copy still completes via
+    shutil.copy2.
+    """
+
+    def test_robust_copy2_attempts_clone_first(self, tmp_path):
+        """robust_copy2 routes through the reflink fast-path."""
+        from apm_cli.utils.file_ops import _reflink_copy_file, robust_copy2
+
+        src = tmp_path / "src.bin"
+        dst = tmp_path / "dst.bin"
+        src.write_bytes(b"hello")
+        with patch(
+            "apm_cli.utils.file_ops._reflink_copy_file",
+            wraps=_reflink_copy_file,
+        ) as wrapped:
+            robust_copy2(src, dst)
+            wrapped.assert_called_once()
+        assert dst.read_bytes() == b"hello"
+
+    def test_robust_copy2_falls_back_when_clone_fails(self, tmp_path):
+        """When clone_file returns False, shutil.copy2 still completes the copy."""
+        from apm_cli.utils.file_ops import robust_copy2
+
+        src = tmp_path / "src.bin"
+        dst = tmp_path / "dst.bin"
+        src.write_bytes(b"payload")
+        with patch("apm_cli.utils.reflink.clone_file", return_value=False):
+            robust_copy2(src, dst)
+        assert dst.read_bytes() == b"payload"
+
+    def test_robust_copytree_uses_reflink_per_file(self, tmp_path):
+        """robust_copytree's copy_function is the reflink-aware wrapper."""
+        from apm_cli.utils.file_ops import robust_copytree
+
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "a.txt").write_bytes(b"alpha")
+        (src / "b.txt").write_bytes(b"beta")
+        dst = tmp_path / "dst"
+        with patch(
+            "apm_cli.utils.file_ops._reflink_copy_file",
+            wraps=__import__(
+                "apm_cli.utils.file_ops", fromlist=["_reflink_copy_file"]
+            )._reflink_copy_file,
+        ) as wrapped:
+            robust_copytree(src, dst)
+            assert wrapped.call_count == 2
+        assert (dst / "a.txt").read_bytes() == b"alpha"
+        assert (dst / "b.txt").read_bytes() == b"beta"
+
+    def test_robust_copytree_completes_even_when_clones_unsupported(self, tmp_path):
+        """Clone failures must not break the copy."""
+        from apm_cli.utils.file_ops import robust_copytree
+
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "a.txt").write_bytes(b"x")
+        (src / "sub").mkdir()
+        (src / "sub" / "b.txt").write_bytes(b"y")
+        dst = tmp_path / "dst"
+        with patch("apm_cli.utils.reflink.clone_file", return_value=False):
+            robust_copytree(src, dst)
+        assert (dst / "a.txt").read_bytes() == b"x"
+        assert (dst / "sub" / "b.txt").read_bytes() == b"y"
+
+    def test_apm_no_reflink_env_skips_clones(self, tmp_path, monkeypatch):
+        """APM_NO_REFLINK forces the fallback path end-to-end."""
+        from apm_cli.utils import reflink as reflink_mod
+        from apm_cli.utils.file_ops import robust_copytree
+
+        reflink_mod._reset_capability_cache()
+        monkeypatch.setenv("APM_NO_REFLINK", "1")
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "a.txt").write_bytes(b"x")
+        with (
+            patch.object(reflink_mod, "_clone_macos") as mac,
+            patch.object(reflink_mod, "_clone_linux") as lin,
+        ):
+            robust_copytree(src, tmp_path / "dst")
+            mac.assert_not_called()
+            lin.assert_not_called()
+        assert (tmp_path / "dst" / "a.txt").read_bytes() == b"x"

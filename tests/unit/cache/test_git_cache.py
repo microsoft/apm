@@ -259,3 +259,117 @@ class TestGitCacheEnvForwarding:
             assert call.kwargs.get("env") is sentinel, (
                 f"env not forwarded to: {call.args[0] if call.args else call.kwargs.get('args')}"
             )
+
+
+class TestCheckoutWriteDedup:
+    """_create_checkout must short-circuit when a concurrent process
+    populated the shard while we were waiting on the shard lock.
+
+    This is the cross-process write-deduplication pattern: the lock
+    winner clones; lock losers see a populated shard at re-probe time
+    and return immediately without doing any clone work themselves.
+    """
+
+    def test_short_circuits_when_final_exists_under_lock(self, tmp_path: Path) -> None:
+        """If final_dir is already populated when the lock is acquired,
+        no git subprocess is invoked."""
+        from apm_cli.cache.url_normalize import cache_shard_key
+
+        cache = GitCache(tmp_path)
+        url = "https://github.com/owner/repo"
+        sha = "1" * 40
+        shard = cache_shard_key(url)
+
+        # Simulate "another process already landed this shard": create
+        # the final_dir BEFORE _create_checkout runs.
+        final_dir = tmp_path / "git" / "checkouts_v1" / shard / sha
+        final_dir.mkdir(parents=True)
+        (final_dir / ".git").mkdir()
+
+        with (
+            patch("subprocess.run") as mock_run,
+            patch(
+                "apm_cli.cache.git_cache.verify_checkout_sha",
+                return_value=True,
+            ) as mock_verify,
+        ):
+            result = cache._create_checkout(url, shard, sha)
+            mock_run.assert_not_called()
+            mock_verify.assert_called_with(final_dir, sha)
+        assert result == final_dir
+
+    def test_proceeds_with_clone_when_final_missing(self, tmp_path: Path) -> None:
+        """If final_dir does not exist on lock entry, clone happens."""
+        from apm_cli.cache.url_normalize import cache_shard_key
+
+        cache = GitCache(tmp_path)
+        url = "https://github.com/owner/repo"
+        sha = "2" * 40
+        shard = cache_shard_key(url)
+
+        # Pre-create the bare repo dir so _create_checkout can target it
+        (tmp_path / "git" / "db_v1" / shard).mkdir(parents=True)
+
+        def _populate(*args, **kwargs):
+            # On the `git clone --local --shared` invocation, materialise
+            # the staged dir with a minimal .git so the rename succeeds.
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "clone" in cmd and "--local" in cmd:
+                staged = Path(cmd[-1])
+                staged.mkdir(parents=True, exist_ok=True)
+                (staged / ".git").mkdir(exist_ok=True)
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with (
+            patch("subprocess.run", side_effect=_populate) as mock_run,
+            patch(
+                "apm_cli.cache.git_cache.verify_checkout_sha",
+                return_value=True,
+            ),
+        ):
+            result = cache._create_checkout(url, shard, sha)
+            # Two git invocations: clone + checkout.
+            assert mock_run.call_count >= 2
+        assert result.is_dir()
+
+    def test_short_circuits_on_integrity_pass_only(self, tmp_path: Path) -> None:
+        """A populated final_dir with FAILING integrity is not a hit:
+        we must proceed to re-clone rather than serve a corrupt shard."""
+        from apm_cli.cache.url_normalize import cache_shard_key
+
+        cache = GitCache(tmp_path)
+        url = "https://github.com/owner/repo"
+        sha = "3" * 40
+        shard = cache_shard_key(url)
+
+        # Populate final_dir BUT integrity will report failure.
+        final_dir = tmp_path / "git" / "checkouts_v1" / shard / sha
+        final_dir.mkdir(parents=True)
+        (tmp_path / "git" / "db_v1" / shard).mkdir(parents=True)
+
+        def _populate(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if "clone" in cmd and "--local" in cmd:
+                staged = Path(cmd[-1])
+                staged.mkdir(parents=True, exist_ok=True)
+                (staged / ".git").mkdir(exist_ok=True)
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        # First verify call (re-probe under lock) returns False; subsequent
+        # calls (after atomic_land) return True so we don't blow up on
+        # the post-rename verification.
+        verify_calls = [False, True, True]
+
+        def _verify(*_args, **_kwargs):
+            return verify_calls.pop(0) if verify_calls else True
+
+        with (
+            patch("subprocess.run", side_effect=_populate) as mock_run,
+            patch(
+                "apm_cli.cache.git_cache.verify_checkout_sha",
+                side_effect=_verify,
+            ),
+        ):
+            cache._create_checkout(url, shard, sha)
+            # We did NOT short-circuit -- clone happened.
+            assert mock_run.called
