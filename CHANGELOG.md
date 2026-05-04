@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Parallel subdir install race.** `apm install` no longer intermittently fails with `RuntimeError: Subdirectory '<path>' not found in repository` when multiple dependencies resolve to different subdirectories of the same `repo@ref`. The shared clone cache now stores subdir-agnostic bare clones and each consumer materializes its own working tree (mirrors the WS3 `GitCache` pattern). (#1135, fixes #1126)
+
 ## [0.12.1] - 2026-05-03
 
 ### Added

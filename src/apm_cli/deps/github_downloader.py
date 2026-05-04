@@ -2091,7 +2091,7 @@ class GitHubPackageDownloader:
                     )
                 except Exception as e:
                     raise RuntimeError(
-                        f"Failed to materialize working tree from shared bare: {e}"
+                        f"Failed to prepare dependency from cached clone: {e}"
                     ) from e
             else:
                 # Legacy per-dep clone path (no shared cache).
