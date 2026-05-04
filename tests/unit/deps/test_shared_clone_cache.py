@@ -435,7 +435,7 @@ class TestBareCloneFallback:
             # Tier-1 happy path: every call succeeds.
             return MagicMock(returncode=0, stdout="", stderr="")
 
-        with patch("apm_cli.deps.github_downloader.subprocess.run", side_effect=fake_run):
+        with patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fake_run):
             d._bare_clone_with_fallback(
                 "https://example/o/r",
                 bare,
@@ -481,7 +481,7 @@ class TestBareCloneFallback:
                 raise sp.CalledProcessError(1, args, stderr=b"reject")
             return MagicMock(returncode=0, stdout="", stderr="")
 
-        with patch("apm_cli.deps.github_downloader.subprocess.run", side_effect=fake_run):
+        with patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fake_run):
             d._bare_clone_with_fallback(
                 "https://example/o/r",
                 bare,
@@ -520,7 +520,7 @@ class TestBareCloneFallback:
             captured.append(list(args))
             return MagicMock(returncode=0, stdout="", stderr="")
 
-        with patch("apm_cli.deps.github_downloader.subprocess.run", side_effect=fake_run):
+        with patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fake_run):
             d._bare_clone_with_fallback(
                 "https://example/o/r",
                 bare,
@@ -575,7 +575,7 @@ class TestMaterializeFromBare:
                 return MagicMock(returncode=0, stdout="abc123\n", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
 
-        with patch("apm_cli.deps.github_downloader.subprocess.run", side_effect=fake_run):
+        with patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fake_run):
             d._materialize_from_bare(bare, consumer, ref=None, env={})
 
         rev_parse_calls = [c for c in captured if "rev-parse" in c]
@@ -598,7 +598,7 @@ class TestMaterializeFromBare:
             captured.append(list(args))
             return MagicMock(returncode=0, stdout="", stderr="")
 
-        with patch("apm_cli.deps.github_downloader.subprocess.run", side_effect=fake_run):
+        with patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fake_run):
             sha = d._materialize_from_bare(
                 bare, consumer, ref=None, env={}, known_sha="deadbeef" * 5
             )
@@ -764,7 +764,7 @@ class TestBareCloneRetryRmtree:
                 assert not (bare / "stale_file").exists(), "rmtree did not run before init"
             return MagicMock(returncode=0, stdout="", stderr="")
 
-        with patch("apm_cli.deps.github_downloader.subprocess.run", side_effect=fake_run):
+        with patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fake_run):
             d._bare_clone_with_fallback(
                 "https://example/o/r",
                 bare,

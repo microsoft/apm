@@ -1,6 +1,5 @@
 """GitHub package downloader for APM dependencies."""
 
-import logging
 import os
 import random  # noqa: F401
 import re
@@ -46,6 +45,12 @@ from ..utils.github_host import (
     sanitize_token_url_in_message,
 )
 from ..utils.yaml_io import yaml_to_str
+from .bare_cache import (
+    bare_clone_with_fallback,
+    build_clone_failure_message,
+    clone_with_fallback,
+    materialize_from_bare,
+)
 from .download_strategies import DownloadDelegate
 from .git_remote_ops import (
     parse_ls_remote_output,
@@ -101,49 +106,6 @@ def _rmtree(path) -> None:
     from ..utils.file_ops import robust_rmtree
 
     robust_rmtree(path, ignore_errors=True)
-
-
-def _scrub_bare_remote_url(bare_path: Path, git_exe: str, env: dict[str, str]) -> None:
-    """Redact ``remote.origin.url`` in a bare repo's ``.git/config``.
-
-    After a successful bare clone, ``remote.origin.url`` retains the
-    tokenized URL (e.g. ``https://oauth2:<TOKEN>@github.com/...``). The
-    bare is read-only after this point in the WS2 dedup pipeline (no
-    further fetches), so the URL is dead weight that just persists the
-    token on disk. Replace with ``redacted://`` to eliminate the
-    on-disk token footprint.
-
-    Best-effort: ``check=False`` so a config-set failure does not abort
-    the clone (the bare is still functionally correct without the
-    redaction). Convergent panel finding (auth + supply-chain MAJOR).
-    On exception, log at WARNING so token-leak-aware operators have an
-    audit trail (supply-chain reviewer follow-up: security mechanisms
-    must not fail silently).
-    """
-    try:
-        result = subprocess.run(
-            [git_exe, "-C", str(bare_path), "remote", "set-url", "origin", "redacted://"],
-            env=env,
-            check=False,
-            capture_output=True,
-            timeout=10,
-        )
-        if result.returncode != 0:
-            logging.getLogger(__name__).warning(
-                "Failed to redact remote URL from bare repo config at %s "
-                "(git exit=%d). Tokenized URL may persist on disk until "
-                "shared cache cleanup.",
-                bare_path,
-                result.returncode,
-            )
-    except Exception as exc:
-        logging.getLogger(__name__).warning(
-            "Exception while redacting remote URL from bare repo config "
-            "at %s: %s. Tokenized URL may persist on disk until shared "
-            "cache cleanup.",
-            bare_path,
-            exc,
-        )
 
 
 class GitProgressReporter(RemoteProgress):
@@ -622,58 +584,17 @@ class GitHubPackageDownloader:
         verbose_callback=None,
         **clone_kwargs,
     ) -> Repo:
-        """Clone a working-tree repository following the TransportSelector plan.
-
-        Thin adapter over :meth:`_execute_transport_plan` that supplies a
-        working-tree clone action (``Repo.clone_from``). Behavior is
-        unchanged from the pre-#1126 implementation, except every clone
-        attempt now begins with ``shutil.rmtree(target, ignore_errors=True)``
-        for symmetry with the bare-clone path. This is strictly safer
-        (clean slate per attempt) and matches the existing behavior on
-        the second-and-subsequent attempts where target may contain a
-        partial clone from the failed first attempt.
-
-        Args:
-            repo_url_base: Base repository reference (owner/repo)
-            target_path: Target path for cloning
-            progress_reporter: GitProgressReporter instance for progress updates
-            dep_ref: DependencyReference for platform/protocol decisions
-            verbose_callback: Optional callable for verbose logging (receives str messages)
-            **clone_kwargs: Additional arguments for Repo.clone_from
-
-        Returns:
-            Repo: Successfully cloned repository
-
-        Raises:
-            RuntimeError: If the planned attempt(s) all fail.
-        """
-        repo_holder: list[Repo] = []
-
-        def _wt_action(url: str, env: dict[str, str], target: Path) -> None:
-            # Pre-attempt cleanup: GitPython's Repo.clone_from refuses a
-            # non-empty target. Symmetric with _bare_action so retries
-            # always start from a clean slate. Behavior change from the
-            # pre-#1126 implementation - covered by 6.13.
-            if target.exists():
-                shutil.rmtree(target, ignore_errors=True)
-            repo_holder.append(
-                Repo.clone_from(
-                    url,
-                    target,
-                    env=env,
-                    progress=progress_reporter,
-                    **clone_kwargs,
-                )
-            )
-
-        self._execute_transport_plan(
+        """Thin delegate to :func:`bare_cache.clone_with_fallback` (kept on the class so test patches still work)."""
+        return clone_with_fallback(
+            self._execute_transport_plan,
             repo_url_base,
             target_path,
+            progress_reporter=progress_reporter,
             dep_ref=dep_ref,
-            clone_action=_wt_action,
             verbose_callback=verbose_callback,
+            repo_cls=Repo,
+            **clone_kwargs,
         )
-        return repo_holder[0]
 
     def _execute_transport_plan(
         self,
@@ -897,69 +818,21 @@ class GitHubPackageDownloader:
                     break
 
         # All planned attempts failed (or strict-mode single failure)
-        if plan.strict and len(plan.attempts) >= 1:
-            tried = plan.attempts[0].label
-            error_msg = f"Failed to clone repository {repo_url_base} via {tried}. "
-            if plan.fallback_hint:
-                error_msg += plan.fallback_hint + " "
-        else:
-            error_msg = f"Failed to clone repository {repo_url_base} using all available methods. "
-        configured_host = os.environ.get("GITHUB_HOST", "")
-        if is_ado and not self.has_ado_token:
-            host = dep_host or "dev.azure.com"
-            error_msg += self.auth_resolver.build_error_context(
-                host,
-                "clone",
-                org=dep_ref.ado_organization if dep_ref else None,
-                port=dep_ref.port if dep_ref else None,
-                dep_url=dep_ref.repo_url if dep_ref else None,
-            )
-        elif is_generic:
-            if dep_host:
-                host_info = self.auth_resolver.classify_host(
-                    dep_host,
-                    port=dep_ref.port if dep_ref else None,
-                )
-                host_name = host_info.display_name
-            else:
-                host_name = "the target host"
-            error_msg += (
-                f"For private repositories on {host_name}, configure SSH keys or a git credential helper. "
-                f"APM delegates authentication to git for non-GitHub/ADO hosts."
-            )
-        elif (
-            configured_host
-            and dep_host
-            and dep_host == configured_host
-            and configured_host != "github.com"
-        ):
-            suggested = f"github.com/{repo_url_base}"
-            if dep_ref and dep_ref.virtual_path:
-                suggested += f"/{dep_ref.virtual_path}"
-            error_msg += (
-                f"GITHUB_HOST is set to '{configured_host}', so shorthand dependencies "
-                f"(without a hostname) resolve against that host. "
-                f"If this package lives on a different server (e.g., github.com), "
-                f"use the full hostname in apm.yml: {suggested}"
-            )
-        elif not has_token:
-            # No auth was resolved (neither env var nor credential helper).
-            # Guide the user through setting up authentication.
-            host = dep_host or default_host()
-            org = dep_ref.repo_url.split("/")[0] if dep_ref and dep_ref.repo_url else None
-            error_msg += self.auth_resolver.build_error_context(
-                host,
-                "clone",
-                org=org,
-                port=dep_ref.port if dep_ref else None,
-                dep_url=dep_ref.repo_url if dep_ref else None,
-            )
-        else:
-            error_msg += "Please check repository access permissions and authentication setup."
-
-        if last_error:
-            sanitized_error = self._sanitize_git_error(str(last_error))
-            error_msg += f" Last error: {sanitized_error}"
+        error_msg = build_clone_failure_message(
+            repo_url_base=repo_url_base,
+            plan=plan,
+            dep_ref=dep_ref,
+            dep_host=dep_host,
+            is_ado=bool(is_ado),
+            is_generic=is_generic,
+            has_ado_token=self.has_ado_token,
+            has_token=has_token,
+            auth_resolver=self.auth_resolver,
+            configured_github_host=os.environ.get("GITHUB_HOST", ""),
+            default_host_fn=default_host,
+            last_error=last_error,
+            sanitize_git_error=self._sanitize_git_error,
+        )
 
         raise RuntimeError(error_msg)
 
@@ -976,155 +849,14 @@ class GitHubPackageDownloader:
         ref: str | None,
         is_commit_sha: bool,
     ) -> None:
-        """Clone a repository as a bare repo, with full transport-plan fallback.
-
-        Sibling helper to :meth:`_clone_with_fallback`. Composes via
-        :meth:`_execute_transport_plan` so it inherits ADO bearer retry
-        and protocol fallback automatically. The bare clone is
-        subdir-agnostic (no sparse cone), so a single bare can serve N
-        consumers each materializing a different subdir from the same
-        repo+ref - this is the core fix for #1126.
-
-        3-tier strategy (per design.md sec 5.2):
-
-          - Tier 1 (SHA refs): ``git init --bare && git remote add
-            origin <url> && git fetch --depth=1 origin <sha>``. Requires
-            server-side ``uploadpack.allowReachableSHA1InWant=true``
-            (default on github.com / GHES; some older GHE / ADO Server /
-            Bitbucket Server reject this).
-          - Tier 1 (symbolic / default branch): ``git clone --bare
-            --depth=1 [--branch <ref>] <url>``.
-          - Tier 2 (both): full ``git clone --bare <url>``, validate via
-            ``git rev-parse --verify <sha>^{commit}`` for SHA refs.
-          - Tier 3: re-raise.
-
-        After every successful tier, ``git update-ref HEAD <ref>`` is
-        invoked for SHA refs so consumer ``git rev-parse HEAD`` resolves
-        unambiguously (the v3 BLOCKER fix). Then
-        :func:`_scrub_bare_remote_url` redacts the tokenized
-        ``remote.origin.url`` from ``.git/config`` to eliminate
-        on-disk token persistence (panel convergent finding).
-
-        Note: bare-integrity verification (post-clone ``rev-parse HEAD
-        == known_sha``) is intentionally deferred. The bare is
-        ephemeral, mode-0700, and produced by a trusted (in-tree)
-        callable. If ``SharedCloneCache`` is ever opened to
-        plugin/user-supplied callables, restore the integrity check at
-        the cache boundary. See design.md sec 12 (Bare integrity
-        verification).
-        """
-        from ..utils.git_env import get_git_executable
-
-        git_exe = get_git_executable()
-
-        def _bare_action(url: str, env: dict[str, str], target: Path) -> None:
-            # Pre-attempt cleanup: any prior tier-1 partial state must be
-            # wiped before re-attempting (e.g. on ADO bearer retry the
-            # template re-invokes _bare_action with a fresh URL/env, and
-            # the tier-1 init+fetch leaves a half-built bare on disk).
-            # See 6.15.
-            if target.exists():
-                shutil.rmtree(target, ignore_errors=True)
-
-            if is_commit_sha:
-                # Tier 1: init + fetch by SHA.
-                # Note: `git remote add origin <url>` stores the
-                # tokenized URL in `.git/config`. The ADO-bearer env
-                # approach relies on http.extraHeader (not stored URL
-                # auth), so this is safe today. _scrub_bare_remote_url
-                # below redacts the URL after a successful clone so the
-                # token does not persist on disk.
-                try:
-                    subprocess.run(
-                        [git_exe, "init", "--bare", str(target)],
-                        env=env,
-                        check=True,
-                        capture_output=True,
-                    )
-                    subprocess.run(
-                        [git_exe, "-C", str(target), "remote", "add", "origin", url],
-                        env=env,
-                        check=True,
-                        capture_output=True,
-                    )
-                    subprocess.run(
-                        [git_exe, "-C", str(target), "fetch", "--depth=1", "origin", ref],
-                        env=env,
-                        check=True,
-                        capture_output=True,
-                        timeout=300,
-                    )
-                    # CRITICAL (v3 BLOCKER): init+fetch leaves HEAD pointing
-                    # at refs/heads/main which doesn't exist locally.
-                    # Without update-ref, consumer's `git rev-parse HEAD`
-                    # is ambiguous. See 6.18.
-                    subprocess.run(
-                        [git_exe, "-C", str(target), "update-ref", "HEAD", ref],
-                        env=env,
-                        check=True,
-                        capture_output=True,
-                    )
-                    _scrub_bare_remote_url(target, git_exe, env)
-                    return
-                except subprocess.CalledProcessError:
-                    # Tier 2: full bare clone, validate SHA, set HEAD.
-                    shutil.rmtree(target, ignore_errors=True)
-                    subprocess.run(
-                        [git_exe, "clone", "--bare", url, str(target)],
-                        env=env,
-                        check=True,
-                        capture_output=True,
-                        timeout=600,
-                    )
-                    subprocess.run(
-                        [
-                            git_exe,
-                            "-C",
-                            str(target),
-                            "rev-parse",
-                            "--verify",
-                            f"{ref}^{{commit}}",
-                        ],
-                        env=env,
-                        check=True,
-                        capture_output=True,
-                    )
-                    subprocess.run(
-                        [git_exe, "-C", str(target), "update-ref", "HEAD", ref],
-                        env=env,
-                        check=True,
-                        capture_output=True,
-                    )
-                    _scrub_bare_remote_url(target, git_exe, env)
-                    return
-
-            # Symbolic ref or default branch.
-            args = [git_exe, "clone", "--bare", "--depth=1"]
-            if ref:
-                args += ["--branch", ref]
-            args += [url, str(target)]
-            try:
-                subprocess.run(args, env=env, check=True, capture_output=True, timeout=300)
-                _scrub_bare_remote_url(target, git_exe, env)
-                return
-            except subprocess.CalledProcessError:
-                # Tier 2: full bare clone (no shallow, no --branch).
-                shutil.rmtree(target, ignore_errors=True)
-                subprocess.run(
-                    [git_exe, "clone", "--bare", url, str(target)],
-                    env=env,
-                    check=True,
-                    capture_output=True,
-                    timeout=600,
-                )
-                _scrub_bare_remote_url(target, git_exe, env)
-                return
-
-        self._execute_transport_plan(
+        """Thin delegate to :func:`bare_cache.bare_clone_with_fallback` (kept on the class so test patches still work)."""
+        bare_clone_with_fallback(
+            self._execute_transport_plan,
             repo_url_base,
             bare_target,
             dep_ref=dep_ref,
-            clone_action=_bare_action,
+            ref=ref,
+            is_commit_sha=is_commit_sha,
         )
 
     def _materialize_from_bare(
@@ -1136,108 +868,8 @@ class GitHubPackageDownloader:
         env: dict[str, str],
         known_sha: str | None = None,
     ) -> str:
-        """Create a working-tree checkout from a bare repo via local-shared clone.
-
-        Mirrors :class:`GitCache`'s ``_create_checkout`` pattern: each
-        consumer gets its own working tree backed by the shared bare's
-        object database (via ``objects/info/alternates``). Hardlink-cheap
-        and concurrent-safe (consumer dirs are unique per call).
-
-        SHA resolution policy (lifetime invariant 5.2.1):
-          - If ``known_sha`` is provided (caller passed a 40-char SHA
-            ref), use it directly. Avoids ``rev-parse HEAD`` which is
-            ambiguous on init+fetch bares before update-ref runs.
-          - Otherwise, resolve from the BARE via ``git --git-dir
-            <bare> rev-parse HEAD``. NOT from the consumer - opening
-            ``Repo(consumer_dir)`` leaks a Windows file handle that
-            blocks downstream rmtree.
-
-        CRLF + LFS pinning before checkout:
-          - ``core.autocrlf=false`` guarantees byte-identical content
-            across consumers regardless of the user's global git config.
-          - ``filter.lfs.smudge=""`` + ``filter.lfs.required=false``
-            disables LFS smudge cross-platform (the empty string trick
-            works everywhere; ``cat`` is not on Windows PATH).
-
-        Returns:
-            The resolved commit SHA. Caller threads this into
-            ``resolved_commit`` for the lockfile.
-        """
-        from ..utils.git_env import get_git_executable
-
-        git_exe = get_git_executable()
-
-        if known_sha:
-            resolved_sha = known_sha
-        else:
-            sha_result = subprocess.run(
-                [git_exe, "--git-dir", str(bare_path), "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                env=env,
-                check=True,
-            )
-            resolved_sha = sha_result.stdout.strip()
-
-        consumer_dir.parent.mkdir(parents=True, exist_ok=True)
-        # --no-checkout because we want to set core.autocrlf and disable
-        # LFS smudge BEFORE checkout writes any file content.
-        subprocess.run(
-            [
-                git_exe,
-                "clone",
-                "--local",
-                "--shared",
-                "--no-checkout",
-                str(bare_path),
-                str(consumer_dir),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            env=env,
-            check=True,
-        )
-        # CRLF determinism (panel: byte-identical across users).
-        subprocess.run(
-            [git_exe, "-C", str(consumer_dir), "config", "core.autocrlf", "false"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            env=env,
-            check=True,
-        )
-        # Disable LFS smudge cross-platform: empty-string smudge is the
-        # portable equivalent of `git lfs smudge --skip`. The `cat`
-        # alternative is not on Windows PATH.
-        for key, val in (
-            ("filter.lfs.smudge", ""),
-            ("filter.lfs.clean", ""),
-            ("filter.lfs.process", ""),
-            ("filter.lfs.required", "false"),
-        ):
-            subprocess.run(
-                [git_exe, "-C", str(consumer_dir), "config", key, val],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                env=env,
-                check=False,
-            )
-        subprocess.run(
-            [git_exe, "-C", str(consumer_dir), "checkout", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            env=env,
-            check=True,
-        )
-        return resolved_sha
-
-    # ------------------------------------------------------------------
-    # Remote ref enumeration (no clone required)
-    # ------------------------------------------------------------------
+        """Thin delegate to :func:`bare_cache.materialize_from_bare` (kept on the class so test patches still work)."""
+        return materialize_from_bare(bare_path, consumer_dir, ref=ref, env=env, known_sha=known_sha)
 
     @staticmethod
     def _parse_ls_remote_output(output: str) -> list[RemoteRef]:
