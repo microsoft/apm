@@ -446,3 +446,93 @@ class TestPluginIntegration:
 
         assert command_result.files_integrated == 1
         assert (project_root / ".claude" / "commands" / "test-command.md").exists()
+
+    def test_plugin_cursor_command_deployment(self, tmp_path):
+        """Plugin install must deploy commands to .cursor/commands/ when .cursor/ exists.
+
+        Companion to test_plugin_integrator_deployment, which only covers
+        the .claude/ target.  This locks in cursor 1.6+ slash-command
+        support against regressions in the install pipeline.
+        """
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        fixture_path = Path(__file__).parent.parent / "fixtures" / "mock-marketplace-plugin"
+        plugin_dir = tmp_path / "installed-plugin"
+        shutil.copytree(fixture_path, plugin_dir)
+
+        validation = validate_apm_package(plugin_dir)
+        assert validation.is_valid
+        package = validation.package
+        assert isinstance(package, APMPackage)
+
+        package_info = PackageInfo(
+            package=package,
+            install_path=plugin_dir,
+            resolved_reference=ResolvedReference(
+                original_ref="main",
+                ref_type=GitReferenceType.BRANCH,
+                resolved_commit="abcdef1234567890",
+                ref_name="main",
+            ),
+            installed_at=datetime.now().isoformat(),
+            package_type=validation.package_type,
+        )
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        # The cursor target only deploys when .cursor/ exists in the project root,
+        # mirroring real-world IDE adoption (no opt-in -> no surprise files).
+        (project_root / ".cursor").mkdir()
+
+        result = CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["cursor"], package_info, project_root
+        )
+
+        assert result.files_integrated == 1
+        assert (project_root / ".cursor" / "commands" / "test-command.md").exists()
+        # No deployment surprises -- nothing escapes into other tools' folders.
+        assert not (project_root / ".claude" / "commands" / "test-command.md").exists()
+
+    def test_plugin_cursor_command_skipped_when_dir_missing(self, tmp_path):
+        """No .cursor/ in the project root -> no .cursor/commands/ deployment.
+
+        Regression guard for the no-opt-in behavior contract: cursor
+        users get the integration only when they have signaled intent
+        by creating a .cursor/ folder (which Cursor itself creates on
+        first run).  This prevents the install pipeline from polluting
+        non-Cursor projects with foreign tool config.
+        """
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        fixture_path = Path(__file__).parent.parent / "fixtures" / "mock-marketplace-plugin"
+        plugin_dir = tmp_path / "installed-plugin"
+        shutil.copytree(fixture_path, plugin_dir)
+
+        validation = validate_apm_package(plugin_dir)
+        assert validation.is_valid
+
+        package_info = PackageInfo(
+            package=validation.package,
+            install_path=plugin_dir,
+            resolved_reference=ResolvedReference(
+                original_ref="main",
+                ref_type=GitReferenceType.BRANCH,
+                resolved_commit="abcdef1234567890",
+                ref_name="main",
+            ),
+            installed_at=datetime.now().isoformat(),
+            package_type=validation.package_type,
+        )
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        # Note: NO .cursor/ created here.
+
+        result = CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["cursor"], package_info, project_root
+        )
+
+        assert result.files_integrated == 0
+        assert not (project_root / ".cursor").exists(), (
+            "install must NOT create .cursor/ when the user has not opted in"
+        )

@@ -157,6 +157,12 @@ applyTo: "**/*"
 
 Executable workflows with parameters. Use the `input:` key to declare
 parameters, and `${input:name}` to reference them in the prompt body.
+Deployed as slash commands to targets that support them:
+
+- Claude Code: `.claude/commands/*.md` (normalized to supported command frontmatter)
+- Cursor: `.cursor/commands/*.md` (Cursor 1.6+; Cursor is de-emphasizing commands in favor of rules/skills)
+- OpenCode: `.opencode/commands/*.md` (normalized to supported command frontmatter)
+- Gemini CLI: `.gemini/commands/*.toml` (converted to TOML command format)
 
 ```yaml
 ---

@@ -227,6 +227,27 @@ APM separates production and development dependencies:
 
 This prevents transitive inclusion of development-only packages (test fixtures, linting rules, internal helpers) in distributed artifacts. The lockfile marks dev dependencies with `is_dev: true` for explicit tracking. See the [Lock File Specification](../../reference/lockfile-spec/#42-dependency-entries) for field details.
 
+## Slash command deployment
+
+Several IDE-style targets read files in their `commands/` directory as
+**slash commands** -- typing `/foo` in the IDE invokes the file's
+content as an LLM prompt with full tool access. Across all supported
+targets (Claude Code, Cursor, OpenCode, Gemini CLI), invocation
+requires the user to type the command name; commands are not
+auto-invoked at IDE startup or on disk-write.
+
+`apm install` deploys package `.prompt.md` files to each target's
+commands directory by default when that directory exists, so packaged
+slash commands are available to the user immediately and consistently
+across targets.
+
+| Target | Commands directory | Notes |
+|--------|--------------------|-------|
+| **Claude Code** | `.claude/commands/*.md` | Deployed when `.claude/` exists. |
+| **Cursor** | `.cursor/commands/*.md` | Deployed when `.cursor/` exists. Cursor 1.6+ only; Cursor is de-emphasizing commands in favor of rules/skills -- monitor [Cursor release notes](https://cursor.com/changelog) for changes. The shared command transformer keeps the Claude-compatible frontmatter subset (`description`, `allowed-tools`, `model`, `argument-hint`, `input`); Cursor-specific keys (`author`, `mcp`, `parameters`, ...) are dropped with an install-time warning per file. |
+| **OpenCode** | `.opencode/commands/*.md` | Deployed when `.opencode/` exists. |
+| **Gemini CLI** | `.gemini/commands/*.toml` | Deployed when `.gemini/` exists. |
+
 ## MCP server trust model
 
 APM integrates MCP (Model Context Protocol) server configurations from packages. Trust is explicit and scoped by dependency depth.

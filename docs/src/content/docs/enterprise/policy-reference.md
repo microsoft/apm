@@ -588,7 +588,7 @@ All examples below use the literal output APM emits today. Symbol legend: `[+]` 
 $ apm install --verbose
 [i] Resolving dependencies...
 [i] Policy: org:contoso/.github (cached, fetched 12m ago) -- enforcement=block
-[+] Installed 4 APM dependencies, 2 MCP servers
+[+] Installed 4 APM dependencies, 2 MCP servers in 1.2s
 ```
 
 Without `--verbose`, the `Policy:` line is suppressed for `enforcement=warn` and `enforcement=off`. Under `enforcement=block` it is **always** shown (rendered as a `[!]` warning) so users know blocking is active.
@@ -614,7 +614,7 @@ Same denied dep, but the org policy ships `enforcement: warn`:
 ```shell
 $ apm install
 [i] Resolving dependencies...
-[+] Installed 4 APM dependencies, 2 MCP servers
+[+] Installed 4 APM dependencies, 2 MCP servers in 1.2s
 
 [!] Policy
     acme/evil-pkg -- Blocked by org policy at org:contoso/.github -- remove `acme/evil-pkg` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
@@ -628,7 +628,7 @@ Violations flow through `DiagnosticCollector` and surface in the end-of-install 
 $ apm install --no-policy
 [!] Policy enforcement disabled by --no-policy for this invocation. This does NOT bypass apm audit --ci. CI will still fail the PR for the same policy violation.
 [i] Resolving dependencies...
-[+] Installed 4 APM dependencies, 2 MCP servers
+[+] Installed 4 APM dependencies, 2 MCP servers in 1.2s
 ```
 
 #### `APM_POLICY_DISABLE=1` env var: identical wording
@@ -637,7 +637,7 @@ $ apm install --no-policy
 $ APM_POLICY_DISABLE=1 apm install
 [!] Policy enforcement disabled by APM_POLICY_DISABLE=1 for this invocation. This does NOT bypass apm audit --ci. CI will still fail the PR for the same policy violation.
 [i] Resolving dependencies...
-[+] Installed 4 APM dependencies, 2 MCP servers
+[+] Installed 4 APM dependencies, 2 MCP servers in 1.2s
 ```
 
 The warning is emitted on every invocation and cannot be silenced.
@@ -683,7 +683,7 @@ When a dep brings in an MCP server denied by `mcp.deny` or rejected by `mcp.tran
 $ apm install
 [i] Resolving dependencies...
 [!] Policy: org:contoso/.github -- enforcement=block
-[+] Installed 4 APM dependencies
+[+] Installed 4 APM dependencies in 0.8s
 [x] Transitive MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.
 
 [!] Policy

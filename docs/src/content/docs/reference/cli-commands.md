@@ -396,6 +396,7 @@ apm uninstall -g microsoft/apm-sample-package
 | Claude hook settings | `.claude/settings.json` (hooks key cleaned) |
 | Cursor rules | `.cursor/rules/*.mdc` |
 | Cursor agents | `.cursor/agents/*.md` |
+| Cursor commands | `.cursor/commands/*.md` (Cursor 1.6+) |
 | Cursor skills | `.cursor/skills/{folder-name}/` |
 | Cursor hooks | `.cursor/hooks.json` (hooks key cleaned) |
 | OpenCode agents | `.opencode/agents/*.md` |

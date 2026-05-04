@@ -12,7 +12,7 @@ from dataclasses import dataclass, field  # noqa: F401
 from typing import Dict, List, Optional  # noqa: F401, UP035
 
 from apm_cli.utils.console import (
-    _get_console,
+    _get_console,  # noqa: F401  -- re-exported for back-compat (tests patch this name)
     _rich_echo,
     _rich_info,
     _rich_warning,
@@ -237,24 +237,16 @@ class DiagnosticCollector:
 
         In normal mode, shows counts and actionable hints.
         In verbose mode, also lists individual file paths / messages.
+
+        The legacy "-- Diagnostics --" section header has been removed: each
+        category renderer already labels itself, and the header added visual
+        weight without information. The closing blank-line separator is
+        retained so subsequent install output starts cleanly.
         """
         if not self._diagnostics:
             return
 
         groups = self.by_category()
-
-        console = _get_console()
-        # Separator line
-        if console:
-            try:
-                console.print()
-                console.print("-- Diagnostics --", style="bold cyan")
-            except Exception:
-                _rich_echo("")
-                _rich_echo("-- Diagnostics --", color="cyan", bold=True)
-        else:
-            _rich_echo("")
-            _rich_echo("-- Diagnostics --", color="cyan", bold=True)
 
         for cat in _CATEGORY_ORDER:
             items = groups.get(cat)
@@ -277,14 +269,6 @@ class DiagnosticCollector:
                 self._render_error_group(items)
             elif cat == CATEGORY_INFO:
                 self._render_info_group(items)
-
-        if console:
-            try:
-                console.print()
-            except Exception:
-                _rich_echo("")
-        else:
-            _rich_echo("")
 
     # -- Per-category renderers ------------------------------------
 
@@ -372,16 +356,11 @@ class DiagnosticCollector:
         noun = "file" if count == 1 else "files"
         _rich_warning(f"  [!] {count} {noun} skipped -- local files exist, not managed by APM")
         _rich_info("    Use 'apm install --force' to overwrite")
-        if not self.verbose:
-            _rich_info("    Run with --verbose to see individual files")
-        else:
-            # Group by package for readability
-            by_pkg = _group_by_package(items)
-            for pkg, diags in by_pkg.items():
-                if pkg:
-                    _rich_echo(f"    [{pkg}]", color="dim")
-                for d in diags:
-                    _rich_echo(f"      +- {d.message}", color="dim")
+        # Per-dep attribution is now emitted inline by the integrate phase
+        # (see services.integrate_package_primitives -- the
+        # "(files unchanged)" annotation under each [+] header). The
+        # collision footer stays as a global count summary; do NOT enumerate
+        # individual file paths even under --verbose.
 
     def _render_overwrite_group(self, items: list[Diagnostic]) -> None:
         count = len(items)

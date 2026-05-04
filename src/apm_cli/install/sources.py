@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional  # noqa: F401, UP035
 
 from apm_cli.utils.console import _rich_error, _rich_success
+from apm_cli.utils.short_sha import format_short_sha
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
@@ -273,10 +274,18 @@ class CachedDependencySource(DependencySource):
         dep_key: str,
         resolved_ref: Any,
         dep_locked_chk: Any,
+        fetched_this_run: bool = False,
     ):
         super().__init__(ctx, dep_ref, install_path, dep_key)
         self.resolved_ref = resolved_ref
         self.dep_locked_chk = dep_locked_chk
+        # F2 (#1116): when the resolver callback fetched this package
+        # earlier in the SAME install run, we still hit the cached
+        # source path (skip_download=True), but the install line should
+        # NOT say "(cached)" -- bytes were just downloaded. The integrate
+        # phase passes True here when the dep_key is in
+        # ctx.callback_downloaded.
+        self.fetched_this_run = fetched_this_run
 
     def acquire(self) -> Materialization | None:
         from apm_cli.constants import APM_YML_FILENAME
@@ -300,15 +309,20 @@ class CachedDependencySource(DependencySource):
 
         display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
         _ref = dep_ref.reference or ""
-        _sha = ""
-        if (
-            dep_locked_chk
-            and dep_locked_chk.resolved_commit
-            and dep_locked_chk.resolved_commit != "cached"
-        ):
-            _sha = dep_locked_chk.resolved_commit[:8]
+        # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
+        # Prefer the lockfile-recorded SHA when present; otherwise fall
+        # back to the SHA captured by the parallel resolver callback in
+        # this same install run (cold-path case where no lockfile exists
+        # yet, but the resolver already learned the resolved commit).
+        _sha = format_short_sha(dep_locked_chk.resolved_commit) if dep_locked_chk else ""
+        if not _sha:
+            _callback_sha = ctx.callback_downloaded.get(dep_key)
+            if _callback_sha:
+                _sha = format_short_sha(_callback_sha)
         if logger:
-            logger.download_complete(display_name, ref=_ref, sha=_sha, cached=True)
+            logger.download_complete(
+                display_name, ref=_ref, sha=_sha, cached=not self.fetched_this_run
+            )
 
         deltas: dict[str, int] = {"installed": 1}
         if not dep_ref.reference:
@@ -439,7 +453,7 @@ class FreshDependencySource(DependencySource):
         resolved_ref: Any,
         dep_locked_chk: Any,
         ref_changed: bool,
-        progress: Any,
+        progress: Any = None,
     ):
         super().__init__(ctx, dep_ref, install_path, dep_key)
         self.resolved_ref = resolved_ref
@@ -468,10 +482,19 @@ class FreshDependencySource(DependencySource):
             display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
             short_name = display_name.split("/")[-1] if "/" in display_name else display_name
 
-            task_id = progress.add_task(
-                description=f"Fetching {short_name}",
-                total=None,
-            )
+            # Workstream B (#1116): per-dep progress is owned by the
+            # shared InstallTui ``ctx.tui``; legacy local Progress is
+            # only wired when integrate is invoked outside the install
+            # pipeline (no callers do this today, but the parameter is
+            # kept for back-compat).
+            task_id = None
+            if progress is not None:
+                task_id = progress.add_task(
+                    description=f"Fetching {short_name}",
+                    total=None,
+                )
+            if ctx.tui is not None:
+                ctx.tui.task_started(dep_key, f"fetch {short_name}")
 
             download_ref = build_download_ref(
                 dep_ref,
@@ -491,8 +514,11 @@ class FreshDependencySource(DependencySource):
                 )
 
             # CRITICAL: hide progress BEFORE printing success to avoid overlap
-            progress.update(task_id, visible=False)
-            progress.refresh()
+            if progress is not None and task_id is not None:
+                progress.update(task_id, visible=False)
+                progress.refresh()
+            if ctx.tui is not None:
+                ctx.tui.task_completed(dep_key)
 
             deltas: dict[str, int] = {"installed": 1}
 
@@ -502,7 +528,8 @@ class FreshDependencySource(DependencySource):
                 _sha = ""
                 if resolved:
                     _ref = resolved.ref_name if resolved.ref_name else ""
-                    _sha = resolved.resolved_commit[:8] if resolved.resolved_commit else ""
+                    # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
+                    _sha = format_short_sha(resolved.resolved_commit)
                 logger.download_complete(display_name, ref=_ref, sha=_sha)
                 if ctx.auth_resolver:
                     try:
@@ -520,7 +547,7 @@ class FreshDependencySource(DependencySource):
                 _ref_suffix = ""
                 if resolved:
                     _r = resolved.ref_name if resolved.ref_name else ""
-                    _s = resolved.resolved_commit[:8] if resolved.resolved_commit else ""
+                    _s = format_short_sha(resolved.resolved_commit)
                     if _r and _s:
                         _ref_suffix = f" #{_r} @{_s}"
                     elif _r:
@@ -626,6 +653,7 @@ def make_dependency_source(
     dep_locked_chk: Any = None,
     ref_changed: bool = False,
     skip_download: bool = False,
+    fetched_this_run: bool = False,
     progress: Any = None,
 ) -> DependencySource:
     """Factory: pick the right ``DependencySource`` for *dep_ref*.
@@ -633,6 +661,11 @@ def make_dependency_source(
     Caller is responsible for resolving the download strategy (cached vs
     fresh) before invoking the factory; the resolved-ref and
     locked-checksum data flow into the appropriate source.
+
+    ``fetched_this_run`` (F2): when ``skip_download=True`` AND the
+    package was actually downloaded earlier in this run by the resolver
+    callback, set this to ``True`` so the cached source emits the
+    download-complete line WITHOUT the misleading ``(cached)`` suffix.
     """
     if dep_ref.is_local and dep_ref.local_path:
         return LocalDependencySource(ctx, dep_ref, install_path, dep_key)
@@ -644,6 +677,7 @@ def make_dependency_source(
             dep_key,
             resolved_ref,
             dep_locked_chk,
+            fetched_this_run=fetched_this_run,
         )
     return FreshDependencySource(
         ctx,

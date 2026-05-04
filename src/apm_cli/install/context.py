@@ -141,6 +141,17 @@ class InstallContext:
     cowork_nonsupported_warned: bool = False  # integrate (once-per-run guard)
 
     # ------------------------------------------------------------------
+    # TUI controller (PR #1116, workstream B): one Live region for the
+    # whole pipeline.  Phases call ``ctx.tui.start_phase(...)`` /
+    # ``ctx.tui.task_started(...)`` / ``ctx.tui.task_completed(...)``;
+    # when the controller is disabled (CI, dumb terminal,
+    # ``APM_PROGRESS=never``) every method is a no-op.  Pipeline owns
+    # the context-manager lifecycle (``with ctx.tui:``) so individual
+    # phases never need to enter / exit it.
+    # ------------------------------------------------------------------
+    tui: Any = None  # InstallTui
+
+    # ------------------------------------------------------------------
     # Legacy skill paths opt-out (convergence §3)
     # ------------------------------------------------------------------
     legacy_skill_paths: bool = False  # --legacy-skill-paths flag or APM_LEGACY_SKILL_PATHS env

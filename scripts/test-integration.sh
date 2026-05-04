@@ -436,6 +436,19 @@ run_e2e_tests() {
         exit 1
     fi
 
+    # Run cache lockfile-parity test (requires GITHUB_APM_PAT or GITHUB_TOKEN).
+    # Asserts byte-identical apm.lock.yaml across cold / warm / no-cache
+    # regimes -- the worst silent regression the cache layer could introduce.
+    log_info "Running cache lockfile-parity E2E test..."
+    echo "Command: pytest tests/integration/test_cache_lockfile_parity.py -v -s --tb=short"
+
+    if pytest tests/integration/test_cache_lockfile_parity.py -v -s --tb=short; then
+        log_success "Cache lockfile-parity E2E test passed!"
+    else
+        log_error "Cache lockfile-parity E2E test failed!"
+        exit 1
+    fi
+
     # Run Azure DevOps E2E tests (requires ADO_APM_PAT)
     if [[ -n "${ADO_APM_PAT:-}" ]]; then
         log_info "Running Azure DevOps E2E tests..."

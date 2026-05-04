@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-05-03
+
+### Added
+
+- **Cursor slash command support (Cursor 1.6+).** `apm install` deploys package `.prompt.md` files to `.cursor/commands/*.md` when a `.cursor/` directory is present, completing cross-tool slash-command parity with Claude Code, OpenCode, and Gemini CLI. (#1046)
+- **`apm install` performance + UX overhaul:** WS3 persistent two-tier cache for git + HTTP (with rev-parse HEAD verification on cache hits), parallel level-batched BFS dependency resolution, parallel MCP registry batch lookups with ETag-revalidated HTTP cache, in-install repo clone dedup for subdirectory deps, reflink-aware file copies with write-dedup for cache checkouts, live progress UI for parallel resolution and download, per-phase timing in `--verbose`, elapsed time on every exit path, and ASCII-only progress bar. (#1116)
+
+### Fixed
+
+- **gh-aw lock workflows: bump `microsoft/apm-action` v1.5.0 -> v1.6.0** so packed bundles use the legacy `--format apm` layout that `apm unpack` accepts after the v0.12.0 default flip to plugin format. (#1121)
+- **Windows CI: explicit UTF-8 encoding** in the `_make_package` test helper to unblock Windows runners. (#1124)
+
 ## [0.12.0] - 2026-05-03
 
 ### Added

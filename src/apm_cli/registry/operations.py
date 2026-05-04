@@ -30,11 +30,15 @@ class MCPServerOperations:
         server_references: list[str],
         project_root: Path | str | None = None,
         user_scope: bool = False,
+        max_workers: int = 4,
     ) -> list[str]:
         """Check which MCP servers actually need installation across target runtimes.
 
         This method checks the actual MCP configuration files to see which servers
         are already installed by comparing server IDs (UUIDs), not names.
+
+        WS2b (#1116): per-server registry lookups run in parallel via a bounded
+        ThreadPoolExecutor (uv-inspired, cap 4).
 
         Args:
             target_runtimes: List of target runtimes to check
@@ -43,11 +47,13 @@ class MCPServerOperations:
                 paths when checking install status.
             user_scope: Whether to inspect user-scope config instead of
                 project-local config for runtimes that support it.
+            max_workers: Max parallel lookups (default 4).
 
         Returns:
             List of server references that need installation in at least one runtime
         """
-        servers_needing_installation = set()
+        from concurrent.futures import ThreadPoolExecutor
+
         # Pre-load installed IDs per runtime (O(R) reads instead of O(S*R))
         installed_by_runtime: dict[str, set[str]] = {
             runtime: self._get_installed_server_ids(
@@ -58,39 +64,30 @@ class MCPServerOperations:
             for runtime in target_runtimes
         }
 
-        # Check each server reference
-        for server_ref in server_references:
+        def _check_one(server_ref: str) -> tuple[str, bool]:
+            """Return (server_ref, needs_install)."""
             try:
-                # Get server info from registry to find the canonical ID
                 server_info = self.registry_client.find_server_by_reference(server_ref)
-
                 if not server_info:
-                    # Server not found in registry, might be a local/custom server
-                    # Add to installation list for safety
-                    servers_needing_installation.add(server_ref)
-                    continue
-
+                    return (server_ref, True)
                 server_id = server_info.get("id")
                 if not server_id:
-                    # No ID available, add to installation list
-                    servers_needing_installation.add(server_ref)
-                    continue
-
-                # Check if this server needs installation in ANY of the target runtimes
-                needs_installation = False
+                    return (server_ref, True)
                 for runtime in target_runtimes:
                     if server_id not in installed_by_runtime[runtime]:
-                        needs_installation = True
-                        break
+                        return (server_ref, True)
+                return (server_ref, False)
+            except Exception:
+                return (server_ref, True)
 
-                if needs_installation:
-                    servers_needing_installation.add(server_ref)
+        servers_needing_installation: list[str] = []
+        workers = min(max_workers, len(server_references)) if server_references else 1
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="mcp-check") as executor:
+            for ref, needs_install in executor.map(_check_one, server_references):
+                if needs_install:
+                    servers_needing_installation.append(ref)
 
-            except Exception as e:  # noqa: F841
-                # If we can't check the server, assume it needs installation
-                servers_needing_installation.add(server_ref)
-
-        return list(servers_needing_installation)
+        return servers_needing_installation
 
     def _get_installed_server_ids(
         self,
@@ -179,49 +176,58 @@ class MCPServerOperations:
 
         return installed_ids
 
-    def validate_servers_exist(self, server_references: list[str]) -> tuple[list[str], list[str]]:
+    def validate_servers_exist(
+        self, server_references: list[str], max_workers: int = 4
+    ) -> tuple[list[str], list[str]]:
         """Validate that all servers exist in the registry before attempting installation.
 
         This implements fail-fast validation similar to npm's behavior.
-        Network errors are treated as transient — the server is assumed valid
+        Network errors are treated as transient -- the server is assumed valid
         so a flaky registry API does not block installation.
+
+        WS2b (#1116): lookups run in parallel via a bounded ThreadPoolExecutor
+        (uv-inspired).  Each registry HTTP call is independent; results are
+        collected in submission order via ``executor.map``.
 
         Args:
             server_references: List of MCP server references to validate
+            max_workers: Max parallel HTTP lookups (default 4).
 
         Returns:
             Tuple of (valid_servers, invalid_servers)
         """
-        valid_servers = []
-        invalid_servers = []
+        from concurrent.futures import ThreadPoolExecutor
 
-        for server_ref in server_references:
+        valid_servers: list[str] = []
+        invalid_servers: list[str] = []
+
+        def _validate_one(server_ref: str) -> tuple[str, bool]:
+            """Return (server_ref, is_valid)."""
             try:
                 server_info = self.registry_client.find_server_by_reference(server_ref)
-                if server_info:
-                    valid_servers.append(server_ref)
-                else:
-                    invalid_servers.append(server_ref)
+                return (server_ref, server_info is not None)
             except requests.RequestException:
                 if getattr(self.registry_client, "_is_custom_url", False):
-                    # Custom registry: fail-closed. The user explicitly configured
-                    # this endpoint; unreachable means hard error, not a silent
-                    # assumption of validity. Prevents silent misconfiguration
-                    # from reaching production. (#814)
                     raise RuntimeError(  # noqa: B904
                         f"Could not reach MCP registry at "
                         f"{self.registry_client.registry_url} while validating "
                         f"server '{server_ref}'. MCP_REGISTRY_URL is set -- "
                         f"verify the URL is correct and reachable."
                     )
-                # Default registry: transient error -- assume server exists and
-                # let downstream installation attempt the actual resolution.
                 logger.debug(
                     "Registry lookup failed for %s, assuming valid (transient error)",
                     server_ref,
                     exc_info=True,
                 )
-                valid_servers.append(server_ref)
+                return (server_ref, True)
+
+        workers = min(max_workers, len(server_references)) if server_references else 1
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="mcp-validate") as executor:
+            for ref, is_valid in executor.map(_validate_one, server_references):
+                if is_valid:
+                    valid_servers.append(ref)
+                else:
+                    invalid_servers.append(ref)
 
         return valid_servers, invalid_servers
 

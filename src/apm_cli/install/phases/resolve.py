@@ -23,6 +23,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.utils.short_sha import format_short_sha
+
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
 
@@ -67,7 +69,7 @@ def run(ctx: InstallContext) -> None:
                 )
             if ctx.logger.verbose:
                 for locked_dep in existing_lockfile.get_all_dependencies():
-                    _sha = locked_dep.resolved_commit[:8] if locked_dep.resolved_commit else ""
+                    _sha = format_short_sha(locked_dep.resolved_commit)
                     _ref = (
                         locked_dep.resolved_ref
                         if hasattr(locked_dep, "resolved_ref") and locked_dep.resolved_ref
@@ -96,6 +98,33 @@ def run(ctx: InstallContext) -> None:
     )
     ctx.downloader = downloader
 
+    # WS2a (#1116): attach a per-run shared clone cache so subdirectory
+    # deps from the same upstream repo+ref share a single git clone.
+    # The cache is cleaned up in the resolve phase's finally-equivalent
+    # (after resolution completes, whether success or failure).
+    from apm_cli.deps.shared_clone_cache import SharedCloneCache
+
+    shared_cache = SharedCloneCache()
+    downloader.shared_clone_cache = shared_cache
+
+    # WS3 (#1116): attach persistent cross-run git cache unless disabled
+    # via APM_NO_CACHE environment variable.
+    import os as _os
+
+    if not _os.environ.get("APM_NO_CACHE"):
+        from apm_cli.cache.paths import get_cache_root
+
+        try:
+            from apm_cli.cache.git_cache import GitCache
+
+            _cache_root = get_cache_root()
+            downloader.persistent_git_cache = GitCache(
+                _cache_root,
+                refresh=getattr(ctx, "refresh", False),
+            )
+        except (OSError, ValueError):
+            pass  # Cache unavailable (permissions, missing dir) -- degrade gracefully
+
     # ------------------------------------------------------------------
     # 4. Tracking variables (phase-local except where noted)
     # ------------------------------------------------------------------
@@ -105,6 +134,15 @@ def run(ctx: InstallContext) -> None:
     callback_downloaded: builtins.dict = {}
     transitive_failures: builtins.list = []
     callback_failures: builtins.set = builtins.set()
+    # F7 (#1116): the resolver may dispatch ``download_callback`` calls
+    # across a worker pool. CPython's GIL makes individual dict/set/list
+    # mutations atomic, but logging emission and the read+update on
+    # ``callback_downloaded`` (e.g. duplicate-key races) are not. A single
+    # narrow lock around the result-recording sites is sufficient and
+    # cheap; the heavy I/O work runs OUTSIDE the lock.
+    import threading as _threading
+
+    callback_lock = _threading.Lock()
 
     # ------------------------------------------------------------------
     # 5. Download callback for transitive resolution
@@ -134,6 +172,23 @@ def run(ctx: InstallContext) -> None:
         install_path = dep_ref.get_install_path(modules_dir)
         if install_path.exists():
             return install_path
+        # F1 (#1116): surface a heartbeat BEFORE the network/copy work so
+        # users see the install advancing past silent transitive lookups.
+        # Under F7's parallel BFS this callback may run on a worker
+        # thread, so serialise the emission via ``callback_lock`` to
+        # keep heartbeat lines from interleaving with each other.
+        # Workstream B (#1116): when the shared InstallTui is painting
+        # the Live region, the static heartbeat line would interleave
+        # with the spinner -- route the heartbeat to the TUI's
+        # task_started instead and skip the static line.
+        if logger:
+            with callback_lock:
+                _display = dep_ref.get_display_name()
+                _tui = getattr(ctx, "tui", None)
+                if _tui is not None:
+                    _tui.task_started(dep_ref.get_unique_key(), f"resolve {_display}")
+                if _tui is None or not _tui.is_animating():
+                    logger.resolving_heartbeat(_display)
         try:
             # Handle local packages: copy instead of git clone
             if dep_ref.is_local and dep_ref.local_path:
@@ -146,7 +201,11 @@ def run(ctx: InstallContext) -> None:
                     # absolute paths are unambiguous; reject relative refs.
                     # Note: callback_failures is a set (see line ~105),
                     # so use .add() rather than dict-style assignment.
-                    callback_failures.add(dep_ref.get_unique_key())
+                    with callback_lock:
+                        callback_failures.add(dep_ref.get_unique_key())
+                    _tui = getattr(ctx, "tui", None)
+                    if _tui is not None:
+                        _tui.task_failed(dep_ref.get_unique_key())
                     return None
                 # Anchor relative paths on the *declaring* package's source
                 # directory when available (#857). Falls back to project_root
@@ -164,8 +223,15 @@ def run(ctx: InstallContext) -> None:
                     logger=logger,
                 )
                 if result_path:
-                    callback_downloaded[dep_ref.get_unique_key()] = None
+                    with callback_lock:
+                        callback_downloaded[dep_ref.get_unique_key()] = None
+                    _tui = getattr(ctx, "tui", None)
+                    if _tui is not None:
+                        _tui.task_completed(dep_ref.get_unique_key())
                     return result_path
+                _tui = getattr(ctx, "tui", None)
+                if _tui is not None:
+                    _tui.task_failed(dep_ref.get_unique_key())
                 return None
 
             # T5: Use locked commit if available (reproducible installs)
@@ -194,7 +260,12 @@ def run(ctx: InstallContext) -> None:
             resolved_sha = None
             if result and hasattr(result, "resolved_reference") and result.resolved_reference:
                 resolved_sha = result.resolved_reference.resolved_commit
-            callback_downloaded[dep_ref.get_unique_key()] = resolved_sha
+            callback_downloaded_value = resolved_sha
+            with callback_lock:
+                callback_downloaded[dep_ref.get_unique_key()] = callback_downloaded_value
+            _tui = getattr(ctx, "tui", None)
+            if _tui is not None:
+                _tui.task_completed(dep_ref.get_unique_key())
             return install_path
         except Exception as e:
             dep_display = dep_ref.get_display_name()
@@ -211,11 +282,18 @@ def run(ctx: InstallContext) -> None:
 
             # Verbose: inline detail via logger (single output path).
             # Deferred diagnostics below cover the non-logger case.
-            if logger:
-                logger.verbose_detail(f"  {fail_msg}")
-            # Collect for deferred diagnostics summary (always, even non-verbose)
-            callback_failures.add(dep_key)
-            transitive_failures.append((dep_display, fail_msg))
+            # F7 (#1116): single critical section for both the logger
+            # emission and the result-recording so concurrent failures
+            # don't interleave their lines.
+            with callback_lock:
+                if logger:
+                    logger.verbose_detail(f"  {fail_msg}")
+                # Collect for deferred diagnostics summary (always, even non-verbose)
+                callback_failures.add(dep_key)
+                transitive_failures.append((dep_display, fail_msg))
+            _tui = getattr(ctx, "tui", None)
+            if _tui is not None:
+                _tui.task_failed(dep_key)
             return None
 
     # ------------------------------------------------------------------
@@ -403,3 +481,8 @@ def run(ctx: InstallContext) -> None:
     ctx.callback_downloaded = callback_downloaded
     ctx.callback_failures = callback_failures
     ctx.transitive_failures = transitive_failures
+
+    # WS2a (#1116): release shared clone temp dirs now that all subdir
+    # deps have extracted their subpaths.  Safe to call even if no
+    # subdir deps were processed (no-op in that case).
+    shared_cache.cleanup()

@@ -204,6 +204,32 @@ def robust_rmtree(
             raise
 
 
+def _reflink_copy_file(src: str, dst: str, *, follow_symlinks: bool = True) -> str:
+    """``shutil.copy2`` work-alike that tries a reflink clone first.
+
+    Falls through to ``shutil.copy2`` when the clone fails for any
+    reason. The fallback path is always executed when reflinks are
+    unsupported on the destination filesystem (cached per ``st_dev``)
+    or when ``APM_NO_REFLINK`` is set.
+
+    Used as the ``copy_function`` argument to :func:`shutil.copytree` so
+    every regular file in a tree benefits from copy-on-write when
+    available. Symlinks and special files are routed straight to
+    ``shutil.copy2`` because clone primitives only target regular files.
+    """
+    from .reflink import clone_file
+
+    try:
+        if follow_symlinks and not os.path.islink(src):
+            if clone_file(src, dst):
+                return dst
+    except OSError:
+        # Defensive: clone_file is documented as never-raises but the
+        # underlying ctypes/ioctl path could surface an os-level error.
+        pass
+    return shutil.copy2(src, dst, follow_symlinks=follow_symlinks)
+
+
 def robust_copytree(
     src: Path | str,
     dst: Path | str,
@@ -214,6 +240,10 @@ def robust_copytree(
     max_retries: int = _DEFAULT_MAX_RETRIES,
 ) -> Path:
     """Copy a directory tree, retrying on transient lock errors.
+
+    Per-file copies attempt a copy-on-write reflink clone first
+    (transparent on filesystems that support it) and fall back to
+    ``shutil.copy2`` otherwise.
 
     On retry, any partial destination is removed first (clean-slate),
     unless *dirs_exist_ok* is True.
@@ -244,6 +274,7 @@ def robust_copytree(
             dst_s,
             symlinks=symlinks,
             ignore=ignore,
+            copy_function=_reflink_copy_file,
             dirs_exist_ok=dirs_exist_ok,
         )
 
@@ -285,7 +316,7 @@ def robust_copy2(
     src_s, dst_s = str(src), str(dst)
 
     def _do_copy2() -> str:
-        return shutil.copy2(src_s, dst_s)
+        return _reflink_copy_file(src_s, dst_s)
 
     result = _retry_on_lock(
         _do_copy2,

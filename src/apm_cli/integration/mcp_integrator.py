@@ -1277,7 +1277,10 @@ class MCPIntegrator:
 
                 operations = MCPServerOperations()
 
-                # Early validation: check all servers exist in registry (fail-fast)
+                # Early validation: check all servers exist in registry (fail-fast).
+                # F4 (#1116): emit a single batch heartbeat so users see the
+                # registry round-trip in progress instead of silent stall.
+                logger.mcp_lookup_heartbeat(len(registry_dep_names))
                 if verbose:
                     logger.verbose_detail(f"Validating {len(registry_deps)} registry servers...")
                 valid_servers, invalid_servers = operations.validate_servers_exist(

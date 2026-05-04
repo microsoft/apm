@@ -206,6 +206,37 @@ class GitHubPackageDownloader:
         # Delegate backend-specific download logic to the download delegate.
         self._strategies = DownloadDelegate(host=self)
 
+        # WS2a (#1116): per-run shared clone cache for subdirectory dep
+        # deduplication.  Set by the install pipeline before resolution
+        # starts; None means no dedup (each subdir dep clones independently).
+        self.shared_clone_cache = None
+
+        # WS3 (#1116): persistent cross-run git cache.  When set, the
+        # download flow checks the on-disk cache before any network clone.
+        # Set by the install pipeline; None disables persistent caching.
+        self.persistent_git_cache = None
+
+    def _git_env_dict(self) -> dict[str, str]:
+        """Return a sanitized git env dict for cache-layer subprocess calls.
+
+        Combines the auth-aware ``self.git_env`` (which already strips
+        prompts and forces empty system config) with the ambient-state
+        sanitization performed by ``git_subprocess_env``. Required for
+        every ``GitCache.get_checkout`` call so that private repos
+        receive credentials AND the subprocess never inherits a stray
+        ``GIT_DIR`` / ``GIT_CEILING_DIRECTORIES`` that would bias the
+        cache fetch / integrity verification.
+        """
+        from ..utils.git_env import git_subprocess_env
+
+        env: dict[str, str] = git_subprocess_env()
+        # self.git_env carries auth tokens + safety flags; let it win
+        # over ambient os.environ where keys overlap.
+        for key, value in self.git_env.items():
+            if isinstance(value, str):
+                env[key] = value
+        return env
+
     def _setup_git_environment(self) -> dict[str, Any]:
         """Set up Git environment with authentication using centralized token manager.
 
@@ -1141,6 +1172,75 @@ class GitHubPackageDownloader:
             ref_name=ref_name,
         )
 
+    def _resolve_commit_sha_for_ref(self, dep_ref: DependencyReference, ref: str) -> str | None:
+        """Resolve a Git ref to its 40-char commit SHA via the cheap GitHub commits API.
+
+        Uses ``GET /repos/{owner}/{repo}/commits/{ref}`` with
+        ``Accept: application/vnd.github.sha`` which returns just the SHA in the
+        response body (no JSON parsing, no extra payload).
+
+        For Artifactory or Azure DevOps hosts, returns ``None`` -- no equivalent
+        cheap lookup is wired and the caller falls back to ``ref`` only.
+
+        Returns:
+            40-char commit SHA on success, ``None`` on any failure (404, network,
+            non-GitHub host, or unexpected body shape). Failures are swallowed
+            so callers can still record the ref name.
+        """
+        # Skip non-GitHub hosts -- Artifactory and Azure DevOps have no
+        # equivalent cheap commit-resolve endpoint we want to depend on here.
+        try:
+            if dep_ref.is_artifactory() or dep_ref.is_azure_devops():
+                return None
+        except Exception:
+            return None
+
+        host = dep_ref.host or default_host()
+
+        # If the user already passed a 40-char hex SHA, treat it as resolved.
+        if re.match(r"^[a-f0-9]{40}$", ref.lower() or ""):
+            return ref.lower()
+
+        try:
+            owner, repo = dep_ref.repo_url.split("/", 1)
+        except ValueError:
+            return None
+
+        # Build commits API URL -- mirrors the Contents API host shape.
+        if host == "github.com":
+            api_url = f"https://api.github.com/repos/{owner}/{repo}/commits/{ref}"
+        elif host.lower().endswith(".ghe.com"):
+            api_url = f"https://api.{host}/repos/{owner}/{repo}/commits/{ref}"
+        else:
+            api_url = f"https://{host}/api/v3/repos/{owner}/{repo}/commits/{ref}"
+
+        # Resolve auth using the same path the file download uses.
+        org = None
+        parts = dep_ref.repo_url.split("/")
+        if parts:
+            org = parts[0]
+        try:
+            file_ctx = self.auth_resolver.resolve(host, org, port=dep_ref.port)
+            token = file_ctx.token
+        except Exception:
+            token = None
+
+        headers: dict[str, str] = {"Accept": "application/vnd.github.sha"}
+        if token:
+            headers["Authorization"] = f"token {token}"
+
+        try:
+            response = self._resilient_get(api_url, headers=headers, timeout=10)
+            if response.status_code != 200:
+                return None
+            body = (response.text or "").strip()
+            if re.match(r"^[a-f0-9]{40}$", body.lower()):
+                return body.lower()
+            return None
+        except Exception:
+            # Network errors, retries exhausted, etc -- never fail the install.
+            return None
+
     def download_raw_file(
         self, dep_ref: DependencyReference, file_path: str, ref: str = "main", verbose_callback=None
     ) -> bytes:
@@ -1309,6 +1409,15 @@ class GitHubPackageDownloader:
         # Determine the ref to use
         ref = dep_ref.reference or "main"
 
+        # Resolve the commit SHA cheaply BEFORE the file download. This is one
+        # short HTTP call (Accept: application/vnd.github.sha returns just the
+        # 40-char SHA in the body) and the result is propagated into PackageInfo
+        # so the lockfile and per-dep header can render the SHA suffix instead
+        # of just the ref name. On non-GitHub hosts or any failure this returns
+        # None and we fall back to ref-name only -- the install never fails on
+        # SHA resolution.
+        resolved_commit = self._resolve_commit_sha_for_ref(dep_ref, ref)
+
         # Update progress - downloading
         if progress_obj and progress_task_id is not None:
             progress_obj.update(progress_task_id, completed=50, total=100)
@@ -1394,12 +1503,29 @@ class GitHubPackageDownloader:
             package_path=target_path,
         )
 
+        # Build the resolved reference. On non-GitHub hosts or SHA-resolve
+        # failure the resolved_commit stays None and the suffix renders as
+        # "#ref" only -- matching the existing subdirectory behavior in
+        # _try_sparse_checkout / _download_subdirectory.
+        ref_type = (
+            GitReferenceType.COMMIT
+            if re.match(r"^[a-f0-9]{40}$", ref.lower())
+            else GitReferenceType.BRANCH
+        )
+        resolved_ref = ResolvedReference(
+            original_ref=str(dep_ref.reference) if dep_ref.reference else ref,
+            ref_name=ref,
+            ref_type=ref_type,
+            resolved_commit=resolved_commit,
+        )
+
         # Return PackageInfo
         return PackageInfo(
             package=package,
             install_path=target_path,
             installed_at=datetime.now().isoformat(),
             dependency_ref=dep_ref,  # Store for canonical dependency string
+            resolved_reference=resolved_ref,
         )
 
     def _try_sparse_checkout(
@@ -1508,6 +1634,30 @@ class GitHubPackageDownloader:
         if progress_obj and progress_task_id is not None:
             progress_obj.update(progress_task_id, completed=10, total=100)
 
+        # WS2a (#1116): attempt shared clone dedup when a per-run cache
+        # is available.  Two subdir deps from the same (host, owner, repo, ref)
+        # share one clone; different refs always get independent clones.
+        shared_cache = self.shared_clone_cache
+        use_shared = shared_cache is not None
+        # Determine cache key components from the dep_ref.
+        cache_host = dep_ref.host or default_host()
+        cache_owner = dep_ref.repo_url.split("/")[0] if "/" in dep_ref.repo_url else ""
+        cache_repo = dep_ref.repo_url.split("/")[1] if "/" in dep_ref.repo_url else dep_ref.repo_url
+
+        # WS3 (#1116): try persistent cross-run cache first.
+        # Build a canonical URL for cache key derivation.
+        _persistent_cache = self.persistent_git_cache
+        _persistent_checkout: Path | None = None
+        if _persistent_cache is not None:
+            _canonical_url = f"https://{cache_host}/{cache_owner}/{cache_repo}"
+            try:
+                _persistent_checkout = _persistent_cache.get_checkout(
+                    _canonical_url, ref, env=self._git_env_dict()
+                )
+            except Exception:
+                # Cache miss or failure -- fall through to normal clone path.
+                _persistent_checkout = None
+
         # Use mkdtemp + explicit cleanup so we control when rmtree runs.
         # tempfile.TemporaryDirectory().__exit__ calls shutil.rmtree without our
         # retry logic, which raises WinError 32 when git processes still hold
@@ -1515,71 +1665,120 @@ class GitHubPackageDownloader:
         from ..config import get_apm_temp_dir
 
         temp_dir = None
+        shared_clone_path: Path | None = None
         try:
-            temp_dir = tempfile.mkdtemp(dir=get_apm_temp_dir())
-            # Sparse checkout always targets "repo/".  If it fails we clone into
-            # "repo_clone/" so we never have to rmtree a directory that may still
-            # have live git handles from the failed subprocess.
-            sparse_clone_path = Path(temp_dir) / "repo"
-            temp_clone_path = sparse_clone_path
-
-            # Update progress - cloning
-            if progress_obj and progress_task_id is not None:
-                progress_obj.update(progress_task_id, completed=20, total=100)
-
-            # Phase 4 (#171): Try sparse-checkout first (git 2.25+), fall back to full clone
-            sparse_ok = self._try_sparse_checkout(dep_ref, sparse_clone_path, subdir_path, ref)
-
-            if not sparse_ok:
-                # Full clone into a fresh subdirectory so we don't have to touch
-                # the (possibly locked) sparse-checkout directory at all.
-                temp_clone_path = Path(temp_dir) / "repo_clone"
-
-                package_display_name = subdir_path.split("/")[-1]
-                progress_reporter = (
-                    GitProgressReporter(progress_task_id, progress_obj, package_display_name)
-                    if progress_task_id and progress_obj
-                    else None
-                )
-
-                # Detect if ref is a commit SHA (can't be used with --branch in shallow clones)
-                is_commit_sha = ref and re.match(r"^[a-f0-9]{7,40}$", ref) is not None
-
-                clone_kwargs = {
-                    "dep_ref": dep_ref,
-                }
-                if is_commit_sha:
-                    # For commit SHAs, clone without checkout then checkout the specific commit.
-                    # Shallow clone doesn't support fetching by arbitrary SHA.
-                    clone_kwargs["no_checkout"] = True
-                else:
-                    clone_kwargs["depth"] = 1
-                    if ref:
-                        clone_kwargs["branch"] = ref
+            if _persistent_checkout is not None:
+                # WS3: persistent cache hit -- use the cached checkout directly.
+                temp_clone_path = _persistent_checkout
+            elif use_shared:
+                # Try shared clone path.  clone_fn encapsulates the full
+                # sparse-checkout -> fallback-clone logic.
+                def _shared_clone_fn(clone_target: Path) -> None:
+                    sparse_path = clone_target
+                    sparse_ok = self._try_sparse_checkout(dep_ref, sparse_path, subdir_path, ref)
+                    if sparse_ok:
+                        return
+                    # Sparse failed -- full clone into same target
+                    # (shared cache doesn't care about the sparse/full distinction)
+                    full_path = clone_target.parent / "repo_clone"
+                    is_commit_sha = ref and re.match(r"^[a-f0-9]{7,40}$", ref) is not None
+                    clone_kwargs = {"dep_ref": dep_ref}
+                    if is_commit_sha:
+                        clone_kwargs["no_checkout"] = True
+                    else:
+                        clone_kwargs["depth"] = 1
+                        if ref:
+                            clone_kwargs["branch"] = ref
+                    self._clone_with_fallback(dep_ref.repo_url, full_path, **clone_kwargs)
+                    if is_commit_sha:
+                        repo_obj = None
+                        try:
+                            repo_obj = Repo(full_path)
+                            repo_obj.git.checkout(ref)
+                        except Exception as e:
+                            raise RuntimeError(f"Failed to checkout commit {ref}: {e}") from e
+                        finally:
+                            _close_repo(repo_obj)
+                    # Move full clone into expected position (rename is atomic
+                    # on same filesystem).  If sparse path already exists from
+                    # the failed attempt, remove it first.
+                    if sparse_path.exists():
+                        _rmtree(sparse_path)
+                    full_path.rename(sparse_path)
 
                 try:
-                    self._clone_with_fallback(
-                        dep_ref.repo_url,
-                        temp_clone_path,
-                        progress_reporter=progress_reporter,
-                        **clone_kwargs,
+                    shared_clone_path = shared_cache.get_or_clone(
+                        cache_host, cache_owner, cache_repo, ref, _shared_clone_fn
                     )
                 except Exception as e:
                     raise RuntimeError(f"Failed to clone repository: {e}") from e
+                temp_clone_path = shared_clone_path
+            else:
+                # Legacy per-dep clone path (no shared cache).
+                temp_dir = tempfile.mkdtemp(dir=get_apm_temp_dir())
+                # Sparse checkout always targets "repo/".  If it fails we clone into
+                # "repo_clone/" so we never have to rmtree a directory that may still
+                # have live git handles from the failed subprocess.
+                sparse_clone_path = Path(temp_dir) / "repo"
+                temp_clone_path = sparse_clone_path
 
-                if is_commit_sha:
-                    repo_obj = None
+                # Update progress - cloning
+                if progress_obj and progress_task_id is not None:
+                    progress_obj.update(progress_task_id, completed=20, total=100)
+
+                # Phase 4 (#171): Try sparse-checkout first (git 2.25+), fall back to full clone
+                sparse_ok = self._try_sparse_checkout(dep_ref, sparse_clone_path, subdir_path, ref)
+
+                if not sparse_ok:
+                    # Full clone into a fresh subdirectory so we don't have to touch
+                    # the (possibly locked) sparse-checkout directory at all.
+                    temp_clone_path = Path(temp_dir) / "repo_clone"
+
+                    package_display_name = subdir_path.split("/")[-1]
+                    progress_reporter = (
+                        GitProgressReporter(progress_task_id, progress_obj, package_display_name)
+                        if progress_task_id and progress_obj
+                        else None
+                    )
+
+                    # Detect if ref is a commit SHA (can't be used with --branch in shallow clones)
+                    is_commit_sha = ref and re.match(r"^[a-f0-9]{7,40}$", ref) is not None
+
+                    clone_kwargs = {
+                        "dep_ref": dep_ref,
+                    }
+                    if is_commit_sha:
+                        # For commit SHAs, clone without checkout then checkout the specific commit.
+                        # Shallow clone doesn't support fetching by arbitrary SHA.
+                        clone_kwargs["no_checkout"] = True
+                    else:
+                        clone_kwargs["depth"] = 1
+                        if ref:
+                            clone_kwargs["branch"] = ref
+
                     try:
-                        repo_obj = Repo(temp_clone_path)
-                        repo_obj.git.checkout(ref)
+                        self._clone_with_fallback(
+                            dep_ref.repo_url,
+                            temp_clone_path,
+                            progress_reporter=progress_reporter,
+                            **clone_kwargs,
+                        )
                     except Exception as e:
-                        raise RuntimeError(f"Failed to checkout commit {ref}: {e}") from e
-                    finally:
-                        _close_repo(repo_obj)
+                        raise RuntimeError(f"Failed to clone repository: {e}") from e
 
-                # Disable progress reporter after clone
-                if progress_reporter:
-                    progress_reporter.disabled = True
+                    if is_commit_sha:
+                        repo_obj = None
+                        try:
+                            repo_obj = Repo(temp_clone_path)
+                            repo_obj.git.checkout(ref)
+                        except Exception as e:
+                            raise RuntimeError(f"Failed to checkout commit {ref}: {e}") from e
+                        finally:
+                            _close_repo(repo_obj)
+
+                    # Disable progress reporter after clone
+                    if progress_reporter:
+                        progress_reporter.disabled = True
 
             # Update progress - extracting subdirectory
             if progress_obj and progress_task_id is not None:
@@ -1950,6 +2149,75 @@ class GitHubPackageDownloader:
         if target_path.exists() and any(target_path.iterdir()):
             _rmtree(target_path)
             target_path.mkdir(parents=True, exist_ok=True)
+
+        # WS3 (#1116): persistent cross-run cache fast path for whole-repo
+        # deps.  When a cached checkout exists for the resolved SHA, copy
+        # files directly into target_path and skip the network clone.
+        _persistent_cache = self.persistent_git_cache
+        if _persistent_cache is not None:
+            try:
+                cache_host = dep_ref.host or default_host()
+                cache_owner = dep_ref.repo_url.split("/")[0] if "/" in dep_ref.repo_url else ""
+                cache_repo = (
+                    dep_ref.repo_url.split("/")[1] if "/" in dep_ref.repo_url else dep_ref.repo_url
+                )
+                _canonical_url = f"https://{cache_host}/{cache_owner}/{cache_repo}"
+                _cached = _persistent_cache.get_checkout(
+                    _canonical_url,
+                    resolved_ref.resolved_commit or resolved_ref.ref_name,
+                    locked_sha=resolved_ref.resolved_commit,
+                    env=self._git_env_dict(),
+                )
+                from ..utils.file_ops import robust_copy2, robust_copytree
+
+                for item in _cached.iterdir():
+                    if item.name == ".git":
+                        continue
+                    src = _cached / item.name
+                    dst = target_path / item.name
+                    if src.is_dir():
+                        robust_copytree(src, dst)
+                    else:
+                        robust_copy2(src, dst)
+
+                # Validate, then return without cloning.
+                validation_result = validate_apm_package(target_path)
+                if validation_result.is_valid and validation_result.package:
+                    package = validation_result.package
+                    package.source = dep_ref.to_github_url()
+                    package.resolved_commit = resolved_ref.resolved_commit
+                    if (
+                        validation_result.package_type == PackageType.MARKETPLACE_PLUGIN
+                        and package.version == "0.0.0"
+                        and resolved_ref.resolved_commit
+                    ):
+                        short_sha = resolved_ref.resolved_commit[:7]
+                        package.version = short_sha
+                        apm_yml_path = target_path / "apm.yml"
+                        if apm_yml_path.exists():
+                            from ..utils.yaml_io import dump_yaml, load_yaml
+
+                            _data = load_yaml(apm_yml_path) or {}
+                            _data["version"] = short_sha
+                            dump_yaml(_data, apm_yml_path)
+                    return PackageInfo(
+                        package=package,
+                        install_path=target_path,
+                        resolved_reference=resolved_ref,
+                        installed_at=datetime.now().isoformat(),
+                        dependency_ref=dep_ref,
+                        package_type=validation_result.package_type,
+                    )
+                # Validation failed against cached copy: fall through to a
+                # fresh clone (cache may be stale or repo structure changed).
+                if target_path.exists() and any(target_path.iterdir()):
+                    _rmtree(target_path)
+                    target_path.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                # Any cache failure -> fall back to network clone.
+                if target_path.exists() and any(target_path.iterdir()):
+                    _rmtree(target_path)
+                    target_path.mkdir(parents=True, exist_ok=True)
 
         # Store progress reporter so we can disable it after clone
         progress_reporter = None

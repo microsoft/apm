@@ -1,9 +1,11 @@
 """APM install command and dependency installation engine."""
 
 import builtins
+import contextlib
 import dataclasses
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any, List, Optional  # noqa: F401, UP035
 
@@ -89,7 +91,6 @@ from ..utils.path_security import safe_rmtree  # noqa: F401
 from ._helpers import (
     _create_minimal_apm_yml,
     _get_default_config,
-    _rich_blank_line,
     _update_gitignore_for_apm_modules,  # noqa: F401
 )
 
@@ -197,6 +198,7 @@ class InstallContext:
     no_policy: bool
     install_mode: Any  # InstallMode
     packages: tuple  # Original Click packages
+    refresh: bool = False
     only_packages: builtins.list | None = None
     manifest_snapshot: bytes | None = None
     snapshot_manifest_path: Optional["Path"] = None
@@ -951,6 +953,12 @@ def _handle_mcp_install(
     help="Skip org policy enforcement for this invocation. Does NOT bypass apm audit --ci.",
 )
 @click.option(
+    "--refresh",
+    is_flag=True,
+    default=False,
+    help="Bypass the persistent cache and re-fetch all dependencies from upstream.",
+)
+@click.option(
     "--legacy-skill-paths",
     "legacy_skill_paths",
     is_flag=True,
@@ -1002,6 +1010,7 @@ def install(  # noqa: PLR0913
     registry_url,
     skill_names,
     no_policy,
+    refresh,
     legacy_skill_paths,
     alias,
 ):
@@ -1027,10 +1036,21 @@ def install(  # noqa: PLR0913
         apm install ./build/my-bundle           # Deploy a local bundle (directory)
         apm install ./my-bundle.tar.gz          # Deploy a local bundle (archive)
         apm install ./bundle --as custom-name   # Local bundle with custom log label
+
+    Environment variables:
+        APM_PROGRESS    Animated install UI: auto (default; TTY only,
+                        off in CI), always (force on -- never set in CI),
+                        never (disable; also implied for non-TTY stdout).
     """
     # C1 #856: defaults BEFORE try so the finally clause never sees an
     # UnboundLocalError if InstallLogger(...) raises during construction.
     _apm_verbose_prev = os.environ.get("APM_VERBOSE")
+    # F5 (#1116): elapsed wall time covers EVERY exit path. Captured
+    # before logger construction so `finally` can render a timing line
+    # even if logger init itself raised.
+    install_started_at = time.perf_counter()
+    summary_rendered = False
+    logger = None
     try:
         # Create structured logger for install output early so exception
         # handlers can always reference it (avoids UnboundLocalError if
@@ -1348,6 +1368,7 @@ def install(  # noqa: PLR0913
             no_policy=no_policy,
             install_mode=InstallMode(only) if only else InstallMode.ALL,
             packages=packages,
+            refresh=refresh,
             only_packages=builtins.list(validated_packages) if packages else None,
             manifest_snapshot=_manifest_snapshot,
             snapshot_manifest_path=_snapshot_manifest_path,
@@ -1365,7 +1386,9 @@ def install(  # noqa: PLR0913
             mcp_count=mcp_count,
             apm_diagnostics=apm_diagnostics,
             force=force,
+            elapsed_seconds=time.perf_counter() - install_started_at,
         )
+        summary_rendered = True
 
     except InsecureDependencyPolicyError:
         _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
@@ -1386,11 +1409,20 @@ def install(  # noqa: PLR0913
         raise
     except Exception as e:
         _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
-        logger.error(f"Error installing dependencies: {e}")
-        if not verbose:
-            logger.progress("Run with --verbose for detailed diagnostics")
+        if logger:
+            logger.error(f"Error installing dependencies: {e}")
+            if not verbose:
+                logger.progress("Run with --verbose for detailed diagnostics")
+        else:
+            _rich_error(f"Error installing dependencies: {e}")
         sys.exit(1)
     finally:
+        # F5 (#1116): render minimal elapsed-time line on exit paths that
+        # did not already render the full install summary. Best-effort:
+        # never let a render failure mask the original exception/exit.
+        if not summary_rendered and logger is not None:
+            with contextlib.suppress(Exception):
+                logger.install_interrupted(elapsed_seconds=time.perf_counter() - install_started_at)
         # HACK(#852) cleanup: restore APM_VERBOSE so it stays scoped to this call.
         if _apm_verbose_prev is None:
             os.environ.pop("APM_VERBOSE", None)
@@ -1700,37 +1732,25 @@ def _install_apm_packages(ctx, outcome):
     return apm_count, mcp_count, apm_diagnostics
 
 
-def _post_install_summary(*, logger, apm_count, mcp_count, apm_diagnostics, force):
-    """Render diagnostics and final install summary.
+def _post_install_summary(
+    *, logger, apm_count, mcp_count, apm_diagnostics, force, elapsed_seconds=None
+):
+    """Thin shim forwarding to :func:`apm_cli.install.summary.render_post_install_summary`.
 
-    Shows diagnostic details (if any), the install summary line, and
-    exits with code 1 when critical security findings are present
-    (unless *force* is set).
+    Kept as a module-level alias so existing tests that
+    ``@patch("apm_cli.commands.install._post_install_summary")`` continue
+    to work after the extraction (microsoft/apm#1116, F5).
     """
-    # Show diagnostics and final install summary
-    if apm_diagnostics and apm_diagnostics.has_diagnostics:
-        apm_diagnostics.render_summary()
-    else:
-        _rich_blank_line()
+    from apm_cli.install.summary import render_post_install_summary
 
-    error_count = 0
-    if apm_diagnostics:
-        try:
-            error_count = int(apm_diagnostics.error_count)
-        except (TypeError, ValueError):
-            error_count = 0
-    logger.install_summary(
+    render_post_install_summary(
+        logger=logger,
         apm_count=apm_count,
         mcp_count=mcp_count,
-        errors=error_count,
-        stale_cleaned=logger.stale_cleaned_total,
+        apm_diagnostics=apm_diagnostics,
+        force=force,
+        elapsed_seconds=elapsed_seconds,
     )
-
-    # Hard-fail when critical security findings blocked any package.
-    # Consistent with apm unpack which also hard-fails on critical.
-    # Use --force to override.
-    if not force and apm_diagnostics and apm_diagnostics.has_critical_security:
-        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------

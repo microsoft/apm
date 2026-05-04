@@ -86,6 +86,24 @@ class CommandLogger:
         """Log progress during an operation."""
         _rich_info(message, symbol=symbol)
 
+    def mcp_lookup_heartbeat(self, count: int):
+        """Emit a single batch heartbeat before MCP registry validation
+        (F4, microsoft/apm#1116).
+
+        Surfaces a static ``[>] Looking up N MCP server(s) in
+        registry...`` line so the user sees the install moving forward
+        during the (sometimes multi-second) registry round trip. Static
+        line, not a transient progress bar, so it survives in CI logs
+        and ``2>&1 | tee`` pipelines.
+
+        Skipped silently when ``count <= 0`` to avoid noisy zero-batch
+        output on installs with no registry MCP deps.
+        """
+        if count <= 0:
+            return
+        noun = "server" if count == 1 else "servers"
+        _rich_info(f"Looking up {count} MCP {noun} in registry...", symbol="running")
+
     def info(self, message: str, symbol: str = "info"):
         """Log static advisory / informational context.
 
@@ -259,6 +277,24 @@ class InstallLogger(CommandLogger):
             self.verbose_detail(f"  Using cached: {dep_name}")
         elif self.verbose:
             _rich_info(f"  Downloading: {dep_name}", symbol="download")
+
+    def resolving_heartbeat(self, dep_name: str):
+        """Emit a per-dependency progress heartbeat during BFS resolve.
+
+        Surfaces an immediate ``[>] Resolving <name>...`` line so the
+        user sees the install moving forward instead of staring at
+        silence while transitive lookups happen behind the scenes
+        (F1, microsoft/apm#1116). The line is static (not a Rich
+        transient progress bar) so it survives in CI logs and behind
+        ``2>&1 | tee`` pipelines, which the duck critique flagged as
+        the must-survive surface.
+
+        Called from the MAIN thread by the resolver/download callback
+        BEFORE network work begins; F7's parallel BFS keeps emission
+        on the main thread so output ordering is deterministic even
+        when downloads are dispatched to a worker pool.
+        """
+        _rich_info(f"Resolving {dep_name}...", symbol="running")
 
     def download_complete(
         self,
@@ -631,6 +667,7 @@ class InstallLogger(CommandLogger):
         mcp_count: int,
         errors: int = 0,
         stale_cleaned: int = 0,
+        elapsed_seconds: float | None = None,
     ):
         """Log final install summary.
 
@@ -641,6 +678,10 @@ class InstallLogger(CommandLogger):
             stale_cleaned: Total stale + orphan files removed during
                 this install. Reported as a parenthetical so existing
                 callers and assertion patterns continue to work.
+            elapsed_seconds: Wall-clock duration of the install command.
+                When provided, appended as `` in {x:.1f}s`` before the
+                terminating period so the user can see how long the
+                whole command took (F5, microsoft/apm#1116).
         """
         parts = []
         if apm_count > 0:
@@ -655,14 +696,38 @@ class InstallLogger(CommandLogger):
             file_noun = "file" if stale_cleaned == 1 else "files"
             cleanup_suffix = f" ({stale_cleaned} stale {file_noun} cleaned)"
 
+        timing_suffix = ""
+        if elapsed_seconds is not None:
+            timing_suffix = f" in {elapsed_seconds:.1f}s"
+
         if parts:
             summary = " and ".join(parts)
             if errors > 0:
                 _rich_warning(
-                    f"Installed {summary}{cleanup_suffix} with {errors} error(s).",
+                    f"Installed {summary}{cleanup_suffix}{timing_suffix} with {errors} error(s).",
                     symbol="warning",
                 )
             else:
-                _rich_success(f"Installed {summary}{cleanup_suffix}.", symbol="sparkles")
+                _rich_success(
+                    f"Installed {summary}{cleanup_suffix}{timing_suffix}.",
+                    symbol="sparkles",
+                )
         elif errors > 0:
-            _rich_error(f"Installation failed with {errors} error(s).", symbol="error")
+            _rich_error(
+                f"Installation failed with {errors} error(s){timing_suffix}.",
+                symbol="error",
+            )
+
+    def install_interrupted(self, elapsed_seconds: float):
+        """Log a minimal elapsed-time line when the normal summary did
+        not render (errors, KeyboardInterrupt, click.UsageError).
+
+        Emitted from the outer ``finally`` in ``commands.install.install``
+        so users always see how long the failed/interrupted command ran
+        (F5, microsoft/apm#1116). Best-effort: callers swallow any
+        exception so a render failure cannot mask the original error.
+        """
+        _rich_warning(
+            f"Install interrupted after {elapsed_seconds:.1f}s.",
+            symbol="warning",
+        )

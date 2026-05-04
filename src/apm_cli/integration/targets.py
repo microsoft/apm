@@ -383,6 +383,18 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         primitives={
             "instructions": PrimitiveMapping("rules", ".mdc", "cursor_rules"),
             "agents": PrimitiveMapping("agents", ".md", "cursor_agent"),
+            # TODO(cursor-command-format): track via dedicated issue once
+            # filed.  Cursor command deployment reuses the shared command
+            # transformer (claude_command), which preserves only the
+            # supported common frontmatter subset (description,
+            # allowed-tools, model, argument-hint, input).  Switch to a
+            # dedicated "cursor_command" format when the integrator
+            # implements a Cursor-specific writer that preserves
+            # Cursor-specific prompt metadata (author, mcp, parameters,
+            # ...) verbatim.  Dropped keys are surfaced via
+            # diagnostics.warn() at install time -- see
+            # command_integrator.
+            "commands": PrimitiveMapping("commands", ".md", "claude_command"),
             "skills": PrimitiveMapping(
                 "skills",
                 "/SKILL.md",

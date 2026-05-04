@@ -2,7 +2,10 @@
 
 import inspect
 import logging
+import os
+import threading
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import List, Optional, Protocol, Set, Tuple  # noqa: F401, UP035
 
@@ -17,6 +20,15 @@ from .dependency_graph import (
 )
 
 _logger = logging.getLogger(__name__)
+
+
+# Default worker pool size for the level-batched BFS download phase.
+# Parallel resolution is the CENTRAL execution model (uv-inspired);
+# the ``APM_RESOLVE_PARALLEL`` env var exists solely as a diagnostic /
+# parity-testing knob (e.g. ``APM_RESOLVE_PARALLEL=1 apm install`` to
+# reproduce legacy sequential ordering for diff-debugging).  It is NOT
+# a user-facing feature toggle.
+_DEFAULT_RESOLVE_PARALLEL = 4
 
 
 # Type alias for the download callback.
@@ -49,6 +61,7 @@ class APMDependencyResolver:
         max_depth: int = 50,
         apm_modules_dir: Path | None = None,
         download_callback: DownloadCallback | None = None,
+        max_parallel: int | None = None,
     ):
         """Initialize the resolver with maximum recursion depth.
 
@@ -58,6 +71,13 @@ class APMDependencyResolver:
                              will be determined from project_root during resolution.
             download_callback: Optional callback to download missing packages. If provided,
                                the resolver will attempt to fetch uninstalled transitive deps.
+            max_parallel: Max worker threads for the level-batched
+                parallel BFS download phase (the default execution
+                model). ``None`` resolves from the
+                ``APM_RESOLVE_PARALLEL`` env var, falling back to
+                ``_DEFAULT_RESOLVE_PARALLEL`` (4). Set to ``1`` ONLY
+                for parity-testing against the legacy sequential path
+                -- this is a diagnostic knob, not a user toggle.
         """
         self.max_depth = max_depth
         self._apm_modules_dir: Path | None = apm_modules_dir
@@ -84,6 +104,40 @@ class APMDependencyResolver:
         # copied later via ``_copy_local_package``, defeating the
         # fail-closed posture this guard is meant to enforce.
         self._rejected_remote_local_keys: set[str] = set()
+        # Protects mutations of ``_downloaded_packages`` and
+        # ``_rejected_remote_local_keys`` when the parallel BFS
+        # dispatches ``_try_load_dependency_package`` calls onto a
+        # worker pool. The ``max_parallel=1`` parity path still
+        # acquires the lock -- the overhead is negligible and the
+        # symmetry simplifies reasoning.
+        self._download_lock = threading.Lock()
+        self._max_parallel = self._resolve_max_parallel(max_parallel)
+
+    @staticmethod
+    def _resolve_max_parallel(explicit: int | None) -> int:
+        """Compute effective worker count for level-batched parallel BFS.
+
+        Parallel is the default and central execution model.  The
+        override exists for parity testing (``APM_RESOLVE_PARALLEL=1``)
+        and CI diagnostics, not as a user-facing knob.
+
+        Order of precedence:
+        1. Explicit ``max_parallel`` ctor arg.
+        2. ``APM_RESOLVE_PARALLEL`` env var (diagnostic/parity knob).
+        3. ``_DEFAULT_RESOLVE_PARALLEL``.
+
+        Always coerced to ``>= 1`` so the executor never gets a zero
+        or negative ``max_workers``.
+        """
+        if explicit is not None:
+            return max(1, int(explicit))
+        env = os.environ.get("APM_RESOLVE_PARALLEL", "").strip()
+        if env:
+            try:
+                return max(1, int(env))
+            except ValueError:
+                _logger.debug("Ignoring invalid APM_RESOLVE_PARALLEL=%r", env)
+        return _DEFAULT_RESOLVE_PARALLEL
 
     @staticmethod
     def _signature_accepts_parent_pkg(callback) -> bool:
@@ -223,88 +277,134 @@ class APMDependencyResolver:
                 queued_keys.add(key)
             # If already queued as prod, prod wins — skip
 
-        # Process dependencies breadth-first
+        # Process dependencies breadth-first with level-batched parallelism.
+        #
+        # Parallel BFS is the CENTRAL resolution strategy (uv-inspired).
+        # Each level fans out potentially I/O-bound
+        # ``_try_load_dependency_package`` calls across a bounded worker
+        # pool. All tree mutations -- ``tree.add_node``,
+        # ``parent_node.children.append``, ``processing_queue.append``,
+        # ``queued_keys`` writes -- still happen on the main thread, in
+        # deterministic submission order, so parallelism never affects
+        # the resolved tree shape.
+        #
+        # The ``max_parallel == 1`` branch exists SOLELY as a parity-
+        # testing escape hatch (verifies sequential-identical output);
+        # it is not a user-facing toggle.
         while processing_queue:
-            dep_ref, depth, parent_node, is_dev = processing_queue.popleft()
+            # --- Drain one level ---
+            current_depth = processing_queue[0][1]
+            level_items: list[tuple[DependencyReference, int, DependencyNode | None, bool]] = []
+            while processing_queue and processing_queue[0][1] == current_depth:
+                level_items.append(processing_queue.popleft())
 
-            # Remove from queued set since we're now processing this dependency
-            queued_keys.discard(dep_ref.get_unique_key())
+            # --- Phase A (main thread): dedup + node creation ---
+            # Each work_item is (node, dep_ref, parent_node, is_dev)
+            # and represents a NEW node that needs its package loaded.
+            # Items that hit the existing-node fast-path or exceed
+            # ``max_depth`` are resolved here and never reach the worker
+            # pool.
+            work_items: list[
+                tuple[DependencyNode, DependencyReference, DependencyNode | None, bool]
+            ]
+            work_items = []
+            for dep_ref, depth, parent_node, is_dev in level_items:
+                # Remove from queued set since we're now processing this dependency
+                queued_keys.discard(dep_ref.get_unique_key())
 
-            # Check maximum depth to prevent infinite recursion
-            if depth > self.max_depth:
-                continue
+                # Check maximum depth to prevent infinite recursion
+                if depth > self.max_depth:
+                    continue
 
-            # Check if we already processed this dependency at this level or higher
-            existing_node = tree.get_node(dep_ref.get_unique_key())
-            if existing_node and existing_node.depth <= depth:
-                # Prod wins over dev: if existing was dev and this is prod, promote it
-                if existing_node.is_dev and not is_dev:
-                    existing_node.is_dev = False
-                # We've already processed this dependency at a shallower or equal depth
-                # Create parent-child relationship if parent exists
-                if parent_node and existing_node not in parent_node.children:
-                    parent_node.children.append(existing_node)
-                continue
+                # Check if we already processed this dependency at this level or higher
+                existing_node = tree.get_node(dep_ref.get_unique_key())
+                if existing_node and existing_node.depth <= depth:
+                    # Prod wins over dev: if existing was dev and this is prod, promote it
+                    if existing_node.is_dev and not is_dev:
+                        existing_node.is_dev = False
+                    # We've already processed this dependency at a shallower or equal depth
+                    # Create parent-child relationship if parent exists
+                    if parent_node and existing_node not in parent_node.children:
+                        parent_node.children.append(existing_node)
+                    continue
 
-            # Create a new node for this dependency
-            # Note: In a real implementation, we would load the actual package here
-            # For now, create a placeholder package
-            placeholder_package = APMPackage(
-                name=dep_ref.get_display_name(), version="unknown", source=dep_ref.repo_url
-            )
-
-            node = DependencyNode(
-                package=placeholder_package,
-                dependency_ref=dep_ref,
-                depth=depth,
-                parent=parent_node,
-                is_dev=is_dev,
-            )
-
-            # Add to tree
-            tree.add_node(node)
-
-            # Create parent-child relationship
-            if parent_node:
-                parent_node.children.append(node)
-
-            # Try to load the dependency package and its dependencies
-            # For Task 3, this focuses on the resolution algorithm structure
-            # Package loading integration will be completed in Tasks 2 & 4
-            try:
-                # Compute breadcrumb chain from this node's ancestry so download
-                # errors can report "root > mid > failing-dep" context.
-                parent_chain = node.get_ancestor_chain()
-
-                loaded_package = self._try_load_dependency_package(
-                    dep_ref,
-                    parent_chain=parent_chain,
-                    parent_pkg=parent_node.package if parent_node else None,
+                # Create a new node for this dependency
+                # Note: In a real implementation, we would load the actual package here
+                # For now, create a placeholder package
+                placeholder_package = APMPackage(
+                    name=dep_ref.get_display_name(), version="unknown", source=dep_ref.repo_url
                 )
+
+                node = DependencyNode(
+                    package=placeholder_package,
+                    dependency_ref=dep_ref,
+                    depth=depth,
+                    parent=parent_node,
+                    is_dev=is_dev,
+                )
+
+                # Add to tree
+                tree.add_node(node)
+
+                # Create parent-child relationship
+                if parent_node:
+                    parent_node.children.append(node)
+
+                work_items.append((node, dep_ref, parent_node, is_dev))
+
+            # --- Phase B (workers): load packages ---
+            if not work_items:
+                results: list[
+                    tuple[
+                        tuple[DependencyNode, DependencyReference, DependencyNode | None, bool],
+                        APMPackage | None,
+                        Exception | None,
+                    ]
+                ] = []
+            elif self._max_parallel == 1 or len(work_items) == 1:
+                # Parity-testing path: byte-identical to legacy sequential
+                # output so ``APM_RESOLVE_PARALLEL=1`` can be used to
+                # diff-debug ordering issues.  NOT a feature flag.
+                results = [self._load_work_item(it) for it in work_items]
+            else:
+                workers = min(self._max_parallel, len(work_items))
+                with ThreadPoolExecutor(
+                    max_workers=workers, thread_name_prefix="apm-resolve"
+                ) as executor:
+                    # ``executor.map`` preserves submission order, which
+                    # keeps next-level enqueuing deterministic regardless
+                    # of which worker finishes first.
+                    results = list(executor.map(self._load_work_item, work_items))
+
+            # --- Phase C (main thread): integrate results, enqueue sub-deps ---
+            for (node, dep_ref, _parent_node, is_dev), loaded_package, exc in results:
+                if exc is not None:
+                    # Could not load dependency package -- expected for remote deps
+                    # whose apm.yml lives at the resolved repo. Surface via stdlib
+                    # debug logger so --verbose users can diagnose silent skips
+                    # (#940 SR2). The node already has a placeholder package, so
+                    # subsequent integration phases keep working.
+                    _logger.debug(
+                        "Could not load transitive apm.yml for %s: %s",
+                        dep_ref.get_display_name(),
+                        exc,
+                    )
+                    continue
                 if loaded_package:
                     # Update the node with the actual loaded package
                     node.package = loaded_package
 
                     # Get sub-dependencies and add them to the processing queue
-                    # Transitive deps inherit is_dev from parent
+                    # Transitive deps inherit is_dev from parent. Iteration
+                    # order matches the manifest's declaration order, which
+                    # ``loaded_package.get_apm_dependencies()`` preserves.
                     sub_dependencies = loaded_package.get_apm_dependencies()
                     for sub_dep in sub_dependencies:
                         # Avoid infinite recursion by checking if we're already processing this dep
                         # Use O(1) set lookup instead of O(n) list comprehension
                         if sub_dep.get_unique_key() not in queued_keys:
-                            processing_queue.append((sub_dep, depth + 1, node, is_dev))
+                            processing_queue.append((sub_dep, node.depth + 1, node, is_dev))
                             queued_keys.add(sub_dep.get_unique_key())
-            except (ValueError, FileNotFoundError) as e:
-                # Could not load dependency package -- expected for remote deps
-                # whose apm.yml lives at the resolved repo. Surface via stdlib
-                # debug logger so --verbose users can diagnose silent skips
-                # (#940 SR2). The node already has a placeholder package, so
-                # subsequent integration phases keep working.
-                _logger.debug(
-                    "Could not load transitive apm.yml for %s: %s",
-                    dep_ref.get_display_name(),
-                    e,
-                )
 
         return tree
 
@@ -430,6 +530,30 @@ class APMDependencyResolver:
 
         return True
 
+    def _load_work_item(self, item):
+        """Worker payload for the level-batched parallel BFS.
+
+        Pure I/O wrapper around ``_try_load_dependency_package`` that
+        returns ``(item, loaded_package_or_None, exception_or_None)``
+        so the main thread can keep all tree mutations on its side.
+        Defined as a method (not a closure inside the BFS while-loop)
+        to satisfy ruff B023 -- no risk of accidentally capturing a
+        loop-iteration variable.
+        """
+        node, dep_ref, parent_node, _is_dev = item
+        # Compute breadcrumb chain from this node's ancestry so download
+        # errors can report "root > mid > failing-dep" context.
+        parent_chain = node.get_ancestor_chain()
+        try:
+            loaded = self._try_load_dependency_package(
+                dep_ref,
+                parent_chain=parent_chain,
+                parent_pkg=parent_node.package if parent_node else None,
+            )
+            return (item, loaded, None)
+        except (ValueError, FileNotFoundError) as exc:
+            return (item, None, exc)
+
     def _try_load_dependency_package(
         self,
         dep_ref: DependencyReference,
@@ -501,7 +625,8 @@ class APMDependencyResolver:
             # remain in the dep tree -> ``deps_to_install`` -> the integrate
             # loop would still call ``_copy_local_package`` and copy the
             # very path we just refused.
-            self._rejected_remote_local_keys.add(dep_ref.get_unique_key())
+            with self._download_lock:
+                self._rejected_remote_local_keys.add(dep_ref.get_unique_key())
             return None
 
         # Get the canonical install path for this dependency
@@ -515,7 +640,20 @@ class APMDependencyResolver:
                 # in a single resolution. The anchor is part of the key so that
                 # two parents with different ``source_path`` values can each
                 # fetch / copy the same dep into their own slot if needed.
-                if unique_key not in self._downloaded_packages:
+                #
+                # F7 (#1116): atomically check-and-reserve under
+                # ``_download_lock`` so two BFS workers racing on the
+                # same logical dep can't both pass the gate and double-
+                # fetch. The reserving worker fetches; later workers
+                # observe the reservation and skip the callback.
+                with self._download_lock:
+                    should_fetch = unique_key not in self._downloaded_packages
+                    if should_fetch:
+                        # Reserve the slot before releasing the lock so a
+                        # concurrent worker can't slip past the gate while
+                        # we're inside the (potentially slow) callback.
+                        self._downloaded_packages.add(unique_key)
+                if should_fetch:
                     try:
                         if self._callback_accepts_parent_pkg:
                             downloaded_path = self._download_callback(
@@ -529,14 +667,23 @@ class APMDependencyResolver:
                                 dep_ref, self._apm_modules_dir, parent_chain
                             )
                         if downloaded_path and downloaded_path.exists():
-                            self._downloaded_packages.add(unique_key)
                             install_path = downloaded_path
+                        else:
+                            # Fetch produced no usable path -- release the
+                            # reservation so a subsequent retry (or a
+                            # different anchor with the same key) can try
+                            # again rather than silently treating the dep
+                            # as already-downloaded.
+                            with self._download_lock:
+                                self._downloaded_packages.discard(unique_key)
                     except Exception as exc:
                         # Surface the failure at default verbosity AND log a
                         # traceback at debug. Previously this branch silently
                         # swallowed any error, masking transient network /
                         # auth failures behind a generic "package not found"
                         # downstream message (#940 F2 + SR5).
+                        with self._download_lock:
+                            self._downloaded_packages.discard(unique_key)
                         try:
                             from apm_cli.utils.console import _rich_warning
 
