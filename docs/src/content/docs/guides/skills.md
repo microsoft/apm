@@ -4,21 +4,23 @@ sidebar:
   order: 2
 ---
 
-Skills (`SKILL.md`) are package meta-guides that help AI agents quickly understand what an APM package does and how to leverage its content. They provide a concise summary optimized for AI consumption.
+APM installs, locks, audits, and deploys skills across runtimes (GitHub Copilot, Claude Code, Cursor, OpenCode, Codex, Gemini). It is the package manager for skills, not the spec.
 
-## What are Skills?
+:::note[Authoring a SKILL.md?]
+The `SKILL.md` format - frontmatter rules, body conventions, when to prefer a skill over an instruction or prompt - is defined by the agent-skills spec at <https://agentskills.io>. Treat that as the canonical source. This page covers what APM does *with* skills: distribution, version locking, governance, security scanning, and cross-runtime deployment.
+:::
 
-Skills describe an APM package in a format AI agents can quickly parse:
-- **What** the package provides (name, description)
-- **How** to use it (body content with guidelines)
-- **Resources** available (bundled scripts, references, examples)
+## What APM does with skills
 
-### Skills Can Be Used Two Ways
+- **Install** from any git host (`apm install owner/repo/skill-name`).
+- **Lock** the resolved commit in `apm.lock.yaml` so every machine and CI job gets identical bytes.
+- **Audit** for hidden-character and prompt-injection findings on every install / compile / unpack (zero config); use `apm audit` for SARIF / JSON / markdown reports.
+- **Deploy** to the right convention directory for each detected runtime (`.claude/skills/`, `.agents/skills/`, `.cursor/`, ...) - see [Routing](#what-happens-during-install) below.
 
-1. **Package meta-guides for your own package**: Add a `SKILL.md` to your APM package to help AI agents understand what your package does
-2. **Installed from Claude skill repositories**: Install skills from monorepos like `ComposioHQ/awesome-claude-skills` to gain new capabilities
+### Two ways to consume a skill
 
-When you install a package with a SKILL.md, AI agents can quickly understand how to use it.
+1. **As a dependency of your APM package** - declare it in `apm.yml`, `apm install` resolves and deploys it.
+2. **Bundled inside your own package** - ship a `SKILL.md` (root, single-skill repo) or `.apm/skills/<name>/SKILL.md` (multi-skill layout); APM treats it like any other primitive.
 
 ## Installing Skills
 
@@ -155,14 +157,13 @@ my-skill/
 apm init my-skill && cd my-skill
 ```
 
-This creates:
+This creates a single file:
 ```
 my-skill/
-├── apm.yml       # Package manifest
-└── .apm/         # Primitives folder
+└── apm.yml       # Package manifest (the only file `apm init` writes)
 ```
 
-Add a `SKILL.md` at root to make it a publishable skill (see below).
+`apm init` does not scaffold `.apm/` for you. Author the skill yourself: drop a `SKILL.md` at the root for a single-skill repo (Option 1 below), or create `.apm/skills/<name>/SKILL.md` for a multi-skill layout (Options 2-4 below). See [Anatomy of an APM Package](../../introduction/anatomy-of-an-apm-package/) for the full source layout.
 
 ### Option 1: Standalone Skill
 
@@ -378,15 +379,15 @@ The migration is automatic and idempotent. Files not tracked in the lockfile are
 
 ### 1. Clear Naming
 Use descriptive, lowercase-hyphenated names:
-- ✅ `brand-guidelines`
-- ✅ `code-review-expert`
-- ❌ `mySkill`
-- ❌ `Skill_1`
+- `[+]` `brand-guidelines`
+- `[+]` `code-review-expert`
+- `[x]` `mySkill`
+- `[x]` `Skill_1`
 
 ### 2. Focused Description
 Keep the description to one line:
-- ✅ `Applies corporate brand colors and typography`
-- ❌ `This skill helps you with branding and it can also do typography and it uses the company colors...`
+- `[+]` `Applies corporate brand colors and typography`
+- `[x]` `This skill helps you with branding and it can also do typography and it uses the company colors...`
 
 ### 3. Structured Body
 Organize with clear sections:

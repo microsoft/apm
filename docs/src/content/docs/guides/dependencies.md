@@ -143,9 +143,23 @@ dependencies:
       alias: review                      # local alias (controls install directory name)
     - git: ssh://git@bitbucket.example.com:7999/project/repo.git  # Bitbucket Datacenter (custom SSH port)
       ref: v1.0
+    # Azure DevOps with sub-path and ref pin
+    - git: https://dev.azure.com/myorg/myproject/_git/myrepo
+      path: instructions/security
+      ref: v2.0
 ```
 
 Fields: `git` (required), `path`, `ref`, `alias` (all optional). The `git` value is any HTTPS, HTTP or SSH clone URL.
+
+:::note[Azure DevOps + sub-path + ref]
+The shorthand form for the same ADO entry is:
+
+```yaml
+- dev.azure.com/myorg/myproject/_git/myrepo/instructions/security#v2.0
+```
+
+Use the **shorthand** or the **object form** for ADO sub-paths. The full `https://dev.azure.com/<org>/<project>/_git/<repo>/<sub-path>` URL form is not yet accepted by the parser ([tracking issue](https://github.com/microsoft/apm/issues)) - if you copy the URL straight from your ADO browser tab, switch to one of the two forms above. Spaces in project / repo names must be URL-encoded as `%20`.
+:::
 
 Explicit URL schemes are honored exactly -- see [Transport selection](#transport-selection-ssh-vs-https) for the full contract. Custom ports are preserved across every attempt (including any cross-protocol fallback enabled with `--allow-protocol-fallback`), so `ssh://host:7999/...` retried over HTTPS becomes `https://host:7999/...`.
 

@@ -250,6 +250,22 @@ change.
 **Multi-tool output.** Write your configuration once. APM compiles it for
 every supported AI tool.
 
+## Stability
+
+These surfaces are stable and recommended for production use:
+
+- `apm install`, `apm.lock.yaml`, `apm audit` - dependency resolution, version locking, security scanning.
+- `apm compile`, `apm pack`, `apm unpack` - multi-tool output, bundle distribution, plugin export.
+- Authoring layout (`apm.yml`, `.apm/`) and consumption from GitHub, Azure DevOps, GitLab, Bitbucket, and self-hosted Git hosts.
+- Cross-tool deployment to GitHub Copilot, Claude Code, Cursor, OpenCode, Codex, and Gemini.
+
+These surfaces are **experimental** and may change between releases:
+
+- `apm run` and `apm runtime setup` - local execution of agent workflows. Vendor-neutral by design and modeled on what `npx` is to `npm`. Not a current priority for the project; treat as a preview.
+- Microsoft 365 Copilot Cowork target. See [Copilot Cowork](../../integrations/copilot-cowork/).
+
+The dependency-management core does not depend on the experimental runtime surface. If `apm run` is not in your workflow, the stable surface above stands on its own.
+
 ## What's next
 
 - [Installation](../../getting-started/installation/) — get APM running in under a minute
