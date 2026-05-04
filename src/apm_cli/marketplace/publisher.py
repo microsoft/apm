@@ -643,7 +643,9 @@ class MarketplacePublisher:
                     return TargetResult(
                         target=target,
                         outcome=PublishOutcome.SKIPPED_REF_CHANGE,
-                        message=(f"Entry '{entry_str}' uses implicit latest; pass allow_ref_change to pin"),
+                        message=(
+                            f"Entry '{entry_str}' uses implicit latest; pass allow_ref_change to pin"
+                        ),
                         old_version=None,
                         new_version=new_ref,
                     )
@@ -667,8 +669,7 @@ class MarketplacePublisher:
                     target=target,
                     outcome=(PublishOutcome.SKIPPED_DOWNGRADE),
                     message=(
-                        f"Downgrade from {old_ref} to {new_ref}; "
-                        "pass allow_downgrade to override"
+                        f"Downgrade from {old_ref} to {new_ref}; pass allow_downgrade to override"
                     ),
                     old_version=old_ref,
                     new_version=new_ref,

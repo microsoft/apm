@@ -1902,36 +1902,6 @@ def _post_install_summary(
 # directly to avoid relying on transitive aliasing.
 
 
-@dataclasses.dataclass(frozen=True)
-class _InstallApmDependenciesOptions:
-    force: bool = False
-    parallel_downloads: int = 4
-    logger: Optional["InstallLogger"] = None
-    scope: Any | None = None
-    auth_resolver: Optional["AuthResolver"] = None
-    target: str | None = None
-    allow_insecure: bool = False
-    allow_insecure_hosts: tuple[str, ...] = ()
-    marketplace_provenance: dict | None = None
-    protocol_pref: Any | None = None
-    allow_protocol_fallback: bool | None = None
-    no_policy: bool = False
-    skill_subset: tuple | None = None
-    skill_subset_from_cli: bool = False
-    legacy_skill_paths: bool = False
-    frozen: bool = False
-    plan_callback: Any = None
-
-    @classmethod
-    def from_kwargs(cls, kwargs: dict[str, Any]) -> "_InstallApmDependenciesOptions":
-        known = {field.name for field in dataclasses.fields(cls)}
-        unknown = set(kwargs) - known
-        if unknown:
-            unknown_list = ", ".join(sorted(unknown))
-            raise TypeError(f"unexpected install option(s): {unknown_list}")
-        return cls(**kwargs)
-
-
 # ---------------------------------------------------------------------------
 # Pipeline entry point -- thin re-export preserving the patch path
 # ``apm_cli.commands.install._install_apm_dependencies`` used by tests.
@@ -1956,10 +1926,10 @@ def _install_apm_dependencies(
     if not APM_DEPS_AVAILABLE:
         raise RuntimeError("APM dependency system not available")
 
-    from apm_cli.install.request import InstallRequest
+    from apm_cli.install.request import InstallApmDependenciesOptions, InstallRequest
     from apm_cli.install.service import InstallService
 
-    options = _InstallApmDependenciesOptions.from_kwargs(kwargs)
+    options = InstallApmDependenciesOptions.from_kwargs(kwargs)
     request = InstallRequest(
         apm_package=apm_package,
         update_refs=update_refs,
