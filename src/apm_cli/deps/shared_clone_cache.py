@@ -2,9 +2,17 @@
 
 When multiple subdirectory deps reference the same upstream repository at
 the same ref (e.g. ``github:owner/repo/skills/X@main`` and
-``github:owner/repo/agents/Y@main``), a single clone is shared across all
-consumers within one install run.  This mirrors uv's strategy of caching
-Git repos by fully-resolved commit hash.
+``github:owner/repo/agents/Y@main``), a single BARE clone is shared across
+all consumers within one install run. Each consumer materializes its own
+working tree from the bare via ``git clone --local --shared --no-checkout``
+plus ``git checkout HEAD``. This mirrors uv's strategy of caching Git repos
+by fully-resolved commit hash, and the WS3 ``GitCache`` pattern internally.
+
+Why bare (#1126): subdir-agnostic. Two parallel consumers requesting
+different subdirectories of the same repo+ref share one bare without
+racing on sparse-checkout state (the original v1 design materialized a
+sparse working tree at the cache layer and lost the second consumer's
+files when both threads raced through the cache).
 
 The cache is instance-scoped (NOT module-level) to avoid races between
 parallel test invocations.  Thread-safety is guaranteed via per-key locks.
@@ -15,6 +23,7 @@ for the same key retry with a fresh clone.
 """
 
 import logging
+import os
 import shutil
 import tempfile
 import threading
@@ -90,11 +99,27 @@ class SharedCloneCache:
                 dir=str(self._base_dir) if self._base_dir else None,
                 prefix=f"apm_shared_{owner}_{repo}_",
             )
-            clone_path = Path(temp_dir) / "repo"
+            clone_path = Path(temp_dir) / "bare"
             with self._lock:
                 self._temp_dirs.append(temp_dir)
             try:
                 clone_fn(clone_path)
+                # Debug-mode shape invariant: clone_fn MUST produce a
+                # bare repo. A bare has HEAD as a regular file at the
+                # root and no nested .git/ dir. Working-tree clones
+                # have it the other way around. This is the canary
+                # that catches a regression where someone reverts to
+                # the v1 "materialize-in-cache" pattern. See 6.16.
+                if os.environ.get("APM_DEBUG"):
+                    head_file = clone_path / "HEAD"
+                    git_dir = clone_path / ".git"
+                    if not head_file.is_file() or git_dir.exists():
+                        raise RuntimeError(
+                            f"SharedCloneCache invariant violated: "
+                            f"{clone_path} is not a bare repo "
+                            f"(HEAD file present: {head_file.is_file()}, "
+                            f".git/ present: {git_dir.exists()})"
+                        )
                 entry.path = clone_path
                 return clone_path
             except Exception as exc:

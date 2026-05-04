@@ -388,7 +388,20 @@ run_e2e_tests() {
         log_error "APM Dependencies integration tests failed!"
         exit 1
     fi
-    
+
+    # Subdirectory dedup race E2E (#1126): two sibling subdirs of the
+    # same upstream repo+ref must install in parallel without the
+    # "Subdirectory ... not found" race the v1 cache produced.
+    log_info "Running #1126 parallel subdir dedup E2E..."
+    echo "Command: pytest tests/integration/test_install_subdir_dedup_e2e.py -v -s --tb=short -m integration"
+
+    if pytest tests/integration/test_install_subdir_dedup_e2e.py -v -s --tb=short -m integration; then
+        log_success "#1126 subdir dedup E2E passed!"
+    else
+        log_error "#1126 subdir dedup E2E failed!"
+        exit 1
+    fi
+
     # Run Transport Selection integration tests (issue #778)
     # Always-on cases use HTTPS against a public repo. SSH cases auto-skip
     # when no usable SSH key is available for git@github.com.
