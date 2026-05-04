@@ -397,6 +397,24 @@ def compile(
             any(apm_dir.rglob("*.instructions.md")) or any(apm_dir.rglob("*.chatmode.md"))
         )
 
+        # Also check directories listed in apm.yml 'includes' field — these are
+        # root-level dirs (e.g. agents/, instructions/) discovered by apm init --discover.
+        if not local_apm_has_content:
+            from ...utils.yaml_io import load_yaml as _load_yaml
+
+            _manifest_data = _load_yaml(Path(APM_YML_FILENAME)) or {}
+            _includes = _manifest_data.get("includes", "auto")
+            if isinstance(_includes, list):
+                for _inc in _includes:
+                    _inc_path = Path(_inc)
+                    if _inc_path.is_dir() and (
+                        any(_inc_path.rglob("*.instructions.md"))
+                        or any(_inc_path.rglob("*.agent.md"))
+                        or any(_inc_path.rglob("*.chatmode.md"))
+                    ):
+                        local_apm_has_content = True
+                        break
+
         # If no primitive sources exist, check deeper to provide better feedback
         if not apm_modules_exists and not local_apm_has_content and not constitution_exists:
             # Check if .apm directories exist but are empty

@@ -62,9 +62,39 @@ _PROMPT_TARGETS_ORDERED: list[str] = [
     default=None,
     help="Comma-separated target list (skip prompt, write directly)",
 )
+@click.option(
+    "--discover",
+    is_flag=True,
+    help="Preview existing agent context files and propose an apm.yml",
+)
+@click.option(
+    "--write",
+    "write_discovery",
+    is_flag=True,
+    help="With --discover, write the proposed apm.yml after confirmation",
+)
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["text", "json", "yaml"]),
+    default="text",
+    show_default=True,
+    help="Discovery output format",
+)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.pass_context
-def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose):
+def init(
+    ctx,
+    project_name,
+    yes,
+    plugin,
+    marketplace_flag,
+    target_flag,
+    discover,
+    write_discovery,
+    output_format,
+    verbose,
+):
     """Initialize a new APM project (like npm init).
 
     Creates a minimal apm.yml with auto-detected metadata.
@@ -73,6 +103,14 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose)
     """
     logger = CommandLogger("init", verbose=verbose)
     try:
+        if write_discovery and not discover:
+            logger.error("--write can only be used with --discover")
+            sys.exit(1)
+
+        if discover and (plugin or marketplace_flag):
+            logger.error("--discover cannot be combined with --plugin or --marketplace")
+            sys.exit(1)
+
         # Handle explicit current directory
         if project_name == ".":
             project_name = None
@@ -88,6 +126,12 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose)
         # Determine project directory and name
         if project_name:
             project_dir = Path(project_name)
+            if discover and not write_discovery and not project_dir.exists():
+                logger.error(
+                    "--discover preview requires an existing project directory; "
+                    "use --write to create a new one"
+                )
+                sys.exit(1)
             project_dir.mkdir(exist_ok=True)
             os.chdir(project_dir)
             logger.progress(f"Created project directory: {project_name}", symbol="folder")
@@ -95,6 +139,16 @@ def init(ctx, project_name, yes, plugin, marketplace_flag, target_flag, verbose)
         else:
             project_dir = Path.cwd()
             final_project_name = project_dir.name
+
+        if discover:
+            _run_discovery_init(
+                final_project_name=final_project_name,
+                yes=yes,
+                write_discovery=write_discovery,
+                output_format=output_format,
+                logger=logger,
+            )
+            return
 
         # Validate plugin name early
         if plugin and not _validate_plugin_name(final_project_name):
@@ -570,3 +624,37 @@ def _prompt_target_selection(
         return _prompt_target_selection(prechecked, signal_hints)
 
     return chosen
+
+
+def _run_discovery_init(final_project_name, yes, write_discovery, output_format, logger):
+    """Run preview-first brownfield context discovery."""
+    from ..context_discovery import (
+        discover_agent_context,
+        echo_discovery_result,
+        write_proposed_manifest,
+    )
+
+    if write_discovery and not yes:
+        config = _interactive_project_setup(final_project_name, logger)
+    else:
+        config = _get_default_config(final_project_name)
+
+    result = discover_agent_context(Path.cwd(), config)
+    echo_discovery_result(result, output_format, write=write_discovery)
+
+    if not write_discovery:
+        return
+
+    if result.existing_apm_yml:
+        logger.warning("apm.yml already exists")
+        if not yes:
+            confirm = click.confirm("Continue and overwrite?")
+            if not confirm:
+                logger.progress("Initialization cancelled.")
+                return
+        else:
+            logger.progress("--yes specified, overwriting apm.yml...")
+
+    write_proposed_manifest(result, Path(APM_YML_FILENAME))
+    if output_format == "text":
+        logger.success("APM project initialized successfully!")

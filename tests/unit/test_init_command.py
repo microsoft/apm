@@ -1,6 +1,6 @@
 """Tests for the apm init command."""
 
-import json  # noqa: F401
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -11,6 +11,16 @@ import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+
+
+def _isolate_discovery_env(monkeypatch, base_path: Path) -> None:
+    home = base_path / "home"
+    system = base_path / "system"
+    home.mkdir(exist_ok=True)
+    system.mkdir(exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_DIRS", str(system))
+    monkeypatch.setenv("APM_E2E_TESTS", "1")
 
 
 class TestInitCommand:
@@ -364,6 +374,150 @@ class TestInitCommand:
                 assert result.exit_code == 0
                 assert "apm.yml" in result.output
                 assert "start.prompt.md" not in result.output
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_init_discover_preview_does_not_write_apm_yml(self, monkeypatch):
+        """apm init --discover previews existing context without writing by default."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            _isolate_discovery_env(monkeypatch, Path(tmp_dir))
+            try:
+                commands_dir = Path(".claude") / "commands"
+                commands_dir.mkdir(parents=True)
+                (commands_dir / "review.md").write_text("review", encoding="utf-8")
+
+                result = self.runner.invoke(cli, ["init", "--discover", "--yes"])
+
+                assert result.exit_code == 0
+                assert "Agent context discovery preview" in result.output
+                assert ".claude/commands/review.md" in result.output
+                assert "Preview only" in result.output
+                assert not Path("apm.yml").exists()
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_init_discover_write_writes_proposed_manifest(self, monkeypatch):
+        """apm init --discover --write writes the proposed apm.yml."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            _isolate_discovery_env(monkeypatch, Path(tmp_dir))
+            try:
+                Path(".codex").mkdir()
+                Path(".codex/config.toml").write_text("[mcp_servers]\n", encoding="utf-8")
+
+                result = self.runner.invoke(cli, ["init", "--discover", "--write", "--yes"])
+
+                assert result.exit_code == 0
+                assert "Writing proposed apm.yml" in result.output
+                assert "APM project initialized successfully!" in result.output
+                assert Path("apm.yml").exists()
+                with open("apm.yml", encoding="utf-8") as f:
+                    config = yaml.safe_load(f)
+                assert config["target"] == "codex"
+                assert config["dependencies"] == {"apm": [], "mcp": []}
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_init_discover_json_output(self, monkeypatch):
+        """Discovery supports structured JSON output for automation."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            _isolate_discovery_env(monkeypatch, Path(tmp_dir))
+            try:
+                Path("AGENTS.md").write_text("Use tests.", encoding="utf-8")
+
+                result = self.runner.invoke(
+                    cli,
+                    ["init", "--discover", "--yes", "--format", "json"],
+                )
+
+                assert result.exit_code == 0
+                payload = json.loads(result.output)
+                assert payload["summary"]["total_files"] == 1
+                assert payload["files"][0]["path"] == "AGENTS.md"
+                assert payload["files"][0]["importability"] == "convertible"
+                assert not Path("apm.yml").exists()
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_init_write_without_discover_fails(self):
+        """--write is reserved for discovery mode."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                result = self.runner.invoke(cli, ["init", "--write", "--yes"])
+
+                assert result.exit_code != 0
+                assert "--write can only be used with --discover" in result.output
+                assert not Path("apm.yml").exists()
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_init_discover_yaml_output(self, monkeypatch):
+        """Discovery --format yaml produces valid YAML with a 'files' key."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            _isolate_discovery_env(monkeypatch, Path(tmp_dir))
+            try:
+                Path("AGENTS.md").write_text("Use tests.", encoding="utf-8")
+
+                result = self.runner.invoke(
+                    cli,
+                    ["init", "--discover", "--yes", "--format", "yaml"],
+                )
+
+                assert result.exit_code == 0
+                import yaml as _yaml
+
+                payload = _yaml.safe_load(result.output)
+                assert "files" in payload
+                assert payload["files"][0]["tool"] == "agents"
+                assert not Path("apm.yml").exists()
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_init_discover_preserves_existing_manifest(self, monkeypatch):
+        """--discover --write preserves name/version/dependencies from an existing apm.yml."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            _isolate_discovery_env(monkeypatch, Path(tmp_dir))
+            try:
+                existing = {
+                    "name": "my-project",
+                    "version": "3.0.0",
+                    "dependencies": {"apm": ["owner/special-pkg"]},
+                }
+                import yaml as _yaml
+
+                with open("apm.yml", "w", encoding="utf-8") as f:
+                    _yaml.dump(existing, f)
+
+                Path(".claude").mkdir()
+                Path(".claude/CLAUDE.md").write_text("instructions", encoding="utf-8")
+
+                result = self.runner.invoke(cli, ["init", "--discover", "--write", "--yes"])
+
+                assert result.exit_code == 0
+                with open("apm.yml", encoding="utf-8") as f:
+                    written = _yaml.safe_load(f)
+                assert written["name"] == "my-project"
+                assert written["version"] == "3.0.0"
+                assert written["dependencies"]["apm"] == ["owner/special-pkg"]
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_init_discover_empty_project_exits_zero(self, monkeypatch):
+        """--discover on a project with no context files exits 0 and reports nothing found."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            _isolate_discovery_env(monkeypatch, Path(tmp_dir))
+            try:
+                result = self.runner.invoke(cli, ["init", "--discover", "--yes"])
+
+                assert result.exit_code == 0
+                assert "No known agent context files found." in result.output
+                assert not Path("apm.yml").exists()
             finally:
                 os.chdir(self.original_dir)
 

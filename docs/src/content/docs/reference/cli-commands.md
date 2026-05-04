@@ -37,6 +37,9 @@ apm init [PROJECT_NAME] [OPTIONS]
 - `-y, --yes` - Skip interactive prompts and use auto-detected defaults
 - `--plugin` - Initialize as a plugin authoring project (creates `plugin.json` + `apm.yml` with `devDependencies`)
 - `--marketplace` - Seed `apm.yml` with a `marketplace:` authoring block. See the [Authoring a marketplace guide](../../guides/marketplace-authoring/).
+- `--discover` - Preview existing agent context files and propose an `apm.yml` for brownfield projects
+- `--write` - With `--discover`, write the proposed `apm.yml` after confirmation
+- `--format [text|json|yaml]` - Discovery output format
 
 **Examples:**
 ```bash
@@ -57,6 +60,12 @@ apm init my-plugin --plugin
 
 # Initialize a project that also publishes a marketplace
 apm init my-marketplace --marketplace
+
+# Preview existing agent context files without writing anything
+apm init --discover
+
+# Generate apm.yml from the discovery proposal
+apm init --discover --write
 ```
 
 **Behavior:**
@@ -64,6 +73,7 @@ apm init my-marketplace --marketplace
 - **Interactive mode**: Prompts for project details unless `--yes` specified
 - **Auto-detection**: Automatically detects author from `git config user.name` and description from project context
 - **Brownfield friendly**: Works cleanly in existing projects without file pollution
+- **Discovery mode** (`--discover`): Scans known project, user, and safe system-level agent context locations for APM-native, convertible, and reference-only files, then prints a proposed `apm.yml`. It is read-only unless `--write` is provided
 - **Plugin mode** (`--plugin`): Creates both `plugin.json` and `apm.yml` with an empty `devDependencies` section. Plugin names must be kebab-case (`^[a-z][a-z0-9-]{0,63}$`), max 64 characters
 
 **Creates:**

@@ -1,0 +1,744 @@
+"""Brownfield agent context discovery for ``apm init --discover``."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import click
+
+from .constants import DEFAULT_SKIP_DIRS
+from .core.target_detection import detect_target
+from .primitives.discovery import _glob_match
+from .utils.paths import portable_relpath
+from .utils.yaml_io import load_yaml, yaml_to_str
+
+APM_YML = "apm.yml"
+
+IMPORT_APM_NATIVE = "apm-native"
+IMPORT_CONVERTIBLE = "convertible"
+IMPORT_REFERENCE_ONLY = "reference-only"
+IMPORT_IGNORED = "ignored"
+
+_TOKEN_RE = re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{10,}\b")
+_URL_USERINFO_RE = re.compile(r"\b(https?://)[^/\s@]+@([^/\s]+)")
+
+
+@dataclass(frozen=True)
+class ContextDiscoveryRule:
+    """A known agent context path pattern."""
+
+    tool: str
+    kind: str
+    patterns: tuple[str, ...]
+    importability: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class ContextDiscoveryFinding:
+    """One discovered context/config file."""
+
+    path: Path
+    display_path: str
+    scope: str
+    tool: str
+    kind: str
+    importability: str
+    reason: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "path": self.display_path,
+            "scope": self.scope,
+            "tool": self.tool,
+            "type": self.kind,
+            "importability": self.importability,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class ContextDiscoveryResult:
+    """Complete discovery result for a project."""
+
+    project_root: Path
+    detected_target: str
+    target_reason: str
+    existing_apm_yml: bool
+    findings: tuple[ContextDiscoveryFinding, ...]
+    proposed_manifest: dict[str, Any]
+
+    def summary(self) -> dict[str, Any]:
+        by_scope = Counter(f.scope for f in self.findings)
+        by_importability = Counter(f.importability for f in self.findings)
+        return {
+            "total_files": len(self.findings),
+            "by_scope": dict(sorted(by_scope.items())),
+            "by_importability": dict(sorted(by_importability.items())),
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "project_root": redact_text(str(self.project_root)),
+            "existing_apm_yml": self.existing_apm_yml,
+            "detected_target": {
+                "target": self.detected_target,
+                "reason": self.target_reason,
+            },
+            "summary": self.summary(),
+            "files": [finding.to_dict() for finding in self.findings],
+            "proposed_apm_yml": self.proposed_manifest,
+        }
+
+
+APM_NATIVE_RULES: tuple[ContextDiscoveryRule, ...] = (
+    ContextDiscoveryRule(
+        "apm",
+        "instruction",
+        (
+            ".apm/instructions/*.instructions.md",
+            ".github/instructions/*.instructions.md",
+            "**/*.instructions.md",
+        ),
+        IMPORT_APM_NATIVE,
+        "APM instruction primitive",
+    ),
+    ContextDiscoveryRule(
+        "apm",
+        "agent",
+        (
+            ".apm/agents/*.agent.md",
+            ".github/agents/*.agent.md",
+            "**/*.agent.md",
+        ),
+        IMPORT_APM_NATIVE,
+        "APM agent primitive",
+    ),
+    ContextDiscoveryRule(
+        "apm",
+        "chatmode",
+        (
+            ".apm/chatmodes/*.chatmode.md",
+            ".github/chatmodes/*.chatmode.md",
+            "**/*.chatmode.md",
+        ),
+        IMPORT_APM_NATIVE,
+        "APM chatmode primitive",
+    ),
+    ContextDiscoveryRule(
+        "apm",
+        "context",
+        (
+            ".apm/context/*.context.md",
+            ".apm/memory/*.memory.md",
+            ".github/context/*.context.md",
+            ".github/memory/*.memory.md",
+            "**/*.context.md",
+            "**/*.memory.md",
+        ),
+        IMPORT_APM_NATIVE,
+        "APM context primitive",
+    ),
+    ContextDiscoveryRule(
+        "apm",
+        "skill",
+        ("SKILL.md", ".apm/skills/*/SKILL.md"),
+        IMPORT_APM_NATIVE,
+        "APM skill primitive",
+    ),
+)
+
+TOOL_CONTEXT_RULES: tuple[ContextDiscoveryRule, ...] = (
+    ContextDiscoveryRule(
+        "agents",
+        "root-instructions",
+        ("AGENTS.md",),
+        IMPORT_CONVERTIBLE,
+        "standard agent instructions file",
+    ),
+    ContextDiscoveryRule(
+        "claude",
+        "root-instructions",
+        ("CLAUDE.md", ".claude/CLAUDE.md"),
+        IMPORT_CONVERTIBLE,
+        "Claude instructions file",
+    ),
+    ContextDiscoveryRule(
+        "gemini",
+        "root-instructions",
+        ("GEMINI.md", ".gemini/GEMINI.md"),
+        IMPORT_CONVERTIBLE,
+        "Gemini instructions file",
+    ),
+    ContextDiscoveryRule(
+        "copilot",
+        "instruction",
+        (".github/copilot-instructions.md",),
+        IMPORT_CONVERTIBLE,
+        "Copilot instructions file",
+    ),
+    ContextDiscoveryRule(
+        "claude",
+        "command",
+        (".claude/commands/**/*.md",),
+        IMPORT_CONVERTIBLE,
+        "Claude command prompt",
+    ),
+    ContextDiscoveryRule(
+        "claude",
+        "agent",
+        (".claude/agents/**/*.md",),
+        IMPORT_CONVERTIBLE,
+        "Claude agent file",
+    ),
+    ContextDiscoveryRule(
+        "claude",
+        "skill",
+        (".claude/skills/**/SKILL.md",),
+        IMPORT_CONVERTIBLE,
+        "Claude skill file",
+    ),
+    ContextDiscoveryRule(
+        "codex",
+        "agent",
+        (".codex/agents/**/*.md",),
+        IMPORT_CONVERTIBLE,
+        "Codex agent file",
+    ),
+    ContextDiscoveryRule(
+        "agent-skills",
+        "skill",
+        (".agents/skills/**/SKILL.md",),
+        IMPORT_CONVERTIBLE,
+        "shared agent skill file",
+    ),
+    ContextDiscoveryRule(
+        "cursor",
+        "rule",
+        (".cursor/rules/**/*.md", ".cursorrules"),
+        IMPORT_CONVERTIBLE,
+        "Cursor rule file",
+    ),
+    ContextDiscoveryRule(
+        "cursor",
+        "agent",
+        (".cursor/agents/**/*.md",),
+        IMPORT_CONVERTIBLE,
+        "Cursor agent file",
+    ),
+    ContextDiscoveryRule(
+        "cursor",
+        "skill",
+        (".cursor/skills/**/SKILL.md",),
+        IMPORT_CONVERTIBLE,
+        "Cursor skill file",
+    ),
+    ContextDiscoveryRule(
+        "opencode",
+        "agent",
+        (".opencode/agents/**/*.md",),
+        IMPORT_CONVERTIBLE,
+        "OpenCode agent file",
+    ),
+    ContextDiscoveryRule(
+        "opencode",
+        "command",
+        (".opencode/commands/**/*.md",),
+        IMPORT_CONVERTIBLE,
+        "OpenCode command prompt",
+    ),
+    ContextDiscoveryRule(
+        "opencode",
+        "skill",
+        (".opencode/skills/**/SKILL.md",),
+        IMPORT_CONVERTIBLE,
+        "OpenCode skill file",
+    ),
+    ContextDiscoveryRule(
+        "gemini",
+        "command",
+        (".gemini/commands/**/*.md",),
+        IMPORT_CONVERTIBLE,
+        "Gemini command prompt",
+    ),
+    ContextDiscoveryRule(
+        "gemini",
+        "skill",
+        (".gemini/skills/**/SKILL.md",),
+        IMPORT_CONVERTIBLE,
+        "Gemini skill file",
+    ),
+    ContextDiscoveryRule(
+        "windsurf",
+        "rule",
+        (".windsurf/rules/**/*.md",),
+        IMPORT_CONVERTIBLE,
+        "Windsurf rule file",
+    ),
+    ContextDiscoveryRule(
+        "windsurf",
+        "skill",
+        (".windsurf/skills/**/SKILL.md",),
+        IMPORT_CONVERTIBLE,
+        "Windsurf skill file",
+    ),
+    ContextDiscoveryRule(
+        "windsurf",
+        "workflow",
+        (".windsurf/workflows/**/*.md",),
+        IMPORT_CONVERTIBLE,
+        "Windsurf workflow file",
+    ),
+    ContextDiscoveryRule(
+        "mcp",
+        "config",
+        (".mcp.json", ".lsp.json"),
+        IMPORT_REFERENCE_ONLY,
+        "tool configuration; review before translating to apm.yml dependencies",
+    ),
+    ContextDiscoveryRule(
+        "claude",
+        "settings",
+        (".claude/settings.json", ".claude/settings.local.json"),
+        IMPORT_REFERENCE_ONLY,
+        "Claude settings file",
+    ),
+    ContextDiscoveryRule(
+        "codex",
+        "settings",
+        (".codex/config.toml", ".codex/hooks.json"),
+        IMPORT_REFERENCE_ONLY,
+        "Codex configuration file",
+    ),
+    ContextDiscoveryRule(
+        "cursor",
+        "settings",
+        (".cursor/settings.json", ".cursor/hooks.json"),
+        IMPORT_REFERENCE_ONLY,
+        "Cursor configuration file",
+    ),
+    ContextDiscoveryRule(
+        "opencode",
+        "settings",
+        (".opencode/opencode.json", ".opencode/hooks.json"),
+        IMPORT_REFERENCE_ONLY,
+        "OpenCode configuration file",
+    ),
+    ContextDiscoveryRule(
+        "gemini",
+        "settings",
+        (".gemini/settings.json",),
+        IMPORT_REFERENCE_ONLY,
+        "Gemini settings file",
+    ),
+    ContextDiscoveryRule(
+        "windsurf",
+        "settings",
+        (".windsurf/hooks.json",),
+        IMPORT_REFERENCE_ONLY,
+        "Windsurf hooks file",
+    ),
+)
+
+PROJECT_RULES = APM_NATIVE_RULES + TOOL_CONTEXT_RULES
+
+USER_RULES: tuple[ContextDiscoveryRule, ...] = tuple(
+    ContextDiscoveryRule(
+        rule.tool,
+        rule.kind,
+        rule.patterns,
+        rule.importability,
+        rule.reason,
+    )
+    for rule in TOOL_CONTEXT_RULES
+)
+
+SYSTEM_RULES: tuple[ContextDiscoveryRule, ...] = (
+    ContextDiscoveryRule(
+        "apm",
+        "instruction",
+        ("apm/AGENTS.md", "apm/instructions/**/*.md"),
+        IMPORT_REFERENCE_ONLY,
+        "system-level APM context location",
+    ),
+    ContextDiscoveryRule(
+        "codex",
+        "settings",
+        ("codex/config.toml",),
+        IMPORT_REFERENCE_ONLY,
+        "system-level Codex configuration",
+    ),
+    ContextDiscoveryRule(
+        "gemini",
+        "settings",
+        ("gemini/settings.json",),
+        IMPORT_REFERENCE_ONLY,
+        "system-level Gemini configuration",
+    ),
+)
+
+
+def discover_agent_context(
+    project_root: Path,
+    config: dict[str, Any],
+    *,
+    home_dir: Path | None = None,
+    system_dirs: tuple[Path, ...] | None = None,
+) -> ContextDiscoveryResult:
+    """Discover known agent context files and build an ``apm.yml`` proposal."""
+
+    project_root = project_root.resolve()
+    home_dir = Path.home() if home_dir is None else home_dir
+    system_dirs = _default_system_dirs() if system_dirs is None else system_dirs
+
+    findings: list[ContextDiscoveryFinding] = []
+    findings.extend(_scan_scope(project_root, "project", PROJECT_RULES, project_root, home_dir))
+
+    if home_dir.exists():
+        findings.extend(_scan_scope(home_dir, "user", USER_RULES, project_root, home_dir))
+
+    for system_dir in system_dirs:
+        if system_dir.exists():
+            findings.extend(_scan_scope(system_dir, "system", SYSTEM_RULES, project_root, home_dir))
+
+    target, target_reason = detect_target(project_root)
+    existing_manifest = _load_existing_manifest(project_root)
+    proposed_manifest = build_proposed_manifest(
+        config,
+        project_root,
+        detected_target=target,
+        existing_manifest=existing_manifest,
+        findings=tuple(findings),
+    )
+
+    return ContextDiscoveryResult(
+        project_root=project_root,
+        detected_target=target,
+        target_reason=target_reason,
+        existing_apm_yml=existing_manifest is not None,
+        findings=tuple(sorted(findings, key=_finding_sort_key)),
+        proposed_manifest=proposed_manifest,
+    )
+
+
+def build_proposed_manifest(
+    config: dict[str, Any],
+    project_root: Path,
+    *,
+    detected_target: str | None = None,
+    existing_manifest: dict[str, Any] | None = None,
+    findings: tuple[ContextDiscoveryFinding, ...] = (),
+) -> dict[str, Any]:
+    """Build a conservative manifest proposal, preserving existing fields."""
+
+    manifest: dict[str, Any] = dict(existing_manifest or {})
+    manifest.setdefault("name", config["name"])
+    manifest.setdefault("version", config["version"])
+    manifest.setdefault("description", config["description"])
+    manifest.setdefault("author", config["author"])
+
+    dependencies = manifest.get("dependencies")
+    dependencies = {} if not isinstance(dependencies, dict) else dict(dependencies)
+    dependencies.setdefault("apm", [])
+    dependencies.setdefault("mcp", [])
+    manifest["dependencies"] = dependencies
+
+    # Collect root-level dirs that hold APM-native project-scope files but are
+    # outside the standard .apm/ and .github/ locations (which are always
+    # scanned by the compiler).  These need an explicit 'includes' entry so
+    # that both users and tooling know where the primitives live.
+    _standard_prefixes = (".apm/", ".github/")
+    extra_dirs: list[str] = sorted(
+        {
+            f.display_path.split("/")[0]
+            for f in findings
+            if f.scope == "project"
+            and f.importability == IMPORT_APM_NATIVE
+            and "/" in f.display_path
+            and not any(f.display_path.startswith(p) for p in _standard_prefixes)
+        }
+    )
+    existing_includes = manifest.get("includes")
+    if extra_dirs and existing_includes in (None, "auto"):
+        manifest["includes"] = extra_dirs
+    else:
+        manifest.setdefault("includes", "auto")
+
+    manifest.setdefault("scripts", {})
+
+    target = detected_target
+    if target is None:
+        target, _reason = detect_target(project_root)
+    user_target = _manifest_target(target)
+    if user_target and "target" not in manifest:
+        manifest["target"] = user_target
+
+    return manifest
+
+
+def format_discovery_result(
+    result: ContextDiscoveryResult, output_format: str, *, write: bool = False
+) -> str:
+    """Format a discovery result for CLI output."""
+
+    if output_format == "json":
+        return json.dumps(result.to_dict(), indent=2) + "\n"
+    if output_format == "yaml":
+        return yaml_to_str(result.to_dict())
+    return _format_text_result(result, write=write)
+
+
+def write_proposed_manifest(result: ContextDiscoveryResult, path: Path) -> None:
+    """Write the proposed manifest to ``path``."""
+
+    from .utils.yaml_io import dump_yaml
+
+    dump_yaml(result.proposed_manifest, path)
+
+
+def redact_text(value: str) -> str:
+    """Redact token-like strings and URL credentials from diagnostic output."""
+
+    value = _URL_USERINFO_RE.sub(r"\1\2", value)
+    return _TOKEN_RE.sub("<redacted-token>", value)
+
+
+def _format_text_result(result: ContextDiscoveryResult, *, write: bool = False) -> str:
+    lines = [
+        "Agent context discovery preview",
+        "",
+        f"Project: {redact_text(str(result.project_root))}",
+        f"Existing apm.yml: {'yes' if result.existing_apm_yml else 'no'}",
+        f"Detected target: {result.detected_target} ({result.target_reason})",
+        "",
+    ]
+
+    summary = result.summary()
+    lines.append(f"Found {summary['total_files']} context/config file(s).")
+    if result.findings:
+        lines.extend(_format_findings_table(result.findings))
+    else:
+        lines.append("No known agent context files found.")
+
+    lines.extend(
+        [
+            "",
+            "Proposed apm.yml:",
+            yaml_to_str(result.proposed_manifest).rstrip(),
+            "",
+            (
+                "Writing proposed apm.yml."
+                if write
+                else "Preview only. Re-run with --write to create or update apm.yml."
+            ),
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _format_findings_table(findings: tuple[ContextDiscoveryFinding, ...]) -> list[str]:
+    headers = ("Scope", "Tool", "Type", "Importability", "Path")
+    rows = [
+        (
+            finding.scope,
+            finding.tool,
+            finding.kind,
+            finding.importability,
+            finding.display_path,
+        )
+        for finding in findings
+    ]
+    widths = [
+        max(len(headers[index]), *(len(row[index]) for row in rows))
+        for index in range(len(headers))
+    ]
+    lines = [
+        "",
+        "  ".join(headers[index].ljust(widths[index]) for index in range(len(headers))),
+        "  ".join("-" * widths[index] for index in range(len(headers))),
+    ]
+    for row in rows:
+        lines.append("  ".join(row[index].ljust(widths[index]) for index in range(len(row))))
+    return lines
+
+
+def _scan_scope(
+    base_dir: Path,
+    scope: str,
+    rules: tuple[ContextDiscoveryRule, ...],
+    project_root: Path,
+    home_dir: Path,
+) -> list[ContextDiscoveryFinding]:
+    findings: list[ContextDiscoveryFinding] = []
+    seen: set[Path] = set()
+    candidate_files = (
+        _iter_candidate_files(base_dir)
+        if scope == "project"
+        else _iter_rule_candidate_files(base_dir, rules)
+    )
+
+    for file_path in candidate_files:
+        rel_path = portable_relpath(file_path, base_dir)
+        rule = _matching_rule(rel_path, rules)
+        if rule is None:
+            continue
+        resolved = file_path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if _is_binary(file_path):
+            findings.append(
+                ContextDiscoveryFinding(
+                    path=file_path,
+                    display_path=_display_path(file_path, scope, project_root, home_dir),
+                    scope=scope,
+                    tool=rule.tool,
+                    kind=rule.kind,
+                    importability=IMPORT_IGNORED,
+                    reason="binary file ignored",
+                )
+            )
+            continue
+        findings.append(
+            ContextDiscoveryFinding(
+                path=file_path,
+                display_path=_display_path(file_path, scope, project_root, home_dir),
+                scope=scope,
+                tool=rule.tool,
+                kind=rule.kind,
+                importability=rule.importability,
+                reason=rule.reason,
+            )
+        )
+    return findings
+
+
+def _iter_candidate_files(base_dir: Path) -> list[Path]:
+    files: list[Path] = []
+    for root, dirs, names in os.walk(base_dir):
+        current = Path(root)
+        dirs[:] = sorted(
+            name
+            for name in dirs
+            if name not in DEFAULT_SKIP_DIRS and not (current / name).is_symlink()
+        )
+        for name in sorted(names):
+            file_path = current / name
+            if file_path.is_file() and not file_path.is_symlink():
+                files.append(file_path)
+    return files
+
+
+def _iter_rule_candidate_files(
+    base_dir: Path, rules: tuple[ContextDiscoveryRule, ...]
+) -> list[Path]:
+    """Find files for user/system scopes without walking arbitrary trees."""
+
+    files: set[Path] = set()
+    for rule in rules:
+        for pattern in rule.patterns:
+            for file_path in base_dir.glob(pattern):
+                if _has_skipped_part(file_path, base_dir):
+                    continue
+                if file_path.is_file() and not file_path.is_symlink():
+                    files.add(file_path)
+    return sorted(files)
+
+
+def _has_skipped_part(file_path: Path, base_dir: Path) -> bool:
+    try:
+        rel_parts = file_path.relative_to(base_dir).parts
+    except ValueError:
+        return True
+    return any(part in DEFAULT_SKIP_DIRS for part in rel_parts)
+
+
+def _matching_rule(
+    rel_path: str, rules: tuple[ContextDiscoveryRule, ...]
+) -> ContextDiscoveryRule | None:
+    normalized = rel_path.replace("\\", "/")
+    for rule in rules:
+        if any(_glob_match(normalized, pattern) for pattern in rule.patterns):
+            return rule
+    return None
+
+
+def _display_path(file_path: Path, scope: str, project_root: Path, home_dir: Path) -> str:
+    if scope == "project":
+        return redact_text(portable_relpath(file_path, project_root))
+    if scope == "user":
+        try:
+            rel = portable_relpath(file_path, home_dir)
+            return redact_text(f"~/{rel}")
+        except ValueError:
+            return redact_text(str(file_path))
+    return redact_text(str(file_path))
+
+
+def _finding_sort_key(finding: ContextDiscoveryFinding) -> tuple[int, str, int, str]:
+    scope_order = {"project": 0, "user": 1, "system": 2}
+    import_order = {
+        IMPORT_APM_NATIVE: 0,
+        IMPORT_CONVERTIBLE: 1,
+        IMPORT_REFERENCE_ONLY: 2,
+        IMPORT_IGNORED: 3,
+    }
+    return (
+        scope_order.get(finding.scope, 99),
+        finding.tool,
+        import_order.get(finding.importability, 99),
+        finding.display_path,
+    )
+
+
+def _is_binary(path: Path) -> bool:
+    try:
+        chunk = path.read_bytes()[:2048]
+    except OSError:
+        return False
+    return b"\0" in chunk
+
+
+def _load_existing_manifest(project_root: Path) -> dict[str, Any] | None:
+    path = project_root / APM_YML
+    if not path.exists():
+        return None
+    try:
+        data = load_yaml(path)
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _manifest_target(target: str) -> str | None:
+    if target == "minimal":
+        return None
+    if target == "vscode":
+        return "copilot"
+    return target
+
+
+def _default_system_dirs() -> tuple[Path, ...]:
+    raw = os.environ.get("XDG_CONFIG_DIRS", "/etc/xdg")
+    paths = []
+    for item in raw.split(":"):
+        if not item:
+            continue
+        path = Path(item)
+        if path.is_absolute():
+            paths.append(path)
+    return tuple(paths)
+
+
+def echo_discovery_result(
+    result: ContextDiscoveryResult, output_format: str, *, write: bool = False
+) -> None:
+    """Emit discovery output through Click."""
+
+    click.echo(format_discovery_result(result, output_format, write=write), nl=False)
