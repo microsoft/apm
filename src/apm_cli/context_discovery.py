@@ -152,6 +152,39 @@ APM_NATIVE_RULES: tuple[ContextDiscoveryRule, ...] = (
         IMPORT_APM_NATIVE,
         "APM skill primitive",
     ),
+    ContextDiscoveryRule(
+        "apm",
+        "hook",
+        ("hooks/*.json", ".apm/hooks/*.json"),
+        IMPORT_APM_NATIVE,
+        "APM hook definition",
+    ),
+    ContextDiscoveryRule(
+        "apm",
+        "hook-script",
+        (
+            "hooks/scripts/**/*.sh",
+            "hooks/scripts/**/*.py",
+            ".apm/hooks/scripts/**/*.sh",
+            ".apm/hooks/scripts/**/*.py",
+        ),
+        IMPORT_APM_NATIVE,
+        "APM hook script",
+    ),
+    ContextDiscoveryRule(
+        "apm",
+        "command",
+        (".apm/prompts/**/*.prompt.md",),
+        IMPORT_APM_NATIVE,
+        "APM command prompt",
+    ),
+    ContextDiscoveryRule(
+        "apm",
+        "style",
+        (".apm/styles/*.style.md", ".github/styles/*.style.md"),
+        IMPORT_APM_NATIVE,
+        "APM output style primitive",
+    ),
 )
 
 TOOL_CONTEXT_RULES: tuple[ContextDiscoveryRule, ...] = (
@@ -294,6 +327,57 @@ TOOL_CONTEXT_RULES: tuple[ContextDiscoveryRule, ...] = (
         (".windsurf/workflows/**/*.md",),
         IMPORT_CONVERTIBLE,
         "Windsurf workflow file",
+    ),
+    # --- harness: commands (executable prompts / slash commands) ---
+    ContextDiscoveryRule(
+        "copilot",
+        "command",
+        (".github/prompts/**/*.prompt.md",),
+        IMPORT_CONVERTIBLE,
+        "Copilot custom prompt",
+    ),
+    ContextDiscoveryRule(
+        "codex",
+        "command",
+        (".codex/commands/**/*.md",),
+        IMPORT_CONVERTIBLE,
+        "Codex command prompt",
+    ),
+    # --- harness: hooks (pre/post tool-use event handlers) ---
+    ContextDiscoveryRule(
+        "copilot",
+        "hook",
+        (".github/hooks/*.json",),
+        IMPORT_CONVERTIBLE,
+        "Copilot hook definition",
+    ),
+    ContextDiscoveryRule(
+        "copilot",
+        "hook-script",
+        (
+            ".github/hooks/scripts/**/*.sh",
+            ".github/hooks/scripts/**/*.py",
+        ),
+        IMPORT_CONVERTIBLE,
+        "Copilot hook script",
+    ),
+    ContextDiscoveryRule(
+        "claude",
+        "hook-script",
+        (
+            ".claude/hooks/scripts/**/*.sh",
+            ".claude/hooks/scripts/**/*.py",
+        ),
+        IMPORT_CONVERTIBLE,
+        "Claude hook script",
+    ),
+    # --- harness: styles (output/response style definitions) ---
+    ContextDiscoveryRule(
+        "agents",
+        "style",
+        ("STYLE.md",),
+        IMPORT_CONVERTIBLE,
+        "project output style guide",
     ),
     ContextDiscoveryRule(
         "mcp",

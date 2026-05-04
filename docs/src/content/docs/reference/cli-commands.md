@@ -74,6 +74,11 @@ apm init --discover --write
 - **Auto-detection**: Automatically detects author from `git config user.name` and description from project context
 - **Brownfield friendly**: Works cleanly in existing projects without file pollution
 - **Discovery mode** (`--discover`): Scans known project, user, and safe system-level agent context locations for APM-native, convertible, and reference-only files, then prints a proposed `apm.yml`. It is read-only unless `--write` is provided
+- **Harness discovery**: The discovery scan covers the full agent harness -- hooks (pre/post tool-use event handlers), commands (executable prompt files / slash commands), and styles (output style guides) -- in addition to instructions, agents, and skills. Discovered harness items are reported by tool, scope, kind, and importability:
+  - `hook`: `hooks/*.json`, `.apm/hooks/*.json` (APM-native); `.github/hooks/*.json` (Copilot)
+  - `hook-script`: shell/Python scripts under `hooks/scripts/`, `.github/hooks/scripts/`, `.claude/hooks/scripts/`
+  - `command`: `.apm/prompts/**/*.prompt.md` (APM-native); `.github/prompts/**/*.prompt.md` (Copilot); `.codex/commands/**/*.md` (Codex); `.claude/commands/**/*.md` (Claude); `.opencode/commands/**/*.md` (OpenCode); `.gemini/commands/**/*.md` (Gemini)
+  - `style`: `.apm/styles/*.style.md`, `.github/styles/*.style.md` (APM-native); `STYLE.md` (project-level)
 - **Plugin mode** (`--plugin`): Creates both `plugin.json` and `apm.yml` with an empty `devDependencies` section. Plugin names must be kebab-case (`^[a-z][a-z0-9-]{0,63}$`), max 64 characters
 
 **Creates:**
