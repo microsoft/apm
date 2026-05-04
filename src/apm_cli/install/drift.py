@@ -637,6 +637,10 @@ def render_drift_text(findings: list[DriftFinding], verbose: bool = False) -> st
                 lines.append(f"      {item.inline_diff}")
         lines.append("")
 
+    lines.append(
+        f"  {STATUS_SYMBOLS['info']} Run 'apm install' to re-sync deployed files with the lockfile."
+    )
+
     return "\n".join(lines).rstrip() + "\n"
 
 

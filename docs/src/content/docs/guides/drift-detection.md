@@ -60,18 +60,17 @@ non-zero exit covers all of them.
 
 ## When to use `--no-drift`
 
-The escape hatch exists for three legitimate cases:
+The escape hatch exists for two legitimate cases:
 
 1. **Tight inner loops** where you intentionally have local edits and
    just want a content-only safety scan (`apm audit --no-drift -v`).
-2. **Strip-mode invocations** -- `--strip` and `--file` operate on a
-   single payload and are mutually exclusive with `--no-drift` enforcement.
-3. **Performance budgets** in matrix CI where you've already covered
+2. **Performance budgets** in matrix CI where you've already covered
    drift in a single non-matrix job upstream.
 
-`--no-drift` is mutually exclusive with `--strip` and `--file` (the CLI
-rejects the combination with a usage error rather than silently picking
-one).
+Drift detection is also auto-skipped when `--strip` or `--file` is used;
+both target a single payload and have nothing to diff against. Combining
+`--no-drift` with `--strip` or `--file` is rejected with a usage error
+(rather than silently picking one).
 
 ## Output formats
 

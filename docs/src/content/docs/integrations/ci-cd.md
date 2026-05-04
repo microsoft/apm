@@ -60,22 +60,22 @@ This step is not needed if your team only uses GitHub Copilot and Claude, which 
 
 ### Verify Deployed Primitives
 
-To ensure `.github/`, `.claude/`, `.cursor/`, `.opencode/`, and `.gemini/` integration files stay in sync with `apm.yml`, add a drift check:
+`apm audit --ci` catches integration drift by default -- no separate
+`git status` step required:
 
 ```yaml
-      - name: Check APM integration drift
-        run: |
-          apm install
-          if [ -n "$(git status --porcelain -- .github/ .claude/ .cursor/ .opencode/ .gemini/)" ]; then
-            echo "APM integration files are out of date. Run 'apm install' and commit."
-            exit 1
-          fi
+      - name: Audit + drift check
+        run: apm audit --ci
 ```
 
-This catches cases where a developer updates `apm.yml` but forgets to re-run `apm install`.
+This single command runs the seven baseline lockfile checks AND replays
+the install pipeline into a scratch tree to detect missed `apm install`
+runs, hand-edited deployed files, and orphaned files. See the
+[Drift Detection guide](../../guides/drift-detection/) for details and
+opt-out (`--no-drift`).
 
 :::tip[We dogfood this]
-APM's own repo uses the `APM Self-Check` job in [`microsoft/apm`'s `ci.yml`](https://github.com/microsoft/apm/blob/main/.github/workflows/ci.yml) as a reference implementation for installing APM, running CI validation commands such as `apm audit --ci`, and checking for drift with `git status --porcelain`. Use it as a practical example when wiring these checks into your own workflow.
+APM's own repo uses the `APM Self-Check` job in [`microsoft/apm`'s `ci.yml`](https://github.com/microsoft/apm/blob/main/.github/workflows/ci.yml) as a reference implementation for installing APM and running `apm audit --ci`. Use it as a practical example when wiring these checks into your own workflow.
 :::
 
 ## Azure Pipelines

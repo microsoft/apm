@@ -156,7 +156,7 @@ apm install github/awesome-copilot/skills/review-and-refactor
 - `apm_modules/` -- add to `.gitignore`. Rebuilt from the lockfile on install.
 
 :::tip[Keeping deployed files in sync]
-When you update `apm.yml`, re-run `apm install` and commit the changed `.github/`, `.claude/`, `.cursor/`, and `.gemini/` files. A [CI drift check](../../integrations/ci-cd/#verify-deployed-primitives) catches stale files automatically.
+When you update `apm.yml`, re-run `apm install` and commit the changed `.github/`, `.claude/`, `.cursor/`, and `.gemini/` files. A [CI drift check](../../guides/drift-detection/) catches stale files automatically.
 :::
 
 :::note[Using Codex or Gemini?]
