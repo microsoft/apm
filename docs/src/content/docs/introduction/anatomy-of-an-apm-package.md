@@ -302,7 +302,7 @@ install as first-class dependencies) and exports to plugin format
 you dependency management, lockfiles, and security scanning during
 authoring; `plugin.json` is the runtime distribution format. Use both --
 see [Why not just ship a `plugin.json`?](#why-not-just-ship-a-pluginjson)
-above and the [hybrid authoring workflow](../../guides/plugins/#hybrid-authoring-workflow).
+above and the [authoring workflow](../../guides/plugins/#authoring-workflow).
 
 ## See also
 

@@ -353,7 +353,7 @@ This:
 
 ## Exporting APM packages as plugins
 
-Use the [hybrid authoring workflow](#hybrid-authoring-workflow) to develop plugins with APM's full tooling and export them as standalone plugin directories. See [Pack & Distribute -- Plugin format](../../guides/pack-distribute/#plugin-format-vs-apm-format) for the output mapping and structure.
+Use the [authoring workflow](#authoring-workflow) to develop plugins with APM's full tooling and export them as standalone plugin directories. See [Pack & Distribute -- Plugin format](../../guides/pack-distribute/#plugin-format-vs-apm-format) for the output mapping and structure.
 
 ## Finding Plugins
 
