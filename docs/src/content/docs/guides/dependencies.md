@@ -158,7 +158,7 @@ The shorthand form for the same ADO entry is:
 - dev.azure.com/myorg/myproject/_git/myrepo/instructions/security#v2.0
 ```
 
-Use the **shorthand** or the **object form** for ADO sub-paths. The full `https://dev.azure.com/<org>/<project>/_git/<repo>/<sub-path>` URL form is not yet accepted by the parser ([tracking issue](https://github.com/microsoft/apm/issues)) - if you copy the URL straight from your ADO browser tab, switch to one of the two forms above. Spaces in project / repo names must be URL-encoded as `%20`.
+Use the **shorthand** or the **object form** for ADO sub-paths. The full `https://dev.azure.com/<org>/<project>/_git/<repo>/<sub-path>` URL form is not yet accepted by the parser. If you copy the URL straight from your ADO browser tab, switch to one of the two forms above. Spaces in project / repo names must be URL-encoded as `%20`.
 :::
 
 Explicit URL schemes are honored exactly -- see [Transport selection](#transport-selection-ssh-vs-https) for the full contract. Custom ports are preserved across every attempt (including any cross-protocol fallback enabled with `--allow-protocol-fallback`), so `ssh://host:7999/...` retried over HTTPS becomes `https://host:7999/...`.
