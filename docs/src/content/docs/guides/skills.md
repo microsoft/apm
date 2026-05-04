@@ -14,7 +14,7 @@ The `SKILL.md` format - frontmatter rules, body conventions, when to prefer a sk
 
 - **Install** from any git host (`apm install owner/repo/skill-name`).
 - **Lock** the resolved commit in `apm.lock.yaml` so every machine and CI job gets identical bytes.
-- **Audit** for hidden-character and prompt-injection findings on every install / compile / unpack (zero config); use `apm audit` for SARIF / JSON / markdown reports.
+- **Audit** for hidden Unicode character findings on every install / compile / unpack (zero config); use `apm audit` for SARIF / JSON / markdown reports.
 - **Deploy** to the right convention directory for each detected runtime (`.claude/skills/`, `.agents/skills/`, `.cursor/`, ...) - see [Routing](#what-happens-during-install) below.
 
 ### Two ways to consume a skill
