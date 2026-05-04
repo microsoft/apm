@@ -43,7 +43,9 @@
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm audit [PKG]` | Scan for security issues | `--file PATH`, `--strip`, `--dry-run`, `-v`, `-f [text\|json\|sarif\|md]`, `-o PATH`, `--ci`, `--policy SOURCE`, `--no-cache`, `--no-fail-fast` |
+| `apm audit [PKG]` | Scan for security issues + detect integration drift | `--file PATH`, `--strip`, `--dry-run`, `-v`, `-f [text\|json\|sarif\|md]`, `-o PATH`, `--ci`, `--policy SOURCE`, `--no-cache`, `--no-fail-fast`, `--no-drift` |
+
+`apm audit` runs **drift detection by default** (issue #1071). It replays `apm install` cache-only into a temporary scratch tree and diffs the result against your working tree. Catches three failure modes: (1) `.apm/` source added without re-running `apm install`, (2) hand-edits to deployed files that diverge from canonical source, (3) orphan files left after their source was removed. The scan is read-only -- never writes to your project, lockfile, or `apm_modules/`. Build IDs, CRLF line endings, and BOMs are normalized away so they cannot trigger false positives. Use `--no-drift` to opt out (e.g. fast inner loops); the flag is mutually exclusive with `--strip`/`--file`. In `--ci` mode drift findings produce exit code 1 alongside the seven baseline lockfile checks. Drift output is integrated into JSON (top-level `drift` key) and SARIF (rule IDs `apm/drift/<kind>` where kind is `modified`/`unintegrated`/`orphaned`).
 
 ## Distribution
 

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`apm audit` now detects integration drift by default.** Catches the three failure modes that previously required manual git diffing: (1) `.apm/` source added without re-running `apm install` (the #1067 case), (2) hand-edits to deployed files that diverge from what the install pipeline would produce, and (3) orphaned files still on disk after their source was removed. Implemented via cache-only install replay -- `apm audit` reproduces what `apm install` would write into a temporary scratch tree, then diffs that against the project. Read-only by design (no writes to project, lockfile, or apm_modules). Build IDs, CRLF line endings, and BOMs are normalized away to prevent false positives. Use `--no-drift` to opt out (escape hatch for performance-constrained loops). New `--no-drift` flag is mutually exclusive with `--strip`/`--file`. Drift findings are integrated into JSON (`drift` top-level key) and SARIF (`apm/drift/<kind>` rule IDs) output; in `--ci` mode drift findings exit code 1 alongside lockfile failures. Replaces the bash `git status --porcelain` workaround documented in `.github/workflows/ci.yml`. (#1071, supersedes scope of #898)
+
 ### Fixed
 
 - **Parallel subdir install race.** `apm install` no longer intermittently fails with `RuntimeError: Subdirectory '<path>' not found in repository` when multiple dependencies resolve to different subdirectories of the same `repo@ref`. The shared clone cache now stores subdir-agnostic bare clones and each consumer materializes its own working tree (mirrors the WS3 `GitCache` pattern). (#1135, fixes #1126)
