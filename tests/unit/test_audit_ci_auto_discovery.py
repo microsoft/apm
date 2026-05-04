@@ -113,7 +113,7 @@ class TestAutoDiscoveryRuns:
         mock_discover.return_value = _make_policy_fetch_with_unmanaged_deny()
 
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
-            result = runner.invoke(audit, ["--ci"])
+            result = runner.invoke(audit, ["--ci", "--no-drift"])
 
         # Auto-discovery should have been invoked.
         mock_discover.assert_called_once()
@@ -126,7 +126,7 @@ class TestAutoDiscoveryRuns:
         mock_discover.return_value = _make_no_policy_fetch()
 
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
-            result = runner.invoke(audit, ["--ci"])
+            result = runner.invoke(audit, ["--ci", "--no-drift"])
 
         mock_discover.assert_called_once()
         # Baseline-only (no unmanaged-file enforcement) -> exit 0.
@@ -144,7 +144,7 @@ class TestAutoDiscoveryOptOut:
         mock_discover.return_value = _make_policy_fetch_with_unmanaged_deny()
 
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
-            result = runner.invoke(audit, ["--ci", "--no-policy"])
+            result = runner.invoke(audit, ["--ci", "--no-drift", "--no-policy"])
 
         mock_discover.assert_not_called()
         assert result.exit_code == 0, result.output
@@ -164,7 +164,7 @@ class TestAutoDiscoveryFetchFailure:
         )
 
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
-            result = runner.invoke(audit, ["--ci"])
+            result = runner.invoke(audit, ["--ci", "--no-drift"])
 
         # Default warn -> proceed with baseline only.
         assert result.exit_code == 0, result.output
@@ -183,6 +183,6 @@ class TestAutoDiscoveryFetchFailure:
         )
 
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
-            result = runner.invoke(audit, ["--ci"])
+            result = runner.invoke(audit, ["--ci", "--no-drift"])
 
         assert result.exit_code == 1, result.output

@@ -93,6 +93,7 @@ def integrate_package_primitives(
     scope: InstallScope | None = None,
     skill_subset: tuple | None = None,
     ctx: InstallContext | None = None,
+    scratch_root: Path | None = None,
 ) -> dict:
     """Run the full integration pipeline for a single package.
 
@@ -129,6 +130,23 @@ def integrate_package_primitives(
 
     if not targets:
         return result
+
+    # ------------------------------------------------------------------
+    # Drift-replay safety guard (#drift): when ``scratch_root`` is set,
+    # the caller is replaying integration into an isolated directory.
+    # We assert it exists and is NOT inside ``project_root`` to keep the
+    # read-only contract of ``apm audit --check drift`` enforceable.
+    # The ``project_root`` passed in will already point at ``scratch_root``
+    # (so all writes redirect via target.deploy_path), so this check is
+    # purely defense-in-depth against accidental misuse.
+    # ------------------------------------------------------------------
+    if scratch_root is not None:
+        from apm_cli.utils.path_security import ensure_path_within
+
+        scratch_root = Path(scratch_root).resolve()
+        # ``project_root`` is the redirect target; it must equal scratch_root
+        # OR sit inside it.  ensure_path_within(child, parent) raises if not.
+        ensure_path_within(Path(project_root).resolve(), scratch_root)
 
     # --- Amendment 6: cowork non-skill primitive warning (once per run) ---
     _cowork_active = any(t.name == "copilot-cowork" for t in targets)
