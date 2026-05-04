@@ -26,12 +26,19 @@ CATEGORY_ERROR = "error"
 CATEGORY_SECURITY = "security"
 CATEGORY_POLICY = "policy"
 CATEGORY_AUTH = "auth"
+CATEGORY_DRIFT = "drift"
 CATEGORY_INFO = "info"
+
+# Drift severities: kinds of divergence from the lockfile-defined state.
+DRIFT_MODIFIED = "modified"  # tracked file content changed
+DRIFT_UNINTEGRATED = "unintegrated"  # tracked file missing from project
+DRIFT_ORPHANED = "orphaned"  # untracked file present in managed dir
 
 _CATEGORY_ORDER = [
     CATEGORY_SECURITY,
     CATEGORY_POLICY,
     CATEGORY_AUTH,
+    CATEGORY_DRIFT,
     CATEGORY_COLLISION,
     CATEGORY_OVERWRITE,
     CATEGORY_WARNING,
@@ -177,6 +184,37 @@ class DiagnosticCollector:
                 )
             )
 
+    def drift(
+        self,
+        path: str,
+        kind: str,
+        package: str = "",
+        detail: str = "",
+    ) -> None:
+        """Record a drift finding from ``apm audit`` replay.
+
+        Parameters
+        ----------
+        path : str
+            Project-relative path of the divergent file.
+        kind : str
+            One of ``DRIFT_MODIFIED``, ``DRIFT_UNINTEGRATED``, ``DRIFT_ORPHANED``.
+        package : str
+            Package name owning the file (best-effort; may be empty for orphans).
+        detail : str
+            Optional inline diff or extra context (rendered only in verbose).
+        """
+        with self._lock:
+            self._diagnostics.append(
+                Diagnostic(
+                    message=path,
+                    category=CATEGORY_DRIFT,
+                    package=package,
+                    detail=detail,
+                    severity=kind,
+                )
+            )
+
     # ------------------------------------------------------------------
     # Query helpers
     # ------------------------------------------------------------------
@@ -204,6 +242,11 @@ class DiagnosticCollector:
     def policy_count(self) -> int:
         """Return number of policy diagnostics."""
         return sum(1 for d in self._diagnostics if d.category == CATEGORY_POLICY)
+
+    @property
+    def drift_count(self) -> int:
+        """Return number of drift findings."""
+        return sum(1 for d in self._diagnostics if d.category == CATEGORY_DRIFT)
 
     @property
     def has_critical_security(self) -> bool:
@@ -259,6 +302,8 @@ class DiagnosticCollector:
                 self._render_policy_group(items)
             elif cat == CATEGORY_AUTH:
                 self._render_auth_group(items)
+            elif cat == CATEGORY_DRIFT:
+                self._render_drift_group(items)
             elif cat == CATEGORY_COLLISION:
                 self._render_collision_group(items)
             elif cat == CATEGORY_OVERWRITE:
@@ -400,6 +445,34 @@ class DiagnosticCollector:
             _rich_info(f"  [i] {d.message}")
             if d.detail and self.verbose:
                 _rich_echo(f"    +- {d.detail}", color="dim")
+
+    def _render_drift_group(self, items: list[Diagnostic]) -> None:
+        """Render drift findings: modified / unintegrated / orphaned files.
+
+        Stable section header so machine consumers can grep for it.
+        Counts shown by kind, then per-file lines with severity-coded markers.
+        """
+        modified = [d for d in items if d.severity == "modified"]
+        unintegrated = [d for d in items if d.severity == "unintegrated"]
+        orphaned = [d for d in items if d.severity == "orphaned"]
+
+        total = len(items)
+        _rich_warning(f"  [!] Drift detected: {total} file(s) diverge from lockfile")
+
+        for label, group, marker in (
+            ("modified", modified, "M"),
+            ("unintegrated", unintegrated, "U"),
+            ("orphaned", orphaned, "O"),
+        ):
+            if not group:
+                continue
+            _rich_echo(f"    {len(group)} {label}:", color="yellow")
+            for d in group:
+                pkg_prefix = f"[{d.package}] " if d.package else ""
+                _rich_echo(f"      {marker}  {pkg_prefix}{d.message}", color="yellow")
+                if d.detail and self.verbose:
+                    for line in d.detail.splitlines():
+                        _rich_echo(f"         {line}", color="dim")
 
 
 def _group_by_package(items: list[Diagnostic]) -> dict[str, list[Diagnostic]]:
