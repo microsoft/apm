@@ -331,6 +331,36 @@ def _filter_targets(all_targets, names: frozenset[str] | None):
     return [t for t in all_targets if t.name in names]
 
 
+def _read_apm_yml_target(project_root: Path):
+    """Return the ``target:`` field from ``apm.yml`` if present, else ``None``.
+
+    This lets ``run_replay`` reproduce the SAME target set the install
+    pipeline used, instead of falling back to directory auto-detection
+    that misses targets whose deployment directories are still empty.
+    """
+    apm_yml = project_root / "apm.yml"
+    if not apm_yml.exists():
+        return None
+    try:
+        import yaml as _yaml  # local import: drift module avoids top-level yaml dep
+
+        data = _yaml.safe_load(apm_yml.read_text(encoding="utf-8")) or {}
+    except Exception:
+        # Manifest unreadable / corrupt: fall back to auto-detect rather
+        # than crashing the replay; the caller still surfaces a useful
+        # error elsewhere if the project is truly broken.
+        return None
+    raw = data.get("target")
+    if raw is None:
+        return None
+    try:
+        from apm_cli.core.target_detection import parse_target_field
+
+        return parse_target_field(raw, source_path=apm_yml)
+    except Exception:
+        return None
+
+
 def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     """Execute the cache-only replay and return the populated scratch dir.
 
@@ -360,7 +390,13 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     scratch_root = _make_scratch_root(project_root)
     apm_modules_dir = project_root / "apm_modules"
 
-    all_targets = resolve_targets(project_root)
+    # Honor apm.yml's ``target:`` field so multi-target projects replay
+    # into all governed roots (not just whichever directory happens to
+    # already exist via auto-detection). Without this, a project that
+    # targets ``copilot,claude,cursor`` would replay only the primary
+    # auto-detected target and report the others as ``orphaned``.
+    explicit_target = _read_apm_yml_target(project_root)
+    all_targets = resolve_targets(project_root, explicit_target=explicit_target)
     targets = _filter_targets(all_targets, config.targets)
 
     diagnostics = DiagnosticCollector(verbose=logger.verbose)

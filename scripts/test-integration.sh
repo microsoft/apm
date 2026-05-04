@@ -524,6 +524,34 @@ run_e2e_tests() {
         exit 1
     fi
 
+    # Run drift-detection integration tests -- offline, no tokens needed
+    # Guards `apm audit` drift replay (Phase D) across all 9 drift cases,
+    # multi-target, --no-drift opt-out, and false-positive guards
+    # (CRLF, BOM, Build ID line). Pinning these tests prevents silent
+    # regression of the drift contract.
+    log_info "Running drift detection integration tests..."
+    echo "Command: pytest tests/integration/test_drift_check.py -v -s --tb=short"
+
+    if pytest tests/integration/test_drift_check.py -v -s --tb=short; then
+        log_success "Drift detection integration tests passed!"
+    else
+        log_error "Drift detection integration tests failed!"
+        exit 1
+    fi
+
+    # Run drift-detection E2E tests -- offline, no tokens needed
+    # Verifies the no-write contract, air-gap proof, performance smoke,
+    # and JSON/SARIF output shapes for the `apm audit` drift surface.
+    log_info "Running drift detection E2E tests..."
+    echo "Command: pytest tests/integration/test_drift_check_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_drift_check_e2e.py -v -s --tb=short; then
+        log_success "Drift detection E2E tests passed!"
+    else
+        log_error "Drift detection E2E tests failed!"
+        exit 1
+    fi
+
     log_success "All integration test suites completed successfully!"
     
 
