@@ -24,7 +24,6 @@ delegating instance methods on the class.
 from __future__ import annotations
 
 import logging
-import shutil
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -36,6 +35,20 @@ if TYPE_CHECKING:
     from ..models.apm_package import DependencyReference
 
 
+def _rmtree(path: Path) -> None:
+    """Remove a directory tree, handling read-only files and brief Windows locks.
+
+    Delegates to :func:`robust_rmtree` which retries with exponential backoff
+    on transient lock errors and chmod-resets read-only ``.git/objects/pack``
+    files (Windows portability finding from the #1126 paper audit).
+    Duplicated from :mod:`github_downloader` to avoid a circular import
+    (``github_downloader`` imports from this module).
+    """
+    from ..utils.file_ops import robust_rmtree
+
+    robust_rmtree(path, ignore_errors=True)
+
+
 def _scrub_bare_remote_url(bare_path: Path, git_exe: str, env: dict[str, str]) -> None:
     """Redact ``remote.origin.url`` in a bare repo's ``.git/config``.
 
@@ -45,6 +58,11 @@ def _scrub_bare_remote_url(bare_path: Path, git_exe: str, env: dict[str, str]) -
     further fetches), so the URL is dead weight that just persists the
     token on disk. Replace with ``redacted://`` to eliminate the
     on-disk token footprint.
+
+    Defense-in-depth: tier-1 (init + remote add + fetch) leaves
+    ``FETCH_HEAD`` containing the tokenized URL on disk even after the
+    config scrub. Truncate it to empty so the token does not survive
+    in any on-disk artifact. Best-effort (non-fatal on OSError).
 
     Best-effort: ``check=False`` so a config-set failure does not abort
     the clone (the bare is still functionally correct without the
@@ -75,6 +93,20 @@ def _scrub_bare_remote_url(bare_path: Path, git_exe: str, env: dict[str, str]) -
             "at %s: %s. Tokenized URL may persist on disk until shared "
             "cache cleanup.",
             bare_path,
+            exc,
+        )
+
+    # Defense-in-depth: truncate FETCH_HEAD which retains the tokenized
+    # URL after tier-1 init+fetch (supply-chain panel follow-up).
+    fetch_head = bare_path / "FETCH_HEAD"
+    try:
+        if fetch_head.exists():
+            fetch_head.write_text("")
+    except OSError as exc:
+        logging.getLogger(__name__).warning(
+            "Failed to truncate FETCH_HEAD at %s: %s. Tokenized URL "
+            "may persist on disk until shared cache cleanup.",
+            fetch_head,
             exc,
         )
 
@@ -137,79 +169,98 @@ def bare_clone_with_fallback(
         # the tier-1 init+fetch leaves a half-built bare on disk).
         # See 6.15.
         if target.exists():
-            shutil.rmtree(target, ignore_errors=True)
+            _rmtree(target)
 
         if is_commit_sha:
-            # Tier 1: init + fetch by SHA.
-            # Note: `git remote add origin <url>` stores the
-            # tokenized URL in `.git/config`. The ADO-bearer env
-            # approach relies on http.extraHeader (not stored URL
-            # auth), so this is safe today. _scrub_bare_remote_url
-            # below redacts the URL after a successful clone so the
-            # token does not persist on disk.
-            try:
-                subprocess.run(
-                    [git_exe, "init", "--bare", str(target)],
-                    env=env,
-                    check=True,
-                    capture_output=True,
-                )
-                subprocess.run(
-                    [git_exe, "-C", str(target), "remote", "add", "origin", url],
-                    env=env,
-                    check=True,
-                    capture_output=True,
-                )
-                subprocess.run(
-                    [git_exe, "-C", str(target), "fetch", "--depth=1", "origin", ref],
-                    env=env,
-                    check=True,
-                    capture_output=True,
-                    timeout=300,
-                )
-                # CRITICAL (v3 BLOCKER): init+fetch leaves HEAD pointing
-                # at refs/heads/main which doesn't exist locally.
-                # Without update-ref, consumer's `git rev-parse HEAD`
-                # is ambiguous. See 6.18.
-                subprocess.run(
-                    [git_exe, "-C", str(target), "update-ref", "HEAD", ref],
-                    env=env,
-                    check=True,
-                    capture_output=True,
-                )
-                _scrub_bare_remote_url(target, git_exe, env)
-                return
-            except subprocess.CalledProcessError:
-                # Tier 2: full bare clone, validate SHA, set HEAD.
-                shutil.rmtree(target, ignore_errors=True)
-                subprocess.run(
-                    [git_exe, "clone", "--bare", url, str(target)],
-                    env=env,
-                    check=True,
-                    capture_output=True,
-                    timeout=600,
-                )
-                subprocess.run(
-                    [
-                        git_exe,
-                        "-C",
-                        str(target),
-                        "rev-parse",
-                        "--verify",
-                        f"{ref}^{{commit}}",
-                    ],
-                    env=env,
-                    check=True,
-                    capture_output=True,
-                )
-                subprocess.run(
-                    [git_exe, "-C", str(target), "update-ref", "HEAD", ref],
-                    env=env,
-                    check=True,
-                    capture_output=True,
-                )
-                _scrub_bare_remote_url(target, git_exe, env)
-                return
+            # Tier 1 (init + fetch by SHA) requires a full 40-char SHA:
+            # `git fetch origin <sha>` only works for full SHAs (the
+            # smart-HTTP protocol does not resolve abbreviated SHAs),
+            # and `git update-ref HEAD <sha>` requires a full 40-char
+            # SHA-1. For short SHAs, skip directly to tier 2 where
+            # `rev-parse <short>` against the full bare can resolve
+            # the abbreviation. Copilot review finding (#1135).
+            if len(ref) == 40:
+                # Note: `git remote add origin <url>` stores the
+                # tokenized URL in `.git/config`. The ADO-bearer env
+                # approach relies on http.extraHeader (not stored URL
+                # auth), so this is safe today. _scrub_bare_remote_url
+                # below redacts the URL after a successful clone so the
+                # token does not persist on disk.
+                try:
+                    subprocess.run(
+                        [git_exe, "init", "--bare", str(target)],
+                        env=env,
+                        check=True,
+                        capture_output=True,
+                    )
+                    subprocess.run(
+                        [git_exe, "-C", str(target), "remote", "add", "origin", url],
+                        env=env,
+                        check=True,
+                        capture_output=True,
+                    )
+                    subprocess.run(
+                        [git_exe, "-C", str(target), "fetch", "--depth=1", "origin", ref],
+                        env=env,
+                        check=True,
+                        capture_output=True,
+                        timeout=300,
+                    )
+                    # CRITICAL (v3 BLOCKER): init+fetch leaves HEAD pointing
+                    # at refs/heads/main which doesn't exist locally.
+                    # Without update-ref, consumer's `git rev-parse HEAD`
+                    # is ambiguous. See 6.18.
+                    subprocess.run(
+                        [git_exe, "-C", str(target), "update-ref", "HEAD", ref],
+                        env=env,
+                        check=True,
+                        capture_output=True,
+                    )
+                    _scrub_bare_remote_url(target, git_exe, env)
+                    return
+                except subprocess.CalledProcessError:
+                    pass  # fall through to tier 2
+
+            # Tier 2: full bare clone, validate SHA, set HEAD.
+            if target.exists():
+                _rmtree(target)
+            subprocess.run(
+                [git_exe, "clone", "--bare", url, str(target)],
+                env=env,
+                check=True,
+                capture_output=True,
+                timeout=600,
+            )
+            # Resolve abbreviated SHAs (and re-validate full SHAs) against
+            # the full clone. `rev-parse <short>^{commit}` returns the
+            # 40-char SHA; we feed that into update-ref so HEAD never
+            # holds a partial reference. Without this, short-SHA pins
+            # would set resolved_commit to the abbreviation and lockfile
+            # comparisons against `head.commit.hexsha` (always 40-char)
+            # would never match. Copilot review finding (#1135).
+            full_sha_result = subprocess.run(
+                [
+                    git_exe,
+                    "-C",
+                    str(target),
+                    "rev-parse",
+                    "--verify",
+                    f"{ref}^{{commit}}",
+                ],
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            full_sha = full_sha_result.stdout.strip()
+            subprocess.run(
+                [git_exe, "-C", str(target), "update-ref", "HEAD", full_sha],
+                env=env,
+                check=True,
+                capture_output=True,
+            )
+            _scrub_bare_remote_url(target, git_exe, env)
+            return
 
         # Symbolic ref or default branch.
         args = [git_exe, "clone", "--bare", "--depth=1"]
@@ -222,7 +273,7 @@ def bare_clone_with_fallback(
             return
         except subprocess.CalledProcessError:
             # Tier 2: full bare clone (no shallow, no --branch).
-            shutil.rmtree(target, ignore_errors=True)
+            _rmtree(target)
             subprocess.run(
                 [git_exe, "clone", "--bare", url, str(target)],
                 env=env,
@@ -366,7 +417,7 @@ def clone_with_fallback(
     callable (typically ``self._execute_transport_plan``) that supplies
     a working-tree clone action (``Repo.clone_from``). Behavior is
     unchanged from the pre-#1126 implementation, except every clone
-    attempt now begins with ``shutil.rmtree(target, ignore_errors=True)``
+    attempt now begins with a robust ``_rmtree`` of the target
     for symmetry with the bare-clone path. This is strictly safer
     (clean slate per attempt) and matches the existing behavior on
     the second-and-subsequent attempts where target may contain a
@@ -387,7 +438,7 @@ def clone_with_fallback(
         # always start from a clean slate. Behavior change from the
         # pre-#1126 implementation - covered by 6.13.
         if target.exists():
-            shutil.rmtree(target, ignore_errors=True)
+            _rmtree(target)
         repo_holder.append(
             _repo.clone_from(
                 url,

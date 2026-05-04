@@ -1,9 +1,9 @@
 """GitHub package downloader for APM dependencies."""
 
+import contextlib
 import os
 import random  # noqa: F401
 import re
-import shutil
 import stat  # noqa: F401
 import subprocess
 import sys
@@ -755,11 +755,18 @@ class GitHubPackageDownloader:
                 return
             except (GitCommandError, subprocess.CalledProcessError) as e:
                 # ADO bearer fallback for clone (mirrors validation/list_remote_refs):
-                # PAT was rejected -> silently retry this attempt with az-cli bearer.
-                # Note: subprocess errors may include tokenized URLs in stderr;
-                # the existing _sanitize_git_error / _sanitize_url path used in the
-                # final error message handles redaction at the boundary.
+                # PAT was rejected -> silently retry with az-cli bearer.
+                # Append e.stderr to err_msg because str(CalledProcessError)
+                # does NOT include stderr by default; without this, the bare
+                # clone path would never trigger bearer retry on PAT 401.
                 err_msg = str(e)
+                stderr_attr = getattr(e, "stderr", None)
+                if stderr_attr:
+                    if isinstance(stderr_attr, bytes):
+                        with contextlib.suppress(Exception):
+                            err_msg += " " + stderr_attr.decode("utf-8", errors="replace")
+                    else:
+                        err_msg += " " + str(stderr_attr)
                 if (
                     is_ado
                     and attempt.use_token
@@ -1170,7 +1177,7 @@ class GitHubPackageDownloader:
 
         finally:
             if temp_dir and temp_dir.exists():
-                shutil.rmtree(temp_dir, ignore_errors=True)
+                _rmtree(temp_dir)
 
         return ResolvedReference(
             original_ref=original_ref_str,
@@ -1719,7 +1726,16 @@ class GitHubPackageDownloader:
                         temp_clone_path,
                         ref=ref,
                         env=self._git_env_dict(),
-                        known_sha=ref if is_commit_sha else None,
+                        # Only short-circuit SHA resolution when the user
+                        # pinned a full 40-char SHA. Abbreviated SHAs
+                        # (7-39 chars) must be resolved to the full
+                        # SHA against the bare so resolved_commit
+                        # matches `head.commit.hexsha` (always 40-char)
+                        # in lockfile comparisons. The bare's HEAD has
+                        # already been update-ref'd to the full SHA in
+                        # _bare_action, so rev-parse HEAD returns 40 chars.
+                        # Copilot review finding (#1135).
+                        known_sha=ref if (is_commit_sha and len(ref) == 40) else None,
                     )
                 except Exception as e:
                     raise RuntimeError(
@@ -2036,7 +2052,7 @@ class GitHubPackageDownloader:
             )
         except RuntimeError:
             if target_path.exists():
-                shutil.rmtree(target_path, ignore_errors=True)
+                _rmtree(target_path)
             raise
         if progress_obj and progress_task_id is not None:
             progress_obj.update(progress_task_id, completed=70, total=100)
@@ -2044,7 +2060,7 @@ class GitHubPackageDownloader:
         validation_result = validate_apm_package(target_path)
         if not validation_result.is_valid:
             if target_path.exists():
-                shutil.rmtree(target_path, ignore_errors=True)
+                _rmtree(target_path)
             error_msg = f"Invalid APM package {dep_ref.repo_url}:\n"
             for error in validation_result.errors:
                 error_msg += f"  - {error}\n"
@@ -2286,7 +2302,7 @@ class GitHubPackageDownloader:
             # Remove .git directory to save space and prevent treating as a Git repository
             git_dir = target_path / ".git"
             if git_dir.exists():
-                shutil.rmtree(git_dir, ignore_errors=True)
+                _rmtree(git_dir)
 
         except GitCommandError as e:
             # Check if this might be a private repository access issue
@@ -2316,7 +2332,7 @@ class GitHubPackageDownloader:
         if not validation_result.is_valid:
             # Clean up on validation failure
             if target_path.exists():
-                shutil.rmtree(target_path, ignore_errors=True)
+                _rmtree(target_path)
 
             error_msg = f"Invalid APM package {dep_ref.repo_url}:\n"
             for error in validation_result.errors:
