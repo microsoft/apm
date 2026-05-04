@@ -422,11 +422,13 @@ class TestBareCloneFallback:
         return d
 
     def test_sha_ref_tier1_init_fetch_path(self, tmp_path: Path) -> None:
-        """6.4 + 6.18: SHA ref triggers init+fetch tier 1 with update-ref HEAD."""
+        """6.4 + 6.18: full SHA triggers init+fetch tier 1 with update-ref HEAD."""
         from apm_cli.models.dependency.reference import DependencyReference
 
+        # Real 40-char hex SHA (tier-1 only runs for full SHAs, not abbreviations).
+        full_sha = "0123456789abcdef0123456789abcdef01234567"
         d = self._make_downloader(tmp_path)
-        dep = DependencyReference.parse("o/r/skills/X#abc1234567890abcdef1234567890abcdef12345678")
+        dep = DependencyReference.parse(f"o/r/skills/X#{full_sha}")
         bare = tmp_path / "bare"
         captured: list[list[str]] = []
 
@@ -440,7 +442,7 @@ class TestBareCloneFallback:
                 "https://example/o/r",
                 bare,
                 dep_ref=dep,
-                ref="abc1234567890abcdef1234567890abcdef12345678",
+                ref=full_sha,
                 is_commit_sha=True,
             )
 
@@ -456,20 +458,26 @@ class TestBareCloneFallback:
         assert len(update_ref_calls) == 1, (
             f"expected 1 update-ref HEAD call, got {update_ref_calls}"
         )
-        assert update_ref_calls[0][-1] == "abc1234567890abcdef1234567890abcdef12345678"
+        assert update_ref_calls[0][-1] == full_sha
         # 6.19: token scrub via remote set-url origin redacted://
         assert any("remote set-url origin redacted://" in s for s in cmd_strings), (
             "missing token scrub"
         )
 
     def test_sha_ref_tier2_fallback_on_fetch_rejection(self, tmp_path: Path) -> None:
-        """6.12: tier-1 fetch fails (server rejects SHA fetch) -> tier-2 full clone."""
+        """6.12: tier-1 fetch fails (server rejects SHA fetch) -> tier-2 full clone.
+
+        Also covers Copilot review #1135: tier-2 must use the full 40-char SHA
+        from `rev-parse --verify <ref>^{commit}` for `update-ref HEAD`, not
+        the (possibly abbreviated) input ref.
+        """
         import subprocess as sp
 
         from apm_cli.models.dependency.reference import DependencyReference
 
+        full_sha = "0123456789abcdef0123456789abcdef01234567"
         d = self._make_downloader(tmp_path)
-        dep = DependencyReference.parse("o/r/skills/X#abc1234567890abcdef1234567890abcdef12345678")
+        dep = DependencyReference.parse(f"o/r/skills/X#{full_sha}")
         bare = tmp_path / "bare"
         captured: list[list[str]] = []
 
@@ -479,6 +487,10 @@ class TestBareCloneFallback:
             if "fetch --depth=1" in cmd_str:
                 # Tier-1 fetch fails (simulating allowReachableSHA1InWant=false)
                 raise sp.CalledProcessError(1, args, stderr=b"reject")
+            if "rev-parse --verify" in cmd_str:
+                # Tier-2 resolves the (possibly abbreviated) ref to the
+                # canonical 40-char SHA via rev-parse stdout.
+                return MagicMock(returncode=0, stdout=full_sha + "\n", stderr="")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fake_run):
@@ -486,7 +498,7 @@ class TestBareCloneFallback:
                 "https://example/o/r",
                 bare,
                 dep_ref=dep,
-                ref="abc1234567890abcdef1234567890abcdef12345678",
+                ref=full_sha,
                 is_commit_sha=True,
             )
 
@@ -500,12 +512,61 @@ class TestBareCloneFallback:
         assert any("rev-parse --verify" in s and "^{commit}" in s for s in cmd_strings), (
             "missing tier-2 SHA verify"
         )
-        # update-ref HEAD <sha> still set on tier 2
+        # update-ref HEAD <sha> still set on tier 2 with the full 40-char SHA
         update_ref_calls = [
             c for c in captured if len(c) >= 4 and c[-3] == "update-ref" and c[-2] == "HEAD"
         ]
         assert len(update_ref_calls) == 1
-        assert update_ref_calls[0][-1] == "abc1234567890abcdef1234567890abcdef12345678"
+        assert update_ref_calls[0][-1] == full_sha
+
+    def test_short_sha_skips_tier1_and_resolves_via_tier2(self, tmp_path: Path) -> None:
+        """Copilot review #1135: short SHA must skip tier 1 (which requires
+        full SHA for `git fetch <sha>`) and resolve to a 40-char SHA via
+        tier-2 `rev-parse --verify <short>^{commit}`. The resolved 40-char
+        SHA is what gets passed to `update-ref HEAD`, not the abbreviation.
+        """
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        short_sha = "abc1234"  # 7-char abbreviation
+        full_sha = "abc12345670000000000000000000000000fffff"
+        d = self._make_downloader(tmp_path)
+        dep = DependencyReference.parse(f"o/r/skills/X#{short_sha}")
+        bare = tmp_path / "bare"
+        captured: list[list[str]] = []
+
+        def fake_run(args, **kwargs):
+            captured.append(list(args))
+            cmd_str = " ".join(args)
+            if "rev-parse --verify" in cmd_str:
+                return MagicMock(returncode=0, stdout=full_sha + "\n", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fake_run):
+            d._bare_clone_with_fallback(
+                "https://example/o/r",
+                bare,
+                dep_ref=dep,
+                ref=short_sha,
+                is_commit_sha=True,
+            )
+
+        cmd_strings = [" ".join(c) for c in captured]
+        # Tier 1 (init+fetch) MUST NOT be attempted for short SHAs.
+        assert not any("init --bare" in s for s in cmd_strings), (
+            f"tier-1 must be skipped for short SHA, got {cmd_strings}"
+        )
+        assert not any("fetch --depth=1" in s for s in cmd_strings), (
+            "tier-1 fetch must be skipped for short SHA"
+        )
+        # Tier 2 full clone + rev-parse + update-ref
+        assert any("clone --bare" in s for s in cmd_strings), "missing tier-2 clone"
+        update_ref_calls = [
+            c for c in captured if len(c) >= 4 and c[-3] == "update-ref" and c[-2] == "HEAD"
+        ]
+        assert len(update_ref_calls) == 1
+        # CRITICAL: the resolved full 40-char SHA is set, not the abbreviation.
+        assert update_ref_calls[0][-1] == full_sha
+        assert update_ref_calls[0][-1] != short_sha
 
     def test_symbolic_ref_tier1_shallow_clone(self, tmp_path: Path) -> None:
         """Symbolic ref triggers tier-1 shallow clone with --branch."""
@@ -819,3 +880,155 @@ class TestInvalidSubdirErrorWording:
                     match=r"Subdirectory ['\"]?skills/DOES_NOT_EXIST_TYPO['\"]? not found",
                 ):
                     downloader.download_subdirectory_package(dep, target_out)
+
+
+class TestBareScrubFetchHead:
+    """Supply-chain panel follow-up: tier-1 init+fetch leaves the tokenized
+    URL inside ``FETCH_HEAD`` even after the config scrub. The bare-cache
+    scrub helper must truncate ``FETCH_HEAD`` so the token does not survive
+    on disk in any artifact.
+    """
+
+    def test_scrub_truncates_fetch_head_when_present(self, tmp_path: Path) -> None:
+        from apm_cli.deps.bare_cache import _scrub_bare_remote_url
+
+        bare = tmp_path / "bare"
+        bare.mkdir()
+        fetch_head = bare / "FETCH_HEAD"
+        fetch_head.write_text(
+            "abcdef0123456789  branch 'main' of "
+            "https://oauth2:ghp_SECRET_TOKEN_FAKE@github.com/o/r\n"
+        )
+
+        with patch("apm_cli.deps.bare_cache.subprocess.run") as run_mock:
+            run_mock.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            _scrub_bare_remote_url(bare, "/usr/bin/git", {})
+
+        assert fetch_head.exists(), "FETCH_HEAD must be preserved (only truncated)"
+        assert fetch_head.read_text() == "", (
+            "FETCH_HEAD must be truncated so the tokenized URL does not persist on disk"
+        )
+
+    def test_scrub_no_op_when_fetch_head_absent(self, tmp_path: Path) -> None:
+        from apm_cli.deps.bare_cache import _scrub_bare_remote_url
+
+        bare = tmp_path / "bare"
+        bare.mkdir()
+        # No FETCH_HEAD file present (tier-2 path: full clone --bare).
+
+        with patch("apm_cli.deps.bare_cache.subprocess.run") as run_mock:
+            run_mock.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            # Must not raise even when FETCH_HEAD does not exist.
+            _scrub_bare_remote_url(bare, "/usr/bin/git", {})
+
+        assert not (bare / "FETCH_HEAD").exists()
+
+
+class TestAdoBareBearerRetry:
+    """Panel follow-up: the ADO bearer 401 retry path in
+    ``_execute_transport_plan`` must compose correctly with the bare
+    clone action, so that an ADO bare cache materialization recovers
+    from a stale PAT exactly the way the working-tree clone path does
+    (validation parity).
+    """
+
+    def _make_ado_downloader(self, tmp_path: Path):
+        from apm_cli.deps.github_downloader import GitHubPackageDownloader
+        from apm_cli.deps.transport_selection import TransportAttempt, TransportPlan
+
+        d = GitHubPackageDownloader.__new__(GitHubPackageDownloader)
+        d.auth_resolver = MagicMock()
+        d.token_manager = MagicMock()
+        d._transport_selector = MagicMock()
+        d._protocol_pref = MagicMock()
+        d._allow_fallback = False
+        d._fallback_port_warned = set()
+        d._strategies = MagicMock()
+        d.git_env = {}
+
+        # Token attempt with basic auth scheme on ADO is the trigger
+        # condition for the bearer retry branch.
+        d._build_repo_url = MagicMock(
+            side_effect=lambda *a, **kw: (
+                "https://bearer-url/o/r"
+                if kw.get("auth_scheme") == "bearer"
+                else "https://pat-url/o/r"
+            )
+        )
+        d._resolve_dep_token = MagicMock(return_value="pat-token")
+        ctx = MagicMock()
+        ctx.auth_scheme = "basic"
+        ctx.git_env = {}
+        d._resolve_dep_auth_ctx = MagicMock(return_value=ctx)
+        d._sanitize_git_error = MagicMock(side_effect=lambda s: s)
+
+        attempt = TransportAttempt(scheme="https", label="https-token", use_token=True)
+        plan = TransportPlan(attempts=[attempt], strict=False)
+        d._transport_selector.select = MagicMock(return_value=plan)
+        return d
+
+    def test_bare_clone_recovers_via_ado_bearer_after_pat_401(self, tmp_path: Path) -> None:
+        """ADO bare clone: PAT 401 -> bearer retry succeeds."""
+        import subprocess as sp
+
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        d = self._make_ado_downloader(tmp_path)
+        # ADO-style ref.
+        dep = DependencyReference.parse("dev.azure.com/org/proj/_git/repo/skills/X#main")
+        assert dep.is_azure_devops(), "fixture sanity: dep must be ADO"
+
+        bare = tmp_path / "bare"
+        urls_seen: list[str] = []
+
+        def fake_run(args, **kwargs):
+            cmd_str = " ".join(args)
+            if "clone --bare" in cmd_str:
+                # URL appears in args; locate it by content rather than position
+                # (varies for tier-1 shallow vs tier-2 full clone).
+                url = next((a for a in args if a.startswith("https://")), "")
+                urls_seen.append(url)
+                if "pat-url" in url:
+                    raise sp.CalledProcessError(
+                        128, args, stderr=b"fatal: Authentication failed for 'https://...'"
+                    )
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        # Stub the bearer provider to be available with a fake token.
+        bearer_provider = MagicMock()
+        bearer_provider.is_available.return_value = True
+        bearer_provider.get_bearer_token.return_value = "fake-bearer-token"
+
+        with (
+            patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fake_run),
+            patch(
+                "apm_cli.core.azure_cli.get_bearer_provider",
+                return_value=bearer_provider,
+            ),
+            patch(
+                "apm_cli.utils.github_host.build_ado_bearer_git_env",
+                return_value={"GIT_CONFIG_COUNT": "1"},
+            ),
+        ):
+            d._bare_clone_with_fallback(
+                "https://pat-url/o/r",
+                bare,
+                dep_ref=dep,
+                ref="main",
+                is_commit_sha=False,
+            )
+
+        # Both URLs must have been attempted: PAT first, bearer second.
+        assert any("pat-url" in u for u in urls_seen), (
+            f"expected PAT clone attempt, got urls={urls_seen}"
+        )
+        assert any("bearer-url" in u for u in urls_seen), (
+            f"expected bearer retry clone attempt, got urls={urls_seen}"
+        )
+        # Bearer attempt must come AFTER the PAT failure.
+        pat_idx = next(i for i, u in enumerate(urls_seen) if "pat-url" in u)
+        bearer_idx = next(i for i, u in enumerate(urls_seen) if "bearer-url" in u)
+        assert bearer_idx > pat_idx, f"bearer retry must follow PAT failure, urls={urls_seen}"
+        # Stale-PAT diagnostic must be emitted on bearer success.
+        assert d.auth_resolver.emit_stale_pat_diagnostic.called

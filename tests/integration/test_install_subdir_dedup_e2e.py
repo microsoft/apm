@@ -52,8 +52,19 @@ KNOWN_SHA: str | None = None
 
 
 def _resolve_known_sha() -> str | None:
-    """Resolve a real commit SHA on github/awesome-copilot for the sha-https variant."""
+    """Resolve a real commit SHA on github/awesome-copilot for the sha-https variant.
+
+    Passes ``GH_TOKEN`` to the ``gh`` subprocess so the test does not depend
+    on the developer's ambient ``gh auth login`` state -- CI workers will have
+    ``GITHUB_APM_PAT`` (or ``GITHUB_TOKEN``) but no ``gh`` config (Copilot
+    review #1135).
+    """
     import subprocess
+
+    token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_APM_PAT")
+    if not token:
+        return None
+    env = {**os.environ, "GH_TOKEN": token}
 
     try:
         result = subprocess.run(
@@ -61,6 +72,7 @@ def _resolve_known_sha() -> str | None:
             capture_output=True,
             text=True,
             timeout=15,
+            env=env,
         )
         if result.returncode == 0 and result.stdout.strip():
             sha = result.stdout.strip()
@@ -133,13 +145,22 @@ def test_two_subdirs_same_repo_parallel(ref_kind: str, ref_value: str | None) ->
         assert any(target_a.iterdir()), f"{SUBDIR_A} is empty"
         assert any(target_b.iterdir()), f"{SUBDIR_B} is empty"
 
-        # Lockfile parity: same cache key -> same resolved_commit.
-        sha_a = getattr(pkg_a, "resolved_commit", None) or getattr(pkg_a, "commit_sha", None)
-        sha_b = getattr(pkg_b, "resolved_commit", None) or getattr(pkg_b, "commit_sha", None)
-        if sha_a and sha_b and sha_a != "unknown" and sha_b != "unknown":
-            assert sha_a == sha_b, (
-                f"Sibling subdirs from same repo+ref must resolve to "
-                f"same commit, got a={sha_a} b={sha_b}"
-            )
+        # Lockfile parity (Copilot review #1135 + panel follow-up):
+        # The canonical resolved SHA path is ``pkg.resolved_reference.resolved_commit``
+        # (set in ``apm_package.py``). Asserting on it directly catches
+        # silent regressions where the cache hit fails to propagate the
+        # SHA back into the consumer's resolved reference.
+        sha_a = pkg_a.resolved_reference.resolved_commit
+        sha_b = pkg_b.resolved_reference.resolved_commit
+        assert sha_a is not None and sha_a != "unknown" and len(sha_a) == 40, (
+            f"expected resolved 40-char SHA for {SUBDIR_A}, got {sha_a!r}"
+        )
+        assert sha_b is not None and sha_b != "unknown" and len(sha_b) == 40, (
+            f"expected resolved 40-char SHA for {SUBDIR_B}, got {sha_b!r}"
+        )
+        assert sha_a == sha_b, (
+            f"Sibling subdirs from same repo+ref must resolve to "
+            f"same commit, got a={sha_a} b={sha_b}"
+        )
     finally:
         shutil.rmtree(test_dir, ignore_errors=True)
