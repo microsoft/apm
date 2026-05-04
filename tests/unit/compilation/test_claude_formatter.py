@@ -496,3 +496,128 @@ class TestErrorHandling:
         result = formatter.format_distributed(primitives, {temp_project: [instruction]})
 
         assert isinstance(result, ClaudeCompilationResult)
+
+
+class TestSkipInstructions:
+    """Tests for skip_instructions behavior when .claude/rules/ is populated."""
+
+    @pytest.fixture
+    def temp_project(self):
+        """Create a temporary project directory."""
+        temp_dir = tempfile.mkdtemp()
+        resolved = Path(temp_dir).resolve()
+        yield resolved
+        shutil.rmtree(resolved, ignore_errors=True)
+
+    @pytest.fixture
+    def sample_primitives(self, temp_project):
+        """Create sample primitives for testing."""
+        primitives = PrimitiveCollection()
+        instruction = Instruction(
+            name="python-style",
+            file_path=temp_project / ".apm/instructions/python.instructions.md",
+            description="Python coding standards",
+            apply_to="**/*.py",
+            content="Use type hints and follow PEP 8.",
+            author="test",
+            source="local",
+        )
+        primitives.add_primitive(instruction)
+        return primitives
+
+    def test_skip_instructions_omits_project_standards(self, temp_project, sample_primitives):
+        """When skip_instructions is True, Project Standards section is omitted."""
+        formatter = ClaudeFormatter(str(temp_project))
+        placement_map = {temp_project: list(sample_primitives.instructions)}
+
+        config = {"skip_instructions": True}
+        result = formatter.format_distributed(sample_primitives, placement_map, config)
+
+        # No files generated (no constitution or dependencies either)
+        assert result.success
+        assert len(result.content_map) == 0
+
+    def test_skip_instructions_preserves_constitution(self, temp_project, sample_primitives):
+        """When skip_instructions is True, constitution is still included."""
+        from apm_cli.compilation.constitution import clear_constitution_cache
+
+        # Create a constitution file at the expected path
+        memory_dir = temp_project / ".specify" / "memory"
+        memory_dir.mkdir(parents=True)
+        (memory_dir / "constitution.md").write_text("Always be helpful.")
+
+        clear_constitution_cache()
+        formatter = ClaudeFormatter(str(temp_project))
+        placement_map = {temp_project: list(sample_primitives.instructions)}
+
+        config = {"skip_instructions": True}
+        result = formatter.format_distributed(sample_primitives, placement_map, config)
+
+        assert result.success
+        assert len(result.content_map) == 1
+        content = result.content_map[temp_project / "CLAUDE.md"]
+        assert "# Constitution" in content
+        assert "Always be helpful." in content
+        assert "# Project Standards" not in content
+
+    def test_skip_instructions_preserves_dependencies(self, temp_project, sample_primitives):
+        """When skip_instructions is True, dependencies are still included."""
+        # Create a dependency with CLAUDE.md
+        dep_dir = temp_project / "apm_modules" / "owner" / "package"
+        dep_dir.mkdir(parents=True)
+        (dep_dir / "CLAUDE.md").write_text("# dep")
+
+        formatter = ClaudeFormatter(str(temp_project))
+        placement_map = {temp_project: list(sample_primitives.instructions)}
+
+        config = {"skip_instructions": True}
+        result = formatter.format_distributed(sample_primitives, placement_map, config)
+
+        assert result.success
+        assert len(result.content_map) == 1
+        content = result.content_map[temp_project / "CLAUDE.md"]
+        assert "# Dependencies" in content
+        assert "@apm_modules/owner/package/CLAUDE.md" in content
+        assert "# Project Standards" not in content
+
+    def test_skip_instructions_omits_subdirectory_files(self, temp_project, sample_primitives):
+        """When skip_instructions is True, subdirectory CLAUDE.md files are not generated."""
+        subdir = temp_project / "src"
+        subdir.mkdir()
+
+        primitives = PrimitiveCollection()
+        instruction = Instruction(
+            name="src-style",
+            file_path=temp_project / ".apm/instructions/src.instructions.md",
+            description="Source standards",
+            apply_to="src/**/*.py",
+            content="Source-specific rules.",
+            author="test",
+            source="local",
+        )
+        primitives.add_primitive(instruction)
+
+        placement_map = {subdir: list(primitives.instructions)}
+
+        config = {"skip_instructions": True}
+        formatter = ClaudeFormatter(str(temp_project))
+        result = formatter.format_distributed(primitives, placement_map, config)
+
+        assert result.success
+        assert len(result.content_map) == 0
+
+    def test_no_skip_instructions_includes_project_standards(
+        self, temp_project, sample_primitives
+    ):
+        """When skip_instructions is False (default), instructions are included."""
+        formatter = ClaudeFormatter(str(temp_project))
+        placement_map = {temp_project: list(sample_primitives.instructions)}
+
+        config = {"skip_instructions": False}
+        result = formatter.format_distributed(sample_primitives, placement_map, config)
+
+        assert result.success
+        assert len(result.content_map) == 1
+        content = result.content_map[temp_project / "CLAUDE.md"]
+        assert "# Project Standards" in content
+        assert "Use type hints and follow PEP 8." in content

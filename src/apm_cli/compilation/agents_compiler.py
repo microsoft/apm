@@ -552,8 +552,23 @@ class AgentsCompiler:
             debug=config.debug,
         )
 
+        # Skip instructions in CLAUDE.md when they are already deployed to
+        # .claude/rules/ by `apm install` (avoids duplicate context in Claude Code).
+        claude_rules_dir = self.base_dir / ".claude" / "rules"
+        skip_instructions = claude_rules_dir.is_dir() and any(claude_rules_dir.glob("*.md"))
+        if skip_instructions:
+            self._log(
+                "progress",
+                "Instructions already in .claude/rules/ -- skipping from CLAUDE.md",
+                symbol="info",
+            )
+
         # Format CLAUDE.md files
-        claude_config = {"source_attribution": config.source_attribution, "debug": config.debug}
+        claude_config = {
+            "source_attribution": config.source_attribution,
+            "debug": config.debug,
+            "skip_instructions": skip_instructions,
+        }
         claude_result = claude_formatter.format_distributed(
             primitives, placement_map, claude_config
         )

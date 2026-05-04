@@ -671,5 +671,75 @@ class TestCompileClaudeMdConstitutionInjectionFailure(unittest.TestCase):
         )
 
 
+# ---------------------------------------------------------------------------
+# AgentsCompiler._compile_claude_md() -- skip_instructions when .claude/rules/ populated
+# ---------------------------------------------------------------------------
+
+
+class TestClaudeCompileSkipInstructions(unittest.TestCase):
+    """Test that _compile_claude_md skips instructions when .claude/rules/ has files."""
+
+    def setUp(self):
+        self.original_dir = os.getcwd()
+        self.tmp = tempfile.mkdtemp()
+        self.tmp_resolved = str(Path(self.tmp).resolve())
+        os.chdir(self.tmp_resolved)
+        # Minimal apm.yml so discovery works
+        with open("apm.yml", "w") as f:
+            yaml.dump({"name": "test-project", "version": "1.0.0"}, f)
+        # Create .apm/instructions with a sample instruction
+        instr_dir = Path(self.tmp_resolved) / ".apm" / "instructions"
+        instr_dir.mkdir(parents=True)
+        (instr_dir / "style.instructions.md").write_text(
+            "---\ndescription: Style guide\napplyTo: '**/*.py'\n---\nUse type hints.\n"
+        )
+
+    def tearDown(self):
+        os.chdir(self.original_dir)
+        import shutil
+
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_instructions_included_without_rules_dir(self):
+        """Without .claude/rules/, instructions appear in CLAUDE.md."""
+        compiler = AgentsCompiler(self.tmp_resolved)
+        config = CompilationConfig(target="claude", dry_run=True)
+        result = compiler.compile(config)
+        assert result.success
+        assert "Project Standards" in result.content or "1" in str(result.stats)
+
+    def test_instructions_skipped_with_populated_rules_dir(self):
+        """With .claude/rules/ containing .md files, instructions are skipped."""
+        rules_dir = Path(self.tmp_resolved) / ".claude" / "rules"
+        rules_dir.mkdir(parents=True)
+        (rules_dir / "style.md").write_text("---\npaths:\n  - '**/*.py'\n---\nUse type hints.\n")
+
+        compiler = AgentsCompiler(self.tmp_resolved)
+        config = CompilationConfig(target="claude", dry_run=False)
+        result = compiler.compile(config)
+        assert result.success
+
+        # Check that the generated CLAUDE.md does not contain instructions
+        claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
+        if claude_md.exists():
+            content = claude_md.read_text()
+            assert "# Project Standards" not in content
+
+    def test_instructions_not_skipped_with_empty_rules_dir(self):
+        """An empty .claude/rules/ does not trigger instruction skipping."""
+        rules_dir = Path(self.tmp_resolved) / ".claude" / "rules"
+        rules_dir.mkdir(parents=True)
+
+        compiler = AgentsCompiler(self.tmp_resolved)
+        config = CompilationConfig(target="claude", dry_run=False)
+        result = compiler.compile(config)
+        assert result.success
+
+        claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
+        assert claude_md.exists()
+        content = claude_md.read_text()
+        assert "# Project Standards" in content
+
+
 if __name__ == "__main__":
     unittest.main()

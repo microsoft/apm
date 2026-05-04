@@ -97,15 +97,29 @@ class ClaudeFormatter:
         try:
             config = config or {}
             source_attribution = config.get("source_attribution", True)
+            self._skip_instructions = config.get("skip_instructions", False)
 
             # Generate Claude placements from the placement map
             placements = self._generate_placements(
                 placement_map, primitives, source_attribution=source_attribution
             )
 
-            # Generate content for each placement
+            # Generate content for each placement.
+            # When instructions are skipped (already in .claude/rules/), only
+            # emit root CLAUDE.md if it has other content (constitution or
+            # dependencies); subdirectory placements are omitted entirely.
             content_map = {}
             for placement in placements:
+                if self._skip_instructions:
+                    try:
+                        is_root = placement.claude_path.parent.resolve() == self.base_dir
+                    except OSError:
+                        is_root = placement.claude_path.parent == self.base_dir
+                    if not is_root:
+                        continue
+                    has_constitution = bool(read_constitution(self.base_dir))
+                    if not placement.dependencies and not has_constitution:
+                        continue
                 content = self._generate_claude_content(placement, primitives)
                 content_map[placement.claude_path] = content
 
@@ -272,8 +286,11 @@ class ClaudeFormatter:
                 sections.append(constitution.strip())
                 sections.append("")
 
-        # Project Standards section (grouped by pattern)
-        if placement.instructions:
+        # Project Standards section (grouped by pattern).
+        # Skipped when instructions are already deployed to .claude/rules/ by
+        # `apm install`, since Claude Code reads both locations and would see
+        # duplicate content.
+        if placement.instructions and not self._skip_instructions:
             sections.append("# Project Standards")
             sections.append("")
 
