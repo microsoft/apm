@@ -255,7 +255,7 @@ every supported AI tool.
 These surfaces are stable and recommended for production use:
 
 - `apm install`, `apm.lock.yaml`, `apm audit` - dependency resolution, version locking, security scanning.
-- `apm compile`, `apm pack`, `apm unpack` - multi-tool output, bundle distribution, plugin export.
+- `apm compile`, `apm pack`, `apm install <bundle-path>` - multi-tool output, bundle distribution, and supported local-bundle installation.
 - Authoring layout (`apm.yml`, `.apm/`) and consumption from GitHub, Azure DevOps, GitLab, Bitbucket, and self-hosted Git hosts.
 - Cross-tool deployment to GitHub Copilot, Claude Code, Cursor, OpenCode, Codex, and Gemini.
 
