@@ -20,13 +20,13 @@ class ProtectedPathMutationError(RuntimeError):
     """Raised when a path under guard was mutated during drift replay."""
 
 
-def _snapshot(paths: list[Path]) -> dict[Path, tuple[float, int] | None]:
+def _snapshot(paths: list[Path]) -> dict[Path, tuple[int, int] | None]:
     """Capture (mtime_ns, size) for each path, or ``None`` if missing.
 
     Symlinks are followed; missing paths record ``None`` so they may
     legitimately remain absent without triggering the guard.
     """
-    snap: dict[Path, tuple[float, int] | None] = {}
+    snap: dict[Path, tuple[int, int] | None] = {}
     for p in paths:
         try:
             st = p.stat()
@@ -77,7 +77,7 @@ class _ReadOnlyProjectGuard:
     def __init__(self, project_root: Path, protected_subpaths: list[str]) -> None:
         self.project_root = project_root.resolve()
         self.protected_roots = [self.project_root / sp for sp in protected_subpaths]
-        self._snapshot: dict[Path, tuple[float, int] | None] = {}
+        self._snapshot: dict[Path, tuple[int, int] | None] = {}
 
     def __enter__(self) -> _ReadOnlyProjectGuard:
         files = _walk_protected(self.protected_roots)

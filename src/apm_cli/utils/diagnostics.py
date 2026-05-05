@@ -32,7 +32,7 @@ CATEGORY_INFO = "info"
 # Drift severities: kinds of divergence from the lockfile-defined state.
 DRIFT_MODIFIED = "modified"  # tracked file content changed
 DRIFT_UNINTEGRATED = "unintegrated"  # tracked file missing from project
-DRIFT_ORPHANED = "orphaned"  # untracked file present in managed dir
+DRIFT_ORPHANED = "orphaned"  # tracked in lockfile but not produced by replay
 
 _CATEGORY_ORDER = [
     CATEGORY_SECURITY,

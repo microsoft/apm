@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import atexit
 import json
-import re
 import shutil
 import tempfile
 import tracemalloc
@@ -84,36 +83,22 @@ class CacheMissError(RuntimeError):
 
 # ---------------------------------------------------------------------------
 # Normalization helpers (operate on bytes; bytes-in / bytes-out)
+#
+# Re-exported from ``apm_cli.utils.normalization`` so existing callers and
+# tests that import ``_strip_build_id`` / ``_normalize`` from this module
+# keep working. The implementation lives in ``utils/`` so future callers
+# (policy linters, content-scan helpers) can reuse it without importing
+# the drift module.
 # ---------------------------------------------------------------------------
 
-_BUILD_ID_PATTERN = re.compile(
-    rb"<!--\s*Build ID:\s*[a-f0-9]+\s*-->\s*\n?",
-    re.IGNORECASE,
+from apm_cli.utils.normalization import (  # noqa: E402, F401  -- re-exported for back-compat
+    _BOM,
+    _BUILD_ID_PATTERN,
+    _normalize,
+    _normalize_line_endings,
+    _strip_bom,
+    _strip_build_id,
 )
-_BOM = b"\xef\xbb\xbf"
-
-
-def _strip_build_id(content: bytes) -> bytes:
-    """Remove APM ``<!-- Build ID: <sha> -->`` headers wherever they appear."""
-    return _BUILD_ID_PATTERN.sub(b"", content)
-
-
-def _normalize_line_endings(content: bytes) -> bytes:
-    """Convert CRLF to LF; leaves bare CR alone (rare, intentional)."""
-    return content.replace(b"\r\n", b"\n")
-
-
-def _strip_bom(content: bytes) -> bytes:
-    """Drop a UTF-8 BOM at the start of the file (only at offset 0)."""
-    if content.startswith(_BOM):
-        return content[len(_BOM) :]
-    return content
-
-
-def _normalize(content: bytes) -> bytes:
-    """Apply all drift-tolerant normalizations to a file's bytes."""
-    return _strip_build_id(_normalize_line_endings(_strip_bom(content)))
-
 
 # ---------------------------------------------------------------------------
 # Scratch directory lifecycle
@@ -178,6 +163,20 @@ class CheckLogger(CommandLogger):
     def replay_start(self) -> None:
         self._emit("running", "Replaying install (cache-only)...")
 
+    def scratch_root(self, path: Path) -> None:
+        """Verbose-only: announce the scratch tmpdir to stderr.
+
+        Stays on stderr so JSON/SARIF stdout payloads remain
+        machine-parseable. Self-gates on ``self.verbose`` so the
+        normal-mode user never sees it.
+        """
+        if not self.verbose:
+            return
+        click.echo(
+            f"{STATUS_SYMBOLS['info']} drift scratch root: {path}",
+            err=True,
+        )
+
     def diff_start(self) -> None:
         self._emit("running", "Diffing scratch vs working tree...")
 
@@ -234,6 +233,17 @@ def _materialize_install_path(
             f"cache miss for {lock_dep.repo_url}@{lock_dep.resolved_commit}: "
             f"expected {candidate}; run 'apm install' to populate the cache"
         )
+    # Stale-cache detection: verify the cache pin marker matches the
+    # lockfile's resolved_commit. Catches the "teammate bumped the
+    # lockfile, didn't reinstall" + "shared CI runner reused stale
+    # apm_modules" scenarios. Not defense against active tampering.
+    if lock_dep.resolved_commit:
+        from apm_cli.install.cache_pin import CachePinError, verify_marker
+
+        try:
+            verify_marker(candidate, lock_dep.resolved_commit)
+        except CachePinError as exc:
+            raise CacheMissError(f"{exc}; run 'apm install' to refresh apm_modules cache") from exc
     return candidate
 
 
@@ -388,6 +398,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
     project_root = config.project_root.resolve()
     scratch_root = _make_scratch_root(project_root)
+    logger.scratch_root(scratch_root)
     apm_modules_dir = project_root / "apm_modules"
 
     # Honor apm.yml's ``target:`` field so multi-target projects replay

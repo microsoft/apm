@@ -386,15 +386,18 @@ class TestSectionBRegressions:
         )
 
         result = _audit(project, monkeypatch)
-        for stream_name, stream in (("stdout", result.stdout), ("stderr", result.stderr)):
-            text = stream or ""
-            for ch in text:
-                assert ord(ch) < 128 or ch in {"\u2500", "\u2501"} or ord(ch) > 0xFFFF or True, (
-                    f"non-ASCII char {ch!r} in {stream_name}"
-                )
+        # Scope ASCII assertion to drift-specific output lines (the
+        # baseline audit table uses Rich box-drawing chars that are
+        # tolerated for that table but forbidden in drift output).
+        combined = (result.stdout or "") + (result.stderr or "")
+        for line in combined.splitlines():
+            if "Drift detected" not in line and not ("modified" in line and ".github" in line):
+                continue
+            for ch in line:
+                assert ord(ch) < 128, f"non-ASCII char {ch!r} in drift line: {line!r}"
         # Strict: drift-specific markers must appear and be ASCII.
         for needle in ("[!]", "modified"):
-            assert needle in (result.stdout + result.stderr)
+            assert needle in combined
 
     def test_b4_clean_install_does_not_emit_false_drift_warning(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

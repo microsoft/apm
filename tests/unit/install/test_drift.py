@@ -120,6 +120,64 @@ def test_diff_engine_modified_ignored_after_normalization(tmp_path):
     assert findings == []
 
 
+# Inverse-normalization regression suite: each guard MUST NOT mask a
+# real content change that happens to coexist with a
+# legitimately-ignorable difference. Without these tests, a future
+# refactor that over-broadens normalization (e.g. stripping all HTML
+# comments instead of just Build-ID, or normalizing all whitespace)
+# would silently hide real drift.
+
+
+def test_normalization_does_not_mask_real_drift_under_build_id(tmp_path):
+    """A real text change MUST be reported even when one side has a Build-ID header."""
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    _write(
+        scratch / ".apm" / "skills" / "x.md",
+        b"<!-- Build ID: aaaa -->\nallowlisted line\n",
+    )
+    # Project: different Build-ID (ignorable) AND a real content change
+    # ("BLOCKED line" instead of "allowlisted line").
+    _write(
+        project / ".apm" / "skills" / "x.md",
+        b"<!-- Build ID: bbbb -->\nBLOCKED line\n",
+    )
+
+    findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=[])
+    assert len(findings) == 1
+    assert findings[0].kind == "modified"
+    assert findings[0].path == ".apm/skills/x.md"
+
+
+def test_normalization_does_not_mask_real_drift_under_bom(tmp_path):
+    """BOM stripping MUST NOT mask a real change in the rest of the file."""
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    _write(scratch / ".apm" / "skills" / "x.md", b"hello world\n")
+    # Project starts with a BOM (ignorable) but has different body content.
+    _write(project / ".apm" / "skills" / "x.md", b"\xef\xbb\xbfhello WORLD\n")
+
+    findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=[])
+    assert len(findings) == 1
+    assert findings[0].kind == "modified"
+
+
+def test_normalization_does_not_mask_real_drift_under_crlf(tmp_path):
+    """CRLF normalization MUST NOT mask a real character change."""
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    _write(scratch / ".apm" / "skills" / "x.md", b"alpha\nbeta\ngamma\n")
+    # Project uses CRLF (ignorable) AND has a different middle line.
+    _write(
+        project / ".apm" / "skills" / "x.md",
+        b"alpha\r\nBETA-changed\r\ngamma\r\n",
+    )
+
+    findings = diff_scratch_against_project(scratch, project, _empty_lockfile(), targets=[])
+    assert len(findings) == 1
+    assert findings[0].kind == "modified"
+
+
 def test_diff_engine_unintegrated_kind(tmp_path):
     scratch = tmp_path / "scratch"
     project = tmp_path / "project"
@@ -213,3 +271,29 @@ def test_check_logger_phases_to_stderr(capsys):
     assert "[>]" in captured.err
     assert "[+]" in captured.err
     assert "[!]" in captured.err
+
+
+def test_check_logger_scratch_root_emits_to_stderr_when_verbose(capsys, tmp_path):
+    """Verbose-mode scratch root announcement stays on stderr (B4 follow-up).
+
+    Stdout must remain a clean JSON/SARIF channel. The scratch tmpdir
+    is diagnostic noise, not report payload, so it goes to stderr and
+    is gated on ``verbose`` so the normal-mode user never sees it.
+    """
+    logger = CheckLogger(verbose=True)
+    logger.scratch_root(tmp_path / "drift-scratch-xyz")
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "drift scratch root:" in captured.err
+    assert "drift-scratch-xyz" in captured.err
+    assert "[i]" in captured.err
+
+
+def test_check_logger_scratch_root_silent_when_not_verbose(capsys, tmp_path):
+    """Non-verbose mode must NOT leak the scratch tmpdir."""
+    logger = CheckLogger(verbose=False)
+    logger.scratch_root(tmp_path / "drift-scratch-secret")
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "drift-scratch-secret" not in captured.err
+    assert captured.err == ""

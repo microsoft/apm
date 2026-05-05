@@ -14,10 +14,14 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import List, Optional  # noqa: F401, UP035
+from typing import TYPE_CHECKING, List, Optional, Sequence  # noqa: F401, UP035
 
 from ..deps.lockfile import _SELF_KEY
 from .models import CheckResult, CIAuditResult
+
+if TYPE_CHECKING:
+    from ..deps.lockfile import LockFile
+    from ..install.drift import DriftFinding
 
 _logger = logging.getLogger(__name__)
 
@@ -405,11 +409,11 @@ def _check_includes_consent(
 
 def _check_drift(
     project_root: Path,
-    lockfile,
-    targets=None,
+    lockfile: LockFile,
+    targets: Sequence[str] | None = None,
     cache_only: bool = True,
     verbose: bool = False,
-) -> tuple[CheckResult, list]:
+) -> tuple[CheckResult, list[DriftFinding]]:
     """Replay the install in a scratch dir and diff against the project.
 
     Returns the standard :class:`CheckResult` PLUS the list of
@@ -446,8 +450,7 @@ def _check_drift(
                 name="drift",
                 passed=False,
                 message=(
-                    f"drift replay aborted: {exc} -- "
-                    "run 'apm install' first or use --no-cache (not yet supported)"
+                    f"drift replay aborted: {exc}; run 'apm install' to refresh apm_modules cache"
                 ),
             ),
             [],

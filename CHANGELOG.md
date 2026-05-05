@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`apm audit` now detects integration drift by default.** Read-only cache-only install replay catches missed `apm install` runs, hand-edited deployed files, and orphaned files. Findings exposed in JSON (`drift` key) and SARIF (`apm/drift/<kind>` rules); in `--ci` mode they contribute to the exit code. Opt out with `--no-drift` (mutually exclusive with `--strip`/`--file`). See the [Drift Detection guide](docs/src/content/docs/guides/drift-detection.md) for details. (#1071, supersedes scope of #898)
+- **`apm audit` now detects integration drift by default.** Read-only cache-only install replay catches missed `apm install` runs, hand-edited deployed files, and orphaned files. Findings exposed in JSON (`drift` key) and SARIF (`apm/drift/<kind>` rules); in `--ci` mode they contribute to the exit code (bare audit reports drift but stays exit 0 -- advisory). Opt out with `--no-drift` (mutually exclusive with `--strip`/`--file`). See the [Drift Detection guide](docs/src/content/docs/guides/drift-detection.md) for details. (#1137, closes #1071, supersedes scope of #898)
+- **Cache pin markers for drift replay (`.apm-pin`).** `apm install` now writes a `{schema_version, resolved_commit}` marker into each cached package root after lockfile finalize. `apm audit` drift-replay verifies the marker matches the lockfile's `resolved_commit` before diffing, so a stale shared cache (e.g. a CI runner whose cache predates the current `apm.lock.yaml` pin) fails closed with an actionable "run `apm install` to refresh" message instead of silently producing meaningless drift output. Stale-cache detection only -- not a defense against an active adversary with write access to `apm_modules/`. After upgrading, the first drift run on existing caches will request a one-time `apm install` to write markers. (#1137)
 
 ### Fixed
 

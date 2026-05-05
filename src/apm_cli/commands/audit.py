@@ -670,9 +670,10 @@ def _audit_content_scan(
         all_findings = [f for ff in findings_by_file.values() for f in ff]
         exit_code = 1 if ContentScanner.has_critical(all_findings) else 2
 
-    # Drift findings escalate exit code to 1 (critical).
-    if drift_failed and exit_code == 0:
-        exit_code = 1
+    # Note: bare `apm audit` is advisory for drift; drift findings are
+    # rendered (text/json/sarif) but DO NOT escalate the exit code. Use
+    # `apm audit --ci` (handled in _audit_ci_gate) to gate on drift.
+    _ = drift_failed  # retained for symmetry; gate path lives in --ci.
 
     if effective_format == "text":
         if cfg.output_path:
@@ -844,8 +845,10 @@ def audit(
 
     \b
     Exit codes:
-        0  Clean, info-only findings, or successful strip
-        1  Critical findings detected, or --ci with violations, or drift
+        0  Clean, info-only findings, or drift-only (advisory) in bare
+           audit, or successful strip
+        1  Critical findings detected, or --ci with violations
+           (including drift in --ci mode)
         2  Warning-only findings (suspicious but not critical), or
            usage error (mutually exclusive flags)
 

@@ -258,7 +258,10 @@ class TestDriftE2E:
         )
 
         result = _run(["audit"])
-        assert result.exit_code == 1
+        # Bare `apm audit` is advisory: drift is rendered but does not
+        # fail the run (closes contract bug from PR #1137 review). Use
+        # `apm audit --ci` for gated drift.
+        assert result.exit_code == 0
 
         combined = (result.stdout or "") + (result.stderr or "")
         # Filter to lines that contain drift-specific markers.
@@ -288,3 +291,104 @@ class TestDriftE2E:
         result = _run(["audit", "--help"])
         assert result.exit_code == 0
         assert "--no-drift" in result.stdout
+
+    def test_bare_audit_with_drift_exits_zero_but_ci_audit_exits_one(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Drift exit-code contract (regression for PR #1137 review).
+
+        * Bare ``apm audit`` is advisory: drift is rendered but exit
+          stays 0 so users can run audit locally without their shell
+          treating drift as a fatal error.
+        * ``apm audit --ci`` is the explicit gate: the same drift state
+          must produce exit code 1 so CI pipelines fail closed.
+        """
+        project = _make_project(tmp_path)
+        monkeypatch.chdir(project)
+        assert _run(["install"]).exit_code == 0
+
+        # Tamper with a deployed file so drift is non-empty.
+        (project / ".github" / "instructions" / "rules.instructions.md").write_bytes(
+            b"# tampered locally\n"
+        )
+
+        bare = _run(["audit"])
+        assert bare.exit_code == 0, (
+            f"bare audit must be advisory on drift; got exit={bare.exit_code} "
+            f"stdout={bare.stdout!r} stderr={bare.stderr!r}"
+        )
+        bare_combined = (bare.stdout or "") + (bare.stderr or "")
+        assert "Drift detected" in bare_combined or "drift" in bare_combined.lower(), (
+            "bare audit must still RENDER drift even though exit is 0"
+        )
+
+        ci = _run(["audit", "--ci"])
+        assert ci.exit_code == 1, (
+            f"--ci audit must gate on drift; got exit={ci.exit_code} "
+            f"stdout={ci.stdout!r} stderr={ci.stderr!r}"
+        )
+
+    def test_apm_install_writes_cache_pin_marker_for_each_remote_dep(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """End-to-end proof of the cache-pin contract (PR #1137 follow-up).
+
+        After ``apm install`` finishes, every cached non-local dep
+        whose lockfile entry has a ``resolved_commit`` MUST carry a
+        ``.apm-pin`` JSON marker recording that exact commit.
+
+        This drives the supply-chain hardening: a future ``apm audit``
+        on the same workspace will refuse to compare a stale cache
+        against an updated lockfile because the marker will not
+        match. We exercise the WRITE side here with a synthetic
+        remote-style locked dep and the corresponding cached payload,
+        because spinning up a real remote install is out of scope for
+        a hermetic test.
+        """
+        from apm_cli.deps.lockfile import LockedDependency, LockFile, get_lockfile_path
+        from apm_cli.install.cache_pin import (
+            MARKER_FILENAME,
+            SCHEMA_VERSION,
+            verify_marker,
+        )
+
+        project = _make_project(tmp_path)
+        monkeypatch.chdir(project)
+
+        # Pre-populate apm_modules to simulate a previously-cached
+        # remote dep whose marker is missing (e.g. cache pre-dates
+        # this release of APM).
+        apm_modules = project / "apm_modules"
+        cached_pkg = apm_modules / "owner" / "repo"
+        cached_pkg.mkdir(parents=True)
+        (cached_pkg / "apm.yml").write_bytes(
+            yaml.safe_dump({"name": "repo", "version": "1.0.0"}).encode()
+        )
+        assert not (cached_pkg / MARKER_FILENAME).exists()
+
+        # Pre-seed apm.lock.yaml with a remote dep so LockfileBuilder
+        # has something to mark (an `apm install` rebuild from manifest
+        # alone would not include this dep).
+        commit_sha = "deadc0de" * 5
+        seed_lock = LockFile()
+        seed_lock.add_dependency(
+            LockedDependency(
+                repo_url="owner/repo",
+                host="github.com",
+                resolved_commit=commit_sha,
+                package_type="apm_package",
+            )
+        )
+        seed_lock.save(get_lockfile_path(project))
+
+        result = _run(["install"])
+        assert result.exit_code == 0, (
+            f"install failed: stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+
+        marker = cached_pkg / MARKER_FILENAME
+        assert marker.exists(), "install must self-heal pre-existing caches by writing the marker"
+        verify_marker(cached_pkg, commit_sha)
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        assert payload["schema_version"] == SCHEMA_VERSION
+        assert payload["resolved_commit"] == commit_sha
