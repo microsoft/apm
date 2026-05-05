@@ -7,13 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-05-05
+
 ### Added
 
 - **`apm audit` now catches forgotten installs and hand-edits by default.** No more shipping stale `.github/instructions/` because someone forgot to re-run `apm install`, no more silent hand-edits to regenerated content. Opt out with `--no-drift`. See the [Drift Detection guide](https://danielmeppiel.github.io/awd-cli/guides/drift-detection/). (#1137, closes #1071, supersedes scope of #898)
 
 ### Fixed
 
-- **Parallel subdir install race.** `apm install` no longer intermittently fails with `RuntimeError: Subdirectory '<path>' not found in repository` when multiple dependencies resolve to different subdirectories of the same `repo@ref`. The shared clone cache now stores subdir-agnostic bare clones and each consumer materializes its own working tree (mirrors the WS3 `GitCache` pattern). (#1135, fixes #1126)
+- **Parallel subdir install race.** `apm install` no longer intermittently fails with `RuntimeError: Subdirectory '<path>' not found in repository` when multiple dependencies (including ADO sub-path deps) resolve to different subdirectories of the same `repo@ref`. The shared clone cache now stores subdir-agnostic bare clones and each consumer materializes its own working tree (mirrors the WS3 `GitCache` pattern). (#1135, fixes #1126, fixes #1140)
+
+### Changed
+
+- **Docs: `first-package` guide accuracy.** Clarifies how `includes: auto` actually behaves and corrects the skill deployment paths so a newcomer's first package matches what `apm install` writes to disk. (#1129)
+- **Docs: APM's role for skills, plugins-as-packages, ADO sub-paths.** Six user-surfaced doc gaps closed in one pass -- unifies the "plugin == package" framing, adds ADO sub-path install examples, and states the current stability posture so users stop guessing from release notes. (#1127)
 
 ## [0.12.1] - 2026-05-03
 
