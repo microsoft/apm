@@ -643,6 +643,14 @@ class AgentsCompiler:
         stats = claude_result.stats.copy()
         stats["claude_files_written"] = files_written
 
+        if files_written == 0 and skip_instructions:
+            self._log(
+                "progress",
+                "CLAUDE.md not generated (instructions in .claude/rules/, "
+                "no constitution or dependencies to emit)",
+                symbol="info",
+            )
+
         # Display CLAUDE.md compilation output using standard formatter
         # Get proper compilation results from distributed compiler (has optimization decisions)
         from ..output.formatters import CompilationFormatter
