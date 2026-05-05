@@ -207,7 +207,7 @@ class SecurityGate:
 # ---------------------------------------------------------------------------
 
 
-def ignore_symlinks(directory, contents):
+def ignore_symlinks(directory: str, contents: list[str]) -> list[str]:
     """``shutil.copytree`` ignore callback that filters out symlinks."""
     return [c for c in contents if (Path(directory) / c).is_symlink()]
 
@@ -217,7 +217,7 @@ def ignore_symlinks(directory, contents):
 _APM_PIN_FILENAME = ".apm-pin"
 
 
-def ignore_non_content(directory, contents):
+def ignore_non_content(directory: str, contents: list[str]) -> list[str]:
     """``shutil.copytree`` ignore callback that filters non-content artifacts.
 
     Excludes symlinks (security) and the ``.apm-pin`` cache marker, which
