@@ -212,6 +212,8 @@ def ignore_symlinks(directory, contents):
     return [c for c in contents if (Path(directory) / c).is_symlink()]
 
 
+# Duplicated from cache_pin.MARKER_FILENAME to avoid a circular import
+# (cache_pin imports from security.gate).
 _APM_PIN_FILENAME = ".apm-pin"
 
 

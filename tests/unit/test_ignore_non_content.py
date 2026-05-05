@@ -11,6 +11,8 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+import pytest
+
 from apm_cli.security.gate import ignore_non_content
 
 
@@ -38,7 +40,10 @@ class TestIgnoreNonContent:
         (src / "SKILL.md").write_text("# My Skill", encoding="utf-8")
         target = tmp_path / "secret.txt"
         target.write_text("secret", encoding="utf-8")
-        (src / "evil-link").symlink_to(target)
+        try:
+            (src / "evil-link").symlink_to(target)
+        except OSError:
+            pytest.skip("Symlinks not supported on this platform")
 
         dest = tmp_path / "dest"
         shutil.copytree(src, dest, ignore=ignore_non_content)
