@@ -97,14 +97,11 @@ _KEY_HASH_LEN = 16
 # (branches, tags) MUST be resolved upstream by the resolver layer
 # before reaching this cache. Aliased to the shared canonical pattern.
 from .ref_resolver import FULL_SHA_RE as _FULL_SHA_RE  # noqa: E402
+from .ref_resolver import OWNER_REPO_RE as _REMOTE_SOURCE_RE  # noqa: E402
 
 # Conservative host shape -- defence-in-depth on top of the regex in
-# yml_schema.py. The cache layer never trusts that the caller already
-# validated.
+# yml_schema.py. The cache layer never trusts that the caller already validated.
 _HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-]{0,253}$")
-
-# ``owner/repo`` rejecting leading dot to keep the composite stable.
-_REMOTE_SOURCE_RE = re.compile(r"^[^./\s][^/\s]*/[^/\s]+$")
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +227,7 @@ def compute_cache_key(
     try:
         validate_path_segments(path, context="upstream cache path")
     except PathTraversalError as exc:
-        raise UpstreamCacheError(str(exc)) from exc
+        raise UpstreamCacheError(f"invalid upstream path {path!r}: {type(exc).__name__}") from exc
 
     return UpstreamCacheKey(
         host=host,
@@ -297,7 +294,9 @@ class UpstreamCache:
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            logger.debug("Upstream cache meta unreadable for %s: %s", key.directory_name, exc)
+            logger.debug(
+                "Upstream cache meta unreadable for %s: %s", key.directory_name, type(exc).__name__
+            )
             return None
         recorded_sha = meta.get("sha")
         if recorded_sha != key.sha:
@@ -312,12 +311,32 @@ class UpstreamCache:
             )
             return None
         try:
-            return json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+            raw_bytes = manifest_path.read_bytes()
+        except OSError as exc:
             logger.debug(
                 "Upstream cache manifest unreadable for %s: %s",
                 key.directory_name,
-                exc,
+                type(exc).__name__,
+            )
+            return None
+        recorded_content_sha256 = meta.get("content_sha256")
+        if recorded_content_sha256 is not None:
+            actual_sha256 = hashlib.sha256(raw_bytes).hexdigest()
+            if actual_sha256 != recorded_content_sha256:
+                logger.warning(
+                    "Upstream cache content integrity miss for %s: expected %s, got %s",
+                    key.directory_name,
+                    recorded_content_sha256,
+                    actual_sha256,
+                )
+                return None
+        try:
+            return json.loads(raw_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            logger.debug(
+                "Upstream cache manifest parse error for %s: %s",
+                key.directory_name,
+                type(exc).__name__,
             )
             return None
 
@@ -334,18 +353,19 @@ class UpstreamCache:
         manifest_path = entry_dir / "manifest.json"
         meta_path = entry_dir / "meta.json"
 
+        manifest_bytes = json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8")
+        content_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
         try:
-            manifest_path.write_text(
-                json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
-            )
+            manifest_path.write_bytes(manifest_bytes)
             meta_path.write_text(
                 json.dumps(
                     {
-                        "sha": key.sha,
+                        "content_sha256": content_sha256,
                         "host": key.host,
                         "owner": key.owner,
-                        "repo": key.repo,
                         "path": key.path,
+                        "repo": key.repo,
+                        "sha": key.sha,
                     },
                     sort_keys=True,
                 ),
@@ -353,7 +373,7 @@ class UpstreamCache:
             )
         except OSError as exc:
             raise UpstreamCacheError(
-                f"failed to write upstream cache for {key.composite}: {exc}"
+                f"failed to write upstream cache for {key.composite}: {type(exc).__name__}"
             ) from exc
 
     def get_or_fetch(

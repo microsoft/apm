@@ -239,6 +239,11 @@ class _UpstreamResolverFactory:
         self._builder = builder
         self._yml = yml
         self._host_resolvers: dict[str, RefResolver] = {}
+        # Populated by _build_upstream_resolver from the existing lockfile.
+        # Maps ``owner/repo`` to the previously resolved manifest SHA so that
+        # offline rebuilds (``BuildOptions.offline=True``) can replay the
+        # cached SHA without a network round-trip to re-resolve a tag/branch.
+        self._lockfile_shas_by_repo: dict[str, str] = {}
 
     # -- internal: per-host RefResolver cache -----------------------------------
 
@@ -264,15 +269,29 @@ class _UpstreamResolverFactory:
         # SHA short-circuit -- offline-safe, no network.
         if _SHA40_RE.match(ref_or_branch):
             return ref_or_branch
+        owner_repo = f"{owner}/{repo}"
+        # Lockfile replay: when offline and we have a previously resolved SHA
+        # for this repo (loaded at build start), return it without a network
+        # call. Enables ``--offline`` rebuilds for tag/branch refs.
         if self._builder._options.offline:
+            known = self._lockfile_shas_by_repo.get(owner_repo)
+            if known:
+                return known
             raise BuildError(f"cannot resolve ref '{ref_or_branch}' offline for {owner}/{repo}")
         resolver = self._resolver_for_host(host)
-        owner_repo = f"{owner}/{repo}"
         refs = resolver.list_remote_refs(owner_repo)
         for remote in refs:
             if remote.name == f"refs/tags/{ref_or_branch}":
                 return remote.sha
             if remote.name == f"refs/heads/{ref_or_branch}":
+                # B1: branch refs are mutable. Reject unless allow_head is
+                # enabled at the build level; callers that need to track HEAD
+                # explicitly set BuildOptions.allow_head=True.
+                if not self._builder._options.allow_head:
+                    raise BuildError(
+                        f"ref '{ref_or_branch}' resolves to a mutable branch HEAD; "
+                        f"set allow_head: true or pin a SHA/tag for reproducible builds."
+                    )
                 return remote.sha
         raise BuildError(f"ref '{ref_or_branch}' not found in {owner}/{repo}")
 
@@ -323,8 +342,13 @@ class _UpstreamResolverFactory:
 
     def build(self) -> UpstreamResolver:
         upstreams_by_alias = {u.alias: u for u in self._yml.upstreams}
-        # See ``MarketplaceBuilder._build_upstream_resolver`` for the
-        # rationale on ``canonical_full_name=None`` in v1.
+        # ``canonical_full_name`` is intentionally ``None`` in v1.
+        # The rename-guard (checking that the fetched repo full_name still
+        # matches the lockfile's recorded name) requires a GitHub Contents API
+        # call for which no existing v1 helper exists. The lockfile already
+        # records the field for forward-compatibility; the guard fires in v2
+        # once the helper is wired. This deferral is documented in the trust
+        # table in docs/guides/marketplace-upstreams.md.
         return UpstreamResolver(
             upstreams=upstreams_by_alias,
             cache=UpstreamCache(),
@@ -743,7 +767,34 @@ class MarketplaceBuilder:
         testability; this method remains the single assembly point.
         """
         factory = _UpstreamResolverFactory(self, yml)
+        # Seed the factory with previously resolved manifest SHAs from the
+        # lockfile. This allows offline rebuilds to replay known SHAs for
+        # tag/branch refs without making network calls.
+        factory._lockfile_shas_by_repo.update(self._load_lockfile_upstream_shas())
         return factory.build()
+
+    def _load_lockfile_upstream_shas(self) -> dict[str, str]:
+        """Return ``{owner/repo: manifest_sha}`` from the current lockfile.
+
+        Best-effort: any read/parse error returns an empty dict, falling
+        back to online resolution. Only 40-char SHAs are returned (tags and
+        branch names stored in old lockfiles are skipped).
+        """
+        try:
+            from ..deps.lockfile import LockFile, get_lockfile_path
+
+            lockfile_path = get_lockfile_path(self._project_root)
+            if not lockfile_path.exists():
+                return {}
+            lock = LockFile.load_or_create(lockfile_path)
+            shas: dict[str, str] = {}
+            for lu in lock.upstreams.values():
+                owner_repo = f"{lu.owner}/{lu.repo}"
+                if lu.manifest_sha and _SHA40_RE.match(lu.manifest_sha):
+                    shas[owner_repo] = lu.manifest_sha
+            return shas
+        except Exception:
+            return {}
 
     # -- remote description fetcher -----------------------------------------
 

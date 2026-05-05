@@ -77,7 +77,7 @@ export default defineConfig({
 						{ label: 'Org-Wide Packages', slug: 'guides/org-packages' },
 						{ label: 'Marketplaces', slug: 'guides/marketplaces' },
 						{ label: 'Marketplace Authoring', slug: 'guides/marketplace-authoring' },
-						{ label: 'Marketplace Upstreams', slug: 'guides/marketplace-upstreams' },
+						{ label: 'Marketplace upstreams', slug: 'guides/marketplace-upstreams' },
 						{ label: 'CI Policy Enforcement', slug: 'guides/ci-policy-setup' },
 						{ label: 'Agent Workflows (Experimental)', slug: 'guides/agent-workflows' },
 					],

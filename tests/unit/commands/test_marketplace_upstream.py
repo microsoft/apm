@@ -117,7 +117,7 @@ class TestUpstreamAdd:
                 "add",
                 "a/b",
                 "--alias",
-                "1bad",
+                "-bad-alias",
                 "--ref",
                 SHA40,
                 "--no-verify",
@@ -216,7 +216,7 @@ class TestUpstreamRemove:
                 "--no-verify",
             ],
         )
-        result = runner.invoke(marketplace, ["upstream", "remove", "tobedeleted"])
+        result = runner.invoke(marketplace, ["upstream", "remove", "tobedeleted", "--yes"])
         assert result.exit_code == 0
         assert "tobedeleted" in result.output
         data = yaml.safe_load((tmp_path / "marketplace.yml").read_text())
@@ -225,7 +225,7 @@ class TestUpstreamRemove:
     def test_unknown_alias_exits_2(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_yml(tmp_path)
-        result = runner.invoke(marketplace, ["upstream", "remove", "ghost"])
+        result = runner.invoke(marketplace, ["upstream", "remove", "ghost", "--yes"])
         assert result.exit_code == 2
         assert "not found" in result.output.lower()
 
@@ -249,7 +249,7 @@ class TestUpstreamRemove:
                     plugin: gitnexus
             """),
         )
-        result = runner.invoke(marketplace, ["upstream", "remove", "gitnexus"])
+        result = runner.invoke(marketplace, ["upstream", "remove", "gitnexus", "--yes"])
         assert result.exit_code == 2
         assert "still referenced" in result.output.lower()
 

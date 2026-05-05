@@ -246,7 +246,13 @@ def _render_marketplace_result(logger, report, dry_run, extra_warnings=None):
             f"Would write marketplace.json ({total_packages} package(s)) -> {report.output_path}"
         )
         return
-    logger.success(f"Built marketplace.json ({total_packages} package(s)) -> {report.output_path}")
+    direct_count = len(report.resolved)
+    upstream_count = len(report.upstream_resolved)
+    if upstream_count > 0:
+        count_str = f"{direct_count} direct + {upstream_count} upstream"
+    else:
+        count_str = f"{total_packages} package(s)"
+    logger.success(f"Built marketplace.json ({count_str}) -> {report.output_path}")
 
 
 @click.command(

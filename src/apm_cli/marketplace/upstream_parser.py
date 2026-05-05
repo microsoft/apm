@@ -82,24 +82,21 @@ __all__ = [
 # Constants
 # ---------------------------------------------------------------------------
 
-# ``owner/repo`` shape. Reuses the regex from yml_schema with the same
-# leading-dot rejection so ``./local`` cannot pose as a remote source.
-_REMOTE_SOURCE_RE = re.compile(r"^[^./\s][^/\s]*/[^/\s]+$")
-
-# 40-char lowercase hex git SHA. Truncated SHAs are explicitly rejected
-# because the strict parser is the line of defence against ambiguous
-# refs reaching ``RefResolver``. Aliased to the shared canonical pattern
-# in ``ref_resolver`` so authoring + parsing share one source of truth.
+# ``owner/repo`` shape. Reuses the shared regex from ref_resolver with the
+# same leading-dot rejection so ``./local`` cannot pose as a remote source.
 from .ref_resolver import FULL_SHA_RE as _FULL_SHA_RE  # noqa: E402
+from .ref_resolver import OWNER_REPO_RE as _REMOTE_SOURCE_RE  # noqa: E402
 
 # Tag / ref names: conservative subset. Disallows whitespace, tilde,
 # caret, and other characters that ``git ls-remote`` would refuse, but
 # permits the dots/slashes/dashes that real release tags use.
 _REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/\-+]{0,254}$")
 
-# v1 host allow-list. Cross-host plugins (upstream on github, plugin on
-# gitlab) are explicitly out of scope -- the plan reserves multi-host
-# for v2 to avoid expanding the auth surface area in this slice.
+# Host allow-list for documentation purposes only. Actual host validation
+# is performed by the resolver layer (``_UpstreamResolverFactory``) where
+# the network call happens. The parser does NOT gate on this constant so
+# that GHE upstreams (e.g. ``github.example.com``) are not rejected at
+# parse time before the resolver has a chance to attempt auth resolution.
 _SUPPORTED_HOSTS: frozenset[str] = frozenset({"github.com"})
 
 # Strict per-shape key sets. Anything outside these is a ``unknown-key``
@@ -273,24 +270,6 @@ def parse_marketplace_strict(
     if not isinstance(data, dict):
         raise TypeError(
             f"upstream marketplace.json root must be a JSON object, got {type(data).__name__}"
-        )
-
-    if upstream_host not in _SUPPORTED_HOSTS:
-        # Surface as a single rejection so the caller still gets a
-        # StrictManifest skeleton and can format the diagnostic
-        # uniformly.
-        return StrictManifest(
-            name=str(data.get("name", "")),
-            rejections=(
-                StrictRejection(
-                    plugin_name="<manifest>",
-                    reason="unsupported-host",
-                    detail=(
-                        f"upstream host '{upstream_host}' is not supported in v1 "
-                        f"(supported: {sorted(_SUPPORTED_HOSTS)})"
-                    ),
-                ),
-            ),
         )
 
     if not _REMOTE_SOURCE_RE.match(upstream_owner_repo):
@@ -642,13 +621,21 @@ def _resolve_dict_source(
     # alternate ``source`` key inside the dict. Strict parsing requires
     # ``type`` to be set explicitly so that ``unsupported-source-type``
     # rejections name the actual offending value.
+    # Exception: the short-form ``{"repo": "owner/repo", "ref": "..."}``
+    # that some APM and Anthropic marketplaces emit without an explicit
+    # ``type`` key is tolerated -- we infer ``github`` when ``repo`` is
+    # present. Only hard-reject when ``type`` is explicitly set to an
+    # unrecognised value.
     source_type = raw.get("type", "")
     if not isinstance(source_type, str) or not source_type:
-        return StrictRejection(
-            plugin_name=name,
-            reason="invalid-source-shape",
-            detail=f"plugin '{name}' source object missing 'type' discriminator",
-        )
+        if "repo" in raw:
+            source_type = "github"
+        else:
+            return StrictRejection(
+                plugin_name=name,
+                reason="invalid-source-shape",
+                detail=f"plugin '{name}' source object missing 'type' discriminator and 'repo' key",
+            )
 
     if source_type == "npm":
         return StrictRejection(
@@ -682,18 +669,12 @@ def _resolve_dict_source(
             ),
         )
 
-    # Host: defaults to upstream host; explicit value must match v1
-    # allow-list (no cross-host plugins).
+    # Host: defaults to upstream host. Host validation is performed by the
+    # resolver layer when the actual API call is made; the parser does not
+    # gate on host to keep GHE upstreams working.
     host = raw.get("host", upstream_host)
-    if not isinstance(host, str) or host not in _SUPPORTED_HOSTS:
-        return StrictRejection(
-            plugin_name=name,
-            reason="unsupported-host",
-            detail=(
-                f"plugin '{name}' source.host='{host}' is not supported in v1 "
-                f"(supported: {sorted(_SUPPORTED_HOSTS)})"
-            ),
-        )
+    if not isinstance(host, str) or not host:
+        host = upstream_host
 
     # ``repo`` may be expressed as ``repo: owner/repo`` or as a full
     # ``url:`` (for git-subdir). Only the former is supported in v1 to

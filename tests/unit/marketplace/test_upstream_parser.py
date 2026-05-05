@@ -69,15 +69,17 @@ class TestManifestRoot:
                 upstream_owner_repo="o/r",
             )
 
-    def test_unsupported_host_yields_rejection_not_exception(self):
+    def test_unsupported_host_parsed_without_rejection(self):
+        # B4: host validation is performed by the resolver layer, NOT the
+        # parser. The parser must accept non-github.com upstream hosts so
+        # that GHE upstreams work without a parse-time gate.
         manifest = parse_marketplace_strict(
             {"name": "x", "plugins": []},
             upstream_owner_repo="o/r",
             upstream_host="gitlab.com",
         )
-        rej = _only_rejection(manifest)
-        assert rej.reason == "unsupported-host"
-        assert rej.plugin_name == "<manifest>"
+        assert manifest.rejections == ()
+        assert manifest.plugins == ()
 
     def test_invalid_owner_repo_raises(self):
         # Wrong-shape upstream coordinates are a programming error
@@ -307,22 +309,26 @@ class TestEntryRejections:
         )
         assert rej.reason == "unknown-source-key"
 
-    def test_unsupported_source_host(self):
-        rej = _only_rejection(
-            _parse(
-                [
-                    {
-                        "name": "p",
-                        "source": {
-                            "type": "github",
-                            "repo": "o/r",
-                            "host": "gitlab.com",
-                        },
-                    }
-                ]
-            )
+    def test_cross_host_source_accepted_by_parser(self):
+        # B4: host validation is performed by the resolver layer. The parser
+        # accepts cross-host source objects (e.g. a plugin hosted on an
+        # enterprise GHE instance) and stores the host so the resolver can
+        # apply its own per-host auth logic.
+        manifest = _parse(
+            [
+                {
+                    "name": "p",
+                    "source": {
+                        "type": "github",
+                        "repo": "o/r",
+                        "host": "gitlab.com",
+                    },
+                }
+            ]
         )
-        assert rej.reason == "unsupported-host"
+        assert manifest.rejections == ()
+        assert len(manifest.plugins) == 1
+        assert manifest.plugins[0].source.host == "gitlab.com"
 
     def test_url_form_rejected(self):
         rej = _only_rejection(
@@ -402,8 +408,20 @@ class TestEntryRejections:
         rej = _only_rejection(_parse([{"name": "p", "source": ""}]))
         assert rej.reason == "invalid-source-shape"
 
-    def test_dict_source_missing_type(self):
-        rej = _only_rejection(_parse([{"name": "p", "source": {"repo": "o/r"}}]))
+    def test_dict_source_missing_type_with_repo_infers_github(self):
+        # B3: the short-form ``{"repo": "owner/repo", "ref": "..."}`` that
+        # some APM and Anthropic marketplaces emit without an explicit ``type``
+        # key is now accepted by inferring ``type=github`` when ``repo`` is
+        # present. Hard-reject only when ``type`` is present but unrecognised.
+        manifest = _parse([{"name": "p", "source": {"repo": "o/r"}}])
+        assert manifest.rejections == ()
+        assert len(manifest.plugins) == 1
+        assert manifest.plugins[0].source.type == "github"
+
+    def test_dict_source_missing_type_and_repo_yields_rejection(self):
+        # Still a rejection when both ``type`` and ``repo`` are absent --
+        # the parser cannot infer a source shape.
+        rej = _only_rejection(_parse([{"name": "p", "source": {}}]))
         assert rej.reason == "invalid-source-shape"
 
     def test_non_dict_plugin_entry(self):

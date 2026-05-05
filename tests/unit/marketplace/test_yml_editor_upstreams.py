@@ -114,8 +114,17 @@ class TestAddUpstreamHappy:
 class TestAddUpstreamErrors:
     def test_invalid_alias_rejected(self, tmp_path: Path) -> None:
         yml = _write_yml(tmp_path, _BASE_YML)
+        # B5: the regex is ``^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$``.
+        # Aliases starting with '-' are still invalid; digit-leading ones are now valid.
         with pytest.raises(MarketplaceYmlError, match="Upstream alias"):
-            add_upstream_entry(yml, alias="1bad-alias", repo="a/b", ref=SHA40)
+            add_upstream_entry(yml, alias="-bad-alias", repo="a/b", ref=SHA40)
+
+    def test_digit_leading_alias_accepted(self, tmp_path: Path) -> None:
+        # B5: digit-leading aliases are now valid (schema and editor aligned).
+        yml = _write_yml(tmp_path, _BASE_YML)
+        add_upstream_entry(yml, alias="2fa-marketplace", repo="a/b", ref=SHA40)
+        data = yaml.safe_load(yml.read_text())
+        assert data["upstreams"][0]["alias"] == "2fa-marketplace"
 
     def test_invalid_repo_rejected(self, tmp_path: Path) -> None:
         yml = _write_yml(tmp_path, _BASE_YML)

@@ -77,7 +77,9 @@ LOCAL_SOURCE_RE = re.compile(r"^\./")
 # Remote-only ``owner/repo`` shape -- used by upstream registration
 # validation, where local-path shorthand is not meaningful. Disallows a
 # leading ``.`` so ``./local`` is rejected, matching curator intent.
-_REMOTE_SOURCE_RE = re.compile(r"^[^./\s][^/\s]*/[^/\s]+$")
+# Shared with upstream_cache and upstream_parser via ref_resolver.
+from .ref_resolver import OWNER_REPO_RE as _REMOTE_SOURCE_RE  # noqa: E402
+
 # Upstream alias: identifier-like, used as a directory-safe key in cache
 # paths and lockfile keys. Conservative character set keeps cache keys
 # Windows-safe and avoids collisions with the ``__`` cache delimiter.

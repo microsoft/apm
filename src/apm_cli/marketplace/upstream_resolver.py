@@ -487,6 +487,11 @@ class UpstreamResolver:
         if entry.ref is not None:
             ref = entry.ref
             sha = self._maybe_sha(ref)
+            if sha is None:
+                # ref is a tag or branch name -- resolve to an immutable SHA so
+                # the lockfile records a content-addressed pin, not a movable ref.
+                owner, repo = plugin.source.repo.split("/", 1)
+                sha = self._normalise_to_sha(self._ref_to_sha(plugin.source.host, owner, repo, ref))
             return ref, sha, "curator-ref"
 
         if entry.version is not None:
@@ -524,7 +529,14 @@ class UpstreamResolver:
             return plugin.source.sha, plugin.source.sha, "upstream-pin"
         if plugin.source.ref is not None:
             ref = plugin.source.ref
-            return ref, self._maybe_sha(ref), "upstream-pin"
+            sha = self._maybe_sha(ref)
+            if sha is None:
+                # ref is a tag or branch name -- resolve to an immutable SHA.
+                # This prevents a force-pushed tag from silently changing what
+                # was pinned at build time.
+                owner, repo = plugin.source.repo.split("/", 1)
+                sha = self._normalise_to_sha(self._ref_to_sha(plugin.source.host, owner, repo, ref))
+            return ref, sha, "upstream-pin"
 
         # 4. Same-repo fallback (deterministic). When the upstream
         # plugin lives in the same repo as the upstream marketplace

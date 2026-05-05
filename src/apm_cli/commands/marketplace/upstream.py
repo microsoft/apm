@@ -203,17 +203,15 @@ def list_cmd(verbose):
         )
         return
 
-    logger.info(f"{len(entries)} upstream(s) registered:", symbol="info")
+    noun = "upstream" if len(entries) == 1 else "upstreams"
+    logger.info(f"{len(entries)} {noun} registered:", symbol="info")
     for entry in entries:
         alias = entry.get("alias", "<unknown>")
         repo = entry.get("repo", "<unknown>")
         host = entry.get("host", "github.com")
         pin = entry.get("ref") or entry.get("branch", "<unpinned>")
         head = " (HEAD-tracking)" if entry.get("allow_head") else ""
-        # Per-entry rows are visual continuation under the count line
-        # above; rendering them without the [i] prefix avoids the
-        # double-symbol look that confused cli-logging review.
-        logger.tree_item(f"  {alias} -> {host}/{repo} @ {pin}{head}")
+        logger.info(f"  {alias} -> {host}/{repo} @ {pin}{head}", symbol="info")
 
 
 # ---------------------------------------------------------------------------
@@ -223,19 +221,27 @@ def list_cmd(verbose):
 
 @upstream.command(help="Remove an upstream marketplace")
 @click.argument("alias", required=True)
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
-def remove(alias, verbose):
+def remove(alias, yes, verbose):
     """Remove an upstream marketplace from authoring config."""
     logger = CommandLogger("marketplace-upstream-remove", verbose=verbose)
     yml = _ensure_yml_exists(logger)
+    # Validate the alias exists before prompting -- unknown alias always
+    # exits 2 without a confirm prompt (prevents misleading UX).
+    try:
+        remove_upstream_entry(Path(yml), alias, dry_run=True)
+    except MarketplaceYmlError as exc:
+        logger.error(str(exc), symbol="error")
+        sys.exit(2)
+    if not yes:
+        click.confirm(f"Remove upstream '{alias}'?", abort=True)
     try:
         remove_upstream_entry(Path(yml), alias)
     except MarketplaceYmlError as exc:
         logger.error(str(exc), symbol="error")
         sys.exit(2)
 
-    # Default success symbol is "sparkles" ([*]); [+] (check) reads as
-    # "addition" in this codebase, which doesn't fit a removal action.
     logger.success(f"Removed upstream '{alias}'")
 
 

@@ -38,7 +38,7 @@ from . import (
 @click.option(
     "--plugin",
     default=None,
-    help="Plugin name in the upstream marketplace (defaults to --name when --upstream is set)",
+    help="Plugin name in the upstream marketplace (required when --upstream is set)",
 )
 @click.option("--allow-head", is_flag=True, help="Allow upstream plugin to track a mutable ref")
 @click.option("--no-verify", is_flag=True, help="Skip remote reachability check")
@@ -78,6 +78,11 @@ def add(
     if source and (plugin or allow_head):
         raise click.UsageError(
             "--plugin and --allow-head only apply to upstream packages (use with --upstream)."
+        )
+    if upstream and plugin is None:
+        raise click.UsageError(
+            "--plugin is required when --upstream is set. "
+            "Specify the plugin name as it appears in the upstream marketplace."
         )
     if subdir and upstream:
         raise click.UsageError("--subdir only applies to direct packages (not --upstream).")

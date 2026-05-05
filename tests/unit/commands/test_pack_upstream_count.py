@@ -46,8 +46,8 @@ def _make_report(
 
 
 def test_success_message_counts_direct_plus_upstream() -> None:
-    """Success path: ``Built marketplace.json (N package(s))`` reports
-    direct + upstream total."""
+    """Success path: ``Built marketplace.json (N direct + M upstream)`` when
+    upstream packages are present."""
     logger = MagicMock()
     report = _make_report(resolved_count=2, upstream_count=3)
 
@@ -55,21 +55,19 @@ def test_success_message_counts_direct_plus_upstream() -> None:
 
     logger.success.assert_called_once()
     msg = logger.success.call_args[0][0]
-    assert "(5 package(s))" in msg, msg
+    assert "(2 direct + 3 upstream)" in msg, msg
     assert "Built marketplace.json" in msg
 
 
 def test_success_message_with_only_upstream_packages() -> None:
-    """Upstream-only build still reports the upstream count -- guards
-    the original bug where ``len(resolved)`` returned 0 for
-    upstream-only marketplaces."""
+    """Upstream-only build shows ``0 direct + N upstream`` breakdown."""
     logger = MagicMock()
     report = _make_report(resolved_count=0, upstream_count=4)
 
     _render_marketplace_result(logger, report, dry_run=False)
 
     msg = logger.success.call_args[0][0]
-    assert "(4 package(s))" in msg, msg
+    assert "(0 direct + 4 upstream)" in msg, msg
 
 
 def test_dry_run_message_counts_direct_plus_upstream() -> None:

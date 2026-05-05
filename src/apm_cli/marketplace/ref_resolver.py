@@ -31,6 +31,7 @@ from .git_stderr import translate_git_stderr
 
 __all__ = [
     "FULL_SHA_RE",
+    "OWNER_REPO_RE",
     "GitLsRemoteError",
     "OfflineMissError",
     "RefCache",
@@ -48,6 +49,11 @@ __all__ = [
 # home for git-ref concepts. ``_SHA_RE`` is a backwards-compatible alias.
 FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _SHA_RE = FULL_SHA_RE
+
+# Shared ``owner/repo`` shape validator. Rejects leading dot or slash to
+# keep cache-key composites stable. Imported by upstream_cache,
+# upstream_parser, and yml_schema to avoid triplication.
+OWNER_REPO_RE = re.compile(r"^[^./\s][^/\s]*/[^/\s]+$")
 
 
 @dataclass(frozen=True)

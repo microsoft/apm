@@ -481,6 +481,7 @@ Not in the first release. `apm marketplace publish` uses the `gh` CLI and assume
 ## Related reading
 
 - [Marketplaces guide](../marketplaces/) -- consumer-side: registering and installing from a marketplace.
+- [Marketplace upstreams](../marketplace-upstreams/) -- expose plugins from external marketplaces with allow-list governance and immutable commit pinning.
 - [CLI command reference](../../reference/cli-commands/) -- authoritative options for `apm pack` and every `apm marketplace` subcommand.
 - [Manifest schema](../../reference/manifest-schema/) -- the `apm.yml` shape including the `marketplace:` block.
 - [Plugins guide](../plugins/) -- what a plugin is and how consumers install one.

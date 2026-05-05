@@ -16,7 +16,6 @@ from __future__ import annotations
 import re
 from io import StringIO
 from pathlib import Path
-from typing import List, Optional  # noqa: F401, UP035
 
 from ruamel.yaml import YAML
 
@@ -308,15 +307,15 @@ def remove_plugin_entry(yml_path: Path, name: str) -> None:
 # -------------------------------------------------------------------
 
 
-_UPSTREAM_ALIAS_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
+_UPSTREAM_ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _UPSTREAM_REPO_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 
 
 def _validate_upstream_alias(alias: str) -> None:
     if not _UPSTREAM_ALIAS_RE.match(alias):
         raise MarketplaceYmlError(
-            f"Upstream alias '{alias}' must start with a letter and contain "
-            f"only letters, digits, '_' or '-'."
+            f"Upstream alias '{alias}' must start with a letter or digit and contain "
+            f"only letters, digits, '_' or '-' (max 64 chars)."
         )
 
 
@@ -402,12 +401,15 @@ def add_upstream_entry(
     _write_and_validate(yml_path, data, original_text)
 
 
-def remove_upstream_entry(yml_path: Path, alias: str) -> None:
+def remove_upstream_entry(yml_path: Path, alias: str, *, dry_run: bool = False) -> None:
     """Remove an ``upstreams[]`` entry by alias.
 
     Raises ``MarketplaceYmlError`` when the alias is in use by any
     ``packages[]`` entry -- removing it would leave the manifest with
     dangling references.
+
+    When *dry_run* is True, all validation is performed but the file is
+    not written. Useful for pre-validating before prompting the user.
     """
     data, original_text = _load_rt(yml_path)
     container = _get_marketplace_container(data)
@@ -427,6 +429,8 @@ def remove_upstream_entry(yml_path: Path, alias: str) -> None:
             )
 
     idx = _find_upstream_index(upstreams, alias)
+    if dry_run:
+        return
     del upstreams[idx]
     _write_and_validate(yml_path, data, original_text)
 
