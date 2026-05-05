@@ -87,6 +87,7 @@ class MarketplaceGroup(click.Group):
         "doctor",
         "publish",
         "package",
+        "upstream",
         "migrate",
     ]
 
@@ -206,8 +207,10 @@ def marketplace(ctx):
 
 
 from .plugin import package  # noqa: E402
+from .upstream import upstream  # noqa: E402
 
 marketplace.add_command(package)
+marketplace.add_command(upstream)
 
 
 def _check_gitignore_for_marketplace_json(logger):

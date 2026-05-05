@@ -13,7 +13,7 @@ atomic-write-then-revalidate pattern:
 
 from __future__ import annotations
 
-import re  # noqa: F401
+import re
 from io import StringIO
 from pathlib import Path
 from typing import List, Optional  # noqa: F401, UP035
@@ -31,7 +31,10 @@ from .yml_schema import (
 
 __all__ = [
     "add_plugin_entry",
+    "add_upstream_entry",
+    "list_upstream_entries",
     "remove_plugin_entry",
+    "remove_upstream_entry",
     "update_plugin_entry",
 ]
 
@@ -297,3 +300,150 @@ def remove_plugin_entry(yml_path: Path, name: str) -> None:
 
     # --- write + validate ---
     _write_and_validate(yml_path, data, original_text)
+
+
+# -------------------------------------------------------------------
+# Upstream entries
+# -------------------------------------------------------------------
+
+
+_UPSTREAM_ALIAS_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
+_UPSTREAM_REPO_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+
+
+def _validate_upstream_alias(alias: str) -> None:
+    if not _UPSTREAM_ALIAS_RE.match(alias):
+        raise MarketplaceYmlError(
+            f"Upstream alias '{alias}' must start with a letter and contain "
+            f"only letters, digits, '_' or '-'."
+        )
+
+
+def _validate_upstream_repo(repo: str) -> None:
+    if not _UPSTREAM_REPO_RE.match(repo):
+        raise MarketplaceYmlError(
+            f"Upstream 'repo' must match '<owner>/<repo>' shape, got '{repo}'"
+        )
+
+
+def _find_upstream_index(upstreams, alias: str) -> int:
+    """Return the index of the upstream whose ``alias`` matches.
+
+    Aliases are case-sensitive (unlike package names) because they are
+    used as primary keys throughout the upstream resolution and
+    lockfile pipeline. Raises ``MarketplaceYmlError`` if not found.
+    """
+    for idx, entry in enumerate(upstreams):
+        entry_alias = entry.get("alias", "")
+        if isinstance(entry_alias, str) and entry_alias == alias:
+            return idx
+    raise MarketplaceYmlError(f"Upstream '{alias}' not found")
+
+
+def add_upstream_entry(
+    yml_path: Path,
+    *,
+    alias: str,
+    repo: str,
+    ref: str | None = None,
+    branch: str | None = None,
+    path: str | None = None,
+    host: str | None = None,
+    allow_head: bool = False,
+) -> None:
+    """Append a new entry to ``upstreams[]``.
+
+    Either ``ref`` (commit SHA, tag) or ``branch`` (with ``allow_head``
+    when mutable) must be provided -- mirroring the strict-parser
+    contract.  Raises ``MarketplaceYmlError`` on validation failure or
+    duplicate alias.
+    """
+    _validate_upstream_alias(alias)
+    _validate_upstream_repo(repo)
+
+    if ref is None and branch is None:
+        raise MarketplaceYmlError("Upstream must specify either 'ref' (commit/tag) or 'branch'.")
+    if path is not None:
+        _validate_subdir(path)
+
+    data, original_text = _load_rt(yml_path)
+    container = _get_marketplace_container(data)
+    upstreams = container.get("upstreams")
+    if upstreams is None:
+        from ruamel.yaml.comments import CommentedSeq
+
+        upstreams = CommentedSeq()
+        container["upstreams"] = upstreams
+
+    # Duplicate-alias check.
+    for entry in upstreams:
+        entry_alias = entry.get("alias", "")
+        if isinstance(entry_alias, str) and entry_alias == alias:
+            raise MarketplaceYmlError(f"Upstream '{alias}' already exists")
+
+    from ruamel.yaml.comments import CommentedMap
+
+    new_entry = CommentedMap()
+    new_entry["alias"] = alias
+    new_entry["repo"] = repo
+    if ref is not None:
+        new_entry["ref"] = ref
+    if branch is not None:
+        new_entry["branch"] = branch
+    if path is not None:
+        new_entry["path"] = path
+    if host is not None:
+        new_entry["host"] = host
+    if allow_head:
+        new_entry["allow_head"] = True
+
+    upstreams.append(new_entry)
+    _write_and_validate(yml_path, data, original_text)
+
+
+def remove_upstream_entry(yml_path: Path, alias: str) -> None:
+    """Remove an ``upstreams[]`` entry by alias.
+
+    Raises ``MarketplaceYmlError`` when the alias is in use by any
+    ``packages[]`` entry -- removing it would leave the manifest with
+    dangling references.
+    """
+    data, original_text = _load_rt(yml_path)
+    container = _get_marketplace_container(data)
+    upstreams = container.get("upstreams")
+    if upstreams is None:
+        raise MarketplaceYmlError(f"Upstream '{alias}' not found")
+
+    # Reject removal if any package still references this alias.
+    packages = container.get("packages") or []
+    for entry in packages:
+        entry_alias = entry.get("upstream", None)
+        if isinstance(entry_alias, str) and entry_alias == alias:
+            entry_name = entry.get("name", "<unnamed>")
+            raise MarketplaceYmlError(
+                f"Upstream '{alias}' is still referenced by package "
+                f"'{entry_name}'. Remove the package first."
+            )
+
+    idx = _find_upstream_index(upstreams, alias)
+    del upstreams[idx]
+    _write_and_validate(yml_path, data, original_text)
+
+
+def list_upstream_entries(yml_path: Path) -> list[dict]:
+    """Return the list of upstream entries as plain dicts.
+
+    The values are read-only snapshots; modifying them does not write
+    back to disk. Returns an empty list when no ``upstreams:`` block is
+    present.
+    """
+    data, _ = _load_rt(yml_path)
+    container = _get_marketplace_container(data)
+    upstreams = container.get("upstreams") or []
+    result: list[dict] = []
+    for entry in upstreams:
+        if not isinstance(entry, dict):
+            continue
+        # Materialise to a plain dict (drop ruamel CommentedMap wrapping).
+        result.append({k: v for k, v in entry.items()})
+    return result
