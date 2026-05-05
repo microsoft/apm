@@ -74,6 +74,7 @@ class ClaudeFormatter:
 
         self.warnings: builtins.list[str] = []
         self.errors: builtins.list[str] = []
+        self._skip_instructions: bool = False
 
     def format_distributed(
         self,
@@ -306,9 +307,7 @@ class ClaudeFormatter:
                 )
             )
 
-        # Note: CLAUDE.md only contains instructions (Project Standards).
-        # Agents/workflows are NOT included - they go to .github/agents/ as separate files.
-        # This matches AGENTS.md behavior which also only contains instructions.
+        # Agents/workflows go to .github/agents/ as separate files, not here.
 
         # Footer
         sections.append("---")

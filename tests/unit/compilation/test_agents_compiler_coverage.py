@@ -767,7 +767,7 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         config = CompilationConfig(target="claude", dry_run=True)
         result = compiler.compile(config)
         assert result.success
-        assert "Project Standards" not in result.content
+        assert result.stats.get("claude_files_generated", 0) == 0
 
     def test_skip_instructions_stats_reflect_emitted_files(self):
         """Stats report zero files generated when all placements are skipped."""
