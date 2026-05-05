@@ -8,6 +8,27 @@ sidebar:
 cannot ship to production unnoticed. This page explains what drift means,
 how the check works, and the escape hatch when you need to disable it.
 
+## Try it now
+
+```bash
+cd <your-apm-project>
+apm audit
+```
+
+If you have any `.apm/` sources or installed dependencies, the audit
+will replay your install into a scratch tmpdir and report any drift.
+No writes to your working tree, no network, no MCP calls.
+
+Common first-run results:
+
+- **Clean tree, no drift** -- exit 0, no output beyond the standard
+  audit summary.
+- **Forgot to re-run `apm install`** -- drift findings under kind
+  `unintegrated` for every `.apm/` source whose deployed counterpart
+  is missing.
+- **First run on a pre-marker cache** -- a one-line warning asking
+  you to run `apm install` once so cache pin markers are written.
+
 ## What is integration drift?
 
 Integration drift is any divergence between what `apm install` would
@@ -55,8 +76,8 @@ False-positive guards normalize:
 | `apm audit --no-drift` | Skipped entirely | governed only by other checks |
 
 In `--ci` mode drift findings are pooled with the seven baseline lockfile
-checks (`lockfile-exists`, `ref-consistency`, etc.) -- a single
-non-zero exit covers all of them.
+checks (`lockfile-exists`, `ref-consistency`, etc.) plus integration
+drift detection -- a single non-zero exit covers all of them.
 
 ## When to use `--no-drift`
 
@@ -105,7 +126,10 @@ The recommended CI gate is now a single line:
 - run: apm audit --ci
 ```
 
-This subsumes the legacy bash workaround:
+### Before vs after: the legacy bash workaround
+
+Previously CI pipelines had to grep `git status` to catch un-installed
+or hand-edited deployed files. That workaround is no longer needed:
 
 ```yaml
 # Legacy -- no longer needed once apm-action ships with drift support
@@ -114,6 +138,12 @@ This subsumes the legacy bash workaround:
       exit 1
     fi
 ```
+
+`apm audit --ci` subsumes this entirely AND catches three additional
+classes of drift the bash workaround missed (`unintegrated` of source
+files never integrated, `orphaned` files left behind by removed
+dependencies, and `modified` files normalized for build-id /
+line-ending / BOM noise).
 
 For org-policy enforcement, combine with `--policy org` -- drift
 detection composes orthogonally with the 17 audit-only policy checks.

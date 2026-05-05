@@ -721,3 +721,31 @@ class TestSectionENoDriftFlag:
         combined = result.stdout + result.stderr
         assert "modified" in combined
         assert ".github/instructions/rules.instructions.md" in combined
+
+    def test_e10_bare_audit_surfaces_cache_miss_on_stderr(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When drift fails (CacheMissError, CachePinError) and produces no
+        findings, bare ``apm audit`` MUST tell the user on stderr -- silence
+        is a UX trap (user cannot tell "drift was clean" from "drift never
+        ran"). Per dev-ux + cli-logging-ux panel feedback (PR #1137)."""
+        from apm_cli.install.drift import CacheMissError
+
+        project = _make_apm_project(tmp_path)
+        _install(project, monkeypatch)
+
+        def _boom(*_args, **_kwargs):
+            raise CacheMissError(
+                "cache miss for org/foo@deadbeef: expected /tmp/x; "
+                "run 'apm install' to populate the cache"
+            )
+
+        # Patch the symbol where ci_checks._check_drift looks it up.
+        monkeypatch.setattr("apm_cli.install.drift.run_replay", _boom)
+
+        result = _audit(project, monkeypatch)
+        # Bare audit is advisory: exit code is not gated on drift failure.
+        assert result.exit_code in {0, 2}
+        # The stderr-warning contract.
+        assert "drift check could not run" in result.stderr.lower()
+        assert "cache miss" in result.stderr.lower()

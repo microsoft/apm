@@ -68,7 +68,8 @@ This step is not needed if your team only uses GitHub Copilot and Claude, which 
         run: apm audit --ci
 ```
 
-This single command runs the seven baseline lockfile checks AND replays
+This single command runs the seven baseline lockfile checks PLUS integration
+drift detection (default-on) AND replays
 the install pipeline into a scratch tree to detect missed `apm install`
 runs, hand-edited deployed files, and orphaned files. See the
 [Drift Detection guide](../../guides/drift-detection/) for details and
@@ -147,7 +148,7 @@ apm install
 
 ## Governance with `apm audit`
 
-`apm audit --ci` verifies lockfile consistency in CI (7 baseline checks, no configuration). Add `--policy org` to enforce organizational rules (17 additional checks). For full setup including SARIF integration and GitHub Code Scanning, see the [CI Policy Enforcement guide](../../guides/ci-policy-setup/).
+`apm audit --ci` verifies lockfile consistency in CI (7 baseline checks plus integration drift detection, no configuration). Add `--policy org` to enforce organizational rules (17 additional checks). For full setup including SARIF integration and GitHub Code Scanning, see the [CI Policy Enforcement guide](../../guides/ci-policy-setup/).
 
 For content scanning and hidden Unicode detection, `apm install` automatically blocks critical findings. Run `apm audit` for on-demand reporting. See [Governance](../../enterprise/governance-guide/) for the full governance model.
 

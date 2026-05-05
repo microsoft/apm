@@ -149,7 +149,17 @@ def test_sync_markers_skips_local_deps(tmp_path: Path) -> None:
     assert written == 0
 
 
-def test_sync_markers_skips_deps_without_resolved_commit(tmp_path: Path) -> None:
+def test_sync_markers_warns_on_remote_unpinned_dep(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Remote dep without ``resolved_commit`` MUST emit a stderr warning.
+
+    Silent no-op was a supply-chain fail-open: an unpinned remote dep
+    cannot get a marker, so drift cannot verify its cache freshness.
+    Per supply-chain panel feedback (PR #1137), surface this loudly so
+    operators notice and re-pin. Marker count is still zero (nothing
+    to write), but the warning is mandatory.
+    """
     apm_modules = tmp_path / "apm_modules"
     pkg_dir = apm_modules / "owner" / "repo"
     pkg_dir.mkdir(parents=True)
@@ -158,13 +168,51 @@ def test_sync_markers_skips_deps_without_resolved_commit(tmp_path: Path) -> None
     dep = LockedDependency(
         repo_url="owner/repo",
         host="github.com",
-        resolved_commit=None,  # e.g. branch-tracked dep without pin
+        resolved_commit=None,  # branch-tracked dep without pin
     )
     lockfile.add_dependency(dep)
 
     written = sync_markers_for_lockfile(lockfile, tmp_path, apm_modules)
     assert written == 0
     assert not (pkg_dir / MARKER_FILENAME).exists()
+
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert "owner/repo" in combined
+    assert "no resolved_commit" in combined
+    assert "apm install" in combined
+
+
+def test_find_unpinned_remote_deps_excludes_local_and_pinned(tmp_path: Path) -> None:
+    """find_unpinned_remote_deps returns only remote deps with no commit."""
+    lockfile = LockFile()
+    lockfile.add_dependency(
+        LockedDependency(
+            repo_url="./local-pkg",
+            source="local",
+            local_path="./local-pkg",
+            resolved_commit=None,
+        )
+    )
+    lockfile.add_dependency(
+        LockedDependency(
+            repo_url="org/pinned",
+            host="github.com",
+            resolved_commit="cafebabe" * 5,
+        )
+    )
+    lockfile.add_dependency(
+        LockedDependency(
+            repo_url="org/unpinned",
+            host="github.com",
+            resolved_commit=None,
+        )
+    )
+
+    from apm_cli.install.cache_pin import find_unpinned_remote_deps
+
+    unpinned = find_unpinned_remote_deps(lockfile)
+    assert unpinned == ["org/unpinned"]
 
 
 def test_sync_markers_skips_deps_with_no_cached_install(tmp_path: Path) -> None:

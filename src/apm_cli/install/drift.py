@@ -36,6 +36,7 @@ import click
 
 from apm_cli.core.command_logger import CommandLogger
 from apm_cli.utils.console import STATUS_SYMBOLS
+from apm_cli.utils.guards import _ReadOnlyProjectGuard
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
@@ -228,6 +229,16 @@ def _materialize_install_path(
 
     dep_ref = lock_dep.to_dependency_ref()
     candidate = dep_ref.get_install_path(apm_modules_dir)
+    # Supply-chain fail-closed: a remote dep without a resolved_commit is
+    # unverifiable -- there is no marker we can write at install time and
+    # no commit we can compare at audit time. Refuse to replay it rather
+    # than silently trust whatever happens to live in the cache.
+    if getattr(lock_dep, "source", None) != "local" and not lock_dep.resolved_commit:
+        raise CacheMissError(
+            f"cannot replay {lock_dep.repo_url}: lockfile entry has no resolved_commit "
+            "(cache freshness unverifiable). Re-run 'apm install' with a pinned ref "
+            "(commit, tag, or specific branch HEAD) before audit."
+        )
     if not candidate.exists():
         raise CacheMissError(
             f"cache miss for {lock_dep.repo_url}@{lock_dep.resolved_commit}: "
@@ -413,6 +424,15 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     diagnostics = DiagnosticCollector(verbose=logger.verbose)
     integrators = _make_integrators()
 
+    # Defense-in-depth: snapshot every file under a governed root and
+    # under apm.lock.yaml, then assert no mutation on exit. The primary
+    # write-redirect is ``scratch_root=scratch_root`` threaded into every
+    # integrator; this guard catches accidental direct-path writes that
+    # bypass the redirect (e.g. an integrator that hard-codes
+    # ``project_root / target.root_dir``). See guards.py for semantics.
+    governed = _governed_root_dirs(targets)
+    protected_subpaths = [*sorted(governed), "apm.lock.yaml", "AGENTS.md"]
+
     snapshot_started = False
     if logger.verbose:
         try:
@@ -424,43 +444,44 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     logger.replay_start()
     replayed_count = 0
     try:
-        for lock_dep in lock.get_all_dependencies():
-            if lock_dep.local_path == _SELF_KEY:
-                # Synthesized self-entry: project's own local content.
-                # Re-integrate from project_root itself.
-                install_path = project_root
-            else:
-                install_path = _materialize_install_path(
-                    lock_dep,
-                    project_root,
-                    apm_modules_dir,
-                    cache_only=config.cache_only,
+        with _ReadOnlyProjectGuard(project_root, protected_subpaths):
+            for lock_dep in lock.get_all_dependencies():
+                if lock_dep.local_path == _SELF_KEY:
+                    # Synthesized self-entry: project's own local content.
+                    # Re-integrate from project_root itself.
+                    install_path = project_root
+                else:
+                    install_path = _materialize_install_path(
+                        lock_dep,
+                        project_root,
+                        apm_modules_dir,
+                        cache_only=config.cache_only,
+                    )
+
+                package_info = _build_package_info(lock_dep, install_path)
+                dep_key = lock_dep.get_unique_key()
+
+                integrate_package_primitives(
+                    package_info,
+                    scratch_root,
+                    targets=targets,
+                    prompt_integrator=integrators["prompt"],
+                    agent_integrator=integrators["agent"],
+                    skill_integrator=integrators["skill"],
+                    instruction_integrator=integrators["instruction"],
+                    command_integrator=integrators["command"],
+                    hook_integrator=integrators["hook"],
+                    force=True,
+                    managed_files=set(),
+                    diagnostics=diagnostics,
+                    package_name=dep_key,
+                    logger=None,
+                    scope=None,
+                    skill_subset=None,
+                    ctx=None,
+                    scratch_root=scratch_root,
                 )
-
-            package_info = _build_package_info(lock_dep, install_path)
-            dep_key = lock_dep.get_unique_key()
-
-            integrate_package_primitives(
-                package_info,
-                scratch_root,
-                targets=targets,
-                prompt_integrator=integrators["prompt"],
-                agent_integrator=integrators["agent"],
-                skill_integrator=integrators["skill"],
-                instruction_integrator=integrators["instruction"],
-                command_integrator=integrators["command"],
-                hook_integrator=integrators["hook"],
-                force=True,
-                managed_files=set(),
-                diagnostics=diagnostics,
-                package_name=dep_key,
-                logger=None,
-                scope=None,
-                skill_subset=None,
-                ctx=None,
-                scratch_root=scratch_root,
-            )
-            replayed_count += 1
+                replayed_count += 1
     finally:
         if snapshot_started:
             try:

@@ -128,6 +128,29 @@ def verify_marker(install_path: Path, expected_commit: str) -> None:
         )
 
 
+def find_unpinned_remote_deps(lockfile: LockFile) -> list[str]:
+    """Return repo_url for every remote dep that lacks a ``resolved_commit``.
+
+    A remote dep without a pinned commit is a supply-chain weakness:
+
+    * The cache could come from any commit on the referenced branch/tag.
+    * Drift replay cannot verify the cache matches the lockfile.
+    * No marker can be written, so future drift runs cannot fail-closed.
+
+    Callers (``sync_markers_for_lockfile`` at install, ``_materialize_install_path``
+    at audit) should not silently no-op these entries -- they should
+    warn on install and fail-closed on audit.
+    """
+    unpinned: list[str] = []
+    for _key, dep in lockfile.dependencies.items():
+        if getattr(dep, "source", None) == "local":
+            continue
+        commit = getattr(dep, "resolved_commit", None)
+        if not isinstance(commit, str) or not commit:
+            unpinned.append(getattr(dep, "repo_url", "") or _key)
+    return unpinned
+
+
 def sync_markers_for_lockfile(
     lockfile: LockFile,
     project_root: Path,
@@ -140,9 +163,25 @@ def sync_markers_for_lockfile(
     marker contract get marked on the next ``apm install`` even when
     the lockfile YAML itself does not need to be rewritten.
 
+    Side-effect: any remote dep that lacks a ``resolved_commit`` produces
+    a single stderr warning (one per dep). These deps cannot participate
+    in stale-cache verification, which is a supply-chain weakness worth
+    surfacing -- silent no-op would let unpinned refs sneak past audit.
+
     Returns the count of markers written (useful for verbose logging
     and for tests).
     """
+    unpinned = find_unpinned_remote_deps(lockfile)
+    if unpinned:
+        from apm_cli.utils.console import _rich_warning
+
+        for repo in unpinned:
+            _rich_warning(
+                f"cache-pin: remote dep {repo!r} has no resolved_commit; "
+                "drift cannot verify its cache freshness. Re-run 'apm install' "
+                "with a pinned ref (commit, tag, or specific branch HEAD)."
+            )
+
     written = 0
     for dep_key, dep in lockfile.dependencies.items():  # noqa: B007
         if not _is_markable(dep):
@@ -187,6 +226,7 @@ __all__ = [
     "MARKER_FILENAME",
     "SCHEMA_VERSION",
     "CachePinError",
+    "find_unpinned_remote_deps",
     "sync_markers_for_lockfile",
     "verify_marker",
     "write_marker",

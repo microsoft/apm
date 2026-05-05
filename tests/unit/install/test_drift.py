@@ -297,3 +297,113 @@ def test_check_logger_scratch_root_silent_when_not_verbose(capsys, tmp_path):
     assert captured.out == ""
     assert "drift-scratch-secret" not in captured.err
     assert captured.err == ""
+
+
+# ---------------------------------------------------------------------------
+# Supply-chain fail-closed: unpinned remote dep
+# ---------------------------------------------------------------------------
+
+
+def test_materialize_unpinned_remote_dep_raises_cache_miss(tmp_path):
+    """Remote dep with empty resolved_commit MUST fail-closed at audit.
+
+    The cache could contain content from any commit on the referenced
+    branch. Drift cannot prove freshness without a marker, and a marker
+    cannot be written without a commit. Per supply-chain panel feedback
+    (PR #1137), refuse to replay rather than silently trust the cache.
+    """
+    from apm_cli.install.drift import CacheMissError, _materialize_install_path
+
+    apm_modules = tmp_path / "apm_modules"
+    apm_modules.mkdir()
+    dep = LockedDependency(
+        repo_url="org/unpinned",
+        host="github.com",
+        resolved_commit=None,
+    )
+
+    with pytest.raises(CacheMissError) as exc_info:
+        _materialize_install_path(dep, tmp_path, apm_modules, cache_only=True)
+
+    msg = str(exc_info.value)
+    assert "org/unpinned" in msg
+    assert "no resolved_commit" in msg
+    assert "apm install" in msg
+
+
+def test_materialize_local_dep_without_commit_does_not_raise(tmp_path):
+    """Local deps legitimately have no resolved_commit -- must not fail-closed."""
+    from apm_cli.install.drift import _materialize_install_path
+
+    apm_modules = tmp_path / "apm_modules"
+    apm_modules.mkdir()
+    local_pkg = tmp_path / "local-pkg"
+    local_pkg.mkdir()
+    dep = LockedDependency(
+        repo_url="./local-pkg",
+        source="local",
+        local_path="./local-pkg",
+        resolved_commit=None,
+    )
+    # Should not raise the unpinned-remote guard. (May raise a different
+    # error depending on local-path resolution; we only assert the
+    # specific supply-chain message is NOT what surfaced.)
+    try:
+        _materialize_install_path(dep, tmp_path, apm_modules, cache_only=True)
+    except Exception as exc:  # pragma: no cover -- only inspecting message
+        assert "no resolved_commit" not in str(exc), (
+            "local deps must not trip the unpinned-remote guard"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Defense-in-depth: _ReadOnlyProjectGuard wired into run_replay
+# ---------------------------------------------------------------------------
+
+
+def test_run_replay_wraps_loop_with_readonly_guard(monkeypatch, tmp_path):
+    """A monkeypatched integrator that writes to project_root MUST trip the guard.
+
+    Defense-in-depth: even though every integrator should be redirected
+    via ``scratch_root=scratch_root``, an accidental direct-path write
+    (or a future regression) would silently corrupt the working tree.
+    The guard catches it and raises ProtectedPathMutationError.
+    """
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.drift import ReplayConfig, run_replay
+    from apm_cli.utils.guards import ProtectedPathMutationError
+
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    (project_root / ".apm").mkdir()
+    (project_root / ".apm" / "tracked.md").write_text("baseline\n", encoding="utf-8")
+
+    lockfile_path = project_root / "apm.lock.yaml"
+    # Seed local_deployed_files so LockFile.read() synthesizes the self-entry
+    # and the replay loop iterates at least once.
+    lock = LockFile()
+    lock.local_deployed_files = [".apm/tracked.md"]
+    lock.write(lockfile_path)
+
+    # Monkey-patch integrate_package_primitives to write into project_root.
+    def _bad_integrator(*args, **kwargs):
+        # Simulate a leaky integrator that writes to project tree, not scratch.
+        (project_root / ".apm" / "leaked.md").write_text("oops\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "apm_cli.install.services.integrate_package_primitives",
+        _bad_integrator,
+    )
+
+    config = ReplayConfig(
+        project_root=project_root,
+        lockfile_path=lockfile_path,
+        targets=None,
+        cache_only=True,
+    )
+    logger = CheckLogger(verbose=False)
+
+    with pytest.raises(ProtectedPathMutationError) as exc_info:
+        run_replay(config, logger)
+
+    assert "leaked.md" in str(exc_info.value) or "created:" in str(exc_info.value)
