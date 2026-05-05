@@ -536,6 +536,9 @@ class TestSkipInstructions:
         # No files generated (no constitution or dependencies either)
         assert result.success
         assert len(result.content_map) == 0
+        # Stats reflect zero emitted files, not the original placement count
+        assert result.stats["claude_files_generated"] == 0
+        assert result.placements == []
 
     def test_skip_instructions_preserves_constitution(self, temp_project, sample_primitives):
         """When skip_instructions is True, constitution is still included."""

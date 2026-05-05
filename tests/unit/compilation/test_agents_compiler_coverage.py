@@ -703,10 +703,12 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
     def test_instructions_included_without_rules_dir(self):
         """Without .claude/rules/, instructions appear in CLAUDE.md."""
         compiler = AgentsCompiler(self.tmp_resolved)
-        config = CompilationConfig(target="claude", dry_run=True)
+        config = CompilationConfig(target="claude", dry_run=False)
         result = compiler.compile(config)
         assert result.success
-        assert "Project Standards" in result.content or "1" in str(result.stats)
+        claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
+        assert claude_md.exists()
+        assert "# Project Standards" in claude_md.read_text()
 
     def test_instructions_skipped_with_populated_rules_dir(self):
         """With .claude/rules/ containing .md files, instructions are skipped."""
@@ -766,6 +768,18 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         result = compiler.compile(config)
         assert result.success
         assert "Project Standards" not in result.content
+
+    def test_skip_instructions_stats_reflect_emitted_files(self):
+        """Stats report zero files generated when all placements are skipped."""
+        rules_dir = Path(self.tmp_resolved) / ".claude" / "rules"
+        rules_dir.mkdir(parents=True)
+        (rules_dir / "style.md").write_text("---\npaths:\n  - '**/*.py'\n---\nUse type hints.\n")
+
+        compiler = AgentsCompiler(self.tmp_resolved)
+        config = CompilationConfig(target="claude", dry_run=True)
+        result = compiler.compile(config)
+        assert result.success
+        assert result.stats.get("claude_files_generated", 0) == 0
 
     def test_skip_instructions_emits_log_messages(self):
         """When instructions are skipped, informational log messages are emitted."""

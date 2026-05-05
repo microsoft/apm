@@ -123,12 +123,16 @@ class ClaudeFormatter:
                 content = self._generate_claude_content(placement, primitives)
                 content_map[placement.claude_path] = content
 
+            # Filter placements to only those that produced content so stats
+            # and downstream consumers see an accurate picture.
+            emitted_placements = [p for p in placements if p.claude_path in content_map]
+
             # Compile statistics
-            stats = self._compile_stats(placements, primitives)
+            stats = self._compile_stats(emitted_placements, primitives)
 
             return ClaudeCompilationResult(
                 success=len(self.errors) == 0,
-                placements=placements,
+                placements=emitted_placements,
                 content_map=content_map,
                 warnings=self.warnings.copy(),
                 errors=self.errors.copy(),
