@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Parallel subdir install race.** `apm install` no longer intermittently fails with `RuntimeError: Subdirectory '<path>' not found in repository` when multiple dependencies (including ADO sub-path deps) resolve to different subdirectories of the same `repo@ref`. The shared clone cache now stores subdir-agnostic bare clones and each consumer materializes its own working tree (mirrors the WS3 `GitCache` pattern). (#1135, fixes #1126, fixes #1140)
+- **Re-installing the same package no longer rmtree's it.** `compute_package_hash` now excludes the `.apm-pin` cache marker (introduced by #1137) so the supply-chain content-hash check sees a stable hash across installs instead of falsely tripping and deleting `apm_modules/<owner>/<pkg>/`. (#1142, regression from #1137)
 
 ### Changed
 
