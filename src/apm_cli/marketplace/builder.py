@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import urllib.error
 import urllib.request
 from collections import OrderedDict
@@ -156,8 +155,9 @@ class BuildOptions:
 # Builder
 # ---------------------------------------------------------------------------
 
-# 40-char hex SHA pattern
-_SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+# 40-char hex SHA pattern -- shared across marketplace modules; see
+# ``marketplace/ref_resolver.FULL_SHA_RE``.
+from .ref_resolver import FULL_SHA_RE as _SHA40_RE  # noqa: E402
 
 # Version range indicators -- if a version string starts with any of these
 # or contains spaces, it's a resolution constraint, not a display override.
@@ -216,6 +216,124 @@ def _subtract_plugin_root(source: str, plugin_root: str) -> str:
         raise BuildError(f"pluginRoot subtraction produced path with traversal: '{result}'")
 
     return "./" + result
+
+
+class _UpstreamResolverFactory:
+    """Build an :class:`UpstreamResolver` wired to a builder context.
+
+    Extracted from :meth:`MarketplaceBuilder._build_upstream_resolver`
+    to flatten what was previously a 100+ line closure stack. Owns:
+
+    - the per-host :class:`RefResolver` cache (lazy, never inherits the
+      curator's auth context across hosts);
+    - the ``ref_to_sha`` resolution path (SHA short-circuit, offline
+      guard, ls-remote-backed tag/branch resolution);
+    - the ``version_range`` semver-pattern resolution path.
+
+    Lifetime is one build invocation. Holding the cache as instance
+    state (rather than a closure cell) makes the dependencies between
+    the three resolver functions explicit.
+    """
+
+    def __init__(self, builder: MarketplaceBuilder, yml: MarketplaceYml) -> None:
+        self._builder = builder
+        self._yml = yml
+        self._host_resolvers: dict[str, RefResolver] = {}
+
+    # -- internal: per-host RefResolver cache -----------------------------------
+
+    def _resolver_for_host(self, host: str) -> RefResolver:
+        if host not in self._host_resolvers:
+            if host == self._builder._host:
+                self._host_resolvers[host] = self._builder._get_resolver()
+            else:
+                # v1: only github.com is supported. Construct an
+                # unauthenticated RefResolver so we never leak the
+                # curator's PAT to a foreign host.
+                self._host_resolvers[host] = RefResolver(
+                    timeout_seconds=self._builder._options.timeout_seconds,
+                    offline=self._builder._options.offline,
+                    host=host,
+                    token=None,
+                )
+        return self._host_resolvers[host]
+
+    # -- ref resolution ---------------------------------------------------------
+
+    def ref_to_sha(self, host: str, owner: str, repo: str, ref_or_branch: str) -> str:
+        # SHA short-circuit -- offline-safe, no network.
+        if _SHA40_RE.match(ref_or_branch):
+            return ref_or_branch
+        if self._builder._options.offline:
+            raise BuildError(f"cannot resolve ref '{ref_or_branch}' offline for {owner}/{repo}")
+        resolver = self._resolver_for_host(host)
+        owner_repo = f"{owner}/{repo}"
+        refs = resolver.list_remote_refs(owner_repo)
+        for remote in refs:
+            if remote.name == f"refs/tags/{ref_or_branch}":
+                return remote.sha
+            if remote.name == f"refs/heads/{ref_or_branch}":
+                return remote.sha
+        raise BuildError(f"ref '{ref_or_branch}' not found in {owner}/{repo}")
+
+    # -- version-range resolution ----------------------------------------------
+
+    def version_range(
+        self,
+        host: str,
+        owner: str,
+        repo: str,
+        semver_range: str,
+        *,
+        tag_pattern: str | None = None,
+        include_prerelease: bool = False,
+    ) -> tuple[str, str]:
+        resolver = self._resolver_for_host(host)
+        owner_repo = f"{owner}/{repo}"
+        pattern = tag_pattern or self._yml.build.tag_pattern
+        tag_rx = build_tag_regex(pattern)
+        refs = resolver.list_remote_refs(owner_repo)
+        candidates: list[tuple[SemVer, str, str]] = []
+        for remote in refs:
+            if not remote.name.startswith("refs/tags/"):
+                continue
+            tag_name = remote.name[len("refs/tags/") :]
+            m = tag_rx.match(tag_name)
+            if not m:
+                continue
+            version_str = m.group("version")
+            sv = parse_semver(version_str)
+            if sv is None:
+                continue
+            if sv.is_prerelease and not (
+                include_prerelease or self._builder._options.include_prerelease
+            ):
+                continue
+            if satisfies_range(sv, semver_range):
+                candidates.append((sv, tag_name, remote.sha))
+        if not candidates:
+            raise BuildError(
+                f"no version of {owner}/{repo} matches '{semver_range}' (pattern='{pattern}')"
+            )
+        candidates.sort(key=lambda c: c[0], reverse=True)
+        _, best_tag, best_sha = candidates[0]
+        return best_tag, best_sha
+
+    # -- assembly ---------------------------------------------------------------
+
+    def build(self) -> UpstreamResolver:
+        upstreams_by_alias = {u.alias: u for u in self._yml.upstreams}
+        # See ``MarketplaceBuilder._build_upstream_resolver`` for the
+        # rationale on ``canonical_full_name=None`` in v1.
+        return UpstreamResolver(
+            upstreams=upstreams_by_alias,
+            cache=UpstreamCache(),
+            ref_to_sha=self.ref_to_sha,
+            canonical_full_name=None,
+            version_range_resolver=self.version_range,
+            auth_resolver=self._builder._auth_resolver,
+            offline=self._builder._options.offline,
+        )
 
 
 class MarketplaceBuilder:
@@ -617,105 +735,15 @@ class MarketplaceBuilder:
         targeting any other host yield an error diagnostic from
         :meth:`UpstreamResolver.resolve_all`. Cross-host fan-out is
         slated for v2.
+
+        Implementation note: the per-host ``RefResolver`` cache and the
+        ref/version resolver functions used to live inside this method
+        as a 100+ line closure stack. They are now factored into
+        :class:`_UpstreamResolverFactory` for readability and
+        testability; this method remains the single assembly point.
         """
-        upstreams_by_alias = {u.alias: u for u in yml.upstreams}
-
-        # Lazy per-host RefResolver cache. ``_get_resolver()`` is reused
-        # for the curator's host; other hosts get fresh instances with
-        # auth resolved per-host (never inherit the curator's token).
-        host_resolvers: dict[str, RefResolver] = {}
-
-        def _resolver_for_host(host: str) -> RefResolver:
-            if host not in host_resolvers:
-                if host == self._host:
-                    host_resolvers[host] = self._get_resolver()
-                else:
-                    # v1: only github.com is supported. Construct an
-                    # unauthenticated RefResolver so we never leak the
-                    # curator's PAT to a foreign host.
-                    host_resolvers[host] = RefResolver(
-                        timeout_seconds=self._options.timeout_seconds,
-                        offline=self._options.offline,
-                        host=host,
-                        token=None,
-                    )
-            return host_resolvers[host]
-
-        def ref_to_sha(host: str, owner: str, repo: str, ref_or_branch: str) -> str:
-            # SHA short-circuit -- offline-safe, no network.
-            if _SHA40_RE.match(ref_or_branch):
-                return ref_or_branch
-            if self._options.offline:
-                # Cannot resolve a non-SHA ref offline.
-                raise BuildError(f"cannot resolve ref '{ref_or_branch}' offline for {owner}/{repo}")
-            resolver = _resolver_for_host(host)
-            owner_repo = f"{owner}/{repo}"
-            refs = resolver.list_remote_refs(owner_repo)
-            for remote in refs:
-                # Match tags and branches by their unqualified name.
-                if remote.name == f"refs/tags/{ref_or_branch}":
-                    return remote.sha
-                if remote.name == f"refs/heads/{ref_or_branch}":
-                    return remote.sha
-            raise BuildError(
-                f"ref '{ref_or_branch}' not found in {owner}/{repo}",
-            )
-
-        def version_range_resolver(
-            host: str,
-            owner: str,
-            repo: str,
-            semver_range: str,
-            *,
-            tag_pattern: str | None = None,
-            include_prerelease: bool = False,
-        ) -> tuple[str, str]:
-            resolver = _resolver_for_host(host)
-            owner_repo = f"{owner}/{repo}"
-            pattern = tag_pattern or yml.build.tag_pattern
-            tag_rx = build_tag_regex(pattern)
-            refs = resolver.list_remote_refs(owner_repo)
-            candidates: list[tuple[SemVer, str, str]] = []
-            for remote in refs:
-                if not remote.name.startswith("refs/tags/"):
-                    continue
-                tag_name = remote.name[len("refs/tags/") :]
-                m = tag_rx.match(tag_name)
-                if not m:
-                    continue
-                version_str = m.group("version")
-                sv = parse_semver(version_str)
-                if sv is None:
-                    continue
-                if sv.is_prerelease and not (
-                    include_prerelease or self._options.include_prerelease
-                ):
-                    continue
-                if satisfies_range(sv, semver_range):
-                    candidates.append((sv, tag_name, remote.sha))
-            if not candidates:
-                raise BuildError(
-                    f"no version of {owner}/{repo} matches '{semver_range}' (pattern='{pattern}')"
-                )
-            candidates.sort(key=lambda c: c[0], reverse=True)
-            _, best_tag, best_sha = candidates[0]
-            return best_tag, best_sha
-
-        # v1: pass canonical_full_name=None to skip the rename guard at
-        # build time. Lockfile-side pinning + strict source-shape parsing
-        # already provide tamper detection. Wiring AuthResolver-routed
-        # GitHub REST calls is tracked as a follow-up todo so this
-        # builder integration is testable end-to-end without proliferating
-        # network mocks.
-        return UpstreamResolver(
-            upstreams=upstreams_by_alias,
-            cache=UpstreamCache(),
-            ref_to_sha=ref_to_sha,
-            canonical_full_name=None,
-            version_range_resolver=version_range_resolver,
-            auth_resolver=self._auth_resolver,
-            offline=self._options.offline,
-        )
+        factory = _UpstreamResolverFactory(self, yml)
+        return factory.build()
 
     # -- remote description fetcher -----------------------------------------
 

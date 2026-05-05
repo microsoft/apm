@@ -30,6 +30,9 @@ from .errors import GitLsRemoteError, OfflineMissError
 from .git_stderr import translate_git_stderr
 
 __all__ = [
+    "FULL_SHA_RE",
+    "GitLsRemoteError",
+    "OfflineMissError",
     "RefCache",
     "RefResolver",
     "RemoteRef",
@@ -39,7 +42,12 @@ __all__ = [
 # Dataclass
 # ---------------------------------------------------------------------------
 
-_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+# Shared 40-char lowercase-hex commit-SHA pattern. Imported by all
+# marketplace + plugin-CLI modules that need to discriminate a SHA from
+# a tag/branch ref. Kept here because ``ref_resolver`` is the natural
+# home for git-ref concepts. ``_SHA_RE`` is a backwards-compatible alias.
+FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_SHA_RE = FULL_SHA_RE
 
 
 @dataclass(frozen=True)

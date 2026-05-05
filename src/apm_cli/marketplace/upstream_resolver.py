@@ -34,7 +34,6 @@ network.
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -64,8 +63,8 @@ __all__ = [
 # Module constants
 # ---------------------------------------------------------------------------
 
-_FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-
+# Shared 40-char SHA pattern.
+from .ref_resolver import FULL_SHA_RE as _FULL_SHA_RE  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -265,6 +264,15 @@ class UpstreamResolver:
         upstream-level failures (rename, missing alias, fetch error)
         propagate to the upstream's *every* dependent package as
         per-package diagnostics so the curator sees the cascade.
+
+        Resolution is intentionally sequential. Build-time concurrency
+        was considered and deferred: the per-upstream cache layer is
+        the bottleneck, manifest fetches dominate wall-clock, and
+        most curator marketplaces have a small number of upstreams
+        (single digits). Threading would obscure error attribution
+        without a measurable speedup at the current scale and is
+        revisited only if a curator profile produces evidence
+        otherwise.
         """
         resolved: list[ResolvedUpstreamPackage] = []
         for entry in entries:

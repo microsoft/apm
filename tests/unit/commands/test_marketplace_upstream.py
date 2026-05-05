@@ -126,6 +126,48 @@ class TestUpstreamAdd:
         assert result.exit_code == 2
         assert "alias" in result.output.lower()
 
+    def test_duplicate_alias_exits_2(self, runner, tmp_path, monkeypatch):
+        # Re-adding the same alias must hard-fail at exit code 2 from
+        # the CLI layer (not silently overwrite). The editor layer
+        # raises ``MarketplaceYmlError``; this test pins the CLI
+        # contract that surfaces it.
+        monkeypatch.chdir(tmp_path)
+        _write_yml(tmp_path)
+        first = runner.invoke(
+            marketplace,
+            [
+                "upstream",
+                "add",
+                "abhigyanpatwari/GitNexus",
+                "--alias",
+                "gitnexus",
+                "--ref",
+                SHA40,
+                "--no-verify",
+            ],
+        )
+        assert first.exit_code == 0, first.output
+
+        second = runner.invoke(
+            marketplace,
+            [
+                "upstream",
+                "add",
+                "other/Repo",
+                "--alias",
+                "gitnexus",
+                "--ref",
+                SHA40,
+                "--no-verify",
+            ],
+        )
+        assert second.exit_code == 2, second.output
+        assert "gitnexus" in second.output
+        # Original entry must remain untouched.
+        data = yaml.safe_load((tmp_path / "marketplace.yml").read_text())
+        assert len(data["upstreams"]) == 1
+        assert data["upstreams"][0]["repo"] == "abhigyanpatwari/GitNexus"
+
 
 class TestUpstreamList:
     def test_empty(self, runner, tmp_path, monkeypatch):

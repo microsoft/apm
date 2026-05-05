@@ -210,10 +210,10 @@ def list_cmd(verbose):
         host = entry.get("host", "github.com")
         pin = entry.get("ref") or entry.get("branch", "<unpinned>")
         head = " (HEAD-tracking)" if entry.get("allow_head") else ""
-        logger.info(
-            f"  {alias} -> {host}/{repo} @ {pin}{head}",
-            symbol="info",
-        )
+        # Per-entry rows are visual continuation under the count line
+        # above; rendering them without the [i] prefix avoids the
+        # double-symbol look that confused cli-logging review.
+        logger.tree_item(f"  {alias} -> {host}/{repo} @ {pin}{head}")
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +234,9 @@ def remove(alias, verbose):
         logger.error(str(exc), symbol="error")
         sys.exit(2)
 
-    logger.success(f"Removed upstream '{alias}'", symbol="check")
+    # Default success symbol is "sparkles" ([*]); [+] (check) reads as
+    # "addition" in this codebase, which doesn't fit a removal action.
+    logger.success(f"Removed upstream '{alias}'")
 
 
 __all__ = ["add", "list_cmd", "remove", "upstream"]

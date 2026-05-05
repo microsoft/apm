@@ -88,8 +88,9 @@ _REMOTE_SOURCE_RE = re.compile(r"^[^./\s][^/\s]*/[^/\s]+$")
 
 # 40-char lowercase hex git SHA. Truncated SHAs are explicitly rejected
 # because the strict parser is the line of defence against ambiguous
-# refs reaching ``RefResolver``.
-_FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+# refs reaching ``RefResolver``. Aliased to the shared canonical pattern
+# in ``ref_resolver`` so authoring + parsing share one source of truth.
+from .ref_resolver import FULL_SHA_RE as _FULL_SHA_RE  # noqa: E402
 
 # Tag / ref names: conservative subset. Disallows whitespace, tilde,
 # caret, and other characters that ``git ls-remote`` would refuse, but

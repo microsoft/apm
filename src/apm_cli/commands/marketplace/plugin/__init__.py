@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import sys
 from pathlib import Path
 
@@ -15,9 +14,8 @@ from ....marketplace.errors import (
     MarketplaceYmlError,  # noqa: F401
     OfflineMissError,
 )
+from ....marketplace.ref_resolver import FULL_SHA_RE as _SHA_RE
 from ..._helpers import _is_interactive  # noqa: F401
-
-_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 def _yml_path() -> Path:

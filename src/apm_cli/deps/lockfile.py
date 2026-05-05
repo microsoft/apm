@@ -289,7 +289,10 @@ class LockedUpstreamPlugin:
 
     upstream_name: str  # plugin name as it appears in the upstream manifest
     emitted_as: str  # display name in the curator's marketplace.json
-    resolved_sha: str
+    # ``None`` is a valid pin only when ``pin_source == "branch-head"``
+    # (allow_head opt-in flow). The lockfile round-trips it as ``null``;
+    # ``from_dict`` preserves that semantics rather than coercing to ``""``.
+    resolved_sha: str | None
     resolved_source: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -306,7 +309,7 @@ class LockedUpstreamPlugin:
         return cls(
             upstream_name=upstream_name,
             emitted_as=data.get("emitted_as", upstream_name),
-            resolved_sha=data.get("resolved_sha", ""),
+            resolved_sha=data.get("resolved_sha"),
             resolved_source=dict(data.get("resolved_source") or {}),
         )
 

@@ -95,8 +95,8 @@ _KEY_HASH_LEN = 16
 
 # 40-char hex git SHA. The cache is content-addressed; non-SHA refs
 # (branches, tags) MUST be resolved upstream by the resolver layer
-# before reaching this cache.
-_FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+# before reaching this cache. Aliased to the shared canonical pattern.
+from .ref_resolver import FULL_SHA_RE as _FULL_SHA_RE  # noqa: E402
 
 # Conservative host shape -- defence-in-depth on top of the regex in
 # yml_schema.py. The cache layer never trusts that the caller already
@@ -326,9 +326,11 @@ class UpstreamCache:
         entry_dir = self._entry_dir(key)
         entry_dir.mkdir(parents=True, exist_ok=True)
 
-        # Write meta first; if a reader sees both files, they were
-        # written in this order so meta is at most as old as the
-        # manifest.
+        # Order: manifest first, then meta. ``get()`` reads meta last
+        # via ``_load_meta()``, which short-circuits the cache hit when
+        # meta is absent. If a crash interleaves these writes, an
+        # incomplete entry is skipped (manifest without meta) rather
+        # than served stale.
         manifest_path = entry_dir / "manifest.json"
         meta_path = entry_dir / "meta.json"
 

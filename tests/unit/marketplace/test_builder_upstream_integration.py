@@ -360,3 +360,97 @@ def test_upstream_only_build_emits_valid_marketplace(tmp_path: Path) -> None:
     # Round-trip parse must succeed.
     parsed = parse_marketplace_json(doc)
     assert len(parsed.plugins) == 1
+
+
+# ---------------------------------------------------------------------------
+# Reproducibility + regression-trap (test-coverage panel recommendations)
+# ---------------------------------------------------------------------------
+
+
+def test_byte_identical_rebuild_produces_same_output(tmp_path: Path) -> None:
+    """Rebuilding from the same lock+inputs yields byte-identical bytes.
+
+    Regression trap for the reproducibility contract: two consecutive
+    builds against an identical mixed (direct + upstream) ``apm.yml``
+    with the same upstream manifest fixture must emit the same
+    ``marketplace.json`` byte stream. Any non-determinism (timestamp
+    leak, dict-iteration order, formatter drift) breaks this.
+    """
+    fixture_manifest = _gitnexus_manifest()
+
+    def _build_once(work_dir: Path) -> bytes:
+        work_dir.mkdir(parents=True, exist_ok=True)
+        yml_path = _write_yml(work_dir, _MIXED_YML)
+        cache = UpstreamCache(
+            base_dir=work_dir / ".cache",
+            fetch_callback=MagicMock(return_value=fixture_manifest),
+        )
+        options = BuildOptions(offline=True)
+        builder = MarketplaceBuilder(yml_path, options)
+        builder._resolver = _MockRefResolver(  # type: ignore[assignment]
+            {"acme/direct-tool": [RemoteRef(name="refs/tags/v1.0.0", sha=SHA_DIRECT)]}
+        )
+        _patch_resolver_factory(builder, cache=cache)
+        report = builder.build()
+        assert report.errors == ()
+        return report.output_path.read_bytes()
+
+    first = _build_once(tmp_path / "build-a")
+    second = _build_once(tmp_path / "build-b")
+    assert first == second
+
+
+def test_upstream_does_not_mutate_direct_package_emission(tmp_path: Path) -> None:
+    """Adding an upstream entry does not change the direct subset's bytes.
+
+    Regression trap: the direct-package emission produced by a mixed
+    (direct + upstream) build must match the direct-only emission of
+    the same direct entry, plugin-by-plugin. If upstream bookkeeping
+    ever leaks into the direct emission path, this fails.
+    """
+    import json
+
+    direct_only_yml = """\
+name: acme-marketplace
+description: ACME curated marketplace
+version: 0.1.0
+marketplace:
+  owner:
+    name: ACME Corp
+  packages:
+    - name: direct-tool
+      source: acme/direct-tool
+      version: "^1.0.0"
+"""
+
+    # Direct-only build.
+    direct_dir = tmp_path / "direct-only"
+    direct_dir.mkdir(parents=True, exist_ok=True)
+    direct_yml = _write_yml(direct_dir, direct_only_yml)
+    direct_builder = MarketplaceBuilder(direct_yml, BuildOptions(offline=True))
+    direct_builder._resolver = _MockRefResolver(  # type: ignore[assignment]
+        {"acme/direct-tool": [RemoteRef(name="refs/tags/v1.0.0", sha=SHA_DIRECT)]}
+    )
+    direct_report = direct_builder.build()
+    direct_doc = json.loads(direct_report.output_path.read_text(encoding="utf-8"))
+    direct_plugin = next(p for p in direct_doc["plugins"] if p["name"] == "direct-tool")
+
+    # Mixed build.
+    mixed_dir = tmp_path / "mixed"
+    mixed_dir.mkdir(parents=True, exist_ok=True)
+    mixed_yml = _write_yml(mixed_dir, _MIXED_YML)
+    cache = UpstreamCache(
+        base_dir=mixed_dir / ".cache",
+        fetch_callback=MagicMock(return_value=_gitnexus_manifest()),
+    )
+    mixed_builder = MarketplaceBuilder(mixed_yml, BuildOptions(offline=True))
+    mixed_builder._resolver = _MockRefResolver(  # type: ignore[assignment]
+        {"acme/direct-tool": [RemoteRef(name="refs/tags/v1.0.0", sha=SHA_DIRECT)]}
+    )
+    _patch_resolver_factory(mixed_builder, cache=cache)
+    mixed_report = mixed_builder.build()
+    mixed_doc = json.loads(mixed_report.output_path.read_text(encoding="utf-8"))
+    mixed_direct_plugin = next(p for p in mixed_doc["plugins"] if p["name"] == "direct-tool")
+
+    # The direct plugin's emitted dict must match across builds.
+    assert direct_plugin == mixed_direct_plugin
