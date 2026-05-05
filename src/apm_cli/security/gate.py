@@ -212,16 +212,18 @@ def ignore_symlinks(directory, contents):
     return [c for c in contents if (Path(directory) / c).is_symlink()]
 
 
-def ignore_symlinks_and_pin(directory, contents):
-    """``shutil.copytree`` ignore callback that filters symlinks and ``.apm-pin``.
+_APM_PIN_FILENAME = ".apm-pin"
 
-    The ``.apm-pin`` cache marker belongs exclusively in ``apm_modules/``
-    and must not leak into deploy targets when skills are copied out.
+
+def ignore_non_content(directory, contents):
+    """``shutil.copytree`` ignore callback that filters non-content artifacts.
+
+    Excludes symlinks (security) and the ``.apm-pin`` cache marker, which
+    belongs exclusively in ``apm_modules/`` and must not leak into deploy
+    targets when skills are copied out.
     """
-    from apm_cli.install.cache_pin import MARKER_FILENAME
-
     return [
         c
         for c in contents
-        if (Path(directory) / c).is_symlink() or c == MARKER_FILENAME
+        if (Path(directory) / c).is_symlink() or c == _APM_PIN_FILENAME
     ]

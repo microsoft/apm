@@ -476,6 +476,8 @@ def _map_plugin_artifacts(
             shutil.rmtree(target_skills)
         skill_dirs = [s for s in skill_sources if s.is_dir()]
         skill_files = [s for s in skill_sources if s.is_file()]
+        from apm_cli.security.gate import ignore_non_content
+
         is_custom_list = isinstance(manifest.get("skills"), list)
         if is_custom_list and skill_dirs:
             target_skills.mkdir(parents=True, exist_ok=True)
@@ -483,13 +485,13 @@ def _map_plugin_artifacts(
                 shutil.copytree(
                     d,
                     target_skills / d.name,
-                    ignore=_ignore_symlinks,
+                    ignore=ignore_non_content,
                     dirs_exist_ok=True,
                 )
         elif skill_dirs:
-            shutil.copytree(skill_dirs[0], target_skills, ignore=_ignore_symlinks)
+            shutil.copytree(skill_dirs[0], target_skills, ignore=ignore_non_content)
             for extra in skill_dirs[1:]:
-                shutil.copytree(extra, target_skills, dirs_exist_ok=True, ignore=_ignore_symlinks)
+                shutil.copytree(extra, target_skills, dirs_exist_ok=True, ignore=ignore_non_content)
         if skill_files:
             target_skills.mkdir(parents=True, exist_ok=True)
             for f in skill_files:

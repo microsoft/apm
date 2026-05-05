@@ -240,8 +240,8 @@ class TestSkillIntegratorCopytreeSymlinkContainment(unittest.TestCase):
         self.assertNotIn("evil.txt", copied)
         self.assertNotIn("agents/evil-nested.txt", copied)
 
-    def test_skill_integrator_native_skill_copytree_uses_ignore_symlinks(self):
-        """integrate_native_skills passes ignore_symlinks to shutil.copytree.
+    def test_skill_integrator_native_skill_copytree_uses_ignore_non_content(self):
+        """integrate_native_skills passes ignore_non_content to shutil.copytree.
 
         Source-level guard: if a future refactor drops the callback,
         this test fails before any malicious package can exploit it.
@@ -252,22 +252,22 @@ class TestSkillIntegratorCopytreeSymlinkContainment(unittest.TestCase):
 
         source = inspect.getsource(skill_integrator)
         # All three copytree calls in skill_integrator.py must reference
-        # ignore_symlinks (directly or via a composing helper).
+        # ignore_non_content (directly or via a composing helper).
         copytree_count = source.count("shutil.copytree(")
-        ignore_symlinks_refs = source.count("ignore_symlinks")
+        ignore_non_content_refs = source.count("ignore_non_content")
         self.assertGreaterEqual(
             copytree_count,
             3,
             f"Expected >=3 copytree calls in skill_integrator, found {copytree_count}",
         )
-        # Each copytree must be matched by at least one ignore_symlinks
-        # reference (the helper at line 818 composes one ignore_symlinks
-        # import + one usage inside a closure -- still >=copytree_count).
+        # Each copytree must be matched by at least one ignore_non_content
+        # reference (the helper composes one import + one usage inside a
+        # closure -- still >=copytree_count).
         self.assertGreaterEqual(
-            ignore_symlinks_refs,
+            ignore_non_content_refs,
             copytree_count,
-            f"Expected >={copytree_count} ignore_symlinks references "
-            f"(one per copytree); found {ignore_symlinks_refs}",
+            f"Expected >={copytree_count} ignore_non_content references "
+            f"(one per copytree); found {ignore_non_content_refs}",
         )
 
 
