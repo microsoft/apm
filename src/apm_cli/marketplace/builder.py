@@ -1358,6 +1358,7 @@ class MarketplaceBuilder:
             output_path.parent.mkdir(parents=True, exist_ok=True)
             content = self._serialize_json(new_json)
             self._atomic_write(output_path, content)
+            self._write_upstream_lockfile(upstream_resolved)
 
         # Cleanup resolver
         if self._resolver is not None:
@@ -1377,6 +1378,76 @@ class MarketplaceBuilder:
             upstream_resolved=tuple(upstream_resolved),
             upstream_diagnostics=result.upstream_diagnostics,
         )
+
+    def _write_upstream_lockfile(self, upstream_resolved: list[ResolvedUpstreamPackage]) -> None:
+        """Persist upstream provenance into ``apm.lock.yaml``.
+
+        For every successfully resolved upstream package, record the
+        upstream marketplace coordinates (host/owner/repo/path/manifest
+        SHA) and the per-plugin pin (resolved SHA + emitted display
+        name + resolved source dict). The lockfile is the **only**
+        place provenance lives -- ``marketplace.json`` stays
+        Anthropic-conformant with no APM-specific keys.
+
+        Reads the existing lockfile (if any), preserves all unrelated
+        sections, replaces the ``upstreams`` block, and writes back.
+        """
+        from datetime import datetime, timezone
+
+        from ..deps.lockfile import (
+            LockedUpstream,
+            LockedUpstreamPlugin,
+            LockFile,
+            get_lockfile_path,
+        )
+
+        lockfile_path = get_lockfile_path(self._project_root)
+        lock = LockFile.load_or_create(lockfile_path)
+
+        if not upstream_resolved:
+            # No upstreams in this build; if the existing lockfile has
+            # an ``upstreams`` block from a previous build, preserve it
+            # only when the apm.yml still declares those upstreams.
+            # For v1 simplicity, leave the existing block untouched
+            # when there's nothing new to write.
+            return
+
+        refreshed_at = datetime.now(timezone.utc).isoformat()
+        new_upstreams: dict[str, LockedUpstream] = {}
+        for rup in upstream_resolved:
+            alias = rup.upstream.alias
+            if alias not in new_upstreams:
+                new_upstreams[alias] = LockedUpstream(
+                    alias=alias,
+                    host=rup.upstream.host,
+                    owner=rup.upstream.repo.split("/", 1)[0]
+                    if "/" in rup.upstream.repo
+                    else rup.upstream.repo,
+                    repo=rup.upstream.repo.split("/", 1)[1] if "/" in rup.upstream.repo else "",
+                    path=rup.upstream.path,
+                    manifest_sha=rup.upstream_manifest_sha,
+                    canonical_full_name=rup.upstream_canonical_full_name,
+                    refreshed_at=refreshed_at,
+                )
+            resolved_source = {
+                "host": rup.plugin_host,
+                "repo": rup.plugin_repo,
+                "sha": rup.plugin_sha,
+            }
+            if rup.plugin_subdir:
+                resolved_source["path"] = rup.plugin_subdir
+            if rup.plugin_ref:
+                resolved_source["ref"] = rup.plugin_ref
+            new_upstreams[alias].plugins[rup.plugin.name] = LockedUpstreamPlugin(
+                upstream_name=rup.plugin.name,
+                emitted_as=rup.entry.name,
+                resolved_sha=rup.plugin_sha,
+                resolved_source=resolved_source,
+            )
+
+        lock.upstreams = new_upstreams
+        lockfile_path.parent.mkdir(parents=True, exist_ok=True)
+        lock.write(lockfile_path)
 
 
 # ---------------------------------------------------------------------------

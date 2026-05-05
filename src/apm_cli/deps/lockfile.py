@@ -226,6 +226,92 @@ class LockedDependency:
 
 
 @dataclass
+class LockedUpstream:
+    """Provenance record for an upstream-sourced marketplace package.
+
+    Captures the full chain needed to verify a curator-controlled
+    pass-through emission: which external marketplace was queried, at
+    which immutable manifest commit, and which plugin commit was
+    selected. Stored under :attr:`LockFile.upstreams` keyed by alias.
+    """
+
+    alias: str
+    host: str
+    owner: str
+    repo: str
+    path: str
+    manifest_sha: str
+    canonical_full_name: str | None = None
+    refreshed_at: str | None = None
+    # plugins[upstream_name] = LockedUpstreamPlugin
+    plugins: dict[str, "LockedUpstreamPlugin"] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "host": self.host,
+            "owner": self.owner,
+            "repo": self.repo,
+            "path": self.path,
+            "manifest_sha": self.manifest_sha,
+        }
+        if self.canonical_full_name:
+            result["canonical_full_name"] = self.canonical_full_name
+        if self.refreshed_at:
+            result["refreshed_at"] = self.refreshed_at
+        if self.plugins:
+            result["plugins"] = {
+                name: plugin.to_dict() for name, plugin in sorted(self.plugins.items())
+            }
+        return result
+
+    @classmethod
+    def from_dict(cls, alias: str, data: dict[str, Any]) -> "LockedUpstream":
+        plugins_raw = data.get("plugins") or {}
+        plugins = {
+            name: LockedUpstreamPlugin.from_dict(name, body) for name, body in plugins_raw.items()
+        }
+        return cls(
+            alias=alias,
+            host=data.get("host", ""),
+            owner=data.get("owner", ""),
+            repo=data.get("repo", ""),
+            path=data.get("path", ""),
+            manifest_sha=data.get("manifest_sha", ""),
+            canonical_full_name=data.get("canonical_full_name"),
+            refreshed_at=data.get("refreshed_at"),
+            plugins=plugins,
+        )
+
+
+@dataclass
+class LockedUpstreamPlugin:
+    """A single curator-exposed plugin pinned from an upstream marketplace."""
+
+    upstream_name: str  # plugin name as it appears in the upstream manifest
+    emitted_as: str  # display name in the curator's marketplace.json
+    resolved_sha: str
+    resolved_source: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "emitted_as": self.emitted_as,
+            "resolved_sha": self.resolved_sha,
+        }
+        if self.resolved_source:
+            result["resolved_source"] = dict(sorted(self.resolved_source.items()))
+        return result
+
+    @classmethod
+    def from_dict(cls, upstream_name: str, data: dict[str, Any]) -> "LockedUpstreamPlugin":
+        return cls(
+            upstream_name=upstream_name,
+            emitted_as=data.get("emitted_as", upstream_name),
+            resolved_sha=data.get("resolved_sha", ""),
+            resolved_source=dict(data.get("resolved_source") or {}),
+        )
+
+
+@dataclass
 class LockFile:
     """APM lock file for reproducible dependency resolution."""
 
@@ -237,6 +323,7 @@ class LockFile:
     mcp_configs: dict[str, dict] = field(default_factory=dict)
     local_deployed_files: list[str] = field(default_factory=list)
     local_deployed_file_hashes: dict[str, str] = field(default_factory=dict)
+    upstreams: dict[str, LockedUpstream] = field(default_factory=dict)
 
     def add_dependency(self, dep: LockedDependency) -> None:
         """Add a dependency to the lock file."""
@@ -283,6 +370,10 @@ class LockFile:
                 data["local_deployed_file_hashes"] = dict(
                     sorted(self.local_deployed_file_hashes.items())
                 )
+            if self.upstreams:
+                data["upstreams"] = {
+                    alias: upstream.to_dict() for alias, upstream in sorted(self.upstreams.items())
+                }
             from ..utils.yaml_io import yaml_to_str
 
             return yaml_to_str(data)
@@ -309,6 +400,13 @@ class LockFile:
         lock.mcp_configs = dict(data.get("mcp_configs") or {})
         lock.local_deployed_files = list(data.get("local_deployed_files", []))
         lock.local_deployed_file_hashes = dict(data.get("local_deployed_file_hashes") or {})
+        upstreams_raw = data.get("upstreams") or {}
+        if isinstance(upstreams_raw, dict):
+            lock.upstreams = {
+                alias: LockedUpstream.from_dict(alias, body)
+                for alias, body in upstreams_raw.items()
+                if isinstance(body, dict)
+            }
         # Synthesize a virtual self-entry representing the project's own
         # local content. This unifies traversal across "real" dependencies
         # and the local package, without changing the on-disk YAML shape.
