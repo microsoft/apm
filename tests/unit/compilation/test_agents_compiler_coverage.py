@@ -768,6 +768,16 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         result = compiler.compile(config)
         assert result.success
         assert result.stats.get("claude_files_generated", 0) == 0
+        assert "Would generate 0 files" in result.content
+
+    def test_dry_run_reports_file_without_skip(self):
+        """Dry-run without .claude/rules/ reports CLAUDE.md would be generated."""
+        compiler = AgentsCompiler(self.tmp_resolved)
+        config = CompilationConfig(target="claude", dry_run=True)
+        result = compiler.compile(config)
+        assert result.success
+        assert "Would generate 1 files" in result.content
+        assert "CLAUDE.md" in result.content
 
     def test_skip_instructions_stats_reflect_emitted_files(self):
         """Stats report zero files generated when all placements are skipped."""
