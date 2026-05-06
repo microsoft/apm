@@ -142,6 +142,109 @@ class TestMcpEnvVarHeadersCopilot:
             f"File contents:\n{full_text}"
         )
 
+    def test_self_defined_stdio_server_translates_env_vars_in_args(self, tmp_path, apm_command):
+        """Self-defined stdio server with env-var placeholders in BOTH the
+        ``env`` block and ``args`` list must land in mcp-config.json with
+        ``${VAR}`` runtime placeholders. Closes the integration-tier gap
+        flagged by test-coverage review for the ``_raw_stdio`` branch of
+        ``_format_server_config`` and the supply-chain regression where
+        the dict-shaped ``env`` block was silently dropped to ``{}``.
+        """
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        (project_dir / ".github").mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        _write_apm_yml(
+            project_dir,
+            [
+                {
+                    "name": "test-stdio-server",
+                    "registry": False,
+                    "transport": "stdio",
+                    "command": "echo",
+                    "args": [
+                        "--token=${env:MY_STDIO_TOKEN}",
+                        "--bearer=${MY_STDIO_TOKEN}",
+                        "--legacy=<MY_LEGACY_VAR>",
+                    ],
+                    "env": {
+                        "PRIMARY_TOKEN": "${MY_STDIO_TOKEN}",
+                        "PREFIXED_TOKEN": "${env:MY_STDIO_TOKEN}",
+                        "LEGACY_TOKEN": "<MY_LEGACY_VAR>",
+                    },
+                }
+            ],
+        )
+
+        env = os.environ.copy()
+        env["HOME"] = str(fake_home)
+        env["MY_STDIO_TOKEN"] = "stdio-secret-must-not-leak"
+        env["MY_LEGACY_VAR"] = "legacy-secret-must-not-leak"
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        env["APM_NON_INTERACTIVE"] = "1"
+
+        result = subprocess.run(
+            [apm_command, "install", "--target", "copilot"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+        )
+
+        assert result.returncode == 0, (
+            f"apm install failed (rc={result.returncode}).\n"
+            f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+
+        mcp_config = fake_home / ".copilot" / "mcp-config.json"
+        assert mcp_config.exists(), (
+            f"Expected ~/.copilot/mcp-config.json to exist after install.\n"
+            f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+
+        config = json.loads(mcp_config.read_text(encoding="utf-8"))
+        servers = config.get("mcpServers") or {}
+        assert len(servers) == 1, (
+            f"Expected 1 server in mcp-config.json, got: {list(servers.keys())}"
+        )
+        server = next(iter(servers.values()))
+
+        # env block: all three syntaxes translate to ${VAR}.
+        env_block = server.get("env") or {}
+        assert env_block.get("PRIMARY_TOKEN") == "${MY_STDIO_TOKEN}", (
+            f"Bare ${{VAR}} in stdio env must remain ${{VAR}}.\nGot: {env_block!r}"
+        )
+        assert env_block.get("PREFIXED_TOKEN") == "${MY_STDIO_TOKEN}", (
+            f"${{env:VAR}} in stdio env must translate to ${{VAR}}.\nGot: {env_block!r}"
+        )
+        assert env_block.get("LEGACY_TOKEN") == "${MY_LEGACY_VAR}", (
+            f"Legacy <VAR> in stdio env must translate to ${{VAR}}.\nGot: {env_block!r}"
+        )
+
+        # args list: all three syntaxes translate to ${VAR}.
+        args = server.get("args") or []
+        assert "--token=${MY_STDIO_TOKEN}" in args, (
+            f"${{env:VAR}} in stdio args must translate to ${{VAR}}.\nGot: {args!r}"
+        )
+        assert "--bearer=${MY_STDIO_TOKEN}" in args, (
+            f"Bare ${{VAR}} in stdio args must remain ${{VAR}}.\nGot: {args!r}"
+        )
+        assert "--legacy=${MY_LEGACY_VAR}" in args, (
+            f"Legacy <VAR> in stdio args must translate to ${{VAR}}.\nGot: {args!r}"
+        )
+
+        # CRITICAL: neither secret may appear as a literal anywhere.
+        full_text = mcp_config.read_text(encoding="utf-8")
+        assert "stdio-secret-must-not-leak" not in full_text, (
+            f"Copilot stdio config leaked MY_STDIO_TOKEN as plaintext.\nFile contents:\n{full_text}"
+        )
+        assert "legacy-secret-must-not-leak" not in full_text, (
+            f"Copilot stdio config leaked MY_LEGACY_VAR as plaintext.\nFile contents:\n{full_text}"
+        )
+
 
 class TestMcpEnvVarHeadersCursor:
     """Sibling-adapter regression trap for #1152.

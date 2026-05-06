@@ -409,6 +409,56 @@ class TestSiblingAdaptersUnchanged(unittest.TestCase):
         self.assertEqual(result, "Bearer literal-value")
 
 
+class TestCopilotEnvVarTranslationInStdioEnvBlock(unittest.TestCase):
+    """Issue #1152 supply-chain regression trap: self-defined stdio deps
+    pass ``env`` as a plain dict ({NAME: value}), not a list of
+    {name, description, required} dicts. The translate-mode pipeline
+    must handle this shape without silently dropping the block to ``{}``.
+    """
+
+    def setUp(self):
+        CopilotClientAdapter.reset_install_run_state()
+
+    def tearDown(self):
+        CopilotClientAdapter.reset_install_run_state()
+
+    def test_dict_shaped_env_block_translates_all_placeholder_syntaxes(self):
+        adapter = CopilotClientAdapter()
+        result = adapter._resolve_environment_variables(
+            {
+                "PRIMARY_TOKEN": "${MY_STDIO_TOKEN}",
+                "PREFIXED_TOKEN": "${env:MY_STDIO_TOKEN}",
+                "LEGACY_TOKEN": "<MY_LEGACY_VAR>",
+            },
+            env_overrides=None,
+        )
+        self.assertEqual(result["PRIMARY_TOKEN"], "${MY_STDIO_TOKEN}")
+        self.assertEqual(result["PREFIXED_TOKEN"], "${MY_STDIO_TOKEN}")
+        self.assertEqual(result["LEGACY_TOKEN"], "${MY_LEGACY_VAR}")
+
+    def test_dict_shaped_env_block_with_literal_replaced_by_runtime_placeholder(self):
+        adapter = CopilotClientAdapter()
+        with patch.dict(os.environ, {"MY_TOKEN": "ignored-os-env"}, clear=False):
+            result = adapter._resolve_environment_variables(
+                {"MY_TOKEN": "literal-value-from-apm-yml"}, env_overrides=None
+            )
+        self.assertEqual(result["MY_TOKEN"], "${MY_TOKEN}")
+        for v in result.values():
+            self.assertNotIn("literal-value-from-apm-yml", v)
+            self.assertNotIn("ignored-os-env", v)
+
+    def test_dict_shaped_env_block_does_not_silently_drop(self):
+        """Regression trap for the bug where dict-input was iterated as a
+        list-of-dicts, every key failed isinstance(dict), and the result
+        was an empty {} -- breaking every self-defined stdio MCP server.
+        """
+        adapter = CopilotClientAdapter()
+        result = adapter._resolve_environment_variables(
+            {"FOO": "${env:FOO}", "BAR": "${BAR}"}, env_overrides=None
+        )
+        self.assertEqual(set(result.keys()), {"FOO", "BAR"})
+
+
 class TestCopilotInstallRunSummary(unittest.TestCase):
     """Issue #1152: aggregated post-install diagnostics.
 

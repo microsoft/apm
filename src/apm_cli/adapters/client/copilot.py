@@ -11,6 +11,8 @@ import re
 from pathlib import Path
 from typing import ClassVar
 
+import click
+
 from ...core.docker_args import DockerArgsProcessor
 from ...core.token_manager import GitHubTokenManager
 from ...registry.client import SimpleRegistryClient
@@ -404,15 +406,29 @@ class CopilotClientAdapter(MCPClientAdapter):
         """
         if cls._install_run_summary_emitted:
             return
+
+        # Visual separator from the install tree's closing line so the
+        # post-tree summary block reads as a distinct section.
+        emitted_any = False
+
+        def _emit_separator_once():
+            nonlocal emitted_any
+            if not emitted_any:
+                click.echo("")
+                emitted_any = True
+
         if cls._security_upgraded_keys:
             visible = sorted(k for k in cls._security_upgraded_keys if not k.startswith("("))
             count = len(visible) if visible else len(cls._security_upgraded_keys)
+            noun = "variable" if count == 1 else "variables"
             affected = ", ".join(visible) if visible else "(values previously stored as literals)"
+            _emit_separator_once()
             _rich_warning(
-                f"Security improvement: {count} environment variable(s) previously stored as "
+                f"Security improvement: {count} environment {noun} previously stored as "
                 f"plaintext in the Copilot config are now resolved at runtime.\n"
                 f"    Affected: {affected}\n"
-                f"    Ensure these are exported in your shell before running 'gh copilot'"
+                f"    Ensure these are exported in your shell before running 'gh copilot'",
+                symbol="warning",
             )
         if cls._unset_env_keys_by_server:
             all_unset: set[str] = set()
@@ -420,18 +436,33 @@ class CopilotClientAdapter(MCPClientAdapter):
                 all_unset.update(names)
             sorted_unset = sorted(all_unset)
             export_hint = " ".join(f"{name}=..." for name in sorted_unset)
+            count = len(sorted_unset)
+            noun = "variable" if count == 1 else "variables"
+            _emit_separator_once()
             _rich_warning(
-                f"Copilot CLI will resolve {len(sorted_unset)} environment variable(s) at runtime "
-                f"that are not currently set: {', '.join(sorted_unset)}.\n"
-                f"    Export them in your shell before running 'gh copilot', e.g.:\n"
-                f"      export {export_hint}"
+                f"Copilot CLI will resolve {count} environment {noun} at runtime "
+                f"that {'is' if count == 1 else 'are'} not currently set: "
+                f"{', '.join(sorted_unset)}.\n"
+                f"    Export {'it' if count == 1 else 'them'} in your shell before "
+                f"running 'gh copilot', e.g.:\n"
+                f"      export {export_hint}",
+                symbol="warning",
             )
+        # Deprecation notice is informational housekeeping (not a runtime
+        # blocker), but it ships unguarded for now so legacy <VAR> usage
+        # remains visible until the v1.0 removal. If --quiet gating is
+        # added in future, the unset-env and security warnings above must
+        # remain unsuppressible because they describe action-required state.
         if cls._legacy_angle_offenders_by_server:
             servers = sorted(cls._legacy_angle_offenders_by_server.keys())
+            count = len(servers)
+            noun = "server" if count == 1 else "servers"
+            _emit_separator_once()
             _rich_warning(
-                f"Deprecated: <VAR> placeholder syntax used in {len(servers)} server(s) "
+                f"Deprecated: <VAR> placeholder syntax used in {count} {noun} "
                 f"({', '.join(servers)}). Migrate to ${{VAR}} in apm.yml. "
-                f"<VAR> support will be removed in v1.0."
+                f"<VAR> support will be removed in v1.0.",
+                symbol="warning",
             )
         cls._install_run_summary_emitted = True
 
@@ -692,6 +723,39 @@ class CopilotClientAdapter(MCPClientAdapter):
         # rather than secrets. These stay literal in translate mode so that
         # tool-selection still works without a user export step.
         default_github_env = {"GITHUB_TOOLSETS": "context", "GITHUB_DYNAMIC_TOOLSETS": "1"}
+
+        # Self-defined stdio deps pass ``env`` as a plain dict
+        # ({NAME: value-or-placeholder}); registry-sourced deps pass a list
+        # of {name, description, required} dicts. Translate-mode handling
+        # for the dict shape: each value is either already a placeholder
+        # (translate it to the canonical ${VAR} form) or a literal (record
+        # the key as a placeholder reference and emit ${NAME} so the
+        # value never lands on disk). See issue #1152.
+        if isinstance(env_vars, dict) and self._supports_runtime_env_substitution:
+            translated = {}
+            placeholder_keys = []
+            for name, raw_value in env_vars.items():
+                if not name:
+                    continue
+                if not isinstance(raw_value, str):
+                    translated[name] = raw_value
+                    continue
+                if _has_env_placeholder(raw_value):
+                    self._last_legacy_angle_vars.update(_extract_legacy_angle_vars(raw_value))
+                    translated[name] = _translate_env_placeholder(raw_value)
+                    # Record every ${VAR} in the translated value (handles
+                    # both ${env:VAR} -> ${VAR} and bare ${VAR} cases).
+                    for match in _ENV_VAR_RE.finditer(translated[name]):
+                        placeholder_keys.append(match.group(1))
+                elif name in default_github_env and raw_value == default_github_env[name]:
+                    translated[name] = raw_value
+                else:
+                    # Literal value present in apm.yml -- replace with a
+                    # runtime placeholder so the secret never touches disk.
+                    translated[name] = "${" + name + "}"
+                    placeholder_keys.append(name)
+            self._last_env_placeholder_keys = set(placeholder_keys)
+            return translated
 
         if self._supports_runtime_env_substitution:
             resolved = {}
