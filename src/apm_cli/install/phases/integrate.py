@@ -140,7 +140,7 @@ def _resolve_download_strategy(
                             lockfile_match = True
                             lockfile_match_via_content_hash_only = True
 
-    # Self-heal pipeline (PR #1158, refactor PR #XXXX).
+    # Self-heal pipeline (PR #1158).
     #
     # All install-time heals (branch-ref drift detection, v<=0.12.2
     # buggy-lockfile recovery, future heals) live in
