@@ -45,18 +45,27 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
         return  # delegate to sub-command
 
     from apm_cli.core.apm_yml import CANONICAL_TARGETS
-    from apm_cli.core.errors import NoHarnessError
-    from apm_cli.core.target_detection import resolve_targets
+    from apm_cli.core.errors import AmbiguousHarnessError, NoHarnessError
+    from apm_cli.core.target_detection import (
+        detect_signals,
+        resolve_targets,
+    )
     from apm_cli.integration.targets import KNOWN_TARGETS
 
     project_root = Path.cwd()
 
     # Try to resolve targets using the v2 algorithm.
+    # On ambiguous-harness, show all detected signals (the user ran
+    # ``apm targets`` precisely to see what's there).
     # On no-harness error, report empty active list.
     try:
         resolved = resolve_targets(project_root)
         active = resolved.targets
         source = resolved.source
+    except AmbiguousHarnessError:
+        signals = detect_signals(project_root)
+        active = sorted({s.target for s in signals})
+        source = "auto-detected (ambiguous)"
     except (NoHarnessError, click.UsageError):
         active = []
         source = "none"
@@ -88,14 +97,20 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
                 indent=2,
             )
         )
-    elif not active:
-        click.echo("No targets detected.")
-        click.echo(
-            "Hint: create a harness config (e.g. CLAUDE.md, .cursor/, .github/copilot-instructions.md)"
-        )
-        click.echo("      or set 'target:' in apm.yml.")
     else:
-        for name in active:
+        # Default: show all canonical targets with active/inactive status
+        all_targets = sorted(CANONICAL_TARGETS)
+        click.echo(f"  {'Target':<20} {'Status':<12} {'Root'}")
+        for name in all_targets:
             profile = KNOWN_TARGETS.get(name)
             root = profile.root_dir if profile else "?"
-            click.echo(f"  {name:<20} {root}/")
+            if name in active:
+                click.echo(f"  {name:<20} {'active':<12} {root}/")
+            else:
+                click.echo(f"  {name:<20} {'no signal':<12} {root}/")
+        if not active:
+            click.echo("")
+            click.echo(
+                "Hint: create a harness config (e.g. CLAUDE.md, .cursor/, .github/copilot-instructions.md)"
+            )
+            click.echo("      or set 'target:' in apm.yml.")

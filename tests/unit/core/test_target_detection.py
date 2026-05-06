@@ -656,12 +656,12 @@ class TestTargetParamType:
 
     def test_invalid_single_target(self):
         """Invalid target name produces clean error."""
-        with pytest.raises(click.exceptions.BadParameter, match="'invalid' is not a valid target"):
+        with pytest.raises(click.UsageError, match="Unknown target"):
             self.tp.convert("invalid", None, None)
 
     def test_invalid_in_multi(self):
         """Invalid target in comma list produces clean error."""
-        with pytest.raises(click.exceptions.BadParameter, match="'nope' is not a valid target"):
+        with pytest.raises(click.UsageError, match="Unknown target"):
             self.tp.convert("claude,nope", None, None)
 
     def test_all_combined_with_other_rejected(self):
@@ -927,9 +927,9 @@ class TestCoworkParserLayer:
     # -- Case 8: invalid target still rejected (sanity check) ------------
 
     def test_invalid_target_still_rejected(self):
-        """'nonsense' must still raise BadParameter after adding copilot-cowork."""
+        """'nonsense' must still raise UsageError after adding copilot-cowork."""
         with pytest.raises(
-            click.exceptions.BadParameter,
-            match="'nonsense' is not a valid target",
+            click.UsageError,
+            match="Unknown target",
         ):
             self.tp.convert("nonsense", None, None)

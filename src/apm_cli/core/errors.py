@@ -14,7 +14,6 @@ from pathlib import Path
 
 import click
 
-
 # ---------------------------------------------------------------------------
 # Error classes
 # ---------------------------------------------------------------------------
@@ -93,9 +92,7 @@ def render_no_harness_error(project_root: Path | None = None) -> str:
     )
 
 
-def render_ambiguous_error(
-    project_root: Path | None, detected: list[str]
-) -> str:
+def render_ambiguous_error(project_root: Path | None, detected: list[str]) -> str:
     """Render the 3-section error for 'multiple harnesses detected'."""
     detected_csv = ", ".join(detected)
     return (

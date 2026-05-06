@@ -3,5 +3,3 @@ version: 0.1.0
 targets:
   - claude
   - copilot
-dependencies:
-  - path: ../shared/minimal_skill

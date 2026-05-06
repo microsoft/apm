@@ -39,9 +39,7 @@ def _validate_canonical(tokens: list[str]) -> None:
     """Validate every token is in CANONICAL_TARGETS. Raises UnknownTargetError."""
     for token in tokens:
         if token not in CANONICAL_TARGETS:
-            raise UnknownTargetError(
-                render_unknown_target_error(token, sorted(CANONICAL_TARGETS))
-            )
+            raise UnknownTargetError(render_unknown_target_error(token, sorted(CANONICAL_TARGETS)))
 
 
 def parse_targets_field(yaml_data: dict) -> list[str]:

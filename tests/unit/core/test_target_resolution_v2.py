@@ -67,7 +67,6 @@ from apm_cli.core.errors import (
     NoHarnessError,
     UnknownTargetError,
 )
-
 from apm_cli.core.target_detection import (
     detect_signals,
     expand_all_targets,

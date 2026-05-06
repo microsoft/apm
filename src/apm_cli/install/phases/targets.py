@@ -71,7 +71,6 @@ def run(ctx: InstallContext) -> None:
     from apm_cli.integration.targets import (
         resolve_targets as _resolve_targets_legacy,
     )
-    from apm_cli.utils.console import _rich_info
 
     # Get config target from apm.yml if available
     config_target = ctx.apm_package.target
@@ -203,7 +202,16 @@ def run(ctx: InstallContext) -> None:
         # Read targets from apm.yml (supports both target: and targets:)
         _v2_yaml: list[str] | None = None
         if _v2_flag is None and not ctx.target_override:
-            _v2_yaml = _read_yaml_targets(ctx)
+            import click as _click
+
+            try:
+                _v2_yaml = _read_yaml_targets(ctx)
+            except _click.UsageError as exc:
+                # ConflictingTargetsError (both target: and targets: in
+                # apm.yml) is a user error -- surface with exit code 2.
+                if ctx.logger:
+                    ctx.logger.error(str(exc))
+                raise SystemExit(2) from exc
 
         # Skip v2 entirely when all override targets were non-canonical
         # (e.g. copilot-cowork only).  Those are fully handled by the
@@ -220,7 +228,6 @@ def run(ctx: InstallContext) -> None:
             # that v2 does not handle.
             import click as _click
 
-            _v2_ok = True
             try:
                 _resolved = _resolve_targets_v2(
                     ctx.project_root,
@@ -228,55 +235,57 @@ def run(ctx: InstallContext) -> None:
                     yaml_targets=_v2_yaml,
                 )
             except _click.UsageError as exc:
-                # If legacy already resolved targets (e.g. via explicit
-                # flag or yaml), fall through and use legacy targets.
-                # This preserves backward compat for edge cases where v2
-                # is stricter than legacy (empty project with legacy
-                # fallback-to-copilot).
-                if _targets:
-                    _v2_ok = False
-                else:
-                    if ctx.logger:
-                        ctx.logger.error(str(exc))
-                    raise SystemExit(2) from exc
+                # v2 target-resolution errors (NoHarnessError,
+                # AmbiguousHarnessError, etc.) are intentionally
+                # STRICTER than the legacy resolver.  They always
+                # take precedence -- the whole point of the overhaul
+                # is to stop silently falling back to copilot.
+                #
+                # The ONLY exception: if ALL legacy targets are
+                # non-canonical (e.g. copilot-cowork) and v2 was
+                # invoked without any canonical flag/yaml, the error
+                # is a false positive because v2 does not handle
+                # non-canonical targets.  That case is already
+                # guarded by ``_skip_v2`` above, so it never reaches
+                # this except block.
+                if ctx.logger:
+                    ctx.logger.error(str(exc))
+                raise SystemExit(2) from exc
 
-            if _v2_ok:
-                # Emit provenance BEFORE any mutation
-                _provenance_msg = format_provenance(_resolved)
-                _rich_info(_provenance_msg, symbol="info")
+            # Emit provenance BEFORE any mutation
+            _provenance_msg = format_provenance(_resolved)
+            _click.echo(f"[i] {_provenance_msg}")
 
-                # Map resolved v2 target names to TargetProfile objects,
-                # materializing deploy directories (three-guard collapse:
-                # auto_create unconditionally post-resolution).
-                _v2_targets = []
-                for _tname in _resolved.targets:
-                    _profile = KNOWN_TARGETS.get(_tname)
-                    if _profile is None:
-                        continue
-                    _target_dir = ctx.project_root / _profile.root_dir
-                    if not _target_dir.exists():
-                        try:
-                            _target_dir.mkdir(parents=True, exist_ok=True)
-                        except PermissionError:
-                            if ctx.logger:
-                                ctx.logger.error(
-                                    f"Cannot create {_profile.root_dir}/ -- permission denied. "
-                                    f"Check directory permissions or use a different --target."
-                                )
-                            raise SystemExit(1) from None
+            # Map resolved v2 target names to TargetProfile objects,
+            # materializing deploy directories (three-guard collapse:
+            # auto_create unconditionally post-resolution).
+            _v2_targets = []
+            for _tname in _resolved.targets:
+                _profile = KNOWN_TARGETS.get(_tname)
+                if _profile is None:
+                    continue
+                _target_dir = ctx.project_root / _profile.root_dir
+                if not _target_dir.exists():
+                    try:
+                        _target_dir.mkdir(parents=True, exist_ok=True)
+                    except PermissionError:
                         if ctx.logger:
-                            ctx.logger.verbose_detail(
-                                f"Created {_profile.root_dir}/ ({_tname} target)"
+                            ctx.logger.error(
+                                f"Cannot create {_profile.root_dir}/ -- permission denied. "
+                                f"Check directory permissions or use a different --target."
                             )
-                    _profile = _replace(_profile, resolved_deploy_root=_target_dir)
-                    _v2_targets.append(_profile)
+                        raise SystemExit(1) from None
+                    if ctx.logger:
+                        ctx.logger.verbose_detail(f"Created {_profile.root_dir}/ ({_tname} target)")
+                _profile = _replace(_profile, resolved_deploy_root=_target_dir)
+                _v2_targets.append(_profile)
 
-                # Replace legacy targets with v2 targets for project-scope.
-                # Keep any legacy-only targets (e.g. copilot-cowork) that v2
-                # doesn't handle.
-                _v2_names = {t.name for t in _v2_targets}
-                _legacy_only = [t for t in _targets if t.name not in _v2_names]
-                _targets = _v2_targets + _legacy_only
+            # Replace legacy targets with v2 targets for project-scope.
+            # Keep any legacy-only targets (e.g. copilot-cowork) that v2
+            # doesn't handle.
+            _v2_names = {t.name for t in _v2_targets}
+            _legacy_only = [t for t in _targets if t.name not in _v2_names]
+            _targets = _v2_targets + _legacy_only
 
     else:
         # User-scope: legacy target directory creation and logging.

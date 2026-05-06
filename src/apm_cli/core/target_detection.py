@@ -573,17 +573,28 @@ class TargetParamType(click.ParamType):
         try:
             return parse_target_field(value)
         except ValueError as e:
+            # Use the v2 three-section error renderer for unknown targets
+            # so that CLI, apm.yml, and auto-detect all share the same
+            # error format (#1154).
+            from apm_cli.core.apm_yml import CANONICAL_TARGETS
+            from apm_cli.core.errors import UnknownTargetError, render_unknown_target_error
+
+            err_msg = str(e)
+            if "is not a valid target" in err_msg:
+                target_name = value if isinstance(value, str) else ",".join(value or [])
+                rendered = render_unknown_target_error(target_name, sorted(CANONICAL_TARGETS))
+                raise UnknownTargetError(rendered) from None
             # Click idiom: route validation errors through self.fail so the
             # user sees a clean "Invalid value for '--target': ..." message
             # rather than a Python traceback.
-            self.fail(str(e), param, ctx)
+            self.fail(err_msg, param, ctx)
 
 
 # ---------------------------------------------------------------------------
 # v2 Resolution algorithm (#1154)
 # ---------------------------------------------------------------------------
 
-from dataclasses import dataclass
+from dataclasses import dataclass  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -673,9 +684,7 @@ def _validate_canonical_v2(tokens: list[str]) -> None:
 
     for token in tokens:
         if token not in CANONICAL_TARGETS:
-            raise UnknownTargetError(
-                render_unknown_target_error(token, sorted(CANONICAL_TARGETS))
-            )
+            raise UnknownTargetError(render_unknown_target_error(token, sorted(CANONICAL_TARGETS)))
 
 
 def resolve_targets(
@@ -724,9 +733,7 @@ def resolve_targets(
         raise NoHarnessError(render_no_harness_error(project_root))
 
     if len(target_set) >= 2:
-        raise AmbiguousHarnessError(
-            render_ambiguous_error(project_root, target_set)
-        )
+        raise AmbiguousHarnessError(render_ambiguous_error(project_root, target_set))
 
     # Exactly 1 target detected
     return ResolvedTargets(
