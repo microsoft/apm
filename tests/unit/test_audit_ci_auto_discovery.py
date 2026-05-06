@@ -186,3 +186,85 @@ class TestAutoDiscoveryFetchFailure:
             result = runner.invoke(audit, ["--ci", "--no-drift"])
 
         assert result.exit_code == 1, result.output
+
+
+# -- #1159: silent-skip fix for no-policy outcomes -------------------
+#
+# Pre-#1159, ``--ci`` auto-discovery silently swallowed
+# ``no_git_remote`` / ``absent`` / ``empty`` / ``disabled`` (set
+# ``fetch_result = None`` with no log line). The fix surfaces those
+# outcomes via stderr warnings and honors ``policy.fetch_failure_default``
+# for parity with the install path.
+
+
+def _make_no_policy_outcome(outcome: str) -> PolicyFetchResult:
+    return PolicyFetchResult(
+        policy=None,
+        source="https://example.invalid",
+        outcome=outcome,
+    )
+
+
+class TestNoPolicyOutcomesWarn:
+    """Auto-discovery returns no-policy outcome; default warn -> stderr line, exit 0."""
+
+    @pytest.mark.parametrize(
+        ("outcome", "needle"),
+        [
+            ("no_git_remote", "Could not determine org from git remote"),
+            ("absent", "No org policy found at"),
+            ("empty", "is present but empty"),
+        ],
+    )
+    @patch("apm_cli.policy.discovery.discover_policy_with_chain")
+    def test_warn_to_stderr_and_proceeds(self, mock_discover, runner, tmp_path, outcome, needle):
+        _setup_project_with_unmanaged_file(tmp_path)
+        mock_discover.return_value = _make_no_policy_outcome(outcome)
+
+        with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
+            result = runner.invoke(audit, ["--ci", "--no-drift", "-f", "json"])
+
+        assert result.exit_code == 0, result.output
+        assert needle in result.stderr
+        assert "[!]" in result.stderr
+        assert "fetch_failure_default=block" in result.stderr
+        # JSON on stdout must remain parseable.
+        import json as _json
+
+        _json.loads(result.stdout)
+
+
+class TestNoPolicyOutcomesBlock:
+    """policy.fetch_failure_default=block -> [x] + exit 1 for no-policy outcomes."""
+
+    @pytest.mark.parametrize("outcome", ["no_git_remote", "absent", "empty"])
+    @patch("apm_cli.policy.discovery.discover_policy_with_chain")
+    def test_block_exits_one(self, mock_discover, runner, tmp_path, outcome):
+        _setup_project_with_unmanaged_file(tmp_path)
+        # Opt-in to fail closed.
+        apm_yml = (tmp_path / "apm.yml").read_text() + ("policy:\n  fetch_failure_default: block\n")
+        (tmp_path / "apm.yml").write_text(apm_yml, encoding="utf-8")
+        mock_discover.return_value = _make_no_policy_outcome(outcome)
+
+        with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
+            result = runner.invoke(audit, ["--ci", "--no-drift"])
+
+        assert result.exit_code == 1, result.output
+        assert "[x]" in result.stderr
+        assert "policy.fetch_failure_default=block" in result.stderr
+
+
+class TestDisabledOutcome:
+    """outcome=disabled emits forensic [i] breadcrumb on stderr; exit 0."""
+
+    @patch("apm_cli.policy.discovery.discover_policy_with_chain")
+    def test_disabled_emits_info(self, mock_discover, runner, tmp_path):
+        _setup_project_with_unmanaged_file(tmp_path)
+        mock_discover.return_value = _make_no_policy_outcome("disabled")
+
+        with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
+            result = runner.invoke(audit, ["--ci", "--no-drift"])
+
+        assert result.exit_code == 0, result.output
+        assert "[i]" in result.stderr
+        assert "auto-discovery disabled" in result.stderr

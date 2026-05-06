@@ -334,7 +334,7 @@ This section covers offline **policy** enforcement (the `apm-policy.yml` cache).
 | Online | Discovers + enforces | Discovers + enforces | Loads from path, enforces | Discovers + enforces |
 | Cache fresh (< 1h) | Cache hit, enforces | Cache hit, enforces | n/a (file path skips cache) | Cache hit, enforces |
 | Cache stale (1h - 7d) | Refresh attempted; on fail, `cached_stale` outcome -- proceed with cached unless `policy.fetch_failure: block` | Same | n/a | Same |
-| Offline, cache > 7d | `cache_miss_fetch_fail` -- fail-OPEN by default; fail-closed only if `policy.fetch_failure_default: block` in `apm.yml` | Same | Loads from path, full enforce | Same as install |
+| Offline, cache > 7d | `cache_miss_fetch_fail` -- fail-OPEN by default; fail-closed only if `policy.fetch_failure_default: block` in `apm.yml` | Same | Loads from path, full enforce | Same as install -- also covers `no_git_remote` / `absent` / `empty` outcomes when `policy.fetch_failure_default: block` |
 
 Workarounds when the network is unreliable:
 
@@ -352,6 +352,7 @@ Workarounds when the network is unreliable:
 | Network failure (`cache_miss_fetch_fail`) | Fail-OPEN, log warning, install proceeds with no policy | `policy.fetch_failure_default: block` in `apm.yml` | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
 | Cached stale (1h - 7d, refresh failed) | Warn and proceed with cached policy | `policy.fetch_failure: block` set in the cached policy itself | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
 | Malformed YAML (`malformed`) (org policy file) | Fail-OPEN by default | `policy.fetch_failure_default: block` | `policy/parser.py` |
+| **No policy resolved (`no_git_remote` / `absent` / `empty`)** | **Fail-OPEN, log warning** | `policy.fetch_failure_default: block` in `apm.yml` -- applies to BOTH `apm install` and `apm audit --ci` | [policy-reference#951-no-policy-outcomes](../policy-reference/#951-no-policy-outcomes-no_git_remote--absent--empty) |
 | Hash-mismatch (project pin vs fetched) | **Always fail-CLOSED** | n/a (cannot be relaxed) | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
 | Garbage response | Fail-OPEN by default | `policy.fetch_failure_default: block` | [policy-reference#95-network-failure-semantics](../policy-reference/#95-network-failure-semantics) |
 | Malformed project manifest (`manifest_parse`) | **Always fail-CLOSED** | n/a (cannot be relaxed) | `policy/policy_checks.py`, `policy/ci_checks.py` |
