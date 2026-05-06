@@ -530,9 +530,12 @@ def _prompt_target_selection(
         click.echo("  (no signals detected)")
 
     click.echo(
-        f"\n{INFO}[i] Type a number to toggle, ranges like '1-3' or '1,3,5' for multiple,"
-        f"\n    'all' / 'none' to flip every entry, or press Enter to confirm."
-        f"\n    You can change this later with 'apm targets set <target,...>'.{RESET}"
+        f"\n{INFO}[i] Tip: select the tools your team uses. You can change this later"
+        f"\n    with 'apm targets set <target,...>' or edit apm.yml directly.{RESET}"
+    )
+    click.echo(
+        f"{INFO}[i] Type a number to toggle, ranges like '1-3' or '1,3,5' for multiple,"
+        f"\n    'all' / 'none' to flip every entry, or press Enter to confirm.{RESET}"
     )
 
     while True:
