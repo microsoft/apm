@@ -723,7 +723,7 @@ Three additional outcomes describe "discovery succeeded but produced no enforcea
 - `absent` -- the resolved org has no `apm-policy.yml` at the discovered source.
 - `empty` -- the file exists but parses to an empty policy (no rules).
 
-Pre-#1159, these outcomes were silently fail-open on BOTH `apm install` and `apm audit --ci` even when the project pinned `policy.fetch_failure_default: block`. As of v0.12.3 they honour the same knob as fetch failures:
+Pre-#1159, these outcomes were silently fail-open on BOTH `apm install` and `apm audit --ci` even when the project pinned `policy.fetch_failure_default: block`. Since [#1159](https://github.com/microsoft/apm/issues/1159) they honour the same knob as fetch failures:
 
 - **`warn` (default):** `[!]` warning on stderr explaining the cause; install / audit proceeds.
 - **`block`:** `[x]` error on stderr; install raises `PolicyViolationError`, `apm audit --ci` exits 1.

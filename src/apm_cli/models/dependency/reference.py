@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional  # noqa: F401, UP035
 
+from ...cache.url_normalize import SCP_LIKE_RE
 from ...utils.github_host import (
     default_host,
     is_artifactory_path,
@@ -675,10 +676,7 @@ class DependencyReference:
         Returns:
             ``(host, port, repo_url, reference, alias)`` or *None* if not an SCP URL.
         """
-        ssh_match = re.match(
-            r"^(?P<user>[a-zA-Z0-9_][a-zA-Z0-9_.+-]*)@(?P<host>[^:/]+):(?P<path>.+)$",
-            dependency_str,
-        )
+        ssh_match = SCP_LIKE_RE.match(dependency_str)
         if not ssh_match:
             return None
 

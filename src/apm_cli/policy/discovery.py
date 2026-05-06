@@ -33,7 +33,7 @@ from urllib.parse import urlparse
 import requests
 import yaml
 
-from ..cache.url_normalize import _SCP_LIKE_RE
+from ..cache.url_normalize import SCP_LIKE_RE
 from ..utils.path_security import PathTraversalError, ensure_path_within
 from .parser import PolicyValidationError, load_policy
 from .project_config import (
@@ -677,7 +677,7 @@ def _parse_remote_url(url: str) -> tuple[str, str] | None:
 
     # SCP-like SSH: <user>@<host>:<path> -- any user, not just `git`.
     # Closes #1159 for non-`git` SSH users (EMU, custom GHE accounts).
-    scp_match = _SCP_LIKE_RE.match(url)
+    scp_match = SCP_LIKE_RE.match(url)
     if scp_match:
         host = scp_match.group("host")
         path_part = scp_match.group("path")

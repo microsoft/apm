@@ -64,7 +64,7 @@ def _audit_outcome_cause(outcome: str, source: str | None, err_text: str | None)
     """
     src = source or "unknown"
     if outcome == "no_git_remote":
-        return "Could not determine org from git remote; org-policy enforcement skipped"
+        return "Could not determine org from git remote"
     if outcome == "absent":
         return f"No org policy found at {src}"
     if outcome == "empty":
