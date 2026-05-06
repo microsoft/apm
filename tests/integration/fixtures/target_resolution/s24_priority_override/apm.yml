@@ -1,0 +1,6 @@
+name: target-resolution-test
+version: 0.1.0
+targets:
+  - claude
+dependencies:
+  - path: ../shared/minimal_skill

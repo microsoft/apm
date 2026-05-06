@@ -1,0 +1,7 @@
+name: target-resolution-test
+version: 0.1.0
+target: claude
+targets:
+  - copilot
+dependencies:
+  - path: ../shared/minimal_skill
