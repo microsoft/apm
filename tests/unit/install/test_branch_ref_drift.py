@@ -24,11 +24,11 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from apm_cli.install.phases.integrate import (
+from apm_cli.install.heals.buggy_lockfile_recovery import (
     _BUGGY_BRANCH_REF_DRIFT_VERSIONS,
     _is_buggy_lockfile_apm_version,
-    _resolve_download_strategy,
 )
+from apm_cli.install.phases.integrate import _resolve_download_strategy
 from apm_cli.install.sources import CachedDependencySource
 from apm_cli.models.apm_package import GitReferenceType
 
