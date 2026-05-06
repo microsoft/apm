@@ -29,17 +29,6 @@ from ._helpers import (
     _validate_project_name,
 )
 
-# Short descriptions for target selection prompt (scope S3)
-_TARGET_DESCRIPTIONS: dict[str, str] = {
-    "copilot": ".github/copilot-instructions.md + prompts + agents",
-    "claude": "CLAUDE.md + .claude/ commands, agents, skills",
-    "cursor": ".cursor/ agents, skills, rules",
-    "opencode": "AGENTS.md + .opencode/ agents, commands, skills",
-    "codex": "AGENTS.md + .codex/ agents, hooks",
-    "gemini": "GEMINI.md + .gemini/ commands, skills, settings",
-    "windsurf": "AGENTS.md + .windsurf/ rules, skills, workflows",
-}
-
 # Display order for the prompt (matches scope S1 UX spec)
 _PROMPT_TARGETS_ORDERED: list[str] = [
     "copilot",
@@ -465,9 +454,8 @@ def _prompt_target_selection(
         lines = []
         for i, target in enumerate(targets):
             mark = "[x]" if selected[i] else "[ ]"
-            desc = _TARGET_DESCRIPTIONS.get(target, "")
             hint = signal_hints.get(target, "")
-            line = f"  {i + 1}. {mark} {target:10s} -- {desc}"
+            line = f"  {i + 1}. {mark} {target}"
             if hint:
                 line += f"  {hint}"
             lines.append(line)
