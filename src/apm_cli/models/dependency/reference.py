@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional  # noqa: F401, UP035
 
+from ...cache.url_normalize import SCP_LIKE_RE
 from ...utils.github_host import (
     default_host,
     is_artifactory_path,
@@ -663,21 +664,25 @@ class DependencyReference:
 
     @staticmethod
     def _parse_ssh_url(dependency_str: str):
-        """Parse an SCP-shorthand SSH URL (``git@host:owner/repo``).
+        """Parse an SCP-shorthand SSH URL (``<user>@host:owner/repo``).
 
-        SCP shorthand cannot carry a port (``:`` is the path separator), so the
-        returned port is always ``None``. For custom SSH ports, use the
-        ``ssh://`` URL form which is handled by ``_parse_ssh_protocol_url``.
+        Accepts any SSH username (not just ``git``), so EMU and custom GHE
+        SSH accounts (e.g. ``enterprise-user@ghe.corp.com:org/repo``) parse
+        correctly. SCP shorthand cannot carry a port (``:`` is the path
+        separator), so the returned port is always ``None``. For custom SSH
+        ports, use the ``ssh://`` URL form which is handled by
+        ``_parse_ssh_protocol_url``.
 
         Returns:
             ``(host, port, repo_url, reference, alias)`` or *None* if not an SCP URL.
         """
-        ssh_match = re.match(r"^git@([^:]+):(.+)$", dependency_str)
+        ssh_match = SCP_LIKE_RE.match(dependency_str)
         if not ssh_match:
             return None
 
-        host = ssh_match.group(1)
-        ssh_repo_part = ssh_match.group(2)
+        user = ssh_match.group("user")
+        host = ssh_match.group("host")
+        ssh_repo_part = ssh_match.group("path")
 
         reference = None
         alias = None
@@ -712,19 +717,19 @@ class DependencyReference:
                     git_suffix = ".git" if had_git_suffix else ""
                     ref_suffix = f"#{reference}" if reference else ""
                     alias_suffix = f"@{alias}" if alias else ""
-                    suggested = f"ssh://git@{host}:{port_candidate}/{remaining_path}{git_suffix}{ref_suffix}{alias_suffix}"
+                    suggested = f"ssh://{user}@{host}:{port_candidate}/{remaining_path}{git_suffix}{ref_suffix}{alias_suffix}"
                     raise ValueError(
-                        f"It looks like '{first_segment}' in 'git@{host}:{repo_url}' "
-                        f"is a port number, but SCP-style URLs (git@host:path) cannot "
+                        f"It looks like '{first_segment}' in '{user}@{host}:{repo_url}' "
+                        f"is a port number, but SCP-style URLs (<user>@host:path) cannot "
                         f"carry a port. Use the ssh:// URL form instead:\n"
                         f"  {suggested}"
                     )
                 else:
                     raise ValueError(
-                        f"It looks like '{first_segment}' in 'git@{host}:{first_segment}' "
+                        f"It looks like '{first_segment}' in '{user}@{host}:{first_segment}' "
                         f"is a port number, but no repository path follows it. "
-                        f"SCP-style URLs (git@host:path) cannot carry a port. "
-                        f"Use the ssh:// URL form: ssh://git@{host}:{port_candidate}/<owner>/<repo>.git"
+                        f"SCP-style URLs (<user>@host:path) cannot carry a port. "
+                        f"Use the ssh:// URL form: ssh://{user}@{host}:{port_candidate}/<owner>/<repo>.git"
                     )
 
         # Security: reject traversal sequences in SSH repo paths

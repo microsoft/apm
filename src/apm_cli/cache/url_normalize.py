@@ -23,8 +23,11 @@ import hashlib
 import re
 import urllib.parse
 
-# SCP-like pattern: git@host:path (no scheme, colon separates host:path)
-_SCP_LIKE_RE = re.compile(
+# SCP-like pattern: <user>@host:path (no scheme, colon separates host:path).
+# Public symbol -- shared by `policy.discovery` and `models.dependency.reference`
+# so dependency parsing and remote-URL introspection can never drift on what
+# counts as an SCP-shorthand SSH URL (e.g. EMU users, Azure DevOps users).
+SCP_LIKE_RE = re.compile(
     r"^(?P<user>[a-zA-Z0-9_][a-zA-Z0-9_.+-]*)@"
     r"(?P<host>[^:/]+)"
     r":(?P<path>.+)$"
@@ -60,7 +63,7 @@ def normalize_repo_url(url: str) -> str:
     url = url.strip()
 
     # Step 2: Convert SCP-like to ssh:// form
-    scp_match = _SCP_LIKE_RE.match(url)
+    scp_match = SCP_LIKE_RE.match(url)
     if scp_match:
         user = scp_match.group("user")
         host = scp_match.group("host")
