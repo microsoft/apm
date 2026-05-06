@@ -301,13 +301,18 @@ class CachedDependencySource(DependencySource):
         * ``fetched_this_run``: bytes were just downloaded by the
           resolver callback. Use the SHA captured at fetch time
           (callback) or the resolver's own SHA. Both reflect what
-          landed on disk in this run.
+          landed on disk in this run. By construction the upstream
+          download path always populates one of those two for a
+          freshly-fetched dep, so we never fall back to the lockfile
+          here -- doing so would risk overwriting on-disk bytes with a
+          stale lockfile SHA.
         * true cached path: trust the existing lockfile SHA. It was
           written by a previous successful install and matches what is
           on disk (verified upstream by the lockfile_match check).
           NEVER use ``resolved_ref`` here.
         * fallback to ``dep_ref.reference`` only when no lockfile SHA
-          is available (cold-path with no prior install).
+          is available (cold-path with no prior install) or when the
+          fetched-this-run path failed to capture a SHA at all.
         """
         ctx = self.ctx
         dep_key = self.dep_key

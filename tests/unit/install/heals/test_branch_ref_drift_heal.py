@@ -108,6 +108,29 @@ class TestBranchRefDriftHealExecute:
         assert "abcdef12" in msg.text
         assert "98765432" in msg.text
 
+    def test_does_not_apply_when_resolved_commit_is_none(self):
+        """Artifactory proxy / non-git source path: resolved_ref exists
+        but resolved_commit is None. Without the guard, applies() would
+        return True (None != "oldsha") and execute() would crash on
+        slicing None[:8]. Regression test for Copilot review #3194552126.
+        """
+        h = BranchRefDriftHeal()
+        ctx = _hctx(resolved_sha="oldsha")
+        ctx.resolved_ref.resolved_commit = None
+        assert h.applies(ctx) is False
+
+    def test_does_not_apply_when_resolved_commit_is_cached_sentinel(self):
+        h = BranchRefDriftHeal()
+        ctx = _hctx()
+        ctx.resolved_ref.resolved_commit = "cached"
+        assert h.applies(ctx) is False
+
+    def test_does_not_apply_when_resolved_commit_is_empty(self):
+        h = BranchRefDriftHeal()
+        ctx = _hctx()
+        ctx.resolved_ref.resolved_commit = ""
+        assert h.applies(ctx) is False
+
 
 class TestBranchRefDriftHealMetadata:
     def test_chain_metadata(self):

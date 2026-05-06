@@ -30,6 +30,14 @@ class BranchRefDriftHeal:
             return False
         if hctx.resolved_ref.ref_type != GitReferenceType.BRANCH:
             return False
+        # Guard against non-git resolution paths (e.g. Artifactory proxy
+        # may return a ResolvedReference whose resolved_commit is None or
+        # the "cached" sentinel). Without this guard a None comparison
+        # below would mis-classify drift, and execute() would crash on
+        # `resolved_commit[:8]`.
+        remote_sha = hctx.resolved_ref.resolved_commit
+        if remote_sha in (None, "", "cached"):
+            return False
         if hctx.existing_lockfile is None:
             return False
         locked = hctx.existing_lockfile.get_dependency(hctx.package_key)
@@ -37,7 +45,7 @@ class BranchRefDriftHeal:
             return False
         if locked.resolved_commit in (None, "", "cached"):
             return False
-        return hctx.resolved_ref.resolved_commit != locked.resolved_commit
+        return remote_sha != locked.resolved_commit
 
     def execute(self, hctx: HealContext) -> None:
         locked = hctx.existing_lockfile.get_dependency(hctx.package_key)
