@@ -580,6 +580,22 @@ run_e2e_tests() {
         exit 1
     fi
 
+    # Run #1147 in-package link rewrite E2E -- offline, no tokens needed
+    # Defends the install-time link rewriter against the .agents/.github
+    # split regression: instructions/prompts/skills with relative links
+    # to in-package siblings must resolve on disk after `apm install`.
+    # Covers happy path, mixed link types, path-traversal escape
+    # (security), in-bundle skill links, and multi-target installs.
+    log_info "Running #1147 in-package link rewrite E2E..."
+    echo "Command: pytest tests/integration/test_link_rewrite_e2e.py -v -s --tb=short"
+
+    if pytest tests/integration/test_link_rewrite_e2e.py -v -s --tb=short; then
+        log_success "#1147 in-package link rewrite E2E passed!"
+    else
+        log_error "#1147 in-package link rewrite E2E failed!"
+        exit 1
+    fi
+
     log_success "All integration test suites completed successfully!"
     
 
