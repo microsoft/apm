@@ -91,7 +91,7 @@ apm install [PACKAGES...] [OPTIONS]
 - `--runtime TEXT` - Target specific runtime only (copilot, codex, vscode, cursor, opencode, gemini, claude,windsurf)
 - `--exclude TEXT` - Exclude specific runtime from installation
 - `--only [apm|mcp]` - Install only specific dependency type
-- `--target [copilot|claude|cursor|codex|opencode|gemini|windsurf|agent-skills|copilot-cowork|all]` - Force deployment to specific target(s). Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). Overrides auto-detection. `agent-skills` deploys to `.agents/skills/` (cross-client). `all` = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with `agent-skills` for both.
+- `--target, -t [copilot|claude|cursor|codex|opencode|gemini|windsurf|agent-skills|copilot-cowork|all]` - Force deployment to specific target(s). Highest-priority entry in the resolution chain (`--target` > `apm.yml` `targets:` > auto-detect). Accepts comma-separated values for multiple targets (e.g., `--target claude,cursor`). `agent-skills` deploys to `.agents/skills/` (cross-client). `all` = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with `agent-skills` for both. With no flag, no `targets:` in `apm.yml`, and no harness signal in the project (e.g. `.claude/`, `.cursor/`, `.github/copilot-instructions.md`), `apm install` exits 2 with a teaching message instead of silently defaulting to `copilot`. Run `apm targets` to see what APM detects in the current directory.
   - `windsurf` - Windsurf/Cascade (`.windsurf/rules/`, `.windsurf/skills/`, `.windsurf/workflows/`, `.windsurf/hooks.json`)
   - `copilot-cowork` - Microsoft 365 Copilot Cowork skills (user scope only, requires `copilot-cowork` experimental flag)
   - `vscode`, `agents` - Deprecated aliases for `copilot` (`.github/`). Still accepted by the parser; prefer `copilot` for GitHub Copilot deployment, or `agent-skills` for cross-client `.agents/skills/` deployment. Removal in v1.0.
@@ -348,6 +348,55 @@ Skills are copied directly to target directories:
 ```
 
 This makes all package primitives available in VSCode, Cursor, OpenCode, Claude Code, and compatible editors for immediate use with your coding agents.
+
+### `apm targets` - Show resolved deployment targets
+
+Inspect which harness targets `apm install` and `apm compile` will deploy to from the current directory, and why. This is the discovery surface for the resolution chain (`--target` flag > `apm.yml` `targets:` > auto-detect from filesystem signals).
+
+`apm targets` works with or without `apm.yml`: it reads filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.cursorrules`, `.github/copilot-instructions.md`, `.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`) and reports each canonical target as `active` or inactive. Implemented as a Click *group* so future sub-commands can attach without breaking the bare `apm targets` invocation.
+
+```bash
+apm targets [OPTIONS]
+```
+
+**Options:**
+- `--all` - Include every canonical target, marking inactive ones (default already lists all canonical targets with status; `--all` reserves space for future filtering).
+- `--json` - Emit machine-readable JSON instead of the table.
+
+**Sample table output:**
+```
+  Target               Status       Root
+  agent-skills         no signal    .agents/skills/
+  claude               active       .claude/
+  codex                no signal    .codex/
+  copilot              no signal    .github/
+  cursor               active       .cursor/
+  gemini               no signal    .gemini/
+  opencode             no signal    .opencode/
+  windsurf             no signal    .windsurf/
+```
+
+**Sample `--json` output:**
+```json
+{
+  "targets": ["claude", "cursor"],
+  "source": "auto-detect from .claude/, .cursor/"
+}
+```
+
+**Use cases:**
+- **Discovery** - "What will `apm install` deploy to in this directory?" before running it.
+- **Scripting** - parse `--json` in CI to assert the expected target set or detect unexpected drift.
+- **Debugging** - diagnose why `apm install` chose a specific target (e.g. an upstream package shipped a stray `CLAUDE.md` that APM picked up as a Claude Code signal).
+
+If APM detects a target you don't intend (a documentation `CLAUDE.md` or `GEMINI.md` is the most common false positive), pin your targets explicitly in `apm.yml`:
+
+```yaml
+targets:
+  - copilot
+```
+
+See [`apm install`](#apm-install---install-dependencies-and-deploy-local-content) and [`apm compile`](#apm-compile---compile-apm-context-into-distributed-agentsmd-files) for how the resolved targets feed into deployment.
 
 ### `apm uninstall` - Remove APM packages
 
@@ -1694,7 +1743,8 @@ apm compile [OPTIONS]
 
 **Options:**
 - `-o, --output TEXT` - Output file path (for single-file mode)
-- `-t, --target [copilot|claude|cursor|codex|opencode|gemini|windsurf|agent-skills|all]` - Target agent format. Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). `vscode` and `agents` are accepted as deprecated aliases for `copilot` (removal in v1.0). `agent-skills` is a no-op for compile (skills-only target). Auto-detects if not specified.
+- `-t, --target [copilot|claude|cursor|codex|opencode|gemini|windsurf|agent-skills|all]` - Target agent format. Highest-priority entry in the resolution chain (`--target` > `apm.yml` `targets:` > auto-detect). Accepts comma-separated values for multiple targets (e.g., `-t claude,copilot`). `vscode` and `agents` are accepted as deprecated aliases for `copilot` (removal in v1.0). `agent-skills` is a no-op for compile (skills-only target). Auto-detects if not specified. Run [`apm targets`](#apm-targets---show-resolved-deployment-targets) to preview what auto-detect resolves to.
+- `--all` - Compile for all canonical targets. Equivalent to `--target all` but does not need to be combined with target-name parsing. Mutually exclusive with `--target`. Prefer `--all` over `--target all`; `--target all` is deprecated and emits a one-line warning.
 - `--chatmode TEXT` - Chatmode to prepend to the AGENTS.md file
 - `--dry-run` - Preview compilation without writing files (shows placement decisions)
 - `--no-links` - Skip markdown link resolution
@@ -1774,7 +1824,7 @@ apm compile --watch --dry-run
 apm compile --target vscode    # AGENTS.md + .github/ (incl. copilot-instructions.md)
 apm compile --target claude    # CLAUDE.md + .claude/ only
 apm compile --target opencode  # AGENTS.md + .opencode/ only
-apm compile --target all       # All formats (default)
+apm compile --all              # All canonical targets (preferred over --target all)
 
 # Multiple targets (comma-separated)
 apm compile -t claude,copilot  # CLAUDE.md + AGENTS.md + .github/copilot-instructions.md

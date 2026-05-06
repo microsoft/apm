@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Explicit, auditable target resolution.** `apm install` and `apm compile` now resolve harness targets in a strict priority chain (`--target` flag > `apm.yml` `targets:` > auto-detect from filesystem signals) and print a one-line `[i] Targets: ...  (source: ...)` provenance summary so the chosen path is never silently inferred. Empty repositories with no signal now exit 2 with a teaching message instead of silently defaulting to `copilot`. Adds `apm targets` discovery command and `apm compile --all` flag (deprecates `--target all`). (#PR_NUMBER, closes #1154, closes #1122, closes #1130, closes #518, closes #888, closes #891, closes #650, closes #1056)
+
 ### Fixed
 
 - Fix `apm install` against a branch ref so it re-downloads when upstream has advanced past the lockfile-recorded SHA, and self-heal lockfiles produced by APM <= 0.12.2 on next install. (#1158)
