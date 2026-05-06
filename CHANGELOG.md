@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Branch-ref drift no longer ships a 3-way-inconsistent lockfile.** `apm install` against a dep with a branch ref (e.g. `ref: main`) now re-downloads when the upstream branch has advanced past the lockfile-recorded SHA, instead of advancing `resolved_commit` while leaving `content_hash` and on-disk content stale. Lockfiles produced by APM <= 0.12.2 self-heal on the next `apm install` with a visible recovery warning, and the supply-chain hard-block correctly skips deps whose hash change is the legitimate result of recovering from this bug. (#1158)
+
 ## [0.12.2] - 2026-05-05
 
 ### Added
