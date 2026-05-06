@@ -304,11 +304,16 @@ atomic (temp file + rename).
   invocation; **do NOT block the install** by default (closes #829).
 - **Garbage response** (HTTP 200 with non-YAML body, e.g. captive portal):
   same posture as fetch failure -- warn loudly, cache fallback if present.
+- **No policy resolved (`no_git_remote` / `absent` / `empty`):** since
+  #1159, these emit a `[!]` warning to stderr and honour
+  `policy.fetch_failure_default: block` for parity with fetch failures.
+  Pre-fix they were silently fail-open even with `block` set.
 
 Opt in to fail-closed semantics with the `policy.fetch_failure: warn|block`
 knob on `apm-policy.yml` (applies when a cached policy is available) or
 `policy.fetch_failure_default: warn|block` in the project's `apm.yml`
-(applies when no policy is available at all). Both default to `warn`.
+(applies for fetch failures AND no-policy outcomes when no policy is
+available at all). Both default to `warn`.
 
 ### 9.6. Hash pin (`policy.hash`)
 
@@ -340,6 +345,14 @@ so it is safe for CI / SIEM ingestion. Supports `--policy-source` and
 When `--policy` (alias `--policy-source`) is omitted, `apm audit --ci`
 auto-discovers the org policy from the git remote, mirroring the install
 path. Use `--no-policy` to skip discovery for a single invocation.
+
+Since #1159, the no-policy outcomes (`no_git_remote`, `absent`, `empty`)
+emit a `[!]` warning to stderr by default and exit 1 with `[x]` when
+the project sets `policy.fetch_failure_default: block` -- pre-fix they
+silently exited 0, leaving CI green with no enforcement applied. JSON
+and SARIF output on stdout stays clean (all diagnostics on stderr).
+Explicit `--policy <file>` keeps the legacy fall-through (no warning)
+so opt-in pointers at minimal baseline files do not regress.
 
 ### 10. Errors and exit codes
 

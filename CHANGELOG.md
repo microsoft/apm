@@ -9,8 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`apm audit --ci` no longer silently skips when no org policy is resolved** -- `no_git_remote` / `absent` / `empty` auto-discovery outcomes now emit a `[!]` warning to stderr by default and honour `policy.fetch_failure_default: block` to fail closed (exit 1); JSON/SARIF on stdout stays clean. (#1159)
+- **SCP-shorthand SSH URLs from non-`git` users now parse correctly** -- `<user>@github.com:owner/repo` (EMU) and `<user>@ssh.dev.azure.com:v3/<org>/<project>/<repo>` (ADO) are accepted by both dependency parsing and policy auto-discovery. (#1159)
 - Fix `apm install` against a branch ref so it re-downloads when upstream has advanced past the lockfile-recorded SHA, and self-heal lockfiles produced by APM <= 0.12.2 on next install. (#1158)
 - Rewrite in-package relative markdown links to their `apm_modules/` location at install time so sibling references survive the `.agents/.github` deploy split. (#1147)
+
+### Changed
+
+- **`apm install` now honours `policy.fetch_failure_default: block` for `no_git_remote` / `absent` / `empty`** -- install-side parity with the audit fix above; default `warn` keeps fail-open. (#1159)
 
 ## [0.12.2] - 2026-05-05
 
