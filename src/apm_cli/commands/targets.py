@@ -40,7 +40,7 @@ import click
     "show_all",
     is_flag=True,
     default=False,
-    help="Show all canonical targets, marking inactive ones (default also lists all canonical targets).",
+    help="Include the agent-skills meta-target in JSON output (excluded by default).",
 )
 @click.pass_context
 def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
@@ -75,11 +75,15 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
     except (NoHarnessError, click.UsageError):
         active = []
 
+    # Hoist signal scan out of the per-row loop -- detect_signals walks the
+    # whole signal whitelist on every call, so doing it inside _row turned a
+    # 7-target render into 7x filesystem scans for no extra information.
+    all_signals = detect_signals(project_root)
+
     # Build per-target row data from canonical tables.
     def _row(name: str) -> dict:
         is_active = name in active
-        signals = detect_signals(project_root)
-        active_source = next((s.source for s in signals if s.target == name), None)
+        active_source = next((s.source for s in all_signals if s.target == name), None)
         return {
             "target": name,
             "status": "active" if is_active else "inactive",
@@ -121,8 +125,11 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
         )
 
     if not active:
+        from apm_cli.utils.console import _rich_info
+
         click.echo("")
-        click.echo(
-            "Hint: create a harness config (e.g. CLAUDE.md, .cursor/, .github/copilot-instructions.md)"
+        _rich_info(
+            "Create a harness config (e.g. CLAUDE.md, .cursor/, .github/copilot-instructions.md) "
+            "or declare `targets:` in apm.yml.",
+            symbol="info",
         )
-        click.echo("      or declare `targets:` in apm.yml.")

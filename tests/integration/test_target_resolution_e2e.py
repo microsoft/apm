@@ -227,6 +227,24 @@ def test_s07_compile_target_all_with_single_signal(tmp_path):
                 )
 
 
+def test_s07b_target_all_deprecation_visible(tmp_path):
+    """S7b: '--target all' emits a user-visible deprecation warning.
+
+    Anti-regression for convergence item 9: the deprecation must surface
+    via the standard CLI warning channel, not warnings.warn (which is
+    silenced by default in CLI output and would invisibly disappear).
+    """
+    project = _setup(tmp_path, "s07_compile_all_single")
+    result = _invoke(["compile", "--target", "all"], project)
+    # Exit code is permissive (compile may succeed or 2 on this fixture).
+    out_lower = result.output.lower()
+    assert "deprecated" in out_lower, (
+        "deprecation warning must be visible in CLI output, not silenced via warnings.warn; "
+        f"got: {result.output!r}"
+    )
+    assert "--all" in result.output, "deprecation must point at the replacement flag"
+
+
 def test_s08_targets_command_table(tmp_path):
     """S8: Closes #1122/#1130/#518 - 'apm targets' shows discoverability table."""
     project = _setup(tmp_path, "s08_targets_cmd")
@@ -237,6 +255,38 @@ def test_s08_targets_command_table(tmp_path):
     assert "claude" in out_lower
     assert "cursor" in out_lower
     assert "target" in out_lower and "status" in out_lower
+
+
+def test_s08b_targets_json_output(tmp_path):
+    """S8b: 'apm targets --json' returns parseable array of per-target objects.
+
+    Anti-regression for the documented contract: array (not object envelope),
+    one entry per canonical harness target, ordered by canonical order. CI
+    scripts depend on this shape, so a regression here silently breaks every
+    consumer that parses the JSON.
+    """
+    import json as _json
+
+    project = _setup(tmp_path, "s08_targets_cmd")
+    result = _invoke(["targets", "--json"], project)
+    assert result.exit_code == 0, result.output
+    payload = _json.loads(result.output)
+    assert isinstance(payload, list), f"--json must emit a list, got {type(payload).__name__}"
+    by_name = {row["target"]: row for row in payload}
+    # claude is signalled (CLAUDE.md fixture), copilot is not.
+    assert by_name["claude"]["status"] == "active"
+    assert by_name["claude"]["source"], "active rows must report a source"
+    assert by_name["copilot"]["status"] == "inactive"
+    assert by_name["copilot"]["needs"] == ".github/copilot-instructions.md"
+    # Default JSON must not include the agent-skills meta-target.
+    assert "agent-skills" not in by_name
+    # --all --json must add the meta-target row.
+    result_all = _invoke(["targets", "--all", "--json"], project)
+    assert result_all.exit_code == 0, result_all.output
+    payload_all = _json.loads(result_all.output)
+    by_name_all = {row["target"]: row for row in payload_all}
+    assert "agent-skills" in by_name_all
+    assert by_name_all["agent-skills"].get("meta_target") is True
 
 
 def test_s09_unknown_target_errors_with_valid_list(tmp_path):
@@ -317,10 +367,6 @@ def test_s14_no_manifest_errors_not_silent(tmp_path):
     assert "apm.yml" in out_lower or "manifest" in out_lower or "no package" in out_lower
 
 
-@pytest.mark.xfail(
-    reason="#1138 install/compile coordination; install side covered, compile follow-up",
-    strict=False,
-)
 def test_s15_no_double_emission_with_existing_rules(tmp_path):
     """S15: Closes #1138 (partial) - install must not double-emit when .claude/rules/ exists."""
     project = _setup(tmp_path, "s15_claude_rules_exists")

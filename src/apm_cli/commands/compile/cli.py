@@ -368,13 +368,12 @@ def compile(
     elif (isinstance(target, str) and target == "all") or (
         isinstance(target, list) and "all" in target
     ):
-        import warnings as _w
-
-        _w.warn(
-            "'--target all' is deprecated; use '--all' instead.",
-            DeprecationWarning,
-            stacklevel=1,
-        )
+        # Surface deprecation through the same UX channel as other
+        # warnings so users actually see it (convergence item 9).
+        # warnings.warn(DeprecationWarning) is invisible by default in
+        # CLI output and would only ever fire for downstream library
+        # consumers running with -W default, which we have none of.
+        logger.warning("'--target all' is deprecated; use '--all' instead.")
 
     try:
         # Check if this is an APM project first

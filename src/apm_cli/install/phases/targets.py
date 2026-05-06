@@ -252,9 +252,14 @@ def run(ctx: InstallContext) -> None:
                     ctx.logger.error(str(exc))
                 raise SystemExit(2) from exc
 
-            # Emit provenance BEFORE any mutation
+            # Emit provenance BEFORE any mutation. Route via _rich_info so
+            # the line picks up consistent symbol + color treatment and so
+            # automated tests can rely on the canonical "[i] Targets: ..."
+            # rendering (convergence item 1).
+            from apm_cli.utils.console import _rich_info
+
             _provenance_msg = format_provenance(_resolved)
-            _click.echo(f"[i] {_provenance_msg}")
+            _rich_info(_provenance_msg, symbol="info")
 
             # Map resolved v2 target names to TargetProfile objects,
             # materializing deploy directories (three-guard collapse:
@@ -359,6 +364,13 @@ def run(ctx: InstallContext) -> None:
 
 def run_targets_phase(ctx) -> None:
     """v2 targets phase entry point using the new resolution algorithm (#1154).
+
+    @internal: Test-only thin wrapper around ``resolve_targets()`` +
+    deploy-dir materialization. Production install pipelines go through
+    :func:`run` above, which composes legacy and v2 resolution in a single
+    pass and emits the provenance line. Do not call this from production
+    code paths -- it exists so unit tests can exercise the v2 mapping
+    without the legacy ``run()`` setup overhead.
 
     Uses ``resolve_targets()`` from ``core.target_detection`` to determine
     effective targets, then materializes deploy directories and populates

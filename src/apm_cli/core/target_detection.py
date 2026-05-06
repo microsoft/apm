@@ -657,7 +657,7 @@ CANONICAL_DEPLOY_DIRS: dict[str, str] = {
 CANONICAL_SIGNAL: dict[str, str] = {
     "claude": "CLAUDE.md",
     "copilot": ".github/copilot-instructions.md",
-    "cursor": ".cursorrules",
+    "cursor": ".cursor/",
     "codex": ".codex/",
     "gemini": "GEMINI.md",
     "opencode": ".opencode/",

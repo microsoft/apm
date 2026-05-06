@@ -360,29 +360,34 @@ apm targets [OPTIONS]
 ```
 
 **Options:**
-- `--all` - Include every canonical target, marking inactive ones (default already lists all canonical targets with status; `--all` reserves space for future filtering).
+- `--all` - Also include the `agent-skills` meta-target (only meaningful with `--json`; the default table already lists every canonical harness target).
 - `--json` - Emit machine-readable JSON instead of the table.
 
 **Sample table output:**
 ```
-  Target               Status       Root
-  agent-skills         no signal    .agents/skills/
-  claude               active       .claude/
-  codex                no signal    .codex/
-  copilot              no signal    .github/
-  cursor               active       .cursor/
-  gemini               no signal    .gemini/
-  opencode             no signal    .opencode/
-  windsurf             no signal    .windsurf/
+  TARGET       STATUS     SOURCE                                   DEPLOY DIR
+  ------------ ---------- ---------------------------------------- ----------
+  claude       active     CLAUDE.md                                .claude/
+  copilot      inactive   needs .github/copilot-instructions.md    .github/
+  cursor       active     .cursor/                                 .cursor/
+  codex        inactive   needs .codex/                            .codex/
+  gemini       inactive   needs GEMINI.md                          .gemini/
+  opencode     inactive   needs .opencode/                         .opencode/
+  windsurf     inactive   needs .windsurf/                         .windsurf/
 ```
+
+The `STATUS` column is `active` when APM detects a signal for that harness, otherwise `inactive`. The `SOURCE` column shows the detected signal path for active rows, and `needs <path>` for inactive rows so the recovery path is self-documenting. The `agent-skills` meta-target is intentionally excluded from the table and only surfaces in `--all --json`.
 
 **Sample `--json` output:**
 ```json
-{
-  "targets": ["claude", "cursor"],
-  "source": "auto-detect from .claude/, .cursor/"
-}
+[
+  {"target": "claude", "status": "active", "source": "CLAUDE.md", "deploy_dir": ".claude/", "needs": null},
+  {"target": "copilot", "status": "inactive", "source": null, "deploy_dir": ".github/", "needs": ".github/copilot-instructions.md"},
+  {"target": "cursor", "status": "active", "source": ".cursor/", "deploy_dir": ".cursor/", "needs": null}
+]
 ```
+
+Output is a JSON array of per-target objects ordered by canonical target order (claude, copilot, cursor, codex, gemini, opencode, windsurf), not alphabetical. Each object exposes `target`, `status`, `source`, `deploy_dir`, and `needs`. With `--all --json`, an additional row `{"target": "agent-skills", ..., "meta_target": true}` is appended.
 
 **Use cases:**
 - **Discovery** - "What will `apm install` deploy to in this directory?" before running it.
