@@ -929,13 +929,13 @@ class TestGiteaVirtualPackageDetection:
         assert dep.is_virtual_file() is True
 
     def test_gitea_collections_path_is_virtual(self):
-        """Path with /collections/ on Gitea is detected as a virtual collection."""
+        """Path with /collections/ on Gitea is detected as a virtual subdirectory package."""
         dep = DependencyReference.parse("gitea.myorg.com/owner/repo/collections/security")
         assert dep.host == "gitea.myorg.com"
         assert dep.repo_url == "owner/repo"
         assert dep.virtual_path == "collections/security"
         assert dep.is_virtual is True
-        assert dep.is_virtual_collection() is True
+        assert dep.is_virtual_subdirectory() is True
 
     def test_dict_format_virtual_on_gitea(self):
         """Dict format with path= on Gitea host yields a virtual package."""

@@ -634,14 +634,43 @@ class DownloadDelegate:
             # All raw attempts failed -- fall through to API path which
             # handles private repos, rate-limit messaging, and SAML errors.
 
+        # --- Generic host: raw URL first, then API version negotiation ---
+        # For non-GitHub non-GHE hosts (Gitea, Gogs, self-hosted git), try the
+        # raw URL path first, then negotiate API versions v1 -> v3.
+        if host.lower() != "github.com" and not host.lower().endswith(".ghe.com"):
+            raw_url = f"https://{host}/{owner}/{repo}/raw/{ref}/{file_path}"
+            raw_headers: dict[str, str] = {}
+            if token:
+                raw_headers["Authorization"] = f"token {token}"
+            try:
+                response = self._host._resilient_get(raw_url, headers=raw_headers, timeout=30)
+                if response.status_code == 200:
+                    if verbose_callback:
+                        verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
+                    return response.content
+            except (requests.RequestException, OSError):
+                pass
+
         # --- Contents API path (authenticated, enterprise, or raw fallback) ---
-        # Build GitHub API URL - format differs by host type
+        # Build API URL candidates - format differs by host type
         if host == "github.com":
-            api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}?ref={ref}"
+            api_url_candidates = [
+                f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}?ref={ref}"
+            ]
         elif host.lower().endswith(".ghe.com"):
-            api_url = f"https://api.{host}/repos/{owner}/{repo}/contents/{file_path}?ref={ref}"
+            api_url_candidates = [
+                f"https://api.{host}/repos/{owner}/{repo}/contents/{file_path}?ref={ref}"
+            ]
         else:
-            api_url = f"https://{host}/api/v3/repos/{owner}/{repo}/contents/{file_path}?ref={ref}"
+            # Generic host: negotiate Gitea/Gogs-style contents API versions.
+            # v1 is native Gitea/Gogs; v3 is a Gogs compatibility alias.
+            # GitLab uses /api/v4/projects/:id/repository/files (different shape)
+            # so it is not included -- GitLab support is limited to git-clone only.
+            api_url_candidates = [
+                f"https://{host}/api/v1/repos/{owner}/{repo}/contents/{file_path}?ref={ref}",
+                f"https://{host}/api/v3/repos/{owner}/{repo}/contents/{file_path}?ref={ref}",
+            ]
+        api_url = api_url_candidates[0]
 
         # Set up authentication headers
         headers: dict[str, str] = {
@@ -659,6 +688,24 @@ class DownloadDelegate:
             return response.content
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 404:
+                # For generic hosts, try remaining API version candidates before ref fallback
+                for candidate_url in api_url_candidates[1:]:
+                    try:
+                        candidate_resp = self._host._resilient_get(
+                            candidate_url, headers=headers, timeout=30
+                        )
+                        candidate_resp.raise_for_status()
+                        if verbose_callback:
+                            verbose_callback(
+                                f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}"
+                            )
+                        return candidate_resp.content
+                    except requests.exceptions.HTTPError as ce:
+                        if ce.response.status_code != 404:
+                            raise RuntimeError(  # noqa: B904
+                                f"Failed to download {file_path}: HTTP {ce.response.status_code}"
+                            )
+
                 # Try fallback branches if the specified ref fails
                 if ref not in ["main", "master"]:
                     raise RuntimeError(  # noqa: B904
@@ -668,34 +715,39 @@ class DownloadDelegate:
                 # Try the other default branch
                 fallback_ref = "master" if ref == "main" else "main"
 
-                # Build fallback API URL
+                # Build fallback URL candidates (same structure as primary)
                 if host == "github.com":
-                    fallback_url = (
+                    fallback_url_candidates = [
                         f"https://api.github.com/repos/{owner}/{repo}"
                         f"/contents/{file_path}?ref={fallback_ref}"
-                    )
+                    ]
                 elif host.lower().endswith(".ghe.com"):
-                    fallback_url = (
+                    fallback_url_candidates = [
                         f"https://api.{host}/repos/{owner}/{repo}"
                         f"/contents/{file_path}?ref={fallback_ref}"
-                    )
+                    ]
                 else:
-                    fallback_url = (
-                        f"https://{host}/api/v3/repos/{owner}/{repo}"
-                        f"/contents/{file_path}?ref={fallback_ref}"
-                    )
+                    fallback_url_candidates = [
+                        f"https://{host}/api/v1/repos/{owner}/{repo}/contents/{file_path}?ref={fallback_ref}",
+                        f"https://{host}/api/v3/repos/{owner}/{repo}/contents/{file_path}?ref={fallback_ref}",
+                    ]
 
-                try:
-                    response = self._host._resilient_get(fallback_url, headers=headers, timeout=30)
-                    response.raise_for_status()
-                    if verbose_callback:
-                        verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
-                    return response.content
-                except requests.exceptions.HTTPError:
-                    raise RuntimeError(  # noqa: B904
-                        f"File not found: {file_path} in {dep_ref.repo_url} "
-                        f"(tried refs: {ref}, {fallback_ref})"
-                    )
+                for fallback_url in fallback_url_candidates:
+                    try:
+                        response = self._host._resilient_get(fallback_url, headers=headers, timeout=30)
+                        response.raise_for_status()
+                        if verbose_callback:
+                            verbose_callback(
+                                f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}"
+                            )
+                        return response.content
+                    except requests.exceptions.HTTPError:
+                        pass
+
+                raise RuntimeError(  # noqa: B904
+                    f"File not found: {file_path} in {dep_ref.repo_url} "
+                    f"(tried refs: {ref}, {fallback_ref})"
+                )
             elif e.response.status_code in (401, 403):
                 # Distinguish rate limiting from auth failure.
                 is_rate_limit = False
