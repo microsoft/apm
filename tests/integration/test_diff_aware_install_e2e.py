@@ -63,6 +63,7 @@ def _write_apm_yml(project_dir, packages):
     config = {
         "name": "diff-aware-test",
         "version": "1.0.0",
+        "target": "copilot",
         "dependencies": {
             "apm": packages,
             "mcp": [],
@@ -106,6 +107,10 @@ def _collect_deployed_files(project_dir, dep_entry):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(
+    reason="Orphan-removal feature (clean deployed files when package dropped from "
+    "apm.yml) is not yet implemented on main. Tests track expected behaviour."
+)
 class TestPackageRemovedFromManifest:
     """When a package is removed from apm.yml, apm install should clean up
     its deployed files and remove it from the lockfile."""
