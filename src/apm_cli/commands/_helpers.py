@@ -612,6 +612,7 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
 
     Args:
         config: dict with name, version, description, author keys.
+            Optional 'target' key: CSV string of targets to pin.
         plugin: if True, include a devDependencies section.
         target_path: explicit file path to write (defaults to cwd/apm.yml).
     """
@@ -621,14 +622,19 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
         "version": config["version"],
         "description": config["description"],
         "author": config["author"],
-        "dependencies": {"apm": [], "mcp": []},
-        # Issue #887: scaffold with explicit consent for local content
-        # deployment so day-2 audit doesn't surprise the maintainer with
-        # an "includes not declared" advisory the moment they drop a
-        # primitive in .apm/.  Override with an explicit path list to
-        # gate what gets deployed.
-        "includes": "auto",
     }
+
+    # Add target field if present in config
+    if "target" in config:
+        apm_yml_data["target"] = config["target"]
+
+    apm_yml_data["dependencies"] = {"apm": [], "mcp": []}
+    # Issue #887: scaffold with explicit consent for local content
+    # deployment so day-2 audit doesn't surprise the maintainer with
+    # an "includes not declared" advisory the moment they drop a
+    # primitive in .apm/.  Override with an explicit path list to
+    # gate what gets deployed.
+    apm_yml_data["includes"] = "auto"
 
     if plugin:
         apm_yml_data["devDependencies"] = {"apm": []}
@@ -640,3 +646,24 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
 
     out_path = target_path or APM_YML_FILENAME
     dump_yaml(apm_yml_data, out_path)
+
+    # Post-process: add target comment header
+    out_file = Path(out_path)
+    content = out_file.read_text(encoding="utf-8")
+
+    if "target" in config:
+        # Insert comment before the target: line
+        target_comment = (
+            "# Which agent platforms to deploy to.\n"
+            "# Resolution order: --target flag > this field > auto-detect from filesystem.\n"
+            "# Accepted values: copilot, claude, cursor, opencode, codex, gemini, windsurf, all\n"
+        )
+        content = content.replace("target:", target_comment + "target:", 1)
+    else:
+        # Insert commented-out skeleton before dependencies:
+        skeleton = (
+            "# Which agent platforms to deploy to (uncomment to pin):\n# target: copilot, claude\n"
+        )
+        content = content.replace("dependencies:", skeleton + "\ndependencies:", 1)
+
+    out_file.write_text(content, encoding="utf-8")
