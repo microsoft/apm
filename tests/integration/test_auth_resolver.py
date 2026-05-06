@@ -25,7 +25,7 @@ E2E_MODE = os.environ.get("APM_E2E_TESTS", "").lower() in ("1", "true", "yes")
 
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.skipif(not E2E_MODE, reason="Integration tests require APM_E2E_TESTS=1"),
+    pytest.mark.requires_e2e_mode,
 ]
 
 # Shared helper: suppress git-credential-fill so env vars are the only source.

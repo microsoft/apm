@@ -134,5 +134,15 @@ markers = [
     "live: marks tests that hit real GitHub repos (requires network + optional GITHUB_TOKEN)",
     "slow: marks tests as slow running tests",
     "benchmark: marks performance benchmark tests (deselected by default, run with -m benchmark)",
+    "requires_e2e_mode: requires APM_E2E_TESTS=1",
+    "requires_github_token: requires GITHUB_APM_PAT or GITHUB_TOKEN",
+    "requires_ado_pat: requires ADO_APM_PAT",
+    "requires_ado_bearer: requires az CLI logged in + APM_TEST_ADO_BEARER=1",
+    "requires_network_integration: requires APM_RUN_INTEGRATION_TESTS=1",
+    "requires_apm_binary: requires built apm binary on PATH (or APM_BINARY_PATH)",
+    "requires_runtime_codex: requires codex runtime installed",
+    "requires_runtime_copilot: requires GitHub Copilot CLI runtime installed",
+    "requires_runtime_llm: requires llm runtime installed",
+    "requires_inference: requires APM_RUN_INFERENCE_TESTS=1 + model API access",
 ]
 
